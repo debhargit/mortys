@@ -1,10 +1,14 @@
 name = "meltahonda"
 compatibility_date = "2026-07-01"
+# nodejs_compat: bcryptjs (functions/_lib/password path) touches node:crypto for
+# its RNG fallback. Everything else in functions/ is WebCrypto / Web-standard.
+compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "public"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "meltahonda-db"
+migrations_dir = "migrations"
 # This is the meltahonda-db that actually exists on the account the current
 # API token authenticates to, and the one holding the live data. The previous
 # id (822ad731-3860-4d81-8139-6e3e28083df8) returns "database could not be
