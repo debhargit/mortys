@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Invoice · Meltha Honda Sales &amp; Servs</title>
+<style>
+  :root { --red:#d62828; --navy:#0b1b2b; --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; }
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#f3f4f6;color:var(--ink);margin:0;padding:24px;font-size:13px}
+  .invoice{max-width:780px;margin:0 auto;background:#fff;border:1px solid var(--line);padding:36px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.05)}
+  .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid var(--navy);padding-bottom:18px;margin-bottom:18px}
+  .brand{display:flex;align-items:center;gap:14px}
+  .brand .logo{width:60px;height:60px;background:linear-gradient(135deg,var(--red),#9d2020);border-radius:12px;display:grid;place-items:center;color:#fff;font-weight:900;font-size:18px;letter-spacing:.5px}
+  .brand h1{margin:0;font-size:22px;color:var(--navy);letter-spacing:-.3px}
+  .brand .sub{font-size:11px;color:var(--muted);margin-top:2px}
+  .meta{text-align:right}
+  .meta .num{font-size:18px;font-weight:800;font-family:ui-monospace,Menlo,monospace;color:var(--red)}
+  .meta .lbl{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);font-weight:700}
+  .panels{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:22px}
+  .panels h4{margin:0 0 6px;font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);font-weight:700}
+  .panels b{font-size:14px}
+  .panels small{display:block;color:var(--muted);line-height:1.6}
+  table{width:100%;border-collapse:collapse;margin-bottom:18px;font-size:12.5px}
+  th{text-align:left;padding:8px 10px;background:var(--navy);color:#fff;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:700}
+  td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th.right,td.right{text-align:right}
+  .totals{margin-left:auto;width:300px;font-size:13.5px;margin-top:12px}
+  .totals .row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed var(--line)}
+  .totals .grand{border:0;background:var(--navy);color:#fff;padding:11px 14px;border-radius:6px;margin-top:8px;font-size:17px;font-weight:800}
+  .totals .grand b{color:#ffb703}
+  .payments{margin-top:18px;background:#dcfce7;color:#166534;padding:10px 14px;border-radius:6px;font-size:12.5px}
+  .payments h4{margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:1px}
+  .footer{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);text-align:center;color:var(--muted);font-size:11px;line-height:1.7}
+  .footer b{color:var(--ink);display:block;margin-bottom:4px;font-size:12px}
+  .actions{max-width:780px;margin:0 auto 20px;display:flex;gap:8px;justify-content:flex-end}
+  .actions button,.actions a{padding:9px 16px;border:0;background:var(--red);color:#fff;font-weight:700;border-radius:6px;cursor:pointer;font-size:13px;text-decoration:none;font-family:inherit}
+  .actions button.gray,.actions a.gray{background:#6b7280}
+  .err{max-width:780px;margin:0 auto;background:#fee2e2;color:#991b1b;padding:14px 18px;border-radius:8px;font-size:14px}
+  @media print {
+    body{background:#fff;padding:0}
+    .invoice{box-shadow:none;border:0;padding:24px}
+    .actions{display:none}
+  }
+</style>
+</head>
+<body>
+
+<div class="actions">
+  <button onclick="window.print()">🖨 Print / Save as PDF</button>
+  <a class="gray" href="/track.html">← Back to tracking</a>
+</div>
+
+<div id="invoice"></div>
+
+<script>
+async function load(){
+  var p = new URLSearchParams(location.search);
+  var wo = p.get('wo');
+  var phone = p.get('phone') || '';
+  if (!wo){ document.getElementById('invoice').innerHTML = '<div class="err">Missing ?wo=WO-... in the URL.</div>'; return; }
+  try {
+    var res = await fetch('/api/invoice/' + encodeURIComponent(wo) + (phone ? '?phone=' + encodeURIComponent(phone) : ''));
+    var d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'Could not load invoice');
+    render(d);
+  } catch (e){
+    document.getElementById('invoice').innerHTML = '<div class="err">' + e.message + '</div>';
+  }
+}
+function fmtMoney(n){ return '$' + Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtDate(s){ if (!s) return ''; return new Date(s).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function render(d){
+  var w = d.work_order;
+  var s = d.shop;
+  var veh = [w.vehicle_year, w.vehicle_make, w.vehicle_model].filter(Boolean).join(' ');
+  var paidTotal = (d.payments||[]).reduce(function(s,p){return s+Number(p.amt);},0);
+  var balance = Math.max(0, Number(w.total_usd) - paidTotal);
+  document.getElementById('invoice').innerHTML =
+    '<div class="invoice">' +
+      '<div class="head">' +
+        '<div class="brand">' +
+          '<div class="logo">F&amp;D</div>' +
+          '<div>' +
+            '<h1>' + esc(s.name) + '</h1>' +
+            '<div class="sub">' + esc(s.address) + '<br/>' + esc(s.phone) + ' · ' + esc(s.website) + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="meta">' +
+          '<div class="lbl">Invoice</div>' +
+          '<div class="num">' + esc(w.wo_number) + '</div>' +
+          '<div style="font-size:11px;color:var(--muted);margin-top:6px">Intake: ' + fmtDate(w.intake_date) + '</div>' +
+          (w.completed_at ? '<div style="font-size:11px;color:var(--muted)">Completed: ' + fmtDate(w.completed_at) + '</div>' : '') +
+        '</div>' +
+      '</div>' +
+      '<div class="panels">' +
+        '<div><h4>Bill to</h4><b>' + esc(w.customer_name) + '</b><small>' + esc(w.customer_phone) + (w.customer_email ? '<br/>' + esc(w.customer_email) : '') + '</small></div>' +
+        '<div><h4>Vehicle</h4><b>' + esc(veh) + '</b><small>' +
+          (w.license_plate ? 'Plate: ' + esc(w.license_plate) + '<br/>' : '') +
+          (w.vehicle_vin ? 'VIN: ' + esc(w.vehicle_vin) + '<br/>' : '') +
+          (w.mileage_in ? 'Mileage: ' + w.mileage_in.toLocaleString() + ' km' : '') +
+        '</small></div>' +
+      '</div>' +
+      (w.complaint ? '<div style="background:#fafafa;border-left:3px solid var(--red);padding:8px 12px;margin-bottom:18px;font-size:12.5px"><b style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)">Reported complaint:</b> ' + esc(w.complaint) + '</div>' : '') +
+      ((d.labor||[]).length || (d.parts||[]).length ?
+        '<table><thead><tr><th>Description</th><th class="right">Hours / Qty</th><th class="right">Rate / Unit</th><th class="right">Amount</th></tr></thead><tbody>' +
+          (d.labor || []).map(function(l){ return '<tr><td><b>' + esc(l.description) + '</b><br/><small style="color:#9ca3af">Labor</small></td><td class="right">' + Number(l.hours).toFixed(2) + ' h</td><td class="right">' + fmtMoney(l.rate) + '/h</td><td class="right"><b>' + fmtMoney(l.total) + '</b></td></tr>'; }).join('') +
+          (d.parts || []).map(function(p){ return '<tr><td><b>' + esc(p.description) + '</b><br/><small style="color:#9ca3af">Part</small></td><td class="right">' + p.qty + '</td><td class="right">' + fmtMoney(p.unit) + '</td><td class="right"><b>' + fmtMoney(p.total) + '</b></td></tr>'; }).join('') +
+        '</tbody></table>'
+      : '<p style="color:var(--muted);font-style:italic">No line items yet.</p>') +
+      '<div class="totals">' +
+        '<div class="row"><span>Labor</span><span>' + fmtMoney(w.labor_total_usd) + '</span></div>' +
+        '<div class="row"><span>Parts</span><span>' + fmtMoney(w.parts_total_usd) + '</span></div>' +
+        '<div class="row"><span>' + esc(d.tax_label) + '</span><span>' + fmtMoney(w.tax_usd) + '</span></div>' +
+        '<div class="grand"><span>TOTAL DUE</span><b>' + fmtMoney(w.total_usd) + '</b></div>' +
+      '</div>' +
+      ((d.payments || []).length ? '<div class="payments"><h4>Payments received</h4>' +
+        (d.payments).map(function(p){ return '✓ ' + fmtMoney(p.amt) + ' via ' + esc(p.method) + (p.reference ? ' · ref ' + esc(p.reference) : '') + ' on ' + fmtDate(p.received_at); }).join('<br/>') +
+        '<br/><br/><b>Balance ' + (balance > 0 ? 'outstanding: ' + fmtMoney(balance) : '— PAID IN FULL') + '</b>' +
+      '</div>' : '') +
+      '<div class="footer">' +
+        '<b>Thank you for your business!</b>' +
+        'Questions about this invoice? Call ' + esc(s.phone) + '<br/>' +
+        'Open Mon – Sat 8:00 AM – 5:30 PM · 127 Hagley Park Road, Kingston 11' +
+      '</div>' +
+    '</div>';
+}
+load();
+</script>
+
+</body>
+</html>

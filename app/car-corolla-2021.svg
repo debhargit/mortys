@@ -1,0 +1,53 @@
+<svg viewBox="0 0 800 450" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1e293b"/>
+      <stop offset="1" stop-color="#0b1b2b"/>
+    </linearGradient>
+    <linearGradient id="body1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f8fafc"/>
+      <stop offset="1" stop-color="#cbd5e1"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="450" fill="url(#bg1)"/>
+  <g opacity=".10" fill="#fff">
+    <circle cx="120" cy="80" r="2"/><circle cx="680" cy="60" r="2"/>
+    <circle cx="220" cy="40" r="1.5"/><circle cx="540" cy="100" r="1.5"/>
+    <circle cx="380" cy="70" r="1.5"/>
+  </g>
+  <ellipse cx="400" cy="350" rx="320" ry="14" fill="#000" opacity=".35"/>
+  <g transform="translate(170,200)">
+    <path d="M0,90 C0,72 14,60 32,58 L70,40 C90,30 116,22 150,18 L320,18 C360,18 392,28 416,46 L450,68 C462,72 470,82 470,96 L470,140 L0,140 Z" fill="url(#body1)" stroke="#0f1720" stroke-width="2"/>
+    <path d="M82,52 C100,40 122,32 154,28 L262,28 L262,68 L70,68 Z" fill="#1e293b" opacity=".85"/>
+    <path d="M274,28 L322,28 C342,28 358,32 374,42 L394,68 L274,68 Z" fill="#1e293b" opacity=".85"/>
+    <line x1="268" y1="28" x2="268" y2="68" stroke="#0f1720" stroke-width="2"/>
+    <path d="M82,52 L92,60 M122,52 L132,60 M162,52 L172,60" stroke="#fff" stroke-width="1" opacity=".4"/>
+    <rect x="20" y="98" width="14" height="6" rx="2" fill="#fbbf24"/>
+    <rect x="446" y="98" width="14" height="6" rx="2" fill="#ef4444"/>
+    <line x1="0" y1="116" x2="470" y2="116" stroke="#0f1720" stroke-width="1" opacity=".4"/>
+    <g>
+      <circle cx="100" cy="140" r="34" fill="#0f1720"/>
+      <circle cx="100" cy="140" r="22" fill="#374151"/>
+      <circle cx="100" cy="140" r="6" fill="#9ca3af"/>
+      <g stroke="#9ca3af" stroke-width="2">
+        <line x1="100" y1="118" x2="100" y2="162"/>
+        <line x1="78" y1="140" x2="122" y2="140"/>
+        <line x1="84" y1="124" x2="116" y2="156"/>
+        <line x1="116" y1="124" x2="84" y2="156"/>
+      </g>
+    </g>
+    <g>
+      <circle cx="380" cy="140" r="34" fill="#0f1720"/>
+      <circle cx="380" cy="140" r="22" fill="#374151"/>
+      <circle cx="380" cy="140" r="6" fill="#9ca3af"/>
+      <g stroke="#9ca3af" stroke-width="2">
+        <line x1="380" y1="118" x2="380" y2="162"/>
+        <line x1="358" y1="140" x2="402" y2="140"/>
+        <line x1="364" y1="124" x2="396" y2="156"/>
+        <line x1="396" y1="124" x2="364" y2="156"/>
+      </g>
+    </g>
+  </g>
+  <text x="400" y="395" text-anchor="middle" font-family="Inter,Helvetica,Arial,sans-serif" font-size="34" font-weight="800" fill="#ffffff" letter-spacing="0.5">2021 Toyota Corolla</text>
+  <text x="400" y="425" text-anchor="middle" font-family="Inter,Helvetica,Arial,sans-serif" font-size="12" font-weight="700" fill="#ffb703" letter-spacing="4">NOW ON THE LOT</text>
+</svg>

@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pick Slip · Meltha Honda</title>
+<style>
+  :root { --ink:#1f2937; --line:#cfcfcf; --muted:#6b7280; --red:#d62828; --navy:#0b1b2b; }
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#f3f4f6;color:var(--ink);margin:0;padding:18px;font-size:13px}
+  .slip{max-width:760px;margin:0 auto;background:#fff;padding:28px;border:1px solid var(--line);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.05)}
+  .head{display:flex;justify-content:space-between;align-items:start;border-bottom:3px solid var(--navy);padding-bottom:14px;margin-bottom:14px}
+  .head .logo{width:54px;height:54px;background:linear-gradient(135deg,var(--red),#9d2020);border-radius:10px;display:grid;place-items:center;color:#fff;font-weight:900;font-size:16px}
+  .head h1{margin:0;font-size:18px;color:var(--navy)}
+  .head .sub{font-size:11px;color:var(--muted)}
+  .head .meta{text-align:right}
+  .head .meta .lbl{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);font-weight:700}
+  .head .meta .num{font-family:ui-monospace,Menlo,monospace;font-size:18px;font-weight:800;color:var(--red)}
+  .banner{background:#fef3c7;color:#92400e;padding:10px 14px;border-radius:7px;font-size:13px;font-weight:700;text-align:center;margin-bottom:14px;border:1px dashed #f59e0b}
+  .panels{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px;font-size:12.5px}
+  .panels b{font-size:14px}
+  .panels small{display:block;color:var(--muted);line-height:1.6}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{background:var(--navy);color:#fff;text-align:left;padding:9px;font-size:11px;text-transform:uppercase;letter-spacing:1px}
+  td{padding:10px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+  td.qty{text-align:center;font-weight:800;font-size:16px;background:#fef3c7;color:#92400e}
+  td.bin{font-family:ui-monospace,Menlo,monospace;font-weight:700;color:var(--navy);background:#f3f4f6;text-align:center}
+  td.sku{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--muted)}
+  td.check{text-align:center;width:38px}
+  td.check::before{content:"☐";font-size:20px;color:#9ca3af}
+  .footer{margin-top:18px;padding-top:14px;border-top:1px dashed var(--line);font-size:11px;color:var(--muted);display:flex;justify-content:space-between}
+  .footer .sign-line{border-top:1px solid var(--ink);width:200px;text-align:center;padding-top:4px;color:var(--ink)}
+  .actions{max-width:760px;margin:0 auto 14px;display:flex;gap:8px;justify-content:flex-end}
+  .actions button,.actions a{padding:9px 16px;border:0;background:var(--red);color:#fff;font-weight:700;border-radius:6px;cursor:pointer;font-size:13px;text-decoration:none;font-family:inherit}
+  .actions .gray{background:#6b7280}
+  .err{max-width:760px;margin:0 auto;background:#fee2e2;color:#991b1b;padding:14px 18px;border-radius:8px;font-size:14px}
+  @media print { body{background:#fff;padding:0} .slip{box-shadow:none;border:0;padding:18px;margin:0} .actions{display:none} }
+</style>
+</head>
+<body>
+
+<div class="actions">
+  <button onclick="window.print()">🖨 Print pick slip</button>
+  <button class="gray" onclick="window.close()">Close</button>
+</div>
+
+<div id="slip"></div>
+
+<script>
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function fmtDate(s){ if (!s) return ''; return new Date(s).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}); }
+async function load(){
+  var p = new URLSearchParams(location.search);
+  var qs = [];
+  if (p.get('wo')) qs.push('wo=' + encodeURIComponent(p.get('wo')));
+  if (p.get('pr')) qs.push('pr=' + encodeURIComponent(p.get('pr')));
+  if (p.get('order')) qs.push('order=' + encodeURIComponent(p.get('order')));
+  if (!qs.length){ document.getElementById('slip').innerHTML = '<div class="err">Missing ?wo=…, ?pr=…, or ?order=… in URL.</div>'; return; }
+  try {
+    var res = await fetch('/api/pickslip?' + qs.join('&'), { credentials: 'same-origin' });
+    var d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'Could not load');
+    render(d);
+  } catch(e){ document.getElementById('slip').innerHTML = '<div class="err">' + esc(e.message) + '</div>'; }
+}
+function render(d){
+  var s = d.shop;
+  var h = d.header;
+  var kindLabel = d.kind === 'work_order' ? 'PICK SLIP · Work Order'
+                : d.kind === 'parts_requisition' ? 'PICK SLIP · Parts Requisition'
+                : 'PICK SLIP · Online Order';
+  document.getElementById('slip').innerHTML =
+    '<div class="slip">' +
+      '<div class="head">' +
+        '<div style="display:flex;gap:12px;align-items:center">' +
+          '<div class="logo">F&amp;D</div>' +
+          '<div><h1>' + esc(s.name) + '</h1><div class="sub">' + esc(s.address) + ' · ' + esc(s.phone) + '</div></div>' +
+        '</div>' +
+        '<div class="meta">' +
+          '<div class="lbl">' + kindLabel + '</div>' +
+          '<div class="num">' + esc(h.number) + '</div>' +
+          '<small style="color:var(--muted);font-size:11px;display:block;margin-top:4px">' + fmtDate(h.intake) + '</small>' +
+        '</div>' +
+      '</div>' +
+      '<div class="banner">📋 Pull these items from the shelves &amp; tick off each one as you go</div>' +
+      '<div class="panels">' +
+        '<div><small style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);font-weight:700">Customer</small><br/><b>' + esc(h.customer || '—') + '</b></div>' +
+        '<div><small style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);font-weight:700">' + (h.vehicle ? 'Vehicle' : 'Linked work order') + '</small><br/><b>' + esc(h.vehicle || h.wo || '—') + '</b>' + (h.mechanic ? '<br/><small>Mechanic: ' + esc(h.mechanic) + '</small>' : '') + '</div>' +
+      '</div>' +
+      (d.items.length === 0 ? '<p style="text-align:center;color:var(--muted);padding:20px">No items on this pick slip.</p>' :
+        '<table><thead><tr><th class="check"></th><th>Bin</th><th>SKU</th><th>Description</th><th style="text-align:center;width:60px">QTY</th></tr></thead><tbody>' +
+          d.items.map(function(it){
+            return '<tr>' +
+              '<td class="check"></td>' +
+              '<td class="bin">' + esc(it.bin_location || '—') + '</td>' +
+              '<td class="sku">' + esc(it.sku || '') + (it.stock_count != null ? '<br/><small style="color:#16a34a">in stock: ' + it.stock_count + '</small>' : '') + '</td>' +
+              '<td><b>' + esc(it.description) + '</b>' + (it.product_name && it.product_name !== it.description ? '<br/><small style="color:var(--muted)">' + esc(it.product_name) + '</small>' : '') + '</td>' +
+              '<td class="qty">' + it.qty + '</td>' +
+            '</tr>';
+          }).join('') +
+        '</tbody></table>') +
+      '<div class="footer">' +
+        '<span>Total items: <b>' + d.items.length + '</b> · Total units: <b>' + d.items.reduce(function(s,i){return s+Number(i.qty);},0) + '</b></span>' +
+        '<div class="sign-line">Picked by</div>' +
+      '</div>' +
+    '</div>';
+  setTimeout(function(){ window.print(); }, 400);
+}
+load();
+</script>
+
+</body>
+</html>

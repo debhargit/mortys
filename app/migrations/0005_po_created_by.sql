@@ -1,0 +1,1 @@
+ALTER TABLE purchase_orders ADD COLUMN created_by INTEGER REFERENCES users(id) ON DELETE SET NULL;

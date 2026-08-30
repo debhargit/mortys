@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Quote · Meltha Honda</title>
+<style>
+  :root { --ink:#1f2937; --line:#cfcfcf; --muted:#6b7280; --red:#d62828; --navy:#0b1b2b; }
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#f3f4f6;color:var(--ink);margin:0;padding:24px;font-size:13px}
+  .doc{max-width:760px;margin:0 auto;background:#fff;padding:30px;border:1px solid var(--line);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.05)}
+  .head{display:flex;justify-content:space-between;align-items:start;border-bottom:3px solid var(--navy);padding-bottom:14px;margin-bottom:14px}
+  .logo{width:60px;height:60px;background:linear-gradient(135deg,var(--red),#9d2020);border-radius:10px;display:grid;place-items:center;color:#fff;font-weight:900;font-size:17px}
+  h1{margin:0;font-size:20px;color:var(--navy)}
+  .sub{font-size:11px;color:var(--muted)}
+  .meta{text-align:right}
+  .meta .lbl{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);font-weight:700}
+  .meta .num{font-size:18px;font-weight:800;font-family:ui-monospace,Menlo,monospace;color:#f59e0b}
+  .banner{background:#fef3c7;color:#92400e;padding:9px 13px;border-radius:7px;font-size:12.5px;text-align:center;margin-bottom:14px;font-weight:700}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:12px}
+  th{background:var(--navy);color:#fff;text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:1px}
+  td{padding:8px 10px;border-bottom:1px solid var(--line)}
+  td.right{text-align:right}
+  .totals{margin-left:auto;width:280px;font-size:13.5px;margin-top:8px}
+  .totals .row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed var(--line)}
+  .totals .grand{background:var(--navy);color:#fff;padding:11px 14px;border-radius:6px;margin-top:8px;font-size:17px;font-weight:800;display:flex;justify-content:space-between}
+  .totals .grand b{color:#ffb703}
+  .footer{margin-top:20px;padding-top:14px;border-top:1px dashed var(--line);font-size:11.5px;color:var(--muted);text-align:center;line-height:1.7}
+  .actions{max-width:760px;margin:0 auto 14px;display:flex;gap:8px;justify-content:flex-end}
+  .actions button,.actions a{padding:9px 16px;border:0;background:var(--red);color:#fff;font-weight:700;border-radius:6px;cursor:pointer;font-size:13px;text-decoration:none;font-family:inherit}
+  .actions .gray{background:#6b7280}
+  @media print {body{background:#fff;padding:0} .doc{box-shadow:none;border:0;padding:18px} .actions{display:none}}
+</style>
+</head>
+<body>
+<div class="actions">
+  <button onclick="window.print()">🖨 Print</button>
+  <button class="gray" onclick="window.close()">Close</button>
+</div>
+<div id="doc"></div>
+<script>
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function fmt(n){ return '$' + Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtDate(s){ if (!s) return ''; return new Date(s).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}); }
+async function load(){
+  var p = new URLSearchParams(location.search);
+  var q = p.get('q');
+  if (!q){ document.getElementById('doc').innerHTML = '<div style="color:#b91c1c">Missing ?q=Q-...</div>'; return; }
+  try {
+    var res = await fetch('/api/admin/pos/quotes/' + encodeURIComponent(q), { credentials:'same-origin' });
+    var d = await res.json();
+    if (!res.ok) throw new Error(d.error);
+    render(d);
+  } catch(e){ document.getElementById('doc').innerHTML = '<div style="color:#b91c1c">' + esc(e.message) + '</div>'; }
+}
+function render(d){
+  var qu = d.quote;
+  var items = qu.items_json || [];
+  document.getElementById('doc').innerHTML =
+    '<div class="doc">' +
+      '<div class="head"><div style="display:flex;gap:12px;align-items:center"><div class="logo">F&amp;D</div><div><h1>' + esc(d.shop.name) + '</h1><div class="sub">' + esc(d.shop.address) + ' · ' + esc(d.shop.phone) + '</div></div></div>' +
+        '<div class="meta"><div class="lbl">QUOTE</div><div class="num">' + esc(qu.quote_number) + '</div><small style="color:var(--muted);font-size:11px;display:block;margin-top:4px">' + fmtDate(qu.created_at) + '</small></div></div>' +
+      '<div class="banner">📝 This is a price quote, not an invoice. Valid until ' + (qu.valid_until ? fmtDate(qu.valid_until) : '—') + '.</div>' +
+      (qu.customer_name ? '<p style="font-size:13px;margin:0 0 10px"><b>For:</b> ' + esc(qu.customer_name) + (qu.customer_phone ? ' · ' + esc(qu.customer_phone) : '') + (qu.vehicle_info ? ' · ' + esc(qu.vehicle_info) : '') + '</p>' : '') +
+      '<table><thead><tr><th>Description</th><th class="right">Qty</th><th class="right">Unit</th><th class="right">Line</th></tr></thead><tbody>' +
+        items.map(function(it){
+          var line = (Number(it.qty) * Number(it.unit_price_usd)) + Number(it.core_charge_usd||0) + Number(it.env_fee_usd||0);
+          return '<tr><td><b>' + esc(it.description) + '</b>' + (Number(it.core_charge_usd) > 0 ? '<br/><small>+ core ' + fmt(it.core_charge_usd) + '</small>' : '') + (Number(it.env_fee_usd) > 0 ? '<br/><small>+ env ' + fmt(it.env_fee_usd) + '</small>' : '') + '</td><td class="right">' + it.qty + '</td><td class="right">' + fmt(it.unit_price_usd) + '</td><td class="right"><b>' + fmt(line) + '</b></td></tr>';
+        }).join('') +
+      '</tbody></table>' +
+      '<div class="totals">' +
+        '<div class="row"><span>Subtotal</span><b>' + fmt(qu.subtotal_usd) + '</b></div>' +
+        (Number(qu.discount_usd) > 0 ? '<div class="row"><span>Discount</span><b>−' + fmt(qu.discount_usd) + '</b></div>' : '') +
+        '<div class="row"><span>GCT (15%)</span><b>' + fmt(qu.tax_usd) + '</b></div>' +
+        '<div class="grand"><span>TOTAL</span><b>' + fmt(qu.total_usd) + '</b></div>' +
+      '</div>' +
+      '<div class="footer">Call us at ' + esc(d.shop.phone) + ' to confirm this quote.<br/>Prices subject to change after the validity date. Stock subject to availability.</div>' +
+    '</div>';
+  setTimeout(function(){ window.print(); }, 400);
+}
+load();
+</script>
+</body>
+</html>

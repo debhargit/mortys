@@ -1,0 +1,55 @@
+# ============================================================================
+#  Meltha Honda — repository ignores
+#
+#  This folder is a full deployed install: bundled Node + PostgreSQL, npm
+#  dependencies, the live database and per-machine config all sit alongside
+#  the source. Only the source, deployment scripts and docs are tracked.
+#  (app/.gitignore covers a few more app-internal paths.)
+# ============================================================================
+
+# ---- bundled runtime & prerequisites (200 MB+, re-fetched by the installers)
+/runtime/
+/prereq/
+/vendor/
+
+# ---- npm dependencies
+node_modules/
+app/node_modules/
+
+# ---- live runtime state: bundled Postgres data dir, boot lock, logs, backups
+/data/
+*.log
+app/srv.tmp
+app/*.tmp
+app/*.copy
+app/server.js.copy
+
+# ---- secrets & per-machine config (set via Admin → Setup, never committed)
+.env
+.env.*
+!.env.example
+app/.env
+app/.env.*
+!app/.env.example
+app/.dev.vars
+app/db-config.json
+app/server-config.json
+app/machine-config.json
+app/terminal-id.json
+app/portable.json
+
+# ---- uploaded media (customer/product photos live in the DB + object storage)
+app/uploads/
+!app/uploads/.gitkeep
+
+# ---- built installers (reproducible from the .ps1 sources via Build-Installers.ps1)
+/*.exe
+
+# ---- editor / OS cruft
+.~lock.*#
+Thumbs.db
+Desktop.ini
+.DS_Store
+.claude/
+.wrangler/
+/dist/

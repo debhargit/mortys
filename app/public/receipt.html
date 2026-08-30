@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Receipt · Meltha Honda</title>
+<style>
+  body{font-family:ui-monospace,Menlo,'Courier New',monospace;background:#f3f4f6;color:#000;margin:0;padding:14px;font-size:12px}
+  .recv{max-width:300px;margin:0 auto;background:#fff;padding:14px 16px;border:1px dashed #ccc}
+  .center{text-align:center}
+  h1{margin:4px 0;font-size:14px}
+  .sub{font-size:11px;color:#444}
+  hr{border:0;border-top:1px dashed #999;margin:8px 0}
+  .row{display:flex;justify-content:space-between;padding:1px 0}
+  .grand{font-weight:800;font-size:14px;border-top:2px solid #000;padding-top:5px;margin-top:5px}
+  .actions{max-width:300px;margin:14px auto;display:flex;gap:6px}
+  .actions button{flex:1;padding:9px;border:0;background:#d62828;color:#fff;font-weight:700;border-radius:6px;cursor:pointer;font-family:inherit}
+  @media print { body{background:#fff;padding:0} .actions{display:none} .recv{border:0} }
+</style>
+</head>
+<body>
+<div class="actions">
+  <button onclick="window.print()">🖨 Print receipt</button>
+  <button onclick="window.close()">Close</button>
+</div>
+<div id="recv"></div>
+<script>
+function fmt(n){ return '$' + Number(n||0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+async function load(){
+  var p = new URLSearchParams(location.search);
+  var id = p.get('id');
+  if (!id) { document.getElementById('recv').innerHTML = 'Missing id'; return; }
+  try {
+    var res = await fetch('/api/admin/pos/sales/' + id);
+    var d = await res.json();
+    if (!res.ok) throw new Error(d.error);
+    var s = d.sale;
+    document.getElementById('recv').innerHTML =
+      '<div class="recv">' +
+        '<div class="center"><h1>MELTHA HONDA SALES &amp; SERVS LTD</h1><div class="sub">127 Hagley Park Road, Kingston 11<br/>876-758-8503</div></div>' +
+        '<hr/>' +
+        '<div class="row"><span>Receipt:</span><b>' + s.receipt_number + '</b></div>' +
+        '<div class="row"><span>Date:</span><b>' + new Date(s.created_at).toLocaleString('en-US') + '</b></div>' +
+        '<div class="row"><span>Cashier:</span><b>' + (s.cashier_name || '—') + '</b></div>' +
+        (s.customer_name ? '<div class="row"><span>Customer:</span><b>' + s.customer_name + '</b></div>' : '') +
+        (s.vehicle_info ? '<div class="row"><span>Vehicle:</span><b>' + s.vehicle_info + '</b></div>' : '') +
+        '<hr/>' +
+        d.items.map(function(i){
+          return '<div style="padding:3px 0">' +
+            '<b>' + i.description + '</b><br/>' +
+            '<div class="row"><span>' + i.qty + ' × ' + fmt(i.unit_price_usd) + '</span><b>' + fmt(i.qty * i.unit_price_usd) + '</b></div>' +
+            (Number(i.core_charge_usd) > 0 ? '<div class="row"><span>  Core charge</span><b>' + fmt(i.core_charge_usd) + '</b></div>' : '') +
+            (Number(i.env_fee_usd) > 0 ? '<div class="row"><span>  Env fee</span><b>' + fmt(i.env_fee_usd) + '</b></div>' : '') +
+            (i.serial_number ? '<div class="sub">  S/N: ' + i.serial_number + '</div>' : '') +
+            (i.warranty_until ? '<div class="sub">  Warranty until ' + i.warranty_until + '</div>' : '') +
+          '</div>';
+        }).join('') +
+        '<hr/>' +
+        '<div class="row"><span>Subtotal</span><b>' + fmt(s.subtotal_usd) + '</b></div>' +
+        (Number(s.discount_usd) > 0 ? '<div class="row"><span>Discount</span><b>−' + fmt(s.discount_usd) + '</b></div>' : '') +
+        '<div class="row"><span>GCT (15%)</span><b>' + fmt(s.tax_usd) + '</b></div>' +
+        '<div class="row grand"><span>TOTAL</span><b>' + fmt(s.total_usd) + '</b></div>' +
+        '<hr/>' +
+        '<div class="row"><span>Paid (' + s.payment_method + ')</span><b>' + fmt(s.amount_tendered || s.total_usd) + '</b></div>' +
+        (Number(s.change_due) > 0 ? '<div class="row"><span>Change</span><b>' + fmt(s.change_due) + '</b></div>' : '') +
+        (s.reference ? '<div class="sub">Ref: ' + s.reference + '</div>' : '') +
+        '<hr/>' +
+        '<div class="center sub">Thank you for shopping with us!<br/>Returns within 30 days with receipt.</div>' +
+      '</div>';
+    setTimeout(function(){ window.print(); }, 400);
+  } catch(e){ document.getElementById('recv').innerHTML = 'Error: ' + e.message; }
+}
+load();
+</script>
+</body>
+</html>

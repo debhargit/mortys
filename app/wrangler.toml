@@ -1,0 +1,38 @@
+name = "meltahonda"
+compatibility_date = "2026-07-01"
+pages_build_output_dir = "public"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "meltahonda-db"
+# This is the meltahonda-db that actually exists on the account the current
+# API token authenticates to, and the one holding the live data. The previous
+# id (822ad731-3860-4d81-8139-6e3e28083df8) returns "database could not be
+# found" here -- if that one is real it lives on a different account.
+database_id = "9ad3e1e3-2019-48d3-be10-55fd98872531"
+
+# Where new-order alerts go. Override either without touching code.
+[vars]
+ORDER_NOTIFY_TO = "admin@melthahonda.com"
+ORDER_NOTIFY_SMS = "876-758-8503"
+
+# Transactional email (order confirmations to customers, new-order alerts to
+# the shop). functions/_lib/mailer.js already targets this binding's API and
+# falls back to console logging while it is absent, so orders are still
+# recorded without it -- they just don't get emailed.
+#
+# To turn it on:
+#   1. npx wrangler email sending enable melthahonda.com
+#      (currently returns "Unauthorized [code: 2036]" -- Email Sending needs a
+#       one-time opt-in in the dashboard, and the API token needs its scope)
+#   2. uncomment the two lines below and redeploy
+# [[send_email]]
+# name = "EMAIL"
+
+# R2 isn't enabled on this account yet (needs a one-time dashboard opt-in) --
+# re-add this binding and run `wrangler r2 bucket create meltahonda-uploads`
+# once it is. Until then, product-photo and inspection-photo uploads will
+# fail (everything else is unaffected).
+# [[r2_buckets]]
+# binding = "UPLOADS"
+# bucket_name = "meltahonda-uploads"

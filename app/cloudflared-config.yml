@@ -1,0 +1,40 @@
+# =====================================================================
+# Cloudflare Tunnel config for the "miamim" tunnel
+# Routes melthahonda.miamimistress.com to the local Meltha Honda server on port 3040.
+#
+# Copy this file to:
+#   %USERPROFILE%\.cloudflared\config.yml
+#   (e.g. C:\Users\debbi\.cloudflared\config.yml)
+#
+# One-time setup steps (run in PowerShell or Command Prompt):
+#
+#   1. Log in:
+#        cloudflared tunnel login
+#
+#   2. Create the tunnel (only if it doesn't exist yet):
+#        cloudflared tunnel create miamim
+#
+#   3. Point DNS at the tunnel:
+#        cloudflared tunnel route dns miamim melthahonda.miamimistress.com
+#
+#   4. Copy this file to %USERPROFILE%\.cloudflared\config.yml
+#
+#   5. Verify:
+#        cloudflared tunnel info miamim
+#        nslookup melthahonda.miamimistress.com
+#
+# After that, start-melthahonda.bat will spin up the local server and run
+# this tunnel, exposing the site at https://melthahonda.miamimistress.com
+# =====================================================================
+
+tunnel: miamim
+
+# Uncomment and set this if cloudflared cannot auto-resolve the
+# credentials file. Replace YOURNAME and the UUID with the real values.
+# credentials-file: C:\Users\YOURNAME\.cloudflared\<TUNNEL-UUID>.json
+
+ingress:
+  - hostname: melthahonda.miamimistress.com
+    service: http://localhost:3040
+  # Catch-all - return 404 for any other hostname routed at this tunnel.
+  - service: http_status:404

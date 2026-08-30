@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bill of Sale · Meltha Honda</title>
+<style>
+  :root { --ink:#1f2937; --line:#cfcfcf; --muted:#6b7280; --red:#d62828; --navy:#0b1b2b; }
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#f3f4f6;color:var(--ink);margin:0;padding:24px;font-size:13px}
+  .bos{max-width:780px;margin:0 auto;background:#fff;padding:36px;border:1px solid var(--line);border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.05)}
+  .head{display:flex;justify-content:space-between;align-items:start;border-bottom:3px solid var(--navy);padding-bottom:18px;margin-bottom:18px}
+  .head .logo{width:64px;height:64px;background:linear-gradient(135deg,var(--red),#9d2020);border-radius:12px;display:grid;place-items:center;color:#fff;font-weight:900;font-size:19px}
+  .head h1{margin:0;font-size:22px;color:var(--navy);letter-spacing:-.3px}
+  .head .sub{font-size:11px;color:var(--muted)}
+  .head .meta{text-align:right}
+  .head .meta .num{font-size:18px;font-weight:800;font-family:ui-monospace,Menlo,monospace;color:var(--red)}
+  .head .meta .lbl{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);font-weight:700}
+  h2.section{font-size:13px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);margin:22px 0 8px;padding-bottom:4px;border-bottom:1px solid var(--line)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;margin-bottom:14px}
+  .grid .lbl{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:2px}
+  .grid .val{font-weight:700;font-size:14px}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
+  th{background:var(--navy);color:#fff;text-align:left;padding:9px;font-size:11px;text-transform:uppercase;letter-spacing:1px}
+  td{padding:9px;border-bottom:1px solid var(--line)}
+  td.right{text-align:right}
+  .totals{margin-left:auto;width:320px;font-size:14px;margin-top:8px}
+  .totals .row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed var(--line)}
+  .totals .grand{border:0;background:var(--navy);color:#fff;padding:13px 16px;border-radius:6px;margin-top:8px;font-size:17px;font-weight:800;display:flex;justify-content:space-between}
+  .totals .grand b{color:#ffb703}
+  .sigblock{display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:32px}
+  .sigblock .line{border-top:1px solid var(--ink);padding-top:6px;text-align:center;font-size:11px;color:var(--muted)}
+  .sigblock img{max-height:80px;display:block;margin:0 auto 4px}
+  .terms{margin-top:24px;padding:14px;background:#fafafa;border:1px solid var(--line);border-radius:7px;font-size:11px;color:var(--muted);line-height:1.6}
+  .terms b{color:var(--ink)}
+  .actions{max-width:780px;margin:0 auto 16px;display:flex;gap:8px;justify-content:flex-end}
+  .actions button,.actions a{padding:9px 16px;border:0;background:var(--red);color:#fff;font-weight:700;border-radius:6px;cursor:pointer;font-size:13px;text-decoration:none;font-family:inherit}
+  .actions .gray{background:#6b7280}
+  .err{max-width:780px;margin:0 auto;background:#fee2e2;color:#991b1b;padding:14px 18px;border-radius:8px}
+  @media print {body{background:#fff;padding:0} .bos{box-shadow:none;border:0;padding:24px} .actions{display:none}}
+</style>
+</head>
+<body>
+<div class="actions">
+  <button onclick="window.print()">🖨 Print / Save as PDF</button>
+  <button class="gray" onclick="window.close()">Close</button>
+</div>
+<div id="bos"></div>
+<script>
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function fmt(n){ return '$' + Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtDate(s){ if (!s) return ''; return new Date(s).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}); }
+async function load(){
+  var p = new URLSearchParams(location.search);
+  var num = p.get('sale');
+  var phone = p.get('phone') || '';
+  if (!num){ document.getElementById('bos').innerHTML = '<div class="err">Missing ?sale=CS-...</div>'; return; }
+  try {
+    var res = await fetch('/api/bill-of-sale/' + encodeURIComponent(num) + (phone ? '?phone=' + encodeURIComponent(phone) : ''), { credentials:'same-origin' });
+    var d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'Could not load');
+    render(d);
+  } catch(e){ document.getElementById('bos').innerHTML = '<div class="err">' + esc(e.message) + '</div>'; }
+}
+function render(d){
+  var s = d.sale, shop = d.shop;
+  document.getElementById('bos').innerHTML =
+    '<div class="bos">' +
+      '<div class="head">' +
+        '<div style="display:flex;gap:14px;align-items:center">' +
+          '<div class="logo">F&amp;D</div>' +
+          '<div><h1>' + esc(shop.name) + '</h1><div class="sub">' + esc(shop.address) + '<br/>' + esc(shop.phone) + '</div></div>' +
+        '</div>' +
+        '<div class="meta">' +
+          '<div class="lbl">BILL OF SALE</div>' +
+          '<div class="num">' + esc(s.sale_number) + '</div>' +
+          '<small style="color:var(--muted)">' + fmtDate(s.created_at) + '</small>' +
+        '</div>' +
+      '</div>' +
+      '<h2 class="section">Vehicle Sold</h2>' +
+      '<div class="grid">' +
+        '<div><div class="lbl">Vehicle</div><div class="val">' + esc(s.vehicle_label || '') + '</div></div>' +
+        '<div><div class="lbl">VIN</div><div class="val" style="font-family:ui-monospace,Menlo,monospace">' + esc(s.vehicle_vin || '—') + '</div></div>' +
+      '</div>' +
+      '<h2 class="section">Buyer</h2>' +
+      '<div class="grid">' +
+        '<div><div class="lbl">Name</div><div class="val">' + esc(s.buyer_name) + '</div></div>' +
+        '<div><div class="lbl">Phone</div><div class="val">' + esc(s.buyer_phone) + '</div></div>' +
+        (s.buyer_email ? '<div><div class="lbl">Email</div><div class="val">' + esc(s.buyer_email) + '</div></div>' : '') +
+        (s.buyer_trn ? '<div><div class="lbl">TRN</div><div class="val">' + esc(s.buyer_trn) + '</div></div>' : '') +
+        (s.buyer_address ? '<div style="grid-column:1/-1"><div class="lbl">Address</div><div class="val">' + esc(s.buyer_address) + '</div></div>' : '') +
+      '</div>' +
+      '<h2 class="section">Sale Terms</h2>' +
+      '<table><thead><tr><th>Description</th><th class="right">Amount</th></tr></thead><tbody>' +
+        '<tr><td>Vehicle sale price</td><td class="right"><b>' + fmt(s.sale_price_usd) + '</b></td></tr>' +
+        (Number(s.trade_in_credit_usd) > 0 ? '<tr><td>Trade-in credit' + (s.trade_in_vehicle ? ' — ' + esc(s.trade_in_vehicle) : '') + '</td><td class="right">−' + fmt(s.trade_in_credit_usd) + '</td></tr>' : '') +
+        (Number(s.tax_usd) > 0 ? '<tr><td>Tax / GCT</td><td class="right">' + fmt(s.tax_usd) + '</td></tr>' : '') +
+      '</tbody></table>' +
+      '<div class="totals">' +
+        '<div class="row"><span>Total due</span><b>' + fmt(s.total_usd) + '</b></div>' +
+        '<div class="row"><span>Deposit paid</span><b>' + fmt(s.deposit_usd) + '</b></div>' +
+        '<div class="grand"><span>BALANCE DUE</span><b>' + fmt(s.balance_due_usd) + '</b></div>' +
+      '</div>' +
+      (s.financing && s.financing !== 'cash' ? '<h2 class="section">Financing</h2><div class="grid">' +
+        '<div><div class="lbl">Method</div><div class="val">' + esc(s.financing) + '</div></div>' +
+        (s.finance_lender ? '<div><div class="lbl">Lender</div><div class="val">' + esc(s.finance_lender) + '</div></div>' : '') +
+        (s.finance_term_months ? '<div><div class="lbl">Term</div><div class="val">' + s.finance_term_months + ' months</div></div>' : '') +
+        (s.finance_apr_pct ? '<div><div class="lbl">APR</div><div class="val">' + s.finance_apr_pct + '%</div></div>' : '') +
+        (s.monthly_payment_usd ? '<div><div class="lbl">Monthly payment</div><div class="val">' + fmt(s.monthly_payment_usd) + '</div></div>' : '') +
+      '</div>' : '') +
+      '<h2 class="section">Signatures</h2>' +
+      '<div class="sigblock">' +
+        '<div>' + (s.customer_signature ? '<img src="' + s.customer_signature + '"/>' : '') + '<div class="line">Buyer signature · ' + (s.signed_at ? fmtDate(s.signed_at) : 'Date') + '</div></div>' +
+        '<div><div class="line">Seller signature · ' + esc(s.salesperson_name || 'Meltha Honda') + '</div></div>' +
+      '</div>' +
+      '<div class="terms">' +
+        '<b>Terms of sale:</b> Vehicle is sold AS-IS unless a written warranty is attached. Buyer acknowledges they have inspected the vehicle and accept it in its present condition. Title transfer is contingent on full payment of any balance due. Any deposit is non-refundable after 72 hours unless the seller fails to deliver the vehicle as described. This document serves as proof of sale once signed by both parties.' +
+      '</div>' +
+    '</div>';
+  setTimeout(function(){ window.print(); }, 500);
+}
+load();
+</script>
+</body>
+</html>

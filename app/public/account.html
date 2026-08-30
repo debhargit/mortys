@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>My Account · Meltha Honda Sales &amp; Servs</title>
+<style>
+  :root{
+    --red:#d62828; --red-dark:#a31f1f;
+    --navy:#0b1b2b; --ink:#0f1720;
+    --muted:#6b7280; --bg:#f6f7f9;
+    --card:#fff; --line:#e5e7eb;
+    --ok:#16a34a; --warn:#f59e0b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:var(--ink);background:var(--bg);line-height:1.55}
+  a{color:inherit}
+
+  header.top{background:var(--navy);color:#fff;padding:14px 24px;display:flex;justify-content:space-between;align-items:center;gap:16px}
+  header.top .left{display:flex;align-items:center;gap:14px}
+  header.top h1{margin:0;font-size:18px;font-weight:800;letter-spacing:.3px}
+  header.top a.home{color:#94a3b8;text-decoration:none;font-size:13px}
+  header.top a.home:hover{color:#fff}
+  header.top .who{font-size:13px;color:#cbd5e1;display:flex;gap:10px;align-items:center}
+  header.top button{background:transparent;border:1px solid rgba(255,255,255,.2);color:#fff;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit}
+  header.top button:hover{background:rgba(255,255,255,.08)}
+
+  .wrap{max-width:960px;margin:0 auto;padding:24px}
+
+  /* PROFILE HERO */
+  .profile{background:linear-gradient(135deg,var(--navy),#13283f);color:#fff;border-radius:14px;padding:24px 28px;margin-bottom:20px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+  .profile .avatar{width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,var(--red),var(--red-dark));display:grid;place-items:center;font-size:24px;font-weight:900;flex-shrink:0}
+  .profile .info{flex:1;min-width:200px}
+  .profile .info b{display:block;font-size:20px}
+  .profile .info span{color:#cbd5e1;font-size:13px}
+  .profile .pts{background:linear-gradient(135deg,#16a34a,#15803d);color:#fff;padding:12px 18px;border-radius:10px;text-align:center;min-width:120px}
+  .profile .pts .num{font-size:26px;font-weight:900;line-height:1}
+  .profile .pts .lbl{font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-top:4px;opacity:.95}
+
+  /* TABS */
+  .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:16px;overflow-x:auto;background:#fff;padding:6px 6px 0;border-radius:10px 10px 0 0}
+  .tabs button{background:transparent;border:none;padding:10px 18px;border-radius:8px 8px 0 0;font-weight:700;font-size:13px;cursor:pointer;color:var(--muted);font-family:inherit;white-space:nowrap}
+  .tabs button.active{background:var(--navy);color:#fff}
+  .tabs button:hover:not(.active){background:#f1f5f9;color:var(--ink)}
+
+  .panel{background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{background:#fafafa;text-align:left;padding:10px 14px;font-weight:700;color:var(--muted);text-transform:uppercase;font-size:11px;letter-spacing:.5px;border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+  tr:hover td{background:#fafafa}
+
+  .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700}
+  .badge.pending{background:#dbeafe;color:#1e40af}
+  .badge.confirmed{background:#d1fae5;color:#065f46}
+  .badge.ready{background:#fef3c7;color:#92400e}
+  .badge.completed{background:#e0e7ff;color:#3730a3}
+  .badge.cancelled{background:#fee2e2;color:#991b1b}
+  .badge.paid{background:#d1fae5;color:#065f46}
+  .badge.unpaid{background:#fef3c7;color:#92400e}
+  .delta{font-weight:800}
+  .delta.pos{color:var(--ok)}
+  .delta.neg{color:var(--red)}
+
+  .empty{padding:60px 20px;text-align:center;color:var(--muted);font-size:14px}
+  .empty a.cta{display:inline-block;margin-top:10px;background:var(--red);color:#fff;padding:9px 16px;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px}
+  .empty a.cta:hover{background:var(--red-dark)}
+
+  /* SIGN-IN OVERLAY */
+  .signin-bg{position:fixed;inset:0;background:rgba(11,27,43,.95);display:none;align-items:center;justify-content:center;z-index:100;padding:20px}
+  .signin-bg.show{display:flex}
+  .signin-card{background:#fff;border-radius:14px;max-width:380px;width:100%;padding:32px;box-shadow:0 24px 60px rgba(0,0,0,.4)}
+  .signin-card h2{margin:0 0 6px;font-size:22px}
+  .signin-card p.sub{color:var(--muted);font-size:13px;margin:0 0 22px}
+  .signin-card label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700;margin-bottom:4px}
+  .signin-card input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;margin-bottom:12px;font-family:inherit}
+  .signin-card button{width:100%;background:var(--red);color:#fff;border:none;padding:12px;border-radius:8px;font-weight:700;cursor:pointer;font-size:14px;font-family:inherit}
+  .signin-card button:hover{background:var(--red-dark)}
+  .signin-card .err{color:var(--red);font-size:12px;margin-bottom:10px;display:none}
+  .signin-card .err.show{display:block}
+  .signin-card .hint{font-size:12px;color:var(--muted);margin-top:14px;text-align:center}
+  .signin-card .hint a{color:var(--red);font-weight:700;text-decoration:none}
+
+  .ord-detail{background:#fafafa;border:1px solid var(--line);border-radius:8px;padding:12px;margin:10px 14px 12px;display:none}
+  .ord-detail.show{display:block}
+  .ord-detail table{font-size:12px}
+  .ord-detail th,.ord-detail td{padding:6px 10px;background:transparent}
+
+  @media (max-width:560px){
+    .profile{padding:18px}
+    .profile .info b{font-size:17px}
+    .profile .pts{flex:1}
+    .wrap{padding:14px}
+    th,td{padding:8px 10px;font-size:12px}
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="left">
+    <h1>My Account</h1>
+    <a class="home" href="/">← Back to shop</a>
+  </div>
+  <div class="who">
+    <span id="whoLabel">—</span>
+    <button id="signoutBtn">Sign out</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="profile" id="profileCard" style="display:none">
+    <div class="avatar" id="avatarLetter">?</div>
+    <div class="info">
+      <b id="profileName">—</b>
+      <span id="profileEmail">—</span>
+    </div>
+    <div class="pts">
+      <div class="num" id="pointsBalance">0</div>
+      <div class="lbl">loyalty pts</div>
+    </div>
+  </div>
+
+  <div class="tabs" id="tabs">
+    <button data-tab="orders" class="active">Order history</button>
+    <button data-tab="service">Service history</button>
+    <button data-tab="points">Points history</button>
+    <button data-tab="wishlist">Wishlist</button>
+    <button data-tab="vehicles">Saved vehicles</button>
+    <button data-tab="addresses">Addresses</button>
+    <button data-tab="chat">💬 Chat with shop</button>
+    <button data-tab="profile">Profile</button>
+  </div>
+
+  <div class="panel" id="panel">
+    <div class="empty">Loading…</div>
+  </div>
+</div>
+
+<!-- SIGN-IN -->
+<div class="signin-bg" id="signinBg">
+  <form class="signin-card" id="signinForm" onsubmit="event.preventDefault(); doSignIn();">
+    <h2>Sign in to your account</h2>
+    <p class="sub">Track orders, see your loyalty points, and check out faster.</p>
+    <div class="err" id="signinErr"></div>
+    <label>Email</label>
+    <input type="email" id="acEmail" required autocomplete="email" />
+    <label>Password</label>
+    <div style="position:relative">
+      <input type="password" id="acPass" required autocomplete="current-password" style="padding-right:48px"/>
+      <button type="button" tabindex="-1" onclick="var i=document.getElementById('acPass');i.type=i.type==='password'?'text':'password';this.textContent=i.type==='password'?'👁':'🙈'" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:0;color:var(--muted);font-size:18px;cursor:pointer;padding:4px 8px">👁</button>
+    </div>
+    <button type="submit">Sign In</button>
+    <div class="hint">No account yet? <a href="/#contact">Create one from the home page</a>.</div>
+  </form>
+</div>
+
+<script>
+'use strict';
+
+async function api(path, opts){
+  opts = opts || {};
+  var init = {
+    method: opts.method || 'GET',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin'
+  };
+  if (opts.body) init.body = JSON.stringify(opts.body);
+  var res = await fetch(path, init);
+  var data = null;
+  try { data = await res.json(); } catch(e){}
+  if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+  return data;
+}
+
+function fmtDate(s){
+  if (!s) return '';
+  return new Date(s).toLocaleString('en-US', { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' });
+}
+function fmtMoney(n){ return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function esc(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+  });
+}
+function badge(text, cls){ return '<span class="badge ' + cls + '">' + esc(text) + '</span>'; }
+function reasonLabel(r){
+  return ({
+    signup_bonus: 'Welcome bonus',
+    purchase: 'Purchase reward',
+    review: 'Review approved',
+    redemption: 'Redeemed at checkout',
+    admin_adjust: 'Manual adjustment',
+  })[r] || r;
+}
+
+// === AUTH ===
+async function doSignIn(){
+  var email = document.getElementById('acEmail').value.trim();
+  var password = document.getElementById('acPass').value;
+  var err = document.getElementById('signinErr');
+  err.classList.remove('show');
+  try {
+    var r = await api('/api/auth/signin', { method:'POST', body:{ email: email, password: password } });
+    document.getElementById('signinBg').classList.remove('show');
+    showProfile(r.user);
+    show('orders');
+  } catch(e){
+    err.textContent = e.message || 'Sign-in failed.';
+    err.classList.add('show');
+  }
+}
+
+document.getElementById('signoutBtn').addEventListener('click', async function(){
+  try { await api('/api/auth/signout', { method:'POST' }); } catch(e){}
+  try { localStorage.removeItem('mh_user'); } catch(e){}
+  location.reload();
+});
+
+// === PROFILE ===
+function showProfile(user){
+  document.getElementById('whoLabel').textContent = user.name || user.email;
+  document.getElementById('profileName').textContent = user.name || user.email.split('@')[0];
+  document.getElementById('profileEmail').textContent = user.email;
+  document.getElementById('avatarLetter').textContent = (user.name || user.email).charAt(0).toUpperCase();
+  document.getElementById('profileCard').style.display = 'flex';
+  loadPoints();
+}
+
+async function loadPoints(){
+  try {
+    var r = await api('/api/points');
+    document.getElementById('pointsBalance').textContent = (r.balance || 0).toLocaleString();
+    window._foxdPoints = r;
+  } catch(e){
+    document.getElementById('pointsBalance').textContent = '0';
+  }
+}
+
+// === TABS ===
+var renderers = { orders: renderOrders, service: renderService, points: renderPoints, wishlist: renderWishlist, vehicles: renderVehicles, addresses: renderAddresses, chat: renderChat, profile: renderProfile };
+var currentTab = 'orders';
+document.querySelectorAll('#tabs button').forEach(function(b){
+  b.addEventListener('click', function(){
+    document.querySelectorAll('#tabs button').forEach(function(x){ x.classList.remove('active'); });
+    b.classList.add('active');
+    currentTab = b.dataset.tab;
+    show(currentTab);
+  });
+});
+
+async function show(tab){
+  var panel = document.getElementById('panel');
+  panel.innerHTML = '<div class="empty">Loading…</div>';
+  try { await renderers[tab](panel); }
+  catch(e){ panel.innerHTML = '<div class="empty">Error: ' + esc(e.message) + '</div>'; }
+}
+
+// === RENDERERS ===
+async function renderOrders(panel){
+  var r = await api('/api/orders');
+  if (!r.orders.length){
+    panel.innerHTML = '<div class="empty">No orders yet.<br/>Browse the shop and place your first order — you\'ll earn 1 point per dollar.<br/><a class="cta" href="/#parts">Browse inventory</a></div>';
+    return;
+  }
+  panel.innerHTML = '<table><thead><tr>' +
+    '<th>Order</th><th>Date</th><th>Total</th><th>Status</th><th></th>' +
+    '</tr></thead><tbody>' +
+    r.orders.map(function(o){
+      return '<tr>' +
+        '<td><b>#' + o.id + '</b></td>' +
+        '<td>' + fmtDate(o.created_at) + '</td>' +
+        '<td>' + fmtMoney(o.total_usd) + '</td>' +
+        '<td>' + badge(o.status, o.status) + '</td>' +
+        '<td><button class="toggle" data-id="' + o.id + '" style="background:transparent;border:1px solid var(--line);padding:5px 10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">View</button></td>' +
+      '</tr><tr id="detail-' + o.id + '" style="display:none"><td colspan="5" style="padding:0;background:#fafafa"><div class="ord-detail show" id="detail-body-' + o.id + '">Loading…</div></td></tr>';
+    }).join('') + '</tbody></table>';
+  panel.querySelectorAll('.toggle').forEach(function(b){
+    b.addEventListener('click', async function(){
+      var id = b.dataset.id;
+      var row = document.getElementById('detail-' + id);
+      var body = document.getElementById('detail-body-' + id);
+      if (row.style.display === 'none'){
+        row.style.display = '';
+        b.textContent = 'Hide';
+        body.textContent = 'Loading…';
+        try {
+          var r = await api('/api/orders/' + id);
+          var items = r.items || [];
+          var rows = items.map(function(it){
+            return '<tr><td>' + esc(it.name || it.product_img) +
+              (it.make_model ? '<br/><small style="color:#6b7280">' + esc(it.make_model) + '</small>' : '') +
+              '</td><td style="text-align:right">× ' + it.qty + '</td><td style="text-align:right">' + fmtMoney(it.price_usd) + '</td>' +
+              '<td style="text-align:right">' + fmtMoney(Number(it.price_usd) * it.qty) + '</td></tr>';
+          }).join('');
+          body.innerHTML =
+            '<table style="font-size:12px"><thead><tr>' +
+              '<th align="left">Item</th><th align="right">Qty</th><th align="right">Unit</th><th align="right">Line</th>' +
+            '</tr></thead><tbody>' + rows + '</tbody></table>' +
+            '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">' +
+              '<small style="color:var(--muted)">Payment: <b>' + esc(r.order.payment_method) + '</b> · ' + esc(r.order.payment_status) + '</small>' +
+              '<b style="font-size:14px">Total ' + fmtMoney(r.order.total_usd) + '</b>' +
+            '</div>';
+        } catch(e){ body.textContent = 'Could not load details: ' + e.message; }
+      } else {
+        row.style.display = 'none';
+        b.textContent = 'View';
+      }
+    });
+  });
+}
+
+async function renderPoints(panel){
+  var r = await api('/api/points');
+  document.getElementById('pointsBalance').textContent = (r.balance || 0).toLocaleString();
+  var rate = r.rate_usd_per_point || 0.05;
+  if (!r.transactions.length){
+    panel.innerHTML = '<div class="empty">No points activity yet.<br/>Earn 1 point per dollar spent. 100 points = ' + fmtMoney(100 * rate) + ' off your next order.</div>';
+    return;
+  }
+  panel.innerHTML = '<div style="padding:14px 16px;background:#fafafa;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--muted)">' +
+    'Earn <b>1 point</b> per USD spent. Reviews approved by our team earn <b>50 points</b>. ' +
+    '<b>100 points = ' + fmtMoney(100 * rate) + ' off</b> at checkout.' +
+    '</div>' +
+    '<table><thead><tr>' +
+    '<th>Date</th><th>Reason</th><th>Reference</th><th style="text-align:right">Points</th>' +
+    '</tr></thead><tbody>' +
+    r.transactions.map(function(t){
+      return '<tr>' +
+        '<td>' + fmtDate(t.created_at) + '</td>' +
+        '<td>' + esc(reasonLabel(t.reason)) + '</td>' +
+        '<td>' + (t.reference_id ? '<small style="color:var(--muted)">#' + t.reference_id + '</small>' : '') + '</td>' +
+        '<td style="text-align:right" class="delta ' + (t.delta >= 0 ? 'pos' : 'neg') + '">' +
+          (t.delta >= 0 ? '+' : '') + t.delta + '</td>' +
+      '</tr>';
+    }).join('') + '</tbody></table>';
+}
+
+
+async function renderProfile(panel){
+  var r = await api('/api/me');
+  if (!r.user) { panel.innerHTML = '<div class="empty">Not signed in.</div>'; return; }
+  var u = r.user;
+  panel.innerHTML =
+    '<form style="padding:24px;max-width:480px" id="profileForm" onsubmit="event.preventDefault();saveProfile();">' +
+      '<div style="margin-bottom:14px"><label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700;margin-bottom:4px">Email</label>' +
+        '<input type="email" disabled value="' + esc(u.email) + '" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;background:#f6f7f9;color:var(--muted);font-family:inherit"/></div>' +
+      '<div style="margin-bottom:14px"><label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700;margin-bottom:4px">Name</label>' +
+        '<input type="text" id="pName" value="' + esc(u.name || '') + '" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;font-family:inherit"/></div>' +
+      '<div style="margin-bottom:14px"><label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700;margin-bottom:4px">Phone</label>' +
+        '<input type="tel" id="pPhone" value="' + esc(u.phone || '') + '" placeholder="876-000-0000" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;font-family:inherit"/></div>' +
+      '<div style="margin-bottom:18px"><label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700;margin-bottom:4px">New password (leave blank to keep current)</label>' +
+        '<input type="password" id="pPass" placeholder="••••••••" minlength="4" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;font-family:inherit"/></div>' +
+      '<div id="profileMsg" style="display:none;padding:10px 12px;border-radius:8px;font-size:13px;margin-bottom:12px"></div>' +
+      '<button type="submit" style="background:var(--red);color:#fff;border:none;padding:11px 22px;border-radius:8px;font-weight:700;cursor:pointer;font-size:14px;font-family:inherit">Save changes</button>' +
+      (u.is_admin ? '<a href="/admin.html" style="margin-left:14px;color:var(--navy);font-size:13px;font-weight:700">Open admin →</a>' : '') +
+    '</form>';
+}
+
+async function renderService(panel){
+  var r = await api('/api/my-work-orders');
+  var list = (r && r.work_orders) || [];
+  if (!list.length){
+    panel.innerHTML = '<div class="empty">No service history yet.<br/>When we open a work order with your phone number, it will appear here.<br/><a class="cta" href="/track.html">Look up a work order by number →</a></div>';
+    return;
+  }
+  panel.innerHTML =
+    '<div style="padding:14px 18px;background:#fafafa;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--muted)">Showing ' + list.length + ' work order' + (list.length===1?'':'s') + ' matched to your account. Tap any row to view full status.</div>' +
+    '<table><thead><tr><th>WO #</th><th>Vehicle</th><th>Status</th><th>Intake</th><th>Total</th><th></th></tr></thead><tbody>' +
+      list.map(function(w){
+        var veh = [w.vehicle_year, w.vehicle_make, w.vehicle_model].filter(Boolean).join(' ');
+        var stMap = { open:'pending', in_progress:'pending', awaiting_parts:'pending', completed:'instock', billed:'instock', paid:'instock', cancelled:'outstock' };
+        return '<tr>' +
+          '<td><b style="font-family:ui-monospace,Menlo,monospace">' + esc(w.wo_number) + '</b></td>' +
+          '<td>' + esc(veh) + '</td>' +
+          '<td>' + badge(w.status.replace(/_/g,' '), stMap[w.status] || 'pending') + '</td>' +
+          '<td>' + fmtDate(w.intake_date) + '</td>' +
+          '<td>' + fmtMoney(w.total_usd) + '</td>' +
+          '<td><a href="/track.html?wo=' + encodeURIComponent(w.wo_number) + '" target="_blank" style="color:var(--red);font-weight:700;text-decoration:none;font-size:12.5px">Details →</a></td>' +
+        '</tr>';
+      }).join('') + '</tbody></table>';
+}
+
+async function renderWishlist(panel){
+  var r = await api('/api/wishlist');
+  var items = (r && r.items) || [];
+  if (!items.length){
+    panel.innerHTML = '<div class="empty">Your wishlist is empty.<br/>Tap the ♡ on any part to save it for later.<br/><a class="cta" href="/#parts">Browse inventory</a></div>';
+    return;
+  }
+  panel.innerHTML =
+    '<table><thead><tr><th>Photo</th><th>Part</th><th>Vehicle</th><th>Condition</th><th>Price</th><th>Stock</th><th></th></tr></thead><tbody>' +
+    items.map(function(it){
+      var thumb = '<img src="' + (it.product_img.startsWith('/') ? it.product_img : encodeURI(it.product_img)) + '" alt="" style="width:54px;height:54px;object-fit:cover;border-radius:6px;border:1px solid var(--line);background:#f3f4f6" onerror="this.style.opacity=0.3"/>';
+      var stock = (it.stock_count > 0 ? badge('In Stock', 'instock') : badge('Out of Stock', 'outstock'));
+      return '<tr>' +
+        '<td>' + thumb + '</td>' +
+        '<td><b>' + esc(it.name || it.product_img) + '</b></td>' +
+        '<td>' + esc(it.make_model || '—') + '</td>' +
+        '<td>' + esc(it.condition || '—') + '</td>' +
+        '<td>' + (it.price_usd ? fmtMoney(it.price_usd) : '<span style="color:#6b7280">Call</span>') + '</td>' +
+        '<td>' + stock + '</td>' +
+        '<td><button data-wishrm="' + esc(it.product_img) + '" style="background:none;border:0;color:#b91c1c;cursor:pointer;font-weight:600;font-size:12.5px">Remove</button></td>' +
+      '</tr>';
+    }).join('') + '</tbody></table>';
+  panel.querySelectorAll('[data-wishrm]').forEach(function(b){
+    b.addEventListener('click', async function(){
+      await api('/api/wishlist/' + encodeURIComponent(b.dataset.wishrm), { method:'DELETE' });
+      show('wishlist');
+    });
+  });
+}
+
+async function renderAddresses(panel){
+  var r = await api('/api/my-addresses');
+  var list = (r && r.addresses) || [];
+  panel.innerHTML =
+    '<div style="padding:14px 18px;background:#fafafa;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--muted)">Save addresses for faster checkout and faster service drop-offs.</div>' +
+    '<div style="padding:14px 18px">' +
+      '<form onsubmit="event.preventDefault();addMyAddress();" style="background:#fff;border:1px solid var(--line);padding:14px;border-radius:8px;margin-bottom:14px">' +
+        '<h4 style="margin:0 0 10px;font-size:14px">+ Add a new address</h4>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
+          '<input id="maLabel" placeholder="Label (Home, Office)" style="padding:9px 11px;border:1px solid var(--line);border-radius:6px;font-size:13px;font-family:inherit"/>' +
+          '<select id="maKind" style="padding:9px 11px;border:1px solid var(--line);border-radius:6px;font-size:13px;font-family:inherit;background:#fff"><option value="shipping">Shipping</option><option value="billing">Billing</option><option value="both">Both</option></select>' +
+          '<input id="maL1" required placeholder="Address line 1 *" style="padding:9px 11px;border:1px solid var(--line);border-radius:6px;font-size:13px;font-family:inherit;grid-column:1/-1"/>' +
+          '<input id="maL2" placeholder="Apt, suite, etc." style="padding:9px 11px;border:1px solid var(--line);border-radius:6px;font-size:13px;font-family:inherit;grid-column:1/-1"/>' +
+          '<input id="maCity" placeholder="City" style="padding:9px 11px;border:1px solid var(--line);border-radius:6px;font-size:13px;font-family:inherit"/>' +
+          '<input id="maParish" placeholder="Parish (e.g. Kingston)" style="padding:9px 11px;border:1px solid var(--line);border-radius:6px;font-size:13px;font-family:inherit"/>' +
+          '<input id="maPhone" type="tel" placeholder="Phone at this address" style="padding:9px 11px;border:1px solid var(--line);border-radius:6px;font-size:13px;font-family:inherit"/>' +
+          '<label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="maDef"/> Make this my default address</label>' +
+          '<button type="submit" class="cta" style="grid-column:1/-1;background:var(--red);color:#fff;border:0;border-radius:6px;padding:11px;font-weight:700;cursor:pointer">Save address</button>' +
+        '</div>' +
+      '</form>' +
+      (list.length === 0 ? '<div class="empty" style="border:0;padding:20px 0">No saved addresses yet.</div>' :
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">' +
+          list.map(function(a){
+            return '<div style="background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px;font-size:13px;line-height:1.6">' +
+              '<b style="font-size:14px">' + esc(a.label || a.kind) + '</b>' +
+              (a.is_default ? ' <span style="background:#dcfce7;color:#166534;padding:1px 7px;border-radius:4px;font-size:10.5px;font-weight:700">DEFAULT</span>' : '') +
+              '<div style="color:#4b5563;margin-top:6px">' +
+                esc(a.line1) + (a.line2 ? '<br/>' + esc(a.line2) : '') + '<br/>' +
+                esc([a.city, a.parish].filter(Boolean).join(', ')) + '<br/>' +
+                esc(a.country || 'Jamaica') + (a.phone ? ' · ' + esc(a.phone) : '') +
+              '</div>' +
+              '<button data-rmma="' + a.id + '" style="background:none;border:0;color:#b91c1c;cursor:pointer;font-weight:600;font-size:12px;margin-top:8px">Delete</button>' +
+            '</div>';
+          }).join('') +
+        '</div>') +
+    '</div>';
+  panel.querySelectorAll('[data-rmma]').forEach(function(b){
+    b.addEventListener('click', async function(){
+      if (!confirm('Delete this address?')) return;
+      await api('/api/my-addresses/' + b.dataset.rmma, { method:'DELETE' });
+      show('addresses');
+    });
+  });
+}
+async function addMyAddress(){
+  var body = {
+    label: document.getElementById('maLabel').value.trim(),
+    kind: document.getElementById('maKind').value,
+    line1: document.getElementById('maL1').value.trim(),
+    line2: document.getElementById('maL2').value.trim(),
+    city: document.getElementById('maCity').value.trim(),
+    parish: document.getElementById('maParish').value.trim(),
+    phone: document.getElementById('maPhone').value.trim(),
+    is_default: document.getElementById('maDef').checked,
+  };
+  try { await api('/api/my-addresses', { method:'POST', body: body }); show('addresses'); }
+  catch(e){ alert(e.message); }
+}
+
+async function renderChat(panel){
+  var r = await api('/api/my-messages');
+  var msgs = (r && r.messages) || [];
+  panel.innerHTML =
+    '<div style="padding:14px 18px;background:#fafafa;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--muted)">Send a message to Meltha Honda directly — we typically reply within business hours.</div>' +
+    '<div style="padding:14px 18px;display:flex;flex-direction:column;min-height:500px">' +
+      '<div id="chatList" style="flex:1;overflow-y:auto;background:#fafafa;border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:10px;max-height:500px">' +
+        (msgs.length === 0 ? '<div style="text-align:center;color:var(--muted);font-size:13px;padding:30px">No messages yet. Send the first one below.</div>' :
+          msgs.map(function(m){
+            var mine = m.sender === 'customer';
+            return '<div style="display:flex;justify-content:' + (mine?'flex-end':'flex-start') + ';margin-bottom:8px">' +
+              '<div style="background:' + (mine?'var(--red)':'#fff') + ';color:' + (mine?'#fff':'#1f2937') + ';padding:10px 13px;border-radius:12px;max-width:75%;font-size:13.5px;line-height:1.5;box-shadow:0 1px 3px rgba(0,0,0,.08)">' +
+                esc(m.body) +
+                '<div style="font-size:10.5px;opacity:.7;margin-top:4px">' + fmtDate(m.created_at) + (mine ? ' · you' : ' · Meltha Honda staff') + '</div>' +
+              '</div>' +
+            '</div>';
+          }).join('')) +
+      '</div>' +
+      '<form onsubmit="event.preventDefault();sendMyMsg();" style="display:flex;gap:8px">' +
+        '<input id="chatInput" required placeholder="Type your message…" style="flex:1;padding:11px 13px;border:1px solid var(--line);border-radius:7px;font-size:14px;font-family:inherit"/>' +
+        '<button type="submit" class="cta" style="background:var(--red);color:#fff;border:0;border-radius:7px;padding:11px 22px;font-weight:700;cursor:pointer">Send</button>' +
+      '</form>' +
+    '</div>';
+  var box = document.getElementById('chatList'); box.scrollTop = box.scrollHeight;
+}
+async function sendMyMsg(){
+  try { await api('/api/my-messages', { method:'POST', body:{ body: document.getElementById('chatInput').value } }); document.getElementById('chatInput').value = ''; show('chat'); }
+  catch(e){ alert(e.message); }
+}
+
+async function renderVehicles(panel){
+  var r = await api('/api/vehicles');
+  var list = (r && r.vehicles) || [];
+  var addForm =
+    '<div style="padding:16px 20px;border-bottom:1px solid var(--line);background:#fafafa">' +
+      '<h3 style="margin:0 0 10px;font-size:14px">Add a vehicle</h3>' +
+      '<form id="vehForm" onsubmit="event.preventDefault();addVehicle();" style="display:grid;grid-template-columns:repeat(4,1fr) auto;gap:8px;align-items:end">' +
+        '<div><label style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700;display:block;margin-bottom:3px">Make</label><input id="vMake" placeholder="Toyota" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;font-family:inherit"/></div>' +
+        '<div><label style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700;display:block;margin-bottom:3px">Model</label><input id="vModel" placeholder="Camry" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;font-family:inherit"/></div>' +
+        '<div><label style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700;display:block;margin-bottom:3px">Year</label><input id="vYear" type="number" min="1980" max="2030" placeholder="2020" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;font-family:inherit"/></div>' +
+        '<div><label style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700;display:block;margin-bottom:3px">VIN (optional)</label><input id="vVin" maxlength="17" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;font-family:inherit;text-transform:uppercase"/></div>' +
+        '<button type="submit" style="background:var(--red);color:#fff;border:0;border-radius:6px;padding:9px 14px;font-weight:700;cursor:pointer;font-size:13px;font-family:inherit">Save</button>' +
+      '</form>' +
+    '</div>';
+  if (!list.length){
+    panel.innerHTML = addForm + '<div class="empty">No vehicles saved yet.<br/>Use the form above, or decode a VIN on the home page to save automatically.</div>';
+    return;
+  }
+  panel.innerHTML = addForm +
+    '<table><thead><tr><th>Vehicle</th><th>VIN</th><th>Saved</th><th></th></tr></thead><tbody>' +
+    list.map(function(v){
+      var lbl = v.label || ((v.year||'') + ' ' + (v.make||'') + ' ' + (v.model||'')).trim();
+      return '<tr>' +
+        '<td><b>' + esc(lbl) + '</b></td>' +
+        '<td style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px">' + esc(v.vin || '—') + '</td>' +
+        '<td>' + fmtDate(v.created_at) + '</td>' +
+        '<td><button data-vid="' + v.id + '" style="background:none;border:0;color:#b91c1c;cursor:pointer;font-weight:600;font-size:12.5px">Delete</button></td>' +
+      '</tr>';
+    }).join('') + '</tbody></table>';
+  panel.querySelectorAll('[data-vid]').forEach(function(b){
+    b.addEventListener('click', async function(){
+      if (!confirm('Delete this saved vehicle?')) return;
+      await api('/api/vehicles/' + b.dataset.vid, { method:'DELETE' });
+      show('vehicles');
+    });
+  });
+}
+
+async function addVehicle(){
+  var body = {
+    make: document.getElementById('vMake').value.trim(),
+    model: document.getElementById('vModel').value.trim(),
+    year: parseInt(document.getElementById('vYear').value, 10) || null,
+    vin: document.getElementById('vVin').value.trim().toUpperCase(),
+  };
+  body.label = [body.year, body.make, body.model].filter(Boolean).join(' ');
+  try {
+    await api('/api/vehicles', { method:'POST', body: body });
+    show('vehicles');
+  } catch(e){ alert('Could not save: ' + e.message); }
+}
+
+async function saveProfile(){
+  var msg = document.getElementById('profileMsg');
+  msg.style.display = 'none';
+  var body = {
+    name: document.getElementById('pName').value.trim(),
+    phone: document.getElementById('pPhone').value.trim(),
+  };
+  var pw = document.getElementById('pPass').value;
+  if (pw) body.password = pw;
+  try {
+    var r = await api('/api/me', { method:'PATCH', body: body });
+    msg.style.background = '#dcfce7'; msg.style.color = '#166534';
+    msg.textContent = '✓ Profile updated.';
+    msg.style.display = 'block';
+    document.getElementById('pPass').value = '';
+    showProfile(r.user);
+  } catch(e){
+    msg.style.background = '#fee2e2'; msg.style.color = '#991b1b';
+    msg.textContent = 'Failed: ' + e.message;
+    msg.style.display = 'block';
+  }
+}
+
+// === INIT ===
+async function init(){
+  await Promise.all([show('orders')]);
+}
+
+(async function bootstrap(){
+  try {
+    var r = await api('/api/me');
+    if (r.user){
+      showProfile(r.user);
+      show('orders');
+    } else {
+      document.getElementById('signinBg').classList.add('show');
+      setTimeout(function(){ document.getElementById('acEmail').focus(); }, 100);
+    }
+  } catch(e){
+    document.getElementById('signinBg').classList.add('show');
+  }
+})();
+</script>
+</body>
+</html>

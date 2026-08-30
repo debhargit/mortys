@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>POS Invoice · Meltha Honda</title>
+<style>
+  :root { --red:#d62828; --navy:#0b1b2b; --ink:#1f2937; --muted:#6b7280; --line:#cfcfcf; }
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#f3f4f6;color:var(--ink);margin:0;padding:24px;font-size:13px}
+  .inv{max-width:780px;margin:0 auto;background:#fff;padding:32px;border:1px solid var(--line);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.05)}
+  .head{display:flex;justify-content:space-between;align-items:start;border-bottom:3px solid var(--navy);padding-bottom:14px;margin-bottom:14px}
+  .brand{display:flex;align-items:center;gap:14px}
+  .brand .logo{width:60px;height:60px;background:linear-gradient(135deg,var(--red),#9d2020);border-radius:12px;display:grid;place-items:center;color:#fff;font-weight:900;font-size:18px}
+  .brand h1{margin:0;font-size:22px;color:var(--navy);letter-spacing:-.3px}
+  .brand .sub{font-size:11px;color:var(--muted);margin-top:2px}
+  .meta{text-align:right}
+  .meta .num{font-size:18px;font-weight:800;font-family:ui-monospace,Menlo,monospace;color:var(--red)}
+  .meta .lbl{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);font-weight:700}
+  .panels{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px}
+  .panels h4{margin:0 0 4px;font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);font-weight:700}
+  .panels b{font-size:14px}
+  .panels small{display:block;color:var(--muted);line-height:1.6}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{background:var(--navy);color:#fff;text-align:left;padding:9px;font-size:11px;text-transform:uppercase;letter-spacing:1px}
+  td{padding:10px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+  th.right,td.right{text-align:right}
+  .totals{margin-left:auto;width:280px;font-size:13px;margin-top:8px}
+  .totals .row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed var(--line)}
+  .totals .grand{background:var(--navy);color:#fff;padding:12px 14px;border-radius:6px;margin-top:8px;font-size:17px;font-weight:800;display:flex;justify-content:space-between}
+  .totals .grand b{color:#ffb703}
+  .paid{margin-top:16px;background:#dcfce7;color:#166534;padding:10px 14px;border-radius:7px;font-size:13px;font-weight:700;text-align:center}
+  .footer{margin-top:24px;padding-top:14px;border-top:1px solid var(--line);text-align:center;color:var(--muted);font-size:11.5px;line-height:1.7}
+  .footer b{color:var(--ink);display:block;margin-bottom:4px;font-size:12px}
+  .actions{max-width:780px;margin:0 auto 14px;display:flex;gap:8px;justify-content:flex-end}
+  .actions button,.actions a{padding:9px 16px;border:0;background:var(--red);color:#fff;font-weight:700;border-radius:6px;cursor:pointer;font-size:13px;text-decoration:none;font-family:inherit}
+  .actions .gray{background:#6b7280}
+  @media print { body{background:#fff;padding:0} .inv{box-shadow:none;border:0;padding:24px} .actions{display:none} }
+</style>
+</head>
+<body>
+<div class="actions">
+  <button onclick="window.print()">🖨 Print / Save as PDF</button>
+  <button class="gray" onclick="window.close()">Close</button>
+</div>
+<div id="inv"></div>
+<script>
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function fmt(n){ return '$' + Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtDate(s){ if (!s) return ''; return new Date(s).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}); }
+async function load(){
+  var p = new URLSearchParams(location.search);
+  var id = p.get('id');
+  if (!id){ document.getElementById('inv').innerHTML = 'Missing ?id='; return; }
+  try {
+    var r = await fetch('/api/admin/pos/sales/' + id, { credentials:'same-origin' });
+    var d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    render(d);
+  } catch(e){ document.getElementById('inv').innerHTML = '<div style="color:#b91c1c">' + esc(e.message) + '</div>'; }
+}
+function render(d){
+  var s = d.sale;
+  var items = d.items || [];
+  document.getElementById('inv').innerHTML =
+    '<div class="inv">' +
+      '<div class="head">' +
+        '<div class="brand"><div class="logo">F&amp;D</div><div><h1>Meltha Honda Sales &amp; Servs Ltd</h1><div class="sub">127 Hagley Park Road, Kingston 11, Jamaica<br/>(876) 758-8503 · https://melthahonda.com</div></div></div>' +
+        '<div class="meta"><div class="lbl">INVOICE</div><div class="num">' + esc(s.receipt_number) + '</div><small style="color:var(--muted);font-size:11px;display:block;margin-top:4px">' + fmtDate(s.created_at) + '</small></div>' +
+      '</div>' +
+      '<div class="panels">' +
+        '<div><h4>Bill to</h4><b>' + esc(s.customer_name || 'Walk-in customer') + '</b><small>' + esc(s.customer_phone || '') + '</small></div>' +
+        '<div><h4>Cashier</h4><b>' + esc(s.cashier_name || '—') + '</b>' + (s.vehicle_info ? '<small>Vehicle: ' + esc(s.vehicle_info) + '</small>' : '') + '</div>' +
+      '</div>' +
+      '<table><thead><tr><th>Description</th><th class="right">Qty</th><th class="right">Unit</th><th class="right">Amount</th></tr></thead><tbody>' +
+        items.map(function(i){
+          var bits = [];
+          if (Number(i.core_charge_usd) > 0) bits.push('<small style="color:#f59e0b">+ core ' + fmt(i.core_charge_usd) + '</small>');
+          if (Number(i.env_fee_usd) > 0) bits.push('<small style="color:#6b7280">+ env ' + fmt(i.env_fee_usd) + '</small>');
+          if (i.serial_number) bits.push('<small style="color:#6b7280">S/N: ' + esc(i.serial_number) + '</small>');
+          if (i.warranty_until) bits.push('<small style="color:#16a34a">Warranty until ' + i.warranty_until + '</small>');
+          return '<tr><td><b>' + esc(i.description) + '</b>' + (bits.length ? '<br/>' + bits.join('<br/>') : '') + '</td>' +
+            '<td class="right">' + i.qty + '</td>' +
+            '<td class="right">' + fmt(i.unit_price_usd) + '</td>' +
+            '<td class="right"><b>' + fmt(i.total_usd) + '</b></td></tr>';
+        }).join('') +
+      '</tbody></table>' +
+      '<div class="totals">' +
+        '<div class="row"><span>Subtotal</span><b>' + fmt(s.subtotal_usd) + '</b></div>' +
+        (Number(s.discount_usd) > 0 ? '<div class="row"><span>Discount</span><b>−' + fmt(s.discount_usd) + '</b></div>' : '') +
+        '<div class="row"><span>GCT (15%)</span><b>' + fmt(s.tax_usd) + '</b></div>' +
+        '<div class="grand"><span>TOTAL DUE</span><b>' + fmt(s.total_usd) + '</b></div>' +
+      '</div>' +
+      '<div class="paid">✓ PAID via ' + esc(s.payment_method) + ' on ' + fmtDate(s.created_at) + (s.reference ? ' · ref ' + esc(s.reference) : '') + '</div>' +
+      '<div class="footer"><b>Thank you for your business!</b>Returns within 30 days with this invoice. Call us at (876) 758-8503 with any questions.</div>' +
+    '</div>';
+  setTimeout(function(){ window.print(); }, 400);
+}
+load();
+</script>
+</body>
+</html>

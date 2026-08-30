@@ -1,0 +1,30 @@
+-- 0011_drop_sample_products.sql
+-- Drops the 26 demo products so the catalogue is only the real stock.
+--
+-- 0002_seed_data.sql planted a starter catalogue: stock photographs pulled
+-- from retail listings, generic names ("Front Fender (LH/RH)"), and invented
+-- prices. That was scaffolding to give the storefront something to render
+-- before there was any real inventory. Since 0006 seeded the actual stock
+-- listing -- 22,977 parts keyed by their real part numbers -- the demo rows
+-- are the only priced items in the catalogue, which makes them the first
+-- thing a customer sees and the only thing the POS can ring up at face value.
+-- They are not stock the shop owns.
+--
+-- Identified by `sku IS NULL`. That is exact, not a heuristic: the stock seed
+-- writes the part number into both `img` and `sku` for every row it creates,
+-- so a null sku is only ever a hand-seeded demo row. Verified against the
+-- live database before writing this -- 22,977 rows carry a sku (matching the
+-- build script's distinct-part count exactly) and 26 do not.
+--
+-- Checked for references before deleting; there were none in production:
+-- no order_items, wishlist rows, notify_subscriptions, reviews, work order
+-- parts, or POS sale lines pointed at any of them. The FKs that do exist
+-- (wishlist, order_items, notify_subscriptions) are ON DELETE CASCADE and
+-- work_order_parts / parts_requisition_items are ON DELETE SET NULL, so the
+-- delete is safe regardless of what accumulates before this runs.
+--
+-- 0002_seed_data.sql is deliberately left alone. Migrations are append-only:
+-- a fresh database still runs 0002 and then this, and lands in the same
+-- place. Editing an applied migration would only make the two diverge.
+
+DELETE FROM products WHERE sku IS NULL;

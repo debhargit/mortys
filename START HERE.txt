@@ -1,0 +1,55 @@
+===============================================================================
+  MELTHA HONDA  --  MIGRATION FOLDER
+===============================================================================
+
+  This one folder is everything needed to move the till, with all of its
+  records, onto this computer. Nothing is downloaded and nothing else has to
+  be installed -- Node.js, PostgreSQL and the one Windows component it needs
+  are all inside.
+
+  No terminal window opens at any point. You will see a small "working" box
+  and, at the end, one message telling you it is done.
+
+
+  TO SET UP THIS COMPUTER AS THE TILL
+  -----------------------------------
+
+    1. Copy this whole folder onto the C: drive of this computer
+       (so it becomes  C:\MelthaHonda-Migration ), or just leave it on the
+       USB stick -- either works.
+
+    2. Double-click:   Restore On New PC.exe
+       Click Yes at the Windows permission prompt.
+
+    3. Wait for the "This computer is the till now" message.
+       Open the "Meltha Honda Admin" shortcut it puts on the desktop, and
+       sign in with the same email and password as the old machine.
+
+  That is all. This PC now starts the till automatically, hidden, every time
+  it is switched on.
+
+
+  IF OTHER COMPUTERS CANNOT REACH IT
+  ---------------------------------
+
+    On THIS computer, run once:   Allow Network Access.vbs
+    Then other PCs use:           http://<this-PC-IP>:3040/admin.html
+    (this PC's address is in  C:\MelthaHonda\app\machine-config.json )
+
+
+  IMPORTANT
+  ---------
+
+    * Once this computer is working as the till, switch the OLD machine off
+      for good. Two live copies of the database drift apart and cannot be
+      merged.
+
+    * Keep the folder path short (C:\... , or the USB root). Some product
+      photos have very long file names and a deep path drops them silently.
+
+    * This folder contains the database password in plain text, exactly as
+      the original install always has. Do not leave the USB stick lying
+      around.
+
+  Full detail: see MIGRATION-README.txt
+===============================================================================

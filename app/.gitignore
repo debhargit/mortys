@@ -1,0 +1,36 @@
+node_modules/
+.env
+uploads/*
+!uploads/.gitkeep
+*.log
+.wrangler/
+# LibreOffice/Excel lock files left behind while a spreadsheet is open
+.~lock.*#
+
+# Local-only wrangler dev vars (SESSION_SECRET etc). Never committed.
+.dev.vars
+
+# Local/online database connection config (host/user/password), set via
+# Admin Setup → Database. Same sensitivity as .env -- never committed.
+db-config.json
+
+# App server's own listening port, set via Admin Setup → Server connection.
+server-config.json
+
+# This machine's display name, set via Admin Setup → This machine. Not
+# sensitive, just local-machine-specific -- doesn't belong in version control
+# any more than the two files above.
+machine-config.json
+
+# Per-install terminal identity — never share between machines
+terminal-id.json
+
+# Build output — reproducible via build-portable.ps1
+dist/
+
+# Build-time binaries — re-fetched by build-portable.ps1 / ensure-*.js
+vendor/
+
+# Local runtime state: bundled Postgres data dir, boot lock, logs
+data/
+.claude/

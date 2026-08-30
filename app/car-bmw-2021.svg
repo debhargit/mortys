@@ -1,0 +1,54 @@
+<svg viewBox="0 0 800 450" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1e3a8a"/>
+      <stop offset="1" stop-color="#0b1b2b"/>
+    </linearGradient>
+    <linearGradient id="body2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1e293b"/>
+      <stop offset="1" stop-color="#0f172a"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="450" fill="url(#bg2)"/>
+  <g opacity=".10" fill="#fff">
+    <circle cx="120" cy="80" r="2"/><circle cx="680" cy="60" r="2"/>
+    <circle cx="220" cy="40" r="1.5"/><circle cx="540" cy="100" r="1.5"/>
+    <circle cx="380" cy="70" r="1.5"/>
+  </g>
+  <ellipse cx="400" cy="350" rx="330" ry="14" fill="#000" opacity=".4"/>
+  <g transform="translate(150,200)">
+    <path d="M0,100 C0,86 8,74 22,70 L48,52 C72,38 100,28 138,22 L320,22 C362,22 398,32 430,52 L478,84 C492,90 500,100 500,116 L500,150 L0,150 Z" fill="url(#body2)" stroke="#000" stroke-width="2"/>
+    <path d="M60,62 C82,48 112,38 146,32 L242,32 L242,76 L46,76 Z" fill="#7dd3fc" opacity=".25"/>
+    <path d="M254,32 L320,32 C346,32 372,36 392,46 L416,76 L254,76 Z" fill="#7dd3fc" opacity=".25"/>
+    <line x1="248" y1="32" x2="248" y2="76" stroke="#0f172a" stroke-width="2"/>
+    <path d="M448,90 L488,90 L484,108 L452,108 Z" fill="#0f172a"/>
+    <path d="M452,92 L464,92 L463,106 L453,106 Z M468,92 L480,92 L481,106 L470,106 Z" fill="#1e293b"/>
+    <rect x="18" y="106" width="14" height="6" rx="2" fill="#fbbf24"/>
+    <line x1="0" y1="124" x2="500" y2="124" stroke="#000" stroke-width="1" opacity=".5"/>
+    <path d="M0,108 L500,108" stroke="#fff" stroke-width="1" opacity=".15"/>
+    <g>
+      <circle cx="92" cy="150" r="38" fill="#0a0f17"/>
+      <circle cx="92" cy="150" r="24" fill="#1f2937"/>
+      <circle cx="92" cy="150" r="6" fill="#9ca3af"/>
+      <g stroke="#9ca3af" stroke-width="2">
+        <line x1="92" y1="126" x2="92" y2="174"/>
+        <line x1="68" y1="150" x2="116" y2="150"/>
+        <line x1="76" y1="134" x2="108" y2="166"/>
+        <line x1="108" y1="134" x2="76" y2="166"/>
+      </g>
+    </g>
+    <g>
+      <circle cx="408" cy="150" r="38" fill="#0a0f17"/>
+      <circle cx="408" cy="150" r="24" fill="#1f2937"/>
+      <circle cx="408" cy="150" r="6" fill="#9ca3af"/>
+      <g stroke="#9ca3af" stroke-width="2">
+        <line x1="408" y1="126" x2="408" y2="174"/>
+        <line x1="384" y1="150" x2="432" y2="150"/>
+        <line x1="392" y1="134" x2="424" y2="166"/>
+        <line x1="424" y1="134" x2="392" y2="166"/>
+      </g>
+    </g>
+  </g>
+  <text x="400" y="395" text-anchor="middle" font-family="Inter,Helvetica,Arial,sans-serif" font-size="34" font-weight="800" fill="#ffffff" letter-spacing="0.5">2021 BMW</text>
+  <text x="400" y="425" text-anchor="middle" font-family="Inter,Helvetica,Arial,sans-serif" font-size="12" font-weight="700" fill="#ffb703" letter-spacing="4">NOW ON THE LOT</text>
+</svg>
