@@ -43,6 +43,20 @@ export async function requireManager(request, env) {
   return g;
 }
 
+// Hono middleware wrappers: run a guard, 401/403 on failure, else stash the
+// user row at c.get('user'). Shared by every route module.
+export function mw(guard) {
+  return async (c, next) => {
+    const g = await guard(c.req.raw, c.env);
+    if (g.error) return c.json({ error: g.error }, g.status);
+    c.set('user', g.user);
+    await next();
+  };
+}
+export const authMw = mw(requireAuth);
+export const adminMw = mw(requireAdmin);
+export const managerMw = mw(requireManager);
+
 // Deny-list capability check. A cap is allowed unless users.perms says
 // {"key": false}; a manager role is never restricted. (server.js also folds in
 // category-level denies — port that in Phase 3 with the staff endpoints.)

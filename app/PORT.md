@@ -50,9 +50,12 @@ locally with `npm run cf:dev` before deploying.
 
 ```
 functions/
-  [[path]].js          catch‑all → Hono app.fetch(request, env, ctx)
+  [[path]].js          catch‑all → Hono app; mounts each _routes module
+  _routes/
+    auth.js            Phase 1 — /api/auth/*, /api/me
+    storefront.js      Phase 2 — products, filters, cart, reviews, wishlist, notify
   _lib/
-    respond.js         json(), err(), notFound() — matches Express body shapes
+    money.js           centsToUsd / usdToCents + PRODUCT_USD_COLS
     password.js        hash() / compare() over bcryptjs
     session.js         readSession() / writeSession() / clearSession()
                        WebCrypto HMAC‑SHA256 signed cookie, name "mh_session",
@@ -92,7 +95,8 @@ Apply while porting each route. D1 is SQLite 3.
 | `date_trunc('day', ts)` / `ts::date` | `date(ts)` |
 | window fns / CTEs | D1 SQLite supports CTEs and most window fns; verify each |
 | `regexp_replace`, `substring(x from '…')` | no regex in SQLite core — do it in JS |
-| money as `NUMERIC(10,2) *_usd` | the D1 migration set already renames to `*_cents INTEGER`; **decide one** and keep it. Recommend: keep `*_usd` as `REAL` in D1 to minimise route rewrites. |
+| money as `NUMERIC(10,2) *_usd` | D1 stores `*_cents INTEGER` (deliberate — see migration headers). **Convention: convert at the SELECT boundary** — `SELECT price_cents / 100.0 AS price_usd …` — and use `functions/_lib/money.js` for anything computed in JS. Route responses stay `*_usd` so the front-ends are untouched. |
+| `products.id` (SERIAL) + `products.search_text` (generated) + `products.barcode` | D1 `products.img` **is** the PK; no `id`, no `search_text`, no `barcode`. Children key on `product_img`, not `product_id`. Search = per-term `LIKE` over `name`/`make_model`/`sku`. |
 
 The existing `migrations/0001_init.sql … 0013` already did a first SQLite
 conversion but **drifted** from `schema.sql`. `migrations/0014_sync_with_postgres.sql`
@@ -107,7 +111,7 @@ conversion but **drifted** from `schema.sql`. `migrations/0014_sync_with_postgre
 | Phase | Scope | Status |
 |---|---|---|
 | **1** | Scaffold, `_lib`, schema sync `0014`, auth slice (`/api/auth/*`, `/api/me`) | **committed, untested** |
-| 2 | Storefront read paths: `/api/products*`, `/api/categories`, `/api/reviews` (GET), cart | |
+| **2** | Storefront reads: `/api/products*`, `/api/filters`, `/api/cart*`, `/api/reviews`, `/api/wishlist*`, `/api/notify`. `_routes/{auth,storefront}.js`, `_lib/money.js`, migration `0015_storefront.sql` (adds `wishlist`). | **committed, untested** |
 | 3 | Auth‑gated reads: dashboard, `/api/admin/orders`, `/api/admin/products`, staff, roles, settings GET | |
 | 4 | POS write path: `/api/admin/pos/sale`, holds, quotes, returns/credit notes, `pos_sale_items` | |
 | 5 | Inventory + purchasing writes; CSV import (parse in‑Worker, cap size) | |
