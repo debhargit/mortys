@@ -21,6 +21,7 @@ import { d1 } from '../_lib/db.js';
 import { adminMw, managerMw, userCan } from '../_lib/guards.js';
 import { boolify } from '../_lib/util.js';
 import { usdToCents } from '../_lib/money.js';
+import { readUploadBody, putUpload } from '../_lib/uploads.js';
 import {
   parseInventoryFile, TEMPLATE_CSV, FIELD_SYNONYMS,
 } from '../_lib/inventory_import.js';
@@ -113,29 +114,43 @@ export default function mount(app) {
     return c.json({ ok: true });
   });
 
-  // Create a product. On the Node stack this took a photo upload straight to
-  // disk; there is no filesystem here and R2 lands in Phase 7, so this variant
-  // takes a JSON body and needs `img` to be an image URL/path the caller
-  // already has (e.g. a product picked from the storefront CDN).
+  // Create a product. Accepts a multipart body with a `photo` file (stored in
+  // R2, Phase 7) or a JSON body carrying an `img` image URL. When R2 is not
+  // yet enabled the upload path returns a clean 501 (see _lib/uploads.js).
   app.post('/api/admin/products', adminMw, async (c) => {
     const db = d1(c.env);
-    const b = await c.req.json().catch(() => ({}));
-    if (!b.img) return c.json({ error: 'img (image URL) is required — photo upload to R2 is Phase 7 of the port' }, 400);
+    let file, body, upload;
+    try {
+      ({ file, body } = await readUploadBody(c, ['photo']));
+      if (file) {
+        if (file.size > 12 * 1024 * 1024) return c.json({ error: 'Image too large — the limit is 12 MB.' }, 413);
+        upload = await putUpload(c.env, {
+          prefix: 'products', bytes: new Uint8Array(await file.arrayBuffer()),
+          contentType: file.type, filename: file.name,
+        });
+      }
+    } catch (e) {
+      if (e.userFacing) return c.json({ error: e.message }, e.status || 400);
+      throw e;
+    }
+    const b = body || {};
+    const img = upload ? upload.url : b.img;
+    if (!img) return c.json({ error: 'A photo upload or an img image URL is required' }, 400);
     if (!b.name || !b.category) return c.json({ error: 'name and category are required' }, 400);
     const condition = ['NEW', 'USED'].includes(String(b.condition || '').toUpperCase())
       ? b.condition.toUpperCase() : 'USED';
-    const exists = await db.one('SELECT img FROM products WHERE img = ?', b.img);
+    const exists = await db.one('SELECT img FROM products WHERE img = ?', img);
     if (exists) return c.json({ error: 'A product with that image key already exists' }, 409);
     await db.run(
       `INSERT INTO products (img, name, make_model, category, condition, price_cents, stock_count, low_threshold, location, bin_location)
          VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      b.img, b.name, b.make_model || '', b.category, condition,
+      img, b.name, b.make_model || '', b.category, condition,
       b.price_usd ? usdToCents(b.price_usd) : null,
       b.stock_count != null ? parseInt(b.stock_count, 10) : 1,
       b.low_threshold != null ? parseInt(b.low_threshold, 10) : 0,
       b.location || null, b.bin_location || null,
     );
-    return c.json({ ok: true, img: b.img });
+    return c.json({ ok: true, img });
   });
 
   app.delete('/api/admin/products/:img', managerMw, async (c) => {
