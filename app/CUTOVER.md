@@ -154,14 +154,54 @@ local cache. If the shop needs to keep ringing sales when the internet is
 down, keep running the **self-hosted portable edition** (this repo's
 `runtime\` + `app\boot.js` + `.vbs` launchers) on a shop PC.
 
-**Settings → Company & Print Settings → "💻 Local / offline server"** hands out
-the download + these steps in-app. To turn the download button on: publish the
-portable-edition zip somewhere reachable (a GitHub release asset, an R2 public
-bucket, a file share), then uncomment `LOCAL_SERVER_URL` (and optionally
-`LOCAL_SERVER_VERSION` / `_SIZE` / `_SHA256`) in `wrangler.toml` and redeploy.
-Until then the panel shows a "build it from the repo" note.
+### The in-app installer (Settings → Company & Print Settings → "💻 Set up an offline copy on a shop PC")
 
-The manual steps: on a shop PC —
+The panel is a small wizard: it asks for the **preset options** —
+
+| field | default |
+|---|---|
+| Shop name | the shop's `company_name` |
+| Install folder | `C:\MelthaHonda` |
+| Local server port | `3040` |
+| Admin sign-in email | the shop's settings email |
+| Admin password | (required, ≥ 6) — creates the local admin login |
+| Open the Windows firewall for other tills | on |
+| Start automatically with Windows | on |
+
+— and the **⬇ Download configured installer** button hands back a single
+`Install Meltha Honda Offline.cmd` with those answers baked in. Run it on the
+shop's main PC (double-click → approve the admin prompt). It:
+
+1. self-elevates, then runs an embedded PowerShell script;
+2. downloads the published bundle from `LOCAL_SERVER_URL`, verifies its
+   SHA-256 (if `LOCAL_SERVER_SHA256` is set), extracts it to the install
+   folder;
+3. writes `machine-config.json` (`{name}`), `server-config.json` (`{port}`)
+   and **`offline-setup.json`** (all the preset answers, incl. the admin
+   email + password) into the app folder;
+4. adds the firewall rules (TCP `<port>` + discovery UDP `41235`) if ticked;
+5. launches the bundle's own first run — `Meltha Honda Admin.vbs` (or
+   `setup.cmd`, or `node server.js`) — which **reads `offline-setup.json` on
+   first start to `initdb` the bundled PostgreSQL, load `schema.sql`, and
+   seed the admin user**;
+6. runs `Start With Windows.vbs` if the service box was ticked;
+7. opens `http://localhost:<port>/admin.html`.
+
+To turn the button on: publish the portable-edition zip somewhere reachable
+(a GitHub release asset, an R2 public bucket, a file share), then set
+`LOCAL_SERVER_URL` (and optionally `LOCAL_SERVER_VERSION` / `_SIZE` /
+`_SHA256`) in `wrangler.toml` and redeploy. Until then the wizard shows a
+"no bundle published" note and the button is disabled.
+
+**Bundle contract:** `build-portable.ps1` must ship a first-run entrypoint
+(`Meltha Honda Admin.vbs` / `setup.cmd`) that, when `offline-setup.json`
+exists in the app folder and the DB is not yet initialised, does the
+unattended `initdb` + `schema.sql` + admin-seed from that file and then
+deletes/ignores it on subsequent starts. Everything the installer does
+before that step (download, extract, config, firewall) lives in the
+generated `.cmd` and needs no bundle support.
+
+The manual fallback, on a shop PC —
 
 - Start it with `Meltha Honda Admin.vbs`; make it permanent with
   `Start With Windows.vbs` (installs the `MelthaHondaAdmin` service). It serves

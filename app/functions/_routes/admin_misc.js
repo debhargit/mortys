@@ -317,22 +317,144 @@ export default function mount(app) {
   // the portable-edition bundle + the setup steps. URL/version/hash come from
   // wrangler.toml [vars] (LOCAL_SERVER_URL etc.) so the shop points it at
   // wherever they publish the zip (GitHub release, R2, a share…).
-  app.get('/api/admin/local-server', adminMw, (c) => {
+  app.get('/api/admin/local-server', adminMw, async (c) => {
     const env = c.env || {};
+    let shopName = 'Meltha Honda Sales & Servs Ltd', shopEmail = '';
+    try { const s = await getShopSettings(c.env); shopName = s.company_name || shopName; shopEmail = s.email || ''; }
+    catch { /* fallback names */ }
     return c.json({
       url: env.LOCAL_SERVER_URL || null,
       version: env.LOCAL_SERVER_VERSION || null,
       sha256: env.LOCAL_SERVER_SHA256 || null,
       size: env.LOCAL_SERVER_SIZE || null,
       docs: 'app/CUTOVER.md#offline--on-premise-use-after-cutover',
-      steps: [
-        'Unzip the download onto the shop’s main PC (any folder).',
-        'Double-click "Meltha Honda Admin.vbs" — it starts the bundled PostgreSQL and opens http://localhost:3040/admin.html.',
-        'Optional: run "Start With Windows.vbs" to install it as the MelthaHondaAdmin service so it is always up.',
-        'Optional: run "Allow Network Access.vbs" to open the firewall (port 3040 + discovery UDP 41235).',
-        'On each other till: run "Connect To Shop Server.vbs" and paste a one-time link from Admin → Setup → Terminals & access.',
-        'The local server keeps its own PostgreSQL and does NOT sync with this hosted site — pick one as the source of truth.',
-      ],
+      // sensible defaults for the install wizard
+      defaults: {
+        shop_name: shopName,
+        install_dir: 'C:\\MelthaHonda',
+        port: 3040,
+        admin_email: shopEmail || 'admin@melthahonda.com',
+        open_firewall: true,
+        install_service: true,
+      },
+    });
+  });
+
+  // Build a one-double-click Windows installer with the shop's answers baked
+  // in. The .cmd self-elevates, writes an embedded PowerShell script and runs
+  // it: download the published bundle, verify its hash, extract, write the
+  // machine / server / offline-setup config, open the firewall, then launch
+  // the bundle's own first-run (which does the PostgreSQL initdb + schema load
+  // + admin seed from offline-setup.json). See app/CUTOVER.md.
+  app.post('/api/admin/local-server/installer', adminMw, async (c) => {
+    const env = c.env || {};
+    const bundleUrl = env.LOCAL_SERVER_URL || '';
+    if (!bundleUrl) {
+      return c.json({ error: 'No offline bundle is published yet. Build the portable edition and set LOCAL_SERVER_URL in wrangler.toml first — see app/CUTOVER.md.' }, 400);
+    }
+    const b = await c.req.json().catch(() => ({}));
+    const shop = String(b.shop_name || 'Meltha Honda').trim().slice(0, 80) || 'Meltha Honda';
+    let dir = String(b.install_dir || 'C:\\MelthaHonda').trim();
+    if (!/^[A-Za-z]:\\[\w .\-\\]{0,120}$/.test(dir)) dir = 'C:\\MelthaHonda';
+    dir = dir.replace(/\\+$/, '');
+    const port = Math.min(65535, Math.max(1024, parseInt(b.port, 10) || 3040));
+    const email = String(b.admin_email || '').trim().slice(0, 120);
+    const pass = String(b.admin_password || '');
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return c.json({ error: 'A valid admin email is required.' }, 400);
+    if (pass.length < 6 || pass.length > 100 || /[\r\n]/.test(pass)) return c.json({ error: 'Admin password must be 6–100 characters, no line breaks.' }, 400);
+    const doFw = b.open_firewall !== false;
+    const doSvc = b.install_service !== false;
+    const sha = String(env.LOCAL_SERVER_SHA256 || '').trim();
+
+    const q = (s) => String(s).replace(/'/g, "''");             // PowerShell single-quote
+    const ps = [
+      "$ErrorActionPreference = 'Stop'",
+      `$Shop      = '${q(shop)}'`,
+      `$Dir       = '${q(dir)}'`,
+      `$Port      = ${port}`,
+      `$Email     = '${q(email)}'`,
+      `$Pass      = '${q(pass)}'`,
+      `$BundleUrl = '${q(bundleUrl)}'`,
+      `$Sha256    = '${q(sha)}'`,
+      `$DoFirewall = $${doFw ? 'true' : 'false'}`,
+      `$DoService  = $${doSvc ? 'true' : 'false'}`,
+      '',
+      'Write-Host "== Meltha Honda offline setup for $Shop ==" -ForegroundColor Cyan',
+      'New-Item -ItemType Directory -Force -Path $Dir | Out-Null',
+      "$zip = Join-Path $Dir 'bundle.zip'",
+      'Write-Host "Downloading the offline bundle..."',
+      '[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12',
+      'Invoke-WebRequest -Uri $BundleUrl -OutFile $zip -UseBasicParsing',
+      'if ($Sha256) {',
+      '  $h = (Get-FileHash $zip -Algorithm SHA256).Hash',
+      '  if ($h -ne $Sha256.ToUpper()) { throw "Downloaded file hash $h does not match the published $Sha256" }',
+      '  Write-Host "Hash verified." -ForegroundColor Green',
+      '}',
+      'Write-Host "Extracting to $Dir ..."',
+      'Expand-Archive -Path $zip -DestinationPath $Dir -Force',
+      'Remove-Item $zip -Force',
+      "$srv = Get-ChildItem -Path $Dir -Recurse -Filter 'server.js' -File -ErrorAction SilentlyContinue | Select-Object -First 1",
+      '$Root = if ($srv) { $srv.DirectoryName } else { $Dir }',
+      'Write-Host "App folder: $Root"',
+      '',
+      "[IO.File]::WriteAllText((Join-Path $Root 'machine-config.json'), (@{ name = $Shop } | ConvertTo-Json))",
+      "[IO.File]::WriteAllText((Join-Path $Root 'server-config.json'),  (@{ port = $Port } | ConvertTo-Json))",
+      "[IO.File]::WriteAllText((Join-Path $Root 'offline-setup.json'), (@{",
+      '  shop_name = $Shop; port = $Port; admin_email = $Email; admin_password = $Pass;',
+      '  install_service = $DoService; open_firewall = $DoFirewall; created = (Get-Date -Format o)',
+      '} | ConvertTo-Json))',
+      'Write-Host "Wrote configuration." -ForegroundColor Green',
+      '',
+      'if ($DoFirewall) {',
+      '  Write-Host "Opening the firewall (TCP $Port, UDP 41235)..."',
+      '  cmd /c "netsh advfirewall firewall add rule name=""Meltha Honda Admin $Port"" dir=in action=allow protocol=TCP localport=$Port" | Out-Null',
+      '  cmd /c "netsh advfirewall firewall add rule name=""Meltha Honda Discovery"" dir=in action=allow protocol=UDP localport=41235" | Out-Null',
+      '}',
+      '',
+      'Write-Host "Starting the local server — first run sets up PostgreSQL and loads the database..." -ForegroundColor Cyan',
+      "$vbs = Join-Path $Root 'Meltha Honda Admin.vbs'",
+      "$setup = Join-Path $Root 'setup.cmd'",
+      'if (Test-Path $vbs) { Start-Process wscript.exe -ArgumentList ("""" + $vbs + """") -WorkingDirectory $Root }',
+      'elseif (Test-Path $setup) { Start-Process $setup -WorkingDirectory $Root }',
+      "else { Start-Process node -ArgumentList 'server.js' -WorkingDirectory $Root }",
+      '',
+      "$startWin = Join-Path $Root 'Start With Windows.vbs'",
+      'if ($DoService -and (Test-Path $startWin)) { Start-Process wscript.exe -ArgumentList ("""" + $startWin + """") }',
+      '',
+      'Start-Sleep -Seconds 8',
+      'Start-Process "http://localhost:$Port/admin.html"',
+      'Write-Host ""',
+      'Write-Host "Setup finished. Sign in at http://localhost:$Port/admin.html with $Email" -ForegroundColor Green',
+      'Read-Host "Press Enter to close"',
+      '',
+    ].join('\r\n');
+
+    // base64 the PS so no quoting survives into the .cmd; the .cmd self-elevates.
+    const psBytes = new TextEncoder().encode(ps);
+    let psBin = '';
+    for (let i = 0; i < psBytes.length; i++) psBin += String.fromCharCode(psBytes[i]);
+    const psB64 = btoa(psBin);
+    const cmd = [
+      '@echo off',
+      'setlocal',
+      'net session >nul 2>&1',
+      'if %errorlevel% NEQ 0 (',
+      '  echo Requesting administrator rights...',
+      '  powershell -NoProfile -Command "Start-Process -FilePath \'%~f0\' -Verb RunAs" >nul 2>&1',
+      '  exit /b',
+      ')',
+      `set "MHPS=${psB64}"`,
+      'powershell -NoProfile -ExecutionPolicy Bypass -Command "$p=Join-Path $env:TEMP \'mh-offline-install.ps1\'; [IO.File]::WriteAllText($p,[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:MHPS))); & powershell -NoProfile -ExecutionPolicy Bypass -File $p"',
+      'endlocal',
+      '',
+    ].join('\r\n');
+
+    return new Response(cmd, {
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition': 'attachment; filename="Install Meltha Honda Offline.cmd"',
+        'Cache-Control': 'no-store',
+      },
     });
   });
 

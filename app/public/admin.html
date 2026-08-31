@@ -11356,32 +11356,89 @@ function terminalRows(list, thisId){
 // anything, so this is "download + do these 5 things", not a one-click wizard.
 async function renderLocalServerPanel(box){
   if (!box) return;
-  var HD = '<div style="padding:12px 16px;border-bottom:1px solid var(--line);font-weight:700;font-size:13px">💻 Local / offline server</div>';
+  var HD = '<div style="padding:12px 16px;border-bottom:1px solid var(--line);font-weight:700;font-size:13px">💻 Set up an offline copy on a shop PC</div>';
   var d;
   try { d = await api('/api/admin/local-server'); }
   catch (e) { box.innerHTML = HD + '<div class="empty" style="padding:20px">Could not load: ' + esc(e.message) + '</div>'; return; }
-  var steps = (d.steps || []).map(function(s, i){
-    return '<li style="margin-bottom:6px"><b>' + (i + 1) + '.</b> ' + esc(s) + '</li>';
-  }).join('');
-  var dl = d.url
-    ? '<a href="' + esc(d.url) + '" target="_blank" rel="noopener" download ' +
-        'style="display:inline-flex;align-items:center;gap:8px;background:var(--navy);color:#fff;text-decoration:none;padding:11px 20px;border-radius:8px;font-weight:700;font-size:13.5px">' +
-        '⬇ Download the local server' + (d.version ? ' <span style="opacity:.75;font-weight:600">v' + esc(d.version) + '</span>' : '') + '</a>' +
-        '<div style="font-size:11px;color:var(--muted);margin-top:6px">' +
-          (d.size ? esc(d.size) + ' · ' : '') + 'Windows. ' +
-          (d.sha256 ? 'SHA-256 <code style="font-size:10.5px;word-break:break-all">' + esc(d.sha256) + '</code>' : '') +
-        '</div>'
-    : '<div style="background:#fef3c7;color:#92400e;padding:10px 12px;border-radius:8px;font-size:12.5px">' +
-        'No download has been published yet. Build the portable bundle from the repo and set <code>LOCAL_SERVER_URL</code> in <code>wrangler.toml</code> to point here — see <code>app/CUTOVER.md</code>.' +
-      '</div>';
+  var def = d.defaults || {};
+  var published = !!d.url;
+
+  var fieldCss = 'width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px;font-family:inherit;background:var(--card)';
+  var lblCss = 'display:block;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:700;margin-bottom:3px';
+
   box.innerHTML = HD +
     '<div style="padding:16px 18px;font-size:13px;line-height:1.6">' +
-      '<p style="margin:0 0 12px">For running the shop when the internet is down. It carries its own PostgreSQL and runs on the shop LAN — <b>it does not sync with this hosted site</b>, so pick one as the source of truth.</p>' +
-      dl +
-      '<div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);margin:16px 0 8px">After downloading</div>' +
-      '<ol style="margin:0;padding-left:18px">' + steps + '</ol>' +
-      '<p style="margin:12px 0 0;color:var(--muted);font-size:12px">Full details in <code>app/CUTOVER.md</code> &rarr; &ldquo;Offline / on-premise use&rdquo; and the local-vs-cloud table in <code>app/PORT.md</code>.</p>' +
+      '<p style="margin:0 0 14px">Runs the shop on the local network when the internet is down. It carries its own PostgreSQL — ' +
+        '<b>it does not sync with this hosted site</b>, so pick one as the source of truth.</p>' +
+
+      (published ? '' :
+        '<div style="background:#fef3c7;color:#92400e;padding:10px 12px;border-radius:8px;font-size:12.5px;margin-bottom:14px">' +
+          'No offline bundle has been published yet. Build the portable edition and set <code>LOCAL_SERVER_URL</code> in <code>wrangler.toml</code> — see <code>app/CUTOVER.md</code>. The installer button is disabled until then.' +
+        '</div>') +
+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 16px;max-width:620px">' +
+        '<div style="grid-column:1/-1"><label style="' + lblCss + '">Shop name (shown on the local server)</label>' +
+          '<input id="lsShop" style="' + fieldCss + '" value="' + esc(def.shop_name || '') + '"/></div>' +
+        '<div><label style="' + lblCss + '">Install folder on the PC</label>' +
+          '<input id="lsDir" style="' + fieldCss + '" value="' + esc(def.install_dir || 'C:\\MelthaHonda') + '"/></div>' +
+        '<div><label style="' + lblCss + '">Local server port</label>' +
+          '<input id="lsPort" type="number" min="1024" max="65535" style="' + fieldCss + '" value="' + esc(String(def.port || 3040)) + '"/></div>' +
+        '<div><label style="' + lblCss + '">Admin sign-in email</label>' +
+          '<input id="lsEmail" type="email" style="' + fieldCss + '" value="' + esc(def.admin_email || '') + '"/></div>' +
+        '<div><label style="' + lblCss + '">Admin password (min 6 — creates the local login)</label>' +
+          '<input id="lsPass" type="text" autocomplete="off" style="' + fieldCss + '" placeholder="choose a password"/></div>' +
+        '<label style="grid-column:1/-1;display:flex;gap:8px;align-items:center;font-size:12.5px;cursor:pointer">' +
+          '<input type="checkbox" id="lsFw"' + (def.open_firewall !== false ? ' checked' : '') + '/> Open the Windows firewall so the other tills can connect (TCP port + discovery UDP 41235)</label>' +
+        '<label style="grid-column:1/-1;display:flex;gap:8px;align-items:center;font-size:12.5px;cursor:pointer">' +
+          '<input type="checkbox" id="lsSvc"' + (def.install_service !== false ? ' checked' : '') + '/> Start automatically with Windows (install as a service)</label>' +
+      '</div>' +
+
+      '<div style="margin-top:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">' +
+        '<button type="button" id="lsBuild"' + (published ? '' : ' disabled') +
+          ' style="display:inline-flex;align-items:center;gap:8px;background:var(--navy);color:#fff;border:0;padding:11px 22px;border-radius:8px;font-weight:700;font-size:13.5px;cursor:pointer' + (published ? '' : ';opacity:.5;cursor:not-allowed') + '">' +
+          '⬇ Download configured installer</button>' +
+        '<span id="lsMsg" style="font-size:12px;color:var(--muted)"></span>' +
+      '</div>' +
+
+      '<p style="margin:14px 0 0;color:var(--muted);font-size:12px">' +
+        'Run the downloaded <code>.cmd</code> on the shop&rsquo;s main PC (double-click &rarr; approve the admin prompt). ' +
+        'It downloads the offline bundle, sets up PostgreSQL, loads the database and creates your admin login — nothing else to do. ' +
+        'Other tills then open <code>http://&lt;that PC&rsquo;s IP&gt;:' + esc(String(def.port || 3040)) + '/admin.html</code>. ' +
+        'Full notes: <code>app/CUTOVER.md</code>.' +
+      '</p>' +
     '</div>';
+
+  var btn = box.querySelector('#lsBuild');
+  var msg = box.querySelector('#lsMsg');
+  if (btn && published) btn.addEventListener('click', async function(){
+    var body = {
+      shop_name: box.querySelector('#lsShop').value.trim(),
+      install_dir: box.querySelector('#lsDir').value.trim(),
+      port: parseInt(box.querySelector('#lsPort').value, 10) || 3040,
+      admin_email: box.querySelector('#lsEmail').value.trim(),
+      admin_password: box.querySelector('#lsPass').value,
+      open_firewall: box.querySelector('#lsFw').checked,
+      install_service: box.querySelector('#lsSvc').checked,
+    };
+    if (body.admin_password.length < 6) { msg.textContent = 'Set an admin password (at least 6 characters).'; msg.style.color = 'var(--red)'; return; }
+    btn.disabled = true; msg.textContent = 'Building…'; msg.style.color = 'var(--muted)';
+    try {
+      var res = await fetch('/api/admin/local-server/installer', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      if (!res.ok) { var j = await res.json().catch(function(){ return {}; }); throw new Error(j.error || ('HTTP ' + res.status)); }
+      var blob = await res.blob();
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'Install Meltha Honda Offline.cmd';
+      document.body.appendChild(a); a.click();
+      setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+      msg.textContent = '✓ Downloaded — run it on the shop PC.'; msg.style.color = '#15803d';
+    } catch (e) {
+      msg.textContent = '✗ ' + e.message; msg.style.color = 'var(--red)';
+    } finally { btn.disabled = false; }
+  });
 }
 
 // ☁ Off-site backup — configure shipping a full pg_dump to a hosted copy of
