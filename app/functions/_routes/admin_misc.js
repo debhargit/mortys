@@ -258,6 +258,30 @@ export default function mount(app) {
     return c.json({ products });
   });
 
+  // ============ LOCAL / OFFLINE SERVER DOWNLOAD ============
+  // The hosted build can't install anything on a shop PC, but it can hand out
+  // the portable-edition bundle + the setup steps. URL/version/hash come from
+  // wrangler.toml [vars] (LOCAL_SERVER_URL etc.) so the shop points it at
+  // wherever they publish the zip (GitHub release, R2, a share…).
+  app.get('/api/admin/local-server', adminMw, (c) => {
+    const env = c.env || {};
+    return c.json({
+      url: env.LOCAL_SERVER_URL || null,
+      version: env.LOCAL_SERVER_VERSION || null,
+      sha256: env.LOCAL_SERVER_SHA256 || null,
+      size: env.LOCAL_SERVER_SIZE || null,
+      docs: 'app/CUTOVER.md#offline--on-premise-use-after-cutover',
+      steps: [
+        'Unzip the download onto the shop’s main PC (any folder).',
+        'Double-click "Meltha Honda Admin.vbs" — it starts the bundled PostgreSQL and opens http://localhost:3040/admin.html.',
+        'Optional: run "Start With Windows.vbs" to install it as the MelthaHondaAdmin service so it is always up.',
+        'Optional: run "Allow Network Access.vbs" to open the firewall (port 3040 + discovery UDP 41235).',
+        'On each other till: run "Connect To Shop Server.vbs" and paste a one-time link from Admin → Setup → Terminals & access.',
+        'The local server keeps its own PostgreSQL and does NOT sync with this hosted site — pick one as the source of truth.',
+      ],
+    });
+  });
+
   // ============ EXTERNAL REFS ============
   app.get('/api/admin/external-refs', adminMw, (c) => {
     const vin = (c.req.query('vin') || '').trim().toUpperCase();

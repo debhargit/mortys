@@ -11167,6 +11167,39 @@ function terminalRows(list, thisId){
   }).join('') + '</div>';
 }
 
+// 💻 Local / offline server — hosted build only. Hands out the portable
+// edition's download + the unzip/run/connect steps. The browser can't install
+// anything, so this is "download + do these 5 things", not a one-click wizard.
+async function renderLocalServerPanel(box){
+  if (!box) return;
+  var HD = '<div style="padding:12px 16px;border-bottom:1px solid var(--line);font-weight:700;font-size:13px">💻 Local / offline server</div>';
+  var d;
+  try { d = await api('/api/admin/local-server'); }
+  catch (e) { box.innerHTML = HD + '<div class="empty" style="padding:20px">Could not load: ' + esc(e.message) + '</div>'; return; }
+  var steps = (d.steps || []).map(function(s, i){
+    return '<li style="margin-bottom:6px"><b>' + (i + 1) + '.</b> ' + esc(s) + '</li>';
+  }).join('');
+  var dl = d.url
+    ? '<a href="' + esc(d.url) + '" target="_blank" rel="noopener" download ' +
+        'style="display:inline-flex;align-items:center;gap:8px;background:var(--navy);color:#fff;text-decoration:none;padding:11px 20px;border-radius:8px;font-weight:700;font-size:13.5px">' +
+        '⬇ Download the local server' + (d.version ? ' <span style="opacity:.75;font-weight:600">v' + esc(d.version) + '</span>' : '') + '</a>' +
+        '<div style="font-size:11px;color:var(--muted);margin-top:6px">' +
+          (d.size ? esc(d.size) + ' · ' : '') + 'Windows. ' +
+          (d.sha256 ? 'SHA-256 <code style="font-size:10.5px;word-break:break-all">' + esc(d.sha256) + '</code>' : '') +
+        '</div>'
+    : '<div style="background:#fef3c7;color:#92400e;padding:10px 12px;border-radius:8px;font-size:12.5px">' +
+        'No download has been published yet. Build the portable bundle from the repo and set <code>LOCAL_SERVER_URL</code> in <code>wrangler.toml</code> to point here — see <code>app/CUTOVER.md</code>.' +
+      '</div>';
+  box.innerHTML = HD +
+    '<div style="padding:16px 18px;font-size:13px;line-height:1.6">' +
+      '<p style="margin:0 0 12px">For running the shop when the internet is down. It carries its own PostgreSQL and runs on the shop LAN — <b>it does not sync with this hosted site</b>, so pick one as the source of truth.</p>' +
+      dl +
+      '<div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);margin:16px 0 8px">After downloading</div>' +
+      '<ol style="margin:0;padding-left:18px">' + steps + '</ol>' +
+      '<p style="margin:12px 0 0;color:var(--muted);font-size:12px">Full details in <code>app/CUTOVER.md</code> &rarr; &ldquo;Offline / on-premise use&rdquo; and the local-vs-cloud table in <code>app/PORT.md</code>.</p>' +
+    '</div>';
+}
+
 // ☁ Off-site backup — configure shipping a full pg_dump to a hosted copy of
 // this app (send side), or let another shop's server back up to this one
 // (receive side). Self-contained: fetches its own state and re-renders itself.
@@ -11438,7 +11471,8 @@ async function renderSettings(panel){
             'This install runs on <b>Cloudflare</b>. The database is <b>Cloudflare&nbsp;D1</b> — fully managed: there is no PostgreSQL to install, no connection string to set, no server port, and no LAN terminal enrolment. ' +
             '&ldquo;Terminals&rdquo; are just staff signed in from a browser over the internet. Backups (Time Travel + export) are covered by the panel below.' +
           '</div>' +
-        '</div>' : '') +
+        '</div>' +
+        '<div class="panel" id="localServerPanel" style="margin-top:16px"><div class="empty" style="padding:24px">Loading local-server download…</div></div>' : '') +
 
       (isCloud ? '' : (
       '<div class="panel" style="margin-top:24px">' +
@@ -11552,6 +11586,7 @@ async function renderSettings(panel){
     '</div>';
 
   renderBackupPanel(panel.querySelector('#backupPanel'));
+  if (isCloud) renderLocalServerPanel(panel.querySelector('#localServerPanel'));
   document.getElementById('setSaveBtn').addEventListener('click', submitSettings);
   document.getElementById('setLogoUpload').addEventListener('click', async function(){
     var f = document.getElementById('setLogoFile').files[0];

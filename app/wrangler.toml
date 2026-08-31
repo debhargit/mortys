@@ -20,6 +20,16 @@ ORDER_NOTIFY_TO = "admin@melthahonda.com"
 ORDER_NOTIFY_SMS = "876-758-8503"
 EMAIL_FROM = "Meltha Honda <noreply@melthahonda.com>"
 
+# Settings -> "Local / offline server" download panel (functions/_routes/
+# admin_misc.js GET /api/admin/local-server). Publish the portable-edition
+# zip somewhere the shop can reach (a GitHub release asset, an R2 public
+# bucket, a file share) and point this at it. Leave blank and the panel
+# shows the build-it-yourself steps instead of a download button.
+# LOCAL_SERVER_URL     = "https://github.com/debhargit/meltha/releases/download/portable-vX/MelthaHonda-portable.zip"
+# LOCAL_SERVER_VERSION = "X.Y.Z"
+# LOCAL_SERVER_SIZE    = "~240 MB"
+# LOCAL_SERVER_SHA256  = "<sha256 of the zip>"
+
 # Phase 8 scheduled jobs (functions/_routes/cron.js). Set the shared secret
 # the companion cron-worker authenticates with — until it is set, every
 # /api/cron/* call is refused (jobs never run open):

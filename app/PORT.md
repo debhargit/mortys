@@ -62,7 +62,12 @@ no LAN terminal enrolment, no DB connection fields (see the cloud-aware
 
 **Offline use = run the self-hosted "portable" edition** (this repo's
 `runtime\node.exe` + `runtime\pgsql` + `app\boot.js` + the `.vbs` launchers).
-It is the local server and works with zero internet:
+It is the local server and works with zero internet. The hosted admin surfaces
+it under **Settings → "💻 Local / offline server"** — `GET
+/api/admin/local-server` (`_routes/admin_misc.js`) returns the download URL +
+setup steps from `wrangler.toml` `[vars]` (`LOCAL_SERVER_URL` /
+`LOCAL_SERVER_VERSION` / `_SIZE` / `_SHA256`); blank until the shop publishes
+the zip and redeploys.
 
 | | Hosted (`melthahonda.com`) | Self-hosted portable |
 |---|---|---|

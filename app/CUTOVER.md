@@ -152,7 +152,16 @@ the window short and low-traffic.
 `melthahonda.com` (Cloudflare + D1) is **online-only** — no offline mode, no
 local cache. If the shop needs to keep ringing sales when the internet is
 down, keep running the **self-hosted portable edition** (this repo's
-`runtime\` + `app\boot.js` + `.vbs` launchers) on a shop PC:
+`runtime\` + `app\boot.js` + `.vbs` launchers) on a shop PC.
+
+**Settings → Company & Print Settings → "💻 Local / offline server"** hands out
+the download + these steps in-app. To turn the download button on: publish the
+portable-edition zip somewhere reachable (a GitHub release asset, an R2 public
+bucket, a file share), then uncomment `LOCAL_SERVER_URL` (and optionally
+`LOCAL_SERVER_VERSION` / `_SIZE` / `_SHA256`) in `wrangler.toml` and redeploy.
+Until then the panel shows a "build it from the repo" note.
+
+The manual steps: on a shop PC —
 
 - Start it with `Meltha Honda Admin.vbs`; make it permanent with
   `Start With Windows.vbs` (installs the `MelthaHondaAdmin` service). It serves
