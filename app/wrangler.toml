@@ -9,11 +9,9 @@ pages_build_output_dir = "public"
 binding = "DB"
 database_name = "meltahonda-db"
 migrations_dir = "migrations"
-# This is the meltahonda-db that actually exists on the account the current
-# API token authenticates to, and the one holding the live data. The previous
-# id (822ad731-3860-4d81-8139-6e3e28083df8) returns "database could not be
-# found" here -- if that one is real it lives on a different account.
-database_id = "9ad3e1e3-2019-48d3-be10-55fd98872531"
+# meltahonda-db on the Debhargithub@gmail.com account
+# (ce557e06f410b0e79dbd1cbe3adeef8b). Recreated clean 2026-08-31.
+database_id = "d82e902b-f8ff-4621-b8d2-cfda269a8dcc"
 
 # Where new-order alerts go, and the From line for outbound email. Override
 # any of these without touching code.
