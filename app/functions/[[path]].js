@@ -20,6 +20,8 @@ import mountAdminCrm from './_routes/admin_crm.js';    // Phase 11 (admin CRM + 
 import mountAdminUsers from './_routes/admin_users.js'; // Phase 12 (users / staff / roles)
 import mountService from './_routes/service.js'; // Phase 13 (service centre)
 import mountOps from './_routes/ops.js'; // Phase 14 (ops)
+import mountReports from './_routes/reports.js';   // Phase 15 (analytics + reports)
+import mountAdminMisc from './_routes/admin_misc.js'; // Phase 15 (settings, marketing, schedule, misc)
 
 const app = new Hono();
 
@@ -37,8 +39,10 @@ mountAdminCrm(app);
 mountAdminUsers(app);
 mountService(app);
 mountOps(app);
+mountReports(app);
+mountAdminMisc(app);
 
-app.get('/api/health', (c) => c.json({ ok: true, runtime: 'cloudflare-pages', ported_phases: [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14] }));
+app.get('/api/health', (c) => c.json({ ok: true, runtime: 'cloudflare-pages', ported_phases: [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15] }));
 
 // Anything under /api not yet ported.
 app.all('/api/*', (c) => c.json({ error: 'This endpoint is not ported to Cloudflare yet — see app/PORT.md' }, 501));
