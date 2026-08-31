@@ -239,6 +239,24 @@ export default function mount(app) {
     return c.json({ order: o, items });
   });
 
+  // ---- summary (top-bar badge counts; admin.html calls this on load) ----
+  app.get('/api/admin/summary', adminMw, async (c) => {
+    const db = d1(c.env);
+    const n = async (sql, ...b) => {
+      try { const r = await db.one(sql, ...b); return (r && r.n) || 0; }
+      catch { return 0; }
+    };
+    const [new_inquiries, pending_appointments, pending_notifications, pending_reviews, pending_orders, low_stock_count] = await Promise.all([
+      n("SELECT COUNT(*) AS n FROM parts_inquiries WHERE status = 'new'"),
+      n("SELECT COUNT(*) AS n FROM service_appointments WHERE status = 'pending'"),
+      n('SELECT COUNT(*) AS n FROM notify_subscriptions WHERE notified_at IS NULL'),
+      n('SELECT COUNT(*) AS n FROM reviews WHERE approved = 0'),
+      n("SELECT COUNT(*) AS n FROM orders WHERE status = 'pending'"),
+      n('SELECT COUNT(*) AS n FROM products WHERE stock_count <= low_threshold'),
+    ]);
+    return c.json({ new_inquiries, pending_appointments, pending_notifications, pending_reviews, pending_orders, low_stock_count });
+  });
+
   // ---- dashboard ------------------------------------------------
   app.get('/api/admin/dashboard', adminMw, async (c) => {
     const db = d1(c.env);
