@@ -2676,9 +2676,14 @@ async function renderPOS(panel){
       })() +
       // Owners / managers see a live count of how many tills are currently
       // connected to the admin (heartbeat from init(); painted by
-      // paintTerminalCount()). Cashiers don't need it, so it isn't rendered.
+      // paintTerminalCount()). Clicking it drops down the list. Cashiers
+      // don't need it, so it isn't rendered.
       (['owner', 'manager'].indexOf(CURRENT_ADMIN_ROLE) !== -1
-        ? '<span id="posTermCount" title="Terminals connected to the admin" style="display:none;font-size:11px;color:#cbd5e1;background:rgba(255,255,255,.14);border-radius:5px;padding:5px 8px;white-space:nowrap"></span>'
+        ? '<span style="position:relative;display:none;align-items:center" id="posTermCountWrap">' +
+            '<button type="button" id="posTermCount" title="Terminals connected to the admin — click for the list" ' +
+              'style="font-size:11px;color:#cbd5e1;background:rgba(255,255,255,.14);border:0;border-radius:5px;padding:5px 8px;white-space:nowrap;cursor:pointer;font-family:inherit"></button>' +
+            '<div id="posTermList" style="display:none;position:absolute;top:100%;right:0;margin-top:5px;width:250px;max-height:58vh;overflow-y:auto;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:10px;box-shadow:0 14px 36px rgba(0,0,0,.30);z-index:80"></div>' +
+          '</span>'
         : '') +
     '</div>' +
 
@@ -3691,6 +3696,32 @@ async function renderPOS(panel){
       if (termMenu.style.display === 'block' && !termMenu.contains(e.target) && !termBtn.contains(e.target)) termMenu.style.display = 'none';
     };
     document.addEventListener('click', window.__posTermDocHandler);
+  }
+
+  // ---- connected-terminals dropdown (cloud presence pill) ------------------
+  // The "👥 N terminals" pill (owner/manager only) drops down the live list
+  // from the /api/admin/presence heartbeat -- label, who's on it, how long
+  // ago it last checked in. Read-only: no enrolment on a hosted Worker.
+  var presCountBtn = document.getElementById('posTermCount');
+  var presList = document.getElementById('posTermList');
+  if (window.__posPresDocHandler) {
+    document.removeEventListener('click', window.__posPresDocHandler);
+    document.removeEventListener('keydown', window.__posPresDocHandler);
+    window.__posPresDocHandler = null;
+  }
+  if (presCountBtn && presList) {
+    presCountBtn.addEventListener('click', function(e){
+      e.stopPropagation();
+      var showing = presList.style.display === 'block';
+      presList.style.display = showing ? 'none' : 'block';
+      if (!showing) { renderTerminalList(); presenceBeat(); }
+    });
+    window.__posPresDocHandler = function(e){
+      if (e.type === 'keydown') { if (e.key === 'Escape') { var b = document.getElementById('posTermList'); if (b) b.style.display = 'none'; } return; }
+      if (presList.style.display === 'block' && !presList.contains(e.target) && !presCountBtn.contains(e.target)) presList.style.display = 'none';
+    };
+    document.addEventListener('click', window.__posPresDocHandler);
+    document.addEventListener('keydown', window.__posPresDocHandler);
   }
 
   // ---- inventory search inside the full-screen cart --------------------------
@@ -12114,15 +12145,47 @@ function terminalLabel(){
   try { var l = localStorage.getItem('mh_terminal_label'); if (l) return l; } catch (_) {}
   return 'Till ' + terminalId().slice(-4).toUpperCase();
 }
+function terminalAgo(ts){
+  if (!ts) return '';
+  var s = Math.max(0, Math.round((Date.now() - new Date((ts.indexOf('Z') < 0 && ts.indexOf('T') > 0 ? ts + 'Z' : ts.replace(' ', 'T') + 'Z'))) / 1000));
+  if (s < 45) return 'just now';
+  if (s < 5400) return Math.round(s / 60) + ' min ago';
+  return Math.round(s / 3600) + ' h ago';
+}
+function renderTerminalList(){
+  var box = document.getElementById('posTermList');
+  if (!box) return;
+  var list = (window.__presenceTerminals || []).slice()
+    .sort(function(a, b){ return (b.is_self ? 1 : 0) - (a.is_self ? 1 : 0) || String(b.last_seen).localeCompare(String(a.last_seen)); });
+  box.innerHTML =
+    '<div style="padding:8px 11px;font-weight:800;font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card)">' +
+      list.length + ' terminal' + (list.length === 1 ? '' : 's') + ' online</div>' +
+    (list.length
+      ? list.map(function(t){
+          return '<div style="padding:8px 11px;border-bottom:1px solid var(--hover)">' +
+            '<div style="display:flex;align-items:center;gap:6px">' +
+              '<span style="width:8px;height:8px;border-radius:50%;flex:none;background:#22c55e"></span>' +
+              '<b style="font-size:12px">🖥 ' + esc(t.label || 'Terminal') + '</b>' +
+              (t.is_self ? '<span style="margin-left:auto;font-size:9px;color:var(--muted)">this screen</span>' : '') +
+            '</div>' +
+            '<div style="font-size:10px;color:var(--muted);margin-top:2px">' +
+              (t.user_name ? esc(t.user_name) + ' · ' : '') + (terminalAgo(t.last_seen) || 'active') + '</div>' +
+          '</div>';
+        }).join('')
+      : '<div style="padding:14px 11px;font-size:12px;color:var(--muted)">No other terminals right now.</div>');
+}
 function paintTerminalCount(){
+  var wrap = document.getElementById('posTermCountWrap');
   var el = document.getElementById('posTermCount');
-  if (!el) return;
-  if (TERMINALS_ONLINE == null) { el.style.display = 'none'; return; }
+  if (!wrap || !el) return;
+  if (TERMINALS_ONLINE == null) { wrap.style.display = 'none'; return; }
   var n = TERMINALS_ONLINE;
-  el.style.display = '';
-  el.textContent = '👥 ' + n + ' ' + (n === 1 ? 'terminal' : 'terminals');
+  wrap.style.display = 'inline-flex';
+  el.textContent = '👥 ' + n + ' ' + (n === 1 ? 'terminal' : 'terminals') + ' ▾';
   el.title = n + ' terminal' + (n === 1 ? '' : 's') +
-    ' connected to the admin in the last few minutes (this one included).';
+    ' connected to the admin in the last few minutes (this one included). Click for the list.';
+  var box = document.getElementById('posTermList');
+  if (box && box.style.display === 'block') renderTerminalList();
 }
 async function presenceBeat(){
   try {
