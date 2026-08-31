@@ -11313,6 +11313,17 @@ async function renderSettings(panel){
   if (!machine.local_db) machine.local_db = { reachable:false, db_exists:false };
   try { netServers = (await api('/api/admin/settings/network-servers')).servers || []; } catch (e) { netServers = []; }
   try { terms = await api('/api/admin/terminals'); } catch (e) { terms = { terminals: [], mode: 'approve', this_terminal_id: null, error: e.message }; }
+  // Hosted (Cloudflare) build: there is no local PostgreSQL, no LAN terminal
+  // enrolment and no server port — those endpoints 501. Blank the fallbacks so
+  // none of that machinery (or its raw error text) renders; a single note
+  // panel replaces the whole local-infrastructure block below.
+  var isCloud = !!machine.cloud;
+  if (isCloud) {
+    netServers = []; dbCfg = { local:null, online:null, online_active:false };
+    dbStatus = { reachable:true, db_exists:true, db_name:'Cloudflare D1', error:'', cloud:true, install:{ running:false } };
+    srvCfg = { running_port:443, configured_port:null, restart_required:false, cloud:true };
+    terms = { terminals: [], mode: 'open', this_terminal_id: null, error: '' };
+  }
 
   panel.innerHTML =
     '<div style="padding:4px 4px 20px;max-width:780px">' +
@@ -11393,13 +11404,24 @@ async function renderSettings(panel){
               ? 'This copy of the app runs on Cloudflare — there is no per-machine local database. Terminals connect over the internet.'
               : 'Detected automatically as soon as the local server is installed and running here — no need to test the connection manually below just to check.') + '</div>' +
         '</div>' +
-        '<div style="padding:12px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px">' +
-          '<div style="font-weight:700;font-size:13px">📡 Servers on your network</div>' +
-          '<button type="button" class="btn ghost" id="setScanBtn">🔍 Scan for servers</button>' +
-        '</div>' +
-        '<div id="setNetServers" style="padding:14px 16px">' + netServerRows(netServers) + '</div>' +
+        (isCloud ? '' :
+          '<div style="padding:12px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px">' +
+            '<div style="font-weight:700;font-size:13px">📡 Servers on your network</div>' +
+            '<button type="button" class="btn ghost" id="setScanBtn">🔍 Scan for servers</button>' +
+          '</div>' +
+          '<div id="setNetServers" style="padding:14px 16px">' + netServerRows(netServers) + '</div>') +
       '</div>' +
 
+      (isCloud ?
+        '<div class="panel" style="margin-top:24px">' +
+          '<div style="padding:12px 16px;border-bottom:1px solid var(--line);font-weight:700;font-size:13px">🗄 Database &amp; hosting</div>' +
+          '<div style="padding:16px 18px;font-size:13px;line-height:1.6">' +
+            'This install runs on <b>Cloudflare</b>. The database is <b>Cloudflare&nbsp;D1</b> — fully managed: there is no PostgreSQL to install, no connection string to set, no server port, and no LAN terminal enrolment. ' +
+            '&ldquo;Terminals&rdquo; are just staff signed in from a browser over the internet. Backups (Time Travel + export) are covered by the panel below.' +
+          '</div>' +
+        '</div>' : '') +
+
+      (isCloud ? '' : (
       '<div class="panel" style="margin-top:24px">' +
         '<div style="padding:12px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px">' +
           '<div style="font-weight:700;font-size:13px">🖧 Terminals &amp; access</div>' +
@@ -11505,7 +11527,7 @@ async function renderSettings(panel){
           '<div id="setSrvMsg" style="display:none;padding:10px 14px;border-radius:7px;font-size:12.5px;margin-bottom:10px"></div>' +
           '<button type="button" id="setSrvSaveBtn" style="background:var(--navy);color:#fff;border:0;padding:10px 20px;border-radius:8px;font-weight:700;cursor:pointer;font-size:13.5px">Save port</button>' +
         '</div>' +
-      '</div>' +
+      '</div>' )) +
 
       '<div class="panel" id="backupPanel" style="margin-top:16px"><div class="empty" style="padding:24px">Loading backup settings…</div></div>' +
     '</div>';
@@ -11540,6 +11562,7 @@ async function renderSettings(panel){
   var scanBtn = document.getElementById('setScanBtn');
   var netServersEl = document.getElementById('setNetServers');
   function wireNetUseButtons(){
+    if (!netServersEl) return;   // hosted build: no "Servers on your network" section
     netServersEl.querySelectorAll('.netUseBtn').forEach(function(b){
       b.addEventListener('click', function(){
         var hostFld = document.getElementById('dbLocalHost'), portFld = document.getElementById('dbLocalPort');
