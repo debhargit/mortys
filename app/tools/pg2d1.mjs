@@ -199,10 +199,12 @@ for (const [table, { cols }] of ordered) {
   const fname = `${String(fileNo).padStart(2, '0')}_${table}.sql`;
   const targets = plans.map((p) => `"${p.target}"`).join(', ');
   const parts = [
-    `-- ${table}: ${rows.length} row(s) from Postgres`,
+    `-- ${table}: ${rows.length} row(s) from Postgres (wholesale replace)`,
     dropped.length ? `-- dropped PG-only columns: ${dropped.join(', ')}` : '',
-    'PRAGMA foreign_keys=OFF;',
-    'BEGIN TRANSACTION;',
+    // No BEGIN/COMMIT: D1's `execute --file` manages its own transaction and
+    // rejects explicit BEGIN. Wipe first so the table is an exact copy of
+    // Postgres — no leftover migration-seed rows, no duplicates.
+    `DELETE FROM "${table}";`,
   ].filter(Boolean);
 
   for (let i = 0; i < rows.length; i += BATCH) {
@@ -211,7 +213,7 @@ for (const [table, { cols }] of ordered) {
       '(' + plans.map((p) => sqlLiteral(p.fn(r[p.src]))).join(', ') + ')').join(',\n  ');
     parts.push(`INSERT OR REPLACE INTO "${table}" (${targets}) VALUES\n  ${values};`);
   }
-  parts.push('COMMIT;', 'PRAGMA foreign_keys=ON;', '');
+  parts.push('');
   fs.writeFileSync(path.join(OUT, fname), parts.join('\n'));
   written.push(fname);
   summary.push([table, String(rows.length), dropped.length ? `dropped: ${dropped.join(', ')}` : 'ok']);
