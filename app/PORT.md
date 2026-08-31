@@ -205,9 +205,16 @@ a time — **all now committed, tested and deployed**:
 
 **All 15 phases are ported, tested and live on `melthahonda.com`.** Every
 non-dropped `server.js` route now has a D1 implementation; `/api/*` returns 501
-only for paths that never existed. Full-app wiring check: **257 routes across
+only for paths that never existed. Full-app wiring check: **264 routes across
 16 modules, no duplicate `(method, path)`**. `wrangler pages functions build`
 compiles the Worker clean.
+
+### Post-launch changes
+
+| # | What | Status |
+|---|---|---|
+| **0026** | Live admin/POS **terminal presence** — `admin_presence` table, `GET/POST /api/admin/presence` (60s heartbeat with a localStorage client id), a `👥 N terminals` pill on the POS ticket bar for owner/manager. | live |
+| **0027** | **Quote-first storefront.** Online shoppers browse live stock with **no prices** and cannot order. `GET /api/products?compact=1` returns the positional-array feed the storefront actually reads (`{cats, rows:[[img,name,mm,catIdx,condIdx,price_cents,stock,bin]]}`); `price_cents`/`price_usd` is `null` unless the signed-in user has `users.show_prices=1` (same gate on `/api/products/:img`, `/api/cart`, `/api/wishlist`). `POST /api/checkout` is disabled (`400 quote_only`). Cart "checkout" → `POST /api/inquiry` (ported): `source='cart'`, line items in `items_json` unpriced; also serves the free-text Request-a-Part form; optional inline photo; notifies the counter. Admin **Parts Inquiries** tab gains a line-item editor (qty / add / remove / unit price / totals / quote notes / status), `GET /api/admin/inquiries/:id`, a pricing `PATCH` (recompute total, stamp `priced_at/by`, `new`→`quoted`), `POST .../show-prices` to flip the linked customer's `users.show_prices`, and `GET .../photo`. Migration `0027_quote_flow.sql` (`users.show_prices`, `parts_inquiries.quote_total_cents/quote_notes/priced_at/priced_by`). | live |
 
 **Dropped by design** (see the table at the top): `/api/admin/backup/*`,
 `/api/admin/terminals/*` + terminal enrolment, `/api/db-install`,
