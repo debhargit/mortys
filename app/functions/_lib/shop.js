@@ -26,3 +26,15 @@ export async function getShopSettings(env) {
   } catch { /* table not migrated yet */ }
   return { ...FALLBACK };
 }
+
+// server.js shopSettingsToShop() — the {name, address, …} shape every print
+// document builder in admin.html expects (name, not company_name).
+export function shopSettingsToShop(s) {
+  return {
+    name: s.company_name, address: s.address, country: s.country, phone: s.phone,
+    email: s.email, website: s.website, logo_url: s.logo_url,
+    print_logo: !!s.print_logo_on_invoice,
+    default_print_template: s.default_print_template,
+    invoice_notice: s.invoice_notice, receipt_notice: s.receipt_notice, statement_notice: s.statement_notice,
+  };
+}
