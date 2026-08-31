@@ -68,8 +68,11 @@ export default function mount(app) {
 
   // No "machine" or "server" on a hosted Worker — return static stubs so the
   // Settings screen renders instead of 501ing, and accept the PATCH as a no-op.
-  app.get('/api/admin/settings/machine', adminMw, (c) => c.json({ ok: true, name: 'Cloudflare Pages', host: 'melthahonda.com', port: 443, local_db: null, cloud: true }));
-  app.patch('/api/admin/settings/machine', managerMw, (c) => c.json({ ok: true, name: 'Cloudflare Pages', cloud: true }));
+  app.get('/api/admin/settings/machine', adminMw, (c) => {
+    const host = new URL(c.req.url).hostname;
+    return c.json({ ok: true, name: host, host, port: 443, local_db: null, cloud: true, mode: 'internet' });
+  });
+  app.patch('/api/admin/settings/machine', managerMw, (c) => c.json({ ok: true, name: new URL(c.req.url).hostname, cloud: true, mode: 'internet' }));
   app.get('/api/admin/settings/server', managerMw, (c) => c.json({ ok: true, running_port: 443, configured_port: null, restart_required: false, cloud: true }));
   app.patch('/api/admin/settings/server', managerMw, (c) => c.json({ ok: true, running_port: 443, configured_port: null, restart_required: false, cloud: true }));
 

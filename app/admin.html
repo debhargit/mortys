@@ -2482,23 +2482,48 @@ async function renderPOS(panel){
       (shiftSession
         ? '<button type="button" id="posShiftBtn" class="posBarBtn" style="background:rgba(22,163,74,.35)" title="Shift #' + shiftSession.id + ' open since ' + fmtDate(shiftSession.opened_at) + (shiftSession.opener_name ? ' by ' + esc(shiftSession.opener_name) : '') + '. Float ' + fmtMoney(shiftSession.opening_float) + '. Click to close.">🗄 Shift open · float ' + fmtMoney(shiftSession.opening_float) + '</button>'
         : '<button type="button" id="posShiftBtn" class="posBarBtn" style="background:rgba(220,38,38,.45)" title="No cash drawer shift is open. Click to open one with a starting float.">🗄 No shift open</button>') +
-      (machine
-        ? (machine.local_db && machine.local_db.reachable
-            // This machine holds the database -- the indicator becomes a button
-            // that drops down every terminal registered against this server,
-            // with per-terminal Block / Disconnect / Forget. On a client till
-            // (no local database) it stays a plain read-only badge.
-            ? '<span style="position:relative;display:inline-flex">' +
-                '<button type="button" id="posTermBtn" title="Terminals on this server — click to manage" ' +
-                  'style="font-size:11px;color:#cbd5e1;display:flex;align-items:center;gap:4px;white-space:nowrap;background:rgba(255,255,255,.14);border:0;border-radius:5px;padding:5px 8px;cursor:pointer;font-family:inherit">' +
-                  '🖥 ' + esc(machine.name) + ' <span style="color:#4ade80">●</span> <span style="opacity:.65">▾</span>' +
-                '</button>' +
-                '<div id="posTermMenu" style="display:none;position:absolute;top:100%;right:0;margin-top:5px;width:330px;max-height:64vh;overflow-y:auto;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:10px;box-shadow:0 14px 36px rgba(0,0,0,.30);z-index:80"></div>' +
-              '</span>'
-            : '<span style="font-size:11px;color:#cbd5e1;display:flex;align-items:center;gap:4px;white-space:nowrap" title="This terminal — ' + esc(machine.host || '') + ':' + esc(machine.port || '') + ' — no local database on this machine (using the shop server)">' +
-                '🖥 ' + esc(machine.name) + ' <span style="color:#fca5a5">●</span>' +
-              '</span>')
-        : '') +
+      // Terminal name + how this till is reaching the app: on the shop LAN
+      // ("Local"), or over the internet to melthahonda.com ("Internet").
+      // Detected from the machine endpoint (cloud stub sets cloud:true) with a
+      // hostname fallback so it's right even if that call fails.
+      (function(){
+        if (!machine) return '';
+        var host = (location.hostname || '').toLowerCase();
+        var isCloud = machine.cloud === true || machine.mode === 'internet' ||
+          host === 'melthahonda.com' || host === 'www.melthahonda.com' || /\.pages\.dev$/.test(host);
+        var isLanHost = host === 'localhost' || host === '127.0.0.1' || /\.local$/.test(host) ||
+          /^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+        var name = esc(machine.name || (isCloud ? (host || 'melthahonda.com') : (host || 'This terminal')));
+        var dot, label, tip, icon;
+        if (isCloud) {
+          icon = '🌐'; dot = '#38bdf8'; label = 'Internet';
+          tip = 'This terminal is connected over the internet to ' + (host || 'melthahonda.com') + '.';
+        } else if (machine.local_db && machine.local_db.reachable) {
+          icon = '🖥'; dot = '#4ade80'; label = 'Local · server';
+          tip = 'This machine holds the shop database, on the local network.';
+        } else if (isLanHost) {
+          icon = '🖥'; dot = '#fbbf24'; label = 'Local';
+          tip = 'On the shop network — using the main PC\'s database.';
+        } else {
+          icon = '🖥'; dot = '#fca5a5'; label = 'Local';
+          tip = 'This terminal — ' + esc(machine.host || '') + ':' + esc(machine.port || '') + ' — no local database on this machine (using the shop server).';
+        }
+        var badge = icon + ' ' + name +
+          ' <span style="display:inline-flex;align-items:center;gap:4px;opacity:.9">' +
+            '<span style="width:7px;height:7px;border-radius:50%;background:' + dot + '"></span>' + label +
+          '</span>';
+        // A local server still gets the click-to-manage-terminals dropdown.
+        if (!isCloud && machine.local_db && machine.local_db.reachable) {
+          return '<span style="position:relative;display:inline-flex">' +
+              '<button type="button" id="posTermBtn" title="' + esc(tip) + ' Click to manage terminals." ' +
+                'style="font-size:11px;color:#cbd5e1;display:flex;align-items:center;gap:6px;white-space:nowrap;background:rgba(255,255,255,.14);border:0;border-radius:5px;padding:5px 8px;cursor:pointer;font-family:inherit">' +
+                badge + ' <span style="opacity:.65">▾</span>' +
+              '</button>' +
+              '<div id="posTermMenu" style="display:none;position:absolute;top:100%;right:0;margin-top:5px;width:330px;max-height:64vh;overflow-y:auto;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:10px;box-shadow:0 14px 36px rgba(0,0,0,.30);z-index:80"></div>' +
+            '</span>';
+        }
+        return '<span title="' + esc(tip) + '" style="font-size:11px;color:#cbd5e1;display:flex;align-items:center;gap:6px;white-space:nowrap">' + badge + '</span>';
+      })() +
     '</div>' +
 
     // 148px was hand-tuned for the layout with the KPI tile strip showing
