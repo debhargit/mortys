@@ -37,11 +37,30 @@
      data-theme attribute on <html> set by the anti-flash script in <head>
      and by #themeToggle's click handler (see bottom of the main script). */
   :root[data-theme="dark"]{
-    --ink:#e6e9ee; --muted:#93a1b5; --bg:#0d1420;
+    color-scheme:dark;
+    /* High-contrast text everywhere in dark mode: body + headings pure white,
+       secondary/label text a bright near-white (readable, still a step down). */
+    --ink:#ffffff; --muted:#e2e8f0; --bg:#0d1420;
     --card:#17202e; --line:#2b3648;
     --card-soft:#1e2836; --card-soft2:#232e3f; --hover:#263244;
-    --heading:#cfe0f5;
+    --heading:#ffffff;
   }
+  /* Catch text that hard-codes a low-contrast grey (inline styles / other
+     rules) so nothing stays dim on a dark surface. */
+  :root[data-theme="dark"] .sidebar,
+  :root[data-theme="dark"] .sidebar .grp-title:hover,
+  :root[data-theme="dark"] .badge.expired{ color:#e6ebf3; }
+  :root[data-theme="dark"] [style*="color:#6b7280"],
+  :root[data-theme="dark"] [style*="color:#64748b"],
+  :root[data-theme="dark"] [style*="color:#6B7280"],
+  :root[data-theme="dark"] [style*="color:#4b5563"],
+  :root[data-theme="dark"] [style*="color:#475569"],
+  :root[data-theme="dark"] [style*="color:#9ca3af"],
+  :root[data-theme="dark"] [style*="color:#94a3b8"],
+  :root[data-theme="dark"] [style*="color:#cbd5e1"],
+  :root[data-theme="dark"] [style*="color:#94a3b8"],
+  :root[data-theme="dark"] [style*="color: var(--muted)"],
+  :root[data-theme="dark"] [style*="color:var(--muted)"]{ color:#e2e8f0 !important; }
   /* END THEME VARS */
   *{box-sizing:border-box}
   body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:var(--ink);background:var(--bg);line-height:1.5}
