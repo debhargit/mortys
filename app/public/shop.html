@@ -848,6 +848,10 @@
   .wa-head b{display:block;font-size:14px}
   .wa-head small{font-size:11.5px;opacity:.85;display:flex;gap:5px;align-items:center}
   .wa-head small::before{content:"";width:7px;height:7px;border-radius:50%;background:#4ade80}
+  /* Amber, not green, once the counter is actually closed -- paintStatus()
+     adds .closed. A permanently green "online" dot at 11pm is a small lie the
+     visitor finds out about only after waiting for a reply. */
+  .wa-head small.closed::before{background:#f59e0b}
   .wa-close{margin-left:auto;background:transparent;border:none;color:#fff;font-size:22px;cursor:pointer;opacity:.8;padding:0 4px}
   .wa-close:hover{opacity:1}
   .wa-body{
@@ -1245,10 +1249,6 @@
   </button>
 </nav>
 
-<!-- WHATSAPP FAB -->
-<button class="wa-fab" onclick="window.open('https://wa.me/18767588503','_blank','noopener')" aria-label="Chat on WhatsApp">
-  <svg viewBox="0 0 24 24"><path d="M12 2C6.5 2 2 6.5 2 12c0 1.8.5 3.6 1.4 5.1L2 22l5-1.4A9.9 9.9 0 0 0 12 22c5.5 0 10-4.5 10-10S17.5 2 12 2zm5.1 13.6c-.2.6-1.2 1.1-1.7 1.2-.4.1-.9.1-2.9-.6-2.5-1-4.1-3.6-4.2-3.8-.1-.2-.9-1.2-.9-2.3 0-1.1.6-1.6.8-1.8.2-.2.4-.3.6-.3h.5c.2 0 .4.1.5.3.2.4.6 1.4.6 1.5 0 .2 0 .4-.1.5l-.4.5c-.1.1-.2.2-.1.4.2.4.8 1.3 1.5 2.1.7.7 1.6 1.2 2 1.4.2.1.4.1.5-.1l.5-.5c.1-.2.3-.2.5-.1l1.5.7c.2.1.4.2.4.4-.1.3-.1.7-.1.8z"/></svg>
-</button>
 
 <script>
 document.addEventListener('DOMContentLoaded', function(){
@@ -4107,5 +4107,187 @@ document.addEventListener('DOMContentLoaded', function(){
 
 }); // end DOMContentLoaded
 </script>
+
+<!-- ===================== LIVE CHAT (WhatsApp hand-off) =====================
+     The stylesheet for this widget (.wa-fab / .wa-card / .wa-bubble / .wa-quick
+     / .wa-input-row) has been in this file all along with nothing rendering
+     into it. This is that markup.
+
+     It is a hand-off, not a hosted chat: there is no chat table, no socket and
+     no agent inbox behind it (see schema.sql / server.js -- neither has ever
+     had one). Everything the visitor types leaves in a wa.me link and is
+     answered on the counter's phone, which is where the shop already takes
+     orders. The card exists to set expectations and collect the first message
+     with some context attached, so the WhatsApp thread does not open with a
+     bare "hi".
+========================================================================= -->
+<button class="wa-fab" id="waFab" type="button" aria-label="Chat with us on WhatsApp" aria-expanded="false" aria-controls="waCard">
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.5 2 2 6.5 2 12c0 1.8.5 3.6 1.4 5.1L2 22l5-1.4A9.9 9.9 0 0 0 12 22c5.5 0 10-4.5 10-10S17.5 2 12 2zm5.1 13.6c-.2.6-1.2 1.1-1.7 1.2-.4.1-.9.1-2.9-.6-2.5-1-4.1-3.6-4.2-3.8-.1-.2-.9-1.2-.9-2.3 0-1.1.6-1.6.8-1.8.2-.2.4-.3.6-.3h.5c.2 0 .4.1.5.3.2.4.6 1.4.6 1.5 0 .2 0 .4-.1.5l-.4.5c-.1.1-.2.2-.1.4.2.4.8 1.3 1.5 2.1.7.7 1.6 1.2 2 1.4.2.1.4.1.5-.1l.5-.5c.1-.2.3-.2.5-.1l1.5.7c.2.1.4.2.4.4-.1.3-.1.7-.1.8z"/></svg>
+</button>
+
+<div class="wa-card" id="waCard" role="dialog" aria-label="Chat with Meltha Honda Sales &amp; Servs">
+  <div class="wa-head">
+    <div class="avi">MH</div>
+    <div style="min-width:0">
+      <b>Meltha Honda Sales &amp; Servs</b>
+      <small id="waStatus">Checking hours…</small>
+    </div>
+    <button class="wa-close" id="waClose" type="button" aria-label="Close chat">&times;</button>
+  </div>
+  <div class="wa-body" id="waBody"></div>
+  <div class="wa-input-row">
+    <input id="waInput" type="text" placeholder="Type your message…" aria-label="Your message" autocomplete="off"/>
+    <button class="wa-send" id="waSend" type="button" aria-label="Send on WhatsApp">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>
+    </button>
+  </div>
+</div>
+
+<script>
+(function(){
+  var WA_NUMBER = '18767588503';
+  // Mon-Sat 08:00-17:30, closed Sunday -- the same hours printed in the topbar,
+  // the service card and the footer. Kept in one place here so the "online"
+  // dot cannot end up contradicting the rest of the page.
+  var OPEN_MIN = 8 * 60, CLOSE_MIN = 17 * 60 + 30;
+
+  var fab    = document.getElementById('waFab');
+  var card   = document.getElementById('waCard');
+  var body   = document.getElementById('waBody');
+  var input  = document.getElementById('waInput');
+  var sendBt = document.getElementById('waSend');
+  var closeB = document.getElementById('waClose');
+  var status = document.getElementById('waStatus');
+  if (!fab || !card) return;
+
+  // ---- opening hours -------------------------------------------------------
+  // Read the shop's own timezone rather than the visitor's. Someone browsing
+  // from Toronto at 9pm must not be told the Kingston counter is open, and
+  // hardcoding UTC-5 would be a latent bug the day Jamaica ever adopts DST.
+  function shopClock(){
+    try {
+      var parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Jamaica', hour12: false,
+        weekday: 'short', hour: '2-digit', minute: '2-digit'
+      }).formatToParts(new Date());
+      var o = {};
+      parts.forEach(function(p){ o[p.type] = p.value; });
+      var h = parseInt(o.hour, 10);
+      if (h === 24) h = 0;                 // some engines render midnight as 24
+      return { day: o.weekday, mins: h * 60 + parseInt(o.minute, 10) };
+    } catch (e) {
+      return null;                          // no Intl/tz data -- fall back below
+    }
+  }
+  function isOpen(){
+    var t = shopClock();
+    if (!t) return null;                    // unknown, don't claim either way
+    if (t.day === 'Sun') return false;
+    return t.mins >= OPEN_MIN && t.mins < CLOSE_MIN;
+  }
+  function paintStatus(){
+    var open = isOpen();
+    if (open === null){ status.textContent = 'Mon–Sat · 8:00am – 5:30pm'; status.className = ''; return; }
+    if (open){
+      status.textContent = 'Online now · replies in minutes';
+      status.className = '';
+    } else {
+      var t = shopClock();
+      status.textContent = t && t.day === 'Sat' && t.mins >= CLOSE_MIN
+        ? 'Closed · back Monday 8:00am'
+        : (t && t.day === 'Sun' ? 'Closed Sundays · back Monday 8:00am' : 'Closed · back at 8:00am');
+      status.className = 'closed';
+    }
+  }
+
+  // ---- bubbles -------------------------------------------------------------
+  function clockLabel(){
+    return new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  }
+  function bubble(html){
+    var d = document.createElement('div');
+    d.className = 'wa-bubble';
+    d.innerHTML = html + '<span class="t">' + clockLabel() + '</span>';
+    body.appendChild(d);
+    body.scrollTop = body.scrollHeight;
+    return d;
+  }
+  var QUICK = [
+    ['Is this part in stock?',  'Hi, I would like to check if a part is in stock.'],
+    ['Get a price quote',       'Hi, could I get a price quote for a part?'],
+    ['Book a service',          'Hi, I would like to book a service appointment.'],
+    ['Opening hours',           'Hi, what are your opening hours?']
+  ];
+  function quickRow(){
+    var wrap = document.createElement('div');
+    wrap.className = 'wa-quick';
+    QUICK.forEach(function(q){
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = q[0];
+      b.addEventListener('click', function(){ handoff(q[1]); });
+      wrap.appendChild(b);
+    });
+    body.appendChild(wrap);
+    body.scrollTop = body.scrollHeight;
+  }
+
+  var seeded = false;
+  function seed(){
+    if (seeded) return;
+    seeded = true;
+    var open = isOpen();
+    bubble('👋 Welcome to <b>Meltha Honda Sales &amp; Servs</b> — Honda and Acura parts, Hagley Park Road.');
+    setTimeout(function(){
+      bubble(open === false
+        ? 'We are closed right now, but send your message anyway and we will reply as soon as we open.'
+        : 'Tell us the part and your vehicle (year, model) and we will check stock for you.');
+      setTimeout(quickRow, 260);
+    }, 420);
+  }
+
+  // ---- hand-off ------------------------------------------------------------
+  // Everything funnels through here so the confirmation bubble and the cleared
+  // input cannot get out of step with what was actually sent.
+  function handoff(text){
+    var msg = (text || '').trim() || 'Hi, I have a question about a part.';
+    window.open('https://wa.me/' + WA_NUMBER + '?text=' + encodeURIComponent(msg), '_blank', 'noopener');
+    input.value = '';
+    bubble('✅ Opening WhatsApp with your message. If nothing happened, call <a href="tel:8767588503" style="color:#075e54;font-weight:700">(876) 758-8503</a>.');
+  }
+
+  // ---- open / close --------------------------------------------------------
+  function setOpen(on){
+    card.classList.toggle('show', on);
+    fab.setAttribute('aria-expanded', on ? 'true' : 'false');
+    if (on){
+      paintStatus();
+      seed();
+      // Not on touch: focusing here springs the on-screen keyboard open and
+      // covers the very bubbles the visitor has just been shown.
+      if (!window.matchMedia || !window.matchMedia('(pointer: coarse)').matches) {
+        setTimeout(function(){ try { input.focus(); } catch (e) {} }, 60);
+      }
+    }
+  }
+  fab.addEventListener('click', function(){ setOpen(!card.classList.contains('show')); });
+  closeB.addEventListener('click', function(){ setOpen(false); });
+  sendBt.addEventListener('click', function(){ handoff(input.value); });
+  input.addEventListener('keydown', function(e){ if (e.key === 'Enter'){ e.preventDefault(); handoff(this.value); } });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && card.classList.contains('show')) setOpen(false);
+  });
+  document.addEventListener('click', function(e){
+    if (!card.classList.contains('show')) return;
+    if (card.contains(e.target) || fab.contains(e.target)) return;
+    setOpen(false);
+  });
+
+  paintStatus();
+  setInterval(paintStatus, 60000);   // keeps the dot honest across the 5:30 close
+})();
+</script>
+<!-- =================== end LIVE CHAT (WhatsApp hand-off) =================== -->
+
 </body>
 </html>

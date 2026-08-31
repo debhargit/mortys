@@ -4,10 +4,12 @@ Moving the admin + storefront off the self‑hosted Node/Express + PostgreSQL st
 onto **Cloudflare Pages** (static `public/`) + **Pages Functions** (a Hono app on
 Workers) + **D1** (SQLite).
 
-This file is the plan. Phase 1 (foundation + one working slice) is committed;
-the rest is iterative. **Nothing in `functions/` has been run** — there is no
-`wrangler` / D1 / account access in the build environment. Verify every phase
-locally with `npm run cf:dev` before deploying.
+This file is the plan. **Phases 1–8 are code-complete and committed**; each was
+verified against `node:sqlite` with the real migration set (the harness mounts
+the actual route modules behind a D1 shim). Phase 9 is cutover tooling +
+runbook (`CUTOVER.md`). **`functions/` has not been run under `wrangler`** —
+there is no `wrangler` / D1 / account access in the build environment, so
+re-check with `npm run cf:dev` once it is available, before DNS.
 
 ---
 
@@ -127,7 +129,7 @@ conversion but **drifted** from `schema.sql`. `migrations/0014_sync_with_postgre
 | **6** | Inventory + purchasing writes: `PATCH/POST/DELETE /api/admin/products[/:img]`, `GET/PATCH /api/admin/products-ext[/:img]`, suppliers CRUD, purchase-orders CRUD + `/items` + `/receive`, `POST /api/admin/receive` (no-PO stock-in), CSV importer (`/inventory/import{,/columns,/template.csv}` + `/import/parts` alias). `_routes/inventory.js`, `_lib/inventory_import.js` (Worker-safe delimited-file port of `inventory-import.js` — CSV/TSV only, `.xlsx` refused), migration `0019_inventory.sql` (products part-dept cols in `*_cents`, suppliers vendor-card cols + unique `code` idx). Receive paths use read→compute→`db.batch()`; import parses `multipart/form-data` in-Worker, 8 MB cap, preview/commit. `POST /api/admin/products` needs an `img` URL (photo upload → R2 is Phase 7). | **committed, tested vs node:sqlite** |
 | **7** | Binary uploads → R2, transactional email → `send_email`. `_lib/uploads.js` (`putUpload`/`getUpload`/`readUploadBody` over `env.UPLOADS`), `_lib/mailer.js` (`sendEmail(env,…)` via `cloudflare:email` `EmailMessage`, hand-built multipart/alternative MIME, console-stub fallback; `templates.{welcome,order,backInStock}Email` ported verbatim), `_routes/media.js`: `GET /uploads/*` (stream from R2), `POST /api/admin/{settings/logo, products-photo, inspections/:id/photos, notify-back-in-stock}`. `POST /api/admin/products` (inventory.js) now takes a `photo` upload. Both bindings still commented in `wrangler.toml` pending account opt-in — until then uploads return a clean 501 and email logs a stub, nothing else affected. No migration. | **committed, tested vs node:sqlite** |
 | **8** | Scheduled jobs. `_lib/jobs.js` — `back-in-stock` (email `notify_subscriptions` whose part is back, set `notified_at`), `reminders-digest` (daily mail to `ORDER_NOTIFY_TO` of `customer_reminders` due today), `low-stock-digest` (daily mail of active parts ≤ `low_threshold`); digests self-throttle via `app_config`, every run logged to `job_runs`. `_routes/cron.js` — `GET/POST /api/cron/:job` (+ `_all`, + `GET /api/cron` listing) gated by `env.CRON_SECRET` (Bearer / `X-Cron-Key` / `?key=`; 503 when unset). `_routes/crm.js` — the `customer_reminders` CRUD + `/reminders/due`. `cron-worker/` — companion Worker (Pages can't own Cron Triggers) whose `scheduled()` calls `/api/cron/*` with the secret. Migration `0020_cron.sql` (`customer_reminders`, `job_runs`). | **committed, tested vs node:sqlite** |
-| 9 | Cutover: point `admin.html` fetches at the same paths (already relative), DNS `melthahonda.com` → Pages, import prod data with `wrangler d1 execute --file` |
+| **9** | Cutover tooling + runbook. `tools/sync-public.mjs` (`npm run cf:build`) copies the current `admin.html`/`index.html`/print shells + assets from `app/` into `public/` — the front-end already uses relative `/api/*` + `credentials:'same-origin'`, so no JS changes. `tools/pg2d1.mjs` (`npm run cf:data`) parses the D1 migrations for each table's real column set, reads the matching Postgres table, applies the same conversions the routes use (`*_usd`→`*_cents`, bool→0/1, jsonb→TEXT, ts→ISO), drops PG-only columns, and writes ordered `INSERT OR REPLACE` files + `_import.sh`/`.ps1`. `CUTOVER.md` = the go-live sequence (opt-ins, migrate, data load, secrets, deploy, cron worker, DNS, checks, rollback). `cf:deploy` now runs `cf:build` first. | **tooling committed + selftested; DNS/opt-ins are operator steps** |
 
 Every phase: `npm run cf:dev`, exercise the affected admin.html screens against
 the local Pages Functions server, diff response bodies against the Express
@@ -146,9 +148,15 @@ npx wrangler d1 execute meltahonda-db --local --file migrations/0001_init.sql
 npm run cf:dev                       # wrangler pages dev public --d1 DB=meltahonda-db
 ```
 
-Deploy (Phase 8):
+Deploy / cutover (Phase 9 — full sequence in `CUTOVER.md`):
 
 ```bash
-npm run cf:deploy                    # wrangler pages deploy public
-# then in the dashboard: Pages project → Custom domains → melthahonda.com
+npm run cf:build                    # sync current front-end into public/
+npm run cf:migrate                  # apply 0001..0020 to the remote D1
+DATABASE_URL=… npm run cf:data      # export live Postgres -> dist/d1-data/*.sql
+bash dist/d1-data/_import.sh        # load it into D1
+npm run cf:deploy                   # cf:build + wrangler pages deploy public
+# then: wrangler pages secret put SESSION_SECRET / CRON_SECRET;
+#       cd cron-worker && wrangler deploy;
+#       dashboard → Pages → Custom domains → melthahonda.com; stop the Express service
 ```

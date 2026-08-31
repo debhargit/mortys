@@ -1,0 +1,822 @@
+24 hours (if no response to quote):
+Email: "Did you see our quote for brake pads? Still available. Reply to this email or call us at (876) 555-1234."
+
+48 hours (if still no response):
+SMS: "Hi Marcus, your brake pad quote expires tomorrow. Need help deciding? Call/text us back."
+
+3 days (final follow-up):
+Email: "We'll hold your quote for 24 more hours. After that we may need to re-quote based on current inventory. Questions? We're here to help."
+
+7 days (if never converted):
+Email: "Still looking for brake pads? We have new inventory. Get a fresh quote: [link]"
++ Add to nurture email sequence (monthly parts deals, tips, etc.)
+Phase 6: Form Analytics & Optimization (Week 3)
+
+
+
+Track key metrics:
+
+Form abandonment funnel:
+- Form viewed: 100%
+- Started filling: 65%
+- Completed Step 1: 80% (of starters)
+- Completed Step 2: 90% (of Step 1)
+- Completed Step 3: 85% (of Step 2)
+- Successfully submitted: 95% (of Step 3)
+
+Overall conversion: 100 → 65 → 52 → 47 → 40 → 38 submissions
+= 38% completion rate
+
+Target: 55-65% completion rate
+
+Field-level analytics:
+- Time spent per field
+- Error rate per field
+- Most abandoned field
+- Most corrected field
+
+Heatmap analysis:
+- Where users click before abandoning
+- How far they scroll
+- Which alternative options they use
+
+A/B tests to run:
+Test 1: Number of steps
+- A: 3 steps (current)
+- B: 2 steps (combine vehicle + preferences)
+- C: 1 step (all on one page with sections)
+
+Test 2: Primary CTA text
+- A: "Get Quote"
+- B: "Get My Quote"
+- C: "Find My Part"
+- D: "Check Availability"
+
+Test 3: Progress indicator
+- A: Step counter (1 of 3)
+- B: Progress bar
+- C: No indicator
+- D: Percentage (33% complete)
+
+Test 4: Alternative contact prominence
+- A: Below form (current)
+- B: Above form
+- C: Side-by-side with form
+- D: Exit-intent popup only
+Expected Results:
+
+30-40% reduction in form abandonment
+45% faster completion time (90 seconds → 50 seconds)
+20% increase in inquiry submissions
+25% increase in quote acceptance rate
+15% reduction in support calls ("how do I order?")
+Success Metrics:
+
+
+
+Metric                          Before    After     Change
+------------------------------- --------- --------- -------
+Form completion rate            55%       75%       +36%
+Average completion time         2:15m     0:50s     -63%
+Form abandonment rate           45%       25%       -44%
+Daily inquiry submissions       15        22        +47%
+Quote-to-purchase conversion    40%       50%       +25%
+5.3 Add Urgency & Scarcity Triggers
+Problem: No psychological drivers to purchase now vs. later
+Impact: Extended decision cycles, lost impulse sales
+Timeline: 2-3 weeks
+Difficulty: Low-Medium
+Cost: $1,000-2,500
+
+Implementation Steps:
+
+Phase 1: Inventory-Based Urgency (Week 1)
+
+
+
+Real-time stock messaging:
+
+High urgency scenarios:
+
+Last few units:
+┌─────────────────────────────────────┐
+│ ⚠️ Only 2 left in stock             │
+│                                     │
+│ 🔥 5 people viewed this today       │
+└─────────────────────────────────────┘
+
+Fast-moving item:
+┌─────────────────────────────────────┐
+│ 🔥 Hot Item — Selling Fast          │
+│                                     │
+│ ⏱️ 8 sold in the last 48 hours     │
+└─────────────────────────────────────┘
+
+Back in stock:
+┌─────────────────────────────────────┐
+│ ✨ Just Restocked!                  │
+│                                     │
+│ 🚨 Was out of stock for 2 weeks    │
+│    Get it before it's gone again    │
+└─────────────────────────────────────┘
+
+Limited quantity incoming:
+┌─────────────────────────────────────┐
+│ 📦 Only 5 arriving this week        │
+│                                     │
+│ ⚡ Pre-order now to guarantee yours │
+└─────────────────────────────────────┘
+
+Medium urgency scenarios:
+
+Popular item:
+┌─────────────────────────────────────┐
+│ ⭐ Popular Choice                   │
+│                                     │
+│ 🏆 #2 best-seller in Brake Parts   │
+└─────────────────────────────────────┘
+
+Recent activity:
+┌─────────────────────────────────────┐
+│ 👥 12 people viewed this part today │
+│                                     │
+│ ✓ 3 sold this week                 │
+└─────────────────────────────────────┘
+
+Frequently purchased:
+┌─────────────────────────────────────┐
+│ 🔄 Customers buy this every 6 months│
+│                                     │
+│ 💡 Time for yours?                 │
+└─────────────────────────────────────┘
+
+Implementation logic:
+IF stock_count <= 3 AND views_today >= 3 THEN
+  SHOW "⚠️ Only [X] left — [Y] people viewing"
+ELSE IF sales_last_week >= 5 THEN
+  SHOW "🔥 Hot Item — [X] sold this week"
+ELSE IF days_since_restock <= 7 THEN
+  SHOW "✨ Just Restocked!"
+ELSE IF views_last_30_days >= 50 THEN
+  SHOW "⭐ Popular choice — [X] views this month"
+END IF
+Phase 2: Time-Limited Offers (Week 1-2)
+
+
+
+Flash sale system:
+
+Weekend specials:
+┌─────────────────────────────────────┐
+│ ⚡ WEEKEND FLASH SALE                │
+│                                     │
+│ 15% OFF All Brake Parts             │
+│                                     │
+│ Ends in: [23:45:12]                 │
+│ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │
+│                                     │
+│ $45.00  ~~$52.94~~  [Save $7.94]    │
+│                                     │
+│ [Add to Cart — Sale Ends Soon] ⏰   │
+└─────────────────────────────────────┘
+
+Daily deal:
+┌─────────────────────────────────────┐
+│ 🎯 DEAL OF THE DAY                  │
+│                                     │
+│ AC Delco Oil Filter                 │
+│ $8.99  ~~$12.50~~  (28% OFF)        │
+│                                     │
+│ ⏰ 7 hours remaining                │
+│ [━━━━━━━━━━━░░░░░░░░] 62%          │
+│                                     │
+│ ✓ 18 purchased today                │
+└─────────────────────────────────────┘
+
+Seasonal promotions:
+┌─────────────────────────────────────┐
+│ 🌧️ RAINY SEASON SALE               │
+│                                     │
+│ 20% OFF Wiper Blades                │
+│ 15% OFF Brake Pads                  │
+│                                     │
+│ Sale ends: May 31, 2026             │
+│                                     │
+│ [Shop Sale Items →]                 │
+└─────────────────────────────────────┘
+
+First-time buyer discount:
+┌─────────────────────────────────────┐
+│ 🎉 Welcome Offer — First Order      │
+│                                     │
+│ Use code: FIRST10                   │
+│ Get 10% off your first purchase     │
+│                                     │
+│ ⏰ Valid for 48 hours               │
+│                                     │
+│ [Copy Code] [Shop Now →]            │
+└─────────────────────────────────────┘
+
+Countdown timer design:
+Large format (hero/banner):
+┌─────────────────────────────────────┐
+│ SALE ENDS IN:                       │
+│                                     │
+│  ┏━━━┓  ┏━━━┓  ┏━━━┓  ┏━━━┓       │
+│  ┃ 2 ┃  ┃ 14┃  ┃ 32┃  ┃ 18┃       │
+│  ┗━━━┛  ┗━━━┛  ┗━━━┛  ┗━━━┛       │
+│  DAYS   HOURS  MINS   SECS          │
+└─────────────────────────────────────┘
+
+Small format (product card):
+Ends in: 2d 14h 32m
+
+Technical requirements:
+- Real-time countdown (JavaScript)
+- Synced with server time (prevent cheating)
+- Automatically hide when expired
+- Schedule future promotions
+Phase 3: Social Proof Triggers (Week 2)
+
+
+
+Recent activity notifications:
+
+Live purchase notifications:
+┌─────────────────────────────────────┐
+│ 🛒 Marcus from Portmore just bought │
+│    Honda Civic brake pads           │
+│    2 minutes ago                    │
+│                                     │
+│ [View This Part →]          [✕]    │
+└─────────────────────────────────────┘
+
+Display rules:
+- Show actual purchases (verified)
+- Display first name + area (privacy)
+- Rotate every 15-30 seconds
+- Don't show same purchase twice in 1 hour
+- Only show if >= 3 purchases today
+
+Recent views:
+┌─────────────────────────────────────┐
+│ 👀 4 people are viewing this now    │
+└─────────────────────────────────────┘
+
+Display if:
+- >= 3 active viewers in last 5 minutes
+- Update in real-time via WebSocket
+
+"Others also bought" module:
+┌─────────────────────────────────────┐
+│ 🛍️ Customers who bought this also   │
+│    bought:                          │
+│                                     │
+│ • Engine oil (55% also bought)      │
+│ • Oil drain plug (38%)              │
+│ • Oil filter wrench (22%)           │
+└─────────────────────────────────────┘
+
+Trending parts:
+┌─────────────────────────────────────┐
+│ 🔥 TRENDING THIS WEEK               │
+│                                     │
+│ 1. 🥇 Honda Civic brake pads (+180%)│
+│ 2. 🥈 Toyota Corolla filters (+95%) │
+│ 3. 🥉 Battery 12V (+ 67%)           │
+│                                     │
+│ [See All Trending →]                │
+└─────────────────────────────────────┘
+
+Low stock alerts:
+┌─────────────────────────────────────┐
+│ ⚠️ LOW STOCK ALERT                  │
+│                                     │
+│ Only 2 left at this price           │
+│                                     │
+│ Next shipment: +$8 more expensive   │
+│                                     │
+│ [Secure Yours Now →]                │
+└─────────────────────────────────────┘
+Phase 4: Cart Abandonment Prevention (Week 2-3)
+
+
+
+Cart urgency messages:
+
+Items in cart for 10+ minutes:
+┌─────────────────────────────────────┐
+│ ⏰ Items in your cart are popular!  │
+│                                     │
+│ Brake pads:                         │
+│ • 3 others viewing now              │
+│ • Only 4 left in stock              │
+│                                     │
+│ [Checkout Now] or [Continue Shopping]│
+└─────────────────────────────────────┘
+
+Reserved inventory timer:
+┌─────────────────────────────────────┐
+│ 🔒 We're holding these items for you│
+│                                     │
+│ Reserved for: [14:45] ⏱️            │
+│                                     │
+│ Complete checkout to secure         │
+│ your parts at these prices          │
+│                                     │
+│ [Proceed to Checkout →]             │
+└─────────────────────────────────────┘
+
+Price change warning:
+┌─────────────────────────────────────┐
+│ ⚠️ PRICE ALERT                      │
+│                                     │
+│ The brake pads in your cart are     │
+│ on sale until midnight tonight.     │
+│                                     │
+│ Price after sale: $52.94            │
+│ Your price now: $45.00              │
+│ You save: $7.94                     │
+│                                     │
+│ [Lock In This Price →]              │
+└─────────────────────────────────────┘
+
+Free shipping threshold:
+┌─────────────────────────────────────┐
+│ 🚚 You're $15 away from FREE pickup!│
+│                                     │
+│ Cart total: $35                     │
+│ Free pickup at: $50+                │
+│                                     │
+│ [Add These →]                       │
+│ • Oil filter - $12                  │
+│ • Air freshener - $8                │
+│ • Wiper fluid - $6                  │
+└─────────────────────────────────────┘
+Phase 5: Exit-Intent Triggers (Week 3)
+
+
+
+Exit-intent popup (desktop):
+
+Trigger: Mouse moves toward browser close/back button
+
+First-time visitor:
+┌─────────────────────────────────────┐
+│              Wait! ✋                │
+│                                     │
+│  Before you go, get 10% off         │
+│  your first order                   │
+│                                     │
+│  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓   │
+│  ┃ your@email.com              ┃   │
+│  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛   │
+│                                     │
+│  [Get My 10% OFF Code →]            │
+│                                     │
+│  No thanks, I'll pay full price     │
+└─────────────────────────────────────┘
+
+Cart abandoner:
+┌─────────────────────────────────────┐
+│          Don't forget! 🛒            │
+│                                     │
+│  You have 2 items in your cart:     │
+│  • Brake pads - $45                 │
+│  • Oil filter - $12                 │
+│                                     │
+│  Total: $57 (normally $70)          │
+│                                     │
+│  ⏰ Sale prices end in 4 hours      │
+│                                     │
+│  [Complete My Order →]              │
+│                                     │
+│  or [Email me the cart]             │
+└─────────────────────────────────────┘
+
+Quote requester (hasn't submitted):
+┌─────────────────────────────────────┐
+│        Need help finding a part? 🔧 │
+│                                     │
+│  Talk to us now:                    │
+│                                     │
+│  📞 Call: (876) 555-1234            │
+│  💬 WhatsApp: [Chat Now →]          │
+│                                     │
+│  Average response: 2 minutes        │
+│                                     │
+│  [No thanks]                        │
+└─────────────────────────────────────┘
+
+Mobile exit detection (scroll up fast):
+- Sticky banner at top
+- Less intrusive than popup
+- Same messaging options
+Phase 6: Seasonal & Event-Based Urgency (Week 3)
+
+
+
+Calendar-based triggers:
+
+Hurricane season (June-November):
+┌─────────────────────────────────────┐
+│ 🌪️ HURRICANE PREP SALE              │
+│                                     │
+│ Stock up before the storm:          │
+│ • Batteries - 20% OFF               │
+│ • Wiper blades - 15% OFF            │
+│ • Emergency lights - 10% OFF        │
+│                                     │
+│ ⚠️ Don't wait until it's too late  │
+│
+
+Calendar-based triggers: (continued)
+
+
+
+Hurricane season (June-November):
+┌─────────────────────────────────────┐
+│ 🌪️ HURRICANE PREP SALE              │
+│                                     │
+│ Stock up before the storm:          │
+│ • Batteries - 20% OFF               │
+│ • Wiper blades - 15% OFF            │
+│ • Emergency lights - 10% OFF        │
+│                                     │
+│ ⚠️ Don't wait until it's too late   │
+│                                     │
+│ [Shop Hurricane Prep →]             │
+└─────────────────────────────────────┘
+
+Christmas/holiday season (Nov-Dec):
+┌─────────────────────────────────────┐
+│ 🎄 LAST CHANCE FOR CHRISTMAS DELIVERY│
+│                                     │
+│ Order by Dec 20 for guaranteed      │
+│ delivery before Christmas           │
+│                                     │
+│ ⏰ [2 days, 14 hours left]          │
+│                                     │
+│ [Shop Gift Ideas →]                 │
+└─────────────────────────────────────┘
+
+Back to school (August):
+┌─────────────────────────────────────┐
+│ 🎒 BACK-TO-SCHOOL TUNE-UP SPECIAL   │
+│                                     │
+│ Get your car ready:                 │
+│ • Oil change: $35 (reg $45)         │
+│ • Brake check: FREE                 │
+│ • Battery test: FREE                │
+│                                     │
+│ Ends August 31                      │
+│                                     │
+│ [Book Service →]                    │
+└─────────────────────────────────────┘
+
+Road trip season (Summer):
+┌─────────────────────────────────────┐
+│ 🚗 ROAD TRIP READY SALE             │
+│                                     │
+│ Don't break down on the way!        │
+│ • Tires - 15% OFF                   │
+│ • Batteries - 20% OFF               │
+│ • Cooling system parts - 10% OFF    │
+│                                     │
+│ [Prepare Your Car →]                │
+└─────────────────────────────────────┘
+
+Tax refund season (March-April):
+┌─────────────────────────────────────┐
+│ 💰 SPEND YOUR TAX REFUND WISELY     │
+│                                     │
+│ Finance available on purchases      │
+│ over $500                           │
+│                                     │
+│ Upgrade your: Engine, Transmission  │
+│ Body parts, Complete service        │
+│                                     │
+│ [Browse Major Parts →]              │
+└─────────────────────────────────────┘
+
+Payday patterns (bi-weekly):
+- Track when most purchases happen
+- Show "Payday Special" on those days
+- Example: "It's payday! Treat your car"
+Expected Results:
+
+15-25% increase in conversion rate
+30% reduction in "think about it" delays
+40% increase in impulse purchases
+20% higher average order value
+10-15% reduction in cart abandonment
+Success Metrics:
+
+
+
+Metric                          Before    After     Change
+------------------------------- --------- --------- -------
+Conversion rate                 5.0%      6.5%      +30%
+Average time to purchase        3.2 days  1.8 days  -44%
+Impulse purchase rate           12%       18%       +50%
+Sale item conversion            N/A       22%       New
+Cart abandonment rate           68%       58%       -15%
+5.4 Expand Service Booking Optimization
+Problem: Service booking lacks confirmation clarity and upsell opportunities
+Impact: Uncertainty after booking, missed revenue from add-ons
+Timeline: 2-3 weeks
+Difficulty: Medium
+Cost: $1,500-3,500
+
+Implementation Steps:
+
+Phase 1: Pre-Booking Optimization (Week 1)
+
+
+
+Service selection page redesign:
+
+Popular services grid:
+┌─────────────────────────────────────┐
+│ What service do you need?           │
+│                                     │
+│ ┌──────────┐ ┌──────────┐          │
+│ │ 🛢️ OIL   │ │ 🔧 BRAKE │          │
+│ │  CHANGE  │ │  SERVICE │          │
+│ │          │ │          │          │
+│ │ From $35 │ │ From $80 │          │
+│ │ 30 mins  │ │ 1-2 hrs  │          │
+│ └──────────┘ └──────────┘          │
+│                                     │
+│ ┌──────────┐ ┌──────────┐          │
+│ │ ⚙️ WHEEL │ │ 🔍 DIAG  │          │
+│ │ ALIGNMENT│ │  SCAN    │          │
+│ │          │ │          │          │
+│ │ $45-65   │ │ $25      │          │
+│ │ 45 mins  │ │ 20 mins  │          │
+│ └──────────┘ └──────────┘          │
+│                                     │
+│ [View All Services] [Custom Request]│
+└─────────────────────────────────────┘
+
+Service detail modal (click to expand):
+┌─────────────────────────────────────┐
+│ 🛢️ OIL CHANGE SERVICE               │
+│                                     │
+│ What's included:                    │
+│ ✓ Up to 5 quarts synthetic blend   │
+│ ✓ New oil filter                    │
+│ ✓ Fluid level check                 │
+│ ✓ Tire pressure check               │
+│ ✓ Visual inspection (brakes, etc.)  │
+│                                     │
+│ Duration: 30 minutes                │
+│ Price: $35 (conventional)           │
+│        $45 (full synthetic)         │
+│                                     │
+│ Popular add-ons:                    │
+│ • Tire rotation (+$15) 🔥 Popular   │
+│ • Air filter replacement (+$20)     │
+│ • Cabin filter replacement (+$18)   │
+│                                     │
+│ [Book This Service →]               │
+└─────────────────────────────────────┘
+
+Pricing transparency:
+┌─────────────────────────────────────┐
+│ BRAKE SERVICE                       │
+│                                     │
+│ Labor: $80-120                      │
+│ (depends on front/rear, complexity) │
+│                                     │
+│ Parts (if needed):                  │
+│ • Brake pads: $35-80/set            │
+│ • Rotors: $45-90/each               │
+│ • Calipers: $60-120/each            │
+│                                     │
+│ 💡 Exact quote after inspection     │
+│                                     │
+│ Average total: $150-300             │
+│ ⭐ Rated 4.9/5 (87 reviews)         │
+│                                     │
+│ [Schedule Inspection →]             │
+└─────────────────────────────────────┘
+
+Vehicle pre-qualification:
+┌─────────────────────────────────────┐
+│ Let's make sure we're ready for you │
+│                                     │
+│ Your vehicle:                       │
+│ Make:  [Honda ▼]                    │
+│ Model: [Civic ▼]                    │
+│ Year:  [2018 ▼]                     │
+│                                     │
+│ ✓ We service this vehicle           │
+│ ✓ Parts available                   │
+│                                     │
+│ [Continue to Booking →]             │
+└─────────────────────────────────────┘
+
+If incompatible:
+┌─────────────────────────────────────┐
+│ ⚠️ Special Order Required           │
+│                                     │
+│ We can service your 1965 Mustang,   │
+│ but parts may take 3-5 days.        │
+│                                     │
+│ Would you like us to:               │
+│ ● Get a quote first                 │
+│ ○ Book when parts arrive            │
+│                                     │
+│ [Get Quote] [Call to Discuss]       │
+└─────────────────────────────────────┘
+Phase 2: Smart Scheduling Interface (Week 1-2)
+
+
+
+Calendar-based booking:
+
+┌─────────────────────────────────────┐
+│ Choose your date & time             │
+│                                     │
+│  May 2026                           │
+│  ─────────────────────────────      │
+│  Su Mo Tu We Th Fr Sa               │
+│           1  2  3  4  5             │
+│   6  7  8  9 10 11 12               │
+│  13 14 15 16 17 18 19               │
+│  20 21 22 [23]24 25 26  ← Today     │
+│  27 28 29 30 31                     │
+│                                     │
+│  Available times for May 23:        │
+│  ○ 8:00 AM  (⚡ Popular)            │
+│  ○ 10:00 AM (✓ Available)          │
+│  ● 12:00 PM (✓ Available) ← Selected│
+│  ○ 2:00 PM  (⚠️ Last slot)         │
+│  ✕ 4:00 PM  (Booked)                │
+│                                     │
+│  ⏱️ Estimated time: 30-45 minutes  │
+│                                     │
+│  [← Back]    [Continue →]           │
+└─────────────────────────────────────┘
+
+Smart recommendations:
+┌─────────────────────────────────────┐
+│ 💡 Best times for you:              │
+│                                     │
+│ Tomorrow (Sat) 8:00 AM              │
+│ ⚡ Least busy - in and out fast     │
+│                                     │
+│ Monday 12:00 PM                     │
+│ 🍴 Drop off during lunch break      │
+│                                     │
+│ Tuesday 8:00 AM                     │
+│ 🌅 First of the day - no delays     │
+└─────────────────────────────────────┘
+
+Wait time indicators:
+- ⚡ Fast (< 30 min expected wait)
+- ✓ Normal (30-45 min)
+- ⚠️ Busy (45-60 min)
+- 🔴 Very busy (60+ min)
+
+Recurring service scheduling:
+┌─────────────────────────────────────┐
+│ 📅 Set up recurring service         │
+│                                     │
+│ Get your oil changed automatically: │
+│                                     │
+│ Frequency:                          │
+│ ● Every 3 months                    │
+│ ○ Every 5,000 km                    │
+│ ○ Every 6 months                    │
+│                                     │
+│ Preferred day: [Saturday ▼]         │
+│ Preferred time: [8:00 AM ▼]         │
+│                                     │
+│ ✓ We'll remind you 1 week before    │
+│ ✓ Easy to reschedule or cancel      │
+│ ✓ Loyalty discount: 5th service FREE│
+│                                     │
+│ [Set Up Recurring] [Skip]           │
+└─────────────────────────────────────┘
+Phase 3: Upsell & Cross-Sell During Booking (Week 2)
+
+
+
+Smart bundling:
+
+Oil change booking:
+┌─────────────────────────────────────┐
+│ Customers who book oil changes      │
+│ often add:                          │
+│                                     │
+│ ☐ Tire rotation (+$15) 💰 Save 25% │
+│   └─ Normally $20, bundled: $15     │
+│                                     │
+│ ☐ Multi-point inspection (FREE)     │
+│   └─ $25 value - complimentary!     │
+│                                     │
+│ ☐ Wiper blade replacement (+$18)    │
+│   └─ Rainy season special           │
+│                                     │
+│ ☐ Air filter (+$20)                 │
+│   └─ Due every 12k miles            │
+│                                     │
+│ [Continue] or [Add All & Save $30]  │
+└─────────────────────────────────────┘
+
+Seasonal recommendations:
+┌─────────────────────────────────────┐
+│ 🌧️ Rainy season is here            │
+│                                     │
+│ While you're here, consider:        │
+│                                     │
+│ ☐ Wiper blade replacement (+$18)    │
+│   Your car's wipers are 12mo old    │
+│                                     │
+│ ☐ Brake inspection (FREE)           │
+│   Critical in wet conditions        │
+│                                     │
+│ ☐ Tire tread check (FREE)           │
+│   Ensure safe grip on wet roads     │
+│                                     │
+│ Total if all added: $18 (save $32)  │
+│                                     │
+│ [Add Recommended] [No Thanks]       │
+└─────────────────────────────────────┘
+
+Mileage-based suggestions:
+System detects: Last service at 45,000 km
+Current: 52,000 km (from previous records)
+
+┌─────────────────────────────────────┐
+│ 📊 Based on your mileage (52k km)   │
+│                                     │
+│ Recommended maintenance:            │
+│                                     │
+│ ✓ Oil change (included)             │
+│                                     │
+│ ☐ Transmission fluid change         │
+│   Recommended at 50k km (+$65)      │
+│                                     │
+│ ☐ Brake fluid flush                 │
+│   Due every 2 years (+$40)          │
+│                                     │
+│ ☐ Coolant flush                     │
+│   Recommended at 50k km (+$55)      │
+│                                     │
+│ Package deal: All 4 services $180   │
+│ (Save $45 vs. individual prices)    │
+│                                     │
+│ [Get Package] [Just Oil Change]     │
+└─────────────────────────────────────┘
+
+Value propositions:
+- "While we have your car" framing
+- Bundle discounts (save $X)
+- Free add-ons (inspection, fluid checks)
+- "Recommended by manufacturer" trust
+- Time savings ("all done in one visit")
+Phase 4: Enhanced Confirmation Experience (Week 2-3)
+
+
+
+Immediate on-screen confirmation:
+┌─────────────────────────────────────┐
+│     ✅ Booking Confirmed! 🎉        │
+│                                     │
+│ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │
+│                                     │
+│ OIL CHANGE + TIRE ROTATION          │
+│                                     │
+│ 📅 Saturday, May 24, 2026           │
+│ 🕐 8:00 AM                          │
+│ ⏱️ Estimated time: 45 minutes       │
+│                                     │
+│ 📍 Fox & D Auto Parts               │
+│    20 McArthur Avenue, Kingston     │
+│    [Get Directions →]               │
+│                                     │
+│ 👤 Customer: Marcus Johnson         │
+│ 📱 Phone: (876) 555-1234            │
+│ 🚗 Vehicle: 2018 Honda Civic        │
+│                                     │
+│ 💰 Estimated cost: $50              │
+│    (Final price after inspection)   │
+│                                     │
+│ Confirmation #: SVC-2026-0523       │
+│                                     │
+│ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │
+│                                     │
+│ WHAT TO BRING:                      │
+│ ✓ Vehicle registration              │
+│ ✓ Payment method                    │
+│ ✓ This confirmation number          │
+│                                     │
+│ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │
+│                                     │
+│ [📧 Email Confirmation]             
+
+
+

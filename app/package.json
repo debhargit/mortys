@@ -8,10 +8,14 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "init-db": "psql \"$DATABASE_URL\" -f schema.sql",
-    "cf:dev": "wrangler pages dev public --d1 DB=meltahonda-db --compatibility-flags nodejs_compat",
-    "cf:deploy": "wrangler pages deploy public",
+    "cf:build": "node tools/sync-public.mjs",
+    "cf:build:check": "node tools/sync-public.mjs --check",
+    "cf:dev": "npm run cf:build && wrangler pages dev public --d1 DB=meltahonda-db --compatibility-flags nodejs_compat",
+    "cf:deploy": "npm run cf:build && wrangler pages deploy public",
     "cf:migrate:local": "wrangler d1 migrations apply meltahonda-db --local",
-    "cf:migrate": "wrangler d1 migrations apply meltahonda-db"
+    "cf:migrate": "wrangler d1 migrations apply meltahonda-db",
+    "cf:data": "node tools/pg2d1.mjs --out dist/d1-data",
+    "cf:data:selftest": "node tools/pg2d1.mjs --selftest"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
