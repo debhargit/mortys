@@ -4,12 +4,18 @@ Moving the admin + storefront off the self‑hosted Node/Express + PostgreSQL st
 onto **Cloudflare Pages** (static `public/`) + **Pages Functions** (a Hono app on
 Workers) + **D1** (SQLite).
 
-This file is the plan. **Phases 1–8 are code-complete and committed**; each was
-verified against `node:sqlite` with the real migration set (the harness mounts
-the actual route modules behind a D1 shim). Phase 9 is cutover tooling +
-runbook (`CUTOVER.md`). **`functions/` has not been run under `wrangler`** —
-there is no `wrangler` / D1 / account access in the build environment, so
-re-check with `npm run cf:dev` once it is available, before DNS.
+This file is the plan. **All 9 phases are complete and committed.** Phases 1–8
+port every endpoint; each was verified against `node:sqlite` with the real
+migration set (the harness mounts the actual route modules behind a D1 shim).
+Phase 9 is the cutover tooling + runbook (`CUTOVER.md`). A static wiring check
+(`node --check` on all 23 `functions/` files; mount every route module; build
+the real Hono app) passes: **82 routes across 9 modules, no duplicate
+`(method, path)`**, `/api/health` → 200, unported `/api/*` → 501.
+
+**`functions/` has not been run under `wrangler`** — there is no `wrangler` /
+D1 / account access in the build environment, so re-check with `npm run cf:dev`
+once it is available, before DNS. That is the only step left; everything after
+it in `CUTOVER.md` is operator actions (account opt-ins, secrets, DNS).
 
 ---
 
@@ -48,11 +54,12 @@ re-check with `npm run cf:dev` once it is available, before DNS.
 
 ---
 
-## Runtime substitutions (Phase 1 — committed)
+## Layout (all committed)
 
 ```
 functions/
-  [[path]].js          catch‑all → Hono app; mounts each _routes module
+  [[path]].js          catch‑all → Hono app; mounts each _routes module, then
+                       /api/health and a 501 for any unported /api/*
   _routes/
     auth.js            Phase 1 — /api/auth/*, /api/me
     storefront.js      Phase 2 — products, filters, cart, reviews, wishlist, notify
@@ -60,6 +67,11 @@ functions/
                        orders, dashboard, …)
     pos.js             Phase 4 — POS reads + hold/quote writes
     pos_txn.js         Phase 5 — sale / void / return (read → compute → batch)
+    inventory.js       Phase 6 — product/supplier/PO writes + CSV importer
+    media.js           Phase 7 — GET /uploads/* + logo/photo/inspection uploads,
+                       notify-back-in-stock
+    crm.js             Phase 8 — customer_reminders CRUD + /reminders/due
+    cron.js            Phase 8 — /api/cron/:job (+ _all, listing), CRON_SECRET
   _lib/
     money.js           centsToUsd / usdToCents + PRODUCT_USD_COLS
     util.js            safeJson (jsonb-as-TEXT), boolify (0/1 -> bool)
@@ -71,10 +83,19 @@ functions/
     session.js         readSession() / writeSession() / clearSession()
                        WebCrypto HMAC‑SHA256 signed cookie, name "mh_session",
                        payload { userId, epoch, iat }, 30‑day maxAge
-    db.js              d1(env) → { q(sql,...b), one(sql,...b), run(sql,...b),
-                       many(sql,...b) }; thin wrapper over env.DB.prepare().bind()
+    db.js              d1(env) → { many, one, run, batch } over env.DB.prepare().bind()
     guards.js          requireAuth / requireAdmin / requireManager / userCan
                        (re‑reads the users row per request, like server.js)
+    inventory_import.js  Worker-safe delimited-file parser (Phase 6)
+    uploads.js         putUpload / getUpload / readUploadBody over env.UPLOADS (Phase 7)
+    mailer.js          sendEmail(env,…) via cloudflare:email + templates (Phase 7)
+    jobs.js            back-in-stock / reminders-digest / low-stock-digest,
+                       runJob() → job_runs (Phase 8)
+cron-worker/           companion Worker — Cron Triggers → /api/cron/* (Phase 8)
+tools/
+  sync-public.mjs      npm run cf:build — refresh public/ from app/ (Phase 9)
+  pg2d1.mjs            npm run cf:data — Postgres → D1 seed files (Phase 9)
+CUTOVER.md             go-live runbook (Phase 9)
 ```
 
 - **Session epoch**: `server.js` bumps `SESSION_EPOCH` in memory to sign
@@ -121,7 +142,7 @@ conversion but **drifted** from `schema.sql`. `migrations/0014_sync_with_postgre
 
 | Phase | Scope | Status |
 |---|---|---|
-| **1** | Scaffold, `_lib`, schema sync `0014`, auth slice (`/api/auth/*`, `/api/me`) | **committed, untested** |
+| **1** | Scaffold, `_lib`, schema sync `0014`, auth slice (`/api/auth/*`, `/api/me`) | **committed; covered by the full-app wiring check** |
 | **2** | Storefront reads: `/api/products*`, `/api/filters`, `/api/cart*`, `/api/reviews`, `/api/wishlist*`, `/api/notify`. `_routes/{auth,storefront}.js`, `_lib/money.js`, migration `0015_storefront.sql` (adds `wishlist`). | **committed, tested vs node:sqlite** |
 | **3** | Admin reads: `/api/admin/{settings,capabilities,me/ui-prefs,roles,roles/mine,user-categories,staff,products,products/:img,low-stock,orders,orders/:id,dashboard}`. `_routes/admin.js`, `_lib/{util,capabilities,shop}.js`, migration `0016_admin.sql` (adds `shop_settings`, `account_payments`, `users.perms`, `user_categories.perms`, `products.supplier_id/barcode`, `orders.coupon_*`). | **committed, tested vs node:sqlite** |
 | **4** | POS reads + simple writes: `/api/admin/pos/{holds,holds/:id,hold(POST),holds/:id(DELETE),quotes,quotes/:id,quote(POST),sales,sales/:id,customer-lookup,reps,walkin-customer,locations,vehicle-models}`. `_routes/pos.js`, `_lib/pos.js`, migration `0017_pos.sql` (users credit/contact cols, `pos_sales.tax_exempt`, `pos_holds.held_by_name`, `pos_quotes.cashier_id`). | **committed, tested vs node:sqlite** |
@@ -129,11 +150,12 @@ conversion but **drifted** from `schema.sql`. `migrations/0014_sync_with_postgre
 | **6** | Inventory + purchasing writes: `PATCH/POST/DELETE /api/admin/products[/:img]`, `GET/PATCH /api/admin/products-ext[/:img]`, suppliers CRUD, purchase-orders CRUD + `/items` + `/receive`, `POST /api/admin/receive` (no-PO stock-in), CSV importer (`/inventory/import{,/columns,/template.csv}` + `/import/parts` alias). `_routes/inventory.js`, `_lib/inventory_import.js` (Worker-safe delimited-file port of `inventory-import.js` — CSV/TSV only, `.xlsx` refused), migration `0019_inventory.sql` (products part-dept cols in `*_cents`, suppliers vendor-card cols + unique `code` idx). Receive paths use read→compute→`db.batch()`; import parses `multipart/form-data` in-Worker, 8 MB cap, preview/commit. `POST /api/admin/products` needs an `img` URL (photo upload → R2 is Phase 7). | **committed, tested vs node:sqlite** |
 | **7** | Binary uploads → R2, transactional email → `send_email`. `_lib/uploads.js` (`putUpload`/`getUpload`/`readUploadBody` over `env.UPLOADS`), `_lib/mailer.js` (`sendEmail(env,…)` via `cloudflare:email` `EmailMessage`, hand-built multipart/alternative MIME, console-stub fallback; `templates.{welcome,order,backInStock}Email` ported verbatim), `_routes/media.js`: `GET /uploads/*` (stream from R2), `POST /api/admin/{settings/logo, products-photo, inspections/:id/photos, notify-back-in-stock}`. `POST /api/admin/products` (inventory.js) now takes a `photo` upload. Both bindings still commented in `wrangler.toml` pending account opt-in — until then uploads return a clean 501 and email logs a stub, nothing else affected. No migration. | **committed, tested vs node:sqlite** |
 | **8** | Scheduled jobs. `_lib/jobs.js` — `back-in-stock` (email `notify_subscriptions` whose part is back, set `notified_at`), `reminders-digest` (daily mail to `ORDER_NOTIFY_TO` of `customer_reminders` due today), `low-stock-digest` (daily mail of active parts ≤ `low_threshold`); digests self-throttle via `app_config`, every run logged to `job_runs`. `_routes/cron.js` — `GET/POST /api/cron/:job` (+ `_all`, + `GET /api/cron` listing) gated by `env.CRON_SECRET` (Bearer / `X-Cron-Key` / `?key=`; 503 when unset). `_routes/crm.js` — the `customer_reminders` CRUD + `/reminders/due`. `cron-worker/` — companion Worker (Pages can't own Cron Triggers) whose `scheduled()` calls `/api/cron/*` with the secret. Migration `0020_cron.sql` (`customer_reminders`, `job_runs`). | **committed, tested vs node:sqlite** |
-| **9** | Cutover tooling + runbook. `tools/sync-public.mjs` (`npm run cf:build`) copies the current `admin.html`/`index.html`/print shells + assets from `app/` into `public/` — the front-end already uses relative `/api/*` + `credentials:'same-origin'`, so no JS changes. `tools/pg2d1.mjs` (`npm run cf:data`) parses the D1 migrations for each table's real column set, reads the matching Postgres table, applies the same conversions the routes use (`*_usd`→`*_cents`, bool→0/1, jsonb→TEXT, ts→ISO), drops PG-only columns, and writes ordered `INSERT OR REPLACE` files + `_import.sh`/`.ps1`. `CUTOVER.md` = the go-live sequence (opt-ins, migrate, data load, secrets, deploy, cron worker, DNS, checks, rollback). `cf:deploy` now runs `cf:build` first. | **tooling committed + selftested; DNS/opt-ins are operator steps** |
+| **9** | Cutover tooling + runbook. `tools/sync-public.mjs` (`npm run cf:build`) copies the current `admin.html`/`index.html`/print shells + assets from `app/` into `public/` — the front-end already uses relative `/api/*` + `credentials:'same-origin'`, so no JS changes. `tools/pg2d1.mjs` (`npm run cf:data`) parses the D1 migrations for each table's real column set, reads the matching Postgres table, applies the same conversions the routes use (`*_usd`→`*_cents`, bool→0/1, jsonb→TEXT, ts→ISO), drops PG-only columns, and writes ordered `INSERT OR REPLACE` files + `_import.sh`/`.ps1`. `CUTOVER.md` = the go-live sequence (opt-ins, migrate, data load, secrets, deploy, cron worker, DNS, checks, rollback). `cf:deploy` now runs `cf:build` first. | **committed; `pg2d1` 14/14 selftest, `sync-public` run. DNS + account opt-ins are operator steps.** |
 
-Every phase: `npm run cf:dev`, exercise the affected admin.html screens against
-the local Pages Functions server, diff response bodies against the Express
-server before merging.
+Each phase was verified with a scratch `node --experimental-sqlite` harness that
+applies all `migrations/*.sql`, mounts the real route module, and asserts on the
+route SQL. Before DNS, also run `npm run cf:dev` and diff a few response bodies
+against the Express server.
 
 ---
 
@@ -143,9 +165,8 @@ server before merging.
 npm i -D wrangler                    # not bundled; add to devDependencies
 npx wrangler login                   # browser OAuth, debhargithud@gmail.com
 npx wrangler d1 create meltahonda-db # if not already on the account
-npx wrangler d1 execute meltahonda-db --local --file migrations/0001_init.sql
-# … 0002 … 0014 in order, --local
-npm run cf:dev                       # wrangler pages dev public --d1 DB=meltahonda-db
+npx wrangler d1 migrations apply meltahonda-db --local   # 0001 … 0020, in order
+npm run cf:dev                       # cf:build + wrangler pages dev public --d1 DB=meltahonda-db
 ```
 
 Deploy / cutover (Phase 9 — full sequence in `CUTOVER.md`):
