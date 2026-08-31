@@ -6,6 +6,7 @@
 // Deployed to melthahonda.com 2026-08-31 (phases 1-8).
 
 import { Hono } from 'hono';
+import { d1 } from './_lib/db.js';
 import mountAuth from './_routes/auth.js';           // Phase 1
 import mountStorefront from './_routes/storefront.js'; // Phase 2
 import mountAdmin from './_routes/admin.js';           // Phase 3 (admin reads)
@@ -42,7 +43,18 @@ mountOps(app);
 mountReports(app);
 mountAdminMisc(app);
 
-app.get('/api/health', (c) => c.json({ ok: true, runtime: 'cloudflare-pages', ported_phases: [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15] }));
+// admin.html's checkDbUp() shows a "database is not running" banner unless this
+// reports db:'up', so it must actually probe D1 (a one-row read). D1 has no
+// separate process to stop, but a binding misconfig or an outage would still
+// surface here instead of as a false "wrong password".
+app.get('/api/health', async (c) => {
+  let db = 'down';
+  try {
+    await d1(c.env).one("SELECT 1 AS ok");
+    db = 'up';
+  } catch { db = 'down'; }
+  return c.json({ ok: db === 'up', db, runtime: 'cloudflare-pages', ported_phases: [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15] }, db === 'up' ? 200 : 503);
+});
 
 // Anything under /api not yet ported.
 app.all('/api/*', (c) => c.json({ error: 'This endpoint is not ported to Cloudflare yet — see app/PORT.md' }, 501));
