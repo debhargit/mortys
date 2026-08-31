@@ -57,11 +57,12 @@ export default function mount(app) {
   app.get('/api/admin/roles', adminMw, async (c) => {
     const rows = await d1(c.env).many(
       `SELECT r.code, r.label, r.rank, r.can_manage, r.hidden_tabs, r.is_system,
+              COALESCE(r.show_extra_menus, 0) AS show_extra_menus,
               (SELECT COUNT(*) FROM users u WHERE u.admin_role = r.code) AS member_count
          FROM roles r ORDER BY r.rank, r.label`
     );
     for (const r of rows) {
-      boolify(r, ['can_manage', 'is_system']);
+      boolify(r, ['can_manage', 'is_system', 'show_extra_menus']);
       r.hidden_tabs = safeJson(r.hidden_tabs, []);
     }
     return c.json({ roles: rows });
@@ -69,11 +70,13 @@ export default function mount(app) {
 
   app.get('/api/admin/roles/mine', adminMw, async (c) => {
     const code = c.get('user').admin_role || null;
-    const r = await d1(c.env).one('SELECT code, label, can_manage, hidden_tabs, rank FROM roles WHERE code = ?', code);
+    const r = await d1(c.env).one(
+      'SELECT code, label, can_manage, hidden_tabs, rank, COALESCE(show_extra_menus, 0) AS show_extra_menus FROM roles WHERE code = ?', code);
     if (!r) {
-      return c.json({ role: { code, label: code || 'unknown', can_manage: code === 'owner', hidden_tabs: [], rank: 99 } });
+      return c.json({ role: { code, label: code || 'unknown', can_manage: code === 'owner', hidden_tabs: [], rank: 99, show_extra_menus: false } });
     }
     r.can_manage = code === 'owner' ? true : !!r.can_manage;
+    r.show_extra_menus = !!r.show_extra_menus;
     r.hidden_tabs = safeJson(r.hidden_tabs, []);
     return c.json({ role: r });
   });

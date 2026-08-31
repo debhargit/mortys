@@ -861,8 +861,10 @@ function buildSidebar(){
   if (!can('pos.access') && hide.indexOf('pos') === -1) hide.push('pos');
   if (!can('reports.view') && hide.indexOf('reports') === -1) hide.push('reports');
   // `optional` groups (Service Centre, Cars & Vehicles) are off unless the
-  // signed-in user enabled them in My Preferences.
-  var showExtra = !!(typeof POS_PREFS !== 'undefined' && POS_PREFS && POS_PREFS.showExtraMenus);
+  // signed-in user enabled them in My Preferences, OR their role turns them
+  // on for everyone (roles.show_extra_menus — e.g. a Service Advisor role).
+  var showExtra = !!(typeof POS_PREFS !== 'undefined' && POS_PREFS && POS_PREFS.showExtraMenus) ||
+                  !!(MY_ROLE && MY_ROLE.show_extra_menus);
   var groups = SIDEBAR_GROUPS
     .filter(function(g){ return showExtra || !g.optional; })
     .map(function(g){
@@ -9228,6 +9230,11 @@ async function renderRoles(panel, openCode){
         '<span><span class="t">Counts as a manager</span>' +
         '<span class="d">Passes the manager-only checks on the server — receiving stock, editing pricing, issuing refunds, managing staff. The screen list below still controls the sidebar.</span></span>' +
       '</label>' +
+      '<label class="qbo-switch">' +
+        '<input type="checkbox" class="qbo-eservice"' + (role.show_extra_menus ? ' checked' : '') + '/>' +
+        '<span><span class="t">Show the Service Centre &amp; Vehicles menus by default</span>' +
+        '<span class="d">Work Orders, Appointments, Mechanics, Inspections, Vehicle Lookup and the rest — normally each user turns these on in My Preferences; tick this to give everyone on this role the service menus automatically.</span></span>' +
+      '</label>' +
       '<div class="qbo-sec">Screens this role can open</div>' +
       cats +
       '<div class="qbo-foot">' +
@@ -9276,6 +9283,7 @@ async function renderRoles(panel, openCode){
           '<div><label class="lbl">Role name</label><input id="nrLabel" class="fld" placeholder="e.g. Supervisor"/></div>' +
           '<div><label class="lbl">Seniority <span style="text-transform:none;letter-spacing:0;font-weight:400">(lower = more senior)</span></label><input id="nrRank" type="number" class="fld" value="50" style="width:120px"/></div>' +
           '<label style="display:inline-flex;align-items:center;gap:7px;font-size:13px;padding-bottom:9px"><input type="checkbox" id="nrManage"/> Counts as a manager</label>' +
+          '<label style="display:inline-flex;align-items:center;gap:7px;font-size:13px;padding-bottom:9px"><input type="checkbox" id="nrService"/> Show Service Centre menus by default</label>' +
           '<button class="qbo-btn" id="nrCreate" type="submit" style="margin-bottom:1px">Create role</button>' +
           '<button class="qbo-btn ghost" id="nrCancel" type="button" style="margin-bottom:1px">Cancel</button>' +
           '<span id="nrMsg" class="qbo-msg" style="margin-left:4px"></span>' +
@@ -9343,6 +9351,7 @@ async function renderRoles(panel, openCode){
       var msg = ed.querySelector('.qbo-msg');
       var body = {
         can_manage: ed.querySelector('.qbo-emanage').checked,
+        show_extra_menus: !!(ed.querySelector('.qbo-eservice') || {}).checked,
         hidden_tabs: Array.prototype.filter.call(ed.querySelectorAll('.qbo-tab'), function(x){ return !x.checked; })
                           .map(function(x){ return x.value; }),
       };
@@ -9380,6 +9389,7 @@ async function submitRole(panel){
       label: label,
       rank: parseInt(document.getElementById('nrRank').value, 10) || 50,
       can_manage: document.getElementById('nrManage').checked,
+      show_extra_menus: !!(document.getElementById('nrService') || {}).checked,
     }});
     renderRoles(panel, res && res.role && res.role.code);
   } catch (e) { msg.textContent = e.message; msg.style.color = 'var(--red)'; }

@@ -500,10 +500,10 @@ export default function mount(app) {
     const rank = Math.max(myRank + 1, parseInt(b.rank, 10) || 50);
     const canManage = acting === 'owner' ? !!b.can_manage : (!!b.can_manage && await roleCanManage(c.env, acting));
     if (await db.one('SELECT code FROM roles WHERE code = ?', code)) return c.json({ error: 'A role with that code already exists' }, 409);
-    await db.run('INSERT INTO roles (code, label, rank, can_manage, hidden_tabs, is_system) VALUES (?,?,?,?,?,0)',
-      code, label, rank, bit(canManage), JSON.stringify(Array.isArray(b.hidden_tabs) ? b.hidden_tabs : []));
+    await db.run('INSERT INTO roles (code, label, rank, can_manage, hidden_tabs, show_extra_menus, is_system) VALUES (?,?,?,?,?,?,0)',
+      code, label, rank, bit(canManage), JSON.stringify(Array.isArray(b.hidden_tabs) ? b.hidden_tabs : []), bit(b.show_extra_menus));
     const role = await db.one('SELECT * FROM roles WHERE code = ?', code);
-    return c.json({ ok: true, role: boolify(role, ['can_manage', 'is_system']) });
+    return c.json({ ok: true, role: boolify(role, ['can_manage', 'is_system', 'show_extra_menus']) });
   });
 
   app.patch('/api/admin/roles/:code', managerMw, async (c) => {
@@ -521,6 +521,7 @@ export default function mount(app) {
     if (b.label !== undefined) { sets.push('label = ?'); vals.push(String(b.label).trim()); }
     if (b.can_manage !== undefined) { sets.push('can_manage = ?'); vals.push(bit(b.can_manage)); }
     if (b.hidden_tabs !== undefined) { sets.push('hidden_tabs = ?'); vals.push(JSON.stringify(Array.isArray(b.hidden_tabs) ? b.hidden_tabs : [])); }
+    if (b.show_extra_menus !== undefined) { sets.push('show_extra_menus = ?'); vals.push(bit(b.show_extra_menus)); }
     if (b.rank !== undefined && !target.is_system) { sets.push('rank = ?'); vals.push(Math.max(myRank + 1, parseInt(b.rank, 10) || 50)); }
     if (!sets.length) return c.json({ error: 'Nothing to update' }, 400);
     vals.push(code);
