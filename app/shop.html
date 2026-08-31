@@ -943,6 +943,55 @@
   .shop-hero-stats div b{display:block;font-size:18px;color:#fff;font-weight:900}
   .shop-hero-stats div span{font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px}
   nav.primary a.active{background:rgba(14,165,233,.12);color:var(--sky)}
+
+  /* ===================================================================
+     SHOP PAGE REFRESH — full-width catalogue, no top gap, fuller
+     pagination, extra polish. Later in the cascade so it wins without
+     !important (except where it overrides an inline style).
+     =================================================================== */
+  .shop-banner{padding:10px 0}
+  .shop-banner > .container,
+  #parts > .container{max-width:none;width:100%;padding-left:clamp(14px,2.4vw,44px);padding-right:clamp(14px,2.4vw,44px)}
+  .shop-banner h2{font-size:19px}
+  .shop-banner p{display:none}
+
+  /* kill the 72px section padding + the toolbar's inline margin-top:32px */
+  #parts{padding:0 0 60px;background:var(--bg);border-top:0}
+  body[data-theme="dark"] #parts{background:var(--bg)}
+  .parts-toolbar{margin:0 !important;position:sticky;top:56px;z-index:25;
+    background:var(--bg);padding:12px 0 11px;border-bottom:1px solid var(--line)}
+  body[data-theme="dark"] .parts-toolbar{background:var(--bg)}
+  @media (min-width:1100px){ .parts-toolbar{top:88px} }
+  .parts-layout{margin-top:18px;gap:28px}
+  .parts-sidebar{top:112px;max-height:calc(100vh - 132px)}
+  @media (min-width:1100px){ .parts-sidebar{top:144px;max-height:calc(100vh - 164px)} }
+
+  /* denser, full-bleed grid; more columns as the viewport grows */
+  .parts{grid-template-columns:repeat(auto-fill,minmax(206px,1fr));gap:16px}
+  @media (min-width:1700px){ .parts{grid-template-columns:repeat(auto-fill,minmax(216px,1fr));gap:18px} }
+  .part{border-radius:12px}
+  .part:hover{transform:translateY(-3px);box-shadow:0 16px 34px rgba(2,8,23,.13);border-color:var(--sky)}
+  .part .img img{transition:transform .35s ease}
+  .part:hover .img img{transform:scale(1.04)}
+
+  .res-head{margin:16px 0 12px;padding-bottom:2px}
+  .res-count b{font-size:15px}
+
+  /* PAGINATION — top + bottom, clearer buttons, always-on summary */
+  .pagination{gap:5px;margin:0;padding:0;flex-wrap:wrap}
+  .pagination:empty{display:none}
+  .pagination-top{margin-bottom:14px;padding-bottom:13px;border-bottom:1px solid var(--line);justify-content:flex-start}
+  #partsPagination{margin-top:26px;padding-top:22px;border-top:1px solid var(--line)}
+  .pg-btn{min-width:34px;height:34px;border-radius:8px;font-weight:700;border-color:var(--line)}
+  .pg-btn:hover:not(:disabled){background:#f0f9ff}
+  .pg-btn.active{box-shadow:0 5px 14px rgba(11,27,43,.30)}
+  .pg-ellipsis{padding:0 2px;color:var(--muted);align-self:center;font-weight:700}
+  .pg-summary{width:100%;text-align:center;font-size:12px;color:var(--muted);
+    margin-top:10px;font-variant-numeric:tabular-nums}
+  .pagination-top .pg-summary{width:auto;margin:0 0 0 auto;text-align:right}
+  body[data-theme="dark"] .pg-btn{background:#13283f;color:#e5e7eb;border-color:rgba(255,255,255,.12)}
+  body[data-theme="dark"] .pg-btn:hover:not(:disabled){background:#1b354f}
+  body[data-theme="dark"] .pg-btn.active{background:var(--navy)}
 </style>
 </head>
 <body>
@@ -1023,7 +1072,7 @@
   <div class="container">
 
     <!-- PARTS TOOLBAR -->
-    <div class="parts-toolbar" style="margin-top:32px">
+    <div class="parts-toolbar">
       <div class="ptb-top">
         <div class="parts-search-wrap">
           <input id="partsSearch" type="search" placeholder="Search parts, model, year…" autocomplete="off" />
@@ -1135,6 +1184,7 @@
           <span class="res-count"><b id="partsCount">—</b> · prices in <span id="currLabel">USD</span></span>
           <div class="refines" id="refineChips"></div>
         </div>
+        <div class="pagination pagination-top" id="partsPaginationTop"></div>
         <div id="partsGrid"></div>
         <div class="pagination" id="partsPagination"></div>
       </div>
@@ -1894,7 +1944,10 @@ document.addEventListener('DOMContentLoaded', function(){
   let currentPage = 1;
   const PER_PAGE = { grid: 12, list: 15, compact: 20 };
   const grid = document.getElementById('partsGrid');
-  const paginationEl = document.getElementById('partsPagination');
+  // Pagination renders into a bar above AND below the grid.
+  const paginationEls = ['partsPaginationTop', 'partsPagination']
+    .map(function(id){ return document.getElementById(id); })
+    .filter(Boolean);
 
   function catLabel(c){
     var m={engine:'Engines',body:'Body & Doors',suspension:'Suspension',electrical:'Electrical',brakes:'Brakes',wheels:'Wheels & Tires',fluids:'Fluids',accessories:'Accessories'};
@@ -1937,42 +1990,57 @@ document.addEventListener('DOMContentLoaded', function(){
     }
   }
 
+  // A run of page numbers with leading/trailing "1 … " / " … N" ellipses,
+  // and always a wider window around the current page than the old ±2.
+  function pageNumbers(page, totalPages){
+    var span = 3;                       // pages either side of the current one
+    var out = [];
+    var lo = Math.max(1, page - span);
+    var hi = Math.min(totalPages, page + span);
+    if (lo > 1){ out.push(1); if (lo > 2) out.push('...'); }
+    for (var i = lo; i <= hi; i++) out.push(i);
+    if (hi < totalPages){ if (hi < totalPages - 1) out.push('...'); out.push(totalPages); }
+    return out;
+  }
+
   function renderPagination(total, perPage, page){
-    if (!paginationEl) return;
-    var totalPages = Math.ceil(total / perPage);
-    if (total === 0){ paginationEl.innerHTML = ''; return; }
-    var showing = Math.min(page * perPage, total);
+    if (!paginationEls.length) return;
+    if (total === 0){ paginationEls.forEach(function(el){ el.innerHTML = ''; }); return; }
+    var totalPages = Math.max(1, Math.ceil(total / perPage));
+    if (page > totalPages) page = totalPages;
     var from = (page - 1) * perPage + 1;
+    var showing = Math.min(page * perPage, total);
+    var nf = function(n){ return n.toLocaleString('en-US'); };
+
     var btns = '';
     if (totalPages > 1){
-      btns += '<button class="pg-btn" data-goto="1"' + (page===1?' disabled':'') + ' title="First page">&laquo;</button>';
-      btns += '<button class="pg-btn" data-goto="' + (page-1) + '"' + (page===1?' disabled':'') + ' title="Previous page">&#8249; Prev</button>';
-      for (var i = 1; i <= totalPages; i++){
-        if (i === 1 || i === totalPages || (i >= page - 2 && i <= page + 2)){
-          btns += '<button class="pg-btn' + (i===page?' active':'') + '" data-goto="' + i + '">' + i + '</button>';
-        } else if (i === page - 3 || i === page + 3){
-          btns += '<span class="pg-info">…</span>';
-        }
-      }
-      btns += '<button class="pg-btn" data-goto="' + (page+1) + '"' + (page===totalPages?' disabled':'') + ' title="Next page">Next &#8250;</button>';
-      btns += '<button class="pg-btn" data-goto="' + totalPages + '"' + (page===totalPages?' disabled':'') + ' title="Last page">&raquo;</button>';
-      // Jumping matters with 1,900+ pages of catalogue.
-      btns += '<span class="pg-info">Go to <input class="pg-jump" id="pgJump" type="number" min="1" max="' + totalPages + '" value="' + page + '" aria-label="Jump to page"/> of ' + totalPages + '</span>';
-    }
-    btns += '<span class="pg-info">Showing ' + from.toLocaleString('en-US') + '–' + showing.toLocaleString('en-US') + ' of ' + total.toLocaleString('en-US') + '</span>';
-    paginationEl.innerHTML = btns;
-
-    paginationEl.querySelectorAll('[data-goto]').forEach(function(b){
-      if (b.disabled) return;
-      b.addEventListener('click', function(){ gotoPage(parseInt(b.dataset.goto, 10), true); });
-    });
-    var jump = paginationEl.querySelector('#pgJump');
-    if (jump){
-      jump.addEventListener('keydown', function(e){
-        if (e.key === 'Enter'){ e.preventDefault(); gotoPage(parseInt(jump.value, 10) || 1, true); }
+      btns += '<button class="pg-btn" data-goto="1"' + (page===1?' disabled':'') + ' title="First page" aria-label="First page">&laquo;</button>';
+      btns += '<button class="pg-btn" data-goto="' + (page-1) + '"' + (page===1?' disabled':'') + ' title="Previous page">&#8249;&nbsp;Prev</button>';
+      pageNumbers(page, totalPages).forEach(function(p){
+        btns += (p === '...')
+          ? '<span class="pg-ellipsis">…</span>'
+          : '<button class="pg-btn' + (p===page?' active" aria-current="page':'') + '" data-goto="' + p + '">' + p + '</button>';
       });
-      jump.addEventListener('change', function(){ gotoPage(parseInt(jump.value, 10) || 1, true); });
+      btns += '<button class="pg-btn" data-goto="' + (page+1) + '"' + (page===totalPages?' disabled':'') + ' title="Next page">Next&nbsp;&#8250;</button>';
+      btns += '<button class="pg-btn" data-goto="' + totalPages + '"' + (page===totalPages?' disabled':'') + ' title="Last page" aria-label="Last page">&raquo;</button>';
+      btns += '<span class="pg-info">Go to <input class="pg-jump" type="number" min="1" max="' + totalPages + '" value="' + page + '" aria-label="Jump to page"/> / ' + nf(totalPages) + '</span>';
     }
+    btns += '<span class="pg-summary">Showing <b>' + nf(from) + '–' + nf(showing) + '</b> of <b>' + nf(total) + '</b>' +
+            (totalPages > 1 ? '  ·  Page ' + nf(page) + ' of ' + nf(totalPages) : '') + '</span>';
+
+    paginationEls.forEach(function(el){
+      el.innerHTML = btns;
+      el.querySelectorAll('[data-goto]').forEach(function(b){
+        if (b.disabled) return;
+        b.addEventListener('click', function(){ gotoPage(parseInt(b.dataset.goto, 10), true); });
+      });
+      var jump = el.querySelector('.pg-jump');
+      if (jump){
+        var go = function(){ gotoPage(parseInt(jump.value, 10) || 1, true); };
+        jump.addEventListener('keydown', function(e){ if (e.key === 'Enter'){ e.preventDefault(); go(); } });
+        jump.addEventListener('change', go);
+      }
+    });
   }
 
   // Advanced filter state. `all` / empty means "don't filter on this".
