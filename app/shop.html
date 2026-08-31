@@ -1628,12 +1628,11 @@ document.addEventListener('DOMContentLoaded', function(){
   function cartQuoteLines(){
     return Object.keys(cart).filter(function(img){ return !prices[img]; });
   }
-  // The storefront is quote-first: online ordering / payment is disabled, so
-  // every cart checkout files a quote request the counter prices by hand.
-  // (A price-approved customer still sees line prices while building the cart
-  // via cartQuoteLines(), but the checkout action is the same.)
+  // Quote-first unless the shop has switched on public pricing + checkout
+  // (Admin → Settings → "Public storefront pricing"), reported by
+  // /api/config as ordering_enabled. Until that call lands, assume quote-first.
   function cartIsQuote(){
-    return true;
+    return !window._foxdOrderingEnabled;
   }
   // The parts the customer wants, in the shape /api/inquiry stores.
   function cartQuoteItems(){
@@ -3148,17 +3147,17 @@ document.addEventListener('DOMContentLoaded', function(){
     document.querySelectorAll('input[name="payMethod"]').forEach(function(r){
       r.addEventListener('change', updatePay);
     });
-    // Detect if Stripe is enabled on the backend
-    if (window._foxdApi){
-      window._foxdApi('/api/config').then(function(r){
-        if (r && r.payments && r.payments.stripe_enabled){
-          window._foxdStripeEnabled = true;
-          // updateCheckoutLabel() decides whether it's actually shown -- a
-          // quote cart keeps it hidden regardless.
-          updateCheckoutLabel();
-        }
+    // Ask the backend whether the storefront is in ordering mode (prices shown,
+    // checkout on) or quote-first mode. Plain fetch -- this runs before the
+    // _foxdApi helper is wired up. Default to quote-first until it answers.
+    fetch('/api/config', { credentials:'same-origin' })
+      .then(function(res){ return res.ok ? res.json() : null; })
+      .then(function(r){
+        if (r && r.payments && r.payments.stripe_enabled) window._foxdStripeEnabled = true;
+        window._foxdOrderingEnabled = !!(r && r.ordering_enabled);
+        updateCheckoutLabel();
+        renderCart();
       }).catch(function(){});
-    }
   })();
   var _fab = document.getElementById('cartFab'); if (_fab) _fab.addEventListener('click', openCart);
 

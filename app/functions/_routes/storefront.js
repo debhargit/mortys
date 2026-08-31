@@ -16,15 +16,22 @@ import { currentUser } from '../_lib/guards.js';
 import { sendEmail } from '../_lib/mailer.js';
 import { readUploadBody } from '../_lib/uploads.js';
 import { safeJson } from '../_lib/util.js';
+import { getShopSettings } from '../_lib/shop.js';
 
-// Storefront pricing is opt-in per customer (users.show_prices). Guests and
-// un-approved accounts get prices stripped from every catalogue/cart response;
-// the front-end then renders "Call for price" and routes checkout to a quote
-// request. See migrations/0027_quote_flow.sql.
+// Who may see prices on the storefront endpoints:
+//   * any admin / staff account — ALWAYS (the POS grid uses these endpoints)
+//   * a customer with users.show_prices = 1 (per-account B2B override)
+//   * everyone, when the global shop_settings.storefront_prices switch is on
+// Otherwise prices are stripped and the front-end shows "Call for price" and
+// routes checkout to a quote request. See migrations 0027 / 0028.
 async function canSeePrices(c) {
   try {
     const u = await currentUser(c.req.raw, c.env);
-    return !!(u && u.show_prices);
+    if (u && (u.is_admin || u.is_staff || u.show_prices)) return true;
+  } catch { /* guest */ }
+  try {
+    const s = await getShopSettings(c.env);
+    return !!(s && s.storefront_prices);
   } catch { return false; }
 }
 
@@ -176,7 +183,7 @@ export default function mount(app) {
         WHERE c.user_id = ? ORDER BY c.updated_at DESC`,
       c.get('user').id
     );
-    const showPrices = !!c.get('user').show_prices;
+    const showPrices = await canSeePrices(c);
     if (!showPrices) rows.forEach((r) => { r.price_usd = null; });
     const total = showPrices ? rows.reduce((s, r) => s + Number(r.price_usd || 0) * r.qty, 0) : null;
     return c.json({ cart: rows, total_usd: total, prices_visible: showPrices });
@@ -244,7 +251,7 @@ export default function mount(app) {
         WHERE w.user_id = ? ORDER BY w.created_at DESC`,
       c.get('user').id
     );
-    if (!c.get('user').show_prices) rows.forEach((r) => { r.price_usd = null; });
+    if (!(await canSeePrices(c))) rows.forEach((r) => { r.price_usd = null; });
     return c.json({ items: rows });
   });
 

@@ -1924,19 +1924,18 @@ document.addEventListener('DOMContentLoaded', function(){
         '</div>' +
       '</div>';
     }).join('');
-    // The storefront is quote-first: a cart checkout files a quote request the
-    // counter prices by hand. Unless every line already carries a price (a
-    // price-approved customer), there is no total to show and the coupon /
-    // points controls don't apply.
+    // Quote-first unless the shop enabled public checkout (/api/config
+    // ordering_enabled) AND every line in the cart is priced. In quote mode
+    // there is no total to show and the coupon / points controls don't apply.
     var allPriced = items.every(function(img){ return prices[img] > 0; });
-    var quoteMode = !allPriced;
+    var quoteMode = !window._foxdOrderingEnabled || !allPriced;
     ['couponInput','couponApply','couponApplied','ptRedeem'].forEach(function(id){
       var el = document.getElementById(id); if (el) el.style.display = quoteMode ? 'none' : '';
     });
     var lblEl = document.getElementById('checkoutLabel');
-    if (lblEl) lblEl.textContent = quoteMode ? 'Request a Quote' : 'Request a Quote';
+    if (lblEl) lblEl.textContent = quoteMode ? 'Request a Quote' : 'Checkout';
     var coBtn = document.getElementById('cartCheckout');
-    if (coBtn) coBtn.style.background = quoteMode ? 'var(--navy)' : 'var(--navy)';
+    if (coBtn) coBtn.style.background = quoteMode ? 'var(--navy)' : 'var(--red)';
 
     var couponLine = '';
     var displayTotal = total;
@@ -2357,8 +2356,32 @@ document.addEventListener('DOMContentLoaded', function(){
     var items = Object.keys(cart);
     if (items.length === 0) return;
 
-    // Quote-first storefront: a cart checkout files a quote request. Online
-    // ordering / payment is off (see /api/config ordering_enabled:false).
+    // Ordering mode: the shop enabled public checkout and every line is priced.
+    // Place a real order; fall through to the quote path on any failure
+    // (not signed in, backend down, etc.).
+    var allPriced = items.every(function(i){ return prices[i] > 0; });
+    if (window._foxdOrderingEnabled && allPriced && window._foxdApi){
+      try {
+        var slider = document.getElementById('ptSlider');
+        var redeemPts = slider && !slider.disabled ? parseInt(slider.value, 10) || 0 : 0;
+        var couponCode = window._foxdAppliedCoupon ? window._foxdAppliedCoupon.code : null;
+        var methodEl = document.querySelector('input[name="payMethod"]:checked');
+        var ord = await window._foxdApi('/api/checkout', { method:'POST', body:{
+          payment_method: methodEl ? methodEl.value : 'cash_pickup', redeem_points: redeemPts, coupon_code: couponCode,
+        } });
+        if (ord && ord.order_id){
+          cart = {};
+          saveCart(); render(currentFilter); renderCart();
+          if (window._foxdRenderFeatured) window._foxdRenderFeatured();
+          if (window._foxdRefreshPoints) window._foxdRefreshPoints();
+          alert('Order #' + ord.order_id + ' placed — ' + fmt(ord.total_usd) + '. We\'ll email you when it\'s ready for pickup.');
+          return;
+        }
+      } catch(e){ /* fall through to the quote / WhatsApp path below */ }
+    }
+
+    // Quote-first (default): a cart checkout files a quote request the counter
+    // prices by hand.
     var me = null;
     try { me = JSON.parse(localStorage.getItem('mh_user') || 'null'); } catch(e){}
     var name = (me && me.name) || '';
@@ -2421,15 +2444,18 @@ document.addEventListener('DOMContentLoaded', function(){
     document.querySelectorAll('input[name="payMethod"]').forEach(function(r){
       r.addEventListener('change', updatePay);
     });
-    // Detect if Stripe is enabled on the backend
-    if (window._foxdApi){
-      window._foxdApi('/api/config').then(function(r){
+    // Storefront mode: ordering_enabled => prices shown + real checkout;
+    // otherwise quote-first. Plain fetch (runs before _foxdApi is wired).
+    fetch('/api/config', { credentials:'same-origin' })
+      .then(function(res){ return res.ok ? res.json() : null; })
+      .then(function(r){
         if (r && r.payments && r.payments.stripe_enabled){
           var opt = document.getElementById('payStripeOpt');
           if (opt) opt.style.display = '';
         }
+        window._foxdOrderingEnabled = !!(r && r.ordering_enabled);
+        try { renderCart(); } catch (e) {}
       }).catch(function(){});
-    }
   })();
   var _fab = document.getElementById('cartFab'); if (_fab) _fab.addEventListener('click', openCart);
 

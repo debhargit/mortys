@@ -14,6 +14,7 @@ const FALLBACK = {
   invoice_notice: 'Goods remain the property of the company until paid in full. Returns accepted within 14 days with the original invoice, in original condition. Electrical parts are non-returnable.',
   receipt_notice: 'Returns within 14 days with this receipt. Electrical parts non-returnable.',
   statement_notice: 'Please settle any outstanding balance promptly. Contact us with any questions about this statement.',
+  storefront_prices: false,
 };
 
 export async function getShopSettings(env) {
@@ -21,6 +22,7 @@ export async function getShopSettings(env) {
     const row = await d1(env).one('SELECT * FROM shop_settings ORDER BY id LIMIT 1');
     if (row) {
       row.print_logo_on_invoice = !!row.print_logo_on_invoice;
+      row.storefront_prices = !!row.storefront_prices;
       return row;
     }
   } catch { /* table not migrated yet */ }

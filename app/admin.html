@@ -11606,6 +11606,20 @@ async function renderSettings(panel){
         '</div>' +
       '</div>' +
 
+      '<div class="panel" style="margin-bottom:16px">' +
+        '<div style="padding:12px 16px;border-bottom:1px solid var(--line);font-weight:700;font-size:13px">🛒 Public storefront pricing</div>' +
+        '<div style="padding:14px 16px">' +
+          '<label style="display:flex;gap:9px;align-items:flex-start;font-size:13px;cursor:pointer">' +
+            '<input type="checkbox" id="setStorefrontPrices" style="margin-top:2px;width:16px;height:16px"' + (s.storefront_prices ? ' checked' : '') + '/>' +
+            '<span><b>Show prices on the public website and allow online checkout</b>' +
+              '<br/><small style="color:var(--muted)">Off (default): the public sees <b>no prices</b> and a cart “checkout” files a <b>quote request</b> in Parts Inquiries. ' +
+              'On: prices are shown to everyone and customers can place cash-pickup / bank-transfer orders. ' +
+              'The admin &amp; POS always show prices either way, and you can still unlock pricing for one customer from a quote request.</small>' +
+            '</span>' +
+          '</label>' +
+        '</div>' +
+      '</div>' +
+
       '<div id="setMsg" style="display:none;padding:10px 14px;border-radius:7px;font-size:12.5px;margin-bottom:12px"></div>' +
       '<button type="button" id="setSaveBtn" style="background:var(--red);color:#fff;border:0;padding:11px 24px;border-radius:8px;font-weight:700;cursor:pointer;font-size:14px">Save settings</button>' +
 
@@ -12060,6 +12074,7 @@ async function submitSettings(){
       invoice_notice: document.getElementById('setInvoiceNotice').value.trim(),
       receipt_notice: document.getElementById('setReceiptNotice').value.trim(),
       statement_notice: document.getElementById('setStatementNotice').value.trim(),
+      storefront_prices: !!(document.getElementById('setStorefrontPrices') || {}).checked,
     };
     await api('/api/admin/settings', { method: 'PATCH', body: body });
     // Reflect immediately in POS_SHOP so a sale rung up right after saving

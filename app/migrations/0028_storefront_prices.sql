@@ -1,0 +1,13 @@
+-- 0028_storefront_prices.sql  (D1 / SQLite)
+--
+-- Global switch for the public storefront, set from Admin -> Settings.
+--   0 (default) = quote-first: the public sees no prices and a cart
+--                 "checkout" files a quote request.
+--   1           = prices shown to everyone on the storefront AND online
+--                 checkout (cash pickup / bank transfer) is re-enabled.
+--
+-- The admin / POS side ALWAYS shows prices regardless of this flag
+-- (functions/_routes/storefront.js canSeePrices(): is_admin || is_staff
+-- short-circuits to true). The per-customer users.show_prices override
+-- still works when this global flag is off.
+ALTER TABLE shop_settings ADD COLUMN storefront_prices INTEGER NOT NULL DEFAULT 0;

@@ -140,10 +140,48 @@ r = await call('get', '/api/config');
 n++; A('config ordering_enabled=false', r.ordering_enabled === false);
 n++; A('config payments.methods empty', Array.isArray(r.payments.methods) && r.payments.methods.length === 0);
 
-// ---- 4. /api/checkout is hard-disabled -----------------------------
+// ---- 4. /api/checkout is disabled while storefront_prices = 0 ----------
 r = await call('post', '/api/checkout', { user: { id: 501, show_prices: 1 }, body: { payment_method: 'cash_pickup' } });
-n++; A('/api/checkout -> 400 quote_only', st === 400 && r.code === 'quote_only');
+n++; A('/api/checkout -> 400 quote_only (global pricing off)', st === 400 && r.code === 'quote_only');
 n++; A('no order rows created', (q1('SELECT COUNT(*) c FROM orders').c) === 0);
+
+// ---- 4a. admin / staff ALWAYS see prices, even with the global flag off ----
+const ck900 = await cookieFor(900);   // user 900 is is_admin = 1
+r = await call('get', '/api/products?compact=1&limit=1000', { cookie: ck900 });
+const admBy = Object.fromEntries(r.rows.map((row) => [row[0], row]));
+n++; A('admin session: prices_visible=true despite storefront_prices=0', r.prices_visible === true && admBy['qz-1'][5] === 4500);
+
+// ---- 4b. flip the global switch ON: prices public + checkout works --------
+sdb.prepare("UPDATE shop_settings SET storefront_prices = 1 WHERE id = 1").run();
+r = await call('get', '/api/config');
+n++; A('config: ordering_enabled=true when storefront_prices=1', r.ordering_enabled === true && r.show_prices === true);
+n++; A('config: payment methods offered', r.payments.methods.length === 2);
+r = await call('get', '/api/products?compact=1&limit=1000');   // guest, no cookie
+n++; A('guest now sees prices (global on)', r.prices_visible === true && Object.fromEntries(r.rows.map((x) => [x[0], x]))['qz-1'][5] === 4500);
+
+// a priced cart for user 501, then checkout
+sdb.prepare('DELETE FROM cart_items').run();
+sdb.prepare("INSERT INTO cart_items (user_id, product_img, qty) VALUES (501,'qz-1',2)").run();
+r = await call('post', '/api/checkout', { user: { id: 501, show_prices: 1 }, body: { payment_method: 'cash_pickup' } });
+n++; A('/api/checkout -> creates an order when global pricing on', st === 200 && r.order_id > 0 && Math.abs(r.total_usd - 90) < 0.01);
+n++; A('order + order_items rows written, cart cleared',
+  q1('SELECT COUNT(*) c FROM orders').c === 1 &&
+  q1('SELECT COUNT(*) c FROM order_items WHERE order_id = ?', r.order_id).c === 1 &&
+  q1('SELECT COUNT(*) c FROM cart_items WHERE user_id = 501').c === 0);
+
+// an unpriced item blocks the order
+sdb.prepare("INSERT INTO cart_items (user_id, product_img, qty) VALUES (501,'qz-2',1)").run();
+r = await call('post', '/api/checkout', { user: { id: 501 }, body: { payment_method: 'cash_pickup' } });
+n++; A('/api/checkout -> 400 when a cart line is unpriced', st === 400 && r.code === 'unpriced_items');
+
+// ---- 4c. flip back OFF for the rest of the suite -------------------------
+sdb.prepare("UPDATE shop_settings SET storefront_prices = 0 WHERE id = 1").run();
+sdb.prepare('DELETE FROM cart_items').run();
+sdb.prepare('DELETE FROM orders').run();
+sdb.prepare('DELETE FROM order_items').run();
+sdb.prepare("DELETE FROM points_transactions WHERE reason IN ('purchase','redemption')").run();
+r = await call('get', '/api/config');
+n++; A('config back to ordering_enabled=false', r.ordering_enabled === false);
 
 // ---- 5. /api/inquiry cart quote request ----------------------------
 r = await call('post', '/api/inquiry', {

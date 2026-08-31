@@ -17,6 +17,7 @@ import { authMw, sessionEpoch, currentUser } from '../_lib/guards.js';
 import { sessionCookie } from '../_lib/session.js';
 import { publicUser } from './auth.js';
 import { sendEmail, templates } from '../_lib/mailer.js';
+import { getShopSettings } from '../_lib/shop.js';
 
 const POINTS_USD_RATE = 0.05;
 const r2 = (n) => Math.round(n * 100) / 100;
@@ -131,15 +132,21 @@ export default function mount(app) {
   });
 
   // ---- payments config (Stripe dropped -> always off) -------------
-  // ordering_enabled:false tells the storefront the cart can only produce a
-  // quote request now (see POST /api/inquiry); show_prices is the per-customer
-  // pricing flag so the catalogue knows whether to render prices.
+  // ordering_enabled follows the global shop_settings.storefront_prices
+  // switch: off => the cart can only file a quote request (POST /api/inquiry);
+  // on => prices are public and cash-pickup / bank-transfer checkout works.
+  // show_prices also turns on for an admin/staff session or a per-account
+  // users.show_prices override.
   app.get('/api/config', async (c) => {
-    let showPrices = false;
-    try { const u = await currentUser(c.req.raw, c.env); showPrices = !!(u && u.show_prices); } catch { /* guest */ }
+    const s = await getShopSettings(c.env);
+    const ordering = !!s.storefront_prices;
+    let showPrices = ordering;
+    if (!showPrices) {
+      try { const u = await currentUser(c.req.raw, c.env); showPrices = !!(u && (u.is_admin || u.is_staff || u.show_prices)); } catch { /* guest */ }
+    }
     return c.json({
-      payments: { stripe_enabled: false, stripe_publishable_key: null, methods: [] },
-      ordering_enabled: false,
+      payments: { stripe_enabled: false, stripe_publishable_key: null, methods: ordering ? ['cash_pickup', 'bank_transfer'] : [] },
+      ordering_enabled: ordering,
       show_prices: showPrices,
     });
   });
@@ -163,10 +170,89 @@ export default function mount(app) {
   // "checkout" must go to POST /api/inquiry, which files a quote request the
   // counter prices by hand. This route stays mounted only to give a stale
   // client a clear answer instead of silently creating an order.
-  app.post('/api/checkout', authMw, (c) => c.json({
-    error: 'Online ordering is disabled. Please submit a quote request and the parts desk will price it and call you back.',
-    code: 'quote_only',
-  }, 400));
+  app.post('/api/checkout', authMw, async (c) => {
+    const settings = await getShopSettings(c.env);
+    if (!settings.storefront_prices) {
+      return c.json({
+        error: 'Online ordering is disabled. Please submit a quote request and the parts desk will price it and call you back.',
+        code: 'quote_only',
+      }, 400);
+    }
+    const db = d1(c.env);
+    const uid = c.get('user').id;
+    const b = await c.req.json().catch(() => ({}));
+    const method = b.payment_method || 'cash_pickup';
+    if (!['cash_pickup', 'bank_transfer', 'stripe'].includes(method)) return c.json({ error: 'Invalid payment_method' }, 400);
+    if (method === 'stripe') return c.json({ error: 'Online card payment is not available' }, 400);
+
+    const items = await db.many(
+      `SELECT c.product_img, c.qty, p.price_cents / 100.0 AS price_usd, p.name, p.make_model
+         FROM cart_items c JOIN products p ON p.img = c.product_img WHERE c.user_id = ?`, uid);
+    if (!items.length) return c.json({ error: 'Cart is empty' }, 400);
+    if (items.some((it) => it.price_usd == null)) {
+      return c.json({ error: 'Some items in your cart are not priced — remove them or submit a quote request for the whole cart.', code: 'unpriced_items' }, 400);
+    }
+    const subtotal = r2(items.reduce((s, it) => s + Number(it.price_usd || 0) * it.qty, 0));
+    let total = subtotal;
+
+    let couponCode = null, couponDiscount = 0;
+    if (b.coupon_code) {
+      const cr = await loadCoupon(db, b.coupon_code);
+      if (cr.ok) {
+        const cd = computeCouponDiscount(cr.coupon, total);
+        if (cd.discount > 0) { couponCode = cr.coupon.code; couponDiscount = cd.discount; total = r2(total - couponDiscount); }
+      }
+    }
+
+    let redeemPts = Math.max(0, parseInt(b.redeem_points || 0, 10) || 0);
+    let pointsDiscount = 0;
+    if (redeemPts > 0) {
+      const bal = await pointsBalance(db, uid);
+      redeemPts = Math.min(redeemPts, bal, Math.floor(total / POINTS_USD_RATE));
+      pointsDiscount = r2(redeemPts * POINTS_USD_RATE);
+      total = Math.max(0, r2(total - pointsDiscount));
+    }
+
+    const orderId = await nextId(db, 'orders');
+    const stmts = [
+      { sql: `INSERT INTO orders (id, user_id, total_cents, notes, payment_method, coupon_code, coupon_discount_cents)
+                VALUES (?,?,?,?,?,?,?)`,
+        binds: [orderId, uid, cents(total), b.notes || null, method, couponCode, cents(couponDiscount)] },
+    ];
+    for (const it of items) {
+      stmts.push({ sql: 'INSERT INTO order_items (order_id, product_img, qty, price_cents) VALUES (?,?,?,?)',
+        binds: [orderId, it.product_img, it.qty, cents(it.price_usd || 0)] });
+    }
+    if (couponCode) {
+      stmts.push({ sql: `INSERT OR IGNORE INTO coupon_redemptions (coupon_code, user_id, order_id, discount_usd) VALUES (?,?,?,?)`,
+        binds: [couponCode, uid, orderId, couponDiscount] });
+      stmts.push({ sql: 'UPDATE coupons SET redeemed_count = redeemed_count + 1 WHERE code = ?', binds: [couponCode] });
+    }
+    if (redeemPts > 0) {
+      stmts.push({ sql: "INSERT INTO points_transactions (user_id, delta, reason, reference_id) VALUES (?,?,'redemption',?)",
+        binds: [uid, -redeemPts, orderId] });
+    }
+    stmts.push({ sql: 'DELETE FROM cart_items WHERE user_id = ?', binds: [uid] });
+    await db.batch(stmts);
+
+    const earnedPoints = Math.floor(total);
+    if (earnedPoints > 0) {
+      await db.run("INSERT INTO points_transactions (user_id, delta, reason, reference_id) VALUES (?,?,'purchase',?)",
+        uid, earnedPoints, orderId);
+    }
+
+    const u = await db.one('SELECT email, name FROM users WHERE id = ?', uid);
+    if (u && u.email) {
+      const li = items.map((it) => ({ product_img: it.product_img, qty: it.qty, price_usd: it.price_usd, name: it.name, make_model: it.make_model }));
+      c.executionCtx?.waitUntil?.(sendEmail(c.env, { to: u.email, ...templates.orderEmail({ name: u.name, orderId, items: li, total }) }).catch(() => {}));
+    }
+
+    return c.json({
+      order_id: orderId, subtotal_usd: subtotal, total_usd: total, status: 'pending', payment_method: method,
+      checkout_url: null, points_redeemed: redeemPts, points_discount_usd: pointsDiscount, points_earned: earnedPoints,
+      coupon_code: couponCode, coupon_discount_usd: couponDiscount,
+    });
+  });
 
   // ---- order history ----------------------------------------
   app.get('/api/orders', authMw, async (c) => {
