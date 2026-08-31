@@ -1578,8 +1578,12 @@ document.addEventListener('DOMContentLoaded', function(){
   function cartQuoteLines(){
     return Object.keys(cart).filter(function(img){ return !prices[img]; });
   }
+  // The storefront is quote-first: online ordering / payment is disabled, so
+  // every cart checkout files a quote request the counter prices by hand.
+  // (A price-approved customer still sees line prices while building the cart
+  // via cartQuoteLines(), but the checkout action is the same.)
   function cartIsQuote(){
-    return cartQuoteLines().length > 0;
+    return true;
   }
   // The parts the customer wants, in the shape /api/inquiry stores.
   function cartQuoteItems(){

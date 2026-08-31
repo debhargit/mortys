@@ -22,20 +22,131 @@ const gcCode = () => {
   return `GC-${p()}-${p()}`;
 };
 
+const INQ_STATUSES = ['new', 'quoted', 'won', 'lost'];
+
+function parseItems(json) {
+  try { const a = JSON.parse(json || '[]'); return Array.isArray(a) ? a : []; }
+  catch { return []; }
+}
+
 export default function mount(app) {
-  // ---- parts inquiries -----------------------------------------
+  // ---- parts inquiries / quote requests -----------------------
   app.get('/api/admin/inquiries', adminMw, async (c) => {
     const inquiries = await d1(c.env).many(
-      `SELECT id, name, phone, vehicle_make, vehicle_model, vehicle_year,
-              condition, part_description, photo_path, status, created_at
-         FROM parts_inquiries ORDER BY created_at DESC LIMIT 200`);
+      `SELECT i.id, i.user_id, i.name, i.phone, i.email, i.vehicle_make, i.vehicle_model, i.vehicle_year,
+              i.condition, i.part_description, i.items_json, i.source, i.photo_path, i.status,
+              i.quote_total_cents / 100.0 AS quote_total_usd, i.quote_notes, i.priced_at, i.created_at,
+              (i.photo_data IS NOT NULL) AS has_photo,
+              u.name AS account_name, COALESCE(u.show_prices, 0) AS customer_show_prices
+         FROM parts_inquiries i
+         LEFT JOIN users u ON u.id = i.user_id
+        ORDER BY i.created_at DESC LIMIT 200`);
     return c.json({ inquiries });
   });
+
+  app.get('/api/admin/inquiries/:id', adminMw, async (c) => {
+    const db = d1(c.env);
+    const i = await db.one(
+      `SELECT i.*, i.quote_total_cents / 100.0 AS quote_total_usd,
+              (i.photo_data IS NOT NULL) AS has_photo,
+              u.name AS account_name, u.email AS account_email, COALESCE(u.show_prices, 0) AS customer_show_prices
+         FROM parts_inquiries i LEFT JOIN users u ON u.id = i.user_id
+        WHERE i.id = ?`, c.req.param('id'));
+    if (!i) return c.json({ error: 'Not found' }, 404);
+    delete i.photo_data;
+    const items = parseItems(i.items_json).map((it) => ({
+      ...it,
+      unit_price_usd: it.unit_price_cents != null ? it.unit_price_cents / 100 : null,
+      list_price_usd: it.list_price_cents != null ? it.list_price_cents / 100 : null,
+      line_total_usd: it.line_total_cents != null ? it.line_total_cents / 100 : null,
+    }));
+    // Current stock for each part on the request, so the counter can see
+    // availability while pricing.
+    const imgs = [...new Set(items.map((x) => x.img).filter(Boolean))];
+    let stock = {};
+    if (imgs.length) {
+      const rows = await db.many(
+        `SELECT img, stock_count, price_cents FROM products WHERE img IN (${imgs.map(() => '?').join(',')})`, ...imgs);
+      stock = Object.fromEntries(rows.map((r) => [r.img, { stock_count: r.stock_count, list_price_usd: r.price_cents != null ? r.price_cents / 100 : null }]));
+    }
+    return c.json({ inquiry: i, items, stock });
+  });
+
+  // Status-only PATCH still works; sending `items` / `quote_notes` prices the
+  // request (recomputes the total, stamps priced_at/priced_by, and moves a
+  // 'new' request to 'quoted').
   app.patch('/api/admin/inquiries/:id', adminMw, async (c) => {
-    const { status } = await c.req.json().catch(() => ({}));
-    if (!['new', 'quoted', 'won', 'lost'].includes(status)) return c.json({ error: 'Invalid status' }, 400);
-    await d1(c.env).run('UPDATE parts_inquiries SET status = ? WHERE id = ?', status, c.req.param('id'));
-    return c.json({ ok: true });
+    const db = d1(c.env);
+    const id = c.req.param('id');
+    const b = await c.req.json().catch(() => ({}));
+    const cur = await db.one('SELECT id, status, items_json FROM parts_inquiries WHERE id = ?', id);
+    if (!cur) return c.json({ error: 'Not found' }, 404);
+
+    const sets = [], vals = [];
+    if (b.status !== undefined) {
+      if (!INQ_STATUSES.includes(b.status)) return c.json({ error: 'Invalid status' }, 400);
+      sets.push('status = ?'); vals.push(b.status);
+    }
+    if (b.quote_notes !== undefined) { sets.push('quote_notes = ?'); vals.push(String(b.quote_notes || '').trim() || null); }
+
+    if (Array.isArray(b.items)) {
+      const items = b.items.map((it) => {
+        const qty = Math.min(999, Math.max(1, parseInt(it.qty, 10) || 1));
+        const unit = it.unit_price_usd === '' || it.unit_price_usd == null ? null : Math.round(Number(it.unit_price_usd) * 100);
+        const unitCents = unit != null && Number.isFinite(unit) && unit >= 0 ? unit : null;
+        return {
+          img: String(it.img || '').trim(),
+          name: String(it.name || it.img || '').trim(),
+          make_model: String(it.make_model || '').trim(),
+          qty,
+          list_price_cents: it.list_price_cents != null ? it.list_price_cents : (it.list_price_usd != null ? Math.round(Number(it.list_price_usd) * 100) : null),
+          unit_price_cents: unitCents,
+          line_total_cents: unitCents != null ? unitCents * qty : null,
+        };
+      }).filter((it) => it.img || it.name);
+      const priced = items.filter((it) => it.unit_price_cents != null);
+      const total = priced.reduce((s, it) => s + it.line_total_cents, 0);
+      sets.push('items_json = ?'); vals.push(JSON.stringify(items));
+      sets.push('quote_total_cents = ?'); vals.push(priced.length ? total : null);
+      if (priced.length) {
+        sets.push("priced_at = COALESCE(priced_at, datetime('now'))");
+        sets.push('priced_by = ?'); vals.push(c.get('user').id);
+        if (b.status === undefined && cur.status === 'new') { sets.push('status = ?'); vals.push('quoted'); }
+      }
+    }
+    if (!sets.length) return c.json({ error: 'Nothing to update' }, 400);
+    vals.push(id);
+    await db.run(`UPDATE parts_inquiries SET ${sets.join(', ')} WHERE id = ?`, ...vals);
+    const row = await db.one(
+      `SELECT *, quote_total_cents / 100.0 AS quote_total_usd, (photo_data IS NOT NULL) AS has_photo
+         FROM parts_inquiries WHERE id = ?`, id);
+    delete row.photo_data;
+    return c.json({ ok: true, inquiry: row, items: parseItems(row.items_json) });
+  });
+
+  // Flip the linked customer's price visibility (users.show_prices). Only
+  // works when the request came from a signed-in account.
+  app.post('/api/admin/inquiries/:id/show-prices', adminMw, async (c) => {
+    const db = d1(c.env);
+    const b = await c.req.json().catch(() => ({}));
+    const enabled = b.enabled === undefined ? true : !!b.enabled;
+    const i = await db.one('SELECT id, user_id, name, email FROM parts_inquiries WHERE id = ?', c.req.param('id'));
+    if (!i) return c.json({ error: 'Not found' }, 404);
+    if (!i.user_id) {
+      return c.json({ error: 'This quote request has no customer account, so there is nobody to show prices to. Ask the customer to create an account and re-submit, or price the quote and send it manually.' }, 400);
+    }
+    await db.run('UPDATE users SET show_prices = ? WHERE id = ?', enabled ? 1 : 0, i.user_id);
+    const u = await db.one('SELECT id, name, email, show_prices FROM users WHERE id = ?', i.user_id);
+    return c.json({ ok: true, user: u, show_prices: !!(u && u.show_prices) });
+  });
+
+  // Inline photo (R2 is off on this account, so quote-request photos ride in
+  // parts_inquiries.photo_data as a BLOB -- see migrations/0009).
+  app.get('/api/admin/inquiries/:id/photo', adminMw, async (c) => {
+    const row = await d1(c.env).one('SELECT photo_data, photo_type FROM parts_inquiries WHERE id = ?', c.req.param('id'));
+    if (!row || !row.photo_data) return c.json({ error: 'No photo' }, 404);
+    const bytes = row.photo_data instanceof ArrayBuffer ? new Uint8Array(row.photo_data) : row.photo_data;
+    return new Response(bytes, { headers: { 'Content-Type': row.photo_type || 'image/jpeg', 'Cache-Control': 'private, max-age=86400' } });
   });
 
   // ---- service appointments -----------------------------------

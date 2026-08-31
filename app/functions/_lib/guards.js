@@ -15,7 +15,7 @@ export async function currentUser(request, env) {
   const db = d1(env);
   if ((s.epoch || 0) !== (await sessionEpoch(db))) return null;
   return db.one(
-    'SELECT id, email, name, phone, is_admin, admin_role, is_staff, disabled, perms FROM users WHERE id = ?',
+    'SELECT id, email, name, phone, is_admin, admin_role, is_staff, disabled, perms, show_prices FROM users WHERE id = ?',
     s.userId
   );
 }

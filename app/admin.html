@@ -985,23 +985,20 @@ async function renderInquiries(panel){
   var r = await api('/api/admin/inquiries');
   if (!r.inquiries.length) return panel.innerHTML = '<div class="empty">No inquiries yet.</div>';
   panel.innerHTML = '<table><thead><tr>' +
-    '<th>When</th><th>Customer</th><th>Vehicle</th><th>Part needed</th><th>Status</th><th></th>' +
+    '<th>When</th><th>Customer</th><th>Vehicle</th><th>Request</th><th>Quote</th><th>Status</th><th></th>' +
     '</tr></thead><tbody>' +
     r.inquiries.map(function(i){
       var veh = [i.vehicle_year, i.vehicle_make, i.vehicle_model].filter(Boolean).join(' ');
-      // Inline photos live in D1 while R2 is off, so both cases go through the
-      // admin photo route rather than linking photo_path directly.
       var photoUrl = i.has_photo ? '/api/admin/inquiries/' + i.id + '/photo' : '';
       var photo = photoUrl
         ? '<a href="' + photoUrl + '" target="_blank" rel="noopener" title="View full size"><img src="' + photoUrl + '" style="width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid var(--line);margin-top:6px;display:block;cursor:zoom-in"/></a>'
         : '';
-      // A cart request carries the actual part numbers — show them as a pick
-      // list rather than the flattened summary line.
       var items = posItemsArray(i.items_json);
       var need = items.length
         ? '<div style="display:flex;flex-direction:column;gap:3px">' + items.map(function(it){
+            var lp = it.unit_price_cents != null ? ' <b style="color:var(--navy)">' + fmtMoney(it.unit_price_cents / 100) + '</b>' : '';
             return '<div style="font-size:12.5px"><b>' + it.qty + ' ×</b> ' + esc(it.name) +
-              (it.img && it.img !== it.name ? ' <code style="font-size:11px;color:var(--muted)">' + esc(it.img) + '</code>' : '') +
+              (it.img && it.img !== it.name ? ' <code style="font-size:11px;color:var(--muted)">' + esc(it.img) + '</code>' : '') + lp +
               (it.make_model ? '<br/><small style="color:var(--muted);padding-left:18px">' + esc(it.make_model) + '</small>' : '') +
             '</div>';
           }).join('') + '</div>'
@@ -1009,21 +1006,155 @@ async function renderInquiries(panel){
       var src = i.source === 'cart'
         ? '<small style="display:inline-block;background:#dbeafe;color:#1d4ed8;font-weight:700;padding:1px 6px;border-radius:4px;font-size:10.5px;margin-bottom:4px">🛒 CART QUOTE</small><br/>'
         : '';
+      var acct = i.user_id
+        ? '<br/><small style="color:var(--muted)">acct: ' + esc(i.account_name || ('#' + i.user_id)) +
+          (Number(i.customer_show_prices) ? ' · <b style="color:#15803d">prices ON</b>' : ' · <span style="color:#b45309">prices off</span>') + '</small>'
+        : '<br/><small style="color:var(--muted)">guest — no account</small>';
       return '<tr>' +
         '<td>' + fmtDate(i.created_at) + '</td>' +
         '<td><b>' + esc(i.name) + '</b><br/><small><a href="tel:' + esc(i.phone) + '">' + esc(i.phone) + '</a></small>' +
-          (i.email ? '<br/><small><a href="mailto:' + esc(i.email) + '">' + esc(i.email) + '</a></small>' : '') + '</td>' +
+          (i.email ? '<br/><small><a href="mailto:' + esc(i.email) + '">' + esc(i.email) + '</a></small>' : '') + acct + '</td>' +
         '<td>' + esc(veh) + (i.condition ? '<br/><small>' + esc(i.condition) + '</small>' : '') + '</td>' +
         '<td>' + src + need + photo + '</td>' +
+        '<td>' + (i.quote_total_usd != null ? '<b>' + fmtMoney(i.quote_total_usd) + '</b>' : '<small style="color:var(--muted)">—</small>') + '</td>' +
         '<td>' + badge(i.status, i.status) + '</td>' +
-        '<td class="actions"><select class="statusEdit" data-id="' + i.id + '" data-kind="inquiry">' +
-          ['new','quoted','won','lost'].map(function(s){
-            return '<option value="' + s + '"' + (s===i.status?' selected':'') + '>' + s + '</option>';
-          }).join('') +
-        '</select></td>' +
+        '<td class="actions"><button class="btn" data-editinq="' + i.id + '" style="white-space:nowrap">✏️ Price / edit</button></td>' +
       '</tr>';
     }).join('') + '</tbody></table>';
-  wireStatusSelects(panel);
+  panel.querySelectorAll('[data-editinq]').forEach(function(b){
+    b.addEventListener('click', function(){ renderInquiryEditor(panel, b.getAttribute('data-editinq')); });
+  });
+}
+
+async function renderInquiryEditor(panel, id){
+  panel.innerHTML = '<div class="empty">Loading quote request…</div>';
+  var r = await api('/api/admin/inquiries/' + id);
+  var inq = r.inquiry, items = r.items || [], stock = r.stock || {};
+  var veh = [inq.vehicle_year, inq.vehicle_make, inq.vehicle_model].filter(Boolean).join(' ');
+  var photoUrl = inq.has_photo ? '/api/admin/inquiries/' + inq.id + '/photo' : '';
+  var isCart = inq.source === 'cart';
+
+  function row(it){
+    var st = stock[it.img] || {};
+    return '<tr class="inqLine">' +
+      '<td><input class="il-name" value="' + esc(it.name || '') + '" style="width:100%;min-width:160px"/></td>' +
+      '<td><input class="il-img" value="' + esc(it.img || '') + '" style="width:120px;font-family:ui-monospace,monospace;font-size:12px"/></td>' +
+      '<td>' + (st.stock_count != null ? '<span style="color:' + (st.stock_count > 0 ? '#15803d' : '#b91c1c') + '">' + st.stock_count + '</span>' : '<small style="color:var(--muted)">—</small>') + '</td>' +
+      '<td><input class="il-qty" type="number" min="1" value="' + (it.qty || 1) + '" style="width:58px"/></td>' +
+      '<td><small style="color:var(--muted)">' + (it.list_price_usd != null ? fmtMoney(it.list_price_usd) : '—') + '</small></td>' +
+      '<td><input class="il-price" type="number" min="0" step="0.01" value="' + (it.unit_price_usd != null ? it.unit_price_usd : '') + '" placeholder="0.00" style="width:90px"/></td>' +
+      '<td class="il-total" style="text-align:right;font-weight:700">—</td>' +
+      '<td><button type="button" class="btn il-del" title="Remove line">✕</button></td>' +
+    '</tr>';
+  }
+
+  panel.innerHTML =
+    '<div style="padding:14px 16px;display:flex;flex-direction:column;gap:14px">' +
+      '<div><button class="btn" id="inqBack">‹ Back to list</button></div>' +
+      '<div style="display:flex;gap:20px;flex-wrap:wrap">' +
+        '<div style="flex:1;min-width:220px">' +
+          '<h3 style="margin:0 0 6px">' + esc(inq.name || '(no name)') + (isCart ? ' <small style="background:#dbeafe;color:#1d4ed8;font-weight:700;padding:1px 7px;border-radius:5px;font-size:11px">CART QUOTE</small>' : '') + '</h3>' +
+          '<div style="font-size:13px;color:var(--muted);line-height:1.7">' +
+            (inq.phone ? '📞 <a href="tel:' + esc(inq.phone) + '">' + esc(inq.phone) + '</a><br/>' : '') +
+            (inq.email ? '✉️ <a href="mailto:' + esc(inq.email) + '">' + esc(inq.email) + '</a><br/>' : '') +
+            (veh ? '🚗 ' + esc(veh) + '<br/>' : '') +
+            (inq.condition ? 'Condition: ' + esc(inq.condition) + '<br/>' : '') +
+            'Received ' + fmtDate(inq.created_at) +
+          '</div>' +
+        '</div>' +
+        '<div style="flex:1;min-width:220px">' +
+          '<div style="border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--card-soft)">' +
+            '<div style="font-weight:700;margin-bottom:6px">Customer pricing</div>' +
+            (inq.user_id
+              ? '<div style="font-size:13px;color:var(--muted);margin-bottom:8px">Account: <b>' + esc(inq.account_name || ('#' + inq.user_id)) + '</b></div>' +
+                '<button class="btn" id="inqShowPrices" style="background:' + (Number(inq.customer_show_prices) ? '#15803d' : 'var(--navy)') + ';color:#fff">' +
+                  (Number(inq.customer_show_prices) ? '✓ Prices visible to this customer — click to hide' : 'Show prices to this customer') +
+                '</button>'
+              : '<div style="font-size:13px;color:#b45309">This request came in without a customer account, so there is nobody to unlock pricing for. Ask them to create an account and re-submit, or send the quote manually.</div>') +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      (photoUrl ? '<div><a href="' + photoUrl + '" target="_blank" rel="noopener"><img src="' + photoUrl + '" style="max-height:140px;border-radius:8px;border:1px solid var(--line)"/></a></div>' : '') +
+      (isCart
+        ? '<div style="overflow-x:auto"><table style="width:100%"><thead><tr>' +
+            '<th>Part</th><th>Part #</th><th>Stock</th><th>Qty</th><th>List</th><th>Unit price</th><th style="text-align:right">Line</th><th></th>' +
+          '</tr></thead><tbody id="inqLines">' + items.map(row).join('') + '</tbody></table>' +
+          '<button class="btn" id="inqAddLine" style="margin-top:8px">+ Add line</button></div>'
+        : '<div style="border:1px solid var(--line);border-radius:8px;padding:12px"><b>Part requested</b><div style="margin-top:4px;white-space:pre-wrap">' + esc(inq.part_description || '') + '</div></div>') +
+      '<div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-end">' +
+        '<label style="flex:1;min-width:240px">Quote notes (lead time, substitutions — shown to the counter)<br/>' +
+          '<textarea id="inqNotes" rows="3" style="width:100%">' + esc(inq.quote_notes || '') + '</textarea></label>' +
+        '<label>Status<br/><select id="inqStatus">' +
+          ['new','quoted','won','lost'].map(function(s){ return '<option value="' + s + '"' + (s === inq.status ? ' selected' : '') + '>' + s + '</option>'; }).join('') +
+        '</select></label>' +
+        (isCart ? '<div style="font-size:16px;font-weight:800">Total: <span id="inqTotal">—</span></div>' : '') +
+      '</div>' +
+      '<div><button class="btn primary" id="inqSave" style="background:var(--navy);color:#fff;padding:10px 22px">Save quote</button> <span id="inqMsg" style="margin-left:10px;font-size:13px"></span></div>' +
+    '</div>';
+
+  function recalc(){
+    var total = 0;
+    panel.querySelectorAll('.inqLine').forEach(function(tr){
+      var qty = parseInt(tr.querySelector('.il-qty').value, 10) || 0;
+      var pr = parseFloat(tr.querySelector('.il-price').value);
+      var cell = tr.querySelector('.il-total');
+      if (isFinite(pr) && pr >= 0 && qty > 0){ var lt = pr * qty; total += lt; cell.textContent = fmtMoney(lt); }
+      else cell.textContent = '—';
+    });
+    var tEl = panel.querySelector('#inqTotal');
+    if (tEl) tEl.textContent = total > 0 ? fmtMoney(total) : '—';
+  }
+  function wireLine(tr){
+    tr.querySelectorAll('.il-qty,.il-price').forEach(function(el){ el.addEventListener('input', recalc); });
+    tr.querySelector('.il-del').addEventListener('click', function(){ tr.remove(); recalc(); });
+  }
+  panel.querySelectorAll('.inqLine').forEach(wireLine);
+  recalc();
+
+  var addBtn = panel.querySelector('#inqAddLine');
+  if (addBtn) addBtn.addEventListener('click', function(){
+    var tb = panel.querySelector('#inqLines');
+    var tmp = document.createElement('tbody');
+    tmp.innerHTML = row({ name:'', img:'', qty:1, list_price_usd:null, unit_price_usd:null });
+    var tr = tmp.firstChild;
+    tb.appendChild(tr); wireLine(tr); recalc();
+  });
+
+  panel.querySelector('#inqBack').addEventListener('click', function(){ renderInquiries(panel); });
+
+  var spBtn = panel.querySelector('#inqShowPrices');
+  if (spBtn) spBtn.addEventListener('click', async function(){
+    var turnOn = !Number(inq.customer_show_prices);
+    spBtn.disabled = true;
+    try {
+      var res = await api('/api/admin/inquiries/' + id + '/show-prices', { method:'POST', body:{ enabled: turnOn } });
+      inq.customer_show_prices = res.show_prices ? 1 : 0;
+      spBtn.style.background = res.show_prices ? '#15803d' : 'var(--navy)';
+      spBtn.textContent = res.show_prices ? '✓ Prices visible to this customer — click to hide' : 'Show prices to this customer';
+    } catch(e){ alert('Could not update: ' + e.message); }
+    finally { spBtn.disabled = false; }
+  });
+
+  panel.querySelector('#inqSave').addEventListener('click', async function(){
+    var body = { status: panel.querySelector('#inqStatus').value, quote_notes: panel.querySelector('#inqNotes').value };
+    if (isCart){
+      body.items = [].map.call(panel.querySelectorAll('.inqLine'), function(tr){
+        var pr = parseFloat(tr.querySelector('.il-price').value);
+        return {
+          img: tr.querySelector('.il-img').value.trim(),
+          name: tr.querySelector('.il-name').value.trim(),
+          qty: parseInt(tr.querySelector('.il-qty').value, 10) || 1,
+          unit_price_usd: isFinite(pr) && pr >= 0 ? pr : null
+        };
+      }).filter(function(it){ return it.img || it.name; });
+    }
+    var msg = panel.querySelector('#inqMsg');
+    msg.textContent = 'Saving…'; msg.style.color = 'var(--muted)';
+    try {
+      await api('/api/admin/inquiries/' + id, { method:'PATCH', body: body });
+      msg.textContent = '✓ Saved'; msg.style.color = '#15803d';
+    } catch(e){ msg.textContent = '✗ ' + e.message; msg.style.color = '#b91c1c'; }
+  });
 }
 
 var apptView = 'list';

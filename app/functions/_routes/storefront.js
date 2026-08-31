@@ -13,6 +13,20 @@
 import { d1 } from '../_lib/db.js';
 import { authMw } from '../_lib/guards.js';
 import { currentUser } from '../_lib/guards.js';
+import { sendEmail } from '../_lib/mailer.js';
+import { readUploadBody } from '../_lib/uploads.js';
+import { safeJson } from '../_lib/util.js';
+
+// Storefront pricing is opt-in per customer (users.show_prices). Guests and
+// un-approved accounts get prices stripped from every catalogue/cart response;
+// the front-end then renders "Call for price" and routes checkout to a quote
+// request. See migrations/0027_quote_flow.sql.
+async function canSeePrices(c) {
+  try {
+    const u = await currentUser(c.req.raw, c.env);
+    return !!(u && u.show_prices);
+  } catch { return false; }
+}
 
 // server.js buildProductWhere(), for SQLite.
 function productWhere(q) {
@@ -65,8 +79,15 @@ export default function mount(app) {
     try {
       const db = d1(c.env);
       const q = c.req.query();
-      const { where, binds } = productWhere(q);
-      const orderBy = SORTS[q.sort] || SORTS.name;
+      const showPrices = await canSeePrices(c);
+      // With prices hidden, a price filter or price sort would leak the very
+      // numbers we're withholding (binary-search the catalogue by price_max).
+      // Drop them for un-approved callers.
+      const qEff = showPrices ? q : { ...q, price_min: undefined, price_max: undefined };
+      const { where, binds } = productWhere(qEff);
+      let sortKey = q.sort;
+      if (!showPrices && (sortKey === 'price_asc' || sortKey === 'price_desc')) sortKey = 'name';
+      const orderBy = SORTS[sortKey] || SORTS.name;
       const limit = Math.min(200, Math.max(1, parseInt(q.limit, 10) || 60));
       const offset = Math.max(0, parseInt(q.offset, 10) || 0);
 
@@ -79,7 +100,27 @@ export default function mount(app) {
       const counted = (cnt && cnt.n) || 0;
       const capped = counted > COUNT_CAP;
       const total = Math.max(capped ? COUNT_CAP : counted, offset + rows.length);
-      return c.json({ products: rows, total, limit, offset, approximate: capped, count_mode: capped ? 'capped' : 'exact' });
+
+      // The storefront (index.html / shop.html) asks with ?compact=1 and reads
+      // a positional-array format: { cats, rows:[[img,name,make_model,catIdx,
+      // condIdx,price_cents,stock_count,bin], ...] }. price_cents is null when
+      // this caller may not see prices, which is what flips a cart into a
+      // quote request client-side.
+      if (q.compact) {
+        const catIndex = {};
+        const cats = [];
+        const packed = rows.map((r) => {
+          const cat = r.category || '';
+          if (!(cat in catIndex)) { catIndex[cat] = cats.length; cats.push(cat); }
+          const priceCents = showPrices && r.price_usd != null ? Math.round(r.price_usd * 100) : null;
+          const condIdx = String(r.condition || '').toUpperCase() === 'USED' ? 1 : 0;
+          return [r.img, r.name, r.make_model || '', catIndex[cat], condIdx, priceCents, r.stock_count, r.bin_location || ''];
+        });
+        return c.json({ cats, rows: packed, total, limit, offset, prices_visible: showPrices });
+      }
+
+      const list = showPrices ? rows : rows.map((r) => ({ ...r, price_usd: null }));
+      return c.json({ products: list, total, limit, offset, prices_visible: showPrices, approximate: capped, count_mode: capped ? 'capped' : 'exact' });
     } catch (e) {
       return c.json({ error: 'Server error' }, 500);
     }
@@ -101,6 +142,10 @@ export default function mount(app) {
       c.req.param('img')
     );
     if (!row) return c.json({ error: 'Not found' }, 404);
+    if (!(await canSeePrices(c))) {
+      row.price_usd = null; row.price_cents = null;
+      row.cost_usd = null; row.cost_cents = null;
+    }
     return c.json({ product: row });
   });
 
@@ -121,8 +166,10 @@ export default function mount(app) {
         WHERE c.user_id = ? ORDER BY c.updated_at DESC`,
       c.get('user').id
     );
-    const total = rows.reduce((s, r) => s + Number(r.price_usd || 0) * r.qty, 0);
-    return c.json({ cart: rows, total_usd: total });
+    const showPrices = !!c.get('user').show_prices;
+    if (!showPrices) rows.forEach((r) => { r.price_usd = null; });
+    const total = showPrices ? rows.reduce((s, r) => s + Number(r.price_usd || 0) * r.qty, 0) : null;
+    return c.json({ cart: rows, total_usd: total, prices_visible: showPrices });
   });
 
   app.post('/api/cart', authMw, async (c) => {
@@ -187,6 +234,7 @@ export default function mount(app) {
         WHERE w.user_id = ? ORDER BY w.created_at DESC`,
       c.get('user').id
     );
+    if (!c.get('user').show_prices) rows.forEach((r) => { r.price_usd = null; });
     return c.json({ items: rows });
   });
 
@@ -202,6 +250,109 @@ export default function mount(app) {
   app.delete('/api/wishlist/:img', authMw, async (c) => {
     await d1(c.env).run('DELETE FROM wishlist WHERE user_id = ? AND product_img = ?', c.get('user').id, c.req.param('img'));
     return c.json({ ok: true });
+  });
+
+  // ---- quote request / parts inquiry --------------------------------
+  // The storefront's "Request a Quote" (cart checkout) and the free-text
+  // "Request a Part" form both post here. A cart request carries `items`
+  // (part numbers + quantities) and lands as source='cart' with the line
+  // items in items_json, unpriced -- the admin Parts Inquiries editor prices
+  // it. Guests allowed; a signed-in shopper is linked via user_id.
+  app.post('/api/inquiry', async (c) => {
+    const db = d1(c.env);
+    let file = null, body = {};
+    try { ({ file, body } = await readUploadBody(c, ['photo_part', 'photo_vehicle', 'photo'])); }
+    catch { body = await c.req.json().catch(() => ({})); }
+    const payload = (body && typeof body.data === 'string') ? safeJson(body.data, {}) : (body || {});
+
+    const name = String(payload.name || '').trim();
+    const phone = String(payload.phone || '').trim();
+    const email = String(payload.email || '').trim();
+    if (!name) return c.json({ error: 'Please enter your name.' }, 400);
+    if (!phone && !email) return c.json({ error: 'Add a phone number or email so we can reply.' }, 400);
+
+    const yearNum = parseInt(payload.vehicle_year, 10);
+    const vehicle_year = Number.isFinite(yearNum) ? yearNum : null;
+    const vehicle_make = String(payload.vehicle_make || '').trim() || null;
+    const vehicle_model = String(payload.vehicle_model || '').trim() || null;
+    const condition = String(payload.condition || '').trim() || null;
+    const notes = String(payload.notes || '').trim();
+
+    const rawItems = Array.isArray(payload.items) ? payload.items : [];
+    let source = 'form';
+    let itemsJson = null;
+    let partDescription = String(payload.part_description || '').trim();
+
+    if (rawItems.length) {
+      source = 'cart';
+      const imgs = [...new Set(rawItems.map((it) => String(it.img || '').trim()).filter(Boolean))].slice(0, 100);
+      const prodRows = imgs.length
+        ? await db.many(
+            `SELECT img, name, make_model, price_cents FROM products WHERE img IN (${imgs.map(() => '?').join(',')})`, ...imgs)
+        : [];
+      const prod = Object.fromEntries(prodRows.map((r) => [r.img, r]));
+      const items = rawItems.map((it) => {
+        const img = String(it.img || '').trim();
+        const p = prod[img] || {};
+        return {
+          img,
+          name: p.name || String(it.name || '').trim() || img,
+          make_model: p.make_model || String(it.make_model || '').trim() || '',
+          qty: Math.min(999, Math.max(1, parseInt(it.qty, 10) || 1)),
+          list_price_cents: p.price_cents != null ? p.price_cents : null,
+          unit_price_cents: null,
+          line_total_cents: null,
+        };
+      }).filter((it) => it.img);
+      if (!items.length) return c.json({ error: 'Your quote request had no valid parts.' }, 400);
+      itemsJson = JSON.stringify(items);
+      const summary = items.slice(0, 6).map((it) => `${it.qty}x ${it.name}${it.img && it.img !== it.name ? ' (' + it.img + ')' : ''}`).join('; ');
+      partDescription = (summary + (items.length > 6 ? `; +${items.length - 6} more` : '') + (notes ? ` -- ${notes}` : '')).slice(0, 800);
+    } else {
+      if (!partDescription) return c.json({ error: 'Tell us which part you need.' }, 400);
+      if (notes) partDescription = (partDescription + ' -- ' + notes).slice(0, 800);
+    }
+
+    let photoData = null, photoType = null;
+    if (file && typeof file.arrayBuffer === 'function') {
+      const buf = new Uint8Array(await file.arrayBuffer());
+      if (buf.byteLength > 0 && buf.byteLength <= 2 * 1024 * 1024) {
+        photoData = buf;
+        photoType = file.type || 'image/jpeg';
+      }
+    }
+
+    let userId = null;
+    try { const u = await currentUser(c.req.raw, c.env); if (u) userId = u.id; } catch { /* guest */ }
+
+    const res = await db.run(
+      `INSERT INTO parts_inquiries
+         (user_id, name, phone, email, vehicle_make, vehicle_model, vehicle_year, condition,
+          part_description, items_json, source, status, photo_data, photo_type)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,'new',?,?)`,
+      userId, name, phone || '', email || null, vehicle_make, vehicle_model, vehicle_year, condition,
+      partDescription, itemsJson, source, photoData, photoType
+    );
+    const id = res.meta.last_row_id;
+
+    // Tell the counter, and confirm to the customer if we have their email.
+    const notifyTo = c.env.ORDER_NOTIFY_TO;
+    if (notifyTo) {
+      c.executionCtx?.waitUntil?.(sendEmail(c.env, {
+        to: notifyTo,
+        subject: `New quote request #${id}${source === 'cart' ? ' (cart)' : ''}`,
+        text: `${name} <${email || 'no email'}> ${phone || ''}\n\n${partDescription}\n\nOpen Admin -> Parts Inquiries.`,
+      }).catch(() => {}));
+    }
+    if (email) {
+      c.executionCtx?.waitUntil?.(sendEmail(c.env, {
+        to: email,
+        subject: `We got your quote request #${id}`,
+        text: `Hi ${name},\n\nThanks -- our parts desk is checking availability and pricing and will get back to you.\n\nYour request:\n${partDescription}\n\n-- Meltha Honda Sales & Servs`,
+      }).catch(() => {}));
+    }
+
+    return c.json({ ok: true, id, status: 'new' });
   });
 
   // ---- notify-when-back-in-stock --------------------------------------

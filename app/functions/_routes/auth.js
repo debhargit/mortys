@@ -62,6 +62,6 @@ export default function mount(app) {
       const role = await d1(c.env).one('SELECT can_manage FROM roles WHERE code = ?', u.admin_role);
       perms_full = u.admin_role === 'owner' || !!(role && role.can_manage);
     }
-    return c.json({ user: { ...publicUser(u), phone: u.phone || null, perms, perms_full } });
+    return c.json({ user: { ...publicUser(u), phone: u.phone || null, show_prices: !!u.show_prices, perms, perms_full } });
   });
 }

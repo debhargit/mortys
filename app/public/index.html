@@ -1924,9 +1924,23 @@ document.addEventListener('DOMContentLoaded', function(){
         '</div>' +
       '</div>';
     }).join('');
+    // The storefront is quote-first: a cart checkout files a quote request the
+    // counter prices by hand. Unless every line already carries a price (a
+    // price-approved customer), there is no total to show and the coupon /
+    // points controls don't apply.
+    var allPriced = items.every(function(img){ return prices[img] > 0; });
+    var quoteMode = !allPriced;
+    ['couponInput','couponApply','couponApplied','ptRedeem'].forEach(function(id){
+      var el = document.getElementById(id); if (el) el.style.display = quoteMode ? 'none' : '';
+    });
+    var lblEl = document.getElementById('checkoutLabel');
+    if (lblEl) lblEl.textContent = quoteMode ? 'Request a Quote' : 'Request a Quote';
+    var coBtn = document.getElementById('cartCheckout');
+    if (coBtn) coBtn.style.background = quoteMode ? 'var(--navy)' : 'var(--navy)';
+
     var couponLine = '';
     var displayTotal = total;
-    if (window._foxdAppliedCoupon){
+    if (!quoteMode && window._foxdAppliedCoupon){
       var cd = window._foxdAppliedCoupon;
       // recompute live based on current subtotal in case cart changed
       var disc = cd.kind === 'percent'
@@ -1938,10 +1952,12 @@ document.addEventListener('DOMContentLoaded', function(){
       var amtEl = document.getElementById('couponAppliedAmt');
       if (amtEl) amtEl.textContent = fmt(disc);
     }
-    document.getElementById('cartTotal').innerHTML =
-      '<div><div class="lbl">Total</div></div>' +
-      '<div style="text-align:right"><b>' + fmt(displayTotal) + '</b><div class="alt">' + altFmt(displayTotal) + '</div></div>' +
-      couponLine;
+    document.getElementById('cartTotal').innerHTML = quoteMode
+      ? '<div><div class="lbl">' + items.length + ' item' + (items.length === 1 ? '' : 's') + '</div></div>' +
+        '<div style="text-align:right"><b>We’ll quote you</b><div class="alt" style="color:#6b7280">prices sent after review</div></div>'
+      : '<div><div class="lbl">Total</div></div>' +
+        '<div style="text-align:right"><b>' + fmt(displayTotal) + '</b><div class="alt">' + altFmt(displayTotal) + '</div></div>' +
+        couponLine;
     box.querySelectorAll('[data-inc]').forEach(function(b){ b.addEventListener('click', function(){ setQty(b.dataset.inc, cart[b.dataset.inc]+1); }); });
     box.querySelectorAll('[data-dec]').forEach(function(b){ b.addEventListener('click', function(){ setQty(b.dataset.dec, cart[b.dataset.dec]-1); }); });
     box.querySelectorAll('[data-rm]').forEach(function(b){ b.addEventListener('click', function(){ setQty(b.dataset.rm, 0); }); });
@@ -2340,58 +2356,52 @@ document.addEventListener('DOMContentLoaded', function(){
   document.getElementById('cartCheckout').addEventListener('click', async function(){
     var items = Object.keys(cart);
     if (items.length === 0) return;
-    var methodEl = document.querySelector('input[name="payMethod"]:checked');
-    var method = methodEl ? methodEl.value : 'cash_pickup';
-    var slider = document.getElementById('ptSlider');
-    var redeemPts = slider && !slider.disabled ? parseInt(slider.value, 10) || 0 : 0;
-    var couponCode = window._foxdAppliedCoupon ? window._foxdAppliedCoupon.code : null;
-    var orderId = null, checkoutUrl = null, lastResult = null;
+
+    // Quote-first storefront: a cart checkout files a quote request. Online
+    // ordering / payment is off (see /api/config ordering_enabled:false).
+    var me = null;
+    try { me = JSON.parse(localStorage.getItem('mh_user') || 'null'); } catch(e){}
+    var name = (me && me.name) || '';
+    var email = (me && me.email) || '';
+    var phone = (me && me.phone) || '';
+    if (!name || !phone){
+      var g = null;
+      try { g = JSON.parse(localStorage.getItem('mh_guest') || 'null'); } catch(e){}
+      name  = name  || (g && g.name)  || (window.prompt('Your name for the quote:') || '').trim();
+      if (!name) return;
+      phone = phone || (g && g.phone) || (window.prompt('A phone number we can call you back on:') || '').trim();
+      if (!phone) return;
+      email = email || (g && g.email) || '';
+      try { localStorage.setItem('mh_guest', JSON.stringify({ name:name, email:email, phone:phone })); } catch(e){}
+    }
+
+    var lineItems = items.map(function(img){
+      var p = parts.find(function(pt){ return pt.i === img; }) || {n:img, m:''};
+      return { img: img, name: p.n || img, make_model: p.m || '', qty: cart[img] };
+    });
+
+    var quoteId = null;
     if (window._foxdApi){
       try {
-        var r = await window._foxdApi('/api/checkout', { method:'POST', body:{ payment_method: method, redeem_points: redeemPts, coupon_code: couponCode } });
-        lastResult = r;
-        orderId = r && r.order_id;
-        checkoutUrl = r && r.checkout_url;
-      } catch(e){ /* not signed in or backend offline — fall through */ }
+        var r = await window._foxdApi('/api/inquiry', { method:'POST', body:{ name:name, email:email, phone:phone, items: lineItems } });
+        quoteId = r && r.id;
+      } catch(e){ /* backend offline — fall through to WhatsApp so it's never lost */ }
     }
-    if (checkoutUrl){
-      // Stripe: hand off to hosted checkout. Server has already cleared the DB cart.
-      window.location.href = checkoutUrl;
-      return;
-    }
-    var label = method === 'bank_transfer' ? 'bank-transfer order' : 'order';
-    var msg = (orderId
-      ? "Hi Meltha Honda Sales & Servs, I placed " + label + " #" + orderId + ":\n\n"
-      : "Hi Meltha Honda Sales & Servs, I'd like to place an order:\n\n");
-    var total = 0;
-    items.forEach(function(img){
-      var p = parts.find(function(pt){ return pt.i === img; }) || {n:img, m:''};
-      var usd = prices[img] || 0;
-      var qty = cart[img];
-      total += usd * qty;
-      msg += "• " + p.n + " (" + p.m + ") x " + qty + " — " + fmt(usd*qty) + "\n";
+
+    var msg = (quoteId
+      ? "Hi Meltha Honda Sales & Servs, I submitted quote request #" + quoteId + ":\n\n"
+      : "Hi Meltha Honda Sales & Servs, I'd like a quote on:\n\n");
+    lineItems.forEach(function(it){
+      msg += "• " + it.name + (it.make_model ? " (" + it.make_model + ")" : "") + " — part " + it.img + " × " + it.qty + "\n";
     });
-    msg += "\nPayment: " + (method === 'bank_transfer' ? 'Bank transfer' : 'Cash on pickup');
-    msg += "\nTotal: " + fmt(total) + "  (" + altFmt(total) + ")\n\nThank you!";
+    msg += "\nName: " + name + "\nPhone: " + phone + "\n\nCould you price these for me? Thank you!";
     window.open('https://wa.me/18767588503?text=' + encodeURIComponent(msg), '_blank', 'noopener');
-    if (orderId){
+
+    if (quoteId){
       cart = {};
       saveCart(); render(currentFilter); renderCart();
       if (window._foxdRenderFeatured) window._foxdRenderFeatured();
-      // Reset slider + refresh balance after order
-      var ptSlider = document.getElementById('ptSlider');
-      if (ptSlider) ptSlider.value = 0;
-      if (window._foxdRefreshPoints) window._foxdRefreshPoints();
-      // Show a small toast about points earned/redeemed
-      if (lastResult && (lastResult.points_earned || lastResult.points_redeemed)){
-        var t = [];
-        if (lastResult.points_redeemed) t.push('redeemed ' + lastResult.points_redeemed + ' pts');
-        if (lastResult.points_earned) t.push('earned ' + lastResult.points_earned + ' pts');
-        if (t.length){
-          var msg2 = msg + '\n\n(Loyalty: ' + t.join(', ') + ')';
-          // (msg2 is informational only — already sent the WhatsApp window above)
-        }
-      }
+      alert('Quote request #' + quoteId + ' sent. Our parts desk will check availability and call you back with pricing.');
     }
   });
 
