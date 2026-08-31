@@ -978,6 +978,7 @@
       <div class="actions">
         <a class="cta" href="shop.html">Shop Now</a>
         <a class="btn-outline" href="#inquiry">Can't find it? Ask us →</a>
+        <button type="button" id="heroSignupCta" class="btn-outline" style="font-family:inherit" onclick="if(window._foxdOpenSignup){window._foxdOpenSignup();}">Create your free account →</button>
       </div>
       <a href="#reviews" class="hero-rating" style="text-decoration:none;margin-top:18px">
         <span class="stars">★★★★★</span>
@@ -3214,9 +3215,12 @@ document.addEventListener('DOMContentLoaded', function(){
     document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && overlay.style.display === 'flex') close(); });
 
     function refreshUI(){
-      if (!openBtn) return;
       var u = null;
       try { u = JSON.parse(localStorage.getItem('mh_user') || 'null'); } catch(e){}
+      // Hide the landing-page "Create your free account" CTA once signed in.
+      var heroSignup = document.getElementById('heroSignupCta');
+      if (heroSignup) heroSignup.style.display = (u && u.email) ? 'none' : '';
+      if (!openBtn) return;
       if (u && u.email){
         var initial = (u.name || u.email).charAt(0).toUpperCase();
         var first = u.name ? u.name.split(' ')[0] : u.email.split('@')[0];
@@ -3261,6 +3265,10 @@ document.addEventListener('DOMContentLoaded', function(){
       close(); refreshUI();
     };
     window._foxdRefreshUI = refreshUI;
+    // Public openers so any button on the page can pop the modal straight
+    // into the right tab (the hero "Create your free account" CTA uses these).
+    window._foxdOpenSignup = function(){ open(); setMode('signup'); };
+    window._foxdOpenSignin = function(){ open(); setMode('signin'); };
     refreshUI();
   })();
 
