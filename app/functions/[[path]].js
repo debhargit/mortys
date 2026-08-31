@@ -10,6 +10,7 @@ import mountAuth from './_routes/auth.js';           // Phase 1
 import mountStorefront from './_routes/storefront.js'; // Phase 2
 import mountAdmin from './_routes/admin.js';           // Phase 3 (admin reads)
 import mountPos from './_routes/pos.js';               // Phase 4 (POS reads + hold/quote)
+import mountPosTxn from './_routes/pos_txn.js';         // Phase 5 (sale / void / return)
 
 const app = new Hono();
 
@@ -17,8 +18,9 @@ mountAuth(app);
 mountStorefront(app);
 mountAdmin(app);
 mountPos(app);
+mountPosTxn(app);
 
-app.get('/api/health', (c) => c.json({ ok: true, runtime: 'cloudflare-pages', ported_phases: [1, 2, 3, 4] }));
+app.get('/api/health', (c) => c.json({ ok: true, runtime: 'cloudflare-pages', ported_phases: [1, 2, 3, 4, 5] }));
 
 // Anything under /api not yet ported.
 app.all('/api/*', (c) => c.json({ error: 'This endpoint is not ported to Cloudflare yet — see app/PORT.md' }, 501));

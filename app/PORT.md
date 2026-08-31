@@ -57,6 +57,7 @@ functions/
     admin.js           Phase 3 — admin reads (settings, roles, staff, products,
                        orders, dashboard, …)
     pos.js             Phase 4 — POS reads + hold/quote writes
+    pos_txn.js         Phase 5 — sale / void / return (read → compute → batch)
   _lib/
     money.js           centsToUsd / usdToCents + PRODUCT_USD_COLS
     util.js            safeJson (jsonb-as-TEXT), boolify (0/1 -> bool)
@@ -122,11 +123,11 @@ conversion but **drifted** from `schema.sql`. `migrations/0014_sync_with_postgre
 | **2** | Storefront reads: `/api/products*`, `/api/filters`, `/api/cart*`, `/api/reviews`, `/api/wishlist*`, `/api/notify`. `_routes/{auth,storefront}.js`, `_lib/money.js`, migration `0015_storefront.sql` (adds `wishlist`). | **committed, tested vs node:sqlite** |
 | **3** | Admin reads: `/api/admin/{settings,capabilities,me/ui-prefs,roles,roles/mine,user-categories,staff,products,products/:img,low-stock,orders,orders/:id,dashboard}`. `_routes/admin.js`, `_lib/{util,capabilities,shop}.js`, migration `0016_admin.sql` (adds `shop_settings`, `account_payments`, `users.perms`, `user_categories.perms`, `products.supplier_id/barcode`, `orders.coupon_*`). | **committed, tested vs node:sqlite** |
 | **4** | POS reads + simple writes: `/api/admin/pos/{holds,holds/:id,hold(POST),holds/:id(DELETE),quotes,quotes/:id,quote(POST),sales,sales/:id,customer-lookup,reps,walkin-customer,locations,vehicle-models}`. `_routes/pos.js`, `_lib/pos.js`, migration `0017_pos.sql` (users credit/contact cols, `pos_sales.tax_exempt`, `pos_holds.held_by_name`, `pos_quotes.cashier_id`). | **committed, tested vs node:sqlite** |
-| 5 | POS **transactions**: `/api/admin/pos/sale`, `/void`, `/return` — D1 has no interactive txns, so read → compute in JS → single `db.batch()`. Needs `gift_cards`/`gift_card_transactions` tables, walk-in customer seed, loyalty (`points_transactions`), credit-limit check. | |
-| 5 | Inventory + purchasing writes; CSV import (parse in‑Worker, cap size) | |
-| 6 | Uploads → R2 (`wrangler r2 bucket create`), email → `send_email` binding | |
-| 7 | Cron Triggers: customer reminders, low‑stock alerts | |
-| 8 | Cutover: point `admin.html` fetches at the same paths (already relative), DNS `melthahonda.com` → Pages, import prod data with `wrangler d1 execute --file` |
+| **5** | POS **transactions**: `POST /api/admin/pos/{sale, sales/:id/void, sales/:id/return}`. `_routes/pos_txn.js`, migration `0018_pos_txn.sql` (`gift_cards`, `gift_card_transactions`, `pos_returns` refund breakdown, walk-in seed). Each: read → compute in JS → one atomic `db.batch()`; sale/return ids pre-assigned `MAX(id)+1`. | **committed, tested vs node:sqlite** |
+| 6 | Inventory + purchasing writes; CSV import (parse in-Worker, cap size) | |
+| 7 | Uploads → R2 (`wrangler r2 bucket create`), email → `send_email` binding | |
+| 8 | Cron Triggers: customer reminders, low-stock alerts | |
+| 9 | Cutover: point `admin.html` fetches at the same paths (already relative), DNS `melthahonda.com` → Pages, import prod data with `wrangler d1 execute --file` |
 
 Every phase: `npm run cf:dev`, exercise the affected admin.html screens against
 the local Pages Functions server, diff response bodies against the Express

@@ -52,3 +52,19 @@ export const nextReturnNumber  = (env) => nextSeq(env, 'pos_returns', 'return_nu
 // Strip common phone separators for a digits-only LIKE (no regexp_replace on D1).
 export const PHONE_DIGITS_SQL = (col) =>
   `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(${col},''),'-',''),' ',''),'(',''),')',''),'+',''),'.','')`;
+
+// server.js genGiftCardCode() — GC-XXXX-XXXX, no ambiguous chars (0/O, 1/I).
+export function genGiftCardCode() {
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const part = () => Array.from({ length: 4 }, () => A[Math.floor(Math.random() * A.length)]).join('');
+  return `GC-${part()}-${part()}`;
+}
+
+// Next id for a table whose PK is INTEGER PRIMARY KEY AUTOINCREMENT. D1 batches
+// can't feed one statement's last_row_id into the next, so pre-assign the id
+// and bind it as a literal in the child inserts. SQLite keeps sqlite_sequence
+// in step with an explicit id, so a later auto-insert won't collide.
+export async function nextId(env, table) {
+  const r = await d1(env).one(`SELECT COALESCE(MAX(id), 0) + 1 AS n FROM ${table}`);
+  return r ? r.n : 1;
+}
