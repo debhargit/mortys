@@ -11280,6 +11280,11 @@ async function renderSettings(panel){
   try { dbStatus = await api('/api/admin/settings/db-server-status'); } catch (e) { dbStatus = { reachable:false, db_exists:false, error:e.message, platform:'', install:{running:false} }; }
   try { srvCfg = await api('/api/admin/settings/server'); } catch (e) { srvCfg = { running_port:null, configured_port:null, restart_required:false }; }
   try { machine = await api('/api/admin/settings/machine'); } catch (e) { machine = { name:'', host:'', port:'', local_db:{reachable:false,db_exists:false} }; }
+  // The Cloudflare build returns local_db:null (no machine-local database);
+  // the rest of this panel reads machine.local_db.reachable, so give it a
+  // safe shape either way.
+  if (!machine) machine = { name:'', host:'', port:'' };
+  if (!machine.local_db) machine.local_db = { reachable:false, db_exists:false };
   try { netServers = (await api('/api/admin/settings/network-servers')).servers || []; } catch (e) { netServers = []; }
   try { terms = await api('/api/admin/terminals'); } catch (e) { terms = { terminals: [], mode: 'approve', this_terminal_id: null, error: e.message }; }
 
@@ -11351,11 +11356,16 @@ async function renderSettings(panel){
             '<span id="setMachineMsg" style="font-size:11.5px;color:var(--muted)"></span>' +
           '</div>' +
           '<div style="display:flex;gap:20px;flex-wrap:wrap;font-size:12.5px">' +
-            '<div><div class="lbl">Local database, this machine</div><b style="color:' + (machine.local_db.reachable ? '#15803d' : '#b91c1c') + '">' +
-              (machine.local_db.reachable ? (machine.local_db.db_exists ? '✓ detected &amp; running' : '✓ Postgres up, app database not created yet') : '✗ not detected') + '</b></div>' +
-            '<div><div class="lbl">Address on this network</div><b>' + esc(machine.host || '—') + ':' + esc(machine.port || '') + '</b></div>' +
+            (machine.cloud
+              ? '<div><div class="lbl">This install</div><b style="color:#0369a1">🌐 Hosted on the internet' + (machine.host ? ' (' + esc(machine.host) + ')' : '') + '</b></div>'
+              : '<div><div class="lbl">Local database, this machine</div><b style="color:' + (machine.local_db.reachable ? '#15803d' : '#b91c1c') + '">' +
+                  (machine.local_db.reachable ? (machine.local_db.db_exists ? '✓ detected &amp; running' : '✓ Postgres up, app database not created yet') : '✗ not detected') + '</b></div>') +
+            '<div><div class="lbl">Address' + (machine.cloud ? '' : ' on this network') + '</div><b>' + esc(machine.host || '—') + (machine.cloud ? '' : ':' + esc(machine.port || '')) + '</b></div>' +
           '</div>' +
-          '<div style="font-size:11px;color:var(--muted);margin-top:8px">Detected automatically as soon as the local server is installed and running here — no need to test the connection manually below just to check.</div>' +
+          '<div style="font-size:11px;color:var(--muted);margin-top:8px">' +
+            (machine.cloud
+              ? 'This copy of the app runs on Cloudflare — there is no per-machine local database. Terminals connect over the internet.'
+              : 'Detected automatically as soon as the local server is installed and running here — no need to test the connection manually below just to check.') + '</div>' +
         '</div>' +
         '<div style="padding:12px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px">' +
           '<div style="font-weight:700;font-size:13px">📡 Servers on your network</div>' +
