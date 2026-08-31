@@ -13,7 +13,7 @@
 import { d1 } from '../_lib/db.js';
 import { adminMw, managerMw } from '../_lib/guards.js';
 import { putUpload, getUpload, readUploadBody, uploadsEnabled } from '../_lib/uploads.js';
-import { sendEmail, templates } from '../_lib/mailer.js';
+import { notifyBackInStock } from '../_lib/jobs.js';
 import { safeJson } from '../_lib/util.js';
 
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
@@ -98,27 +98,10 @@ export default function mount(app) {
     return c.json({ ok: true, photo_path: upload.url });
   });
 
-  // ---- email the back-in-stock waiting list --------------------
+  // ---- email the back-in-stock waiting list (manual trigger; the same
+  //      logic also runs on a schedule — see functions/_lib/jobs.js) --------
   app.post('/api/admin/notify-back-in-stock', adminMw, async (c) => {
-    const db = d1(c.env);
-    const subs = await db.many(
-      `SELECT n.id, n.email, n.phone, p.img AS product_img, p.name AS product_name,
-              p.price_cents / 100.0 AS price_usd
-         FROM notify_subscriptions n
-         JOIN products p ON p.img = n.product_img
-        WHERE n.notified_at IS NULL AND p.stock_count > 0`);
-    let emails_sent = 0, failed = 0;
-    for (const sub of subs) {
-      try {
-        const t = templates.backInStockEmail(sub);
-        await sendEmail(c.env, { to: sub.email, ...t });
-        await db.run('UPDATE notify_subscriptions SET notified_at = CURRENT_TIMESTAMP WHERE id = ?', sub.id);
-        emails_sent++;
-      } catch (e) {
-        failed++;
-        console.warn('[notify-back-in-stock]', sub.email, e.message);
-      }
-    }
-    return c.json({ ok: true, candidates: subs.length, emails_sent, failed });
+    const r = await notifyBackInStock(c.env);
+    return c.json({ ok: true, ...r });
   });
 }

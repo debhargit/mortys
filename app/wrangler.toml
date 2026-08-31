@@ -22,6 +22,12 @@ ORDER_NOTIFY_TO = "admin@melthahonda.com"
 ORDER_NOTIFY_SMS = "876-758-8503"
 EMAIL_FROM = "Meltha Honda <noreply@melthahonda.com>"
 
+# Phase 8 scheduled jobs (functions/_routes/cron.js). Set the shared secret
+# the companion cron-worker authenticates with — until it is set, every
+# /api/cron/* call is refused (jobs never run open):
+#   npx wrangler pages secret put CRON_SECRET --project-name meltahonda
+# Use the same value for `npx wrangler secret put CRON_SECRET` in app/cron-worker.
+
 # Transactional email (Phase 7). functions/_lib/mailer.js targets this
 # binding's API (cloudflare:email EmailMessage) and falls back to a console
 # stub while it is absent, so every email-sending route still succeeds --

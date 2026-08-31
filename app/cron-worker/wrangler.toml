@@ -1,0 +1,18 @@
+# Companion Worker for the Pages project — Pages Functions cannot own Cron
+# Triggers, so this tiny Worker holds the schedule and calls the Pages
+# deployment's /api/cron/* endpoints over HTTP with the shared secret.
+#
+#   cd app/cron-worker
+#   npx wrangler deploy
+#   npx wrangler secret put CRON_SECRET      # must equal the Pages CRON_SECRET
+name = "meltahonda-cron"
+main = "index.js"
+compatibility_date = "2026-07-01"
+
+# Cloudflare cron is UTC. */15 -> frequent back-in-stock sweeps;
+# 0 13 * * * -> ~08:00 Kingston daily digest pass.
+[triggers]
+crons = ["*/15 * * * *", "0 13 * * *"]
+
+[vars]
+PAGES_ORIGIN = "https://melthahonda.com"
