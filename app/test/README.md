@@ -46,7 +46,11 @@ Read-mostly smoke tests against production. They sign in with the seed admin
 - `verify-catalogue.mjs` — `/shop.html` streams the full ~23k-row product
   table (guards the `?compact=1` limit-cap regression) + `/` featured strip,
   prices hidden for a guest
-- `verify-tabs.mjs` — walks admin sidebar tabs
+- `verify-tabs.mjs` — walks admin sidebar tabs (as the owner)
+- `verify-tabs-role.mjs [role]` — creates a throwaway staff account with the
+  given role (default `cashier`), signs in as it, reports which tabs the role
+  can see and that each one loads, then hard-deletes the account. e.g.
+  `node test/verify-tabs-role.mjs manager`
 - `verify-settings.mjs`, `verify-dashboard.mjs`, `verify-pos-badge.mjs`,
   `verify-presence.mjs`, `verify-signup.mjs`, `verify-quote-live.mjs`
 
