@@ -88,17 +88,27 @@ export default function mount(app) {
       let sortKey = q.sort;
       if (!showPrices && (sortKey === 'price_asc' || sortKey === 'price_desc')) sortKey = 'name';
       const orderBy = SORTS[sortKey] || SORTS.name;
-      const limit = Math.min(200, Math.max(1, parseInt(q.limit, 10) || 60));
+      // The storefront (?compact=1) streams the whole ~23k-row catalogue in
+      // large chunks (shop.html pulls in 4,000s), so it needs a much higher
+      // ceiling than the 200 the POS/admin grid ever asks for. Compact rows
+      // are tiny positional arrays, so a 5k-row page is still a small response.
+      const isCompact = !!q.compact;
+      const maxLimit = isCompact ? 5000 : 200;
+      const limit = Math.min(maxLimit, Math.max(1, parseInt(q.limit, 10) || (isCompact ? 1000 : 60)));
       const offset = Math.max(0, parseInt(q.offset, 10) || 0);
 
       const [rows, cnt] = await Promise.all([
         db.many(`SELECT ${LIST_COLS} FROM products WHERE ${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
           ...binds, limit, offset),
-        // Capped like server.js so a huge search shows "5,000+" not a full scan.
-        db.one(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM products WHERE ${where} LIMIT ${COUNT_CAP + 1}) t`, ...binds),
+        // Compact = full-catalogue load: give it the true count (a COUNT(*)
+        // over ~23k rows is trivial). Everything else keeps the server.js cap
+        // so a huge search shows "5,000+" instead of forcing a full scan.
+        isCompact
+          ? db.one(`SELECT COUNT(*) AS n FROM products WHERE ${where}`, ...binds)
+          : db.one(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM products WHERE ${where} LIMIT ${COUNT_CAP + 1}) t`, ...binds),
       ]);
       const counted = (cnt && cnt.n) || 0;
-      const capped = counted > COUNT_CAP;
+      const capped = !isCompact && counted > COUNT_CAP;
       const total = Math.max(capped ? COUNT_CAP : counted, offset + rows.length);
 
       // The storefront (index.html / shop.html) asks with ?compact=1 and reads

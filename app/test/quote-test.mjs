@@ -86,7 +86,14 @@ sdb.exec(`
 DELETE FROM products WHERE img NOT LIKE 'qz-%';
 INSERT INTO products (img,name,make_model,category,condition,price_cents,stock_count,low_threshold,is_active,sku) VALUES
  ('qz-1','QZ Bumper','Civic','body','NEW',4500,7,2,1,'QZ-1'),
- ('qz-2','QZ Grille','Accord','body','NEW',NULL,0,2,1,'QZ-2');
+ ('qz-2','QZ Grille','Accord','body','NEW',NULL,0,2,1,'QZ-2');`);
+// Bulk rows so the compact full-catalogue path (limit way over the 200 the
+// grid uses) can be exercised.
+{
+  const ins = sdb.prepare("INSERT INTO products (img,name,make_model,category,condition,price_cents,stock_count,low_threshold,is_active,sku) VALUES (?,?,?,?,?,?,?,?,?,?)");
+  for (let i = 0; i < 600; i++) ins.run('qz-bulk-' + i, 'QZ Bulk ' + i, 'Civic', 'body', 'NEW', null, 1, 2, 1, 'QZB-' + i);
+}
+sdb.exec(`
 INSERT INTO users (id,email,name,phone,password_hash,is_admin,show_prices,created_at) VALUES
  (500,'buyer@x.com','Buyer B','876-555-1000','h',0,0,datetime('now')),
  (501,'approved@x.com','Appro A','876-555-2000','h',0,1,datetime('now')),
@@ -99,16 +106,26 @@ let n = 0;
 
 // ---- 1. compact products: prices hidden for a guest / un-approved -------
 // currentUser() returns null when no session -> canSeePrices false.
-let r = await call('get', '/api/products?compact=1&limit=50');
+let r = await call('get', '/api/products?compact=1&limit=1000');
 n++; A('compact returns {cats,rows}', Array.isArray(r.rows) && Array.isArray(r.cats));
 const byImg = Object.fromEntries(r.rows.map((row) => [row[0], row]));
 n++; A('guest: qz-1 price_cents is null (hidden)', byImg['qz-1'] && byImg['qz-1'][5] === null);
 n++; A('guest: prices_visible=false', r.prices_visible === false);
 n++; A('row shape [img,name,mm,catIdx,condIdx,price,stock,bin]', byImg['qz-1'][0] === 'qz-1' && byImg['qz-1'][6] === 7);
 
+// ---- 1a. compact honours a large limit (full-catalogue stream) --------
+const TOTAL = q1('SELECT COUNT(*) c FROM products WHERE is_active = 1').c;   // 602
+r = await call('get', '/api/products?compact=1&limit=4000');
+n++; A('compact: limit=4000 honoured (not capped at 200)', r.rows.length === TOTAL && TOTAL > 500);
+n++; A('compact: total is the true row count, not the 5000 cap', r.total === TOTAL);
+r = await call('get', '/api/products?compact=1&limit=250&offset=100');
+n++; A('compact: paginates (limit 250, offset 100)', r.rows.length === 250 && r.offset === 100 && r.total === TOTAL);
+r = await call('get', '/api/products?limit=4000');   // non-compact stays capped
+n++; A('non-compact still capped at 200', r.products.length === 200);
+
 // ---- 1b. approved customer (real session cookie) SEES prices ----------
 const ck501 = await cookieFor(501);
-r = await call('get', '/api/products?compact=1&limit=50', { cookie: ck501 });
+r = await call('get', '/api/products?compact=1&limit=1000', { cookie: ck501 });
 const byImg2 = Object.fromEntries(r.rows.map((row) => [row[0], row]));
 n++; A('approved: prices_visible=true', r.prices_visible === true);
 n++; A('approved: qz-1 price_cents = 4500', byImg2['qz-1'] && byImg2['qz-1'][5] === 4500);
