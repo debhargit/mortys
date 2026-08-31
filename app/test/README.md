@@ -43,6 +43,9 @@ Read-mostly smoke tests against production. They sign in with the seed admin
 (`admin@melthahonda.com` / `password123`) where noted.
 
 - `verify-store-pages.mjs` — boots shop/account/reviews/track/quote pages
+- `verify-catalogue.mjs` — `/shop.html` streams the full ~23k-row product
+  table (guards the `?compact=1` limit-cap regression) + `/` featured strip,
+  prices hidden for a guest
 - `verify-tabs.mjs` — walks admin sidebar tabs
 - `verify-settings.mjs`, `verify-dashboard.mjs`, `verify-pos-badge.mjs`,
   `verify-presence.mjs`, `verify-signup.mjs`, `verify-quote-live.mjs`
