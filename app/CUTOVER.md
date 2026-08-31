@@ -147,10 +147,34 @@ the window short and low-traffic.
 
 ---
 
+## Offline / on-premise use after cutover
+
+`melthahonda.com` (Cloudflare + D1) is **online-only** — no offline mode, no
+local cache. If the shop needs to keep ringing sales when the internet is
+down, keep running the **self-hosted portable edition** (this repo's
+`runtime\` + `app\boot.js` + `.vbs` launchers) on a shop PC:
+
+- Start it with `Meltha Honda Admin.vbs`; make it permanent with
+  `Start With Windows.vbs` (installs the `MelthaHondaAdmin` service). It serves
+  `http://<main-pc-IP>:3040/admin.html` off its bundled PostgreSQL, no internet.
+- Other tills join with `Connect To Shop Server.vbs` + a one-time link from
+  *Admin → Setup → Terminals & access* (or auto-discover via UDP `41235`).
+- **There is no live sync between the local Postgres and the cloud D1.** Run
+  one as the source of truth. To load a fresh local build from the cloud
+  catalogue: let `schema.sql` build the DB, then *Admin → Inventory → Import
+  CSV* (a `wrangler d1 export` dump is SQLite/`*_cents` and won't load into
+  Postgres directly). Local → cloud is `tools/pg2d1.mjs` (step 1 above).
+
+If you run **both** (cloud as primary, local as an offline standby), treat the
+local copy as read-mostly and reconcile any offline sales by hand when the
+connection returns — the same caveat as **Rollback** above.
+
 ## What did NOT come across (by design — see PORT.md)
 
 - Off-site `pg_dump` backup, bundled-Postgres installer, `boot.js`, the Windows
-  service, LAN terminal enrolment / Postgres role issuance. D1's own story is
-  `wrangler d1 export` + Time Travel (30-day PITR).
+  service, LAN terminal enrolment / Postgres role issuance, the "install a
+  local server / DB connection" Settings screens. D1's own story is
+  `wrangler d1 export` + Time Travel (30-day PITR); see "Offline / on-premise
+  use" above for keeping the LAN build for offline.
 - Twilio / SMS. Email only.
 - `.xlsx` inventory import — CSV/TSV only on Workers.

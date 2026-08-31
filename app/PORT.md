@@ -52,6 +52,36 @@ it in `CUTOVER.md` is operator actions (account opt-ins, secrets, DNS).
 - **Local/online dual `pg` pools + `queryWithFallback`** — one D1 binding, no
   fallback needed.
 
+### Offline / on-premise — local vs. cloud
+
+The hosted build (`melthahonda.com`, Cloudflare Pages + D1) is **online-only**.
+D1 has no offline mode and there is no local cache; if the internet drops, the
+POS is down. The Settings page reflects this — no "install a local server",
+no LAN terminal enrolment, no DB connection fields (see the cloud-aware
+`renderSettings` / the `settings/machine` `cloud:true` stub).
+
+**Offline use = run the self-hosted "portable" edition** (this repo's
+`runtime\node.exe` + `runtime\pgsql` + `app\boot.js` + the `.vbs` launchers).
+It is the local server and works with zero internet:
+
+| | Hosted (`melthahonda.com`) | Self-hosted portable |
+|---|---|---|
+| Runtime | Cloudflare Pages Functions (Hono) | Node/Express (`server.js`, `boot.js`) |
+| Database | Cloudflare D1 (`meltahonda-db`) | bundled PostgreSQL (`runtime\pgsql`, port 5433) |
+| Internet | required | not required (LAN only) |
+| Start | — (always up) | `Meltha Honda Admin.vbs`; service via `Start With Windows.vbs` |
+| Access | `https://melthahonda.com/admin` | `http://<main-pc-IP>:3040/admin.html` |
+| Extra tills | ordinary browser sign-ins | `Connect To Shop Server.vbs` + a one-time link from *Setup → Terminals & access*; UDP `41235` discovery |
+| Backup | D1 Time Travel (30-day PITR) + `wrangler d1 export` | `pg_dump` / off-site backup panel |
+
+**There is no automatic sync between the two.** The old Express-side off-site
+backup only ever went local→hosted-copy, and it is dropped on Cloudflare.
+Pick one as the source of truth. To seed a fresh local build from the cloud:
+let `schema.sql` build the Postgres DB, then re-import the catalogue via
+*Admin → Inventory → Import CSV* (`wrangler d1 export` produces SQLite/`*_cents`
+SQL that won't load straight into Postgres). Reverse direction: `tools/pg2d1.mjs`
+(local Postgres → D1 seed files, see Phase 9).
+
 ---
 
 ## Layout (all committed)
