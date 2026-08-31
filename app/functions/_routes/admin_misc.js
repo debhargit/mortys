@@ -76,6 +76,59 @@ export default function mount(app) {
   app.get('/api/admin/settings/server', managerMw, (c) => c.json({ ok: true, running_port: 443, configured_port: null, restart_required: false, cloud: true }));
   app.patch('/api/admin/settings/server', managerMw, (c) => c.json({ ok: true, running_port: 443, configured_port: null, restart_required: false, cloud: true }));
 
+  // ============ TERMINAL PRESENCE ============
+  // Every admin / POS browser heartbeats here (~60s) with a stable client id
+  // it keeps in localStorage. The POS ticket bar shows owners and managers a
+  // live count of connected tills. A row counts as online for ~2.5 min after
+  // its last beat; rows older than a day are pruned on write so the table
+  // cannot grow without bound. There is no persistent connection on a hosted
+  // Worker, so "connected" == "heartbeat seen recently".
+  const PRESENCE_ONLINE = "-150 seconds";
+  async function presenceSnapshot(db, selfId) {
+    const rows = await db.many(
+      `SELECT terminal_id, label, user_name, last_seen
+         FROM admin_presence
+        WHERE last_seen >= datetime('now', ?)
+        ORDER BY last_seen DESC`, PRESENCE_ONLINE);
+    return {
+      online: rows.length,
+      terminals: rows.map((r) => ({
+        terminal_id: r.terminal_id,
+        label: r.label || 'Terminal',
+        user_name: r.user_name || null,
+        last_seen: r.last_seen,
+        is_self: selfId != null && r.terminal_id === selfId,
+      })),
+    };
+  }
+  app.post('/api/admin/presence', adminMw, async (c) => {
+    const db = d1(c.env);
+    const u = c.get('user') || {};
+    const b = await c.req.json().catch(() => ({}));
+    const tid = String(b.terminal_id || '').trim().slice(0, 64);
+    if (!tid) return c.json({ error: 'terminal_id required' }, 400);
+    const label = String(b.label || '').trim().slice(0, 60) || null;
+    const ip = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || null;
+    const ua = String(c.req.header('User-Agent') || '').slice(0, 200) || null;
+    await db.run(
+      `INSERT INTO admin_presence (terminal_id, label, user_id, user_name, ip, user_agent, first_seen, last_seen)
+         VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+       ON CONFLICT(terminal_id) DO UPDATE SET
+         label      = COALESCE(excluded.label, admin_presence.label),
+         user_id    = excluded.user_id,
+         user_name  = excluded.user_name,
+         ip         = excluded.ip,
+         user_agent = excluded.user_agent,
+         last_seen  = datetime('now')`,
+      tid, label, u.id || null, u.name || u.email || null, ip, ua);
+    await db.run("DELETE FROM admin_presence WHERE last_seen < datetime('now', '-1 day')");
+    return c.json({ ok: true, ...(await presenceSnapshot(db, tid)) });
+  });
+  app.get('/api/admin/presence', adminMw, async (c) => {
+    const db = d1(c.env);
+    return c.json(await presenceSnapshot(db, c.req.query('terminal_id') || null));
+  });
+
   // ============ MARKETING ============
   app.get('/api/admin/marketing/segments/count', adminMw, async (c) => {
     const db = d1(c.env);

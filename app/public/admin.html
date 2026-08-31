@@ -2543,6 +2543,12 @@ async function renderPOS(panel){
         }
         return '<span title="' + esc(tip) + '" style="font-size:11px;color:#cbd5e1;display:flex;align-items:center;gap:6px;white-space:nowrap">' + badge + '</span>';
       })() +
+      // Owners / managers see a live count of how many tills are currently
+      // connected to the admin (heartbeat from init(); painted by
+      // paintTerminalCount()). Cashiers don't need it, so it isn't rendered.
+      (['owner', 'manager'].indexOf(CURRENT_ADMIN_ROLE) !== -1
+        ? '<span id="posTermCount" title="Terminals connected to the admin" style="display:none;font-size:11px;color:#cbd5e1;background:rgba(255,255,255,.14);border-radius:5px;padding:5px 8px;white-space:nowrap"></span>'
+        : '') +
     '</div>' +
 
     // 148px was hand-tuned for the layout with the KPI tile strip showing
@@ -3961,6 +3967,12 @@ async function renderPOS(panel){
     window.__posNotifTimer = setInterval(posNotifPoll, 30000);
     posNotifPoll();
   }
+
+  // ---- terminals-connected pill (owners / managers) --------------------
+  // The heartbeat runs app-wide from init(); this just shows the latest
+  // number as soon as the ticket bar exists, then asks for a fresh one.
+  paintTerminalCount();
+  presenceBeat();
 
   // Scanner: a hardware scanner types the code then sends Enter. An exact hit
   // goes straight into the cart so the operator never takes a hand off the gun.
@@ -11946,9 +11958,70 @@ async function submitNewProduct(){
 //  init() — called after successful sign-in (also on initial load if already
 //  authenticated). Builds the sidebar and shows the default tab.
 // =============================================================================
+// =============================================================================
+//  TERMINAL PRESENCE — heartbeat + live "N terminals connected" count
+// =============================================================================
+// Every admin / POS browser keeps a stable id in localStorage and POSTs it to
+// /api/admin/presence about once a minute. The server counts the beats it has
+// seen recently; the POS ticket bar shows owners and managers how many tills
+// are connected to the admin right now.
+var TERMINALS_ONLINE = null;   // last count from the server; null = not known yet
+var TERMINAL_ID = null;
+
+function terminalId(){
+  if (TERMINAL_ID) return TERMINAL_ID;
+  var id = null;
+  try { id = localStorage.getItem('mh_terminal_id'); } catch (_) {}
+  if (!id) {
+    id = 'T-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+    try { localStorage.setItem('mh_terminal_id', id); } catch (_) {}
+  }
+  TERMINAL_ID = id;
+  return id;
+}
+function terminalLabel(){
+  try { var l = localStorage.getItem('mh_terminal_label'); if (l) return l; } catch (_) {}
+  return 'Till ' + terminalId().slice(-4).toUpperCase();
+}
+function paintTerminalCount(){
+  var el = document.getElementById('posTermCount');
+  if (!el) return;
+  if (TERMINALS_ONLINE == null) { el.style.display = 'none'; return; }
+  var n = TERMINALS_ONLINE;
+  el.style.display = '';
+  el.textContent = '👥 ' + n + ' ' + (n === 1 ? 'terminal' : 'terminals');
+  el.title = n + ' terminal' + (n === 1 ? '' : 's') +
+    ' connected to the admin in the last few minutes (this one included).';
+}
+async function presenceBeat(){
+  try {
+    var r = await api('/api/admin/presence', {
+      method: 'POST',
+      body: { terminal_id: terminalId(), label: terminalLabel() },
+    });
+    if (r && typeof r.online === 'number') {
+      TERMINALS_ONLINE = r.online;
+      window.__presenceTerminals = r.terminals || [];
+    }
+  } catch (_) { /* not permitted / offline — keep the last known count */ }
+  paintTerminalCount();
+}
+function startTerminalPresence(){
+  if (window.__presenceTimer) clearInterval(window.__presenceTimer);
+  presenceBeat();
+  window.__presenceTimer = setInterval(presenceBeat, 60000);
+  if (!window.__presenceVisWired) {
+    window.__presenceVisWired = true;
+    document.addEventListener('visibilitychange', function(){
+      if (!document.hidden) presenceBeat();
+    });
+  }
+}
+
 async function init(){
   try {
     buildSidebar();
+    startTerminalPresence();
     try { await loadSummary(); } catch (_) {}
     // The screen this person wants to land on. POS Terminal stays the default
     // -- this is a counter-sales app first -- but someone who lives in Reports
