@@ -152,6 +152,28 @@ conversion but **drifted** from `schema.sql`. `migrations/0014_sync_with_postgre
 | **8** | Scheduled jobs. `_lib/jobs.js` — `back-in-stock` (email `notify_subscriptions` whose part is back, set `notified_at`), `reminders-digest` (daily mail to `ORDER_NOTIFY_TO` of `customer_reminders` due today), `low-stock-digest` (daily mail of active parts ≤ `low_threshold`); digests self-throttle via `app_config`, every run logged to `job_runs`. `_routes/cron.js` — `GET/POST /api/cron/:job` (+ `_all`, + `GET /api/cron` listing) gated by `env.CRON_SECRET` (Bearer / `X-Cron-Key` / `?key=`; 503 when unset). `_routes/crm.js` — the `customer_reminders` CRUD + `/reminders/due`. `cron-worker/` — companion Worker (Pages can't own Cron Triggers) whose `scheduled()` calls `/api/cron/*` with the secret. Migration `0020_cron.sql` (`customer_reminders`, `job_runs`). | **committed, tested vs node:sqlite** |
 | **9** | Cutover tooling + runbook. `tools/sync-public.mjs` (`npm run cf:build`) copies the current `admin.html`/`index.html`/print shells + assets from `app/` into `public/` — the front-end already uses relative `/api/*` + `credentials:'same-origin'`, so no JS changes. `tools/pg2d1.mjs` (`npm run cf:data`) parses the D1 migrations for each table's real column set, reads the matching Postgres table, applies the same conversions the routes use (`*_usd`→`*_cents`, bool→0/1, jsonb→TEXT, ts→ISO), drops PG-only columns, and writes ordered `INSERT OR REPLACE` files + `_import.sh`/`.ps1`. `CUTOVER.md` = the go-live sequence (opt-ins, migrate, data load, secrets, deploy, cron worker, DNS, checks, rollback). `cf:deploy` now runs `cf:build` first. | **committed; `pg2d1` 14/14 selftest, `sync-public` run. DNS + account opt-ins are operator steps.** |
 
+### Phases 10+ — porting the rest of the admin surface
+
+Phases 1–9 covered storefront + POS + core commerce admin (~65 routes). The
+service-centre / HR / marketing / ops half of `admin.html` (~176 more routes)
+is being ported after go-live, one deployable module at a time:
+
+| Phase | Scope | Status |
+|---|---|---|
+| **10** | Customer-facing completion: `POST /api/auth/signup` + `reset-default-admin`, `PATCH /api/me`, `POST /api/checkout` (coupons + loyalty, `db.batch()`), `GET /api/orders[/:id]`, `/api/points`, `/api/config`, `/api/vin/:vin`, `/api/newsletter`, `/api/service`, `/api/coupon/validate`, `/api/vehicles*`, `/api/my-addresses*`, `/api/my-messages`, `/api/my-work-orders`, `/api/work-order-lookup`. `_routes/customer.js`, migration `0021` (`coupons`, `coupon_redemptions`). Also `GET /api/admin/summary` + the `[[path]].js` static-fallthrough fix. | **committed + deployed; 38/38 vs node:sqlite** |
+| **11** | Admin CRM + storefront-admin: inquiries, appointments (+ calendar), notifications, reviews (+ 50pt award), customer addresses/contacts (admin side), message inbox, coupons CRUD, gift-card issue/reload/toggle. `_routes/admin_crm.js`, migration `0022` (`customer_contacts`). | **committed + deployed; 35/35 vs node:sqlite** |
+| 12 | Users & staff & roles admin: `/api/admin/users*` (list/detail/CRUD/role/perms/messages/notifications/account-payments), `/api/admin/staff*` (CRUD + PIN), `/api/admin/roles*`, `/api/admin/user-categories*`, `/api/admin/points/:id`, `POST /api/admin/me/ui-prefs` | |
+| 13 | Service centre: mechanics, services, work-orders (+ labor/parts sub-resources), inspections CRUD, labor standards/estimate, maintenance-due, vehicle-history | |
+| 14 | Ops: parts-requisitions + requisitions workflow, stock-counts (+ items + adjust), deliveries, cash-drawer (+ report), warehouse-activity, bin lookup | |
+| 15 | Marketing (campaigns/segments), schedule + schedule-blocks, time-entries, analytics + reports suite, misc (`lookup`, `external-refs`, `import/services`, `pos/scan`, `pos/customer`, `orders/:id` PATCH) | |
+
+`melthahonda.com` runs whatever is deployed; unported endpoints still return
+501 with the PORT.md pointer. Each phase: migration for D1 gaps → module →
+`node --experimental-sqlite` test → `wrangler d1 migrations apply --remote` →
+`wrangler pages deploy … --branch main` → commit.
+
+---
+
 Each phase was verified with a scratch `node --experimental-sqlite` harness that
 applies all `migrations/*.sql`, mounts the real route module, and asserts on the
 route SQL. Before DNS, also run `npm run cf:dev` and diff a few response bodies
