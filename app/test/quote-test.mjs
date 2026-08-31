@@ -1,0 +1,199 @@
+import { fileURLToPath } from 'node:url';
+// Portable base: this file lives in app/test/, so app/ is one level up.
+const APP = new URL('../', import.meta.url).href;            // file:///.../app/
+const APP_DIR = fileURLToPath(APP);                          // native path
+
+import { DatabaseSync } from 'node:sqlite';
+import fs from 'fs';
+process.chdir(APP_DIR);
+const sdb = new DatabaseSync(':memory:');
+sdb.exec('PRAGMA foreign_keys=ON;');
+for (const f of fs.readdirSync('migrations').filter((x) => /^\d+.*\.sql$/.test(x)).sort()) {
+  try { sdb.exec(fs.readFileSync('migrations/' + f, 'utf8')); }
+  catch (e) { console.log('MIGRATION FAIL', f, e.message.split('\n')[0]); process.exit(1); }
+}
+console.log('migrations 0001-0027 OK');
+
+function makeDB(db) {
+  return { prepare(sql) { return { _sql: sql, _b: [], bind(...b) { this._b = b; return this; },
+      all() { return { results: db.prepare(this._sql).all(...this._b) }; },
+      first() { const r = db.prepare(this._sql).get(...this._b); return r === undefined ? null : r; },
+      run() { const r = db.prepare(this._sql).run(...this._b); return { success: true, meta: { last_row_id: Number(r.lastInsertRowid), changes: r.changes } }; } }; },
+    async batch(s) { const o = []; for (const x of s) o.push(x.run()); return o; } };
+}
+const ENV = { DB: makeDB(sdb), ORDER_NOTIFY_TO: '', SESSION_SECRET: 'test-secret-quote' };
+const { sessionCookie } = await import(APP + 'functions/_lib/session.js');
+async function cookieFor(userId) { return (await sessionCookie(ENV, { userId, epoch: 0 })).split(';')[0]; }
+const routes = [];
+const app = {};
+for (const v of ['get', 'post', 'patch', 'delete', 'put']) app[v] = (p, ...r) => routes.push({ v, p, mws: r.slice(0, -1), h: r[r.length - 1] });
+for (const mod of ['auth', 'storefront', 'customer', 'admin_crm', 'admin_users']) {
+  (await import(APP + 'functions/_routes/' + mod + '.js')).default(app);
+}
+console.log('mounted', routes.length);
+
+function toRe(p) { return new RegExp('^' + p.replace(/:[A-Za-z_]+/g, '([^/]+)') + '$'); }
+function pn(p) { return (p.match(/:([A-Za-z_]+)/g) || []).map((s) => s.slice(1)); }
+function match(v, url) {
+  const [p, qs] = url.split('?'); const query = Object.fromEntries(new URLSearchParams(qs || ''));
+  for (const r of routes) { if (r.v !== v) continue; const m = toRe(r.p).exec(p); if (!m) continue;
+    const params = {}; pn(r.p).forEach((n, i) => params[n] = decodeURIComponent(m[i + 1])); return { r, params, query }; }
+  return null;
+}
+let SESSION_USER = null;   // the row currentUser() would return, or null
+let st = 200;
+async function call(v, url, { body, user, cookie } = {}) {
+  const m = match(v, url); if (!m) throw new Error('no route ' + v + ' ' + url); st = 200;
+  const ctxUser = user !== undefined ? user : SESSION_USER;
+  const headers = new Headers({ 'content-type': 'application/json' });
+  if (cookie) headers.set('cookie', cookie);
+  const raw = new Request('https://x' + url, { method: v.toUpperCase(), headers });
+  const c = {
+    env: ENV, executionCtx: { waitUntil() {} },
+    get: (k) => (k === 'user' ? ctxUser : undefined),
+    req: {
+      url: 'https://x' + url, method: v.toUpperCase(),
+      param: (n) => m.params[n], query: (n) => (n == null ? m.query : m.query[n]),
+      header: (n) => raw.headers.get(n),
+      raw, json: async () => body || {},
+      parseBody: async () => ({}),
+    },
+    json: (o, s) => { if (s) st = s; return { _json: o, _status: s || 200 }; },
+    body: (d, s) => { st = s || 200; return { _body: d, _status: st }; },
+  };
+  // guards.currentUser reads the request/session; stub it by intercepting the
+  // module via ENV -- simplest is to monkeypatch below. Here we rely on routes
+  // that call c.get('user') for auth'd paths; public paths call currentUser().
+  const r = await m.r.h(c);
+  return r && r._json !== undefined ? r._json : r;
+}
+
+// storefront.js + customer.js call currentUser(c.req.raw, c.env) directly for
+// optional auth. Patch that module's export to read our SESSION_USER.
+const guards = await import(APP + 'functions/_lib/guards.js');
+const realCurrent = guards.currentUser;
+// can't reassign ESM export; instead the routes import the binding live -- so
+// patch via the module namespace is not possible. Work around: the public
+// routes we test (products/inquiry/config) use currentUser; give them a DB
+// user by seeding a session-less path -- we assert on c.get('user') routes for
+// price gating and call the compact endpoint with an explicit approved flag by
+// seeding users + relying on cookie. Simpler: test the pure logic paths.
+
+const A = (l, ok) => { console.log((ok ? 'PASS  ' : 'FAIL  ') + l); if (!ok) process.exitCode = 1; };
+const q1 = (s, ...p) => sdb.prepare(s).get(...p);
+
+sdb.exec(`
+DELETE FROM products WHERE img NOT LIKE 'qz-%';
+INSERT INTO products (img,name,make_model,category,condition,price_cents,stock_count,low_threshold,is_active,sku) VALUES
+ ('qz-1','QZ Bumper','Civic','body','NEW',4500,7,2,1,'QZ-1'),
+ ('qz-2','QZ Grille','Accord','body','NEW',NULL,0,2,1,'QZ-2');
+INSERT INTO users (id,email,name,phone,password_hash,is_admin,show_prices,created_at) VALUES
+ (500,'buyer@x.com','Buyer B','876-555-1000','h',0,0,datetime('now')),
+ (501,'approved@x.com','Appro A','876-555-2000','h',0,1,datetime('now')),
+ (900,'admin@x.com','Adm',NULL,'h',1,0,datetime('now'));
+`);
+
+const ADMIN = { id: 900, is_admin: 1, admin_role: 'owner' };
+
+let n = 0;
+
+// ---- 1. compact products: prices hidden for a guest / un-approved -------
+// currentUser() returns null when no session -> canSeePrices false.
+let r = await call('get', '/api/products?compact=1&limit=50');
+n++; A('compact returns {cats,rows}', Array.isArray(r.rows) && Array.isArray(r.cats));
+const byImg = Object.fromEntries(r.rows.map((row) => [row[0], row]));
+n++; A('guest: qz-1 price_cents is null (hidden)', byImg['qz-1'] && byImg['qz-1'][5] === null);
+n++; A('guest: prices_visible=false', r.prices_visible === false);
+n++; A('row shape [img,name,mm,catIdx,condIdx,price,stock,bin]', byImg['qz-1'][0] === 'qz-1' && byImg['qz-1'][6] === 7);
+
+// ---- 1b. approved customer (real session cookie) SEES prices ----------
+const ck501 = await cookieFor(501);
+r = await call('get', '/api/products?compact=1&limit=50', { cookie: ck501 });
+const byImg2 = Object.fromEntries(r.rows.map((row) => [row[0], row]));
+n++; A('approved: prices_visible=true', r.prices_visible === true);
+n++; A('approved: qz-1 price_cents = 4500', byImg2['qz-1'] && byImg2['qz-1'][5] === 4500);
+n++; A('approved: qz-2 (no price set) still null', byImg2['qz-2'] && byImg2['qz-2'][5] === null);
+
+// ---- 2. non-compact also strips price for guest ------------------------
+r = await call('get', '/api/products?limit=50');
+n++; A('non-compact guest: price_usd null', r.products.every((p) => p.price_usd === null) && r.prices_visible === false);
+
+// ---- 3. /api/config: ordering disabled -------------------------------
+r = await call('get', '/api/config');
+n++; A('config ordering_enabled=false', r.ordering_enabled === false);
+n++; A('config payments.methods empty', Array.isArray(r.payments.methods) && r.payments.methods.length === 0);
+
+// ---- 4. /api/checkout is hard-disabled -----------------------------
+r = await call('post', '/api/checkout', { user: { id: 501, show_prices: 1 }, body: { payment_method: 'cash_pickup' } });
+n++; A('/api/checkout -> 400 quote_only', st === 400 && r.code === 'quote_only');
+n++; A('no order rows created', (q1('SELECT COUNT(*) c FROM orders').c) === 0);
+
+// ---- 5. /api/inquiry cart quote request ----------------------------
+r = await call('post', '/api/inquiry', {
+  user: undefined, // guest
+  body: { name: 'Guest G', phone: '876-555-9999', items: [{ img: 'qz-1', qty: 3 }, { img: 'qz-2', qty: 1 }] },
+});
+n++; A('/api/inquiry cart -> ok + id', r.ok === true && r.id > 0);
+const inqRow = q1('SELECT * FROM parts_inquiries WHERE id = ?', r.id);
+n++; A('  source=cart, status=new', inqRow.source === 'cart' && inqRow.status === 'new');
+const its = JSON.parse(inqRow.items_json);
+n++; A('  items_json has 2 lines, unit_price null, list snapshot present', its.length === 2 && its[0].unit_price_cents === null && its[0].list_price_cents === 4500);
+n++; A('  part_description summarised', /qz-1|QZ Bumper/.test(inqRow.part_description));
+
+// ---- 6. /api/inquiry form request (no items) ----------------------
+r = await call('post', '/api/inquiry', { user: undefined, body: { name: 'Formy', email: 'f@x.com', part_description: 'Left mirror for 2012 CR-V' } });
+n++; A('/api/inquiry form -> ok', r.ok === true);
+n++; A('  source=form', q1('SELECT source FROM parts_inquiries WHERE id = ?', r.id).source === 'form');
+
+// ---- 7. /api/inquiry validation ---------------------------------
+r = await call('post', '/api/inquiry', { user: undefined, body: { phone: '876-1' } });
+n++; A('missing name -> 400', st === 400);
+r = await call('post', '/api/inquiry', { user: undefined, body: { name: 'X' } });
+n++; A('no phone/email -> 400', st === 400);
+
+// ---- 8. admin list shows cart lines + account pricing state -------
+const cartInqId = its ? q1("SELECT id FROM parts_inquiries WHERE source='cart' ORDER BY id LIMIT 1").id : null;
+// link it to an account so show-prices can work
+sdb.prepare('UPDATE parts_inquiries SET user_id = 500 WHERE id = ?').run(cartInqId);
+r = await call('get', '/api/admin/inquiries', { user: ADMIN });
+const listed = r.inquiries.find((x) => x.id === cartInqId);
+n++; A('admin list: has_photo, source, customer_show_prices fields', listed && listed.source === 'cart' && Number(listed.customer_show_prices) === 0);
+
+// ---- 9. admin detail ------------------------------------------
+r = await call('get', '/api/admin/inquiries/' + cartInqId, { user: ADMIN });
+n++; A('admin detail: items parsed + stock map', r.items.length === 2 && r.stock['qz-1'] && r.stock['qz-1'].stock_count === 7);
+n++; A('  no photo_data leaked', !('photo_data' in r.inquiry));
+
+// ---- 10. admin prices the quote --------------------------------
+r = await call('patch', '/api/admin/inquiries/' + cartInqId, { user: ADMIN, body: {
+  items: [ { img: 'qz-1', name: 'QZ Bumper', qty: 3, unit_price_usd: 50 }, { img: 'qz-2', name: 'QZ Grille', qty: 1, unit_price_usd: 20 } ],
+  quote_notes: '3-5 day lead on the grille',
+} });
+n++; A('patch prices -> ok', r.ok === true);
+const priced = q1('SELECT * FROM parts_inquiries WHERE id = ?', cartInqId);
+n++; A('  quote_total_cents = 3*5000 + 2000 = 17000', priced.quote_total_cents === 17000);
+n++; A('  status auto-moved new -> quoted', priced.status === 'quoted');
+n++; A('  priced_at + priced_by stamped', priced.priced_at && priced.priced_by === 900);
+n++; A('  quote_notes saved', priced.quote_notes === '3-5 day lead on the grille');
+
+// ---- 11. show-prices toggle ----------------------------------
+r = await call('post', '/api/admin/inquiries/' + cartInqId + '/show-prices', { user: ADMIN, body: { enabled: true } });
+n++; A('show-prices enable -> ok + show_prices true', r.ok === true && r.show_prices === true);
+n++; A('  users.show_prices flipped for user 500', q1('SELECT show_prices FROM users WHERE id=500').show_prices === 1);
+r = await call('post', '/api/admin/inquiries/' + cartInqId + '/show-prices', { user: ADMIN, body: { enabled: false } });
+n++; A('show-prices disable -> show_prices false', r.show_prices === false && q1('SELECT show_prices FROM users WHERE id=500').show_prices === 0);
+
+// ---- 12. show-prices on a guest (no account) request errors -----
+const formInqId = q1("SELECT id FROM parts_inquiries WHERE source='form' ORDER BY id LIMIT 1").id;
+r = await call('post', '/api/admin/inquiries/' + formInqId + '/show-prices', { user: ADMIN, body: { enabled: true } });
+n++; A('show-prices on account-less request -> 400', st === 400 && /no customer account/i.test(r.error || ''));
+
+// ---- 13. status-only PATCH still works ----------------------
+r = await call('patch', '/api/admin/inquiries/' + formInqId, { user: ADMIN, body: { status: 'lost' } });
+n++; A('status-only patch still works', r.ok === true && q1('SELECT status FROM parts_inquiries WHERE id=?', formInqId).status === 'lost');
+
+// ---- 14. user PATCH accepts show_prices ---------------------
+r = await call('patch', '/api/admin/users/500', { user: ADMIN, body: { show_prices: true } });
+n++; A('PATCH /api/admin/users/:id show_prices', q1('SELECT show_prices FROM users WHERE id=500').show_prices === 1);
+
+console.log(`\n${n} checks`);

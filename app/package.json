@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "test": "node test/run-offline.mjs",
     "init-db": "psql \"$DATABASE_URL\" -f schema.sql",
     "cf:build": "node tools/sync-public.mjs",
     "cf:build:check": "node tools/sync-public.mjs --check",
@@ -35,6 +36,7 @@
     "node": ">=18"
   },
   "devDependencies": {
+    "jsdom": "^30.0.1",
     "wrangler": "^4.127.1"
   }
 }
