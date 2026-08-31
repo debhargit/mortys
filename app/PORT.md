@@ -54,8 +54,13 @@ functions/
   _routes/
     auth.js            Phase 1 — /api/auth/*, /api/me
     storefront.js      Phase 2 — products, filters, cart, reviews, wishlist, notify
+    admin.js           Phase 3 — admin reads (settings, roles, staff, products,
+                       orders, dashboard, …)
   _lib/
     money.js           centsToUsd / usdToCents + PRODUCT_USD_COLS
+    util.js            safeJson (jsonb-as-TEXT), boolify (0/1 -> bool)
+    capabilities.js    CAPABILITIES (copied verbatim from server.js)
+    shop.js            getShopSettings(env) with the hardcoded fallback
     password.js        hash() / compare() over bcryptjs
     session.js         readSession() / writeSession() / clearSession()
                        WebCrypto HMAC‑SHA256 signed cookie, name "mh_session",
@@ -111,8 +116,8 @@ conversion but **drifted** from `schema.sql`. `migrations/0014_sync_with_postgre
 | Phase | Scope | Status |
 |---|---|---|
 | **1** | Scaffold, `_lib`, schema sync `0014`, auth slice (`/api/auth/*`, `/api/me`) | **committed, untested** |
-| **2** | Storefront reads: `/api/products*`, `/api/filters`, `/api/cart*`, `/api/reviews`, `/api/wishlist*`, `/api/notify`. `_routes/{auth,storefront}.js`, `_lib/money.js`, migration `0015_storefront.sql` (adds `wishlist`). | **committed, untested** |
-| 3 | Auth‑gated reads: dashboard, `/api/admin/orders`, `/api/admin/products`, staff, roles, settings GET | |
+| **2** | Storefront reads: `/api/products*`, `/api/filters`, `/api/cart*`, `/api/reviews`, `/api/wishlist*`, `/api/notify`. `_routes/{auth,storefront}.js`, `_lib/money.js`, migration `0015_storefront.sql` (adds `wishlist`). | **committed, tested vs node:sqlite** |
+| **3** | Admin reads: `/api/admin/{settings,capabilities,me/ui-prefs,roles,roles/mine,user-categories,staff,products,products/:img,low-stock,orders,orders/:id,dashboard}`. `_routes/admin.js`, `_lib/{util,capabilities,shop}.js`, migration `0016_admin.sql` (adds `shop_settings`, `account_payments`, `users.perms`, `user_categories.perms`, `products.supplier_id/barcode`, `orders.coupon_*`). | **committed, tested vs node:sqlite** |
 | 4 | POS write path: `/api/admin/pos/sale`, holds, quotes, returns/credit notes, `pos_sale_items` | |
 | 5 | Inventory + purchasing writes; CSV import (parse in‑Worker, cap size) | |
 | 6 | Uploads → R2 (`wrangler r2 bucket create`), email → `send_email` binding | |

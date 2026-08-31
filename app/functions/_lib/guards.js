@@ -34,12 +34,20 @@ export async function requireAdmin(request, env) {
   return g;
 }
 
+// server.js roleCanManage(): 'owner' always; else the roles row; unknown = no.
+export async function roleCanManage(env, code) {
+  if (code === 'owner') return true;
+  if (!code) return false;
+  const r = await d1(env).one('SELECT can_manage FROM roles WHERE code = ?', code);
+  return !!(r && r.can_manage);
+}
+
 export async function requireManager(request, env) {
   const g = await requireAdmin(request, env);
   if (g.error) return g;
-  const role = await d1(env).one('SELECT can_manage FROM roles WHERE code = ?', g.user.admin_role);
-  const canManage = g.user.admin_role === 'owner' || !!(role && role.can_manage);
-  if (!canManage) return { error: 'Manager access required for this action', status: 403 };
+  if (!(await roleCanManage(env, g.user.admin_role))) {
+    return { error: 'Manager access required for this action', status: 403 };
+  }
   return g;
 }
 
