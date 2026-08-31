@@ -15,6 +15,7 @@ import mountInventory from './_routes/inventory.js';    // Phase 6 (inventory + 
 import mountMedia from './_routes/media.js';            // Phase 7 (R2 uploads + send_email)
 import mountCrm from './_routes/crm.js';                // Phase 8 (customer reminders CRUD)
 import mountCron from './_routes/cron.js';              // Phase 8 (scheduled-job endpoints)
+import mountCustomer from './_routes/customer.js';      // Phase 10 (checkout, account, signup)
 
 const app = new Hono();
 
@@ -27,8 +28,9 @@ mountInventory(app);
 mountMedia(app);
 mountCrm(app);
 mountCron(app);
+mountCustomer(app);
 
-app.get('/api/health', (c) => c.json({ ok: true, runtime: 'cloudflare-pages', ported_phases: [1, 2, 3, 4, 5, 6, 7, 8] }));
+app.get('/api/health', (c) => c.json({ ok: true, runtime: 'cloudflare-pages', ported_phases: [1, 2, 3, 4, 5, 6, 7, 8, 10] }));
 
 // Anything under /api not yet ported.
 app.all('/api/*', (c) => c.json({ error: 'This endpoint is not ported to Cloudflare yet — see app/PORT.md' }, 501));
