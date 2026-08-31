@@ -46,6 +46,10 @@ Read-mostly smoke tests against production. They sign in with the seed admin
 - `verify-catalogue.mjs` — `/shop.html` streams the full ~23k-row product
   table (guards the `?compact=1` limit-cap regression) + `/` featured strip,
   prices hidden for a guest
+- `verify-quote-e2e.mjs` — full storefront quote flow: guest sees no prices →
+  signed-in customer carts parts, checkout files a quote request (no order) →
+  admin sees it, prices the line items, unlocks pricing for that customer →
+  customer now sees prices. Uses a throwaway signup account, cleans it up.
 - `verify-tabs.mjs` — walks admin sidebar tabs (as the owner)
 - `verify-tabs-role.mjs [role]` — creates a throwaway staff account with the
   given role (default `cashier`), signs in as it, reports which tabs the role
