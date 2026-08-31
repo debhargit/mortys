@@ -1,9 +1,9 @@
-// Cloudflare Pages Functions entry — one Hono app catches every request that
-// isn't a static file under public/. Route modules live in functions/_routes/;
-// each phase of the port (see app/PORT.md) adds one and mounts it here.
+// Cloudflare Pages Functions entry. This catch-all runs for every request, so
+// it must hand anything that isn't a dynamic route (/api/*, /uploads/*) back
+// to Pages via context.next() — otherwise the static front-end in public/
+// (index.html, admin.html, images, …) would 404.
 //
-// NOT RUNTIME-TESTED — no wrangler/D1 in the build environment. Verify with
-// `npm run cf:dev` before relying on it.
+// Deployed to melthahonda.com 2026-08-31 (phases 1-8).
 
 import { Hono } from 'hono';
 import mountAuth from './_routes/auth.js';           // Phase 1
@@ -33,4 +33,11 @@ app.get('/api/health', (c) => c.json({ ok: true, runtime: 'cloudflare-pages', po
 // Anything under /api not yet ported.
 app.all('/api/*', (c) => c.json({ error: 'This endpoint is not ported to Cloudflare yet — see app/PORT.md' }, 501));
 
-export const onRequest = (context) => app.fetch(context.request, context.env, context);
+export const onRequest = (context) => {
+  const { pathname } = new URL(context.request.url);
+  // Dynamic routes go to Hono; everything else is a static asset in public/.
+  if (pathname.startsWith('/api/') || pathname.startsWith('/uploads/')) {
+    return app.fetch(context.request, context.env, context);
+  }
+  return context.next();
+};
