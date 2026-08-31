@@ -154,23 +154,34 @@ conversion but **drifted** from `schema.sql`. `migrations/0014_sync_with_postgre
 
 ### Phases 10+ — porting the rest of the admin surface
 
-Phases 1–9 covered storefront + POS + core commerce admin (~65 routes). The
-service-centre / HR / marketing / ops half of `admin.html` (~176 more routes)
-is being ported after go-live, one deployable module at a time:
+Phases 1–9 covered storefront + POS + core commerce admin (~65 routes).
+Phases 10–15 ported the remaining ~176 routes (the service-centre / HR /
+marketing / ops half of `admin.html`) after go-live, one deployable module at
+a time — **all now committed, tested and deployed**:
 
 | Phase | Scope | Status |
 |---|---|---|
 | **10** | Customer-facing completion: `POST /api/auth/signup` + `reset-default-admin`, `PATCH /api/me`, `POST /api/checkout` (coupons + loyalty, `db.batch()`), `GET /api/orders[/:id]`, `/api/points`, `/api/config`, `/api/vin/:vin`, `/api/newsletter`, `/api/service`, `/api/coupon/validate`, `/api/vehicles*`, `/api/my-addresses*`, `/api/my-messages`, `/api/my-work-orders`, `/api/work-order-lookup`. `_routes/customer.js`, migration `0021` (`coupons`, `coupon_redemptions`). Also `GET /api/admin/summary` + the `[[path]].js` static-fallthrough fix. | **committed + deployed; 38/38 vs node:sqlite** |
 | **11** | Admin CRM + storefront-admin: inquiries, appointments (+ calendar), notifications, reviews (+ 50pt award), customer addresses/contacts (admin side), message inbox, coupons CRUD, gift-card issue/reload/toggle. `_routes/admin_crm.js`, migration `0022` (`customer_contacts`). | **committed + deployed; 35/35 vs node:sqlite** |
-| 12 | Users & staff & roles admin: `/api/admin/users*` (list/detail/CRUD/role/perms/messages/notifications/account-payments), `/api/admin/staff*` (CRUD + PIN), `/api/admin/roles*`, `/api/admin/user-categories*`, `/api/admin/points/:id`, `POST /api/admin/me/ui-prefs` | |
-| 13 | Service centre: mechanics, services, work-orders (+ labor/parts sub-resources), inspections CRUD, labor standards/estimate, maintenance-due, vehicle-history | |
-| 14 | Ops: parts-requisitions + requisitions workflow, stock-counts (+ items + adjust), deliveries, cash-drawer (+ report), warehouse-activity, bin lookup | |
-| 15 | Marketing (campaigns/segments), schedule + schedule-blocks, time-entries, analytics + reports suite, misc (`lookup`, `external-refs`, `import/services`, `pos/scan`, `pos/customer`, `orders/:id` PATCH) | |
+| **12** | Users / staff / roles / categories admin: `/api/admin/users*` (list/detail/CRUD/role/perms/messages/notifications/account-payments), `/api/admin/staff*` (CRUD + PIN + pin-verify), `/api/admin/roles*`, `/api/admin/user-categories*`, `/api/admin/points/:id`, `POST /api/admin/me/ui-prefs`. `_routes/admin_users.js`, `_lib/perms.js`, migration `0023` (`users.company_name/customer_type/tax_id`, `customer_messages.staff_id`, `customer_notifications`). | **committed + deployed; 44/44 vs node:sqlite** |
+| **13** | Service centre: mechanics, services catalogue, work-orders + labor/parts/payments/signature, inspections CRUD + items, labor standards/estimate, maintenance-due (window fn), vehicle-history. `_routes/service.js`, migration `0024` (`services.default_labor_cents/default_parts_cents`). | **committed + deployed; 34/34 vs node:sqlite** |
+| **14** | Ops: parts requisitions (fulfil = read→compute→`db.batch()`), service requisitions + convert-to-WO, stock counts (snapshot→count→post), stock-adjust, deliveries, cash drawer open/close, cash-report, warehouse-activity, bin lookup. `_routes/ops.js`, migration `0025` (rebuild `service_requisitions`/`_items` to current shape). | **committed + deployed; 35/35 vs node:sqlite** |
+| **15** | Analytics + the 13-endpoint reports suite (`_routes/reports.js`); settings PATCH + machine/server cloud stubs, marketing campaigns CRUD/send, schedule + blocks, time-entries clock in/out, `pos/customer`, `pos/scan`, `lookup`, `external-refs`, `orders/:id` PATCH, `/api/invoice/:wo_number`, `/api/pickslip`, CSV `import/services` (`_routes/admin_misc.js`). No migration. | **committed + deployed; 46/46 vs node:sqlite** |
 
-`melthahonda.com` runs whatever is deployed; unported endpoints still return
-501 with the PORT.md pointer. Each phase: migration for D1 gaps → module →
-`node --experimental-sqlite` test → `wrangler d1 migrations apply --remote` →
-`wrangler pages deploy … --branch main` → commit.
+**All 15 phases are ported, tested and live on `melthahonda.com`.** Every
+non-dropped `server.js` route now has a D1 implementation; `/api/*` returns 501
+only for paths that never existed. Full-app wiring check: **257 routes across
+16 modules, no duplicate `(method, path)`**. `wrangler pages functions build`
+compiles the Worker clean.
+
+**Dropped by design** (see the table at the top): `/api/admin/backup/*`,
+`/api/admin/terminals/*` + terminal enrolment, `/api/db-install`,
+`/api/admin/settings/{database,db-server,network-servers}`. Twilio/SMS is
+gone everywhere; `/api/admin/settings/{machine,server}` return cloud stubs.
+
+Each phase: migration for D1 gaps → module → `node --experimental-sqlite`
+test → `wrangler d1 migrations apply --remote` → `wrangler pages deploy …
+--branch main` → commit.
 
 ---
 
