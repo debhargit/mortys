@@ -135,7 +135,7 @@ function saveServerConfig(cfg) {
   fs.writeFileSync(SERVER_CONFIG_PATH, JSON.stringify(cfg, null, 2));
 }
 const SERVER_CFG = loadServerConfig();
-const PORT = parseInt(SERVER_CFG.port || process.env.PORT || '3040', 10);
+const PORT = parseInt(SERVER_CFG.port || process.env.PORT || '3056', 10);
 
 // ---- Postgres pool(s) --------------------------------------------------------
 // Two independent connections, configurable from Admin Setup -> Database
