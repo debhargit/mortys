@@ -1,5 +1,5 @@
 ===============================================================================
-  MELTHA HONDA SALES & SERVS  --  PORTABLE ADMIN
+  VISION AUTO SOLUTIONS  --  PORTABLE ADMIN
 ===============================================================================
 
   Everything needed to run the admin panel and POS is inside this folder.

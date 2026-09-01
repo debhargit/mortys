@@ -66,15 +66,15 @@ async function sendSMS({ to, body }) {
 // ----- TEMPLATES (kept short — one SMS segment is 160 chars) -----------------
 const templates = {
   order: ({ orderId, total }) =>
-    `Vision Auto Solutions: order #${orderId} confirmed (USD $${Number(total).toFixed(2)}). We'll call to confirm pickup. 876-758-8503`,
+    `Vision Auto Solutions: order #${orderId} confirmed (USD $${Number(total).toFixed(2)}). We'll call to confirm pickup. 876-758-5590`,
 
   service: ({ apptId, date, slot }) => {
     const when = [date, slot].filter(Boolean).join(' at ');
-    return `Vision Auto Solutions: service appt #${apptId} requested${when ? ' for ' + when : ''}. We'll call to confirm. 876-758-8503`;
+    return `Vision Auto Solutions: service appt #${apptId} requested${when ? ' for ' + when : ''}. We'll call to confirm. 876-758-5590`;
   },
 
   backInStock: ({ product }) =>
-    `Vision Auto Solutions: "${String(product).slice(0, 60)}" is back in stock. View at visionautosolutions.com or call 876-758-8503`,
+    `Vision Auto Solutions: "${String(product).slice(0, 60)}" is back in stock. View at visionautosolutions.com or call 876-758-5590`,
 };
 
 module.exports = {

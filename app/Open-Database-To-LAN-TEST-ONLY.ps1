@@ -114,7 +114,7 @@ if ($Revert) {
     Write-Host '  postgresql.conf : LAN override removed (back to localhost only)'
 
     # pg_hba.conf: drop lines we tagged
-    $hba = [System.IO.File]::ReadAllLines($Hba) | Where-Object { $_ -notmatch 'meltha-lan-test' }
+    $hba = [System.IO.File]::ReadAllLines($Hba) | Where-Object { $_ -notmatch "(?:vision|meltha)-lan-test" }
     [System.IO.File]::WriteAllLines($Hba, $hba, $Utf8NoBom)
     Write-Host '  pg_hba.conf     : test rules removed'
 
@@ -162,9 +162,9 @@ else {
     # back to clear text and nobody would ever notice. hostssl refuses the
     # connection outright, which is a failure you can see and fix.
     $hba = [System.IO.File]::ReadAllText($Hba)
-    if ($hba -notmatch 'meltha-lan-test') {
-        $hba += "`r`n# meltha-lan-test`r`n" +
-                ("hostssl all             all             {0}          scram-sha-256    # meltha-lan-test`r`n" -f $cidr)
+    if ($hba -notmatch "(?:vision|meltha)-lan-test") {
+        $hba += "`r`n# vision-lan-test`r`n" +
+                ("hostssl all             all             {0}          scram-sha-256    # vision-lan-test`r`n" -f $cidr)
         [System.IO.File]::WriteAllText($Hba, $hba, $Utf8NoBom)
         Write-Host ("  pg_hba.conf     : allow {0} over TLS only (hostssl, scram-sha-256)" -f $cidr)
     } else {

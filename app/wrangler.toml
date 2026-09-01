@@ -17,7 +17,7 @@ database_id = "d82e902b-f8ff-4621-b8d2-cfda269a8dcc"
 # any of these without touching code.
 [vars]
 ORDER_NOTIFY_TO = "admin@visionautosolutions.com"
-ORDER_NOTIFY_SMS = "876-758-8503"
+ORDER_NOTIFY_SMS = "876-758-5590"
 EMAIL_FROM = "Vision Auto Solutions <noreply@visionautosolutions.com>"
 
 # Settings -> "Local / offline server" download panel (functions/_routes/

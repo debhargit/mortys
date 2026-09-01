@@ -10,9 +10,9 @@
 CREATE TABLE IF NOT EXISTS shop_settings (
   id                     INTEGER PRIMARY KEY,
   company_name           TEXT NOT NULL DEFAULT 'Vision Auto Solutions Ltd',
-  address                TEXT NOT NULL DEFAULT '127 Hagley Park Road, Kingston 11',
+  address                TEXT NOT NULL DEFAULT '112C Waltham Park Road, Kingston',
   country                TEXT NOT NULL DEFAULT 'Jamaica',
-  phone                  TEXT NOT NULL DEFAULT '(876) 758-8503',
+  phone                  TEXT NOT NULL DEFAULT '(876) 758-5590',
   email                  TEXT,
   website                TEXT,
   logo_url               TEXT,

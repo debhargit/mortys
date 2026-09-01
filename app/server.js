@@ -1066,8 +1066,8 @@ async function getShopSettings() {
   // meantime) -- mirrors the old hardcoded values so nothing looks different
   // until the table exists.
   return {
-    company_name: 'Vision Auto Solutions Ltd', address: '127 Hagley Park Road, Kingston 11',
-    country: 'Jamaica', phone: '(876) 758-8503', email: null, website: null, logo_url: null,
+    company_name: 'Vision Auto Solutions Ltd', address: '112C Waltham Park Road, Kingston 11',
+    country: 'Jamaica', phone: '(876) 758-5590', email: null, website: null, logo_url: null,
     print_logo_on_invoice: true, default_print_template: 'receipt', quote_valid_days: 14,
     invoice_notice: 'Goods remain the property of the company until paid in full. Returns accepted within 14 days with the original invoice, in original condition. Electrical parts are non-returnable.',
     receipt_notice: 'Returns within 14 days with this receipt. Electrical parts non-returnable.',
@@ -6161,7 +6161,7 @@ app.post('/api/admin/import/parts', requireManager, uploadData.single('csv'), ha
 // A known-good starting file, so nobody has to reverse-engineer the columns.
 app.get('/api/admin/inventory/import/template.csv', requireAdmin, (_req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="meltha-inventory-template.csv"');
+  res.setHeader('Content-Disposition', 'attachment; filename="visionautosolutions-inventory-template.csv"');
   res.send(inventoryImport.TEMPLATE_CSV);
 });
 
@@ -8312,7 +8312,7 @@ async function initDb() {
          VALUES ($1, $2, $3, $4, true)
        ON CONFLICT (email) DO UPDATE
          SET is_admin = true, password_hash = EXCLUDED.password_hash`,
-      ['admin@visionautosolutions.com', 'Admin', '(876) 758-8503', hash]
+      ['admin@visionautosolutions.com', 'Admin', '(876) 758-5590', hash]
     );
     console.log('[initDb] default admin seeded (admin@visionautosolutions.com / password123)');
 

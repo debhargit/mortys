@@ -195,9 +195,10 @@ function networkCidr(address, netmask) {
 //      address is never touched -- someone chose that on purpose.
 //
 //   3. Server build whose bundled database has been opened to the LAN (a
-//      pg_hba.conf line tagged meltha-lan-*): rewrite that line's subnet to the
-//      current one and reload PostgreSQL. It only maintains a rule that already
-//      exists -- it never opens a database that is still loopback-only.
+//      pg_hba.conf line tagged vision-lan-*, or legacy meltha-lan-*): rewrite
+//      that line's subnet to the current one and reload PostgreSQL. It only
+//      maintains a rule that already exists -- it never opens a database that
+//      is still loopback-only.
 async function refreshNetworkConfig() {
   const me = primaryLocalIPv4();
   if (!me) {
@@ -261,7 +262,7 @@ async function refreshNetworkConfig() {
         const lines = fs.readFileSync(hbaPath, 'utf8').split(/\r?\n/);
         let changed = false;
         const next = lines.map((ln) => {
-          if (!/meltha-lan-(test|auto)/.test(ln)) return ln;
+          if (!/(?:vision|meltha)-lan-(test|auto)/.test(ln)) return ln;
           // Only the address/CIDR column is rewritten; the connection type
           // (host / hostssl), database, user and auth method the opener chose
           // are left exactly as they are.

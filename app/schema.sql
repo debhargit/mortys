@@ -1370,9 +1370,9 @@ CREATE INDEX IF NOT EXISTS idx_account_payments_customer ON account_payments (cu
 CREATE TABLE IF NOT EXISTS shop_settings (
   id                     SERIAL PRIMARY KEY,
   company_name           TEXT NOT NULL DEFAULT 'Vision Auto Solutions Ltd',
-  address                TEXT NOT NULL DEFAULT '127 Hagley Park Road, Kingston 11',
+  address                TEXT NOT NULL DEFAULT '112C Waltham Park Road, Kingston',
   country                TEXT NOT NULL DEFAULT 'Jamaica',
-  phone                  TEXT NOT NULL DEFAULT '(876) 758-8503',
+  phone                  TEXT NOT NULL DEFAULT '(876) 758-5590',
   email                  TEXT,
   website                TEXT,
   logo_url               TEXT,
@@ -1400,6 +1400,10 @@ UPDATE shop_settings SET company_name = 'Vision Auto Solutions Ltd'
   WHERE company_name = 'Meltha Honda Sales & Servs Ltd';
 UPDATE shop_settings SET website = 'https://visionautosolutions.com'
   WHERE website IN ('https://melthahonda.miamimistress.com', 'https://melthahonda.com');
+UPDATE shop_settings SET address = '112C Waltham Park Road, Kingston'
+  WHERE address = '127 Hagley Park Road, Kingston 11';
+UPDATE shop_settings SET phone = '(876) 758-5590'
+  WHERE phone = '(876) 758-8503';
 
 -- Rebrand (2026): the synthetic walk-in / no-email customer domain moved from
 -- @walkin.melthahonda.local to @walkin.visionautosolutions.local. Rename the
