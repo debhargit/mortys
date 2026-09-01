@@ -74,7 +74,7 @@ function writeJson(file, obj) {
 }
 
 const CFG = Object.assign({
-  appPort: 3040,
+  appPort: 3056,
   openBrowser: true,
   bundledPostgres: false,
   pgPort: 5433,
@@ -318,8 +318,8 @@ function initPostgres() {
     try { fs.unlinkSync(pwFile); } catch (_) {}
   }
 
-  // Bind the bundled server to loopback only. The Meltha Honda app server is
-  // what the rest of the LAN talks to (port 3040); nothing outside this PC
+  // Bind the bundled server to loopback only. The Vision Auto Solutions app
+  // server is what the rest of the LAN talks to (port 3056); nothing outside this PC
   // has any business opening a raw Postgres connection, and leaving 5433 open
   // on a shop network would be handing out the whole database.
   const confPath = path.join(PGDATA_DIR, 'postgresql.conf');
