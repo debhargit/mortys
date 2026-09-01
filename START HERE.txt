@@ -15,7 +15,7 @@
   -----------------------------------
 
     1. Copy this whole folder onto the C: drive of this computer
-       (so it becomes  C:\MelthaHonda-Migration ), or just leave it on the
+       (so it becomes  C:\VisionAutoSolutions-Migration ), or just leave it on the
        USB stick -- either works.
 
     2. Double-click:   Restore On New PC.exe
@@ -34,7 +34,7 @@
 
     On THIS computer, run once:   Allow Network Access.vbs
     Then other PCs use:           http://<this-PC-IP>:3040/admin.html
-    (this PC's address is in  C:\MelthaHonda\app\machine-config.json )
+    (this PC's address is in  C:\VisionAutoSolutions\app\machine-config.json )
 
 
   IMPORTANT

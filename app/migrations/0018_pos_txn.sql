@@ -45,4 +45,4 @@ ALTER TABLE pos_return_items ADD COLUMN unit_price_cents INTEGER;
 -- ---- walk-in customer (getWalkinCustomerId) --------------------------
 -- The POS ticket bar attaches every walk-in ticket to this one real row.
 INSERT OR IGNORE INTO users (email, name, password_hash, is_admin, admin_role, price_tier, account_number)
-VALUES ('walkin@melthahonda.local', 'Cash Customer - Walk-in', 'x-not-a-login', 0, 'manager', 'retail', 'C-000001');
+VALUES ('walkin@visionautosolutions.local', 'Cash Customer - Walk-in', 'x-not-a-login', 0, 'manager', 'retail', 'C-000001');

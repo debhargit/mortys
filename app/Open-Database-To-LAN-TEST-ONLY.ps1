@@ -181,7 +181,7 @@ else {
     Write-Host '  On the CLIENT laptop, point it at:' -ForegroundColor Green
     Write-Host ('      Database server address :  {0}' -f $addr) -ForegroundColor White
     Write-Host  '      Database port           :  5433'          -ForegroundColor White
-    Write-Host  '      Database name           :  melthahonda'   -ForegroundColor White
+    Write-Host  '      Database name           :  visionautosolutions'   -ForegroundColor White
     Write-Host  '      Database user           :  postgres'      -ForegroundColor White
     Write-Host  '      Database password       :  postgres'      -ForegroundColor White
 }

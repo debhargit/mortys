@@ -49,7 +49,7 @@
   permission prompt.
 
   Pick where to build the folder (a USB stick, an external drive, any folder
-  -- keep the path short). It builds  <that place>\MelthaHonda-Migration ,
+  -- keep the path short). It builds  <that place>\VisionAutoSolutions-Migration ,
   about 400 MB, and tells you when it is done. The till keeps serving the
   whole time.
 
@@ -58,8 +58,8 @@
   STEP 2  --  on the NEW computer
 -------------------------------------------------------------------------------
 
-  Copy the  MelthaHonda-Migration  folder onto the new PC's C: drive (so it
-  becomes  C:\MelthaHonda-Migration ), or just leave it on the USB stick.
+  Copy the  VisionAutoSolutions-Migration  folder onto the new PC's C: drive (so it
+  becomes  C:\VisionAutoSolutions-Migration ), or just leave it on the USB stick.
 
   Open the folder. Double-click   Restore On New PC.exe   and click Yes at the
   permission prompt.
@@ -104,10 +104,10 @@
     not.
 
   * Re-running Restore On New PC.exe later replaces the program files and
-    leaves C:\MelthaHonda\data alone -- it will not overwrite records the new
+    leaves C:\VisionAutoSolutions\data alone -- it will not overwrite records the new
     till has taken since the move.
 
-  * Logs, if a step fails: C:\MelthaHonda\data\logs (boot.log, server.log,
-    postgres.log), plus the tool's own log under %TEMP%\MelthaHonda.
+  * Logs, if a step fails: C:\VisionAutoSolutions\data\logs (boot.log, server.log,
+    postgres.log), plus the tool's own log under %TEMP%\VisionAutoSolutions.
 
 ===============================================================================

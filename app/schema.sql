@@ -1,8 +1,8 @@
 -- ============================================================================
 --  Vision Auto Solutions — Postgres Schema
 --  Run once on a fresh database, e.g.
---    createdb melthahonda
---    psql -d melthahonda -f schema.sql
+--    createdb visionautosolutions
+--    psql -d visionautosolutions -f schema.sql
 --
 --  Safe to re-run: every statement uses CREATE TABLE IF NOT EXISTS.
 -- ============================================================================
@@ -1400,6 +1400,19 @@ UPDATE shop_settings SET company_name = 'Vision Auto Solutions Ltd'
   WHERE company_name = 'Meltha Honda Sales & Servs Ltd';
 UPDATE shop_settings SET website = 'https://visionautosolutions.com'
   WHERE website IN ('https://melthahonda.miamimistress.com', 'https://melthahonda.com');
+
+-- Rebrand (2026): the synthetic walk-in / no-email customer domain moved from
+-- @walkin.melthahonda.local to @walkin.visionautosolutions.local. Rename the
+-- existing rows (the singleton "walkin@" record and every counter-created
+-- customer minted without a real email) so the code that looks them up by the
+-- new address keeps matching. Guarded so it is a no-op once migrated, and so
+-- the singleton rename is skipped if the new address somehow already exists
+-- (email is UNIQUE).
+UPDATE users SET email = regexp_replace(email, '@walkin\.melthahonda\.local$', '@walkin.visionautosolutions.local')
+  WHERE email LIKE '%@walkin.melthahonda.local';
+UPDATE users SET email = 'walkin@visionautosolutions.local'
+  WHERE email = 'walkin@melthahonda.local'
+    AND NOT EXISTS (SELECT 1 FROM users u2 WHERE u2.email = 'walkin@visionautosolutions.local');
 
 -- =============================================================================
 --  POS HOLDS (2026-08-19) -- "Held tickets" (F7 Hold / F8 Recall -> Held tab).

@@ -9,9 +9,9 @@
 
   Run it ON THE NEW MACHINE, from inside the migration folder. It:
 
-    1. Copies the folder to C:\MelthaHonda (short path -- long photo names).
+    1. Copies the folder to C:\VisionAutoSolutions (short path -- long photo names).
        The database (data\) comes across on the first run; on any later run
-       C:\MelthaHonda\data is left untouched, so re-running never overwrites
+       C:\VisionAutoSolutions\data is left untouched, so re-running never overwrites
        records the new till has taken since.
     2. Clears the old machine's run locks.
     3. Installs the bundled Visual C++ runtime if PostgreSQL needs it.
@@ -27,7 +27,7 @@
 #>
 
 param(
-  [string] $Destination = 'C:\MelthaHonda'
+  [string] $Destination = 'C:\VisionAutoSolutions'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -104,7 +104,7 @@ function Finish {
   StatusDone
   if ($script:fail.Count -eq 0) { Tell $script:successText 'done' 'Information'; exit 0 }
   $m = "Some steps did not complete:`r`n`r`n" + (($script:fail | ForEach-Object { '  -  ' + $_ }) -join "`r`n")
-  $m += "`r`n`r`nLogs are in  C:\MelthaHonda\data\logs  (boot.log, server.log, postgres.log)."
+  $m += "`r`n`r`nLogs are in  C:\VisionAutoSolutions\data\logs  (boot.log, server.log, postgres.log)."
   if ($script:logFile) { $m += "`r`nThis run's log:`r`n" + $script:logFile }
   Tell $m 'problems' 'Warning'
   exit 1
@@ -119,7 +119,7 @@ if (-not $pr.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administra
 }
 
 $SOURCE = (Resolve-Path $PSScriptRoot).Path
-LogInit (Join-Path $env:TEMP 'MelthaHonda')
+LogInit (Join-Path $env:TEMP 'VisionAutoSolutions')
 
 Line "$APPNAME  --  restore on this PC"
 Info "from : $SOURCE"
@@ -130,7 +130,7 @@ if (-not (Test-Path (Join-Path $SOURCE 'app\boot.js'))) {
   Finish
 }
 if ((Resolve-Path $SOURCE).Path -ieq (Resolve-Path -LiteralPath $Destination -EA SilentlyContinue).Path) {
-  Bad "run this from the migration folder, not from C:\MelthaHonda itself"
+  Bad "run this from the migration folder, not from C:\VisionAutoSolutions itself"
   Finish
 }
 
@@ -138,7 +138,7 @@ $firstTime = -not (Test-Path (Join-Path $Destination 'data\pgdata\PG_VERSION'))
 if (-not (Confirm (
   "Set up the Vision Auto Solutions till on THIS computer from:`r`n`r`n$SOURCE`r`n`r`n" +
   $(if ($firstTime) { "All stock, sales, customers and staff logins from the old machine will be brought across." }
-    else { "C:\MelthaHonda already has a database -- the program files will be updated and the existing database left as it is." }) +
+    else { "C:\VisionAutoSolutions already has a database -- the program files will be updated and the existing database left as it is." }) +
   "`r`n`r`nContinue?") 'restore on new PC')) {
   Info 'cancelled by user'; StatusDone; exit
 }
@@ -153,7 +153,7 @@ else {
           '/NFL','/NDL','/NP','/NJH','/NJS',
           '/XF', 'admin.lock', 'postmaster.pid', 'postmaster.opts',
                  'Restore On New PC.exe', 'Restore-On-New-PC.ps1', 'START HERE.txt')
-  if (-not $firstTime) { $rc += @('/XD', (Join-Path $SOURCE 'data')); Info 'existing C:\MelthaHonda\data left untouched (re-run)' }
+  if (-not $firstTime) { $rc += @('/XD', (Join-Path $SOURCE 'data')); Info 'existing C:\VisionAutoSolutions\data left untouched (re-run)' }
   & robocopy @rc | Out-Null
   if ($LASTEXITCODE -ge 8) { Bad "copy failed (robocopy exit $LASTEXITCODE)" }
   else {
@@ -263,7 +263,7 @@ $script:successText =
   "Sign in: the same accounts and password as the old machine.`r`n`r`n" +
   "Other computers on the network reach it at this PC's new address:`r`n" +
   "   http://<this-PC-IP>:$port/admin.html`r`n" +
-  "(the address is written in  C:\MelthaHonda\app\machine-config.json)`r`n`r`n" +
+  "(the address is written in  C:\VisionAutoSolutions\app\machine-config.json)`r`n`r`n" +
   "If other PCs cannot connect, run  Allow Network Access.vbs  once here.`r`n" +
   "Then switch the OLD machine off for good, so two tills cannot diverge."
 Finish

@@ -11275,7 +11275,7 @@ function posDbFieldset(prefix, title, sub, c){
       '<div><label class="lbl">Host</label><input id="' + prefix + 'Host" class="fld" value="' + esc(c.host || '') + '" placeholder="localhost"/></div>' +
       '<div><label class="lbl">Port</label><input id="' + prefix + 'Port" class="fld" type="number" value="' + (c.port || 5432) + '"/></div>' +
     '</div>' +
-    '<div style="margin-bottom:8px"><label class="lbl">Database name</label><input id="' + prefix + 'Db" class="fld" value="' + esc(c.database || '') + '" placeholder="melthahonda"/></div>' +
+    '<div style="margin-bottom:8px"><label class="lbl">Database name</label><input id="' + prefix + 'Db" class="fld" value="' + esc(c.database || '') + '" placeholder="visionautosolutions"/></div>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">' +
       '<div><label class="lbl">User</label><input id="' + prefix + 'User" class="fld" value="' + esc(c.user || '') + '" placeholder="postgres"/></div>' +
       '<div><label class="lbl">Password</label><input id="' + prefix + 'Pass" type="password" class="fld" placeholder="' + (c.has_password ? '•••••••• (saved — leave blank to keep)' : 'password') + '"/></div>' +
@@ -11380,7 +11380,7 @@ async function renderLocalServerPanel(box){
         '<div style="grid-column:1/-1"><label style="' + lblCss + '">Shop name (shown on the local server)</label>' +
           '<input id="lsShop" style="' + fieldCss + '" value="' + esc(def.shop_name || '') + '"/></div>' +
         '<div><label style="' + lblCss + '">Install folder on the PC</label>' +
-          '<input id="lsDir" style="' + fieldCss + '" value="' + esc(def.install_dir || 'C:\\MelthaHonda') + '"/></div>' +
+          '<input id="lsDir" style="' + fieldCss + '" value="' + esc(def.install_dir || 'C:\\VisionAutoSolutions') + '"/></div>' +
         '<div><label style="' + lblCss + '">Local server port</label>' +
           '<input id="lsPort" type="number" min="1024" max="65535" style="' + fieldCss + '" value="' + esc(String(def.port || 3040)) + '"/></div>' +
         '<div><label style="' + lblCss + '">Admin sign-in email</label>' +

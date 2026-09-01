@@ -45,7 +45,7 @@ const LOG_DIR = path.join(DATA_DIR, 'logs');
 const PG_PORT = parseInt(process.env.MH_PG_PORT || '5433', 10);
 const PG_USER = process.env.MH_PG_USER || 'postgres';
 const PG_PASS = process.env.MH_PG_PASSWORD || 'postgres';
-const PG_DB = process.env.PGDATABASE || 'melthahonda';
+const PG_DB = process.env.PGDATABASE || 'visionautosolutions';
 
 function log(msg) {
   console.log('       ' + msg);

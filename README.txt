@@ -257,13 +257,13 @@
         If this copy carries its own database, that database survives a
         rebuild. Back up data\pgdata before doing anything drastic to it.
 
-  Keep the folder somewhere SHORT, like  C:\MelthaHonda
+  Keep the folder somewhere SHORT, like  C:\VisionAutoSolutions
         Some of the product photos have file names over 200 characters long.
         Windows still refuses to handle a full path longer than 260, so if
         you put this folder somewhere deep -- inside Documents, inside
         OneDrive, inside a dated subfolder -- Windows Explorer will copy most
         of it and quietly skip those photos. The build prints how much room
-        is left. C:\MelthaHonda or D:\MelthaHonda is always safe.
+        is left. C:\VisionAutoSolutions or D:\VisionAutoSolutions is always safe.
 
   If this copy carries its own database (runtime\pgsql exists)
         It runs a private PostgreSQL on port 5433, reachable only from this

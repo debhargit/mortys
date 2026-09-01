@@ -80,7 +80,7 @@ const CFG = Object.assign({
   pgPort: 5433,
   pgUser: 'postgres',
   pgPassword: 'postgres',
-  database: 'melthahonda',
+  database: 'visionautosolutions',
   dbHost: 'localhost',
   dbPort: 5432,
   dbUser: 'postgres',
@@ -410,7 +410,7 @@ async function ensurePostgresTls() {
     //
     // Writing the full path baked this machine's folder into a file that
     // travels with the package, so every copy carried something like
-    // C:/Users/.../dist/MelthaHonda-Admin-Portable/data/pgdata/server.crt.
+    // C:/Users/.../dist/VisionAutoSolutions-Admin-Portable/data/pgdata/server.crt.
     // On any other PC that path does not exist and the database refuses to
     // start outright:
     //

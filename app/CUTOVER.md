@@ -34,7 +34,7 @@ cd app
 npm run cf:migrate                     # wrangler d1 migrations apply meltahonda-db
 
 # 1b. export the live Postgres data to D1 seed files
-DATABASE_URL="postgresql://USER:PASS@LOCALBOX:5432/melthahonda" npm run cf:data
+DATABASE_URL="postgresql://USER:PASS@LOCALBOX:5432/visionautosolutions" npm run cf:data
 #   -> dist/d1-data/NN_<table>.sql  (money -> *_cents, bool -> 0/1, jsonb -> TEXT)
 #   review the summary table it prints; spot-check a file or two
 
@@ -161,7 +161,7 @@ The panel is a small wizard: it asks for the **preset options** —
 | field | default |
 |---|---|
 | Shop name | the shop's `company_name` |
-| Install folder | `C:\MelthaHonda` |
+| Install folder | `C:\VisionAutoSolutions` |
 | Local server port | `3040` |
 | Admin sign-in email | the shop's settings email |
 | Admin password | (required, ≥ 6) — creates the local admin login |

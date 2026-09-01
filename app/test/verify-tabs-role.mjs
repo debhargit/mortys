@@ -24,7 +24,7 @@ const api = (cookie, path, opts = {}) => fetch(O + path, { ...opts, headers: { '
 
 const owner = await signin('admin@visionautosolutions.com', 'password123');
 if (owner.status !== 200) { console.log('owner signin failed', owner.status); process.exit(1); }
-const email = 'zz-verify-' + ROLE + '@melthahonda.local';
+const email = 'zz-verify-' + ROLE + '@visionautosolutions.local';
 const pass = 'Vfy-' + Math.random().toString(36).slice(2, 10) + '!A9';
 const created = await jget(await api(owner.cookie, '/api/admin/staff', {
   method: 'POST', body: JSON.stringify({ email, password: pass, name: 'ZZ Verify ' + ROLE, admin_role: ROLE }),

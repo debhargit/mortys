@@ -5,7 +5,7 @@
 //  Boot:
 //    npm install                    (first time only)
 //    cp .env.example .env           (edit DATABASE_URL etc.)
-//    psql -d melthahonda -f schema.sql  (first time only — or let the server run it)
+//    psql -d visionautosolutions -f schema.sql  (first time only — or let the server run it)
 //    node server.js
 // ============================================================================
 
@@ -249,7 +249,7 @@ let pool;       // local -- admin/POS/everything else, always
 let onlinePool; // online -- public storefront fallback only, or null if never configured
 function applyDbConfig(cfg) {
   const localCfg = buildPoolConfig(cfg.local) || {
-    connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/melthahonda',
+    connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/visionautosolutions',
     max: 10,
   };
   const oldPool = pool, oldOnline = onlinePool;
@@ -351,7 +351,7 @@ let LOCAL_SERVER_STATUS = { reachable: false, db_exists: false, checked_at: null
 async function detectLocalServer() {
   const cfg = loadDbConfig();
   const localCfg = buildPoolConfig(cfg.local) || { host: 'localhost', port: 5432, user: 'postgres', password: process.env.PGPASSWORD || 'postgres' };
-  const dbName = localCfg.database || 'melthahonda';
+  const dbName = localCfg.database || 'visionautosolutions';
   const probe = new Pool(Object.assign({}, localCfg, { database: 'postgres', max: 1, connectionTimeoutMillis: 3000 }));
   try {
     const r = await probe.query('SELECT 1 FROM pg_database WHERE datname = $1', [dbName]);
@@ -1027,7 +1027,7 @@ async function nextAccountNumber() {
 let walkinCustomerIdCache = null;
 async function getWalkinCustomerId() {
   if (walkinCustomerIdCache !== null) return walkinCustomerIdCache;
-  const { rows } = await query(`SELECT id FROM users WHERE email = 'walkin@melthahonda.local' LIMIT 1`);
+  const { rows } = await query(`SELECT id FROM users WHERE email = 'walkin@visionautosolutions.local' LIMIT 1`);
   walkinCustomerIdCache = rows.length ? rows[0].id : -1;
   return walkinCustomerIdCache;
 }
@@ -1199,7 +1199,7 @@ let dbServerInstall = { running: false, ok: null, error: null, startedAt: null, 
 app.get('/api/admin/settings/db-server-status', requireManager, async (req, res) => {
   const cfg = loadDbConfig();
   const localCfg = buildPoolConfig(cfg.local) || { host: 'localhost', port: 5432, user: 'postgres', password: process.env.PGPASSWORD || 'postgres' };
-  const dbName = (localCfg.database || 'melthahonda');
+  const dbName = (localCfg.database || 'visionautosolutions');
   let reachable = false, dbExists = false, error = null;
   // Connect to the always-present `postgres` maintenance database, not the
   // app's own -- that's the one thing guaranteed to exist on any running
@@ -1223,7 +1223,7 @@ app.post('/api/admin/settings/db-server/create-database', requireManager, async 
   const localCfg = buildPoolConfig(cfg.local) || { host: 'localhost', port: 5432, user: 'postgres', password: process.env.PGPASSWORD || 'postgres' };
   // Identifier, not a value -- can't be parameterized. Whitelisted to
   // word characters only before it ever touches the query string.
-  const dbName = (localCfg.database || 'melthahonda').replace(/[^a-zA-Z0-9_]/g, '');
+  const dbName = (localCfg.database || 'visionautosolutions').replace(/[^a-zA-Z0-9_]/g, '');
   if (!dbName) return res.status(400).json({ ok: false, error: 'No database name configured' });
   const admin = new Pool(Object.assign({}, localCfg, { database: 'postgres', max: 1, connectionTimeoutMillis: 5000 }));
   try {
@@ -1484,7 +1484,7 @@ function effectiveLocalDbSettings() {
   if (local.host) {
     return {
       port: parseInt(local.port, 10) || 5432,
-      database: local.database || 'melthahonda',
+      database: local.database || 'visionautosolutions',
       user: local.user || 'postgres',
       password: local.password || '',
     };
@@ -1493,12 +1493,12 @@ function effectiveLocalDbSettings() {
     const u = new URL(process.env.DATABASE_URL || '');
     return {
       port: parseInt(u.port, 10) || 5432,
-      database: decodeURIComponent((u.pathname || '/melthahonda').replace(/^\//, '')) || 'melthahonda',
+      database: decodeURIComponent((u.pathname || '/visionautosolutions').replace(/^\//, '')) || 'visionautosolutions',
       user: decodeURIComponent(u.username || 'postgres'),
       password: decodeURIComponent(u.password || ''),
     };
   } catch (_) {
-    return { port: 5432, database: 'melthahonda', user: 'postgres', password: '' };
+    return { port: 5432, database: 'visionautosolutions', user: 'postgres', password: '' };
   }
 }
 
@@ -1901,7 +1901,7 @@ async function runBackup(opts) {
   backupRunning = true;
   const started = new Date();
   const stamp = started.toISOString().replace(/[:.]/g, '-').replace('Z', 'Z');
-  const filename = 'melthahonda-' + stamp + '.dump';
+  const filename = 'visionautosolutions-' + stamp + '.dump';
   const filePath = path.join(BACKUP_DIR, filename);
   try {
     fs.mkdirSync(BACKUP_DIR, { recursive: true });
@@ -2636,7 +2636,7 @@ app.patch('/api/admin/users/:id', requireAdmin, requireCap('pos.edit_customer'),
 //
 //  users.email is NOT NULL UNIQUE, but a counter customer usually has no email
 //  to give. Rather than refuse them, mint one from their account number --
-//  <acct>@walkin.melthahonda.local -- which is unique, obviously synthetic, and
+//  <acct>@walkin.visionautosolutions.local -- which is unique, obviously synthetic, and
 //  never mailed. The password is random and discarded: this is a record of a
 //  person, not a login they will ever use.
 app.post('/api/admin/users', requireAdmin, async (req, res) => {
@@ -2646,7 +2646,7 @@ app.post('/api/admin/users', requireAdmin, async (req, res) => {
     if (!name) return res.status(400).json({ error: 'Name is required' });
 
     const acctNo = b.account_number ? String(b.account_number).trim() : await nextAccountNumber();
-    const email = String(b.email || '').trim().toLowerCase() || `${acctNo.toLowerCase()}@walkin.melthahonda.local`;
+    const email = String(b.email || '').trim().toLowerCase() || `${acctNo.toLowerCase()}@walkin.visionautosolutions.local`;
     const hash = await bcrypt.hash(require('crypto').randomBytes(24).toString('hex'), 10);
 
     const { rows } = await query(
@@ -2691,7 +2691,7 @@ app.delete('/api/admin/users/:id', requireManager, async (req, res) => {
   if (u[0].is_admin || u[0].is_staff) {
     return res.status(400).json({ error: 'That is a staff account — manage it under Settings → Users & Staff.' });
   }
-  if (u[0].email === 'walkin@melthahonda.local') {
+  if (u[0].email === 'walkin@visionautosolutions.local') {
     return res.status(400).json({ error: 'The walk-in customer is used by every counter sale and cannot be removed.' });
   }
 
@@ -7072,7 +7072,7 @@ app.post('/api/admin/pos/customer', requireAdmin, requireCap('pos.add_customer')
     const phone = (b.phone || '').trim() || null;
     const priceTier = ['retail', 'trade', 'fleet', 'dealer'].includes(b.price_tier) ? b.price_tier : 'retail';
     const acctNo = await nextAccountNumber();
-    const email = (b.email || '').trim().toLowerCase() || `${acctNo.toLowerCase()}@walkin.melthahonda.local`;
+    const email = (b.email || '').trim().toLowerCase() || `${acctNo.toLowerCase()}@walkin.visionautosolutions.local`;
     const randomPassword = require('crypto').randomBytes(24).toString('hex');
     const hash = await bcrypt.hash(randomPassword, 10);
     const { rows } = await query(
@@ -7185,7 +7185,7 @@ app.get('/api/admin/pos/vehicle-models', requireAdmin, async (req, res) => {
 // fallback. Cached client-side for the session -- this row's id never changes.
 app.get('/api/admin/pos/walkin-customer', requireAdmin, async (req, res) => {
   const { rows } = await query(
-    `SELECT id, name, account_number FROM users WHERE email = 'walkin@melthahonda.local' LIMIT 1`
+    `SELECT id, name, account_number FROM users WHERE email = 'walkin@visionautosolutions.local' LIMIT 1`
   );
   if (!rows.length) return res.status(404).json({ error: 'Walk-in account not seeded yet' });
   res.json({ customer: rows[0] });
@@ -8355,13 +8355,13 @@ async function initDb() {
   // account has no password anyone needs to keep working, so there's nothing
   // to force-reset, and doing so would be pointless churn on every boot.
   try {
-    const { rows: existing } = await query(`SELECT id FROM users WHERE email = 'walkin@melthahonda.local'`);
+    const { rows: existing } = await query(`SELECT id FROM users WHERE email = 'walkin@visionautosolutions.local'`);
     if (!existing.length) {
       const hash = await bcrypt.hash(require('crypto').randomBytes(24).toString('hex'), 10);
       const acctNo = await nextAccountNumber();
       await query(
         `INSERT INTO users (email, name, password_hash, via, is_admin, price_tier, account_number)
-           VALUES ('walkin@melthahonda.local', 'Cash Customer - Walk-in', $1, 'pos', false, 'retail', $2)`,
+           VALUES ('walkin@visionautosolutions.local', 'Cash Customer - Walk-in', $1, 'pos', false, 'retail', $2)`,
         [hash, acctNo]
       );
       console.log('[initDb] seeded "Cash Customer - Walk-in" account (' + acctNo + ')');

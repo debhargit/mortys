@@ -27,7 +27,7 @@ const near = (a, b) => Math.abs(Number(a) - Number(b)) < 0.011;
 const owner = await signin('admin@visionautosolutions.com', 'password123');
 if (owner.status !== 200) { console.log('owner signin failed', owner.status); process.exit(1); }
 
-const email = 'zz-qe2e@melthahonda.local';
+const email = 'zz-qe2e@visionautosolutions.local';
 const pw = 'Qe2e-' + Math.random().toString(36).slice(2, 10) + '!A9';
 const phone = '876-555-7777';
 

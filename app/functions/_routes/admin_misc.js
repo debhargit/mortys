@@ -280,7 +280,7 @@ export default function mount(app) {
     const name = (b.name || '').trim();
     if (!name) return c.json({ error: 'name is required' }, 400);
     const acctNo = await nextAccountNumber(db);
-    const email = (b.email || '').trim().toLowerCase() || `${acctNo.toLowerCase()}@walkin.melthahonda.local`;
+    const email = (b.email || '').trim().toLowerCase() || `${acctNo.toLowerCase()}@walkin.visionautosolutions.local`;
     if (await db.one('SELECT id FROM users WHERE lower(email) = lower(?)', email))
       return c.json({ error: 'A customer with that email already exists' }, 409);
     const hash = await bcrypt.hash(crypto.randomUUID(), 10);
@@ -331,7 +331,7 @@ export default function mount(app) {
       // sensible defaults for the install wizard
       defaults: {
         shop_name: shopName,
-        install_dir: 'C:\\MelthaHonda',
+        install_dir: 'C:\\VisionAutoSolutions',
         port: 3040,
         admin_email: shopEmail || 'admin@visionautosolutions.com',
         open_firewall: true,
@@ -354,8 +354,8 @@ export default function mount(app) {
     }
     const b = await c.req.json().catch(() => ({}));
     const shop = String(b.shop_name || 'Vision Auto Solutions').trim().slice(0, 80) || 'Vision Auto Solutions';
-    let dir = String(b.install_dir || 'C:\\MelthaHonda').trim();
-    if (!/^[A-Za-z]:\\[\w .\-\\]{0,120}$/.test(dir)) dir = 'C:\\MelthaHonda';
+    let dir = String(b.install_dir || 'C:\\VisionAutoSolutions').trim();
+    if (!/^[A-Za-z]:\\[\w .\-\\]{0,120}$/.test(dir)) dir = 'C:\\VisionAutoSolutions';
     dir = dir.replace(/\\+$/, '');
     const port = Math.min(65535, Math.max(1024, parseInt(b.port, 10) || 3040));
     const email = String(b.admin_email || '').trim().slice(0, 120);

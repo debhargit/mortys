@@ -51,7 +51,7 @@ foreach ($k in 'app', 'runtime\pgsql', 'data\pgdata') {
 }
 if ($problems.Count) {
   Info 'Windows Explorer silently skips files whose path passes 260 characters.'
-  Info 'Unzip (or copy) to a short path such as C:\MelthaHonda and try again.'
+  Info 'Unzip (or copy) to a short path such as C:\VisionAutoSolutions and try again.'
 }
 
 # ---- 2. the empty folders PostgreSQL insists on ------------------------------
@@ -171,7 +171,7 @@ if (-not $dbRunning) {
   $sql = "SELECT (SELECT COUNT(*) FROM products) || ' products, ' || " +
          "(SELECT COUNT(*) FROM users) || ' users, ' || " +
          "(SELECT COUNT(*) FROM roles) || ' roles'"
-  $out = & (Join-Path $PGBIN 'psql.exe') -h 127.0.0.1 -p $port -U postgres -d melthahonda -t -A -c $sql 2>&1
+  $out = & (Join-Path $PGBIN 'psql.exe') -h 127.0.0.1 -p $port -U postgres -d visionautosolutions -t -A -c $sql 2>&1
   if ($LASTEXITCODE -eq 0) {
     Ok ($out -join ' ')
     Info 'The database is fine. If sign-in still fails, the fault is elsewhere --'

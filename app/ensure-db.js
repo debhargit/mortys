@@ -40,7 +40,7 @@ async function main() {
       password: process.env.PGPASSWORD || 'postgres',
       host: process.env.PGHOST || 'localhost',
       port: parseInt(process.env.PGPORT || '5432', 10),
-      database: process.env.PGDATABASE || 'melthahonda',
+      database: process.env.PGDATABASE || 'visionautosolutions',
     };
   }
 

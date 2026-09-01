@@ -49,7 +49,7 @@ machine = JsonStr(fso.BuildPath(appDir, "machine-config.json"), "name")
 
 If dbHost  = "" Then dbHost  = JsonStr(fso.BuildPath(appDir, "portable.json"), "dbHost")
 If dbPort  = "" Then dbPort  = "5432"
-If dbName  = "" Then dbName  = "melthahonda"
+If dbName  = "" Then dbName  = "visionautosolutions"
 If dbUser  = "" Then dbUser  = "postgres"
 If appPort = "" Then appPort = "3040"
 If dbHost  = "" Then dbHost  = "localhost"

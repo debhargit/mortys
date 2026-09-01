@@ -67,7 +67,7 @@ const bodyText = doc.body.textContent || '';
 const newErrors = errors.slice(before).filter((e) => !/Not implemented|Could not parse CSS|getContext|localStorage/i.test(e));
 
 // locate the badge span/button
-const badgeEl = [...doc.querySelectorAll('span,button')].find((el) => /melthahonda\.com/.test(el.textContent) && /Internet|Local/.test(el.textContent));
+const badgeEl = [...doc.querySelectorAll('span,button')].find((el) => /visionautosolutions\.com/.test(el.textContent) && /Internet|Local/.test(el.textContent));
 const badgeHTML = badgeEl ? badgeEl.outerHTML : '(not found)';
 
 console.log('opened POS via:', via);

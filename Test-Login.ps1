@@ -43,7 +43,7 @@ Write-Host '===============================================' -ForegroundColor Wh
 Info "account: $Email"
 
 # ---- connection details, the same ones the server uses ----------------------
-$dbHost = '127.0.0.1'; $dbPort = 5433; $dbName = 'melthahonda'; $dbUser = 'postgres'; $dbPass = 'postgres'
+$dbHost = '127.0.0.1'; $dbPort = 5433; $dbName = 'visionautosolutions'; $dbUser = 'postgres'; $dbPass = 'postgres'
 try {
   $cfg = Get-Content (Join-Path $APP 'db-config.json') -Raw -EA Stop | ConvertFrom-Json
   if ($cfg.local) {

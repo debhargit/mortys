@@ -9,7 +9,7 @@
   What it does, and why each step is here rather than left to whoever is
   standing at the counter:
 
-    1. Copies the package to C:\MelthaHonda.
+    1. Copies the package to C:\VisionAutoSolutions.
        Not cosmetic. This package contains file names past Windows' 260-character
        limit, and Explorer skips those silently when copying -- no error, no
        prompt, just a folder that looks complete and is not. A short destination
@@ -34,7 +34,7 @@
 #>
 
 param(
-  [string] $Destination = 'C:\MelthaHonda',
+  [string] $Destination = 'C:\VisionAutoSolutions',
   [switch] $KeepDatabase = $true
 )
 
