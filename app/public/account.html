@@ -138,19 +138,27 @@
 
 <!-- SIGN-IN -->
 <div class="signin-bg" id="signinBg">
-  <form class="signin-card" id="signinForm" onsubmit="event.preventDefault(); doSignIn();">
-    <h2>Sign in to your account</h2>
-    <p class="sub">Track orders, see your loyalty points, and check out faster.</p>
+  <form class="signin-card" id="signinForm" onsubmit="event.preventDefault(); authSubmit();">
+    <h2 id="authTitle">Sign in to your account</h2>
+    <p class="sub" id="authSub">Track orders, see your loyalty points, and check out faster.</p>
     <div class="err" id="signinErr"></div>
+    <div id="authNameRow" style="display:none">
+      <label>Name</label>
+      <input type="text" id="acName" autocomplete="name" />
+    </div>
     <label>Email</label>
     <input type="email" id="acEmail" required autocomplete="email" />
+    <div id="authPhoneRow" style="display:none">
+      <label>Phone</label>
+      <input type="tel" id="acPhone" autocomplete="tel" placeholder="876-..." />
+    </div>
     <label>Password</label>
     <div style="position:relative">
       <input type="password" id="acPass" required autocomplete="current-password" style="padding-right:48px"/>
       <button type="button" tabindex="-1" onclick="var i=document.getElementById('acPass');i.type=i.type==='password'?'text':'password';this.textContent=i.type==='password'?'👁':'🙈'" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:0;color:var(--muted);font-size:18px;cursor:pointer;padding:4px 8px">👁</button>
     </div>
-    <button type="submit">Sign In</button>
-    <div class="hint">No account yet? <a href="/#contact">Create one from the home page</a>.</div>
+    <button type="submit" id="authBtn">Sign In</button>
+    <div class="hint" id="authToggle">No account yet? <a href="#" onclick="event.preventDefault();setAuthMode('signup')">Create one</a>.</div>
   </form>
 </div>
 
@@ -194,6 +202,30 @@ function reasonLabel(r){
 }
 
 // === AUTH ===
+// The card does double duty: sign in, or create an account. setAuthMode()
+// flips the copy and reveals the name/phone rows; authSubmit() routes to the
+// right call. New accounts land on the Profile tab -- the whole point of
+// signing up from here is to manage your own details.
+var AUTH_MODE = 'signin';
+function setAuthMode(mode){
+  AUTH_MODE = mode;
+  var signup = mode === 'signup';
+  document.getElementById('authTitle').textContent = signup ? 'Create your account' : 'Sign in to your account';
+  document.getElementById('authSub').textContent = signup
+    ? 'Set up a login to track orders, earn loyalty points, and update your own details.'
+    : 'Track orders, see your loyalty points, and check out faster.';
+  document.getElementById('authNameRow').style.display = signup ? '' : 'none';
+  document.getElementById('authPhoneRow').style.display = signup ? '' : 'none';
+  document.getElementById('acPass').setAttribute('autocomplete', signup ? 'new-password' : 'current-password');
+  document.getElementById('authBtn').textContent = signup ? 'Create account' : 'Sign In';
+  document.getElementById('authToggle').innerHTML = signup
+    ? 'Already have an account? <a href="#" onclick="event.preventDefault();setAuthMode(\'signin\')">Sign in</a>.'
+    : 'No account yet? <a href="#" onclick="event.preventDefault();setAuthMode(\'signup\')">Create one</a>.';
+  document.getElementById('signinErr').classList.remove('show');
+}
+
+function authSubmit(){ return AUTH_MODE === 'signup' ? doSignUp() : doSignIn(); }
+
 async function doSignIn(){
   var email = document.getElementById('acEmail').value.trim();
   var password = document.getElementById('acPass').value;
@@ -206,6 +238,31 @@ async function doSignIn(){
     show('orders');
   } catch(e){
     err.textContent = e.message || 'Sign-in failed.';
+    err.classList.add('show');
+  }
+}
+
+async function doSignUp(){
+  var err = document.getElementById('signinErr');
+  err.classList.remove('show');
+  var body = {
+    name: document.getElementById('acName').value.trim(),
+    email: document.getElementById('acEmail').value.trim(),
+    phone: document.getElementById('acPhone').value.trim(),
+    password: document.getElementById('acPass').value,
+  };
+  if (!body.email || !body.password){
+    err.textContent = 'Email and password are required.';
+    err.classList.add('show');
+    return;
+  }
+  try {
+    var r = await api('/api/auth/signup', { method:'POST', body: body });
+    document.getElementById('signinBg').classList.remove('show');
+    showProfile(r.user);
+    show('profile');
+  } catch(e){
+    err.textContent = e.message || 'Could not create the account.';
     err.classList.add('show');
   }
 }
