@@ -20,7 +20,7 @@
 #>
 
 param(
-  [string] $Email    = 'admin@melthahonda.com',
+  [string] $Email    = 'admin@visionautosolutions.com',
   [string] $Password = 'password123'
 )
 
@@ -110,7 +110,7 @@ if ($parts[2] -ne 'YES') { Bad 'this account is not an admin -- the panel will r
 else { Ok 'account is an admin' }
 if ([int]$parts[3] -eq 0) {
   Bad 'no password is stored for this account'
-  Info 'Reset it: POST /api/auth/reset-default-admin  (restores admin@melthahonda.com / password123)'
+  Info 'Reset it: POST /api/auth/reset-default-admin  (restores admin@visionautosolutions.com / password123)'
 } else { Ok "password hash stored ($($parts[3]) chars)" }
 
 # ---- 4. the password itself -------------------------------------------------
@@ -139,7 +139,7 @@ if ("$res".Trim() -eq 'MATCH') { Ok 'the password is correct for this account' }
 elseif ("$res".Trim() -eq 'NO-MATCH') {
   Bad 'the password does not match the stored hash'
   Info 'The database and schema are fine -- this really is the wrong password.'
-  Info 'To put admin@melthahonda.com back to password123, restart the server:'
+  Info 'To put admin@visionautosolutions.com back to password123, restart the server:'
   Info 'initDb resets that one account on every boot.'
 } else { Bad "could not run the check: $res" }
 

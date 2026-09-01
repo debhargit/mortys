@@ -1,10 +1,10 @@
-// Verify admin tabs load for a given admin role on melthahonda.com.
+// Verify admin tabs load for a given admin role on visionautosolutions.com.
 //   node verify-tabs-role.mjs cashier
 // Creates a throwaway staff account with that role (as the owner), walks the
 // sidebar signed in as it, then hard-deletes the account.
 import jsdomPkg from 'jsdom';
 const { JSDOM, VirtualConsole } = jsdomPkg;
-const O = 'https://melthahonda.com';
+const O = 'https://visionautosolutions.com';
 const ROLE = process.argv[2] || 'cashier';
 
 const TABS = [
@@ -22,7 +22,7 @@ async function signin(email, password) {
 }
 const api = (cookie, path, opts = {}) => fetch(O + path, { ...opts, headers: { 'content-type': 'application/json', cookie, ...(opts.headers || {}) } });
 
-const owner = await signin('admin@melthahonda.com', 'password123');
+const owner = await signin('admin@visionautosolutions.com', 'password123');
 if (owner.status !== 200) { console.log('owner signin failed', owner.status); process.exit(1); }
 const email = 'zz-verify-' + ROLE + '@melthahonda.local';
 const pass = 'Vfy-' + Math.random().toString(36).slice(2, 10) + '!A9';

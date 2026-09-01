@@ -1243,8 +1243,18 @@ BEGIN
     ALTER TABLE users ADD CONSTRAINT users_admin_role_check CHECK (admin_role IN ('owner','manager','cashier'));
   END IF;
 END $$;
+-- Rebrand (2026): the default admin address moved from melthahonda.com to
+-- visionautosolutions.com. Rename the existing row on installs that predate
+-- the change so the seed's ON CONFLICT (email) still matches and no second
+-- admin account is created. No-op on fresh databases, and skipped if the
+-- new address is already present (email is UNIQUE -- a blind UPDATE would
+-- abort the whole schema apply).
+UPDATE users SET email = 'admin@visionautosolutions.com'
+  WHERE email = 'admin@melthahonda.com'
+    AND NOT EXISTS (SELECT 1 FROM users u2 WHERE u2.email = 'admin@visionautosolutions.com');
+
 -- The default seeded admin account is the shop owner.
-UPDATE users SET admin_role = 'owner' WHERE email = 'admin@melthahonda.com';
+UPDATE users SET admin_role = 'owner' WHERE email = 'admin@visionautosolutions.com';
 
 -- =============================================================================
 --  GIFT CARDS (P2, 2026-08-18)

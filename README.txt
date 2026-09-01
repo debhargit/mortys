@@ -72,7 +72,7 @@
   Default sign-in, created automatically the first time the database is set
   up:
 
-        Email     admin@melthahonda.com
+        Email     admin@visionautosolutions.com
         Password  password123
 
   ** Change that password immediately from Admin -> Staff. **

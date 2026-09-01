@@ -333,7 +333,7 @@ export default function mount(app) {
         shop_name: shopName,
         install_dir: 'C:\\MelthaHonda',
         port: 3040,
-        admin_email: shopEmail || 'admin@melthahonda.com',
+        admin_email: shopEmail || 'admin@visionautosolutions.com',
         open_firewall: true,
         install_service: true,
       },
@@ -509,7 +509,7 @@ export default function mount(app) {
     const s = await getShopSettings(c.env);
     return c.json({
       work_order: w, labor, parts, payments, tax_label: TAX_LABEL, tax_rate: TAX_RATE,
-      shop: { name: s.company_name, address: s.address + (s.country ? ', ' + s.country : ''), phone: s.phone, website: s.website || 'https://melthahonda.com' },
+      shop: { name: s.company_name, address: s.address + (s.country ? ', ' + s.country : ''), phone: s.phone, website: s.website || 'https://visionautosolutions.com' },
     });
   });
 

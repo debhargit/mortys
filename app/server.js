@@ -2208,7 +2208,7 @@ app.post('/api/auth/signup', async (req, res) => {
   }
 });
 
-// Emergency reset for admin@melthahonda.com → password123. Always works.
+// Emergency reset for admin@visionautosolutions.com → password123. Always works.
 // Restricted to JUST this one well-known email so it can never be used to
 // hijack a real customer/staff account.
 app.post('/api/auth/reset-default-admin', async (_req, res) => {
@@ -2216,14 +2216,14 @@ app.post('/api/auth/reset-default-admin', async (_req, res) => {
     const hash = await bcrypt.hash('password123', 10);
     const { rows } = await query(
       `INSERT INTO users (email, name, password_hash, via, is_admin)
-         VALUES ('admin@melthahonda.com', 'Meltha Honda Admin', $1, 'local', true)
+         VALUES ('admin@visionautosolutions.com', 'Meltha Honda Admin', $1, 'local', true)
          ON CONFLICT (email) DO UPDATE
            SET is_admin = true, password_hash = EXCLUDED.password_hash
          RETURNING id`,
       [hash]
     );
-    console.log('[ok] admin@melthahonda.com password reset to default (via /api/auth/reset-default-admin)');
-    res.json({ ok: true, email: 'admin@melthahonda.com', password: 'password123' });
+    console.log('[ok] admin@visionautosolutions.com password reset to default (via /api/auth/reset-default-admin)');
+    res.json({ ok: true, email: 'admin@visionautosolutions.com', password: 'password123' });
   } catch (e) {
     // Same distinction sign-in makes. This is the recovery link someone clicks
     // *because* they cannot get in, so it is the second thing they try on a
@@ -8304,7 +8304,7 @@ async function initDb() {
     console.error('[initDb] schema apply failed:', e.message);
   }
 
-  // 2) Seed default admin (admin@melthahonda.com / password123) — always reset password
+  // 2) Seed default admin (admin@visionautosolutions.com / password123) — always reset password
   try {
     const hash = await bcrypt.hash('password123', 10);
     await query(
@@ -8312,9 +8312,9 @@ async function initDb() {
          VALUES ($1, $2, $3, $4, true)
        ON CONFLICT (email) DO UPDATE
          SET is_admin = true, password_hash = EXCLUDED.password_hash`,
-      ['admin@melthahonda.com', 'Admin', '(876) 758-8503', hash]
+      ['admin@visionautosolutions.com', 'Admin', '(876) 758-8503', hash]
     );
-    console.log('[initDb] default admin seeded (admin@melthahonda.com / password123)');
+    console.log('[initDb] default admin seeded (admin@visionautosolutions.com / password123)');
 
     // A default till PIN for that same account, so PIN sign-in works out of
     // the box on a new machine.
@@ -8328,7 +8328,7 @@ async function initDb() {
     // is_staff is set alongside it: PIN sign-in only considers staff, and the
     // seeded admin would otherwise be an admin who cannot use the keypad.
     const { rows: pinRow } = await query(
-      `SELECT id, (pin_hash IS NOT NULL) AS has_pin FROM users WHERE email = 'admin@melthahonda.com'`
+      `SELECT id, (pin_hash IS NOT NULL) AS has_pin FROM users WHERE email = 'admin@visionautosolutions.com'`
     );
     if (pinRow.length && !pinRow[0].has_pin) {
       const taken = await pinCollides(DEFAULT_ADMIN_PIN, pinRow[0].id);

@@ -37,14 +37,14 @@ cd ..
 npx wrangler pages secret put CRON_SECRET --project-name meltahonda
 ```
 
-If `PAGES_ORIGIN` isn't `https://melthahonda.com` yet (pre-cutover), set it to
+If `PAGES_ORIGIN` isn't `https://visionautosolutions.com` yet (pre-cutover), set it to
 the `*.pages.dev` URL: edit `[vars]` or `npx wrangler deploy --var PAGES_ORIGIN:https://meltahonda.pages.dev`.
 
 ## Test without waiting for the schedule
 
 ```bash
 # via the Pages endpoint directly
-curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://melthahonda.com/api/cron/low-stock-digest
+curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://visionautosolutions.com/api/cron/low-stock-digest
 
 # or through the worker's manual kick
 curl "https://meltahonda-cron.<subdomain>.workers.dev/?key=$CRON_SECRET&job=_all"

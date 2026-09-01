@@ -197,7 +197,7 @@ if ($fail.Count -eq 0) {
   Write-Host '  Installed. This PC is ready.' -ForegroundColor Green
   Write-Host ''
   Write-Host "    Open:      http://localhost:$port/admin.html"
-  Write-Host '    Sign in:   admin@melthahonda.com / password123'
+  Write-Host '    Sign in:   admin@visionautosolutions.com / password123'
   Write-Host '    Change that password once you are in.' -ForegroundColor Yellow
   Write-Host ''
   Write-Host '  It starts on its own every time this PC is switched on.'

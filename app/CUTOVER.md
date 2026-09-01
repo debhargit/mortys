@@ -16,7 +16,7 @@ then it stops taking writes.
   `npx wrangler d1 create meltahonda-db` and paste the id.
 - **R2** opt-in (dashboard) → `npx wrangler r2 bucket create meltahonda-uploads`,
   then uncomment `[[r2_buckets]]` in `wrangler.toml`.
-- **Email Sending** opt-in (dashboard) → `npx wrangler email sending enable melthahonda.com`,
+- **Email Sending** opt-in (dashboard) → `npx wrangler email sending enable visionautosolutions.com`,
   then uncomment `[[send_email]]` in `wrangler.toml`.
 - Pick a long random `CRON_SECRET`.
 
@@ -99,7 +99,7 @@ POST /api/admin/pos/sale (a test sale) -> receipt number, stock decremented
 cd cron-worker
 npx wrangler deploy
 npx wrangler secret put CRON_SECRET            # SAME value as step 2
-# if PAGES_ORIGIN isn't melthahonda.com yet, deploy with --var PAGES_ORIGIN:https://meltahonda.pages.dev
+# if PAGES_ORIGIN isn't visionautosolutions.com yet, deploy with --var PAGES_ORIGIN:https://meltahonda.pages.dev
 cd ..
 curl -X POST -H "Authorization: Bearer <CRON_SECRET>" https://<pages-url>/api/cron/_all   # one manual run
 ```
@@ -109,7 +109,7 @@ curl -X POST -H "Authorization: Bearer <CRON_SECRET>" https://<pages-url>/api/cr
 ## 5. DNS flip
 
 - Cloudflare dashboard → Pages project → **Custom domains** → add
-  `melthahonda.com` (and `www`). Cloudflare provisions the cert.
+  `visionautosolutions.com` (and `www`). Cloudflare provisions the cert.
 - If the apex currently points at the Windows box via an A record, replace it
   with the Pages CNAME target the dashboard shows (or the automatic alias).
 - Lower TTL an hour beforehand so the change propagates fast.
@@ -138,7 +138,7 @@ Restart-Service MelthaHondaAdmin      # (elevated) — or Stop-Service to leave 
 
 Nothing is destructive until step 5. To roll back:
 
-1. Point `melthahonda.com` DNS back at the Windows box.
+1. Point `visionautosolutions.com` DNS back at the Windows box.
 2. `Start-Service MelthaHondaAdmin`.
 
 The Postgres data is untouched (the export in step 1 is read-only). Any writes
@@ -149,7 +149,7 @@ the window short and low-traffic.
 
 ## Offline / on-premise use after cutover
 
-`melthahonda.com` (Cloudflare + D1) is **online-only** — no offline mode, no
+`visionautosolutions.com` (Cloudflare + D1) is **online-only** — no offline mode, no
 local cache. If the shop needs to keep ringing sales when the internet is
 down, keep running the **self-hosted portable edition** (this repo's
 `runtime\` + `app\boot.js` + `.vbs` launchers) on a shop PC.

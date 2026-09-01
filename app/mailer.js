@@ -6,7 +6,7 @@
 //    SMTP_PORT=587
 //    SMTP_USER=you@gmail.com
 //    SMTP_PASS=your-app-password
-//    SMTP_FROM="Meltha Honda <noreply@melthahonda.com>"
+//    SMTP_FROM="Meltha Honda <noreply@visionautosolutions.com>"
 //
 //  If SMTP isn't configured, sendEmail() logs to console instead of failing
 //  so dev/local environments keep working.
@@ -45,7 +45,7 @@ init();
 
 async function sendEmail({ to, subject, html, text }) {
   if (!to) throw new Error('sendEmail: "to" is required');
-  const from = process.env.SMTP_FROM || 'Meltha Honda <noreply@melthahonda.com>';
+  const from = process.env.SMTP_FROM || 'Meltha Honda <noreply@visionautosolutions.com>';
   if (!active) {
     console.log('[mailer:stub] →', to, '|', subject);
     if (text) console.log('         ', text.split('\n').slice(0, 4).join(' | '));

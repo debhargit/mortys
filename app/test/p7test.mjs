@@ -45,7 +45,7 @@ function makeR2() {
   };
 }
 const R2 = makeR2();
-const ENV = { DB: makeDB(sdb), UPLOADS: R2, EMAIL_FROM: 'Meltha Honda <noreply@melthahonda.com>' };
+const ENV = { DB: makeDB(sdb), UPLOADS: R2, EMAIL_FROM: 'Meltha Honda <noreply@visionautosolutions.com>' };
 
 // ---- fake Hono ----
 const routes = [];
