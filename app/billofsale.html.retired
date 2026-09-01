@@ -67,7 +67,7 @@ function render(d){
     '<div class="bos">' +
       '<div class="head">' +
         '<div style="display:flex;gap:14px;align-items:center">' +
-          '<div class="logo">F&amp;D</div>' +
+          '<div class="logo">VA</div>' +
           '<div><h1>' + esc(shop.name) + '</h1><div class="sub">' + esc(shop.address) + '<br/>' + esc(shop.phone) + '</div></div>' +
         '</div>' +
         '<div class="meta">' +
