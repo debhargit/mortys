@@ -778,6 +778,14 @@ app.use((req, _res, next) => {
 const PRIVATE_FILE_RE =
   /(^|\/)(\.env.*|db-config\.json|server-config\.json|machine-config\.json|terminal-id\.json|portable\.json|package(-lock)?\.json|[^\/]*\.(js|mjs|cjs|sql|csv|bat|cmd|ps1|vbs|log|md))$/i;
 const PRIVATE_DIR_RE = /^\/(node_modules|migrations|logs|runtime|pgdata|scripts|functions)(\/|$)/i;
+
+// Front-end asset bundle. app/assets/ holds only browser-side JS/CSS that the
+// storefront pages load with <script src>/<link href> -- it must be reachable
+// even though the blanket .js rule below hides backend source in this folder.
+// A dedicated mount (not a hole in PRIVATE_FILE_RE) keeps the exception to
+// exactly this directory.
+app.use('/assets', express.static(path.join(__dirname, 'assets'), { maxAge: '1h', fallthrough: true }));
+
 app.use((req, res, next) => {
   if (req.path.startsWith('/api/')) return next();
   if (PRIVATE_DIR_RE.test(req.path) || PRIVATE_FILE_RE.test(req.path)) {
@@ -4823,8 +4831,38 @@ app.post('/api/service', async (req, res) => {
 });
 
 // =============================================================================
-//  PARTS INQUIRIES (with optional photo upload)
+//  PARTS INQUIRIES
 // =============================================================================
+// Public "can't find the part / request a quote" form on the storefront.
+// Writes to parts_inquiries, which admin.html -> Inquiries reads back through
+// GET /api/admin/inquiries. The storefront contact form collects a few fields
+// the table has no column for (email, category, fitment preference); the
+// client folds those into part_description as labelled lines before posting.
+app.post('/api/inquiry', async (req, res) => {
+  const b = req.body || {};
+  const name = (b.name || '').trim();
+  const phone = (b.phone || '').trim();
+  const partDescription = (b.part_description || b.message || '').trim();
+  if (!name || !phone || !partDescription)
+    return res.status(400).json({ error: 'name, phone and part_description are required' });
+
+  const { rows } = await query(
+    `INSERT INTO parts_inquiries
+       (user_id, name, phone, vehicle_make, vehicle_model, vehicle_year, condition, part_description)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, created_at`,
+    [
+      (req.session && req.session.userId) || null,
+      name, phone,
+      b.vehicle_make || null,
+      b.vehicle_model || null,
+      b.vehicle_year ? parseInt(b.vehicle_year, 10) || null : null,
+      b.condition || null,
+      partDescription,
+    ]
+  );
+  res.json({ id: rows[0].id, created_at: rows[0].created_at });
+});
+
 // =============================================================================
 //  MECHANICS (staff registry)
 // =============================================================================
