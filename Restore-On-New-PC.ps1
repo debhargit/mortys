@@ -211,8 +211,8 @@ if ((Test-Path $node) -and (Test-Path $boot)) {
 # ------------------------------------------------------------ service
 Head '5. Registering the Windows service'
 Status 'Registering the Windows service...'
-$svcExe = Join-Path $Destination 'Meltha Honda Service.exe'
-if (-not (Test-Path $svcExe)) { Bad 'Meltha Honda Service.exe is missing from the folder' }
+$svcExe = Join-Path $Destination 'Vision Auto Solutions Service.exe'
+if (-not (Test-Path $svcExe)) { Bad 'Vision Auto Solutions Service.exe is missing from the folder' }
 else {
   $existing = Get-Service -Name $SVCNAME -EA SilentlyContinue
   if ($existing) { Info 'already registered -- stopping it to update'; & sc.exe stop $SVCNAME | Out-Null; Start-Sleep -Seconds 6 }
@@ -229,7 +229,7 @@ $port = 3040
 try {
   $sc = Join-Path $Destination 'app\server-config.json'
   if (Test-Path $sc) { $j = Get-Content $sc -Raw | ConvertFrom-Json; if ($j.port) { $port = [int]$j.port } }
-  $lnk = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Meltha Honda Admin.lnk'
+  $lnk = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Vision Auto Solutions Admin.lnk'
   $w = New-Object -ComObject WScript.Shell
   $s = $w.CreateShortcut($lnk)
   $s.TargetPath = "http://localhost:$port/admin.html"

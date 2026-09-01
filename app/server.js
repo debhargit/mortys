@@ -4088,7 +4088,7 @@ app.get('/api/vin/:vin', async (req, res) => {
 //  PUBLIC CONFIG
 // =============================================================================
 // ---- HEALTH ---------------------------------------------------------------
-// Unauthenticated readiness probe. start-melthahonda.bat has advertised this
+// Unauthenticated readiness probe. Start Vision Auto Solutions.bat has advertised this
 // URL since day one but nothing ever implemented it, so anything watching it
 // (the portable launcher's "is it up yet?" poll, a second till waiting for
 // the counter PC to finish booting, an uptime monitor) was watching a 404.

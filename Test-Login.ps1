@@ -2,7 +2,7 @@
 ================================================================================
   Test-Login.ps1  --  where exactly does sign-in break?
 
-  Put this beside "Meltha Honda Admin.exe" on the machine that will not let you
+  Put this beside "Vision Auto Solutions Admin.exe" on the machine that will not let you
   in, then:
 
       powershell -ExecutionPolicy Bypass -File .\Test-Login.ps1

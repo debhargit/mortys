@@ -2,7 +2,7 @@
 ================================================================================
   Test-Database.ps1  --  why won't this copy's database start?
 
-  Put this file in the Vision Auto Solutions folder (beside "Meltha Honda Admin.exe")
+  Put this file in the Vision Auto Solutions folder (beside "Vision Auto Solutions Admin.exe")
   on the machine that is failing, right-click it and choose
   "Run with PowerShell". Or from a terminal in that folder:
 

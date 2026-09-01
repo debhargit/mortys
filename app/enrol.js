@@ -139,6 +139,6 @@ function post(host, port, urlPath, body) {
   console.log('  Encrypted: ' + (d.ca ? 'yes, and this server\'s certificate is pinned' : 'NO - the connection will be in clear text on the network'));
   console.log('  Written  : ' + DB_CONFIG_PATH);
   console.log('');
-  console.log('Start it with "Meltha Honda Admin.exe".');
+  console.log('Start it with "Vision Auto Solutions Admin.exe".');
   process.exit(0);
 })();

@@ -21,7 +21,7 @@ End If
 
 scriptDir  = fso.GetParentFolderName(WScript.ScriptFullName)
 startupDir = sh.SpecialFolders("Startup")
-linkPath   = fso.BuildPath(startupDir, "Meltha Honda Admin.lnk")
+linkPath   = fso.BuildPath(startupDir, "Vision Auto Solutions Admin.lnk")
 
 ' Prefer the compiled launcher. It is a Windows-subsystem executable, so at
 ' login it creates no console at all, and it cannot be re-associated with
@@ -44,7 +44,7 @@ If fso.FileExists(linkPath) Then
     If answer = vbYes Then
         fso.DeleteFile linkPath, True
         MsgBox "Autostart turned off." & vbCrLf & vbCrLf & _
-               "The server is not stopped - use ""Stop Meltha Honda Admin.vbs"" for that.", _
+               "The server is not stopped - use ""Stop Vision Auto Solutions Admin.vbs"" for that.", _
                vbInformation, "Vision Auto Solutions Admin"
     End If
     WScript.Quit 0

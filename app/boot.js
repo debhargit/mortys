@@ -2,7 +2,7 @@
 //  Vision Auto Solutions Admin — portable supervisor
 //
 //  This is the process that actually runs when someone double-clicks
-//  "Meltha Honda Admin.vbs". The .vbs does nothing except launch
+//  "Vision Auto Solutions Admin.vbs". The .vbs does nothing except launch
 //    runtime\node.exe app\boot.js
 //  with window style 0, so no console window is ever created visibly. Every
 //  piece of real logic lives here instead of in VBScript, because here we
@@ -632,7 +632,7 @@ async function seedAppConfig() {
         } else {
           host = 'localhost';
           log('discovery: nothing answered - falling back to localhost. ' +
-              'Run "Meltha Honda Settings.vbs" to set the server address by hand.');
+              'Run "Vision Auto Solutions Settings.vbs" to set the server address by hand.');
         }
       }
       local = { host, port: CFG.dbPort, database: CFG.database, user: CFG.dbUser, password: CFG.dbPassword };
@@ -712,7 +712,7 @@ async function runSupervisor() {
     } else {
       log('database server not reachable at ' + dbHost + ':' + dbPort +
           ' - starting anyway so the admin page loads. Fix the address with ' +
-          '"Meltha Honda Settings.vbs", or start PostgreSQL on that machine.');
+          '"Vision Auto Solutions Settings.vbs", or start PostgreSQL on that machine.');
     }
   }
 

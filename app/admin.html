@@ -11431,7 +11431,7 @@ async function renderLocalServerPanel(box){
       var blob = await res.blob();
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'Install Meltha Honda Offline.cmd';
+      a.download = 'Install Vision Auto Solutions Offline.cmd';
       document.body.appendChild(a); a.click();
       setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
       msg.textContent = '✓ Downloaded — run it on the shop PC.'; msg.style.color = '#15803d';
@@ -11831,7 +11831,7 @@ async function renderSettings(panel){
             ? '<div style="background:#fef3c7;color:#92400e;padding:8px 11px;border-radius:6px;font-size:11.5px;margin-bottom:10px">Currently running on port <b>' + esc(srvCfg.running_port) + '</b>. A restart is needed to switch to the saved port <b>' + esc(srvCfg.configured_port) + '</b>.</div>'
             : '') +
           '<div style="max-width:200px;margin-bottom:10px"><label class="lbl">Port</label><input id="srvPort" type="number" min="1" max="65535" class="fld" value="' + (srvCfg.configured_port || srvCfg.running_port || 3040) + '"/></div>' +
-          '<div style="font-size:11px;color:var(--muted);margin-bottom:10px">The port the app server listens on. Saving does not restart the server — re-run <code>start-melthahonda.bat</code> (or restart the Node process) for a changed port to take effect. There\'s no "fallback" port; this process listens on exactly one.</div>' +
+          '<div style="font-size:11px;color:var(--muted);margin-bottom:10px">The port the app server listens on. Saving does not restart the server — re-run <code>Start Vision Auto Solutions.bat</code> (or restart the Node process) for a changed port to take effect. There\'s no "fallback" port; this process listens on exactly one.</div>' +
           '<div id="setSrvMsg" style="display:none;padding:10px 14px;border-radius:7px;font-size:12.5px;margin-bottom:10px"></div>' +
           '<button type="button" id="setSrvSaveBtn" style="background:var(--navy);color:#fff;border:0;padding:10px 20px;border-radius:8px;font-weight:700;cursor:pointer;font-size:13.5px">Save port</button>' +
         '</div>' +

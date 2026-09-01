@@ -66,8 +66,8 @@ if (-not $Root) { $Root = $PSScriptRoot }
 $PgData  = Join-Path $Root 'data\pgdata'
 $Conf    = Join-Path $PgData 'postgresql.conf'
 $Hba     = Join-Path $PgData 'pg_hba.conf'
-$StopExe = Join-Path $Root 'Stop Meltha Honda Admin.exe'
-$StartExe= Join-Path $Root 'Meltha Honda Admin.exe'
+$StopExe = Join-Path $Root 'Stop Vision Auto Solutions Admin.exe'
+$StartExe= Join-Path $Root 'Vision Auto Solutions Admin.exe'
 $RuleName= 'Vision Auto Solutions DB (TEST)'
 $Marker  = '# --- Vision Auto Solutions LAN test override ---'
 
@@ -84,7 +84,7 @@ if (-not (Test-Path -LiteralPath $Conf)) {
     Write-Host ''
     Write-Host '  Either this is a CLIENT package (no runtime\pgsql), or the server'
     Write-Host '  has never been started -- the data directory is created on first run.'
-    Write-Host '  Start "Meltha Honda Admin.exe" once, let it finish, then re-run this.'
+    Write-Host '  Start "Vision Auto Solutions Admin.exe" once, let it finish, then re-run this.'
     Write-Host ''
     Read-Host 'Press Enter to close'
     return

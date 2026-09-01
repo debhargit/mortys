@@ -74,7 +74,7 @@ the zip and redeploys.
 | Runtime | Cloudflare Pages Functions (Hono) | Node/Express (`server.js`, `boot.js`) |
 | Database | Cloudflare D1 (`meltahonda-db`) | bundled PostgreSQL (`runtime\pgsql`, port 5433) |
 | Internet | required | not required (LAN only) |
-| Start | — (always up) | `Meltha Honda Admin.vbs`; service via `Start With Windows.vbs` |
+| Start | — (always up) | `Vision Auto Solutions Admin.vbs`; service via `Start With Windows.vbs` |
 | Access | `https://visionautosolutions.com/admin` | `http://<main-pc-IP>:3040/admin.html` |
 | Extra tills | ordinary browser sign-ins | `Connect To Shop Server.vbs` + a one-time link from *Setup → Terminals & access*; UDP `41235` discovery |
 | Backup | D1 Time Travel (30-day PITR) + `wrangler d1 export` | `pg_dump` / off-site backup panel |

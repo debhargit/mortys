@@ -9,7 +9,7 @@
 '                              -> "Create a connection link"
 '
 '  This replaces having to type the database address, name, user and password
-'  into Meltha Honda Settings.vbs by hand. That file still exists for fixing a
+'  into Vision Auto Solutions Settings.vbs by hand. That file still exists for fixing a
 '  connection when no link is available.
 ' ===========================================================================
 
@@ -32,7 +32,7 @@ End If
 If Not fso.FileExists(enrolJs) Then
     MsgBox "This portable copy is incomplete - app\enrol.js is missing." & vbCrLf & vbCrLf & _
            "It may have been built before connection links existed. Rebuild the package, " & _
-           "or use ""Meltha Honda Settings.vbs"" to enter the database details by hand.", _
+           "or use ""Vision Auto Solutions Settings.vbs"" to enter the database details by hand.", _
            vbCritical, "Connect To Shop Server"
     WScript.Quit 1
 End If
@@ -82,7 +82,7 @@ End If
 
 If exitCode = 0 Then
     MsgBox "Connected." & vbCrLf & vbCrLf & out & vbCrLf & _
-           "Now start it with ""Meltha Honda Admin.exe"".", vbInformation, "Connect To Shop Server"
+           "Now start it with ""Vision Auto Solutions Admin.exe"".", vbInformation, "Connect To Shop Server"
 Else
     MsgBox "Could not connect." & vbCrLf & vbCrLf & out & vbCrLf & _
            "Common causes:" & vbCrLf & _

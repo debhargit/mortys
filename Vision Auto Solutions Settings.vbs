@@ -114,11 +114,11 @@ If wasRunning And fso.FileExists(nodeExe) Then
     WScript.Sleep 1500
     sh.Run """" & nodeExe & """ """ & bootJs & """", 0, False
     MsgBox "Settings saved. The admin server is restarting." & vbCrLf & vbCrLf & _
-           "Give it a few seconds, then open ""Meltha Honda Admin.vbs"".", _
+           "Give it a few seconds, then open ""Vision Auto Solutions Admin.vbs"".", _
            vbInformation, "Vision Auto Solutions Settings"
 Else
     MsgBox "Settings saved." & vbCrLf & vbCrLf & _
-           "Open ""Meltha Honda Admin.vbs"" to start the admin server.", _
+           "Open ""Vision Auto Solutions Admin.vbs"" to start the admin server.", _
            vbInformation, "Vision Auto Solutions Settings"
 End If
 

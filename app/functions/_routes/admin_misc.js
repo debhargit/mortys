@@ -412,7 +412,7 @@ export default function mount(app) {
       '}',
       '',
       'Write-Host "Starting the local server — first run sets up PostgreSQL and loads the database..." -ForegroundColor Cyan',
-      "$vbs = Join-Path $Root 'Meltha Honda Admin.vbs'",
+      "$vbs = Join-Path $Root 'Vision Auto Solutions Admin.vbs'",
       "$setup = Join-Path $Root 'setup.cmd'",
       'if (Test-Path $vbs) { Start-Process wscript.exe -ArgumentList ("""" + $vbs + """") -WorkingDirectory $Root }',
       'elseif (Test-Path $setup) { Start-Process $setup -WorkingDirectory $Root }',
@@ -452,7 +452,7 @@ export default function mount(app) {
     return new Response(cmd, {
       headers: {
         'Content-Type': 'application/octet-stream',
-        'Content-Disposition': 'attachment; filename="Install Meltha Honda Offline.cmd"',
+        'Content-Disposition': 'attachment; filename="Install Vision Auto Solutions Offline.cmd"',
         'Cache-Control': 'no-store',
       },
     });

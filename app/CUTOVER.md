@@ -169,7 +169,7 @@ The panel is a small wizard: it asks for the **preset options** —
 | Start automatically with Windows | on |
 
 — and the **⬇ Download configured installer** button hands back a single
-`Install Meltha Honda Offline.cmd` with those answers baked in. Run it on the
+`Install Vision Auto Solutions Offline.cmd` with those answers baked in. Run it on the
 shop's main PC (double-click → approve the admin prompt). It:
 
 1. self-elevates, then runs an embedded PowerShell script;
@@ -180,7 +180,7 @@ shop's main PC (double-click → approve the admin prompt). It:
    and **`offline-setup.json`** (all the preset answers, incl. the admin
    email + password) into the app folder;
 4. adds the firewall rules (TCP `<port>` + discovery UDP `41235`) if ticked;
-5. launches the bundle's own first run — `Meltha Honda Admin.vbs` (or
+5. launches the bundle's own first run — `Vision Auto Solutions Admin.vbs` (or
    `setup.cmd`, or `node server.js`) — which **reads `offline-setup.json` on
    first start to `initdb` the bundled PostgreSQL, load `schema.sql`, and
    seed the admin user**;
@@ -194,7 +194,7 @@ To turn the button on: publish the portable-edition zip somewhere reachable
 "no bundle published" note and the button is disabled.
 
 **Bundle contract:** `build-portable.ps1` must ship a first-run entrypoint
-(`Meltha Honda Admin.vbs` / `setup.cmd`) that, when `offline-setup.json`
+(`Vision Auto Solutions Admin.vbs` / `setup.cmd`) that, when `offline-setup.json`
 exists in the app folder and the DB is not yet initialised, does the
 unattended `initdb` + `schema.sql` + admin-seed from that file and then
 deletes/ignores it on subsequent starts. Everything the installer does
@@ -203,7 +203,7 @@ generated `.cmd` and needs no bundle support.
 
 The manual fallback, on a shop PC —
 
-- Start it with `Meltha Honda Admin.vbs`; make it permanent with
+- Start it with `Vision Auto Solutions Admin.vbs`; make it permanent with
   `Start With Windows.vbs` (installs the `MelthaHondaAdmin` service). It serves
   `http://<main-pc-IP>:3040/admin.html` off its bundled PostgreSQL, no internet.
 - Other tills join with `Connect To Shop Server.vbs` + a one-time link from

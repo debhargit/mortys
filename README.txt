@@ -28,7 +28,7 @@
         Uses the database on another computer, so it shares the same stock,
         sales and customers as everyone else. On its very first run it
         searches the network for the main PC automatically and remembers
-        what it finds. If nothing answers, run Meltha Honda Settings.vbs
+        what it finds. If nothing answers, run Vision Auto Solutions Settings.vbs
         and type the main PC's IP address.
 
   Both kinds run the full admin panel and POS. The only difference is where
@@ -56,13 +56,13 @@
   STARTING IT
 -------------------------------------------------------------------------------
 
-  Double-click:            Meltha Honda Admin.exe
+  Double-click:            Vision Auto Solutions Admin.exe
 
   It starts the server if it isn't already running, waits for it to be
   ready, then opens the admin panel in your browser. Double-clicking it
   again later just opens the panel -- it will not start a second copy.
 
-  (There is also a Meltha Honda Admin.vbs that does exactly the same job.
+  (There is also a Vision Auto Solutions Admin.vbs that does exactly the same job.
   It is a fallback for machines that block .exe files; use the .exe unless
   you have a reason not to.)
 
@@ -83,7 +83,7 @@
   STOPPING IT
 -------------------------------------------------------------------------------
 
-  Double-click:            Stop Meltha Honda Admin.exe
+  Double-click:            Stop Vision Auto Solutions Admin.exe
 
   Because the server has no window, this is the only way to shut it down
   short of restarting Windows. Closing the browser does NOT stop it -- the
@@ -117,7 +117,7 @@
   POINTING IT AT A DIFFERENT DATABASE
 -------------------------------------------------------------------------------
 
-  Double-click:            Meltha Honda Settings.vbs
+  Double-click:            Vision Auto Solutions Settings.vbs
 
   Use this when the admin panel will not load, or shows no data, because the
   database address is wrong. It asks for the database server address, port,
@@ -218,13 +218,13 @@
 
   "The admin server did not finish starting"
         Almost always the database. Check boot.log, then run
-        Meltha Honda Settings.vbs and confirm the address.
+        Vision Auto Solutions Settings.vbs and confirm the address.
 
   The page loads but everything is empty
         The server is up but its database is not. Same fix as above.
 
   It was working, now the browser says it cannot connect
-        The server may have stopped. Run Meltha Honda Admin.vbs again.
+        The server may have stopped. Run Vision Auto Solutions Admin.vbs again.
         If it keeps happening, server.log will say why -- the supervisor
         restarts the server automatically after a crash and logs each one.
 
@@ -271,6 +271,6 @@
         lives in data\pgdata. Nothing else on the network shares it -- if you
         want several machines working from the same records, one machine
         should hold the database and the rest should be pointed at its IP
-        address with Meltha Honda Settings.vbs.
+        address with Vision Auto Solutions Settings.vbs.
 
 ===============================================================================

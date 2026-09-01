@@ -79,7 +79,7 @@ Else
            fso.BuildPath(scriptDir, "data\logs\boot.log") & vbCrLf & _
            fso.BuildPath(scriptDir, "data\logs\server.log") & vbCrLf & vbCrLf & _
            "Most common cause: the database it is pointed at is not reachable. " & _
-           "Run ""Meltha Honda Settings.vbs"" to change the database address.", _
+           "Run ""Vision Auto Solutions Settings.vbs"" to change the database address.", _
            vbExclamation, "Vision Auto Solutions Admin"
 End If
 

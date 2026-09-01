@@ -11,7 +11,7 @@
 
   Uses ps2exe (PowerShell Gallery). It compiles with the .NET Framework C#
   compiler that ships in Windows -- no Visual Studio, no dotnet SDK. The
-  result is the same kind of small .NET exe as Meltha Honda Service.exe.
+  result is the same kind of small .NET exe as Vision Auto Solutions Service.exe.
 
   Run once on a machine with internet:
 

@@ -23,7 +23,7 @@
 #        cloudflared tunnel info miamim
 #        nslookup visionautosolutions.com
 #
-# After that, start-melthahonda.bat will spin up the local server and run
+# After that, Start Vision Auto Solutions.bat will spin up the local server and run
 # this tunnel, exposing the site at https://visionautosolutions.com
 # =====================================================================
 

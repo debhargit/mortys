@@ -1,6 +1,6 @@
 @echo off
 rem ===========================================================================
-rem  Meltha Honda Admin.bat  --  batch counterpart of "Meltha Honda Admin.vbs"
+rem  Vision Auto Solutions Admin.bat  --  batch counterpart of "Vision Auto Solutions Admin.vbs"
 rem
 rem  Double-click to:
 rem     1. pin the listening port to 3056 in app\server-config.json
@@ -13,9 +13,9 @@ rem  genuinely hidden -- boot.js is started minimised instead. For a truly
 rem  windowless autostart at login, keep using "Start Service Only.vbs".
 rem
 rem  Usage:
-rem     Meltha Honda Admin.bat            start + open the admin panel
-rem     Meltha Honda Admin.bat --status   print one line of JSON about the instance
-rem     Meltha Honda Admin.bat --stop     stop a running instance
+rem     Vision Auto Solutions Admin.bat            start + open the admin panel
+rem     Vision Auto Solutions Admin.bat --status   print one line of JSON about the instance
+rem     Vision Auto Solutions Admin.bat --stop     stop a running instance
 rem ===========================================================================
 setlocal
 title Vision Auto Solutions Admin (port 3056)

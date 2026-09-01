@@ -2,7 +2,7 @@
 //
 // Brings up the *bundled* PostgreSQL that ships in vendor\, for a machine that
 // has no PostgreSQL installed at all -- a fresh Windows box with nothing on it
-// but a copy of this folder. start-melthahonda.bat calls this only after it has
+// but a copy of this folder. Start Vision Auto Solutions.bat calls this only after it has
 // already failed to reach a real server and failed to find a Windows service,
 // so getting here means "there is no other database on this PC".
 //
