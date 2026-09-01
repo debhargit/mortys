@@ -1,4 +1,4 @@
-name = "meltahonda"
+name = "visionautosolutions"
 compatibility_date = "2026-07-01"
 # nodejs_compat: bcryptjs (functions/_lib/password path) touches node:crypto for
 # its RNG fallback. Everything else in functions/ is WebCrypto / Web-standard.
@@ -7,11 +7,11 @@ pages_build_output_dir = "public"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "meltahonda-db"
+database_name = "visionautosolutions-db"
 migrations_dir = "migrations"
-# meltahonda-db on the Debhargithub@gmail.com account
-# (ce557e06f410b0e79dbd1cbe3adeef8b). Recreated clean 2026-08-31.
-database_id = "d82e902b-f8ff-4621-b8d2-cfda269a8dcc"
+# visionautosolutions-db on the haldaneharrison46@gmail.com account
+# (9a6d4645171dc984e737d3544ff01a37). Created 2026-09-01.
+database_id = "53b55748-5ae3-4fc7-85d1-8d463891a3ef"
 
 # Where new-order alerts go, and the From line for outbound email. Override
 # any of these without touching code.
