@@ -38,7 +38,7 @@ function Info($m) { Write-Host "        $m" -ForegroundColor DarkGray }
 
 Write-Host ''
 Write-Host '===============================================' -ForegroundColor White
-Write-Host '  Meltha Honda -- sign-in check'                 -ForegroundColor White
+Write-Host '  Vision Auto Solutions -- sign-in check'                 -ForegroundColor White
 Write-Host '===============================================' -ForegroundColor White
 Info "account: $Email"
 

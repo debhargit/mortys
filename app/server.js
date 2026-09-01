@@ -1,5 +1,5 @@
 // ============================================================================
-//  Meltha Honda Sales & Servs — Express + Postgres backend
+//  Vision Auto Solutions — Express + Postgres backend
 //  Serves the static site from this same folder and exposes /api/* endpoints.
 //
 //  Boot:
@@ -314,7 +314,7 @@ async function queryWithFallback(text, params) {
 // running, instead of the operator having to type in a hostname or IP by
 // hand: this process detects its own local Postgres on boot and re-checks it
 // periodically (LOCAL_SERVER_STATUS below), and broadcasts a small UDP
-// announcement that other Meltha Honda instances on the same LAN can pick up
+// announcement that other Vision Auto Solutions instances on the same LAN can pick up
 // passively, or query on demand -- so a second terminal machine can find an
 // already-installed local server without typing its IP. Read-only, LAN-only
 // (UDP broadcast doesn't cross a router/subnet), and every piece of it is
@@ -1066,7 +1066,7 @@ async function getShopSettings() {
   // meantime) -- mirrors the old hardcoded values so nothing looks different
   // until the table exists.
   return {
-    company_name: 'Meltha Honda Sales & Servs Ltd', address: '127 Hagley Park Road, Kingston 11',
+    company_name: 'Vision Auto Solutions Ltd', address: '127 Hagley Park Road, Kingston 11',
     country: 'Jamaica', phone: '(876) 758-8503', email: null, website: null, logo_url: null,
     print_logo_on_invoice: true, default_print_template: 'receipt', quote_valid_days: 14,
     invoice_notice: 'Goods remain the property of the company until paid in full. Returns accepted within 14 days with the original invoice, in original condition. Electrical parts are non-returnable.',
@@ -1754,7 +1754,7 @@ app.get('/join', (req, res) => {
     'b.code{display:block;font-family:ui-monospace,Consolas,monospace;font-size:19px;letter-spacing:2px;' +
     'background:rgba(255,255,255,.1);padding:12px;border-radius:8px;margin:14px 0;text-align:center;word-break:break-all}</style>' +
     '<div class="c"><h1>Connect this computer to the shop</h1>' +
-    '<p>On the computer you want to connect, open its Meltha Honda folder and double-click ' +
+    '<p>On the computer you want to connect, open its Vision Auto Solutions folder and double-click ' +
     '<code>Connect To Shop Server.vbs</code>, then paste this code when it asks:</p>' +
     '<b class="code" id="c">(open the full link, including the part after #)</b>' +
     '<p>This code works <b>once</b> and expires shortly. If it stops working, ask for a new one from ' +
@@ -1804,8 +1804,8 @@ function backupOrigin() {
   return safeName(process.env.MH_BACKUP_ORIGIN || os.hostname() || 'shop', 'shop');
 }
 async function shopName() {
-  try { const { rows } = await query('SELECT company_name FROM shop_settings ORDER BY id LIMIT 1'); return (rows[0] && rows[0].company_name) || 'Meltha Honda'; }
-  catch (_) { return 'Meltha Honda'; }
+  try { const { rows } = await query('SELECT company_name FROM shop_settings ORDER BY id LIMIT 1'); return (rows[0] && rows[0].company_name) || 'Vision Auto Solutions'; }
+  catch (_) { return 'Vision Auto Solutions'; }
 }
 
 // One small JSON call to the receiver (ping / latest).
@@ -2060,7 +2060,7 @@ app.post('/api/admin/backup/test', requireManager, async (req, res) => {
     const r = await backupApi('GET', url, '/api/backup/ping', key);
     if (r.status === 200 && r.json && r.json.ok) return res.json({ ok: true, reachable: true, authorized: true, server: r.json.server || null });
     if (r.status === 401 || r.status === 403) return res.json({ ok: false, reachable: true, authorized: false, error: 'The server is reachable but rejected the key.' });
-    return res.json({ ok: false, reachable: true, authorized: false, error: 'Unexpected response (HTTP ' + r.status + '). Is that a Meltha Honda server?' });
+    return res.json({ ok: false, reachable: true, authorized: false, error: 'Unexpected response (HTTP ' + r.status + '). Is that a Vision Auto Solutions server?' });
   } catch (e) {
     return res.json({ ok: false, reachable: false, authorized: false, error: e.message });
   }
@@ -2216,7 +2216,7 @@ app.post('/api/auth/reset-default-admin', async (_req, res) => {
     const hash = await bcrypt.hash('password123', 10);
     const { rows } = await query(
       `INSERT INTO users (email, name, password_hash, via, is_admin)
-         VALUES ('admin@visionautosolutions.com', 'Meltha Honda Admin', $1, 'local', true)
+         VALUES ('admin@visionautosolutions.com', 'Vision Auto Solutions Admin', $1, 'local', true)
          ON CONFLICT (email) DO UPDATE
            SET is_admin = true, password_hash = EXCLUDED.password_hash
          RETURNING id`,
@@ -2234,7 +2234,7 @@ app.post('/api/auth/reset-default-admin', async (_req, res) => {
       console.error('[reset admin] database unreachable:', e.message);
       return res.status(503).json({
         error: 'The database is not running, so the password cannot be reset. ' +
-               'Start the database first — run Test-Database.ps1 in the Meltha Honda folder to find out why it will not start.',
+               'Start the database first — run Test-Database.ps1 in the Vision Auto Solutions folder to find out why it will not start.',
         db_down: true,
       });
     }
@@ -2890,7 +2890,7 @@ app.post('/api/admin/users/:id/notifications', requireAdmin, async (req, res) =>
     [req.params.id, kind, body]
   );
   if (u[0].email) {
-    const subject = kind === 'dunning' ? 'Payment reminder — Meltha Honda Sales & Servs' : 'A note from Meltha Honda Sales & Servs';
+    const subject = kind === 'dunning' ? 'Payment reminder — Vision Auto Solutions' : 'A note from Vision Auto Solutions';
     mailer.sendEmail({ to: u[0].email, subject, text: body, html: `<p>${body.replace(/\n/g, '<br>')}</p>` })
       .catch((e) => console.warn('[notice email]', e.message));
   }
@@ -5064,15 +5064,15 @@ app.patch('/api/admin/work-orders/:id', requireAdmin, async (req, res) => {
       try {
         const { rows: w } = await query('SELECT wo_number, customer_name, customer_phone, vehicle_make, vehicle_model FROM work_orders WHERE id = $1', [req.params.id]);
         if (!w.length || !w[0].customer_phone) return;
-        const base = (process.env.PUBLIC_BASE_URL || 'https://melthahonda.miamimistress.com').replace(/\/$/, '');
+        const base = (process.env.PUBLIC_BASE_URL || 'https://visionautosolutions.com').replace(/\/$/, '');
         const trackUrl = `${base}/track.html?wo=${encodeURIComponent(w[0].wo_number)}&phone=${encodeURIComponent(w[0].customer_phone.replace(/[^\d]/g,'').slice(-7))}`;
         const vehicle = [w[0].vehicle_make, w[0].vehicle_model].filter(Boolean).join(' ');
         const msgs = {
-          in_progress: `Meltha Honda: Your ${vehicle} (${w[0].wo_number}) is now in the bay. Track: ${trackUrl}`,
-          awaiting_parts: `Meltha Honda: We're sourcing parts for your ${vehicle} (${w[0].wo_number}). We'll text when work resumes. ${trackUrl}`,
-          completed: `Meltha Honda: ✓ Your ${vehicle} is ready for pickup! ${w[0].wo_number}. Open Mon-Sat 8:00-5:30. ${trackUrl}`,
-          billed: `Meltha Honda: Invoice ready for ${vehicle} (${w[0].wo_number}). Come by to settle and collect. ${trackUrl}`,
-          paid: `Meltha Honda: Thanks for your business, ${w[0].customer_name.split(' ')[0]}! Receipt: ${trackUrl}`,
+          in_progress: `Vision Auto Solutions: Your ${vehicle} (${w[0].wo_number}) is now in the bay. Track: ${trackUrl}`,
+          awaiting_parts: `Vision Auto Solutions: We're sourcing parts for your ${vehicle} (${w[0].wo_number}). We'll text when work resumes. ${trackUrl}`,
+          completed: `Vision Auto Solutions: ✓ Your ${vehicle} is ready for pickup! ${w[0].wo_number}. Open Mon-Sat 8:00-5:30. ${trackUrl}`,
+          billed: `Vision Auto Solutions: Invoice ready for ${vehicle} (${w[0].wo_number}). Come by to settle and collect. ${trackUrl}`,
+          paid: `Vision Auto Solutions: Thanks for your business, ${w[0].customer_name.split(' ')[0]}! Receipt: ${trackUrl}`,
         };
         const body = msgs[req.body.status];
         if (body && sms.sendSMS) {
@@ -7559,7 +7559,7 @@ app.get('/api/invoice/:wo_number', async (req, res) => {
       // in here rather than changing that page's markup.
       address: shopSettings.address + (shopSettings.country ? ', ' + shopSettings.country : ''),
       phone: shopSettings.phone,
-      website: shopSettings.website || (process.env.PUBLIC_BASE_URL || 'https://melthahonda.miamimistress.com'),
+      website: shopSettings.website || (process.env.PUBLIC_BASE_URL || 'https://visionautosolutions.com'),
     },
   });
 });
@@ -8982,7 +8982,7 @@ async function start() {
   // otherwise a blocked till would serve its admin panel for one heartbeat.
   await terminalHeartbeat();
   app.listen(PORT, () => {
-    console.log('[boot] Meltha Honda server listening on http://localhost:' + PORT);
+    console.log('[boot] Vision Auto Solutions server listening on http://localhost:' + PORT);
   });
 
   // Off-site backup: only the database-owning machine runs the schedule.

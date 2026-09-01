@@ -1,6 +1,6 @@
 <#
 ================================================================================
-  Install.ps1  --  set this PC up as a Meltha Honda till
+  Install.ps1  --  set this PC up as a Vision Auto Solutions till
 
   Right-click and choose "Run with PowerShell", or from an elevated prompt:
 
@@ -49,7 +49,7 @@ function Info($m) { Write-Host "        $m" -ForegroundColor DarkGray }
 
 Write-Host ''
 Write-Host '===============================================' -ForegroundColor White
-Write-Host '  Meltha Honda -- install this till'             -ForegroundColor White
+Write-Host '  Vision Auto Solutions -- install this till'             -ForegroundColor White
 Write-Host '===============================================' -ForegroundColor White
 Info "from : $SOURCE"
 Info "to   : $Destination"
@@ -165,7 +165,7 @@ try {
   # app, so there is nothing to launch -- and nothing for Application Control
   # to refuse.
   $s.TargetPath = "http://localhost:$port/admin.html"
-  $s.Description = 'Open the Meltha Honda admin panel and POS'
+  $s.Description = 'Open the Vision Auto Solutions admin panel and POS'
   $s.Save()
   Ok "created for all users -> http://localhost:$port/admin.html"
 } catch { Bad "could not create the shortcut: $($_.Exception.Message)" }

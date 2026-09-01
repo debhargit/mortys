@@ -38,16 +38,16 @@ $common = @{
   requireAdmin = $true          # one clean UAC prompt at launch
   noConsole    = $true          # no PowerShell window -- ever. The scripts talk
                                 # through a small status box and one final dialog.
-  company      = 'Meltha Honda Sales & Servs'
+  company      = 'Vision Auto Solutions'
   version      = '1.0.0.0'
 }
 
 $targets = @(
   @{ In = 'Make-Migration-Package.ps1'; Out = 'Make Migration Package.exe';
-     Title = 'Meltha Honda -- Make Migration Package';
+     Title = 'Vision Auto Solutions -- Make Migration Package';
      Desc  = 'Copy this till, database and all, to a drive for another PC' }
   @{ In = 'Restore-On-New-PC.ps1';      Out = 'Restore On New PC.exe';
-     Title = 'Meltha Honda -- Restore On New PC';
+     Title = 'Vision Auto Solutions -- Restore On New PC';
      Desc  = 'Rebuild the till on this computer from a migration package' }
 )
 

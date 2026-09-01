@@ -31,7 +31,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$APPNAME = 'Meltha Honda'
+$APPNAME = 'Vision Auto Solutions'
 $SVCNAME = 'MelthaHondaAdmin'
 
 # ------------------------------------------------------------------ GUI layer
@@ -122,7 +122,7 @@ Info "from : $SOURCE"
 Info "to   : $Destination"
 
 if (-not (Test-Path (Join-Path $SOURCE 'app\boot.js'))) {
-  Bad "this folder is not a Meltha Honda migration folder (no app\boot.js beside this tool)"
+  Bad "this folder is not a Vision Auto Solutions migration folder (no app\boot.js beside this tool)"
   Finish
 }
 if ((Resolve-Path $SOURCE).Path -ieq (Resolve-Path -LiteralPath $Destination -EA SilentlyContinue).Path) {
@@ -132,7 +132,7 @@ if ((Resolve-Path $SOURCE).Path -ieq (Resolve-Path -LiteralPath $Destination -EA
 
 $firstTime = -not (Test-Path (Join-Path $Destination 'data\pgdata\PG_VERSION'))
 if (-not (Confirm (
-  "Set up the Meltha Honda till on THIS computer from:`r`n`r`n$SOURCE`r`n`r`n" +
+  "Set up the Vision Auto Solutions till on THIS computer from:`r`n`r`n$SOURCE`r`n`r`n" +
   $(if ($firstTime) { "All stock, sales, customers and staff logins from the old machine will be brought across." }
     else { "C:\MelthaHonda already has a database -- the program files will be updated and the existing database left as it is." }) +
   "`r`n`r`nContinue?") 'restore on new PC')) {
@@ -233,7 +233,7 @@ try {
   $w = New-Object -ComObject WScript.Shell
   $s = $w.CreateShortcut($lnk)
   $s.TargetPath = "http://localhost:$port/admin.html"
-  $s.Description = 'Open the Meltha Honda admin panel and POS'
+  $s.Description = 'Open the Vision Auto Solutions admin panel and POS'
   $s.Save()
   Ok "created -> http://localhost:$port/admin.html"
 } catch { Bad "could not create the shortcut: $($_.Exception.Message)" }

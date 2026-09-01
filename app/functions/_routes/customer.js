@@ -96,7 +96,7 @@ export default function mount(app) {
       const id = await nextId(db, 'users');
       await db.run(
         `INSERT INTO users (id, email, name, password_hash, via, is_admin)
-           VALUES (?, 'admin@visionautosolutions.com', 'Meltha Honda Admin', ?, 'local', 1)`, id, hash);
+           VALUES (?, 'admin@visionautosolutions.com', 'Vision Auto Solutions Admin', ?, 'local', 1)`, id, hash);
     }
     return c.json({ ok: true, email: 'admin@visionautosolutions.com', password: 'password123' });
   });

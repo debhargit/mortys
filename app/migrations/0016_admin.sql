@@ -9,7 +9,7 @@
 -- ---- shop settings (single row, id = 1) ---------------------------------
 CREATE TABLE IF NOT EXISTS shop_settings (
   id                     INTEGER PRIMARY KEY,
-  company_name           TEXT NOT NULL DEFAULT 'Meltha Honda Sales & Servs Ltd',
+  company_name           TEXT NOT NULL DEFAULT 'Vision Auto Solutions Ltd',
   address                TEXT NOT NULL DEFAULT '127 Hagley Park Road, Kingston 11',
   country                TEXT NOT NULL DEFAULT 'Jamaica',
   phone                  TEXT NOT NULL DEFAULT '(876) 758-8503',

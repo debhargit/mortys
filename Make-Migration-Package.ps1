@@ -37,7 +37,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$APPNAME = 'Meltha Honda'
+$APPNAME = 'Vision Auto Solutions'
 $SVCNAME = 'MelthaHondaAdmin'
 
 # ------------------------------------------------------------------ GUI layer
@@ -148,7 +148,7 @@ Info "run from : $PSScriptRoot"
 Info "install  : $SOURCE"
 
 if (-not $SOURCE) {
-  Bad 'could not find the Meltha Honda install (no app\boot.js in the usual places)'
+  Bad 'could not find the Vision Auto Solutions install (no app\boot.js in the usual places)'
   Finish
 }
 

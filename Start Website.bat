@@ -1,6 +1,6 @@
 @echo off
 rem ===========================================================================
-rem  Start Website.bat  --  launch the Meltha Honda / Vision Auto Solutions site
+rem  Start Website.bat  --  launch the Vision Auto Solutions / Vision Auto Solutions site
 rem
 rem  Runs the bundled Node runtime against app\boot.js, which starts the
 rem  database (if this build ships one), supervises server.js and serves the
@@ -20,7 +20,7 @@ rem
 rem  boot.js is single-instance safe: starting it twice just exits.
 rem ===========================================================================
 setlocal
-title Meltha Honda / Vision Auto Solutions - Website Server (port 3056)
+title Vision Auto Solutions / Vision Auto Solutions - Website Server (port 3056)
 
 rem -- Always run from the folder this script lives in --------------------------
 cd /d "%~dp0"

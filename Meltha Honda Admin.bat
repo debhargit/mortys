@@ -18,7 +18,7 @@ rem     Meltha Honda Admin.bat --status   print one line of JSON about the insta
 rem     Meltha Honda Admin.bat --stop     stop a running instance
 rem ===========================================================================
 setlocal
-title Meltha Honda Admin (port 3056)
+title Vision Auto Solutions Admin (port 3056)
 
 cd /d "%~dp0"
 
@@ -61,8 +61,8 @@ call :health && (
 )
 
 rem -- Start boot.js minimised (batch can't fully hide a console) -----------
-echo Starting the Meltha Honda admin server on port %PORT% ...
-start "Meltha Honda Admin server" /min "%NODE%" "%BOOT%"
+echo Starting the Vision Auto Solutions admin server on port %PORT% ...
+start "Vision Auto Solutions Admin server" /min "%NODE%" "%BOOT%"
 
 rem -- Wait up to ~75s for readiness (first run initialises the database) ---
 set /a tries=0

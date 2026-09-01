@@ -302,7 +302,7 @@ export default function mount(app) {
     const r = await db.run('INSERT INTO customer_notifications (user_id, kind, body) VALUES (?,?,?)', id, kind, body);
     if (u.email) {
       const { sendEmail } = await import('../_lib/mailer.js');
-      const subject = kind === 'dunning' ? 'Payment reminder — Meltha Honda Sales & Servs' : 'A note from Meltha Honda Sales & Servs';
+      const subject = kind === 'dunning' ? 'Payment reminder — Vision Auto Solutions' : 'A note from Vision Auto Solutions';
       c.executionCtx?.waitUntil?.(sendEmail(c.env, { to: u.email, subject, text: body, html: `<p>${body.replace(/\n/g, '<br>')}</p>` }).catch(() => {}));
     }
     return c.json({ ok: true, id: r.meta.last_row_id, emailed: !!u.email });

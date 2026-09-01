@@ -319,7 +319,7 @@ export default function mount(app) {
   // wherever they publish the zip (GitHub release, R2, a share…).
   app.get('/api/admin/local-server', adminMw, async (c) => {
     const env = c.env || {};
-    let shopName = 'Meltha Honda Sales & Servs Ltd', shopEmail = '';
+    let shopName = 'Vision Auto Solutions Ltd', shopEmail = '';
     try { const s = await getShopSettings(c.env); shopName = s.company_name || shopName; shopEmail = s.email || ''; }
     catch { /* fallback names */ }
     return c.json({
@@ -353,7 +353,7 @@ export default function mount(app) {
       return c.json({ error: 'No offline bundle is published yet. Build the portable edition and set LOCAL_SERVER_URL in wrangler.toml first — see app/CUTOVER.md.' }, 400);
     }
     const b = await c.req.json().catch(() => ({}));
-    const shop = String(b.shop_name || 'Meltha Honda').trim().slice(0, 80) || 'Meltha Honda';
+    const shop = String(b.shop_name || 'Vision Auto Solutions').trim().slice(0, 80) || 'Vision Auto Solutions';
     let dir = String(b.install_dir || 'C:\\MelthaHonda').trim();
     if (!/^[A-Za-z]:\\[\w .\-\\]{0,120}$/.test(dir)) dir = 'C:\\MelthaHonda';
     dir = dir.replace(/\\+$/, '');
@@ -379,7 +379,7 @@ export default function mount(app) {
       `$DoFirewall = $${doFw ? 'true' : 'false'}`,
       `$DoService  = $${doSvc ? 'true' : 'false'}`,
       '',
-      'Write-Host "== Meltha Honda offline setup for $Shop ==" -ForegroundColor Cyan',
+      'Write-Host "== Vision Auto Solutions offline setup for $Shop ==" -ForegroundColor Cyan',
       'New-Item -ItemType Directory -Force -Path $Dir | Out-Null',
       "$zip = Join-Path $Dir 'bundle.zip'",
       'Write-Host "Downloading the offline bundle..."',
@@ -407,8 +407,8 @@ export default function mount(app) {
       '',
       'if ($DoFirewall) {',
       '  Write-Host "Opening the firewall (TCP $Port, UDP 41235)..."',
-      '  cmd /c "netsh advfirewall firewall add rule name=""Meltha Honda Admin $Port"" dir=in action=allow protocol=TCP localport=$Port" | Out-Null',
-      '  cmd /c "netsh advfirewall firewall add rule name=""Meltha Honda Discovery"" dir=in action=allow protocol=UDP localport=41235" | Out-Null',
+      '  cmd /c "netsh advfirewall firewall add rule name=""Vision Auto Solutions Admin $Port"" dir=in action=allow protocol=TCP localport=$Port" | Out-Null',
+      '  cmd /c "netsh advfirewall firewall add rule name=""Vision Auto Solutions Discovery"" dir=in action=allow protocol=UDP localport=41235" | Out-Null',
       '}',
       '',
       'Write-Host "Starting the local server — first run sets up PostgreSQL and loads the database..." -ForegroundColor Cyan',

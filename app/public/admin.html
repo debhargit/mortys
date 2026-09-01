@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Admin · Meltha Honda Sales &amp; Servs</title>
+<title>Admin · Vision Auto Solutions</title>
 <meta name="robots" content="noindex,nofollow" />
 <script>
 // Set the theme before first paint so there's no flash of the wrong colors.
@@ -272,7 +272,7 @@
 <header class="top">
   <div style="display:flex;align-items:center;gap:14px">
     <div style="width:34px;height:34px;border-radius:8px;background:linear-gradient(160deg,#0ea5e9 52%,#d62828 52%);display:grid;place-items:center;color:#fff;font-weight:800;font-size:13px;letter-spacing:.5px;flex-shrink:0;text-shadow:0 1px 2px rgba(0,0,0,.3)">MH</div>
-    <h1>Meltha Honda · Admin</h1>
+    <h1>Vision Auto Solutions · Admin</h1>
     <a class="home" href="/">← Public site</a>
   </div>
   <div class="who">
@@ -2874,7 +2874,7 @@ async function renderPOS(panel){
     // the end where nobody will ever look for it.
     '<div id="posFooter" style="position:sticky;bottom:0;z-index:6;display:flex;align-items:center;gap:12px;height:30px;padding:0 12px;background:var(--navy);color:#fff;border:1px solid var(--line);border-top:0;border-radius:0 0 8px 8px;font-size:11.5px;overflow:hidden">' +
       '<span id="posFootShop" style="font-weight:800;letter-spacing:.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">' +
-        esc(POS_SHOP.name || 'Meltha Honda Sales & Servs Ltd') +
+        esc(POS_SHOP.name || 'Vision Auto Solutions Ltd') +
       '</span>' +
       '<span id="posFootUser" style="margin-left:auto;white-space:nowrap;opacity:.92;flex-shrink:0" title="Signed in">👤 ' + esc(CURRENT_ADMIN_NAME || '—') + '</span>' +
       '<span style="opacity:.3;flex-shrink:0">|</span>' +
@@ -2968,7 +2968,7 @@ async function renderPOS(panel){
   // rather than the hardcoded fallback it was built with.
   setTimeout(function(){
     var el = document.getElementById('posFootShop');
-    if (el && document.body.contains(el)) el.textContent = POS_SHOP.name || 'Meltha Honda Sales & Servs Ltd';
+    if (el && document.body.contains(el)) el.textContent = POS_SHOP.name || 'Vision Auto Solutions Ltd';
   }, 1500);
 
   // Its own function because loadGrid() has four exits — searching, failed,
@@ -4596,7 +4596,7 @@ function posCartPrint(){
   }).join('');
   var body =
     '<div style="font-family:system-ui,Segoe UI,Arial,sans-serif;padding:22px;max-width:760px;margin:0 auto">' +
-      '<h2 style="margin:0 0 2px">' + esc(POS_SHOP.name || 'Meltha Honda Sales & Servs Ltd') + '</h2>' +
+      '<h2 style="margin:0 0 2px">' + esc(POS_SHOP.name || 'Vision Auto Solutions Ltd') + '</h2>' +
       '<div style="color:#555;font-size:12px">Cart preview · ' + esc(new Date().toLocaleString()) + '</div>' +
       (POS.tag ? '<div style="margin-top:6px;font-weight:700">🏷️ ' + esc(POS.tag) + '</div>' : '') +
       ((POS.custName || (POS.customer && POS.customer.name)) ? '<div style="margin-top:6px">Customer: <b>' + esc(POS.custName || POS.customer.name) + '</b></div>' : '') +
@@ -4639,11 +4639,11 @@ function posCartEmail(){
   var lines = posCartLines().map(function(l){
     return l.qty + ' × ' + l.name + '  (' + fmtMoney(l.unit) + ')' + (l.disc ? '  −' + fmtMoney(l.disc) : '') + '  = ' + fmtMoney(l.ext);
   }).join('\n');
-  var bodyTxt = (POS_SHOP.name || 'Meltha Honda') + ' — cart' + (POS.tag ? ' (' + POS.tag + ')' : '') + '\n\n' +
+  var bodyTxt = (POS_SHOP.name || 'Vision Auto Solutions') + ' — cart' + (POS.tag ? ' (' + POS.tag + ')' : '') + '\n\n' +
     lines + '\n\nSubtotal: ' + fmtMoney(t.subtotal) + '\nGCT: ' + fmtMoney(t.tax) + '\nTOTAL: ' + fmtMoney(t.total) +
     (POS.notes ? '\n\nNote: ' + POS.notes : '');
   window.location.href = 'mailto:' + encodeURIComponent(email) +
-    '?subject=' + encodeURIComponent((POS_SHOP.name || 'Meltha Honda') + ' — your cart') +
+    '?subject=' + encodeURIComponent((POS_SHOP.name || 'Vision Auto Solutions') + ' — your cart') +
     '&body=' + encodeURIComponent(bodyTxt);
   if (!email) posToast('No customer email on file — pick a recipient in your mail app.', true);
 }
@@ -6131,7 +6131,7 @@ function posDocLabel(d){
 // Receipt-style/Invoice-style quote buttons use), so this reuses it
 // instead of fixing a fourth copy of the same conversion by hand.
 function posPrintQuote(q, shop){
-  var d = posQuoteToDocData(q, shop || { name:'Meltha Honda Sales & Servs Ltd', address:'127 Hagley Park Road, Kingston 11', country:'Jamaica', phone:'(876) 758-8503' });
+  var d = posQuoteToDocData(q, shop || { name:'Vision Auto Solutions Ltd', address:'127 Hagley Park Road, Kingston 11', country:'Jamaica', phone:'(876) 758-8503' });
   var s = d.sale;
   var unpriced = d.items.filter(function(it){ return !(it.unit_price_cents > 0); }).length;
   posPrintWindow('Quote ' + s.receipt_number, POS_A4_CSS,
@@ -6489,7 +6489,7 @@ function posQuoteToDocData(q, shop){
 // shop_settings row every server-side print endpoint reads (see
 // getShopSettings()/shopSettingsToShop() in server.js) so the two can't
 // drift the way the four independent hardcoded copies used to.
-var POS_SHOP = { name: 'Meltha Honda Sales & Servs Ltd', address: '127 Hagley Park Road, Kingston 11', country: 'Jamaica', phone: '(876) 758-8503',
+var POS_SHOP = { name: 'Vision Auto Solutions Ltd', address: '127 Hagley Park Road, Kingston 11', country: 'Jamaica', phone: '(876) 758-8503',
   email: null, website: null, logo_url: null, print_logo: true, default_print_template: 'receipt',
   invoice_notice: null, receipt_notice: null, statement_notice: null };
 function loadShopSettingsIntoPosShop(){
@@ -8442,7 +8442,7 @@ async function renderCustomerDetail(panel, id){
   if (fillDunning) fillDunning.addEventListener('click', function(){
     document.getElementById('ntKind').value = 'dunning';
     document.getElementById('ntBody').value =
-      'Hi ' + (u.name || 'there') + ', this is a reminder that your account with Meltha Honda Sales & Servs ' +
+      'Hi ' + (u.name || 'there') + ', this is a reminder that your account with Vision Auto Solutions ' +
       'currently has a balance of ' + fmtMoney(d.account_balance_usd) + ' on account' +
       (u.payment_terms_days != null ? ' (terms: Net ' + u.payment_terms_days + ')' : '') +
       '. Please arrange payment at your earliest convenience. Thank you!';
@@ -11293,7 +11293,7 @@ function posDbFieldset(prefix, title, sub, c){
 // connection fields below rather than making the operator copy an IP by hand.
 function netServerRows(list){
   if (!list.length) {
-    return '<div style="color:var(--muted);font-size:12.5px">No other Meltha Honda servers seen on this network yet. If another machine has the local server installed and running, click "Scan for servers".</div>';
+    return '<div style="color:var(--muted);font-size:12.5px">No other Vision Auto Solutions servers seen on this network yet. If another machine has the local server installed and running, click "Scan for servers".</div>';
   }
   return '<div style="display:grid;gap:8px">' + list.map(function(sv){
     return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid var(--line);border-radius:7px;padding:8px 12px">' +
@@ -11521,7 +11521,7 @@ async function renderBackupPanel(box){
     (recentRows ? '<div style="padding:10px 16px;border-bottom:1px solid var(--line)"><div class="lbl" style="margin-bottom:4px">Recent activity</div>' +
       '<table style="width:100%;font-size:12px"><tbody>' + recentRows + '</tbody></table></div>' : '') +
 
-    '<details style="padding:12px 16px"><summary style="cursor:pointer;font-weight:700;font-size:12.5px">Receive backups from another Meltha Honda server</summary>' +
+    '<details style="padding:12px 16px"><summary style="cursor:pointer;font-weight:700;font-size:12.5px">Receive backups from another Vision Auto Solutions server</summary>' +
       '<p style="font-size:12px;color:var(--muted);margin:8px 0">Turn this on only on the copy that runs on the internet. Give the key below to the shop server so it can send its backups here.</p>' +
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
         '<input id="bkRecvKey" readonly style="' + fld + ';flex:1;min-width:220px;font-family:ui-monospace,monospace" value="' + (d.receive_key_set ? '(click Show)' : 'not set') + '"/>' +

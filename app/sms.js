@@ -1,5 +1,5 @@
 // ============================================================================
-//  Meltha Honda — SMS sender (Twilio wrapper)
+//  Vision Auto Solutions — SMS sender (Twilio wrapper)
 //
 //  Configure via .env:
 //    TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -66,15 +66,15 @@ async function sendSMS({ to, body }) {
 // ----- TEMPLATES (kept short — one SMS segment is 160 chars) -----------------
 const templates = {
   order: ({ orderId, total }) =>
-    `Meltha Honda Sales & Servs: order #${orderId} confirmed (USD $${Number(total).toFixed(2)}). We'll call to confirm pickup. 876-758-8503`,
+    `Vision Auto Solutions: order #${orderId} confirmed (USD $${Number(total).toFixed(2)}). We'll call to confirm pickup. 876-758-8503`,
 
   service: ({ apptId, date, slot }) => {
     const when = [date, slot].filter(Boolean).join(' at ');
-    return `Meltha Honda: service appt #${apptId} requested${when ? ' for ' + when : ''}. We'll call to confirm. 876-758-8503`;
+    return `Vision Auto Solutions: service appt #${apptId} requested${when ? ' for ' + when : ''}. We'll call to confirm. 876-758-8503`;
   },
 
   backInStock: ({ product }) =>
-    `Meltha Honda: "${String(product).slice(0, 60)}" is back in stock. View at melthahonda.miamimistress.com or call 876-758-8503`,
+    `Vision Auto Solutions: "${String(product).slice(0, 60)}" is back in stock. View at visionautosolutions.com or call 876-758-8503`,
 };
 
 module.exports = {

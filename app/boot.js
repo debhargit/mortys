@@ -1,5 +1,5 @@
 // ============================================================================
-//  Meltha Honda Admin — portable supervisor
+//  Vision Auto Solutions Admin — portable supervisor
 //
 //  This is the process that actually runs when someone double-clicks
 //  "Meltha Honda Admin.vbs". The .vbs does nothing except launch
@@ -327,7 +327,7 @@ function initPostgres() {
     let conf = fs.readFileSync(confPath, 'utf8');
     conf += [
       '',
-      '# --- Meltha Honda portable overrides ---',
+      '# --- Vision Auto Solutions portable overrides ---',
       "listen_addresses = 'localhost'",
       'port = ' + CFG.pgPort,
       'max_connections = 50',
@@ -394,7 +394,7 @@ function repairPgDataDirs() {
 // `ssl = on` lines, which is harmless, but two ssl_cert_file lines pointing
 // anywhere different would not be.
 async function ensurePostgresTls() {
-  const marker = '# --- Meltha Honda TLS ---';
+  const marker = '# --- Vision Auto Solutions TLS ---';
   const confPath = path.join(PGDATA_DIR, 'postgresql.conf');
   if (!fs.existsSync(confPath)) return false;
   try {
@@ -624,7 +624,7 @@ async function seedAppConfig() {
       // settle on is written to db-config.json and never re-derived, so the
       // till doesn't wander to a different machine later.
       if (!host || String(host).toLowerCase() === 'auto') {
-        log('discovery: looking for a Meltha Honda server on the network...');
+        log('discovery: looking for a Vision Auto Solutions server on the network...');
         const server = await discoverServer(5000);
         if (server) {
           host = server.host;

@@ -18,7 +18,7 @@ database_id = "d82e902b-f8ff-4621-b8d2-cfda269a8dcc"
 [vars]
 ORDER_NOTIFY_TO = "admin@visionautosolutions.com"
 ORDER_NOTIFY_SMS = "876-758-8503"
-EMAIL_FROM = "Meltha Honda <noreply@visionautosolutions.com>"
+EMAIL_FROM = "Vision Auto Solutions <noreply@visionautosolutions.com>"
 
 # Settings -> "Local / offline server" download panel (functions/_routes/
 # admin_misc.js GET /api/admin/local-server). Publish the portable-edition

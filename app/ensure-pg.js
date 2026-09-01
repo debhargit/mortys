@@ -199,7 +199,7 @@ function initPostgres() {
   try {
     fs.appendFileSync(confPath, [
       '',
-      '# --- Meltha Honda bundled-database overrides ---',
+      '# --- Vision Auto Solutions bundled-database overrides ---',
       "listen_addresses = 'localhost'",
       'port = ' + PG_PORT,
       'max_connections = 50',

@@ -1,5 +1,5 @@
 ' ===========================================================================
-'  Meltha Honda Admin — start the server only, no browser, no window
+'  Vision Auto Solutions Admin — start the server only, no browser, no window
 '
 '  Same as "Meltha Honda Admin.vbs" minus the "wait for it, then open the
 '  admin panel" part. This is what the Windows-login autostart shortcut runs:

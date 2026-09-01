@@ -2,7 +2,7 @@
   "name": "fox-and-d",
   "version": "1.0.0",
   "private": true,
-  "description": "Meltha Honda Sales & Servs — static site + Postgres-backed API",
+  "description": "Vision Auto Solutions — static site + Postgres-backed API",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

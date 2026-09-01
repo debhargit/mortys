@@ -3,7 +3,7 @@
 import { d1 } from './db.js';
 
 const FALLBACK = {
-  company_name: 'Meltha Honda Sales & Servs Ltd',
+  company_name: 'Vision Auto Solutions Ltd',
   address: '127 Hagley Park Road, Kingston 11',
   country: 'Jamaica',
   phone: '(876) 758-8503',

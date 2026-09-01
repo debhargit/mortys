@@ -1,5 +1,5 @@
 // ============================================================================
-//  Meltha Honda — one-shot database bootstrap
+//  Vision Auto Solutions — one-shot database bootstrap
 //
 //  Run once after installing Postgres:    node db-init.js
 //

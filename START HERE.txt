@@ -22,7 +22,7 @@
        Click Yes at the Windows permission prompt.
 
     3. Wait for the "This computer is the till now" message.
-       Open the "Meltha Honda Admin" shortcut it puts on the desktop, and
+       Open the "Vision Auto Solutions Admin" shortcut it puts on the desktop, and
        sign in with the same email and password as the old machine.
 
   That is all. This PC now starts the till automatically, hidden, every time

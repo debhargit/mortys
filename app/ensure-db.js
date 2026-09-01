@@ -1,7 +1,7 @@
 // ensure-db.js
 //
 // Connects to the Postgres server (not a specific database) and creates the
-// Meltha Honda database if it doesn't exist. Used by start-melthahonda.bat so we don't
+// Vision Auto Solutions database if it doesn't exist. Used by start-melthahonda.bat so we don't
 // depend on a working psql.exe / libpq.dll install on the host machine.
 //
 // Reads DATABASE_URL from .env. If unset, falls back to the host/user/password

@@ -2,7 +2,7 @@
 ================================================================================
   Open-Database-To-LAN-TEST-ONLY.ps1
 
-  Lets a Meltha Honda CLIENT folder on another PC connect to the PostgreSQL
+  Lets a Vision Auto Solutions CLIENT folder on another PC connect to the PostgreSQL
   that a STANDALONE server package carries inside it.
 
   Why this is needed
@@ -68,12 +68,12 @@ $Conf    = Join-Path $PgData 'postgresql.conf'
 $Hba     = Join-Path $PgData 'pg_hba.conf'
 $StopExe = Join-Path $Root 'Stop Meltha Honda Admin.exe'
 $StartExe= Join-Path $Root 'Meltha Honda Admin.exe'
-$RuleName= 'Meltha Honda DB (TEST)'
-$Marker  = '# --- Meltha Honda LAN test override ---'
+$RuleName= 'Vision Auto Solutions DB (TEST)'
+$Marker  = '# --- Vision Auto Solutions LAN test override ---'
 
 Write-Host ''
 Write-Host '=======================================================' -ForegroundColor White
-Write-Host '  Meltha Honda -- open bundled database to the LAN'      -ForegroundColor White
+Write-Host '  Vision Auto Solutions -- open bundled database to the LAN'      -ForegroundColor White
 Write-Host '=======================================================' -ForegroundColor White
 Write-Host ("  Package : {0}" -f $Root)
 
@@ -107,7 +107,7 @@ if ($Revert) {
     $skip = $false
     foreach ($l in $lines) {
         if ($l.Trim() -eq $Marker) { $skip = $true; continue }
-        if ($skip -and $l.Trim() -eq '# --- end Meltha Honda LAN test override ---') { $skip = $false; continue }
+        if ($skip -and $l.Trim() -eq '# --- end Vision Auto Solutions LAN test override ---') { $skip = $false; continue }
         if (-not $skip) { $keep.Add($l) }
     }
     [System.IO.File]::WriteAllLines($Conf, $keep, $Utf8NoBom)
@@ -149,7 +149,7 @@ else {
     if ($conf -notmatch [regex]::Escape($Marker)) {
         $conf += "`r`n$Marker`r`n" +
                  "listen_addresses = '*'`r`n" +
-                 "# --- end Meltha Honda LAN test override ---`r`n"
+                 "# --- end Vision Auto Solutions LAN test override ---`r`n"
         [System.IO.File]::WriteAllText($Conf, $conf, $Utf8NoBom)
         Write-Host "  postgresql.conf : listen_addresses = '*'"
     } else {

@@ -2,7 +2,7 @@
 ================================================================================
   Test-Database.ps1  --  why won't this copy's database start?
 
-  Put this file in the Meltha Honda folder (beside "Meltha Honda Admin.exe")
+  Put this file in the Vision Auto Solutions folder (beside "Meltha Honda Admin.exe")
   on the machine that is failing, right-click it and choose
   "Run with PowerShell". Or from a terminal in that folder:
 
@@ -29,7 +29,7 @@ function Info($m) { Write-Host "        $m" -ForegroundColor DarkGray }
 
 Write-Host ''
 Write-Host '===============================================' -ForegroundColor White
-Write-Host '  Meltha Honda -- database check'               -ForegroundColor White
+Write-Host '  Vision Auto Solutions -- database check'               -ForegroundColor White
 Write-Host '===============================================' -ForegroundColor White
 Info $ROOT
 
