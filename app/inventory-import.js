@@ -98,10 +98,14 @@ function toMoney(raw) {
 }
 
 function toInt(raw, fallback) {
-  const t = cellText(raw).replace(/[^0-9\-]/g, '');
-  if (!t || t === '-') return fallback;
-  const n = parseInt(t, 10);
-  return Number.isFinite(n) ? n : fallback;
+  // Keep the decimal point. Parts-system exports routinely write a whole
+  // count as "9.000" (a fixed 3-place decimal); stripping the dot turned
+  // that into 9000. Parse as a real number, then truncate to a whole unit
+  // -- a fractional stock line ("12.5") counts as 12 on hand.
+  const t = cellText(raw).replace(/[^0-9.\-]/g, '');
+  if (!t || t === '-' || t === '.') return fallback;
+  const n = Number(t);
+  return Number.isFinite(n) ? Math.trunc(n) : fallback;
 }
 
 // ------------------------------------------------------------- CSV parsing --
