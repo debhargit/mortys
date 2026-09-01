@@ -5,6 +5,7 @@
   Turns
         Make-Migration-Package.ps1  ->  Make Migration Package.exe
         Restore-On-New-PC.ps1       ->  Restore On New PC.exe
+        Stop-Admin-Server.ps1       ->  Stop Vision Auto Solutions Admin.exe
 
   so they can be double-clicked like the other tools in this folder, with no
   "Run with PowerShell" and no execution-policy prompt.
@@ -35,20 +36,25 @@ if (-not (Get-Module -ListAvailable ps2exe)) {
 Import-Module ps2exe
 
 $common = @{
-  requireAdmin = $true          # one clean UAC prompt at launch
   noConsole    = $true          # no PowerShell window -- ever. The scripts talk
                                 # through a small status box and one final dialog.
   company      = 'Vision Auto Solutions'
   version      = '1.0.0.0'
 }
 
+# Admin = $true adds the manifest so Windows shows one clean UAC prompt at
+# launch. The migration tools touch the service and pgdata and need it; the
+# stop tool only signals boot.js and does not.
 $targets = @(
-  @{ In = 'Make-Migration-Package.ps1'; Out = 'Make Migration Package.exe';
+  @{ In = 'Make-Migration-Package.ps1'; Out = 'Make Migration Package.exe'; Admin = $true;
      Title = 'Vision Auto Solutions -- Make Migration Package';
      Desc  = 'Copy this till, database and all, to a drive for another PC' }
-  @{ In = 'Restore-On-New-PC.ps1';      Out = 'Restore On New PC.exe';
+  @{ In = 'Restore-On-New-PC.ps1';      Out = 'Restore On New PC.exe';      Admin = $true;
      Title = 'Vision Auto Solutions -- Restore On New PC';
      Desc  = 'Rebuild the till on this computer from a migration package' }
+  @{ In = 'Stop-Admin-Server.ps1';      Out = 'Stop Vision Auto Solutions Admin.exe'; Admin = $false;
+     Title = 'Stop Vision Auto Solutions Admin';
+     Desc  = 'Shut down the windowless admin/POS server on this machine' }
 )
 
 foreach ($t in $targets) {
@@ -57,7 +63,9 @@ foreach ($t in $targets) {
   if (-not (Test-Path $in)) { Write-Host "  skip: $($t.In) not found" -ForegroundColor Yellow; continue }
   Write-Host ""
   Write-Host "Compiling $($t.In)  ->  $($t.Out)" -ForegroundColor Cyan
-  Invoke-ps2exe -inputFile $in -outputFile $out -title $t.Title -product $t.Title -description $t.Desc @common
+  $opts = $common.Clone()
+  if ($t.Admin) { $opts.requireAdmin = $true }
+  Invoke-ps2exe -inputFile $in -outputFile $out -title $t.Title -product $t.Title -description $t.Desc @opts
   if (Test-Path $out) {
     Write-Host ("  ok  {0:N0} KB" -f ((Get-Item $out).Length / 1KB)) -ForegroundColor Green
   } else {

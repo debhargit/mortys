@@ -143,6 +143,9 @@ Head '3. Registering the Windows service'
 $svcExe = Join-Path $Destination 'Vision Auto Solutions Service.exe'
 if (-not (Test-Path $svcExe)) { Bad 'Vision Auto Solutions Service.exe is missing from the package' }
 else {
+  # Service name is baked into Vision Auto Solutions Service.exe (no source in
+  # this repo) -- it registers itself as 'MelthaHondaAdmin', so that is what we
+  # look for here too.
   $existing = Get-Service -Name 'MelthaHondaAdmin' -EA SilentlyContinue
   if ($existing) { Info 'already registered -- stopping it to update'; & sc.exe stop MelthaHondaAdmin | Out-Null; Start-Sleep -Seconds 6 }
   $out = & $svcExe --install 2>&1

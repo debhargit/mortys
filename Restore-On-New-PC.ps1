@@ -32,6 +32,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $APPNAME = 'Vision Auto Solutions'
+# The service name is compiled into "Vision Auto Solutions Service.exe" (no
+# source in this repo), so it stays 'MelthaHondaAdmin' even after the rebrand.
+# Renaming it means rebuilding that binary and teaching Install.ps1 to remove
+# the old-named service on upgrade.
 $SVCNAME = 'MelthaHondaAdmin'
 
 # ------------------------------------------------------------------ GUI layer
