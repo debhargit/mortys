@@ -4069,8 +4069,10 @@ document.addEventListener('DOMContentLoaded', function(){
   // never reshuffles what the shopper is already looking at.
   (function loadCatalogue(){
     var VALID_CATS = {engine:1,body:1,suspension:1,electrical:1,brakes:1,wheels:1,fluids:1,accessories:1};
-    var FIRST_CHUNK = 1000;
-    var CHUNK = 4000;
+    // /api/products hard-caps `limit` at 200, so page in 200s until a short
+    // page comes back. The server sorts priced parts first, so page 1 is the
+    // sellable stock and later pages only ever append.
+    var PAGE = 200;
     var first = true;
     var loaded = 0;
 
@@ -4080,22 +4082,23 @@ document.addEventListener('DOMContentLoaded', function(){
     }
 
     function absorb(data){
-      var cats = data.cats || [];
-      var rows = data.rows || [];
+      var rows = (data && (data.products || data.rows)) || [];
       var mapped = rows.map(function(r){
-        // [img, name, make_model, catIdx, condIdx, price_cents, stock_count, bin]
-        var img = r[0];
-        if (r[5] != null) prices[img] = r[5] / 100;
-        liveStock[img] = r[6];
-        var cat = cats[r[3]];
-        var name = r[1] || img;
-        var make = r[2] || '';
-        var bin = r[7] || '';
+        // /api/products row: { img, name, make_model, category, condition,
+        // price_usd, stock_count, bin_location, ... }
+        var img = r.img;
+        var pu = parseFloat(r.price_usd);
+        if (!isNaN(pu)) prices[img] = pu;
+        liveStock[img] = r.stock_count;
+        var cat = String(r.category || '').toLowerCase();
+        var name = r.name || img;
+        var make = r.make_model || '';
+        var bin = r.bin_location || '';
         return {
           n: name,
           m: make,
           c: VALID_CATS[cat] ? cat : 'accessories',
-          b: r[4] === 1 ? 'USED' : 'NEW',
+          b: r.condition === 'USED' ? 'USED' : 'NEW',
           i: img,
           bin: bin,
           // Precomputed lowercase haystack. Building this once at load is what
@@ -4120,15 +4123,16 @@ document.addEventListener('DOMContentLoaded', function(){
       return fetch('/api/products?compact=1&limit=' + size + '&offset=' + offset, { credentials:'same-origin' })
         .then(function(r){ return r.ok ? r.json() : null; })
         .then(function(data){
-          if (!data || !data.rows || !data.rows.length) return 0;
+          var rows = data && (data.products || data.rows);
+          if (!rows || !rows.length) return 0;
           var n = absorb(data);
           setStat(loaded, false);
           return n;
         });
     }
 
-    // First chunk paints; everything after it quietly extends the list.
-    pull(0, FIRST_CHUNK)
+    // First page paints; everything after it quietly extends the list.
+    pull(0, PAGE)
       .then(function(n){
         // Nothing came back. There is no placeholder list to fall back on any
         // more, so say so rather than leaving the shopper staring at an empty
@@ -4142,8 +4146,8 @@ document.addEventListener('DOMContentLoaded', function(){
         // items in their cart is offered "Request a Quote" instead of checkout.
         renderCart();
         (function next(){
-          pull(loaded, CHUNK).then(function(got){
-            if (got >= CHUNK) { next(); return; }
+          pull(loaded, PAGE).then(function(got){
+            if (got >= PAGE) { next(); return; }
             setStat(loaded, true);
             // Re-render once at the end so counts and pagination settle. The
             // shopper keeps their page and filter -- appended rows only ever
