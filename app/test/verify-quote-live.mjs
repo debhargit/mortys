@@ -1,6 +1,6 @@
 import jsdomPkg from 'jsdom';
 const { JSDOM, VirtualConsole } = jsdomPkg;
-const O = 'https://melthahonda.com';
+const O = 'https://mortysautoparts.com';
 
 // ---- storefront: catalogue loads from live stock, no prices --------------
 {
@@ -33,7 +33,7 @@ const O = 'https://melthahonda.com';
 {
   const si = await fetch(O + '/api/auth/signin', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: 'admin@melthahonda.com', password: 'password123' }),
+    body: JSON.stringify({ email: 'admin@mortysautoparts.com', password: 'password123' }),
   });
   const ck = (si.headers.get('set-cookie') || '').split(';')[0];
   // seed one quote request so the editor has something to open

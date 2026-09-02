@@ -1,10 +1,10 @@
-// Verify the two production changes on melthahonda.com:
+// Verify the two production changes on mortysautoparts.com:
 //  1. storefront no longer shows a "Staff Portal" link
 //  2. POS ticket bar shows the "👥 N terminals" pill for an owner/manager,
 //     backed by a working GET/POST /api/admin/presence
 import jsdomPkg from 'jsdom';
 const { JSDOM, VirtualConsole } = jsdomPkg;
-const O = 'https://melthahonda.com';
+const O = 'https://mortysautoparts.com';
 
 // ---- 1. storefront -------------------------------------------------------
 const store = await (await fetch(O + '/')).text();
@@ -15,7 +15,7 @@ console.log('  "Staff Portal" present:', hasStaffPortal, hasStaffPortal ? '  <--
 // ---- 2. sign in for a real session ------------------------------------
 const si = await fetch(O + '/api/auth/signin', {
   method: 'POST', headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ email: 'admin@melthahonda.com', password: 'password123' }),
+  body: JSON.stringify({ email: 'admin@mortysautoparts.com', password: 'password123' }),
 });
 const ck = (si.headers.get('set-cookie') || '').split(';')[0];
 const me = await (await fetch(O + '/api/me', { headers: { cookie: ck } })).json();

@@ -1,18 +1,18 @@
-// Load the LIVE melthahonda.com/admin into jsdom, boot into the POS Terminal
+// Load the LIVE mortysautoparts.com/admin into jsdom, boot into the POS Terminal
 // tab (the default), and assert the ticket-bar machine badge renders as
-// "🌐 melthahonda.com · Internet" with no uncaught error.
+// "🌐 mortysautoparts.com · Internet" with no uncaught error.
 import jsdomPkg from 'jsdom';
 const { JSDOM, VirtualConsole } = jsdomPkg;
 
-const html = await (await fetch('https://melthahonda.com/admin')).text();
+const html = await (await fetch('https://mortysautoparts.com/admin')).text();
 
 const J = (o, code = 200) => new Response(JSON.stringify(o), { status: code, headers: { 'content-type': 'application/json' } });
 const R = {
-  '/api/me': J({ user: { id: 1, email: 'admin@melthahonda.com', name: 'Admin', is_admin: true, admin_role: 'manager', phone: '(876) 758-8503', perms: {}, perms_full: true } }),
+  '/api/me': J({ user: { id: 1, email: 'admin@mortysautoparts.com', name: 'Admin', is_admin: true, admin_role: 'manager', phone: '(876) 758-5590', perms: {}, perms_full: true } }),
   '/api/admin/roles/mine': J({ role: { code: 'manager', label: 'Manager', can_manage: true, hidden_tabs: [], rank: 10 } }),
   '/api/admin/me/ui-prefs': J({ ok: true, prefs: {}, forced_favs: null, favs_locked: false }),
   '/api/admin/summary': J({ new_inquiries: 0, pending_appointments: 0, pending_notifications: 0, pending_reviews: 0, pending_orders: 0, low_stock_count: 0 }),
-  '/api/admin/settings/machine': J({ ok: true, name: 'melthahonda.com', host: 'melthahonda.com', port: 443, local_db: null, cloud: true, mode: 'internet' }),
+  '/api/admin/settings/machine': J({ ok: true, name: 'mortysautoparts.com', host: 'mortysautoparts.com', port: 443, local_db: null, cloud: true, mode: 'internet' }),
   '/api/admin/cash-drawer/open': J({ session: null }),
   '/api/admin/pos/walkin-customer': J({ customer: { id: 2, name: 'Cash Customer - Walk-in', account_number: 'C-000001', price_tier: 'retail', points_balance: 0, open_balance_cents: 0 } }),
   '/api/admin/pos/holds': J({ holds: [] }),
@@ -38,7 +38,7 @@ const vc = new VirtualConsole();
 const errors = [];
 vc.on('jsdomError', (e) => errors.push('jsdomError: ' + (e && e.message)));
 
-const dom = new JSDOM(html, { url: 'https://melthahonda.com/admin', runScripts: 'dangerously', pretendToBeVisual: true, virtualConsole: vc });
+const dom = new JSDOM(html, { url: 'https://mortysautoparts.com/admin', runScripts: 'dangerously', pretendToBeVisual: true, virtualConsole: vc });
 const { window } = dom;
 window.fetch = async (u) => respond(typeof u === 'string' ? u : u.url);
 window.addEventListener('error', (e) => errors.push('window.error: ' + (e.error && e.error.message || e.message)));
@@ -67,7 +67,7 @@ const bodyText = doc.body.textContent || '';
 const newErrors = errors.slice(before).filter((e) => !/Not implemented|Could not parse CSS|getContext|localStorage/i.test(e));
 
 // locate the badge span/button
-const badgeEl = [...doc.querySelectorAll('span,button')].find((el) => /melthahonda\.com/.test(el.textContent) && /Internet|Local/.test(el.textContent));
+const badgeEl = [...doc.querySelectorAll('span,button')].find((el) => /mortysautoparts\.com/.test(el.textContent) && /Internet|Local/.test(el.textContent));
 const badgeHTML = badgeEl ? badgeEl.outerHTML : '(not found)';
 
 console.log('opened POS via:', via);
@@ -85,5 +85,5 @@ console.log('  ticket bar present (posBar):', !!doc.querySelector('#posBar, [id^
 
 const pass = newErrors.length === 0 && !!badgeEl && /🌐/.test(badgeHTML) && /Internet/.test(badgeHTML)
   && /#38bdf8/.test(badgeHTML) && !/Cannot read properties of null/.test(bodyText);
-console.log('\n' + (pass ? 'PASS — POS terminal badge renders as "🌐 melthahonda.com · Internet"' : 'FAIL'));
+console.log('\n' + (pass ? 'PASS — POS terminal badge renders as "🌐 mortysautoparts.com · Internet"' : 'FAIL'));
 process.exit(pass ? 0 : 1);

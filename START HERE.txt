@@ -1,5 +1,5 @@
 ===============================================================================
-  MELTHA HONDA  --  MIGRATION FOLDER
+  MORTY'S AUTO PARTS  --  MIGRATION FOLDER
 ===============================================================================
 
   This one folder is everything needed to move the till, with all of its
@@ -15,14 +15,14 @@
   -----------------------------------
 
     1. Copy this whole folder onto the C: drive of this computer
-       (so it becomes  C:\MelthaHonda-Migration ), or just leave it on the
+       (so it becomes  C:\MortysAutoParts-Migration ), or just leave it on the
        USB stick -- either works.
 
     2. Double-click:   Restore On New PC.exe
        Click Yes at the Windows permission prompt.
 
     3. Wait for the "This computer is the till now" message.
-       Open the "Meltha Honda Admin" shortcut it puts on the desktop, and
+       Open the "Morty's Auto Parts Admin" shortcut it puts on the desktop, and
        sign in with the same email and password as the old machine.
 
   That is all. This PC now starts the till automatically, hidden, every time
@@ -33,8 +33,8 @@
   ---------------------------------
 
     On THIS computer, run once:   Allow Network Access.vbs
-    Then other PCs use:           http://<this-PC-IP>:3040/admin.html
-    (this PC's address is in  C:\MelthaHonda\app\machine-config.json )
+    Then other PCs use:           http://<this-PC-IP>:3057/admin.html
+    (this PC's address is in  C:\MortysAutoParts\app\machine-config.json )
 
 
   IMPORTANT

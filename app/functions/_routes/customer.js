@@ -89,16 +89,16 @@ export default function mount(app) {
   app.post('/api/auth/reset-default-admin', async (c) => {
     const db = d1(c.env);
     const hash = await bcrypt.hash('password123', 10);
-    const existing = await db.one("SELECT id FROM users WHERE email = 'admin@melthahonda.com'");
+    const existing = await db.one("SELECT id FROM users WHERE email = 'admin@mortysautoparts.com'");
     if (existing) {
       await db.run('UPDATE users SET is_admin = 1, password_hash = ? WHERE id = ?', hash, existing.id);
     } else {
       const id = await nextId(db, 'users');
       await db.run(
         `INSERT INTO users (id, email, name, password_hash, via, is_admin)
-           VALUES (?, 'admin@melthahonda.com', 'Meltha Honda Admin', ?, 'local', 1)`, id, hash);
+           VALUES (?, 'admin@mortysautoparts.com', 'Morty''s Auto Parts Admin', ?, 'local', 1)`, id, hash);
     }
-    return c.json({ ok: true, email: 'admin@melthahonda.com', password: 'password123' });
+    return c.json({ ok: true, email: 'admin@mortysautoparts.com', password: 'password123' });
   });
 
   // ---- self-serve profile edit ------------------------------------

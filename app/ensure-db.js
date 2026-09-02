@@ -1,7 +1,7 @@
 // ensure-db.js
 //
 // Connects to the Postgres server (not a specific database) and creates the
-// Meltha Honda database if it doesn't exist. Used by start-melthahonda.bat so we don't
+// Morty's Auto Parts database if it doesn't exist. Used by Start Morty\'s Auto Parts.bat so we don't
 // depend on a working psql.exe / libpq.dll install on the host machine.
 //
 // Reads DATABASE_URL from .env. If unset, falls back to the host/user/password
@@ -40,7 +40,7 @@ async function main() {
       password: process.env.PGPASSWORD || 'postgres',
       host: process.env.PGHOST || 'localhost',
       port: parseInt(process.env.PGPORT || '5432', 10),
-      database: process.env.PGDATABASE || 'melthahonda',
+      database: process.env.PGDATABASE || 'mortysautoparts',
     };
   }
 

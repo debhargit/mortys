@@ -1,11 +1,11 @@
 // ============================================================================
-//  Meltha Honda — Stripe payment wrapper
+//  Morty's Auto Parts — Stripe payment wrapper
 //
 //  Configure via .env (optional — when blank, online payments are simply hidden):
 //    STRIPE_SECRET_KEY=sk_test_...
 //    STRIPE_PUBLISHABLE_KEY=pk_test_...
 //    STRIPE_WEBHOOK_SECRET=whsec_...
-//    PUBLIC_BASE_URL=https://melthahonda.miamimistress.com
+//    PUBLIC_BASE_URL=https://mortysautoparts.com
 // ============================================================================
 
 'use strict';
@@ -37,7 +37,7 @@ async function createCheckoutSession({ orderId, items, customerEmail }) {
   if (!stripe) throw new Error('Stripe not configured');
   const base =
     process.env.PUBLIC_BASE_URL ||
-    'http://localhost:' + (process.env.PORT || '3040');
+    'http://localhost:' + (process.env.PORT || '3057');
 
   const line_items = items.map((i) => ({
     price_data: {
@@ -67,7 +67,7 @@ async function createCheckoutSession({ orderId, items, customerEmail }) {
     success_url: `${base}/order-success.html?order=${orderId}&session={CHECKOUT_SESSION_ID}`,
     cancel_url: `${base}/order-cancel.html?order=${orderId}`,
     payment_intent_data: {
-      description: `Meltha Honda order #${orderId}`,
+      description: `Morty's Auto Parts order #${orderId}`,
       metadata: { order_id: String(orderId) },
     },
   });

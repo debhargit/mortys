@@ -1,5 +1,5 @@
 ' ===========================================================================
-'  Meltha Honda Admin — portable launcher
+'  Morty's Auto Parts Admin — portable launcher
 '
 '  Double-click this file. It will:
 '     1. make sure it is running under wscript (no console window)
@@ -35,12 +35,12 @@ bootJs    = fso.BuildPath(scriptDir, "app\boot.js")
 
 If Not fso.FileExists(nodeExe) Then
     MsgBox "This portable copy is incomplete - runtime\node.exe is missing." & vbCrLf & vbCrLf & _
-           "Copy the whole Meltha Honda Admin folder again, don't copy files out of it one at a time.", _
-           vbCritical, "Meltha Honda Admin"
+           "Copy the whole Morty's Auto Parts Admin folder again, don't copy files out of it one at a time.", _
+           vbCritical, "Morty's Auto Parts Admin"
     WScript.Quit 1
 End If
 If Not fso.FileExists(bootJs) Then
-    MsgBox "This portable copy is incomplete - app\boot.js is missing.", vbCritical, "Meltha Honda Admin"
+    MsgBox "This portable copy is incomplete - app\boot.js is missing.", vbCritical, "Morty's Auto Parts Admin"
     WScript.Quit 1
 End If
 
@@ -74,13 +74,13 @@ Next
 If ready Then
     OpenBrowser url
 Else
-    MsgBox "The Meltha Honda admin server did not finish starting." & vbCrLf & vbCrLf & _
+    MsgBox "The Morty's Auto Parts admin server did not finish starting." & vbCrLf & vbCrLf & _
            "Check the log:" & vbCrLf & _
            fso.BuildPath(scriptDir, "data\logs\boot.log") & vbCrLf & _
            fso.BuildPath(scriptDir, "data\logs\server.log") & vbCrLf & vbCrLf & _
            "Most common cause: the database it is pointed at is not reachable. " & _
-           "Run ""Meltha Honda Settings.vbs"" to change the database address.", _
-           vbExclamation, "Meltha Honda Admin"
+           "Run ""Morty's Auto Parts Settings.vbs"" to change the database address.", _
+           vbExclamation, "Morty's Auto Parts Admin"
 End If
 
 WScript.Quit 0
@@ -112,7 +112,7 @@ Sub OpenBrowser(u)
         MsgBox "The admin server is running, but the browser could not be " & _
                "opened automatically." & vbCrLf & vbCrLf & _
                "Open this address by hand:" & vbCrLf & u, _
-               vbExclamation, "Meltha Honda Admin"
+               vbExclamation, "Morty's Auto Parts Admin"
     End If
 End Sub
 
@@ -123,7 +123,7 @@ Function ReadPort(dir)
     Dim p
     p = ReadJsonNumber(fso.BuildPath(dir, "app\server-config.json"), "port")
     If p = 0 Then p = ReadJsonNumber(fso.BuildPath(dir, "app\portable.json"), "appPort")
-    If p = 0 Then p = 3040
+    If p = 0 Then p = 3057
     ReadPort = p
 End Function
 

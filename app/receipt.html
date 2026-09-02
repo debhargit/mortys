@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Receipt · Meltha Honda</title>
+<title>Receipt · Morty's Auto Parts</title>
 <style>
   body{font-family:ui-monospace,Menlo,'Courier New',monospace;background:#f3f4f6;color:#000;margin:0;padding:14px;font-size:12px}
   .recv{max-width:300px;margin:0 auto;background:#fff;padding:14px 16px;border:1px dashed #ccc}
@@ -37,7 +37,7 @@ async function load(){
     var s = d.sale;
     document.getElementById('recv').innerHTML =
       '<div class="recv">' +
-        '<div class="center"><h1>MELTHA HONDA SALES &amp; SERVS LTD</h1><div class="sub">127 Hagley Park Road, Kingston 11<br/>876-758-8503</div></div>' +
+        '<div class="center"><h1>MORTY\'S AUTO PARTS LTD</h1><div class="sub">112C Waltham Park Road, Kingston<br/>876-758-5590</div></div>' +
         '<hr/>' +
         '<div class="row"><span>Receipt:</span><b>' + s.receipt_number + '</b></div>' +
         '<div class="row"><span>Date:</span><b>' + new Date(s.created_at).toLocaleString('en-US') + '</b></div>' +

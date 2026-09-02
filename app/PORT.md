@@ -54,7 +54,7 @@ it in `CUTOVER.md` is operator actions (account opt-ins, secrets, DNS).
 
 ### Offline / on-premise — local vs. cloud
 
-The hosted build (`melthahonda.com`, Cloudflare Pages + D1) is **online-only**.
+The hosted build (`mortysautoparts.com`, Cloudflare Pages + D1) is **online-only**.
 D1 has no offline mode and there is no local cache; if the internet drops, the
 POS is down. The Settings page reflects this — no "install a local server",
 no LAN terminal enrolment, no DB connection fields (see the cloud-aware
@@ -69,13 +69,13 @@ setup steps from `wrangler.toml` `[vars]` (`LOCAL_SERVER_URL` /
 `LOCAL_SERVER_VERSION` / `_SIZE` / `_SHA256`); blank until the shop publishes
 the zip and redeploys.
 
-| | Hosted (`melthahonda.com`) | Self-hosted portable |
+| | Hosted (`mortysautoparts.com`) | Self-hosted portable |
 |---|---|---|
 | Runtime | Cloudflare Pages Functions (Hono) | Node/Express (`server.js`, `boot.js`) |
-| Database | Cloudflare D1 (`meltahonda-db`) | bundled PostgreSQL (`runtime\pgsql`, port 5433) |
+| Database | Cloudflare D1 (`mortysautoparts-db`) | bundled PostgreSQL (`runtime\pgsql`, port 5433) |
 | Internet | required | not required (LAN only) |
-| Start | — (always up) | `Meltha Honda Admin.vbs`; service via `Start With Windows.vbs` |
-| Access | `https://melthahonda.com/admin` | `http://<main-pc-IP>:3040/admin.html` |
+| Start | — (always up) | `Morty's Auto Parts Admin.vbs`; service via `Start With Windows.vbs` |
+| Access | `https://mortysautoparts.com/admin` | `http://<main-pc-IP>:3057/admin.html` |
 | Extra tills | ordinary browser sign-ins | `Connect To Shop Server.vbs` + a one-time link from *Setup → Terminals & access*; UDP `41235` discovery |
 | Backup | D1 Time Travel (30-day PITR) + `wrangler d1 export` | `pg_dump` / off-site backup panel |
 
@@ -203,7 +203,7 @@ a time — **all now committed, tested and deployed**:
 | **14** | Ops: parts requisitions (fulfil = read→compute→`db.batch()`), service requisitions + convert-to-WO, stock counts (snapshot→count→post), stock-adjust, deliveries, cash drawer open/close, cash-report, warehouse-activity, bin lookup. `_routes/ops.js`, migration `0025` (rebuild `service_requisitions`/`_items` to current shape). | **committed + deployed; 35/35 vs node:sqlite** |
 | **15** | Analytics + the 13-endpoint reports suite (`_routes/reports.js`); settings PATCH + machine/server cloud stubs, marketing campaigns CRUD/send, schedule + blocks, time-entries clock in/out, `pos/customer`, `pos/scan`, `lookup`, `external-refs`, `orders/:id` PATCH, `/api/invoice/:wo_number`, `/api/pickslip`, CSV `import/services` (`_routes/admin_misc.js`). No migration. | **committed + deployed; 46/46 vs node:sqlite** |
 
-**All 15 phases are ported, tested and live on `melthahonda.com`.** Every
+**All 15 phases are ported, tested and live on `mortysautoparts.com`.** Every
 non-dropped `server.js` route now has a D1 implementation; `/api/*` returns 501
 only for paths that never existed. Full-app wiring check: **264 routes across
 16 modules, no duplicate `(method, path)`**. `wrangler pages functions build`
@@ -239,9 +239,9 @@ against the Express server.
 ```bash
 npm i -D wrangler                    # not bundled; add to devDependencies
 npx wrangler login                   # browser OAuth, debhargithud@gmail.com
-npx wrangler d1 create meltahonda-db # if not already on the account
-npx wrangler d1 migrations apply meltahonda-db --local   # 0001 … 0020, in order
-npm run cf:dev                       # cf:build + wrangler pages dev public --d1 DB=meltahonda-db
+npx wrangler d1 create mortysautoparts-db # if not already on the account
+npx wrangler d1 migrations apply mortysautoparts-db --local   # 0001 … 0020, in order
+npm run cf:dev                       # cf:build + wrangler pages dev public --d1 DB=mortysautoparts-db
 ```
 
 Deploy / cutover (Phase 9 — full sequence in `CUTOVER.md`):
@@ -254,5 +254,5 @@ bash dist/d1-data/_import.sh        # load it into D1
 npm run cf:deploy                   # cf:build + wrangler pages deploy public
 # then: wrangler pages secret put SESSION_SECRET / CRON_SECRET;
 #       cd cron-worker && wrangler deploy;
-#       dashboard → Pages → Custom domains → melthahonda.com; stop the Express service
+#       dashboard → Pages → Custom domains → mortysautoparts.com; stop the Express service
 ```

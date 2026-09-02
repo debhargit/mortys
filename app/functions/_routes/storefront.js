@@ -365,7 +365,7 @@ export default function mount(app) {
       c.executionCtx?.waitUntil?.(sendEmail(c.env, {
         to: email,
         subject: `We got your quote request #${id}`,
-        text: `Hi ${name},\n\nThanks -- our parts desk is checking availability and pricing and will get back to you.\n\nYour request:\n${partDescription}\n\n-- Meltha Honda Sales & Servs`,
+        text: `Hi ${name},\n\nThanks -- our parts desk is checking availability and pricing and will get back to you.\n\nYour request:\n${partDescription}\n\n-- Morty's Auto Parts`,
       }).catch(() => {}));
     }
 

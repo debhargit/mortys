@@ -3,10 +3,10 @@
 import { d1 } from './db.js';
 
 const FALLBACK = {
-  company_name: 'Meltha Honda Sales & Servs Ltd',
-  address: '127 Hagley Park Road, Kingston 11',
+  company_name: 'Morty\'s Auto Parts Ltd',
+  address: '112C Waltham Park Road, Kingston 11',
   country: 'Jamaica',
-  phone: '(876) 758-8503',
+  phone: '(876) 758-5590',
   email: null, website: null, logo_url: null,
   print_logo_on_invoice: true,
   default_print_template: 'receipt',

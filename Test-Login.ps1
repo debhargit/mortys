@@ -2,7 +2,7 @@
 ================================================================================
   Test-Login.ps1  --  where exactly does sign-in break?
 
-  Put this beside "Meltha Honda Admin.exe" on the machine that will not let you
+  Put this beside "Morty's Auto Parts Admin.exe" on the machine that will not let you
   in, then:
 
       powershell -ExecutionPolicy Bypass -File .\Test-Login.ps1
@@ -20,7 +20,7 @@
 #>
 
 param(
-  [string] $Email    = 'admin@melthahonda.com',
+  [string] $Email    = 'admin@mortysautoparts.com',
   [string] $Password = 'password123'
 )
 
@@ -38,12 +38,12 @@ function Info($m) { Write-Host "        $m" -ForegroundColor DarkGray }
 
 Write-Host ''
 Write-Host '===============================================' -ForegroundColor White
-Write-Host '  Meltha Honda -- sign-in check'                 -ForegroundColor White
+Write-Host '  Morty''s Auto Parts -- sign-in check'                 -ForegroundColor White
 Write-Host '===============================================' -ForegroundColor White
 Info "account: $Email"
 
 # ---- connection details, the same ones the server uses ----------------------
-$dbHost = '127.0.0.1'; $dbPort = 5433; $dbName = 'melthahonda'; $dbUser = 'postgres'; $dbPass = 'postgres'
+$dbHost = '127.0.0.1'; $dbPort = 5433; $dbName = 'mortysautoparts'; $dbUser = 'postgres'; $dbPass = 'postgres'
 try {
   $cfg = Get-Content (Join-Path $APP 'db-config.json') -Raw -EA Stop | ConvertFrom-Json
   if ($cfg.local) {
@@ -110,7 +110,7 @@ if ($parts[2] -ne 'YES') { Bad 'this account is not an admin -- the panel will r
 else { Ok 'account is an admin' }
 if ([int]$parts[3] -eq 0) {
   Bad 'no password is stored for this account'
-  Info 'Reset it: POST /api/auth/reset-default-admin  (restores admin@melthahonda.com / password123)'
+  Info 'Reset it: POST /api/auth/reset-default-admin  (restores admin@mortysautoparts.com / password123)'
 } else { Ok "password hash stored ($($parts[3]) chars)" }
 
 # ---- 4. the password itself -------------------------------------------------
@@ -139,13 +139,13 @@ if ("$res".Trim() -eq 'MATCH') { Ok 'the password is correct for this account' }
 elseif ("$res".Trim() -eq 'NO-MATCH') {
   Bad 'the password does not match the stored hash'
   Info 'The database and schema are fine -- this really is the wrong password.'
-  Info 'To put admin@melthahonda.com back to password123, restart the server:'
+  Info 'To put admin@mortysautoparts.com back to password123, restart the server:'
   Info 'initDb resets that one account on every boot.'
 } else { Bad "could not run the check: $res" }
 
 # ---- 5. the server ----------------------------------------------------------
 Head '5. Does the server accept it?'
-$port = 3040
+$port = 3057
 try { $sc = Get-Content (Join-Path $APP 'server-config.json') -Raw | ConvertFrom-Json; if ($sc.port) { $port = [int]$sc.port } } catch {}
 try {
   $body = @{ email = $Email; password = $Password } | ConvertTo-Json

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>POS Invoice · Meltha Honda</title>
+<title>POS Invoice · Morty's Auto Parts</title>
 <style>
   :root { --red:#d62828; --navy:#0b1b2b; --ink:#1f2937; --muted:#6b7280; --line:#cfcfcf; }
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#f3f4f6;color:var(--ink);margin:0;padding:24px;font-size:13px}
@@ -64,7 +64,7 @@ function render(d){
   document.getElementById('inv').innerHTML =
     '<div class="inv">' +
       '<div class="head">' +
-        '<div class="brand"><div class="logo">F&amp;D</div><div><h1>Meltha Honda Sales &amp; Servs Ltd</h1><div class="sub">127 Hagley Park Road, Kingston 11, Jamaica<br/>(876) 758-8503 · https://melthahonda.miamimistress.com</div></div></div>' +
+        '<div class="brand"><div class="logo">VA</div><div><h1>Morty\'s Auto Parts Ltd</h1><div class="sub">112C Waltham Park Road, Kingston, Jamaica<br/>(876) 758-5590 · https://mortysautoparts.com</div></div></div>' +
         '<div class="meta"><div class="lbl">INVOICE</div><div class="num">' + esc(s.receipt_number) + '</div><small style="color:var(--muted);font-size:11px;display:block;margin-top:4px">' + fmtDate(s.created_at) + '</small></div>' +
       '</div>' +
       '<div class="panels">' +
@@ -91,7 +91,7 @@ function render(d){
         '<div class="grand"><span>TOTAL DUE</span><b>' + fmt(s.total_usd) + '</b></div>' +
       '</div>' +
       '<div class="paid">✓ PAID via ' + esc(s.payment_method) + ' on ' + fmtDate(s.created_at) + (s.reference ? ' · ref ' + esc(s.reference) : '') + '</div>' +
-      '<div class="footer"><b>Thank you for your business!</b>Returns within 30 days with this invoice. Call us at (876) 758-8503 with any questions.</div>' +
+      '<div class="footer"><b>Thank you for your business!</b>Returns within 30 days with this invoice. Call us at (876) 758-5590 with any questions.</div>' +
     '</div>';
   setTimeout(function(){ window.print(); }, 400);
 }

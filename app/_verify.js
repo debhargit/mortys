@@ -6,8 +6,8 @@ const fs = require('fs');
 const app = express();
 app.use(express.json());
 app.post('/api/auth/signin', (req, res) => {
-  if (req.body && req.body.email === 'admin@melthahonda.com' && req.body.password === 'password123') {
-    return res.json({ user: { id: 1, email: 'admin@melthahonda.com', name: 'Admin', is_admin: true } });
+  if (req.body && req.body.email === 'admin@mortysautoparts.com' && req.body.password === 'password123') {
+    return res.json({ user: { id: 1, email: 'admin@mortysautoparts.com', name: 'Admin', is_admin: true } });
   }
   res.status(401).json({ error: 'Invalid credentials' });
 });

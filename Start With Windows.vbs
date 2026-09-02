@@ -1,5 +1,5 @@
 ' ===========================================================================
-'  Meltha Honda Admin — start with Windows (toggle)
+'  Morty's Auto Parts Admin — start with Windows (toggle)
 '
 '  Adds or removes a shortcut in this user's Startup folder so the admin
 '  server comes up automatically at login, hidden, without opening a browser.
@@ -21,7 +21,7 @@ End If
 
 scriptDir  = fso.GetParentFolderName(WScript.ScriptFullName)
 startupDir = sh.SpecialFolders("Startup")
-linkPath   = fso.BuildPath(startupDir, "Meltha Honda Admin.lnk")
+linkPath   = fso.BuildPath(startupDir, "Morty's Auto Parts Admin.lnk")
 
 ' Prefer the compiled launcher. It is a Windows-subsystem executable, so at
 ' login it creates no console at all, and it cannot be re-associated with
@@ -32,31 +32,31 @@ If Not fso.FileExists(target) Then target = fso.BuildPath(scriptDir, "Start Serv
 
 If Not fso.FileExists(target) Then
     MsgBox "This portable copy is incomplete - ""Start Service Only"" is missing.", _
-           vbCritical, "Meltha Honda Admin"
+           vbCritical, "Morty's Auto Parts Admin"
     WScript.Quit 1
 End If
 
 ' --- Already on? offer to turn it off --------------------------------------
 If fso.FileExists(linkPath) Then
-    answer = MsgBox("The Meltha Honda admin server currently starts automatically " & _
+    answer = MsgBox("The Morty's Auto Parts admin server currently starts automatically " & _
                     "when you sign in to Windows." & vbCrLf & vbCrLf & _
-                    "Turn that off?", vbQuestion + vbYesNo, "Meltha Honda Admin")
+                    "Turn that off?", vbQuestion + vbYesNo, "Morty's Auto Parts Admin")
     If answer = vbYes Then
         fso.DeleteFile linkPath, True
         MsgBox "Autostart turned off." & vbCrLf & vbCrLf & _
-               "The server is not stopped - use ""Stop Meltha Honda Admin.vbs"" for that.", _
-               vbInformation, "Meltha Honda Admin"
+               "The server is not stopped - use ""Stop Morty's Auto Parts Admin.vbs"" for that.", _
+               vbInformation, "Morty's Auto Parts Admin"
     End If
     WScript.Quit 0
 End If
 
 ' --- Turn it on ------------------------------------------------------------
-answer = MsgBox("Start the Meltha Honda admin server automatically when you " & _
+answer = MsgBox("Start the Morty's Auto Parts admin server automatically when you " & _
                 "sign in to Windows?" & vbCrLf & vbCrLf & _
                 "It starts hidden and does not open a browser - use " & _
-                """Meltha Honda Admin"" when you want the panel on screen." & vbCrLf & vbCrLf & _
+                """Morty's Auto Parts Admin"" when you want the panel on screen." & vbCrLf & vbCrLf & _
                 "This only applies to the current Windows user on this computer.", _
-                vbQuestion + vbYesNo, "Meltha Honda Admin")
+                vbQuestion + vbYesNo, "Morty's Auto Parts Admin")
 If answer <> vbYes Then WScript.Quit 0
 
 Set lnk = sh.CreateShortcut(linkPath)
@@ -75,10 +75,10 @@ Else
 End If
 lnk.WorkingDirectory = scriptDir
 lnk.WindowStyle      = 7                     ' minimised; the script itself is hidden anyway
-lnk.Description      = "Start the Meltha Honda admin server (hidden)"
+lnk.Description      = "Start the Morty's Auto Parts admin server (hidden)"
 lnk.Save
 
 MsgBox "Autostart turned on." & vbCrLf & vbCrLf & _
        "The admin server will start hidden the next time you sign in to Windows.", _
-       vbInformation, "Meltha Honda Admin"
+       vbInformation, "Morty's Auto Parts Admin"
 WScript.Quit 0

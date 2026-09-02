@@ -1,4 +1,4 @@
-// Live check (jsdom + network -> https://melthahonda.com): the storefront
+// Live check (jsdom + network -> https://mortysautoparts.com): the storefront
 // catalogue actually connects to D1 and streams the whole ~23k-row product
 // table. Guards against the ?compact=1 limit-cap regression that made the
 // shop show ~400 parts and look like it was pointed at an empty database.
@@ -13,7 +13,7 @@
 //   * /           -> the featured-stock strip renders real cards, no prices
 import jsdomPkg from 'jsdom';
 const { JSDOM, VirtualConsole } = jsdomPkg;
-const O = process.env.ORIGIN || 'https://melthahonda.com';
+const O = process.env.ORIGIN || 'https://mortysautoparts.com';
 
 const NOISE = /parse CSS|Not implemented|getContext|AbortError|localStorage/i;
 

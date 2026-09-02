@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Admin · Meltha Honda Sales &amp; Servs</title>
+<title>Admin · Morty's Auto Parts</title>
 <meta name="robots" content="noindex,nofollow" />
 <script>
 // Set the theme before first paint so there's no flash of the wrong colors.
@@ -94,6 +94,14 @@
   .sidebar .item .star.on{color:#ffb703}
   .sidebar .item .lbl{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .sidebar .empty-fav{padding:5px 18px;font-size:11px;color:#64748b;font-style:italic}
+  /* Account footer — pinned to the bottom of the nav rail */
+  .sidebar .sb-foot{position:sticky;bottom:0;margin-top:12px;padding:10px 14px 14px;background:#0b1b2b;border-top:1px solid rgba(255,255,255,.12)}
+  .sidebar .sb-who{display:flex;align-items:baseline;gap:6px;font-size:12px;font-weight:700;color:#cbd5e1;margin-bottom:7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sidebar .sb-who small{color:#94a3b8;font-weight:600;text-transform:capitalize}
+  .sidebar .sb-signout{width:100%;padding:8px 10px;background:rgba(214,40,40,.16);color:#fecaca;border:1px solid rgba(214,40,40,.4);border-radius:6px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit}
+  .sidebar .sb-signout:hover{background:rgba(214,40,40,.30);color:#fff}
+  .sidebar .sb-signin{background:rgba(14,165,233,.18);color:#bae6fd;border-color:rgba(14,165,233,.45)}
+  .sidebar .sb-signin:hover{background:rgba(14,165,233,.32);color:#fff}
   .content-area{padding:18px 22px;min-width:0}
   .menu-toggle{display:none}
   .wrap{transition:grid-template-columns .15s}
@@ -272,7 +280,7 @@
 <header class="top">
   <div style="display:flex;align-items:center;gap:14px">
     <div style="width:34px;height:34px;border-radius:8px;background:linear-gradient(160deg,#0ea5e9 52%,#d62828 52%);display:grid;place-items:center;color:#fff;font-weight:800;font-size:13px;letter-spacing:.5px;flex-shrink:0;text-shadow:0 1px 2px rgba(0,0,0,.3)">MH</div>
-    <h1>Meltha Honda · Admin</h1>
+    <h1>Morty's Auto Parts · Admin</h1>
     <a class="home" href="/">← Public site</a>
   </div>
   <div class="who">
@@ -516,7 +524,7 @@ document.addEventListener('DOMContentLoaded', function(){
   var reset = document.getElementById('resetDefaultLink');
   if (reset) reset.addEventListener('click', async function(e){
     e.preventDefault();
-    if (!confirm('Reset admin@melthahonda.com to password "password123"?\n\nThis is safe — it only resets THIS one account.')) return;
+    if (!confirm('Reset admin@mortysautoparts.com to password "password123"?\n\nThis is safe — it only resets THIS one account.')) return;
     try {
       var r = await fetch('/api/auth/reset-default-admin', { method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json'}, body:'{}' });
       var text = await r.text();
@@ -921,6 +929,20 @@ function buildSidebar(){
     });
     html += '</div></div>';
   });
+  // Account footer: who's signed in + Sign out, pinned at the bottom of the
+  // rail (mirrors the header control, closer to hand). Shows Sign in instead
+  // when there is no session -- e.g. it lapsed and the modal is up.
+  if (CURRENT_ADMIN_ID) {
+    html += '<div class="sb-foot">' +
+      '<div class="sb-who" title="' + esc(String(CURRENT_ADMIN_NAME || '')) + '">' +
+        '👤 <span class="lbl" style="flex:1;overflow:hidden;text-overflow:ellipsis">' + esc(String(CURRENT_ADMIN_NAME || 'Signed in')) + '</span>' +
+        '<small>' + esc(String(CURRENT_ADMIN_ROLE || '')) + '</small>' +
+      '</div>' +
+      '<button type="button" class="sb-signout" id="sbSignout">⎋ Sign out</button>' +
+    '</div>';
+  } else {
+    html += '<div class="sb-foot"><button type="button" class="sb-signout sb-signin" id="sbSignin">🔑 Sign in</button></div>';
+  }
   sb.innerHTML = html;
   // Wire item clicks
   sb.querySelectorAll('[data-go]').forEach(function(b){
@@ -945,6 +967,14 @@ function buildSidebar(){
   });
   var sbBtn = document.getElementById('sbCollapseBtn');
   if (sbBtn) sbBtn.addEventListener('click', toggleSidebarCollapse);
+  // Account footer: reuse the header's handlers so there's one code path.
+  var sbSo = document.getElementById('sbSignout');
+  if (sbSo) sbSo.addEventListener('click', function(){ var h = document.getElementById('signoutBtn'); if (h) h.click(); });
+  var sbSi = document.getElementById('sbSignin');
+  if (sbSi) sbSi.addEventListener('click', function(){
+    var bg = document.getElementById('signinBg'); if (bg) bg.classList.add('show');
+    var em = document.getElementById('adEmail'); if (em) setTimeout(function(){ try { em.focus(); } catch (_) {} }, 50);
+  });
 }
 
 // Overlay click closes mobile sidebar
@@ -1907,6 +1937,13 @@ async function renderProducts(panel){
       '</select></div>';
     };
     posModal('✎ Edit part',
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line)">' +
+        '<span style="display:flex;gap:6px">' +
+          '<button type="button" class="btn" id="pePrev" title="Edit the previous part in the list (Alt+←)">‹ Prev</button>' +
+          '<button type="button" class="btn" id="peNext" title="Edit the next part in the list (Alt+→)">Next ›</button>' +
+        '</span>' +
+        '<span id="pePos" style="font-size:11.5px;color:var(--muted);font-weight:700"></span>' +
+      '</div>' +
       '<div style="display:flex;gap:16px;align-items:flex-start">' +
         '<img src="/' + encodeURI(p.img) + '" onerror="this.style.display=\'none\'" style="width:120px;height:120px;object-fit:cover;border-radius:8px;border:1px solid var(--line);flex-shrink:0"/>' +
         '<div style="flex:1;min-width:0">' +
@@ -1935,6 +1972,33 @@ async function renderProducts(panel){
           '</div>' +
         '</div>' +
       '</div>', 720);
+
+    // Prev / Next: step through the currently loaded inventory list (PROD_STATE
+    // .rows, in display order) without going back to the table. Disabled at the
+    // ends; hidden if this part isn't in the loaded list (e.g. opened from a
+    // scan). Alt+←/→ do the same.
+    var peIdx = PROD_STATE.rows.findIndex(function(x){ return x.img === p.img; });
+    var peGo = function(delta){
+      var n = peIdx >= 0 && PROD_STATE.rows[peIdx + delta];
+      if (n) { posCloseModal(); productEditModal(n, after); }
+    };
+    var pePrevBtn = document.getElementById('pePrev'), peNextBtn = document.getElementById('peNext');
+    var pePosEl = document.getElementById('pePos');
+    if (window.__peKeyHandler) { document.removeEventListener('keydown', window.__peKeyHandler); window.__peKeyHandler = null; }
+    if (peIdx < 0) { pePrevBtn.style.display = 'none'; peNextBtn.style.display = 'none'; if (pePosEl) pePosEl.textContent = ''; }
+    else {
+      if (pePosEl) pePosEl.textContent = (peIdx + 1) + ' of ' + PROD_STATE.rows.length + (PROD_STATE.rows.length >= PROD_PAGE_SIZE ? '+ loaded' : '');
+      pePrevBtn.disabled = peIdx <= 0;
+      peNextBtn.disabled = peIdx >= PROD_STATE.rows.length - 1;
+      pePrevBtn.addEventListener('click', function(){ peGo(-1); });
+      peNextBtn.addEventListener('click', function(){ peGo(1); });
+      window.__peKeyHandler = function(e){
+        if (!e.altKey || !document.getElementById('pePrev')) return;
+        if (e.key === 'ArrowLeft')  { e.preventDefault(); if (peIdx > 0) peGo(-1); }
+        else if (e.key === 'ArrowRight') { e.preventDefault(); if (peIdx < PROD_STATE.rows.length - 1) peGo(1); }
+      };
+      document.addEventListener('keydown', window.__peKeyHandler);
+    }
 
     var msg = document.getElementById('peMsg');
     document.getElementById('peSave').addEventListener('click', async function(){
@@ -2635,21 +2699,21 @@ async function renderPOS(panel){
         ? '<button type="button" id="posShiftBtn" class="posBarBtn" style="background:rgba(22,163,74,.35)" title="Shift #' + shiftSession.id + ' open since ' + fmtDate(shiftSession.opened_at) + (shiftSession.opener_name ? ' by ' + esc(shiftSession.opener_name) : '') + '. Float ' + fmtMoney(shiftSession.opening_float) + '. Click to close.">🗄 Shift open · float ' + fmtMoney(shiftSession.opening_float) + '</button>'
         : '<button type="button" id="posShiftBtn" class="posBarBtn" style="background:rgba(220,38,38,.45)" title="No cash drawer shift is open. Click to open one with a starting float.">🗄 No shift open</button>') +
       // Terminal name + how this till is reaching the app: on the shop LAN
-      // ("Local"), or over the internet to melthahonda.com ("Internet").
+      // ("Local"), or over the internet to mortysautoparts.com ("Internet").
       // Detected from the machine endpoint (cloud stub sets cloud:true) with a
       // hostname fallback so it's right even if that call fails.
       (function(){
         if (!machine) return '';
         var host = (location.hostname || '').toLowerCase();
         var isCloud = machine.cloud === true || machine.mode === 'internet' ||
-          host === 'melthahonda.com' || host === 'www.melthahonda.com' || /\.pages\.dev$/.test(host);
+          host === 'mortysautoparts.com' || host === 'www.mortysautoparts.com' || /\.pages\.dev$/.test(host);
         var isLanHost = host === 'localhost' || host === '127.0.0.1' || /\.local$/.test(host) ||
           /^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host);
-        var name = esc(machine.name || (isCloud ? (host || 'melthahonda.com') : (host || 'This terminal')));
+        var name = esc(machine.name || (isCloud ? (host || 'mortysautoparts.com') : (host || 'This terminal')));
         var dot, label, tip, icon;
         if (isCloud) {
           icon = '🌐'; dot = '#38bdf8'; label = 'Internet';
-          tip = 'This terminal is connected over the internet to ' + (host || 'melthahonda.com') + '.';
+          tip = 'This terminal is connected over the internet to ' + (host || 'mortysautoparts.com') + '.';
         } else if (machine.local_db && machine.local_db.reachable) {
           icon = '🖥'; dot = '#4ade80'; label = 'Local · server';
           tip = 'This machine holds the shop database, on the local network.';
@@ -2821,7 +2885,7 @@ async function renderPOS(panel){
               '<div style="display:flex;gap:8px;align-items:center">' +
                 '<div style="position:relative;flex:1">' +
                   '<span aria-hidden="true" style="position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:14px;opacity:.55;pointer-events:none">🔍</span>' +
-                  '<input id="posCartSearch" placeholder="Scan or search a part, then Enter to add the top match…" autocomplete="off" style="width:100%;padding:10px 12px 10px 34px;border:2px solid #0891b2;border-radius:7px;font-size:14px;font-family:inherit"/>' +
+                  '<input id="posCartSearch" placeholder="Scan or search by part no., name or vehicle — Enter adds the top match…" autocomplete="off" style="width:100%;padding:10px 12px 10px 34px;border:2px solid #0891b2;border-radius:7px;font-size:14px;font-family:inherit"/>' +
                 '</div>' +
                 '<div style="position:relative;flex-shrink:0">' +
                   '<button type="button" id="posCartFilterBtn" title="Filter the search" style="height:42px;padding:0 12px;border:2px solid #0891b2;border-radius:7px;background:var(--card);color:var(--ink);cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;white-space:nowrap">⚙<span id="posCartFilterDot" style="color:#f59e0b;display:' + (posCartFilterActive() ? 'inline' : 'none') + '"> ●</span> ▾</button>' +
@@ -2874,7 +2938,7 @@ async function renderPOS(panel){
     // the end where nobody will ever look for it.
     '<div id="posFooter" style="position:sticky;bottom:0;z-index:6;display:flex;align-items:center;gap:12px;height:30px;padding:0 12px;background:var(--navy);color:#fff;border:1px solid var(--line);border-top:0;border-radius:0 0 8px 8px;font-size:11.5px;overflow:hidden">' +
       '<span id="posFootShop" style="font-weight:800;letter-spacing:.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">' +
-        esc(POS_SHOP.name || 'Meltha Honda Sales & Servs Ltd') +
+        esc(POS_SHOP.name || 'Morty\'s Auto Parts Ltd') +
       '</span>' +
       '<span id="posFootUser" style="margin-left:auto;white-space:nowrap;opacity:.92;flex-shrink:0" title="Signed in">👤 ' + esc(CURRENT_ADMIN_NAME || '—') + '</span>' +
       '<span style="opacity:.3;flex-shrink:0">|</span>' +
@@ -2968,7 +3032,7 @@ async function renderPOS(panel){
   // rather than the hardcoded fallback it was built with.
   setTimeout(function(){
     var el = document.getElementById('posFootShop');
-    if (el && document.body.contains(el)) el.textContent = POS_SHOP.name || 'Meltha Honda Sales & Servs Ltd';
+    if (el && document.body.contains(el)) el.textContent = POS_SHOP.name || 'Morty\'s Auto Parts Ltd';
   }, 1500);
 
   // Its own function because loadGrid() has four exits — searching, failed,
@@ -3758,7 +3822,8 @@ async function renderPOS(panel){
                     (p.bin_location ? '🗂 ' + esc(p.bin_location) : '');
         return '<button type="button" class="csPick" data-i="' + i + '" style="display:flex;width:100%;gap:10px;align-items:center;text-align:left;border:0;border-bottom:1px solid var(--hover);background:var(--card);color:var(--ink);padding:9px 11px;cursor:pointer;font-family:inherit">' +
           '<code style="flex-shrink:0;font-size:' + posFS(12) + ';font-weight:700;color:var(--ink);word-break:break-all;max-width:190px">' + esc(posPartNo(p)) + '</code>' +
-          '<span style="flex:1;min-width:0;font-size:' + posFS(12) + ';font-weight:600;word-break:break-word;color:var(--ink)">' + esc(p.name) + '</span>' +
+          '<span style="flex:1;min-width:0;font-size:' + posFS(12) + ';font-weight:600;word-break:break-word;color:var(--ink)">' + esc(p.name) +
+            (p.make_model ? ' <span style="font-weight:400;color:var(--muted)">— ' + esc(p.make_model) + '</span>' : '') + '</span>' +
           (place
             ? '<small style="flex-shrink:0;color:#0891b2;font-weight:700;font-size:' + posFS(10.5) + ';max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc((p.location || '') + (p.location && p.bin_location ? ' · ' : '') + (p.bin_location || '')) + '">' + place + '</small>'
             : '') +
@@ -4596,7 +4661,7 @@ function posCartPrint(){
   }).join('');
   var body =
     '<div style="font-family:system-ui,Segoe UI,Arial,sans-serif;padding:22px;max-width:760px;margin:0 auto">' +
-      '<h2 style="margin:0 0 2px">' + esc(POS_SHOP.name || 'Meltha Honda Sales & Servs Ltd') + '</h2>' +
+      '<h2 style="margin:0 0 2px">' + esc(POS_SHOP.name || 'Morty\'s Auto Parts Ltd') + '</h2>' +
       '<div style="color:#555;font-size:12px">Cart preview · ' + esc(new Date().toLocaleString()) + '</div>' +
       (POS.tag ? '<div style="margin-top:6px;font-weight:700">🏷️ ' + esc(POS.tag) + '</div>' : '') +
       ((POS.custName || (POS.customer && POS.customer.name)) ? '<div style="margin-top:6px">Customer: <b>' + esc(POS.custName || POS.customer.name) + '</b></div>' : '') +
@@ -4639,11 +4704,11 @@ function posCartEmail(){
   var lines = posCartLines().map(function(l){
     return l.qty + ' × ' + l.name + '  (' + fmtMoney(l.unit) + ')' + (l.disc ? '  −' + fmtMoney(l.disc) : '') + '  = ' + fmtMoney(l.ext);
   }).join('\n');
-  var bodyTxt = (POS_SHOP.name || 'Meltha Honda') + ' — cart' + (POS.tag ? ' (' + POS.tag + ')' : '') + '\n\n' +
+  var bodyTxt = (POS_SHOP.name || 'Morty\'s Auto Parts') + ' — cart' + (POS.tag ? ' (' + POS.tag + ')' : '') + '\n\n' +
     lines + '\n\nSubtotal: ' + fmtMoney(t.subtotal) + '\nGCT: ' + fmtMoney(t.tax) + '\nTOTAL: ' + fmtMoney(t.total) +
     (POS.notes ? '\n\nNote: ' + POS.notes : '');
   window.location.href = 'mailto:' + encodeURIComponent(email) +
-    '?subject=' + encodeURIComponent((POS_SHOP.name || 'Meltha Honda') + ' — your cart') +
+    '?subject=' + encodeURIComponent((POS_SHOP.name || 'Morty\'s Auto Parts') + ' — your cart') +
     '&body=' + encodeURIComponent(bodyTxt);
   if (!email) posToast('No customer email on file — pick a recipient in your mail app.', true);
 }
@@ -6131,7 +6196,7 @@ function posDocLabel(d){
 // Receipt-style/Invoice-style quote buttons use), so this reuses it
 // instead of fixing a fourth copy of the same conversion by hand.
 function posPrintQuote(q, shop){
-  var d = posQuoteToDocData(q, shop || { name:'Meltha Honda Sales & Servs Ltd', address:'127 Hagley Park Road, Kingston 11', country:'Jamaica', phone:'(876) 758-8503' });
+  var d = posQuoteToDocData(q, shop || { name:'Morty\'s Auto Parts Ltd', address:'112C Waltham Park Road, Kingston', country:'Jamaica', phone:'(876) 758-5590' });
   var s = d.sale;
   var unpriced = d.items.filter(function(it){ return !(it.unit_price_cents > 0); }).length;
   posPrintWindow('Quote ' + s.receipt_number, POS_A4_CSS,
@@ -6167,7 +6232,7 @@ function posPrintQuote(q, shop){
         '<b>' + unpriced + ' item' + (unpriced === 1 ? '' : 's') + ' still to be priced.</b> We will confirm those prices and availability before the order is placed.</div>' : '') +
       (s.notes ? '<div style="margin-top:12px;font-size:10.5px"><b>Notes:</b> ' + esc(s.notes) + '</div>' : '') +
       '<div class="foot">This is a quotation, not an invoice. Prices hold until ' + esc(s.valid_until || 'the date above') +
-        ' and are subject to stock being available at the time of order. — ' + esc((d.shop && d.shop.phone) || '(876) 758-8503') + '</div>' +
+        ' and are subject to stock being available at the time of order. — ' + esc((d.shop && d.shop.phone) || '(876) 758-5590') + '</div>' +
     '</div>'
   );
 }
@@ -6489,7 +6554,7 @@ function posQuoteToDocData(q, shop){
 // shop_settings row every server-side print endpoint reads (see
 // getShopSettings()/shopSettingsToShop() in server.js) so the two can't
 // drift the way the four independent hardcoded copies used to.
-var POS_SHOP = { name: 'Meltha Honda Sales & Servs Ltd', address: '127 Hagley Park Road, Kingston 11', country: 'Jamaica', phone: '(876) 758-8503',
+var POS_SHOP = { name: 'Morty\'s Auto Parts Ltd', address: '112C Waltham Park Road, Kingston', country: 'Jamaica', phone: '(876) 758-5590',
   email: null, website: null, logo_url: null, print_logo: true, default_print_template: 'receipt',
   invoice_notice: null, receipt_notice: null, statement_notice: null };
 function loadShopSettingsIntoPosShop(){
@@ -8442,7 +8507,7 @@ async function renderCustomerDetail(panel, id){
   if (fillDunning) fillDunning.addEventListener('click', function(){
     document.getElementById('ntKind').value = 'dunning';
     document.getElementById('ntBody').value =
-      'Hi ' + (u.name || 'there') + ', this is a reminder that your account with Meltha Honda Sales & Servs ' +
+      'Hi ' + (u.name || 'there') + ', this is a reminder that your account with Morty\'s Auto Parts ' +
       'currently has a balance of ' + fmtMoney(d.account_balance_usd) + ' on account' +
       (u.payment_terms_days != null ? ' (terms: Net ' + u.payment_terms_days + ')' : '') +
       '. Please arrange payment at your earliest convenience. Thank you!';
@@ -10603,7 +10668,7 @@ function rptCsv(){
   var blob = new Blob([out.join('\r\n')], { type: 'text/csv;charset=utf-8' });
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'meltha-' + RPT_CURRENT + '-' + new Date().toISOString().slice(0, 10) + '.csv';
+  a.download = 'vas-' + RPT_CURRENT + '-' + new Date().toISOString().slice(0, 10) + '.csv';
   document.body.appendChild(a);
   a.click();
   setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
@@ -10775,8 +10840,8 @@ function printTill(r){
 
   var body =
     '<div style="width:76mm;margin:0 auto;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;padding:8px 0">' +
-      '<div style="text-align:center;font-weight:700;font-size:13px">MELTHA HONDA SALES &amp; SERVS</div>' +
-      '<div style="text-align:center;font-size:10px">127 Hagley Park Road, Kingston 11</div>' +
+      '<div style="text-align:center;font-weight:700;font-size:13px">MORTY\'S AUTO PARTS</div>' +
+      '<div style="text-align:center;font-size:10px">112C Waltham Park Road, Kingston</div>' +
       '<div style="text-align:center;margin:6px 0;font-weight:700;font-size:14px">' + esc(r.kind) + ' REPORT' +
         (r.kind === 'X' ? ' (LIVE)' : '') + '</div>' +
       '<div style="font-size:10px">Session #' + esc(String(r.session.id)) + '</div>' +
@@ -11275,7 +11340,7 @@ function posDbFieldset(prefix, title, sub, c){
       '<div><label class="lbl">Host</label><input id="' + prefix + 'Host" class="fld" value="' + esc(c.host || '') + '" placeholder="localhost"/></div>' +
       '<div><label class="lbl">Port</label><input id="' + prefix + 'Port" class="fld" type="number" value="' + (c.port || 5432) + '"/></div>' +
     '</div>' +
-    '<div style="margin-bottom:8px"><label class="lbl">Database name</label><input id="' + prefix + 'Db" class="fld" value="' + esc(c.database || '') + '" placeholder="melthahonda"/></div>' +
+    '<div style="margin-bottom:8px"><label class="lbl">Database name</label><input id="' + prefix + 'Db" class="fld" value="' + esc(c.database || '') + '" placeholder="mortysautoparts"/></div>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">' +
       '<div><label class="lbl">User</label><input id="' + prefix + 'User" class="fld" value="' + esc(c.user || '') + '" placeholder="postgres"/></div>' +
       '<div><label class="lbl">Password</label><input id="' + prefix + 'Pass" type="password" class="fld" placeholder="' + (c.has_password ? '•••••••• (saved — leave blank to keep)' : 'password') + '"/></div>' +
@@ -11293,7 +11358,7 @@ function posDbFieldset(prefix, title, sub, c){
 // connection fields below rather than making the operator copy an IP by hand.
 function netServerRows(list){
   if (!list.length) {
-    return '<div style="color:var(--muted);font-size:12.5px">No other Meltha Honda servers seen on this network yet. If another machine has the local server installed and running, click "Scan for servers".</div>';
+    return '<div style="color:var(--muted);font-size:12.5px">No other Morty\'s Auto Parts servers seen on this network yet. If another machine has the local server installed and running, click "Scan for servers".</div>';
   }
   return '<div style="display:grid;gap:8px">' + list.map(function(sv){
     return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid var(--line);border-radius:7px;padding:8px 12px">' +
@@ -11380,9 +11445,9 @@ async function renderLocalServerPanel(box){
         '<div style="grid-column:1/-1"><label style="' + lblCss + '">Shop name (shown on the local server)</label>' +
           '<input id="lsShop" style="' + fieldCss + '" value="' + esc(def.shop_name || '') + '"/></div>' +
         '<div><label style="' + lblCss + '">Install folder on the PC</label>' +
-          '<input id="lsDir" style="' + fieldCss + '" value="' + esc(def.install_dir || 'C:\\MelthaHonda') + '"/></div>' +
+          '<input id="lsDir" style="' + fieldCss + '" value="' + esc(def.install_dir || 'C:\\MortysAutoParts') + '"/></div>' +
         '<div><label style="' + lblCss + '">Local server port</label>' +
-          '<input id="lsPort" type="number" min="1024" max="65535" style="' + fieldCss + '" value="' + esc(String(def.port || 3040)) + '"/></div>' +
+          '<input id="lsPort" type="number" min="1024" max="65535" style="' + fieldCss + '" value="' + esc(String(def.port || 3057)) + '"/></div>' +
         '<div><label style="' + lblCss + '">Admin sign-in email</label>' +
           '<input id="lsEmail" type="email" style="' + fieldCss + '" value="' + esc(def.admin_email || '') + '"/></div>' +
         '<div><label style="' + lblCss + '">Admin password (min 6 — creates the local login)</label>' +
@@ -11403,7 +11468,7 @@ async function renderLocalServerPanel(box){
       '<p style="margin:14px 0 0;color:var(--muted);font-size:12px">' +
         'Run the downloaded <code>.cmd</code> on the shop&rsquo;s main PC (double-click &rarr; approve the admin prompt). ' +
         'It downloads the offline bundle, sets up PostgreSQL, loads the database and creates your admin login — nothing else to do. ' +
-        'Other tills then open <code>http://&lt;that PC&rsquo;s IP&gt;:' + esc(String(def.port || 3040)) + '/admin.html</code>. ' +
+        'Other tills then open <code>http://&lt;that PC&rsquo;s IP&gt;:' + esc(String(def.port || 3057)) + '/admin.html</code>. ' +
         'Full notes: <code>app/CUTOVER.md</code>.' +
       '</p>' +
     '</div>';
@@ -11414,7 +11479,7 @@ async function renderLocalServerPanel(box){
     var body = {
       shop_name: box.querySelector('#lsShop').value.trim(),
       install_dir: box.querySelector('#lsDir').value.trim(),
-      port: parseInt(box.querySelector('#lsPort').value, 10) || 3040,
+      port: parseInt(box.querySelector('#lsPort').value, 10) || 3057,
       admin_email: box.querySelector('#lsEmail').value.trim(),
       admin_password: box.querySelector('#lsPass').value,
       open_firewall: box.querySelector('#lsFw').checked,
@@ -11431,7 +11496,7 @@ async function renderLocalServerPanel(box){
       var blob = await res.blob();
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'Install Meltha Honda Offline.cmd';
+      a.download = 'Install Morty\'s Auto Parts Offline.cmd';
       document.body.appendChild(a); a.click();
       setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
       msg.textContent = '✓ Downloaded — run it on the shop PC.'; msg.style.color = '#15803d';
@@ -11454,7 +11519,7 @@ async function renderBackupPanel(box){
     // run — the database is Cloudflare D1, which has its own built-in backup.
     var host = (location.hostname || '').toLowerCase();
     var cloud = e.status === 501 || /not ported|D1|Cloudflare/i.test(e.message || '')
-      || host === 'melthahonda.com' || /\.pages\.dev$/.test(host);
+      || host === 'mortysautoparts.com' || /\.pages\.dev$/.test(host);
     if (cloud) {
       box.innerHTML = HD +
         '<div style="padding:16px 18px;font-size:13px;line-height:1.6">' +
@@ -11465,10 +11530,10 @@ async function renderBackupPanel(box){
             '<li><b>Deployment history</b> — every deploy of the site is versioned and one-click reversible in the Pages dashboard.</li>' +
           '</ul>' +
           '<div style="background:var(--card-soft,rgba(0,0,0,.04));border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;white-space:pre-wrap;overflow:auto">' +
-            '# roll back to a moment in time\nnpx wrangler d1 time-travel restore meltahonda-db --timestamp=2026-08-31T12:00:00Z\n\n' +
-            '# download a full dump now\nnpx wrangler d1 export meltahonda-db --remote --output backup.sql' +
+            '# roll back to a moment in time\nnpx wrangler d1 time-travel restore mortysautoparts-db --timestamp=2026-08-31T12:00:00Z\n\n' +
+            '# download a full dump now\nnpx wrangler d1 export mortysautoparts-db --remote --output backup.sql' +
           '</div>' +
-          '<p style="margin:12px 0 0;color:var(--muted);font-size:12px">Restore is also available under D1 &rarr; meltahonda-db in the Cloudflare dashboard. See <code>app/CUTOVER.md</code> and the &ldquo;Dropped features&rdquo; note in <code>app/PORT.md</code>.</p>' +
+          '<p style="margin:12px 0 0;color:var(--muted);font-size:12px">Restore is also available under D1 &rarr; mortysautoparts-db in the Cloudflare dashboard. See <code>app/CUTOVER.md</code> and the &ldquo;Dropped features&rdquo; note in <code>app/PORT.md</code>.</p>' +
         '</div>';
       return;
     }
@@ -11499,7 +11564,7 @@ async function renderBackupPanel(box){
       '<label style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;margin-bottom:10px">' +
         '<input type="checkbox" id="bkEnabled"' + (c.enabled ? ' checked' : '') + '/> Back this database up to our online server</label>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:640px">' +
-        '<div style="grid-column:1/-1"><label class="lbl">Online server URL</label><input id="bkUrl" style="' + fld + ';width:100%" value="' + esc(c.url || '') + '" placeholder="https://app.melthahonda.com"/></div>' +
+        '<div style="grid-column:1/-1"><label class="lbl">Online server URL</label><input id="bkUrl" style="' + fld + ';width:100%" value="' + esc(c.url || '') + '" placeholder="https://app.mortysautoparts.com"/></div>' +
         '<div style="grid-column:1/-1"><label class="lbl">Backup key <small style="color:var(--muted)">— from that server’s own Settings → Off-site backup</small></label>' +
           '<input id="bkKey" type="password" style="' + fld + ';width:100%" placeholder="' + (c.key_set ? '•••••••• (leave blank to keep)' : 'paste the key') + '"/></div>' +
         '<div><label class="lbl">Back up every</label><select id="bkEvery" style="' + fld + '">' +
@@ -11521,7 +11586,7 @@ async function renderBackupPanel(box){
     (recentRows ? '<div style="padding:10px 16px;border-bottom:1px solid var(--line)"><div class="lbl" style="margin-bottom:4px">Recent activity</div>' +
       '<table style="width:100%;font-size:12px"><tbody>' + recentRows + '</tbody></table></div>' : '') +
 
-    '<details style="padding:12px 16px"><summary style="cursor:pointer;font-weight:700;font-size:12.5px">Receive backups from another Meltha Honda server</summary>' +
+    '<details style="padding:12px 16px"><summary style="cursor:pointer;font-weight:700;font-size:12.5px">Receive backups from another Morty\'s Auto Parts server</summary>' +
       '<p style="font-size:12px;color:var(--muted);margin:8px 0">Turn this on only on the copy that runs on the internet. Give the key below to the shop server so it can send its backups here.</p>' +
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
         '<input id="bkRecvKey" readonly style="' + fld + ';flex:1;min-width:220px;font-family:ui-monospace,monospace" value="' + (d.receive_key_set ? '(click Show)' : 'not set') + '"/>' +
@@ -11830,8 +11895,8 @@ async function renderSettings(panel){
           (srvCfg.restart_required
             ? '<div style="background:#fef3c7;color:#92400e;padding:8px 11px;border-radius:6px;font-size:11.5px;margin-bottom:10px">Currently running on port <b>' + esc(srvCfg.running_port) + '</b>. A restart is needed to switch to the saved port <b>' + esc(srvCfg.configured_port) + '</b>.</div>'
             : '') +
-          '<div style="max-width:200px;margin-bottom:10px"><label class="lbl">Port</label><input id="srvPort" type="number" min="1" max="65535" class="fld" value="' + (srvCfg.configured_port || srvCfg.running_port || 3040) + '"/></div>' +
-          '<div style="font-size:11px;color:var(--muted);margin-bottom:10px">The port the app server listens on. Saving does not restart the server — re-run <code>start-melthahonda.bat</code> (or restart the Node process) for a changed port to take effect. There\'s no "fallback" port; this process listens on exactly one.</div>' +
+          '<div style="max-width:200px;margin-bottom:10px"><label class="lbl">Port</label><input id="srvPort" type="number" min="1" max="65535" class="fld" value="' + (srvCfg.configured_port || srvCfg.running_port || 3057) + '"/></div>' +
+          '<div style="font-size:11px;color:var(--muted);margin-bottom:10px">The port the app server listens on. Saving does not restart the server — re-run <code>Start Morty\'s Auto Parts.bat</code> (or restart the Node process) for a changed port to take effect. There\'s no "fallback" port; this process listens on exactly one.</div>' +
           '<div id="setSrvMsg" style="display:none;padding:10px 14px;border-radius:7px;font-size:12.5px;margin-bottom:10px"></div>' +
           '<button type="button" id="setSrvSaveBtn" style="background:var(--navy);color:#fff;border:0;padding:10px 20px;border-radius:8px;font-weight:700;cursor:pointer;font-size:13.5px">Save port</button>' +
         '</div>' +

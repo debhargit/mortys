@@ -5,7 +5,7 @@
 #   cd app/cron-worker
 #   npx wrangler deploy
 #   npx wrangler secret put CRON_SECRET      # must equal the Pages CRON_SECRET
-name = "meltahonda-cron"
+name = "mortysautoparts-cron"
 main = "index.js"
 compatibility_date = "2026-07-01"
 
@@ -15,4 +15,4 @@ compatibility_date = "2026-07-01"
 crons = ["*/15 * * * *", "0 13 * * *"]
 
 [vars]
-PAGES_ORIGIN = "https://melthahonda.com"
+PAGES_ORIGIN = "https://mortysautoparts.com"

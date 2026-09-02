@@ -1,8 +1,8 @@
 // ============================================================================
-//  Meltha Honda Admin — portable supervisor
+//  Morty's Auto Parts Admin — portable supervisor
 //
 //  This is the process that actually runs when someone double-clicks
-//  "Meltha Honda Admin.vbs". The .vbs does nothing except launch
+//  "Morty's Auto Parts Admin.vbs". The .vbs does nothing except launch
 //    runtime\node.exe app\boot.js
 //  with window style 0, so no console window is ever created visibly. Every
 //  piece of real logic lives here instead of in VBScript, because here we
@@ -74,13 +74,13 @@ function writeJson(file, obj) {
 }
 
 const CFG = Object.assign({
-  appPort: 3040,
+  appPort: 3057,
   openBrowser: true,
   bundledPostgres: false,
   pgPort: 5433,
   pgUser: 'postgres',
   pgPassword: 'postgres',
-  database: 'melthahonda',
+  database: 'mortysautoparts',
   dbHost: 'localhost',
   dbPort: 5432,
   dbUser: 'postgres',
@@ -195,9 +195,10 @@ function networkCidr(address, netmask) {
 //      address is never touched -- someone chose that on purpose.
 //
 //   3. Server build whose bundled database has been opened to the LAN (a
-//      pg_hba.conf line tagged meltha-lan-*): rewrite that line's subnet to the
-//      current one and reload PostgreSQL. It only maintains a rule that already
-//      exists -- it never opens a database that is still loopback-only.
+//      pg_hba.conf line tagged mortys-lan-*, or legacy vision-/meltha-lan-*): rewrite
+//      that line's subnet to the current one and reload PostgreSQL. It only
+//      maintains a rule that already exists -- it never opens a database that
+//      is still loopback-only.
 async function refreshNetworkConfig() {
   const me = primaryLocalIPv4();
   if (!me) {
@@ -261,7 +262,7 @@ async function refreshNetworkConfig() {
         const lines = fs.readFileSync(hbaPath, 'utf8').split(/\r?\n/);
         let changed = false;
         const next = lines.map((ln) => {
-          if (!/meltha-lan-(test|auto)/.test(ln)) return ln;
+          if (!/(?:mortys|vision|meltha)-lan-(test|auto)/.test(ln)) return ln;
           // Only the address/CIDR column is rewritten; the connection type
           // (host / hostssl), database, user and auth method the opener chose
           // are left exactly as they are.
@@ -318,8 +319,8 @@ function initPostgres() {
     try { fs.unlinkSync(pwFile); } catch (_) {}
   }
 
-  // Bind the bundled server to loopback only. The Meltha Honda app server is
-  // what the rest of the LAN talks to (port 3040); nothing outside this PC
+  // Bind the bundled server to loopback only. The Morty's Auto Parts app
+  // server is what the rest of the LAN talks to (port 3057); nothing outside this PC
   // has any business opening a raw Postgres connection, and leaving 5433 open
   // on a shop network would be handing out the whole database.
   const confPath = path.join(PGDATA_DIR, 'postgresql.conf');
@@ -327,7 +328,7 @@ function initPostgres() {
     let conf = fs.readFileSync(confPath, 'utf8');
     conf += [
       '',
-      '# --- Meltha Honda portable overrides ---',
+      '# --- Morty\'s Auto Parts portable overrides ---',
       "listen_addresses = 'localhost'",
       'port = ' + CFG.pgPort,
       'max_connections = 50',
@@ -394,7 +395,7 @@ function repairPgDataDirs() {
 // `ssl = on` lines, which is harmless, but two ssl_cert_file lines pointing
 // anywhere different would not be.
 async function ensurePostgresTls() {
-  const marker = '# --- Meltha Honda TLS ---';
+  const marker = '# --- Morty\'s Auto Parts TLS ---';
   const confPath = path.join(PGDATA_DIR, 'postgresql.conf');
   if (!fs.existsSync(confPath)) return false;
   try {
@@ -410,7 +411,7 @@ async function ensurePostgresTls() {
     //
     // Writing the full path baked this machine's folder into a file that
     // travels with the package, so every copy carried something like
-    // C:/Users/.../dist/MelthaHonda-Admin-Portable/data/pgdata/server.crt.
+    // C:/Users/.../dist/MortysAutoParts-Admin-Portable/data/pgdata/server.crt.
     // On any other PC that path does not exist and the database refuses to
     // start outright:
     //
@@ -624,7 +625,7 @@ async function seedAppConfig() {
       // settle on is written to db-config.json and never re-derived, so the
       // till doesn't wander to a different machine later.
       if (!host || String(host).toLowerCase() === 'auto') {
-        log('discovery: looking for a Meltha Honda server on the network...');
+        log('discovery: looking for a Morty\'s Auto Parts server on the network...');
         const server = await discoverServer(5000);
         if (server) {
           host = server.host;
@@ -632,7 +633,7 @@ async function seedAppConfig() {
         } else {
           host = 'localhost';
           log('discovery: nothing answered - falling back to localhost. ' +
-              'Run "Meltha Honda Settings.vbs" to set the server address by hand.');
+              'Run "Morty\'s Auto Parts Settings.vbs" to set the server address by hand.');
         }
       }
       local = { host, port: CFG.dbPort, database: CFG.database, user: CFG.dbUser, password: CFG.dbPassword };
@@ -712,7 +713,7 @@ async function runSupervisor() {
     } else {
       log('database server not reachable at ' + dbHost + ':' + dbPort +
           ' - starting anyway so the admin page loads. Fix the address with ' +
-          '"Meltha Honda Settings.vbs", or start PostgreSQL on that machine.');
+          '"Morty\'s Auto Parts Settings.vbs", or start PostgreSQL on that machine.');
     }
   }
 

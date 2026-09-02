@@ -25,11 +25,11 @@ const server = app.listen(0, () => {
   (async () => {
     const adm = await req('/admin.html');
     const admBody = adm.body.toString();
-    console.log('/admin.html →', adm.status, '| type:', adm.type, '| has "Meltha Honda Admin":', admBody.includes('Meltha Honda Admin'));
+    console.log('/admin.html →', adm.status, '| type:', adm.type, '| has "Morty\'s Auto Parts Admin":', admBody.includes('Morty\'s Auto Parts Admin'));
     
     const idx = await req('/');
     const idxBody = idx.body.toString();
-    console.log('/ →', idx.status, '| type:', idx.type, '| has "Meltha Honda":', idxBody.includes('Meltha Honda'));
+    console.log('/ →', idx.status, '| type:', idx.type, '| has "Morty\'s Auto Parts":', idxBody.includes('Morty\'s Auto Parts'));
     
     const pos = await req('/posinvoice.html');
     console.log('/posinvoice.html →', pos.status, '| type:', pos.type, '| has "POS Invoice":', pos.body.toString().includes('POS Invoice'));

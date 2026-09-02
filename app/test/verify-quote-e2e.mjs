@@ -1,4 +1,4 @@
-// End-to-end check of the storefront quote-request flow on melthahonda.com.
+// End-to-end check of the storefront quote-request flow on mortysautoparts.com.
 //
 //   guest sees no prices  ->  signed-in customer adds parts, checkout files a
 //   quote request (no order)  ->  admin sees it, prices the line items, unlocks
@@ -7,7 +7,7 @@
 // Uses a throwaway customer account (created via /api/auth/signup) and cleans
 // it up. The quote-request row is left as status='lost' (there is no delete
 // endpoint for inquiries by design).
-const O = 'https://melthahonda.com';
+const O = 'https://mortysautoparts.com';
 
 // Two products that actually carry a price in D1 (most of the catalogue does not).
 const A = { img: '18215-TA0-A01-G-R', listUsd: 4400.00 };   // MUFFLER RUBBER (REAR)
@@ -24,10 +24,10 @@ let fails = 0;
 const chk = (label, ok, extra = '') => { console.log((ok ? 'PASS  ' : 'FAIL  ') + label + (extra ? '  — ' + extra : '')); if (!ok) fails++; };
 const near = (a, b) => Math.abs(Number(a) - Number(b)) < 0.011;
 
-const owner = await signin('admin@melthahonda.com', 'password123');
+const owner = await signin('admin@mortysautoparts.com', 'password123');
 if (owner.status !== 200) { console.log('owner signin failed', owner.status); process.exit(1); }
 
-const email = 'zz-qe2e@melthahonda.local';
+const email = 'zz-qe2e@mortysautoparts.local';
 const pw = 'Qe2e-' + Math.random().toString(36).slice(2, 10) + '!A9';
 const phone = '876-555-7777';
 

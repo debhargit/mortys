@@ -458,7 +458,7 @@ export default function mount(app) {
   app.get('/api/admin/inventory/import/template.csv', adminMw, (c) =>
     c.body(TEMPLATE_CSV, 200, {
       'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': 'attachment; filename="meltha-inventory-template.csv"',
+      'Content-Disposition': 'attachment; filename="mortysautoparts-inventory-template.csv"',
     }));
 
   async function handleImport(c, fileFields) {

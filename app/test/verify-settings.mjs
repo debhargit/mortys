@@ -1,20 +1,20 @@
-// Load the LIVE melthahonda.com/admin into jsdom, sign in (stub), open the
+// Load the LIVE mortysautoparts.com/admin into jsdom, sign in (stub), open the
 // Settings tab, and assert the panel renders with no uncaught error.
 import jsdomPkg from 'jsdom';
 const { JSDOM, VirtualConsole } = jsdomPkg;
 
-const html = await (await fetch('https://melthahonda.com/admin')).text();
+const html = await (await fetch('https://mortysautoparts.com/admin')).text();
 
 // live-shaped API responses
 const J = (o, code = 200) => new Response(JSON.stringify(o), { status: code, headers: { 'content-type': 'application/json' } });
 const R = {
-  '/api/me': () => J({ user: { id: 1, email: 'admin@melthahonda.com', name: 'Admin', is_admin: true, admin_role: 'manager', phone: '(876) 758-8503', perms: {}, perms_full: true } }),
+  '/api/me': () => J({ user: { id: 1, email: 'admin@mortysautoparts.com', name: 'Admin', is_admin: true, admin_role: 'manager', phone: '(876) 758-5590', perms: {}, perms_full: true } }),
   '/api/admin/roles/mine': () => J({ role: { code: 'manager', label: 'Manager', can_manage: true, hidden_tabs: [], rank: 10 } }),
   '/api/admin/me/ui-prefs': () => J({ ok: true, prefs: {}, forced_favs: null, favs_locked: false }),
   '/api/admin/summary': () => J({ new_inquiries: 0, pending_appointments: 0, pending_notifications: 0, pending_reviews: 0, pending_orders: 0, low_stock_count: 0 }),
-  '/api/admin/settings': () => J({ settings: { id: 1, company_name: 'Meltha Honda Sales & Servs Ltd', address: '127 Hagley Park Road, Kingston 11', country: 'Jamaica', phone: '(876) 758-8503', email: null, website: null, logo_url: null, print_logo_on_invoice: true, default_print_template: 'receipt', quote_valid_days: 14, invoice_notice: 'a', receipt_notice: 'b', statement_notice: 'c' } }),
+  '/api/admin/settings': () => J({ settings: { id: 1, company_name: 'Morty\'s Auto Parts Ltd', address: '112C Waltham Park Road, Kingston', country: 'Jamaica', phone: '(876) 758-5590', email: null, website: null, logo_url: null, print_logo_on_invoice: true, default_print_template: 'receipt', quote_valid_days: 14, invoice_notice: 'a', receipt_notice: 'b', statement_notice: 'c' } }),
   '/api/admin/settings/server': () => J({ ok: true, running_port: 443, configured_port: null, restart_required: false, cloud: true }),
-  '/api/admin/settings/machine': () => J({ ok: true, name: 'melthahonda.com', host: 'melthahonda.com', port: 443, local_db: null, cloud: true, mode: 'internet' }),
+  '/api/admin/settings/machine': () => J({ ok: true, name: 'mortysautoparts.com', host: 'mortysautoparts.com', port: 443, local_db: null, cloud: true, mode: 'internet' }),
   '/api/admin/settings/database': () => J({ error: 'not ported' }, 501),
   '/api/admin/settings/db-server-status': () => J({ error: 'not ported' }, 501),
   '/api/admin/settings/network-servers': () => J({ error: 'not ported' }, 501),
@@ -38,7 +38,7 @@ vc.on('jsdomError', (e) => errors.push('jsdomError: ' + (e && e.message)));
 // (console passthrough not needed)
 
 const dom = new JSDOM(html, {
-  url: 'https://melthahonda.com/admin',
+  url: 'https://mortysautoparts.com/admin',
   runScripts: 'dangerously',
   pretendToBeVisual: true,
   virtualConsole: vc,

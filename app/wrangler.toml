@@ -1,4 +1,4 @@
-name = "meltahonda"
+name = "mortysautoparts"
 compatibility_date = "2026-07-01"
 # nodejs_compat: bcryptjs (functions/_lib/password path) touches node:crypto for
 # its RNG fallback. Everything else in functions/ is WebCrypto / Web-standard.
@@ -7,25 +7,28 @@ pages_build_output_dir = "public"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "meltahonda-db"
+database_name = "mortysautoparts-db"
 migrations_dir = "migrations"
-# meltahonda-db on the Debhargithub@gmail.com account
-# (ce557e06f410b0e79dbd1cbe3adeef8b). Recreated clean 2026-08-31.
-database_id = "d82e902b-f8ff-4621-b8d2-cfda269a8dcc"
+# mortysautoparts-db on the haldaneharrison46@gmail.com account
+# (9a6d4645171dc984e737d3544ff01a37). Created 2026-09-01.
+database_id = "53b55748-5ae3-4fc7-85d1-8d463891a3ef"
 
 # Where new-order alerts go, and the From line for outbound email. Override
 # any of these without touching code.
 [vars]
-ORDER_NOTIFY_TO = "admin@melthahonda.com"
-ORDER_NOTIFY_SMS = "876-758-8503"
-EMAIL_FROM = "Meltha Honda <noreply@melthahonda.com>"
+ORDER_NOTIFY_TO = "admin@mortysautoparts.com"
+ORDER_NOTIFY_SMS = "876-758-5590"
+EMAIL_FROM = "Morty's Auto Parts <noreply@mortysautoparts.com>"
+# The hosted site is HTTPS-only, so the session cookie must carry Secure.
+# (_lib/session.js reads this; unset = no Secure flag.)
+COOKIE_SECURE = "true"
 
 # Settings -> "Local / offline server" download panel (functions/_routes/
 # admin_misc.js GET /api/admin/local-server). Publish the portable-edition
 # zip somewhere the shop can reach (a GitHub release asset, an R2 public
 # bucket, a file share) and point this at it. Leave blank and the panel
 # shows the build-it-yourself steps instead of a download button.
-# LOCAL_SERVER_URL     = "https://github.com/debhargit/meltha/releases/download/portable-vX/MelthaHonda-portable.zip"
+# LOCAL_SERVER_URL     = "https://github.com/debhargit/meltha/releases/download/portable-vX/MortysAutoParts-portable.zip"
 # LOCAL_SERVER_VERSION = "X.Y.Z"
 # LOCAL_SERVER_SIZE    = "~240 MB"
 # LOCAL_SERVER_SHA256  = "<sha256 of the zip>"
@@ -33,7 +36,7 @@ EMAIL_FROM = "Meltha Honda <noreply@melthahonda.com>"
 # Phase 8 scheduled jobs (functions/_routes/cron.js). Set the shared secret
 # the companion cron-worker authenticates with — until it is set, every
 # /api/cron/* call is refused (jobs never run open):
-#   npx wrangler pages secret put CRON_SECRET --project-name meltahonda
+#   npx wrangler pages secret put CRON_SECRET --project-name mortysautoparts
 # Use the same value for `npx wrangler secret put CRON_SECRET` in app/cron-worker.
 
 # Transactional email (Phase 7). functions/_lib/mailer.js targets this
@@ -42,7 +45,7 @@ EMAIL_FROM = "Meltha Honda <noreply@melthahonda.com>"
 # it just logs instead of delivering.
 #
 # To turn it on:
-#   1. npx wrangler email sending enable melthahonda.com
+#   1. npx wrangler email sending enable mortysautoparts.com
 #      (currently returns "Unauthorized [code: 2036]" -- Email Sending needs a
 #       one-time opt-in in the dashboard, and the API token needs its scope)
 #   2. uncomment the two lines below and redeploy
@@ -54,8 +57,8 @@ EMAIL_FROM = "Meltha Honda <noreply@melthahonda.com>"
 # absent, upload endpoints return a clean 501 and nothing else is affected.
 #
 # To turn it on (R2 needs a one-time dashboard opt-in first):
-#   npx wrangler r2 bucket create meltahonda-uploads
+#   npx wrangler r2 bucket create mortysautoparts-uploads
 #   then uncomment below and redeploy
 # [[r2_buckets]]
 # binding = "UPLOADS"
-# bucket_name = "meltahonda-uploads"
+# bucket_name = "mortysautoparts-uploads"

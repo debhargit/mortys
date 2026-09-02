@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Track Your Service · Meltha Honda Sales &amp; Servs</title>
-<meta name="description" content="Check the status of your service work order at Meltha Honda Sales &amp; Servs, Kingston Jamaica." />
+<title>Track Your Service · Morty's Auto Parts</title>
+<meta name="description" content="Check the status of your service work order at Morty's Auto Parts, Kingston Jamaica." />
 <style>
   :root {
     --red:#d62828; --red-dark:#9d2020; --navy:#0b1b2b; --ink:#1f2937; --muted:#6b7280;
@@ -67,7 +67,7 @@
 <body>
 
 <header class="top">
-  <h1>Meltha Honda — Track Your Service</h1>
+  <h1>Morty's Auto Parts — Track Your Service</h1>
   <a href="/">← Back to site</a>
 </header>
 
@@ -83,7 +83,7 @@
       <button type="submit" id="lookupBtn">Look up my work order</button>
     </form>
     <div class="err" id="errMsg"></div>
-    <div class="hint">Don't have your WO number? Call us at <a href="tel:+18767588503">(876) 758-8503</a>.</div>
+    <div class="hint">Don't have your WO number? Call us at <a href="tel:+18767585590">(876) 758-5590</a>.</div>
   </div>
 
   <div class="result" id="result"></div>
@@ -173,8 +173,8 @@ function renderResult(w){
     (w.work_performed ? '<div class="complaint"><b>Work performed</b>' + esc(w.work_performed) + '</div>' : '') +
     totalsHTML +
     '<div class="actions">' +
-      '<a class="call" href="tel:+18767588503">📞 Call shop</a>' +
-      '<a class="chat" href="https://wa.me/18767588503?text=' + encodeURIComponent('Hi, checking on work order ' + w.wo_number) + '" target="_blank" rel="noopener">💬 WhatsApp</a>' +
+      '<a class="call" href="tel:+18767585590">📞 Call shop</a>' +
+      '<a class="chat" href="https://wa.me/18767585590?text=' + encodeURIComponent('Hi, checking on work order ' + w.wo_number) + '" target="_blank" rel="noopener">💬 WhatsApp</a>' +
     '</div>';
   document.getElementById('result').scrollIntoView({ behavior: 'smooth' });
 }

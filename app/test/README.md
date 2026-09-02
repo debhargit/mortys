@@ -37,10 +37,10 @@ removed (that endpoint's new behaviour is covered by `quote-test.mjs`).
   the admin Parts-Inquiries editor (line calc, save payloads, show-prices POST)
   and the storefront cart → `/api/inquiry`.
 
-## Live checks (jsdom + network → https://melthahonda.com)
+## Live checks (jsdom + network → https://mortysautoparts.com)
 
 Read-mostly smoke tests against production. They sign in with the seed admin
-(`admin@melthahonda.com` / `password123`) where noted.
+(`admin@mortysautoparts.com` / `password123`) where noted.
 
 - `verify-store-pages.mjs` — boots shop/account/reviews/track/quote pages
 - `verify-catalogue.mjs` — `/shop.html` streams the full ~23k-row product

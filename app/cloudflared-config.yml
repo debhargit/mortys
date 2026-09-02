@@ -1,6 +1,6 @@
 # =====================================================================
 # Cloudflare Tunnel config for the "miamim" tunnel
-# Routes melthahonda.miamimistress.com to the local Meltha Honda server on port 3040.
+# Routes mortysautoparts.com to the local Morty's Auto Parts server on port 3057.
 #
 # Copy this file to:
 #   %USERPROFILE%\.cloudflared\config.yml
@@ -15,16 +15,16 @@
 #        cloudflared tunnel create miamim
 #
 #   3. Point DNS at the tunnel:
-#        cloudflared tunnel route dns miamim melthahonda.miamimistress.com
+#        cloudflared tunnel route dns miamim mortysautoparts.com
 #
 #   4. Copy this file to %USERPROFILE%\.cloudflared\config.yml
 #
 #   5. Verify:
 #        cloudflared tunnel info miamim
-#        nslookup melthahonda.miamimistress.com
+#        nslookup mortysautoparts.com
 #
-# After that, start-melthahonda.bat will spin up the local server and run
-# this tunnel, exposing the site at https://melthahonda.miamimistress.com
+# After that, Start Morty's Auto Parts.bat will spin up the local server and run
+# this tunnel, exposing the site at https://mortysautoparts.com
 # =====================================================================
 
 tunnel: miamim
@@ -34,7 +34,7 @@ tunnel: miamim
 # credentials-file: C:\Users\YOURNAME\.cloudflared\<TUNNEL-UUID>.json
 
 ingress:
-  - hostname: melthahonda.miamimistress.com
-    service: http://localhost:3040
+  - hostname: mortysautoparts.com
+    service: http://localhost:3057
   # Catch-all - return 404 for any other hostname routed at this tunnel.
   - service: http_status:404

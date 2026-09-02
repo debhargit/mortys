@@ -9,7 +9,7 @@ import fs from 'fs';
 const html = fs.readFileSync(fileURLToPath(new URL('../public/index.html', import.meta.url)), 'utf8');
 const vc = new VirtualConsole(); const errs = [];
 vc.on('jsdomError', e => errs.push(String(e && e.message || e)));
-const dom = new JSDOM(html, { url: 'https://melthahonda.com/', runScripts: 'dangerously', pretendToBeVisual: true, virtualConsole: vc });
+const dom = new JSDOM(html, { url: 'https://mortysautoparts.com/', runScripts: 'dangerously', pretendToBeVisual: true, virtualConsole: vc });
 const w = dom.window;
 w.fetch = async () => new Response(JSON.stringify({ products: [], total: 0 }), { headers: { 'content-type': 'application/json' } });
 w.matchMedia = w.matchMedia || (() => ({ matches:false, addEventListener(){}, removeEventListener(){}, addListener(){}, removeListener(){} }));

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Quote · Meltha Honda</title>
+<title>Quote · Morty's Auto Parts</title>
 <style>
   :root { --ink:#1f2937; --line:#cfcfcf; --muted:#6b7280; --red:#d62828; --navy:#0b1b2b; }
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#f3f4f6;color:var(--ink);margin:0;padding:24px;font-size:13px}
@@ -57,7 +57,7 @@ function render(d){
   var items = qu.items_json || [];
   document.getElementById('doc').innerHTML =
     '<div class="doc">' +
-      '<div class="head"><div style="display:flex;gap:12px;align-items:center"><div class="logo">F&amp;D</div><div><h1>' + esc(d.shop.name) + '</h1><div class="sub">' + esc(d.shop.address) + ' · ' + esc(d.shop.phone) + '</div></div></div>' +
+      '<div class="head"><div style="display:flex;gap:12px;align-items:center"><div class="logo">VA</div><div><h1>' + esc(d.shop.name) + '</h1><div class="sub">' + esc(d.shop.address) + ' · ' + esc(d.shop.phone) + '</div></div></div>' +
         '<div class="meta"><div class="lbl">QUOTE</div><div class="num">' + esc(qu.quote_number) + '</div><small style="color:var(--muted);font-size:11px;display:block;margin-top:4px">' + fmtDate(qu.created_at) + '</small></div></div>' +
       '<div class="banner">📝 This is a price quote, not an invoice. Valid until ' + (qu.valid_until ? fmtDate(qu.valid_until) : '—') + '.</div>' +
       (qu.customer_name ? '<p style="font-size:13px;margin:0 0 10px"><b>For:</b> ' + esc(qu.customer_name) + (qu.customer_phone ? ' · ' + esc(qu.customer_phone) : '') + (qu.vehicle_info ? ' · ' + esc(qu.vehicle_info) : '') + '</p>' : '') +

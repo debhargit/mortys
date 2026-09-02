@@ -2,7 +2,7 @@
 //  enrol.js — redeem a connection link on a client machine.
 //
 //  Run by "Connect To Shop Server.vbs", or by hand:
-//      runtime\node.exe app\enrol.js "http://192.168.1.20:3040/join#ABCD..."
+//      runtime\node.exe app\enrol.js "http://192.168.1.20:3057/join#ABCD..."
 //      runtime\node.exe app\enrol.js 192.168.1.20 ABCD-EFGH-...
 //
 //  What it does: asks the server to trade a one-time token for the database
@@ -62,7 +62,7 @@ function parseArgs(argv) {
     return { host: u.hostname, port: parseInt(u.port, 10) || 80, token };
   }
   if (a.length < 2) return null;
-  return { host: a[0].replace(/^.*:\/\//, '').split('/')[0].split(':')[0], port: parseInt(a[2], 10) || 3040, token: a[1] };
+  return { host: a[0].replace(/^.*:\/\//, '').split('/')[0].split(':')[0], port: parseInt(a[2], 10) || 3057, token: a[1] };
 }
 
 function post(host, port, urlPath, body) {
@@ -129,7 +129,7 @@ function post(host, port, urlPath, body) {
     // password hashes out of the database, which is the point.
     upstream: r.upstream || null,
   });
-  if (!fs.existsSync(SERVER_CONFIG_PATH)) writeJson(SERVER_CONFIG_PATH, { port: r.app_port || 3040 });
+  if (!fs.existsSync(SERVER_CONFIG_PATH)) writeJson(SERVER_CONFIG_PATH, { port: r.app_port || 3057 });
   if (!fs.existsSync(MACHINE_CONFIG_PATH)) writeJson(MACHINE_CONFIG_PATH, { name: '' });
 
   console.log('');
@@ -139,6 +139,6 @@ function post(host, port, urlPath, body) {
   console.log('  Encrypted: ' + (d.ca ? 'yes, and this server\'s certificate is pinned' : 'NO - the connection will be in clear text on the network'));
   console.log('  Written  : ' + DB_CONFIG_PATH);
   console.log('');
-  console.log('Start it with "Meltha Honda Admin.exe".');
+  console.log('Start it with "Morty\'s Auto Parts Admin.exe".');
   process.exit(0);
 })();

@@ -2,14 +2,14 @@
 ================================================================================
   Open-Database-To-LAN-TEST-ONLY.ps1
 
-  Lets a Meltha Honda CLIENT folder on another PC connect to the PostgreSQL
+  Lets a Morty's Auto Parts CLIENT folder on another PC connect to the PostgreSQL
   that a STANDALONE server package carries inside it.
 
   Why this is needed
   ------------------
   The bundled PostgreSQL is deliberately bound to localhost only, on port 5433
   (see initPostgres() in app\boot.js). That is a security decision: on a normal
-  shop install the app server on port 3040 is the only thing the LAN talks to,
+  shop install the app server on port 3057 is the only thing the LAN talks to,
   and nothing outside the machine has any business opening a raw database
   connection. A client folder, however, connects straight to PostgreSQL -- so
   with the shipped settings it can never reach a standalone server.
@@ -66,14 +66,14 @@ if (-not $Root) { $Root = $PSScriptRoot }
 $PgData  = Join-Path $Root 'data\pgdata'
 $Conf    = Join-Path $PgData 'postgresql.conf'
 $Hba     = Join-Path $PgData 'pg_hba.conf'
-$StopExe = Join-Path $Root 'Stop Meltha Honda Admin.exe'
-$StartExe= Join-Path $Root 'Meltha Honda Admin.exe'
-$RuleName= 'Meltha Honda DB (TEST)'
-$Marker  = '# --- Meltha Honda LAN test override ---'
+$StopExe = Join-Path $Root 'Stop Morty''s Auto Parts Admin.exe'
+$StartExe= Join-Path $Root 'Morty''s Auto Parts Admin.exe'
+$RuleName= 'Morty''s Auto Parts DB (TEST)'
+$Marker  = '# --- Morty''s Auto Parts LAN test override ---'
 
 Write-Host ''
 Write-Host '=======================================================' -ForegroundColor White
-Write-Host '  Meltha Honda -- open bundled database to the LAN'      -ForegroundColor White
+Write-Host '  Morty''s Auto Parts -- open bundled database to the LAN'      -ForegroundColor White
 Write-Host '=======================================================' -ForegroundColor White
 Write-Host ("  Package : {0}" -f $Root)
 
@@ -84,7 +84,7 @@ if (-not (Test-Path -LiteralPath $Conf)) {
     Write-Host ''
     Write-Host '  Either this is a CLIENT package (no runtime\pgsql), or the server'
     Write-Host '  has never been started -- the data directory is created on first run.'
-    Write-Host '  Start "Meltha Honda Admin.exe" once, let it finish, then re-run this.'
+    Write-Host '  Start "Morty''s Auto Parts Admin.exe" once, let it finish, then re-run this.'
     Write-Host ''
     Read-Host 'Press Enter to close'
     return
@@ -107,14 +107,14 @@ if ($Revert) {
     $skip = $false
     foreach ($l in $lines) {
         if ($l.Trim() -eq $Marker) { $skip = $true; continue }
-        if ($skip -and $l.Trim() -eq '# --- end Meltha Honda LAN test override ---') { $skip = $false; continue }
+        if ($skip -and $l.Trim() -eq '# --- end Morty''s Auto Parts LAN test override ---') { $skip = $false; continue }
         if (-not $skip) { $keep.Add($l) }
     }
     [System.IO.File]::WriteAllLines($Conf, $keep, $Utf8NoBom)
     Write-Host '  postgresql.conf : LAN override removed (back to localhost only)'
 
     # pg_hba.conf: drop lines we tagged
-    $hba = [System.IO.File]::ReadAllLines($Hba) | Where-Object { $_ -notmatch 'meltha-lan-test' }
+    $hba = [System.IO.File]::ReadAllLines($Hba) | Where-Object { $_ -notmatch "(?:mortys|vision|meltha)-lan-test" }
     [System.IO.File]::WriteAllLines($Hba, $hba, $Utf8NoBom)
     Write-Host '  pg_hba.conf     : test rules removed'
 
@@ -149,7 +149,7 @@ else {
     if ($conf -notmatch [regex]::Escape($Marker)) {
         $conf += "`r`n$Marker`r`n" +
                  "listen_addresses = '*'`r`n" +
-                 "# --- end Meltha Honda LAN test override ---`r`n"
+                 "# --- end Morty's Auto Parts LAN test override ---`r`n"
         [System.IO.File]::WriteAllText($Conf, $conf, $Utf8NoBom)
         Write-Host "  postgresql.conf : listen_addresses = '*'"
     } else {
@@ -162,9 +162,9 @@ else {
     # back to clear text and nobody would ever notice. hostssl refuses the
     # connection outright, which is a failure you can see and fix.
     $hba = [System.IO.File]::ReadAllText($Hba)
-    if ($hba -notmatch 'meltha-lan-test') {
-        $hba += "`r`n# meltha-lan-test`r`n" +
-                ("hostssl all             all             {0}          scram-sha-256    # meltha-lan-test`r`n" -f $cidr)
+    if ($hba -notmatch "(?:mortys|vision|meltha)-lan-test") {
+        $hba += "`r`n# mortys-lan-test`r`n" +
+                ("hostssl all             all             {0}          scram-sha-256    # mortys-lan-test`r`n" -f $cidr)
         [System.IO.File]::WriteAllText($Hba, $hba, $Utf8NoBom)
         Write-Host ("  pg_hba.conf     : allow {0} over TLS only (hostssl, scram-sha-256)" -f $cidr)
     } else {
@@ -181,7 +181,7 @@ else {
     Write-Host '  On the CLIENT laptop, point it at:' -ForegroundColor Green
     Write-Host ('      Database server address :  {0}' -f $addr) -ForegroundColor White
     Write-Host  '      Database port           :  5433'          -ForegroundColor White
-    Write-Host  '      Database name           :  melthahonda'   -ForegroundColor White
+    Write-Host  '      Database name           :  mortysautoparts'   -ForegroundColor White
     Write-Host  '      Database user           :  postgres'      -ForegroundColor White
     Write-Host  '      Database password       :  postgres'      -ForegroundColor White
 }

@@ -6,7 +6,7 @@
 -- are the old draft shape; every current column lives on the Postgres side.
 -- No data exists in the fresh D1, so a clean recreate is simplest.
 --
---   wrangler d1 migrations apply meltahonda-db --remote
+--   wrangler d1 migrations apply mortysautoparts-db --remote
 
 DROP TABLE IF EXISTS service_requisition_items;
 DROP TABLE IF EXISTS service_requisitions;

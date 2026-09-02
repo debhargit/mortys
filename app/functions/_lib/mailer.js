@@ -8,7 +8,7 @@
 //   const t = templates.welcomeEmail({ name, email });
 //   await sendEmail(env, { to: email, ...t });
 
-const DEFAULT_FROM = 'Meltha Honda <noreply@melthahonda.com>';
+const DEFAULT_FROM = 'Morty\'s Auto Parts <noreply@mortysautoparts.com>';
 
 function parseAddr(s) {
   const m = String(s || '').match(/<([^>]+)>/);
@@ -34,7 +34,7 @@ function buildMime({ from, to, subject, text, html }) {
     `From: ${from}`,
     `To: ${to}`,
     `Subject: ${encodeHeader(subject || '')}`,
-    `Message-ID: <${Date.now()}.${Math.random().toString(36).slice(2)}@melthahonda.com>`,
+    `Message-ID: <${Date.now()}.${Math.random().toString(36).slice(2)}@mortysautoparts.com>`,
     `Date: ${new Date().toUTCString()}`,
     'MIME-Version: 1.0',
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
@@ -97,14 +97,14 @@ function shell(title, bodyHtml) {
     <tr><td align="center">
       <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,.08);max-width:560px;width:100%">
         <tr><td style="background:linear-gradient(135deg,#d62828,#a31f1f);padding:18px 24px;color:#fff;font-size:20px;font-weight:800">
-          Meltha Honda Sales &amp; Servs
+          Morty's Auto Parts
         </td></tr>
         <tr><td style="padding:24px;line-height:1.55;font-size:14px">
           ${bodyHtml}
         </td></tr>
         <tr><td style="padding:16px 24px;background:#0b1b2b;color:#94a3b8;font-size:12px;line-height:1.5">
-          127 Hagley Park Avenue, Kingston &middot; +1 876-758-8503<br/>
-          <a href="https://melthahonda.com" style="color:#ffb703;text-decoration:none">melthahonda.com</a>
+          112C Waltham Park Road, Kingston &middot; +1 876-758-5590<br/>
+          <a href="https://mortysautoparts.com" style="color:#ffb703;text-decoration:none">mortysautoparts.com</a>
         </td></tr>
       </table>
     </td></tr>
@@ -114,13 +114,13 @@ function shell(title, bodyHtml) {
 function welcomeEmail({ name } = {}) {
   const greeting = name ? `Hi ${name},` : 'Hi there,';
   return {
-    subject: 'Welcome to Meltha Honda Sales & Servs',
-    text: `${greeting}\n\nThanks for creating an account at Meltha Honda Sales & Servs.\n\nWe stock new and used parts for Honda, Toyota, Nissan, Lexus and American vehicles, plus a full service & repair center including wheel alignment and balancing.\n\nQuestions? Reply to this email or call us at +1 876-758-8503.\n\n- The Meltha Honda Team`,
+    subject: 'Welcome to Morty\'s Auto Parts',
+    text: `${greeting}\n\nThanks for creating an account at Morty's Auto Parts.\n\nWe stock new and used parts for Honda, Toyota, Nissan, Lexus and American vehicles, plus a full service & repair center including wheel alignment and balancing.\n\nQuestions? Reply to this email or call us at +1 876-758-5590.\n\n- The Morty's Auto Parts Team`,
     html: shell('Welcome', `
       <h2 style="margin:0 0 8px;font-size:20px">${escapeHtml(greeting)}</h2>
-      <p>Thanks for creating an account at Meltha Honda Sales &amp; Servs.</p>
+      <p>Thanks for creating an account at Morty's Auto Parts.</p>
       <p>We stock new and used parts for <b>Honda</b>, <b>Toyota</b>, <b>Nissan</b>, <b>Lexus</b> and American vehicles, plus a full service &amp; repair center - including <b>wheel alignment &amp; balancing</b>.</p>
-      <p><a href="https://melthahonda.com" style="display:inline-block;background:#d62828;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700">Browse inventory</a></p>
+      <p><a href="https://mortysautoparts.com" style="display:inline-block;background:#d62828;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700">Browse inventory</a></p>
       <p style="color:#6b7280;font-size:13px">Questions? Just reply - we read every email.</p>
     `),
   };
@@ -133,14 +133,14 @@ function orderEmail({ name, orderId, items = [], total } = {}) {
   ).join('');
   return {
     subject: `Order #${orderId} confirmed`,
-    text: `${greeting}\n\nThanks for your order #${orderId} at Meltha Honda Sales & Servs.\n\nTotal: $${Number(total).toFixed(2)} USD\n\nWe'll call you to confirm pickup or delivery. Reach us at +1 876-758-8503.`,
+    text: `${greeting}\n\nThanks for your order #${orderId} at Morty's Auto Parts.\n\nTotal: $${Number(total).toFixed(2)} USD\n\nWe'll call you to confirm pickup or delivery. Reach us at +1 876-758-5590.`,
     html: shell('Order confirmed', `
       <h2 style="margin:0 0 8px;font-size:20px">${escapeHtml(greeting)}</h2>
       <p>Thanks for your order - we've got it.</p>
       <p><b>Order #${escapeHtml(orderId)}</b></p>
       <table width="100%" cellpadding="0" cellspacing="0" style="margin:14px 0;font-size:13px"><thead><tr><th align="left" style="padding:6px 0;border-bottom:2px solid #0b1b2b;color:#6b7280">Item</th><th align="right" style="padding:6px 0;border-bottom:2px solid #0b1b2b;color:#6b7280">Qty</th><th align="right" style="padding:6px 0;border-bottom:2px solid #0b1b2b;color:#6b7280">Price</th></tr></thead><tbody>${rows}</tbody></table>
       <p style="font-size:16px"><b>Total: $${Number(total).toFixed(2)} USD</b></p>
-      <p>We'll call you shortly to confirm pickup or delivery. You can reach us any time at <b>+1 876-758-8503</b> with your order number.</p>
+      <p>We'll call you shortly to confirm pickup or delivery. You can reach us any time at <b>+1 876-758-5590</b> with your order number.</p>
     `),
   };
 }
@@ -148,14 +148,14 @@ function orderEmail({ name, orderId, items = [], total } = {}) {
 function backInStockEmail({ product_name, price_usd } = {}) {
   const priceText = price_usd ? `$${Number(price_usd).toFixed(2)} USD` : '';
   return {
-    subject: `${product_name} is back in stock at Meltha Honda`,
-    text: `Good news - the ${product_name} you asked us to watch is back in stock${priceText ? ' (' + priceText + ')' : ''}.\n\nGrab it before it sells out again at melthahonda.com or call +1 876-758-8503.`,
+    subject: `${product_name} is back in stock at Morty's Auto Parts`,
+    text: `Good news - the ${product_name} you asked us to watch is back in stock${priceText ? ' (' + priceText + ')' : ''}.\n\nGrab it before it sells out again at mortysautoparts.com or call +1 876-758-5590.`,
     html: shell('Back in stock', `
       <h2 style="margin:0 0 8px;font-size:20px">It's back!</h2>
       <p>The <b>${escapeHtml(product_name)}</b> you asked us to watch is back in stock.</p>
       ${priceText ? `<p style="font-size:18px;color:#0b1b2b"><b>${priceText}</b></p>` : ''}
-      <p><a href="https://melthahonda.com#parts" style="display:inline-block;background:#d62828;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700">Shop now</a></p>
-      <p style="color:#6b7280;font-size:13px">Or call <b>+1 876-758-8503</b> to reserve it.</p>
+      <p><a href="https://mortysautoparts.com#parts" style="display:inline-block;background:#d62828;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700">Shop now</a></p>
+      <p style="color:#6b7280;font-size:13px">Or call <b>+1 876-758-5590</b> to reserve it.</p>
     `),
   };
 }

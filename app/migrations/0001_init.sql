@@ -1,5 +1,5 @@
 -- ============================================================================
---  Meltha Honda — D1 (SQLite) schema, converted from schema.sql (Postgres)
+--  Morty's Auto Parts — D1 (SQLite) schema, converted from schema.sql (Postgres)
 --
 --  Conversion rules applied throughout:
 --   * SERIAL              -> INTEGER PRIMARY KEY AUTOINCREMENT
@@ -193,7 +193,7 @@ CREATE VIEW user_points AS
   GROUP BY user_id;
 
 -- TRADE-IN OFFERS ------------------------------------------------------------
--- Customers offering their vehicle to Meltha Honda as trade-in or outright sale.
+-- Customers offering their vehicle to Morty's Auto Parts as trade-in or outright sale.
 CREATE TABLE trade_in_offers (
   id                 INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id            INTEGER REFERENCES users(id) ON DELETE SET NULL,

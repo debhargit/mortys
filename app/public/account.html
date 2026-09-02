@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>My Account · Meltha Honda Sales &amp; Servs</title>
+<title>My Account · Morty's Auto Parts</title>
 <style>
   :root{
     --red:#d62828; --red-dark:#a31f1f;
@@ -138,19 +138,27 @@
 
 <!-- SIGN-IN -->
 <div class="signin-bg" id="signinBg">
-  <form class="signin-card" id="signinForm" onsubmit="event.preventDefault(); doSignIn();">
-    <h2>Sign in to your account</h2>
-    <p class="sub">Track orders, see your loyalty points, and check out faster.</p>
+  <form class="signin-card" id="signinForm" onsubmit="event.preventDefault(); authSubmit();">
+    <h2 id="authTitle">Sign in to your account</h2>
+    <p class="sub" id="authSub">Track orders, see your loyalty points, and check out faster.</p>
     <div class="err" id="signinErr"></div>
+    <div id="authNameRow" style="display:none">
+      <label>Name</label>
+      <input type="text" id="acName" autocomplete="name" />
+    </div>
     <label>Email</label>
     <input type="email" id="acEmail" required autocomplete="email" />
+    <div id="authPhoneRow" style="display:none">
+      <label>Phone</label>
+      <input type="tel" id="acPhone" autocomplete="tel" placeholder="876-..." />
+    </div>
     <label>Password</label>
     <div style="position:relative">
       <input type="password" id="acPass" required autocomplete="current-password" style="padding-right:48px"/>
       <button type="button" tabindex="-1" onclick="var i=document.getElementById('acPass');i.type=i.type==='password'?'text':'password';this.textContent=i.type==='password'?'👁':'🙈'" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:0;color:var(--muted);font-size:18px;cursor:pointer;padding:4px 8px">👁</button>
     </div>
-    <button type="submit">Sign In</button>
-    <div class="hint">No account yet? <a href="/#contact">Create one from the home page</a>.</div>
+    <button type="submit" id="authBtn">Sign In</button>
+    <div class="hint" id="authToggle">No account yet? <a href="#" onclick="event.preventDefault();setAuthMode('signup')">Create one</a>.</div>
   </form>
 </div>
 
@@ -194,6 +202,30 @@ function reasonLabel(r){
 }
 
 // === AUTH ===
+// The card does double duty: sign in, or create an account. setAuthMode()
+// flips the copy and reveals the name/phone rows; authSubmit() routes to the
+// right call. New accounts land on the Profile tab -- the whole point of
+// signing up from here is to manage your own details.
+var AUTH_MODE = 'signin';
+function setAuthMode(mode){
+  AUTH_MODE = mode;
+  var signup = mode === 'signup';
+  document.getElementById('authTitle').textContent = signup ? 'Create your account' : 'Sign in to your account';
+  document.getElementById('authSub').textContent = signup
+    ? 'Set up a login to track orders, earn loyalty points, and update your own details.'
+    : 'Track orders, see your loyalty points, and check out faster.';
+  document.getElementById('authNameRow').style.display = signup ? '' : 'none';
+  document.getElementById('authPhoneRow').style.display = signup ? '' : 'none';
+  document.getElementById('acPass').setAttribute('autocomplete', signup ? 'new-password' : 'current-password');
+  document.getElementById('authBtn').textContent = signup ? 'Create account' : 'Sign In';
+  document.getElementById('authToggle').innerHTML = signup
+    ? 'Already have an account? <a href="#" onclick="event.preventDefault();setAuthMode(\'signin\')">Sign in</a>.'
+    : 'No account yet? <a href="#" onclick="event.preventDefault();setAuthMode(\'signup\')">Create one</a>.';
+  document.getElementById('signinErr').classList.remove('show');
+}
+
+function authSubmit(){ return AUTH_MODE === 'signup' ? doSignUp() : doSignIn(); }
+
 async function doSignIn(){
   var email = document.getElementById('acEmail').value.trim();
   var password = document.getElementById('acPass').value;
@@ -206,6 +238,31 @@ async function doSignIn(){
     show('orders');
   } catch(e){
     err.textContent = e.message || 'Sign-in failed.';
+    err.classList.add('show');
+  }
+}
+
+async function doSignUp(){
+  var err = document.getElementById('signinErr');
+  err.classList.remove('show');
+  var body = {
+    name: document.getElementById('acName').value.trim(),
+    email: document.getElementById('acEmail').value.trim(),
+    phone: document.getElementById('acPhone').value.trim(),
+    password: document.getElementById('acPass').value,
+  };
+  if (!body.email || !body.password){
+    err.textContent = 'Email and password are required.';
+    err.classList.add('show');
+    return;
+  }
+  try {
+    var r = await api('/api/auth/signup', { method:'POST', body: body });
+    document.getElementById('signinBg').classList.remove('show');
+    showProfile(r.user);
+    show('profile');
+  } catch(e){
+    err.textContent = e.message || 'Could not create the account.';
     err.classList.add('show');
   }
 }
@@ -473,7 +530,7 @@ async function renderChat(panel){
   var r = await api('/api/my-messages');
   var msgs = (r && r.messages) || [];
   panel.innerHTML =
-    '<div style="padding:14px 18px;background:#fafafa;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--muted)">Send a message to Meltha Honda directly — we typically reply within business hours.</div>' +
+    '<div style="padding:14px 18px;background:#fafafa;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--muted)">Send a message to Morty\'s Auto Parts directly — we typically reply within business hours.</div>' +
     '<div style="padding:14px 18px;display:flex;flex-direction:column;min-height:500px">' +
       '<div id="chatList" style="flex:1;overflow-y:auto;background:#fafafa;border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:10px;max-height:500px">' +
         (msgs.length === 0 ? '<div style="text-align:center;color:var(--muted);font-size:13px;padding:30px">No messages yet. Send the first one below.</div>' :
@@ -482,7 +539,7 @@ async function renderChat(panel){
             return '<div style="display:flex;justify-content:' + (mine?'flex-end':'flex-start') + ';margin-bottom:8px">' +
               '<div style="background:' + (mine?'var(--red)':'#fff') + ';color:' + (mine?'#fff':'#1f2937') + ';padding:10px 13px;border-radius:12px;max-width:75%;font-size:13.5px;line-height:1.5;box-shadow:0 1px 3px rgba(0,0,0,.08)">' +
                 esc(m.body) +
-                '<div style="font-size:10.5px;opacity:.7;margin-top:4px">' + fmtDate(m.created_at) + (mine ? ' · you' : ' · Meltha Honda staff') + '</div>' +
+                '<div style="font-size:10.5px;opacity:.7;margin-top:4px">' + fmtDate(m.created_at) + (mine ? ' · you' : ' · Morty\'s Auto Parts staff') + '</div>' +
               '</div>' +
             '</div>';
           }).join('')) +

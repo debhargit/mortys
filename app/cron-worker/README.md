@@ -1,4 +1,4 @@
-# meltahonda-cron
+# mortysautoparts-cron
 
 Pages Functions can't own Cron Triggers, so this ~40-line Worker holds the
 schedule and calls the Pages deployment's `/api/cron/*` endpoints
@@ -34,20 +34,20 @@ Then give the Pages project the *same* value:
 
 ```bash
 cd ..
-npx wrangler pages secret put CRON_SECRET --project-name meltahonda
+npx wrangler pages secret put CRON_SECRET --project-name mortysautoparts
 ```
 
-If `PAGES_ORIGIN` isn't `https://melthahonda.com` yet (pre-cutover), set it to
-the `*.pages.dev` URL: edit `[vars]` or `npx wrangler deploy --var PAGES_ORIGIN:https://meltahonda.pages.dev`.
+If `PAGES_ORIGIN` isn't `https://mortysautoparts.com` yet (pre-cutover), set it to
+the `*.pages.dev` URL: edit `[vars]` or `npx wrangler deploy --var PAGES_ORIGIN:https://mortysautoparts.pages.dev`.
 
 ## Test without waiting for the schedule
 
 ```bash
 # via the Pages endpoint directly
-curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://melthahonda.com/api/cron/low-stock-digest
+curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://mortysautoparts.com/api/cron/low-stock-digest
 
 # or through the worker's manual kick
-curl "https://meltahonda-cron.<subdomain>.workers.dev/?key=$CRON_SECRET&job=_all"
+curl "https://mortysautoparts-cron.<subdomain>.workers.dev/?key=$CRON_SECRET&job=_all"
 
 # local: wrangler dev then trigger the scheduled handler
 npx wrangler dev --test-scheduled

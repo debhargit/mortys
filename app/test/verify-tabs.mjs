@@ -1,10 +1,10 @@
-// Boot the LIVE melthahonda.com/admin in jsdom, sign in for real, then walk a
+// Boot the LIVE mortysautoparts.com/admin in jsdom, sign in for real, then walk a
 // set of sidebar tabs — for each, click it, let its fetches resolve, and check
 // it rendered content with no uncaught error, no show()-catch "Error:", and no
 // raw "not ported" 501 leaking into the panel.
 import jsdomPkg from 'jsdom';
 const { JSDOM, VirtualConsole } = jsdomPkg;
-const ORIGIN = 'https://melthahonda.com';
+const ORIGIN = 'https://mortysautoparts.com';
 
 const TABS = process.argv.slice(2).length ? process.argv.slice(2) : [
   'orders', 'products', 'customers', 'reviews', 'coupons', 'giftcards',
@@ -16,7 +16,7 @@ const TABS = process.argv.slice(2).length ? process.argv.slice(2) : [
 
 const si = await fetch(ORIGIN + '/api/auth/signin', {
   method: 'POST', headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ email: 'admin@melthahonda.com', password: 'password123' }),
+  body: JSON.stringify({ email: 'admin@mortysautoparts.com', password: 'password123' }),
 });
 const cookie = (si.headers.get('set-cookie') || '').split(';')[0];
 if (si.status !== 200) { console.log('signin failed', si.status); process.exit(1); }

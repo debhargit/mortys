@@ -2,7 +2,7 @@
 //
 // Brings up the *bundled* PostgreSQL that ships in vendor\, for a machine that
 // has no PostgreSQL installed at all -- a fresh Windows box with nothing on it
-// but a copy of this folder. start-melthahonda.bat calls this only after it has
+// but a copy of this folder. Start Morty's Auto Parts.bat calls this only after it has
 // already failed to reach a real server and failed to find a Windows service,
 // so getting here means "there is no other database on this PC".
 //
@@ -45,7 +45,7 @@ const LOG_DIR = path.join(DATA_DIR, 'logs');
 const PG_PORT = parseInt(process.env.MH_PG_PORT || '5433', 10);
 const PG_USER = process.env.MH_PG_USER || 'postgres';
 const PG_PASS = process.env.MH_PG_PASSWORD || 'postgres';
-const PG_DB = process.env.PGDATABASE || 'melthahonda';
+const PG_DB = process.env.PGDATABASE || 'mortysautoparts';
 
 function log(msg) {
   console.log('       ' + msg);
@@ -193,13 +193,13 @@ function initPostgres() {
   }
 
   // Loopback only. Nothing outside this PC has any business opening a raw
-  // Postgres connection -- the app server on 3040 is what the LAN talks to --
+  // Postgres connection -- the app server on 3057 is what the LAN talks to --
   // and leaving 5433 open on a shop network would be handing out the database.
   const confPath = path.join(PGDATA, 'postgresql.conf');
   try {
     fs.appendFileSync(confPath, [
       '',
-      '# --- Meltha Honda bundled-database overrides ---',
+      '# --- Morty\'s Auto Parts bundled-database overrides ---',
       "listen_addresses = 'localhost'",
       'port = ' + PG_PORT,
       'max_connections = 50',

@@ -12,11 +12,11 @@ then it stops taking writes.
 ## 0. Prerequisites (one-time, on the Cloudflare account)
 
 - `npx wrangler login` (browser OAuth, `debhargithud@gmail.com`).
-- D1 database `meltahonda-db` exists (id in `wrangler.toml`). If not:
-  `npx wrangler d1 create meltahonda-db` and paste the id.
-- **R2** opt-in (dashboard) → `npx wrangler r2 bucket create meltahonda-uploads`,
+- D1 database `mortysautoparts-db` exists (id in `wrangler.toml`). If not:
+  `npx wrangler d1 create mortysautoparts-db` and paste the id.
+- **R2** opt-in (dashboard) → `npx wrangler r2 bucket create mortysautoparts-uploads`,
   then uncomment `[[r2_buckets]]` in `wrangler.toml`.
-- **Email Sending** opt-in (dashboard) → `npx wrangler email sending enable melthahonda.com`,
+- **Email Sending** opt-in (dashboard) → `npx wrangler email sending enable mortysautoparts.com`,
   then uncomment `[[send_email]]` in `wrangler.toml`.
 - Pick a long random `CRON_SECRET`.
 
@@ -31,15 +31,15 @@ logs a stub. Cutover does **not** need them.
 cd app
 
 # 1a. schema — all migrations, in order, against the real (remote) D1
-npm run cf:migrate                     # wrangler d1 migrations apply meltahonda-db
+npm run cf:migrate                     # wrangler d1 migrations apply mortysautoparts-db
 
 # 1b. export the live Postgres data to D1 seed files
-DATABASE_URL="postgresql://USER:PASS@LOCALBOX:5432/melthahonda" npm run cf:data
+DATABASE_URL="postgresql://USER:PASS@LOCALBOX:5432/mortysautoparts" npm run cf:data
 #   -> dist/d1-data/NN_<table>.sql  (money -> *_cents, bool -> 0/1, jsonb -> TEXT)
 #   review the summary table it prints; spot-check a file or two
 
 # 1c. load them (ordered; parents first; FKs deferred per file)
-bash dist/d1-data/_import.sh meltahonda-db --remote
+bash dist/d1-data/_import.sh mortysautoparts-db --remote
 ```
 
 `pg2d1.mjs` only emits columns that exist in **both** sides — Postgres-only
@@ -51,7 +51,7 @@ fresh; `session_epoch` is re-seeded by migration 0014).
 Sanity check:
 
 ```bash
-npx wrangler d1 execute meltahonda-db --remote --command \
+npx wrangler d1 execute mortysautoparts-db --remote --command \
   "SELECT (SELECT COUNT(*) FROM products) AS products, (SELECT COUNT(*) FROM users) AS users, (SELECT COUNT(*) FROM pos_sales) AS sales;"
 ```
 
@@ -60,8 +60,8 @@ npx wrangler d1 execute meltahonda-db --remote --command \
 ## 2. Secrets + vars
 
 ```bash
-npx wrangler pages secret put SESSION_SECRET   --project-name meltahonda   # reuse app/.env's value
-npx wrangler pages secret put CRON_SECRET      --project-name meltahonda
+npx wrangler pages secret put SESSION_SECRET   --project-name mortysautoparts   # reuse app/.env's value
+npx wrangler pages secret put CRON_SECRET      --project-name mortysautoparts
 # EMAIL_FROM / ORDER_NOTIFY_TO are plain [vars] in wrangler.toml — edit if needed
 ```
 
@@ -99,7 +99,7 @@ POST /api/admin/pos/sale (a test sale) -> receipt number, stock decremented
 cd cron-worker
 npx wrangler deploy
 npx wrangler secret put CRON_SECRET            # SAME value as step 2
-# if PAGES_ORIGIN isn't melthahonda.com yet, deploy with --var PAGES_ORIGIN:https://meltahonda.pages.dev
+# if PAGES_ORIGIN isn't mortysautoparts.com yet, deploy with --var PAGES_ORIGIN:https://mortysautoparts.pages.dev
 cd ..
 curl -X POST -H "Authorization: Bearer <CRON_SECRET>" https://<pages-url>/api/cron/_all   # one manual run
 ```
@@ -109,7 +109,7 @@ curl -X POST -H "Authorization: Bearer <CRON_SECRET>" https://<pages-url>/api/cr
 ## 5. DNS flip
 
 - Cloudflare dashboard → Pages project → **Custom domains** → add
-  `melthahonda.com` (and `www`). Cloudflare provisions the cert.
+  `mortysautoparts.com` (and `www`). Cloudflare provisions the cert.
 - If the apex currently points at the Windows box via an A record, replace it
   with the Pages CNAME target the dashboard shows (or the automatic alias).
 - Lower TTL an hour beforehand so the change propagates fast.
@@ -118,7 +118,7 @@ At this point production traffic is on Pages. **Stop the Express service** so
 nothing writes to the old Postgres:
 
 ```powershell
-Restart-Service MelthaHondaAdmin      # (elevated) — or Stop-Service to leave it down
+Restart-Service MortysAutoPartsAdmin      # (elevated) — or Stop-Service to leave it down
 ```
 
 ---
@@ -138,8 +138,8 @@ Restart-Service MelthaHondaAdmin      # (elevated) — or Stop-Service to leave 
 
 Nothing is destructive until step 5. To roll back:
 
-1. Point `melthahonda.com` DNS back at the Windows box.
-2. `Start-Service MelthaHondaAdmin`.
+1. Point `mortysautoparts.com` DNS back at the Windows box.
+2. `Start-Service MortysAutoPartsAdmin`.
 
 The Postgres data is untouched (the export in step 1 is read-only). Any writes
 that landed in D1 during the window would need to be replayed by hand — keep
@@ -149,7 +149,7 @@ the window short and low-traffic.
 
 ## Offline / on-premise use after cutover
 
-`melthahonda.com` (Cloudflare + D1) is **online-only** — no offline mode, no
+`mortysautoparts.com` (Cloudflare + D1) is **online-only** — no offline mode, no
 local cache. If the shop needs to keep ringing sales when the internet is
 down, keep running the **self-hosted portable edition** (this repo's
 `runtime\` + `app\boot.js` + `.vbs` launchers) on a shop PC.
@@ -161,15 +161,15 @@ The panel is a small wizard: it asks for the **preset options** —
 | field | default |
 |---|---|
 | Shop name | the shop's `company_name` |
-| Install folder | `C:\MelthaHonda` |
-| Local server port | `3040` |
+| Install folder | `C:\MortysAutoParts` |
+| Local server port | `3057` |
 | Admin sign-in email | the shop's settings email |
 | Admin password | (required, ≥ 6) — creates the local admin login |
 | Open the Windows firewall for other tills | on |
 | Start automatically with Windows | on |
 
 — and the **⬇ Download configured installer** button hands back a single
-`Install Meltha Honda Offline.cmd` with those answers baked in. Run it on the
+`Install Morty's Auto Parts Offline.cmd` with those answers baked in. Run it on the
 shop's main PC (double-click → approve the admin prompt). It:
 
 1. self-elevates, then runs an embedded PowerShell script;
@@ -180,7 +180,7 @@ shop's main PC (double-click → approve the admin prompt). It:
    and **`offline-setup.json`** (all the preset answers, incl. the admin
    email + password) into the app folder;
 4. adds the firewall rules (TCP `<port>` + discovery UDP `41235`) if ticked;
-5. launches the bundle's own first run — `Meltha Honda Admin.vbs` (or
+5. launches the bundle's own first run — `Morty's Auto Parts Admin.vbs` (or
    `setup.cmd`, or `node server.js`) — which **reads `offline-setup.json` on
    first start to `initdb` the bundled PostgreSQL, load `schema.sql`, and
    seed the admin user**;
@@ -194,7 +194,7 @@ To turn the button on: publish the portable-edition zip somewhere reachable
 "no bundle published" note and the button is disabled.
 
 **Bundle contract:** `build-portable.ps1` must ship a first-run entrypoint
-(`Meltha Honda Admin.vbs` / `setup.cmd`) that, when `offline-setup.json`
+(`Morty's Auto Parts Admin.vbs` / `setup.cmd`) that, when `offline-setup.json`
 exists in the app folder and the DB is not yet initialised, does the
 unattended `initdb` + `schema.sql` + admin-seed from that file and then
 deletes/ignores it on subsequent starts. Everything the installer does
@@ -203,9 +203,9 @@ generated `.cmd` and needs no bundle support.
 
 The manual fallback, on a shop PC —
 
-- Start it with `Meltha Honda Admin.vbs`; make it permanent with
-  `Start With Windows.vbs` (installs the `MelthaHondaAdmin` service). It serves
-  `http://<main-pc-IP>:3040/admin.html` off its bundled PostgreSQL, no internet.
+- Start it with `Morty's Auto Parts Admin.vbs`; make it permanent with
+  `Start With Windows.vbs` (installs the `MortysAutoPartsAdmin` service). It serves
+  `http://<main-pc-IP>:3057/admin.html` off its bundled PostgreSQL, no internet.
 - Other tills join with `Connect To Shop Server.vbs` + a one-time link from
   *Admin → Setup → Terminals & access* (or auto-discover via UDP `41235`).
 - **There is no live sync between the local Postgres and the cloud D1.** Run

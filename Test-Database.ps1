@@ -2,7 +2,7 @@
 ================================================================================
   Test-Database.ps1  --  why won't this copy's database start?
 
-  Put this file in the Meltha Honda folder (beside "Meltha Honda Admin.exe")
+  Put this file in the Morty's Auto Parts folder (beside "Morty's Auto Parts Admin.exe")
   on the machine that is failing, right-click it and choose
   "Run with PowerShell". Or from a terminal in that folder:
 
@@ -29,7 +29,7 @@ function Info($m) { Write-Host "        $m" -ForegroundColor DarkGray }
 
 Write-Host ''
 Write-Host '===============================================' -ForegroundColor White
-Write-Host '  Meltha Honda -- database check'               -ForegroundColor White
+Write-Host '  Morty''s Auto Parts -- database check'               -ForegroundColor White
 Write-Host '===============================================' -ForegroundColor White
 Info $ROOT
 
@@ -51,7 +51,7 @@ foreach ($k in 'app', 'runtime\pgsql', 'data\pgdata') {
 }
 if ($problems.Count) {
   Info 'Windows Explorer silently skips files whose path passes 260 characters.'
-  Info 'Unzip (or copy) to a short path such as C:\MelthaHonda and try again.'
+  Info 'Unzip (or copy) to a short path such as C:\MortysAutoParts and try again.'
 }
 
 # ---- 2. the empty folders PostgreSQL insists on ------------------------------
@@ -171,7 +171,7 @@ if (-not $dbRunning) {
   $sql = "SELECT (SELECT COUNT(*) FROM products) || ' products, ' || " +
          "(SELECT COUNT(*) FROM users) || ' users, ' || " +
          "(SELECT COUNT(*) FROM roles) || ' roles'"
-  $out = & (Join-Path $PGBIN 'psql.exe') -h 127.0.0.1 -p $port -U postgres -d melthahonda -t -A -c $sql 2>&1
+  $out = & (Join-Path $PGBIN 'psql.exe') -h 127.0.0.1 -p $port -U postgres -d mortysautoparts -t -A -c $sql 2>&1
   if ($LASTEXITCODE -eq 0) {
     Ok ($out -join ' ')
     Info 'The database is fine. If sign-in still fails, the fault is elsewhere --'

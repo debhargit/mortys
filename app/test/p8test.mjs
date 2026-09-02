@@ -32,7 +32,7 @@ function makeDB(db) {
     async batch(stmts) { const out = []; for (const s of stmts) out.push(s.run()); return out; },
   };
 }
-const ENV = { DB: makeDB(sdb), ORDER_NOTIFY_TO: 'shop@melthahonda.com', CRON_SECRET: 'topsecret' };
+const ENV = { DB: makeDB(sdb), ORDER_NOTIFY_TO: 'shop@mortysautoparts.com', CRON_SECRET: 'topsecret' };
 
 const routes = [];
 const app = {};

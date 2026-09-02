@@ -9,9 +9,9 @@
 
   Run it ON THE NEW MACHINE, from inside the migration folder. It:
 
-    1. Copies the folder to C:\MelthaHonda (short path -- long photo names).
+    1. Copies the folder to C:\MortysAutoParts (short path -- long photo names).
        The database (data\) comes across on the first run; on any later run
-       C:\MelthaHonda\data is left untouched, so re-running never overwrites
+       C:\MortysAutoParts\data is left untouched, so re-running never overwrites
        records the new till has taken since.
     2. Clears the old machine's run locks.
     3. Installs the bundled Visual C++ runtime if PostgreSQL needs it.
@@ -27,12 +27,16 @@
 #>
 
 param(
-  [string] $Destination = 'C:\MelthaHonda'
+  [string] $Destination = 'C:\MortysAutoParts'
 )
 
 $ErrorActionPreference = 'Stop'
-$APPNAME = 'Meltha Honda'
-$SVCNAME = 'MelthaHondaAdmin'
+$APPNAME = 'Morty''s Auto Parts'
+# The service name is compiled into "Morty's Auto Parts Service.exe" (no
+# source in this repo), so it stays 'MortysAutoPartsAdmin' even after the rebrand.
+# Renaming it means rebuilding that binary and teaching Install.ps1 to remove
+# the old-named service on upgrade.
+$SVCNAME = 'MortysAutoPartsAdmin'
 
 # ------------------------------------------------------------------ GUI layer
 Add-Type -AssemblyName System.Windows.Forms
@@ -100,7 +104,7 @@ function Finish {
   StatusDone
   if ($script:fail.Count -eq 0) { Tell $script:successText 'done' 'Information'; exit 0 }
   $m = "Some steps did not complete:`r`n`r`n" + (($script:fail | ForEach-Object { '  -  ' + $_ }) -join "`r`n")
-  $m += "`r`n`r`nLogs are in  C:\MelthaHonda\data\logs  (boot.log, server.log, postgres.log)."
+  $m += "`r`n`r`nLogs are in  C:\MortysAutoParts\data\logs  (boot.log, server.log, postgres.log)."
   if ($script:logFile) { $m += "`r`nThis run's log:`r`n" + $script:logFile }
   Tell $m 'problems' 'Warning'
   exit 1
@@ -115,26 +119,26 @@ if (-not $pr.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administra
 }
 
 $SOURCE = (Resolve-Path $PSScriptRoot).Path
-LogInit (Join-Path $env:TEMP 'MelthaHonda')
+LogInit (Join-Path $env:TEMP 'MortysAutoParts')
 
 Line "$APPNAME  --  restore on this PC"
 Info "from : $SOURCE"
 Info "to   : $Destination"
 
 if (-not (Test-Path (Join-Path $SOURCE 'app\boot.js'))) {
-  Bad "this folder is not a Meltha Honda migration folder (no app\boot.js beside this tool)"
+  Bad "this folder is not a Morty's Auto Parts migration folder (no app\boot.js beside this tool)"
   Finish
 }
 if ((Resolve-Path $SOURCE).Path -ieq (Resolve-Path -LiteralPath $Destination -EA SilentlyContinue).Path) {
-  Bad "run this from the migration folder, not from C:\MelthaHonda itself"
+  Bad "run this from the migration folder, not from C:\MortysAutoParts itself"
   Finish
 }
 
 $firstTime = -not (Test-Path (Join-Path $Destination 'data\pgdata\PG_VERSION'))
 if (-not (Confirm (
-  "Set up the Meltha Honda till on THIS computer from:`r`n`r`n$SOURCE`r`n`r`n" +
+  "Set up the Morty's Auto Parts till on THIS computer from:`r`n`r`n$SOURCE`r`n`r`n" +
   $(if ($firstTime) { "All stock, sales, customers and staff logins from the old machine will be brought across." }
-    else { "C:\MelthaHonda already has a database -- the program files will be updated and the existing database left as it is." }) +
+    else { "C:\MortysAutoParts already has a database -- the program files will be updated and the existing database left as it is." }) +
   "`r`n`r`nContinue?") 'restore on new PC')) {
   Info 'cancelled by user'; StatusDone; exit
 }
@@ -149,7 +153,7 @@ else {
           '/NFL','/NDL','/NP','/NJH','/NJS',
           '/XF', 'admin.lock', 'postmaster.pid', 'postmaster.opts',
                  'Restore On New PC.exe', 'Restore-On-New-PC.ps1', 'START HERE.txt')
-  if (-not $firstTime) { $rc += @('/XD', (Join-Path $SOURCE 'data')); Info 'existing C:\MelthaHonda\data left untouched (re-run)' }
+  if (-not $firstTime) { $rc += @('/XD', (Join-Path $SOURCE 'data')); Info 'existing C:\MortysAutoParts\data left untouched (re-run)' }
   & robocopy @rc | Out-Null
   if ($LASTEXITCODE -ge 8) { Bad "copy failed (robocopy exit $LASTEXITCODE)" }
   else {
@@ -211,8 +215,8 @@ if ((Test-Path $node) -and (Test-Path $boot)) {
 # ------------------------------------------------------------ service
 Head '5. Registering the Windows service'
 Status 'Registering the Windows service...'
-$svcExe = Join-Path $Destination 'Meltha Honda Service.exe'
-if (-not (Test-Path $svcExe)) { Bad 'Meltha Honda Service.exe is missing from the folder' }
+$svcExe = Join-Path $Destination 'Morty''s Auto Parts Service.exe'
+if (-not (Test-Path $svcExe)) { Bad 'Morty''s Auto Parts Service.exe is missing from the folder' }
 else {
   $existing = Get-Service -Name $SVCNAME -EA SilentlyContinue
   if ($existing) { Info 'already registered -- stopping it to update'; & sc.exe stop $SVCNAME | Out-Null; Start-Sleep -Seconds 6 }
@@ -225,15 +229,15 @@ else {
 
 # ------------------------------------------------------------ shortcut
 Head '6. Desktop shortcut'
-$port = 3040
+$port = 3057
 try {
   $sc = Join-Path $Destination 'app\server-config.json'
   if (Test-Path $sc) { $j = Get-Content $sc -Raw | ConvertFrom-Json; if ($j.port) { $port = [int]$j.port } }
-  $lnk = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Meltha Honda Admin.lnk'
+  $lnk = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Morty''s Auto Parts Admin.lnk'
   $w = New-Object -ComObject WScript.Shell
   $s = $w.CreateShortcut($lnk)
   $s.TargetPath = "http://localhost:$port/admin.html"
-  $s.Description = 'Open the Meltha Honda admin panel and POS'
+  $s.Description = 'Open the Morty''s Auto Parts admin panel and POS'
   $s.Save()
   Ok "created -> http://localhost:$port/admin.html"
 } catch { Bad "could not create the shortcut: $($_.Exception.Message)" }
@@ -259,7 +263,7 @@ $script:successText =
   "Sign in: the same accounts and password as the old machine.`r`n`r`n" +
   "Other computers on the network reach it at this PC's new address:`r`n" +
   "   http://<this-PC-IP>:$port/admin.html`r`n" +
-  "(the address is written in  C:\MelthaHonda\app\machine-config.json)`r`n`r`n" +
+  "(the address is written in  C:\MortysAutoParts\app\machine-config.json)`r`n`r`n" +
   "If other PCs cannot connect, run  Allow Network Access.vbs  once here.`r`n" +
   "Then switch the OLD machine off for good, so two tills cannot diverge."
 Finish

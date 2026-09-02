@@ -3,8 +3,8 @@
 -- What the sale / void / return transactions need: gift cards, the full
 -- refund breakdown on pos_returns, and the seeded walk-in customer.
 --
---   wrangler d1 migrations apply meltahonda-db --local
---   wrangler d1 migrations apply meltahonda-db
+--   wrangler d1 migrations apply mortysautoparts-db --local
+--   wrangler d1 migrations apply mortysautoparts-db
 
 -- ---- gift cards (store credit + gift-card tender) ---------------------
 CREATE TABLE IF NOT EXISTS gift_cards (
@@ -45,4 +45,4 @@ ALTER TABLE pos_return_items ADD COLUMN unit_price_cents INTEGER;
 -- ---- walk-in customer (getWalkinCustomerId) --------------------------
 -- The POS ticket bar attaches every walk-in ticket to this one real row.
 INSERT OR IGNORE INTO users (email, name, password_hash, is_admin, admin_role, price_tier, account_number)
-VALUES ('walkin@melthahonda.local', 'Cash Customer - Walk-in', 'x-not-a-login', 0, 'manager', 'retail', 'C-000001');
+VALUES ('walkin@mortysautoparts.local', 'Cash Customer - Walk-in', 'x-not-a-login', 0, 'manager', 'retail', 'C-000001');

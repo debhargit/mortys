@@ -280,7 +280,7 @@ export default function mount(app) {
     const name = (b.name || '').trim();
     if (!name) return c.json({ error: 'name is required' }, 400);
     const acctNo = await nextAccountNumber(db);
-    const email = (b.email || '').trim().toLowerCase() || `${acctNo.toLowerCase()}@walkin.melthahonda.local`;
+    const email = (b.email || '').trim().toLowerCase() || `${acctNo.toLowerCase()}@walkin.mortysautoparts.local`;
     if (await db.one('SELECT id FROM users WHERE lower(email) = lower(?)', email))
       return c.json({ error: 'A customer with that email already exists' }, 409);
     const hash = await bcrypt.hash(crypto.randomUUID(), 10);
@@ -319,7 +319,7 @@ export default function mount(app) {
   // wherever they publish the zip (GitHub release, R2, a share…).
   app.get('/api/admin/local-server', adminMw, async (c) => {
     const env = c.env || {};
-    let shopName = 'Meltha Honda Sales & Servs Ltd', shopEmail = '';
+    let shopName = 'Morty\'s Auto Parts Ltd', shopEmail = '';
     try { const s = await getShopSettings(c.env); shopName = s.company_name || shopName; shopEmail = s.email || ''; }
     catch { /* fallback names */ }
     return c.json({
@@ -331,9 +331,9 @@ export default function mount(app) {
       // sensible defaults for the install wizard
       defaults: {
         shop_name: shopName,
-        install_dir: 'C:\\MelthaHonda',
-        port: 3040,
-        admin_email: shopEmail || 'admin@melthahonda.com',
+        install_dir: 'C:\\MortysAutoParts',
+        port: 3057,
+        admin_email: shopEmail || 'admin@mortysautoparts.com',
         open_firewall: true,
         install_service: true,
       },
@@ -353,11 +353,11 @@ export default function mount(app) {
       return c.json({ error: 'No offline bundle is published yet. Build the portable edition and set LOCAL_SERVER_URL in wrangler.toml first — see app/CUTOVER.md.' }, 400);
     }
     const b = await c.req.json().catch(() => ({}));
-    const shop = String(b.shop_name || 'Meltha Honda').trim().slice(0, 80) || 'Meltha Honda';
-    let dir = String(b.install_dir || 'C:\\MelthaHonda').trim();
-    if (!/^[A-Za-z]:\\[\w .\-\\]{0,120}$/.test(dir)) dir = 'C:\\MelthaHonda';
+    const shop = String(b.shop_name || 'Morty\'s Auto Parts').trim().slice(0, 80) || 'Morty\'s Auto Parts';
+    let dir = String(b.install_dir || 'C:\\MortysAutoParts').trim();
+    if (!/^[A-Za-z]:\\[\w .\-\\]{0,120}$/.test(dir)) dir = 'C:\\MortysAutoParts';
     dir = dir.replace(/\\+$/, '');
-    const port = Math.min(65535, Math.max(1024, parseInt(b.port, 10) || 3040));
+    const port = Math.min(65535, Math.max(1024, parseInt(b.port, 10) || 3057));
     const email = String(b.admin_email || '').trim().slice(0, 120);
     const pass = String(b.admin_password || '');
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return c.json({ error: 'A valid admin email is required.' }, 400);
@@ -379,7 +379,7 @@ export default function mount(app) {
       `$DoFirewall = $${doFw ? 'true' : 'false'}`,
       `$DoService  = $${doSvc ? 'true' : 'false'}`,
       '',
-      'Write-Host "== Meltha Honda offline setup for $Shop ==" -ForegroundColor Cyan',
+      'Write-Host "== Morty\'s Auto Parts offline setup for $Shop ==" -ForegroundColor Cyan',
       'New-Item -ItemType Directory -Force -Path $Dir | Out-Null',
       "$zip = Join-Path $Dir 'bundle.zip'",
       'Write-Host "Downloading the offline bundle..."',
@@ -407,12 +407,12 @@ export default function mount(app) {
       '',
       'if ($DoFirewall) {',
       '  Write-Host "Opening the firewall (TCP $Port, UDP 41235)..."',
-      '  cmd /c "netsh advfirewall firewall add rule name=""Meltha Honda Admin $Port"" dir=in action=allow protocol=TCP localport=$Port" | Out-Null',
-      '  cmd /c "netsh advfirewall firewall add rule name=""Meltha Honda Discovery"" dir=in action=allow protocol=UDP localport=41235" | Out-Null',
+      '  cmd /c "netsh advfirewall firewall add rule name=""Morty\'s Auto Parts Admin $Port"" dir=in action=allow protocol=TCP localport=$Port" | Out-Null',
+      '  cmd /c "netsh advfirewall firewall add rule name=""Morty\'s Auto Parts Discovery"" dir=in action=allow protocol=UDP localport=41235" | Out-Null',
       '}',
       '',
       'Write-Host "Starting the local server — first run sets up PostgreSQL and loads the database..." -ForegroundColor Cyan',
-      "$vbs = Join-Path $Root 'Meltha Honda Admin.vbs'",
+      "$vbs = Join-Path $Root 'Morty''s Auto Parts Admin.vbs'",
       "$setup = Join-Path $Root 'setup.cmd'",
       'if (Test-Path $vbs) { Start-Process wscript.exe -ArgumentList ("""" + $vbs + """") -WorkingDirectory $Root }',
       'elseif (Test-Path $setup) { Start-Process $setup -WorkingDirectory $Root }',
@@ -452,7 +452,7 @@ export default function mount(app) {
     return new Response(cmd, {
       headers: {
         'Content-Type': 'application/octet-stream',
-        'Content-Disposition': 'attachment; filename="Install Meltha Honda Offline.cmd"',
+        'Content-Disposition': 'attachment; filename="Install Morty\'s Auto Parts Offline.cmd"',
         'Cache-Control': 'no-store',
       },
     });
@@ -509,7 +509,7 @@ export default function mount(app) {
     const s = await getShopSettings(c.env);
     return c.json({
       work_order: w, labor, parts, payments, tax_label: TAX_LABEL, tax_rate: TAX_RATE,
-      shop: { name: s.company_name, address: s.address + (s.country ? ', ' + s.country : ''), phone: s.phone, website: s.website || 'https://melthahonda.com' },
+      shop: { name: s.company_name, address: s.address + (s.country ? ', ' + s.country : ''), phone: s.phone, website: s.website || 'https://mortysautoparts.com' },
     });
   });
 

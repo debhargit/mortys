@@ -26,7 +26,7 @@
   Parameters (all optional):
     -Target <path>     where to build the folder; skips the picker
     -LeaveStopped      do not restart the service here (use if retiring this PC)
-    -Zip               also write MelthaHonda-Migration-<date>.zip beside it
+    -Zip               also write MortysAutoParts-Migration-<date>.zip beside it
 ================================================================================
 #>
 
@@ -37,8 +37,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$APPNAME = 'Meltha Honda'
-$SVCNAME = 'MelthaHondaAdmin'
+$APPNAME = 'Morty''s Auto Parts'
+# The service name is compiled into "Morty's Auto Parts Service.exe" (no
+# source in this repo), so it stays 'MortysAutoPartsAdmin' even after the rebrand.
+# Renaming it means rebuilding that binary and teaching Install.ps1 to remove
+# the old-named service on upgrade.
+$SVCNAME = 'MortysAutoPartsAdmin'
 
 # ------------------------------------------------------------------ GUI layer
 Add-Type -AssemblyName System.Windows.Forms
@@ -138,7 +142,7 @@ try {
   $pn = (Get-CimInstance Win32_Service -Filter "Name='$SVCNAME'" -EA SilentlyContinue).PathName
   if ($pn) { $svcDir = Split-Path ($pn -replace '^"([^"]+)".*$','$1') -Parent }
 } catch { }
-foreach ($c in @($PSScriptRoot, $svcDir, 'C:\MelthaHonda', 'C:\melthahonda')) {
+foreach ($c in @($PSScriptRoot, $svcDir, 'C:\MortysAutoParts', 'C:\mortysautoparts', 'C:\MortysAutoParts', 'C:\mortysautoparts')) {
   if ($c -and (Test-Path (Join-Path $c 'app\boot.js'))) { $SOURCE = (Resolve-Path $c).Path; break }
 }
 LogInit ($(if ($SOURCE) { Join-Path $SOURCE 'data\logs' } else { $env:TEMP }))
@@ -148,7 +152,7 @@ Info "run from : $PSScriptRoot"
 Info "install  : $SOURCE"
 
 if (-not $SOURCE) {
-  Bad 'could not find the Meltha Honda install (no app\boot.js in the usual places)'
+  Bad 'could not find the Morty''s Auto Parts install (no app\boot.js in the usual places)'
   Finish
 }
 
@@ -166,7 +170,7 @@ if (-not $Target) {
 
 $looksLikeKit = (Test-Path (Join-Path $Target 'Restore-On-New-PC.ps1')) -or (Test-Path (Join-Path $Target 'Restore On New PC.exe'))
 if ($looksLikeKit) { $dest = (Resolve-Path $Target).Path }
-else               { $dest = Join-Path $Target 'MelthaHonda-Migration' }
+else               { $dest = Join-Path $Target 'MortysAutoParts-Migration' }
 
 if ((Resolve-Path -LiteralPath $dest -EA SilentlyContinue).Path -eq $SOURCE) {
   Bad 'the destination is the live install itself -- pick another folder'; Finish
@@ -194,7 +198,7 @@ New-Item -ItemType Directory -Force -Path $dest | Out-Null
 $rc = @(
   "$SOURCE", "$dest", '/E', '/COPY:DAT', '/DCOPY:DAT', '/R:1', '/W:1',
   '/NFL', '/NDL', '/NP', '/NJH', '/NJS',
-  '/XD', (Join-Path $SOURCE 'data'), 'MelthaHonda-Migration',
+  '/XD', (Join-Path $SOURCE 'data'), 'MortysAutoParts-Migration',
   '/XF', 'admin.lock', '.~lock.*#'
 )
 & robocopy @rc | Out-Null
@@ -283,7 +287,7 @@ if (-not (Test-Path (Join-Path $dest 'Restore On New PC.exe')) -and
 if ($Zip -and $script:fail.Count -eq 0) {
   Head '4. Also writing a .zip'
   Status 'Compressing...'
-  $zipPath = Join-Path (Split-Path $dest -Parent) ('MelthaHonda-Migration-' + (Get-Date -Format 'yyyy-MM-dd') + '.zip')
+  $zipPath = Join-Path (Split-Path $dest -Parent) ('MortysAutoParts-Migration-' + (Get-Date -Format 'yyyy-MM-dd') + '.zip')
   $sevenZip = @('C:\Program Files\7-Zip\7z.exe','C:\Program Files (x86)\7-Zip\7z.exe') | Where-Object { Test-Path $_ } | Select-Object -First 1
   try {
     if (Test-Path $zipPath) { Remove-Item $zipPath -Force }

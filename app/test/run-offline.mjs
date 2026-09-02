@@ -3,7 +3,7 @@
 // any file fails or crashes.
 //
 // NOT run here: the jsdom scripts (verify-quote-ui.mjs against public/, and
-// the verify-*.mjs that hit https://melthahonda.com). They need `jsdom` and,
+// the verify-*.mjs that hit https://mortysautoparts.com). They need `jsdom` and,
 // for the live ones, network + the seed admin login -- run those by hand.
 // See README.md.
 import { readdirSync } from 'node:fs';

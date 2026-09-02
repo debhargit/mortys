@@ -176,7 +176,7 @@ export default function mount(app) {
       let mx = 0; for (const r of rows) { const m = String(r.a || '').match(/(\d+)\s*$/); if (m) mx = Math.max(mx, +m[1]); }
       acctNo = 'C-' + String(mx + 1).padStart(6, '0');
     }
-    const email = String(b.email || '').trim().toLowerCase() || `${acctNo.toLowerCase()}@walkin.melthahonda.local`;
+    const email = String(b.email || '').trim().toLowerCase() || `${acctNo.toLowerCase()}@walkin.mortysautoparts.local`;
     if (await db.one('SELECT id FROM users WHERE lower(email) = lower(?) OR account_number = ?', email, acctNo))
       return c.json({ error: 'A customer with that email or account number already exists' }, 409);
     const hash = await bcrypt.hash(crypto.randomUUID(), 10);
@@ -219,7 +219,7 @@ export default function mount(app) {
     const u = await db.one('SELECT id, email, is_admin, is_staff FROM users WHERE id = ?', id);
     if (!u) return c.json({ error: 'No such customer' }, 404);
     if (u.is_admin || u.is_staff) return c.json({ error: 'That is a staff account — manage it under Settings → Users & Staff.' }, 400);
-    if (u.email === 'walkin@melthahonda.local') return c.json({ error: 'The walk-in customer cannot be removed.' }, 400);
+    if (u.email === 'walkin@mortysautoparts.local') return c.json({ error: 'The walk-in customer cannot be removed.' }, 400);
     const h = await db.one(
       `SELECT (SELECT COUNT(*) FROM orders WHERE user_id = ?) AS orders,
               (SELECT COUNT(*) FROM pos_sales WHERE customer_id = ?) AS sales,
@@ -302,7 +302,7 @@ export default function mount(app) {
     const r = await db.run('INSERT INTO customer_notifications (user_id, kind, body) VALUES (?,?,?)', id, kind, body);
     if (u.email) {
       const { sendEmail } = await import('../_lib/mailer.js');
-      const subject = kind === 'dunning' ? 'Payment reminder — Meltha Honda Sales & Servs' : 'A note from Meltha Honda Sales & Servs';
+      const subject = kind === 'dunning' ? 'Payment reminder — Morty\'s Auto Parts' : 'A note from Morty\'s Auto Parts';
       c.executionCtx?.waitUntil?.(sendEmail(c.env, { to: u.email, subject, text: body, html: `<p>${body.replace(/\n/g, '<br>')}</p>` }).catch(() => {}));
     }
     return c.json({ ok: true, id: r.meta.last_row_id, emailed: !!u.email });

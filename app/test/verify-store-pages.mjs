@@ -3,7 +3,7 @@
 // stream can't hang the run.
 import jsdomPkg from 'jsdom';
 const { JSDOM, VirtualConsole } = jsdomPkg;
-const O = 'https://melthahonda.com';
+const O = 'https://mortysautoparts.com';
 
 const PAGES = [
   { path: '/shop.html',        want: '#partsGrid',   wait: 6000 },

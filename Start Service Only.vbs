@@ -1,7 +1,7 @@
 ' ===========================================================================
-'  Meltha Honda Admin — start the server only, no browser, no window
+'  Morty's Auto Parts Admin — start the server only, no browser, no window
 '
-'  Same as "Meltha Honda Admin.vbs" minus the "wait for it, then open the
+'  Same as "Morty's Auto Parts Admin.vbs" minus the "wait for it, then open the
 '  admin panel" part. This is what the Windows-login autostart shortcut runs:
 '  at login you want the till/server PC to start serving the LAN, not to have
 '  a browser window thrown at whoever walks in first.

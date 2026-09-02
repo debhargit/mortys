@@ -1,8 +1,8 @@
 ' ===========================================================================
-'  Meltha Honda Admin — open the Windows Firewall for the shop LAN
+'  Morty's Auto Parts Admin — open the Windows Firewall for the shop LAN
 '
 '  Run this ONCE, on the computer that hosts the admin server, if the other
-'  computers on the network can't reach http://<this-pc>:3040/admin.html even
+'  computers on the network can't reach http://<this-pc>:3057/admin.html even
 '  though it works fine in a browser on this machine itself. That symptom is
 '  almost always Windows Firewall silently dropping the inbound connection.
 '
@@ -33,25 +33,25 @@ End If
 scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
 port = ReadPort(scriptDir)
 
-answer = MsgBox("Allow other computers on this network to reach the Meltha Honda " & _
+answer = MsgBox("Allow other computers on this network to reach the Morty's Auto Parts " & _
                 "admin server?" & vbCrLf & vbCrLf & _
                 "This adds Windows Firewall rules for:" & vbCrLf & _
                 "    TCP port " & port & "  (admin panel)" & vbCrLf & _
                 "    UDP port 41235  (finding this machine on the LAN)" & vbCrLf & vbCrLf & _
                 "Private and domain networks only - not public wifi." & vbCrLf & vbCrLf & _
                 "Windows will ask for administrator permission.", _
-                vbQuestion + vbYesNo, "Meltha Honda Admin")
+                vbQuestion + vbYesNo, "Morty's Auto Parts Admin")
 If answer <> vbYes Then WScript.Quit 0
 
 ' Delete-then-add so re-running after a port change replaces the old rule
 ' instead of leaving a stale hole open on the previous port. The deletes are
 ' expected to fail on a first run; that's why they're chained with & and not
 ' checked.
-cmdLine = "netsh advfirewall firewall delete rule name=""Meltha Honda Admin"" & " & _
-          "netsh advfirewall firewall delete rule name=""Meltha Honda Discovery"" & " & _
-          "netsh advfirewall firewall add rule name=""Meltha Honda Admin"" " & _
+cmdLine = "netsh advfirewall firewall delete rule name=""Morty's Auto Parts Admin"" & " & _
+          "netsh advfirewall firewall delete rule name=""Morty's Auto Parts Discovery"" & " & _
+          "netsh advfirewall firewall add rule name=""Morty's Auto Parts Admin"" " & _
           "dir=in action=allow protocol=TCP localport=" & port & " profile=private,domain & " & _
-          "netsh advfirewall firewall add rule name=""Meltha Honda Discovery"" " & _
+          "netsh advfirewall firewall add rule name=""Morty's Auto Parts Discovery"" " & _
           "dir=in action=allow protocol=UDP localport=41235 profile=private,domain"
 
 ' ShellExecute with the "runas" verb is what raises the UAC prompt; the final
@@ -62,9 +62,9 @@ CreateObject("Shell.Application").ShellExecute "cmd.exe", "/c " & cmdLine, "", "
 If Err.Number <> 0 Then
     MsgBox "Could not change the firewall - permission was refused." & vbCrLf & vbCrLf & _
            "You can add the rules by hand from an Administrator command prompt:" & vbCrLf & vbCrLf & _
-           "netsh advfirewall firewall add rule name=""Meltha Honda Admin"" dir=in " & _
+           "netsh advfirewall firewall add rule name=""Morty's Auto Parts Admin"" dir=in " & _
            "action=allow protocol=TCP localport=" & port & " profile=private,domain", _
-           vbExclamation, "Meltha Honda Admin"
+           vbExclamation, "Morty's Auto Parts Admin"
     WScript.Quit 1
 End If
 On Error GoTo 0
@@ -73,7 +73,7 @@ WScript.Sleep 2500
 MsgBox "Firewall rules added." & vbCrLf & vbCrLf & _
         "Other computers on this network can now open:" & vbCrLf & _
         "    http://" & sh.ExpandEnvironmentStrings("%COMPUTERNAME%") & ":" & port & "/admin.html", _
-        vbInformation, "Meltha Honda Admin"
+        vbInformation, "Morty's Auto Parts Admin"
 WScript.Quit 0
 
 ' ===========================================================================
@@ -81,7 +81,7 @@ Function ReadPort(dir)
     Dim p
     p = ReadJsonNumber(fso.BuildPath(dir, "app\server-config.json"), "port")
     If p = 0 Then p = ReadJsonNumber(fso.BuildPath(dir, "app\portable.json"), "appPort")
-    If p = 0 Then p = 3040
+    If p = 0 Then p = 3057
     ReadPort = p
 End Function
 

@@ -116,7 +116,7 @@ A('settings/server patch noop', r.ok && r.cloud === true);
 
 // ---- local-server installer ----
 r = await call('get', '/api/admin/local-server');
-A('local-server: no bundle -> defaults returned, url null', r.url === null && r.defaults && r.defaults.port === 3040);
+A('local-server: no bundle -> defaults returned, url null', r.url === null && r.defaults && r.defaults.port === 3057);
 r = await call('post', '/api/admin/local-server/installer', { body: { admin_email: 'a@b.com', admin_password: 'secret9' } });
 A('local-server installer: 400 when LOCAL_SERVER_URL unset', st === 400);
 ENV.LOCAL_SERVER_URL = 'https://example.com/mh-portable.zip';
@@ -130,7 +130,7 @@ A('installer: short password -> 400', st === 400);
 r = await call('post', '/api/admin/local-server/installer', {
   body: { shop_name: "O'Brien Auto", install_dir: 'C:\\Shop', port: 3055, admin_email: 'boss@shop.com', admin_password: 'strong-pw-1', open_firewall: true, install_service: false },
 });
-A('installer: 200 + .cmd attachment', st === 200 && /attachment; filename="Install Meltha Honda Offline\.cmd"/.test(r.headers.get('content-disposition') || ''));
+A('installer: 200 + .cmd attachment', st === 200 && /attachment; filename="Install Morty's Auto Parts Offline\.cmd"/.test(r.headers.get('content-disposition') || ''));
 const cmdText = await r.text();
 const b64 = (cmdText.match(/set "MHPS=([A-Za-z0-9+/=]+)"/) || [])[1];
 const psText = b64 ? Buffer.from(b64, 'base64').toString('utf8') : '';
@@ -140,7 +140,7 @@ A('installer: presets baked into the PS (port, dir, hash, escaped quote)',
   /O''Brien Auto/.test(psText) && /\$Sha256\s+=\s+'ABC123'/.test(psText) && /\$DoService\s+=\s+\$false/.test(psText));
 A('installer: PS writes machine/server/offline-setup config + firewall + first-run',
   /machine-config\.json/.test(psText) && /offline-setup\.json/.test(psText) &&
-  /netsh advfirewall/.test(psText) && /Meltha Honda Admin\.vbs/.test(psText) && /admin\.html/.test(psText));
+  /netsh advfirewall/.test(psText) && /Morty''s Auto Parts Admin\.vbs/.test(psText) && /admin\.html/.test(psText));
 delete ENV.LOCAL_SERVER_URL; delete ENV.LOCAL_SERVER_SHA256;
 
 // ---- marketing ----

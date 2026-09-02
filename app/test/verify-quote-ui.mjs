@@ -39,7 +39,7 @@ const J = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: 
       items: [{ img: 'qz-1', name: 'QZ Bumper', make_model: 'CR-V', qty: 2, unit_price_usd: null, list_price_usd: 45, line_total_usd: null }],
       stock: { 'qz-1': { stock_count: 7, list_price_usd: 45 } } }),
   };
-  const dom = new JSDOM(html, { url: 'https://melthahonda.com/admin', runScripts: 'dangerously', pretendToBeVisual: true, virtualConsole: vc });
+  const dom = new JSDOM(html, { url: 'https://mortysautoparts.com/admin', runScripts: 'dangerously', pretendToBeVisual: true, virtualConsole: vc });
   const w = dom.window;
   w.fetch = async (u, o = {}) => {
     const path = String(typeof u === 'string' ? u : u.url).replace(/^https?:\/\/[^/]+/, '').split('?')[0];
@@ -95,7 +95,7 @@ const J = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: 
   vc.on('jsdomError', (e) => errs.push(String(e && e.message || e)));
   const calls = [];
   const dom = new JSDOM(html, {
-    url: 'https://melthahonda.com/', runScripts: 'dangerously', pretendToBeVisual: true, virtualConsole: vc,
+    url: 'https://mortysautoparts.com/', runScripts: 'dangerously', pretendToBeVisual: true, virtualConsole: vc,
     beforeParse(win) { try { win.localStorage.setItem('mh_cart', JSON.stringify({ 'qz-1': 2 })); } catch (e) {} },
   });
   const w = dom.window;

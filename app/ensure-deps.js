@@ -1,7 +1,7 @@
 // ensure-deps.js
 //
 // Restores node_modules from vendor\node_modules.zip, for a machine that has
-// no npm to install them with. start-melthahonda.bat calls this only after it
+// no npm to install them with. Start Morty's Auto Parts.bat calls this only after it
 // has already tried npm, so getting here means "npm is unavailable or failed".
 //
 // Why this exists at all: the Node runtime vendored in vendor\ is the bare

@@ -1,11 +1,11 @@
 // ============================================================================
-//  Meltha Honda Sales & Servs — Express + Postgres backend
+//  Morty's Auto Parts — Express + Postgres backend
 //  Serves the static site from this same folder and exposes /api/* endpoints.
 //
 //  Boot:
 //    npm install                    (first time only)
 //    cp .env.example .env           (edit DATABASE_URL etc.)
-//    psql -d melthahonda -f schema.sql  (first time only — or let the server run it)
+//    psql -d mortysautoparts -f schema.sql  (first time only — or let the server run it)
 //    node server.js
 // ============================================================================
 
@@ -135,7 +135,7 @@ function saveServerConfig(cfg) {
   fs.writeFileSync(SERVER_CONFIG_PATH, JSON.stringify(cfg, null, 2));
 }
 const SERVER_CFG = loadServerConfig();
-const PORT = parseInt(SERVER_CFG.port || process.env.PORT || '3040', 10);
+const PORT = parseInt(SERVER_CFG.port || process.env.PORT || '3057', 10);
 
 // ---- Postgres pool(s) --------------------------------------------------------
 // Two independent connections, configurable from Admin Setup -> Database
@@ -249,7 +249,7 @@ let pool;       // local -- admin/POS/everything else, always
 let onlinePool; // online -- public storefront fallback only, or null if never configured
 function applyDbConfig(cfg) {
   const localCfg = buildPoolConfig(cfg.local) || {
-    connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/melthahonda',
+    connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/mortysautoparts',
     max: 10,
   };
   const oldPool = pool, oldOnline = onlinePool;
@@ -314,7 +314,7 @@ async function queryWithFallback(text, params) {
 // running, instead of the operator having to type in a hostname or IP by
 // hand: this process detects its own local Postgres on boot and re-checks it
 // periodically (LOCAL_SERVER_STATUS below), and broadcasts a small UDP
-// announcement that other Meltha Honda instances on the same LAN can pick up
+// announcement that other Morty's Auto Parts instances on the same LAN can pick up
 // passively, or query on demand -- so a second terminal machine can find an
 // already-installed local server without typing its IP. Read-only, LAN-only
 // (UDP broadcast doesn't cross a router/subnet), and every piece of it is
@@ -351,7 +351,7 @@ let LOCAL_SERVER_STATUS = { reachable: false, db_exists: false, checked_at: null
 async function detectLocalServer() {
   const cfg = loadDbConfig();
   const localCfg = buildPoolConfig(cfg.local) || { host: 'localhost', port: 5432, user: 'postgres', password: process.env.PGPASSWORD || 'postgres' };
-  const dbName = localCfg.database || 'melthahonda';
+  const dbName = localCfg.database || 'mortysautoparts';
   const probe = new Pool(Object.assign({}, localCfg, { database: 'postgres', max: 1, connectionTimeoutMillis: 3000 }));
   try {
     const r = await probe.query('SELECT 1 FROM pg_database WHERE datname = $1', [dbName]);
@@ -768,7 +768,7 @@ app.use((req, _res, next) => {
 // a single laptop reachable only from localhost that was survivable; on a shop
 // LAN -- and in the portable build, where this same folder also holds the
 // launcher, its logs and (optionally) the bundled Postgres data directory --
-// it means http://<this-pc>:3040/db-config.json hands the Postgres password to
+// it means http://<this-pc>:3057/db-config.json hands the Postgres password to
 // anyone who asks for it, and /server.js hands over the whole backend source.
 // Deny the sensitive + executable set before express.static ever sees the
 // request. Dotfiles (.env) are already skipped by express.static's default
@@ -778,6 +778,14 @@ app.use((req, _res, next) => {
 const PRIVATE_FILE_RE =
   /(^|\/)(\.env.*|db-config\.json|server-config\.json|machine-config\.json|terminal-id\.json|portable\.json|package(-lock)?\.json|[^\/]*\.(js|mjs|cjs|sql|csv|bat|cmd|ps1|vbs|log|md))$/i;
 const PRIVATE_DIR_RE = /^\/(node_modules|migrations|logs|runtime|pgdata|scripts|functions)(\/|$)/i;
+
+// Front-end asset bundle. app/assets/ holds only browser-side JS/CSS that the
+// storefront pages load with <script src>/<link href> -- it must be reachable
+// even though the blanket .js rule below hides backend source in this folder.
+// A dedicated mount (not a hole in PRIVATE_FILE_RE) keeps the exception to
+// exactly this directory.
+app.use('/assets', express.static(path.join(__dirname, 'assets'), { maxAge: '1h', fallthrough: true }));
+
 app.use((req, res, next) => {
   if (req.path.startsWith('/api/')) return next();
   if (PRIVATE_DIR_RE.test(req.path) || PRIVATE_FILE_RE.test(req.path)) {
@@ -1019,7 +1027,7 @@ async function nextAccountNumber() {
 let walkinCustomerIdCache = null;
 async function getWalkinCustomerId() {
   if (walkinCustomerIdCache !== null) return walkinCustomerIdCache;
-  const { rows } = await query(`SELECT id FROM users WHERE email = 'walkin@melthahonda.local' LIMIT 1`);
+  const { rows } = await query(`SELECT id FROM users WHERE email = 'walkin@mortysautoparts.local' LIMIT 1`);
   walkinCustomerIdCache = rows.length ? rows[0].id : -1;
   return walkinCustomerIdCache;
 }
@@ -1058,8 +1066,8 @@ async function getShopSettings() {
   // meantime) -- mirrors the old hardcoded values so nothing looks different
   // until the table exists.
   return {
-    company_name: 'Meltha Honda Sales & Servs Ltd', address: '127 Hagley Park Road, Kingston 11',
-    country: 'Jamaica', phone: '(876) 758-8503', email: null, website: null, logo_url: null,
+    company_name: 'Morty\'s Auto Parts Ltd', address: '112C Waltham Park Road, Kingston 11',
+    country: 'Jamaica', phone: '(876) 758-5590', email: null, website: null, logo_url: null,
     print_logo_on_invoice: true, default_print_template: 'receipt', quote_valid_days: 14,
     invoice_notice: 'Goods remain the property of the company until paid in full. Returns accepted within 14 days with the original invoice, in original condition. Electrical parts are non-returnable.',
     receipt_notice: 'Returns within 14 days with this receipt. Electrical parts non-returnable.',
@@ -1191,7 +1199,7 @@ let dbServerInstall = { running: false, ok: null, error: null, startedAt: null, 
 app.get('/api/admin/settings/db-server-status', requireManager, async (req, res) => {
   const cfg = loadDbConfig();
   const localCfg = buildPoolConfig(cfg.local) || { host: 'localhost', port: 5432, user: 'postgres', password: process.env.PGPASSWORD || 'postgres' };
-  const dbName = (localCfg.database || 'melthahonda');
+  const dbName = (localCfg.database || 'mortysautoparts');
   let reachable = false, dbExists = false, error = null;
   // Connect to the always-present `postgres` maintenance database, not the
   // app's own -- that's the one thing guaranteed to exist on any running
@@ -1215,7 +1223,7 @@ app.post('/api/admin/settings/db-server/create-database', requireManager, async 
   const localCfg = buildPoolConfig(cfg.local) || { host: 'localhost', port: 5432, user: 'postgres', password: process.env.PGPASSWORD || 'postgres' };
   // Identifier, not a value -- can't be parameterized. Whitelisted to
   // word characters only before it ever touches the query string.
-  const dbName = (localCfg.database || 'melthahonda').replace(/[^a-zA-Z0-9_]/g, '');
+  const dbName = (localCfg.database || 'mortysautoparts').replace(/[^a-zA-Z0-9_]/g, '');
   if (!dbName) return res.status(400).json({ ok: false, error: 'No database name configured' });
   const admin = new Pool(Object.assign({}, localCfg, { database: 'postgres', max: 1, connectionTimeoutMillis: 5000 }));
   try {
@@ -1476,7 +1484,7 @@ function effectiveLocalDbSettings() {
   if (local.host) {
     return {
       port: parseInt(local.port, 10) || 5432,
-      database: local.database || 'melthahonda',
+      database: local.database || 'mortysautoparts',
       user: local.user || 'postgres',
       password: local.password || '',
     };
@@ -1485,12 +1493,12 @@ function effectiveLocalDbSettings() {
     const u = new URL(process.env.DATABASE_URL || '');
     return {
       port: parseInt(u.port, 10) || 5432,
-      database: decodeURIComponent((u.pathname || '/melthahonda').replace(/^\//, '')) || 'melthahonda',
+      database: decodeURIComponent((u.pathname || '/mortysautoparts').replace(/^\//, '')) || 'mortysautoparts',
       user: decodeURIComponent(u.username || 'postgres'),
       password: decodeURIComponent(u.password || ''),
     };
   } catch (_) {
-    return { port: 5432, database: 'melthahonda', user: 'postgres', password: '' };
+    return { port: 5432, database: 'mortysautoparts', user: 'postgres', password: '' };
   }
 }
 
@@ -1746,7 +1754,7 @@ app.get('/join', (req, res) => {
     'b.code{display:block;font-family:ui-monospace,Consolas,monospace;font-size:19px;letter-spacing:2px;' +
     'background:rgba(255,255,255,.1);padding:12px;border-radius:8px;margin:14px 0;text-align:center;word-break:break-all}</style>' +
     '<div class="c"><h1>Connect this computer to the shop</h1>' +
-    '<p>On the computer you want to connect, open its Meltha Honda folder and double-click ' +
+    '<p>On the computer you want to connect, open its Morty\'s Auto Parts folder and double-click ' +
     '<code>Connect To Shop Server.vbs</code>, then paste this code when it asks:</p>' +
     '<b class="code" id="c">(open the full link, including the part after #)</b>' +
     '<p>This code works <b>once</b> and expires shortly. If it stops working, ask for a new one from ' +
@@ -1796,8 +1804,8 @@ function backupOrigin() {
   return safeName(process.env.MH_BACKUP_ORIGIN || os.hostname() || 'shop', 'shop');
 }
 async function shopName() {
-  try { const { rows } = await query('SELECT company_name FROM shop_settings ORDER BY id LIMIT 1'); return (rows[0] && rows[0].company_name) || 'Meltha Honda'; }
-  catch (_) { return 'Meltha Honda'; }
+  try { const { rows } = await query('SELECT company_name FROM shop_settings ORDER BY id LIMIT 1'); return (rows[0] && rows[0].company_name) || 'Morty\'s Auto Parts'; }
+  catch (_) { return 'Morty\'s Auto Parts'; }
 }
 
 // One small JSON call to the receiver (ping / latest).
@@ -1893,7 +1901,7 @@ async function runBackup(opts) {
   backupRunning = true;
   const started = new Date();
   const stamp = started.toISOString().replace(/[:.]/g, '-').replace('Z', 'Z');
-  const filename = 'melthahonda-' + stamp + '.dump';
+  const filename = 'mortysautoparts-' + stamp + '.dump';
   const filePath = path.join(BACKUP_DIR, filename);
   try {
     fs.mkdirSync(BACKUP_DIR, { recursive: true });
@@ -2052,7 +2060,7 @@ app.post('/api/admin/backup/test', requireManager, async (req, res) => {
     const r = await backupApi('GET', url, '/api/backup/ping', key);
     if (r.status === 200 && r.json && r.json.ok) return res.json({ ok: true, reachable: true, authorized: true, server: r.json.server || null });
     if (r.status === 401 || r.status === 403) return res.json({ ok: false, reachable: true, authorized: false, error: 'The server is reachable but rejected the key.' });
-    return res.json({ ok: false, reachable: true, authorized: false, error: 'Unexpected response (HTTP ' + r.status + '). Is that a Meltha Honda server?' });
+    return res.json({ ok: false, reachable: true, authorized: false, error: 'Unexpected response (HTTP ' + r.status + '). Is that a Morty\'s Auto Parts server?' });
   } catch (e) {
     return res.json({ ok: false, reachable: false, authorized: false, error: e.message });
   }
@@ -2200,7 +2208,7 @@ app.post('/api/auth/signup', async (req, res) => {
   }
 });
 
-// Emergency reset for admin@melthahonda.com → password123. Always works.
+// Emergency reset for admin@mortysautoparts.com → password123. Always works.
 // Restricted to JUST this one well-known email so it can never be used to
 // hijack a real customer/staff account.
 app.post('/api/auth/reset-default-admin', async (_req, res) => {
@@ -2208,14 +2216,14 @@ app.post('/api/auth/reset-default-admin', async (_req, res) => {
     const hash = await bcrypt.hash('password123', 10);
     const { rows } = await query(
       `INSERT INTO users (email, name, password_hash, via, is_admin)
-         VALUES ('admin@melthahonda.com', 'Meltha Honda Admin', $1, 'local', true)
+         VALUES ('admin@mortysautoparts.com', 'Morty''s Auto Parts Admin', $1, 'local', true)
          ON CONFLICT (email) DO UPDATE
            SET is_admin = true, password_hash = EXCLUDED.password_hash
          RETURNING id`,
       [hash]
     );
-    console.log('[ok] admin@melthahonda.com password reset to default (via /api/auth/reset-default-admin)');
-    res.json({ ok: true, email: 'admin@melthahonda.com', password: 'password123' });
+    console.log('[ok] admin@mortysautoparts.com password reset to default (via /api/auth/reset-default-admin)');
+    res.json({ ok: true, email: 'admin@mortysautoparts.com', password: 'password123' });
   } catch (e) {
     // Same distinction sign-in makes. This is the recovery link someone clicks
     // *because* they cannot get in, so it is the second thing they try on a
@@ -2226,7 +2234,7 @@ app.post('/api/auth/reset-default-admin', async (_req, res) => {
       console.error('[reset admin] database unreachable:', e.message);
       return res.status(503).json({
         error: 'The database is not running, so the password cannot be reset. ' +
-               'Start the database first — run Test-Database.ps1 in the Meltha Honda folder to find out why it will not start.',
+               'Start the database first — run Test-Database.ps1 in the Morty\'s Auto Parts folder to find out why it will not start.',
         db_down: true,
       });
     }
@@ -2628,7 +2636,7 @@ app.patch('/api/admin/users/:id', requireAdmin, requireCap('pos.edit_customer'),
 //
 //  users.email is NOT NULL UNIQUE, but a counter customer usually has no email
 //  to give. Rather than refuse them, mint one from their account number --
-//  <acct>@walkin.melthahonda.local -- which is unique, obviously synthetic, and
+//  <acct>@walkin.mortysautoparts.local -- which is unique, obviously synthetic, and
 //  never mailed. The password is random and discarded: this is a record of a
 //  person, not a login they will ever use.
 app.post('/api/admin/users', requireAdmin, async (req, res) => {
@@ -2638,7 +2646,7 @@ app.post('/api/admin/users', requireAdmin, async (req, res) => {
     if (!name) return res.status(400).json({ error: 'Name is required' });
 
     const acctNo = b.account_number ? String(b.account_number).trim() : await nextAccountNumber();
-    const email = String(b.email || '').trim().toLowerCase() || `${acctNo.toLowerCase()}@walkin.melthahonda.local`;
+    const email = String(b.email || '').trim().toLowerCase() || `${acctNo.toLowerCase()}@walkin.mortysautoparts.local`;
     const hash = await bcrypt.hash(require('crypto').randomBytes(24).toString('hex'), 10);
 
     const { rows } = await query(
@@ -2683,7 +2691,7 @@ app.delete('/api/admin/users/:id', requireManager, async (req, res) => {
   if (u[0].is_admin || u[0].is_staff) {
     return res.status(400).json({ error: 'That is a staff account — manage it under Settings → Users & Staff.' });
   }
-  if (u[0].email === 'walkin@melthahonda.local') {
+  if (u[0].email === 'walkin@mortysautoparts.local') {
     return res.status(400).json({ error: 'The walk-in customer is used by every counter sale and cannot be removed.' });
   }
 
@@ -2882,7 +2890,7 @@ app.post('/api/admin/users/:id/notifications', requireAdmin, async (req, res) =>
     [req.params.id, kind, body]
   );
   if (u[0].email) {
-    const subject = kind === 'dunning' ? 'Payment reminder — Meltha Honda Sales & Servs' : 'A note from Meltha Honda Sales & Servs';
+    const subject = kind === 'dunning' ? 'Payment reminder — Morty\'s Auto Parts' : 'A note from Morty\'s Auto Parts';
     mailer.sendEmail({ to: u[0].email, subject, text: body, html: `<p>${body.replace(/\n/g, '<br>')}</p>` })
       .catch((e) => console.warn('[notice email]', e.message));
   }
@@ -3666,7 +3674,7 @@ const PIN_MIN = 4, PIN_MAX = 8;
 // moment a till is set up. Set once, on an account that has none -- never reset
 // on later boots, or a shop that changed it would find the factory PIN back
 // every morning. Change it in Settings -> Users & Staff.
-const DEFAULT_ADMIN_PIN = String(process.env.MH_DEFAULT_ADMIN_PIN || '1010').trim();
+const DEFAULT_ADMIN_PIN = String(process.env.MH_DEFAULT_ADMIN_PIN || '2240').trim();
 
 // Verification has to compare against every staff PIN, because the whole point
 // is that the person types a PIN and nothing else -- there is no user name to
@@ -4080,7 +4088,7 @@ app.get('/api/vin/:vin', async (req, res) => {
 //  PUBLIC CONFIG
 // =============================================================================
 // ---- HEALTH ---------------------------------------------------------------
-// Unauthenticated readiness probe. start-melthahonda.bat has advertised this
+// Unauthenticated readiness probe. Start Morty's Auto Parts.bat has advertised this
 // URL since day one but nothing ever implemented it, so anything watching it
 // (the portable launcher's "is it up yet?" poll, a second till waiting for
 // the counter PC to finish booting, an uptime monitor) was watching a 404.
@@ -4823,8 +4831,38 @@ app.post('/api/service', async (req, res) => {
 });
 
 // =============================================================================
-//  PARTS INQUIRIES (with optional photo upload)
+//  PARTS INQUIRIES
 // =============================================================================
+// Public "can't find the part / request a quote" form on the storefront.
+// Writes to parts_inquiries, which admin.html -> Inquiries reads back through
+// GET /api/admin/inquiries. The storefront contact form collects a few fields
+// the table has no column for (email, category, fitment preference); the
+// client folds those into part_description as labelled lines before posting.
+app.post('/api/inquiry', async (req, res) => {
+  const b = req.body || {};
+  const name = (b.name || '').trim();
+  const phone = (b.phone || '').trim();
+  const partDescription = (b.part_description || b.message || '').trim();
+  if (!name || !phone || !partDescription)
+    return res.status(400).json({ error: 'name, phone and part_description are required' });
+
+  const { rows } = await query(
+    `INSERT INTO parts_inquiries
+       (user_id, name, phone, vehicle_make, vehicle_model, vehicle_year, condition, part_description)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, created_at`,
+    [
+      (req.session && req.session.userId) || null,
+      name, phone,
+      b.vehicle_make || null,
+      b.vehicle_model || null,
+      b.vehicle_year ? parseInt(b.vehicle_year, 10) || null : null,
+      b.condition || null,
+      partDescription,
+    ]
+  );
+  res.json({ id: rows[0].id, created_at: rows[0].created_at });
+});
+
 // =============================================================================
 //  MECHANICS (staff registry)
 // =============================================================================
@@ -5026,15 +5064,15 @@ app.patch('/api/admin/work-orders/:id', requireAdmin, async (req, res) => {
       try {
         const { rows: w } = await query('SELECT wo_number, customer_name, customer_phone, vehicle_make, vehicle_model FROM work_orders WHERE id = $1', [req.params.id]);
         if (!w.length || !w[0].customer_phone) return;
-        const base = (process.env.PUBLIC_BASE_URL || 'https://melthahonda.miamimistress.com').replace(/\/$/, '');
+        const base = (process.env.PUBLIC_BASE_URL || 'https://mortysautoparts.com').replace(/\/$/, '');
         const trackUrl = `${base}/track.html?wo=${encodeURIComponent(w[0].wo_number)}&phone=${encodeURIComponent(w[0].customer_phone.replace(/[^\d]/g,'').slice(-7))}`;
         const vehicle = [w[0].vehicle_make, w[0].vehicle_model].filter(Boolean).join(' ');
         const msgs = {
-          in_progress: `Meltha Honda: Your ${vehicle} (${w[0].wo_number}) is now in the bay. Track: ${trackUrl}`,
-          awaiting_parts: `Meltha Honda: We're sourcing parts for your ${vehicle} (${w[0].wo_number}). We'll text when work resumes. ${trackUrl}`,
-          completed: `Meltha Honda: ✓ Your ${vehicle} is ready for pickup! ${w[0].wo_number}. Open Mon-Sat 8:00-5:30. ${trackUrl}`,
-          billed: `Meltha Honda: Invoice ready for ${vehicle} (${w[0].wo_number}). Come by to settle and collect. ${trackUrl}`,
-          paid: `Meltha Honda: Thanks for your business, ${w[0].customer_name.split(' ')[0]}! Receipt: ${trackUrl}`,
+          in_progress: `Morty's Auto Parts: Your ${vehicle} (${w[0].wo_number}) is now in the bay. Track: ${trackUrl}`,
+          awaiting_parts: `Morty's Auto Parts: We're sourcing parts for your ${vehicle} (${w[0].wo_number}). We'll text when work resumes. ${trackUrl}`,
+          completed: `Morty's Auto Parts: ✓ Your ${vehicle} is ready for pickup! ${w[0].wo_number}. Open Mon-Sat 8:00-5:30. ${trackUrl}`,
+          billed: `Morty's Auto Parts: Invoice ready for ${vehicle} (${w[0].wo_number}). Come by to settle and collect. ${trackUrl}`,
+          paid: `Morty's Auto Parts: Thanks for your business, ${w[0].customer_name.split(' ')[0]}! Receipt: ${trackUrl}`,
         };
         const body = msgs[req.body.status];
         if (body && sms.sendSMS) {
@@ -6123,7 +6161,7 @@ app.post('/api/admin/import/parts', requireManager, uploadData.single('csv'), ha
 // A known-good starting file, so nobody has to reverse-engineer the columns.
 app.get('/api/admin/inventory/import/template.csv', requireAdmin, (_req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="meltha-inventory-template.csv"');
+  res.setHeader('Content-Disposition', 'attachment; filename="mortysautoparts-inventory-template.csv"');
   res.send(inventoryImport.TEMPLATE_CSV);
 });
 
@@ -7034,7 +7072,7 @@ app.post('/api/admin/pos/customer', requireAdmin, requireCap('pos.add_customer')
     const phone = (b.phone || '').trim() || null;
     const priceTier = ['retail', 'trade', 'fleet', 'dealer'].includes(b.price_tier) ? b.price_tier : 'retail';
     const acctNo = await nextAccountNumber();
-    const email = (b.email || '').trim().toLowerCase() || `${acctNo.toLowerCase()}@walkin.melthahonda.local`;
+    const email = (b.email || '').trim().toLowerCase() || `${acctNo.toLowerCase()}@walkin.mortysautoparts.local`;
     const randomPassword = require('crypto').randomBytes(24).toString('hex');
     const hash = await bcrypt.hash(randomPassword, 10);
     const { rows } = await query(
@@ -7147,7 +7185,7 @@ app.get('/api/admin/pos/vehicle-models', requireAdmin, async (req, res) => {
 // fallback. Cached client-side for the session -- this row's id never changes.
 app.get('/api/admin/pos/walkin-customer', requireAdmin, async (req, res) => {
   const { rows } = await query(
-    `SELECT id, name, account_number FROM users WHERE email = 'walkin@melthahonda.local' LIMIT 1`
+    `SELECT id, name, account_number FROM users WHERE email = 'walkin@mortysautoparts.local' LIMIT 1`
   );
   if (!rows.length) return res.status(404).json({ error: 'Walk-in account not seeded yet' });
   res.json({ customer: rows[0] });
@@ -7521,7 +7559,7 @@ app.get('/api/invoice/:wo_number', async (req, res) => {
       // in here rather than changing that page's markup.
       address: shopSettings.address + (shopSettings.country ? ', ' + shopSettings.country : ''),
       phone: shopSettings.phone,
-      website: shopSettings.website || (process.env.PUBLIC_BASE_URL || 'https://melthahonda.miamimistress.com'),
+      website: shopSettings.website || (process.env.PUBLIC_BASE_URL || 'https://mortysautoparts.com'),
     },
   });
 });
@@ -8266,7 +8304,7 @@ async function initDb() {
     console.error('[initDb] schema apply failed:', e.message);
   }
 
-  // 2) Seed default admin (admin@melthahonda.com / password123) — always reset password
+  // 2) Seed default admin (admin@mortysautoparts.com / password123) — always reset password
   try {
     const hash = await bcrypt.hash('password123', 10);
     await query(
@@ -8274,9 +8312,9 @@ async function initDb() {
          VALUES ($1, $2, $3, $4, true)
        ON CONFLICT (email) DO UPDATE
          SET is_admin = true, password_hash = EXCLUDED.password_hash`,
-      ['admin@melthahonda.com', 'Admin', '(876) 758-8503', hash]
+      ['admin@mortysautoparts.com', 'Admin', '(876) 758-5590', hash]
     );
-    console.log('[initDb] default admin seeded (admin@melthahonda.com / password123)');
+    console.log('[initDb] default admin seeded (admin@mortysautoparts.com / password123)');
 
     // A default till PIN for that same account, so PIN sign-in works out of
     // the box on a new machine.
@@ -8290,7 +8328,7 @@ async function initDb() {
     // is_staff is set alongside it: PIN sign-in only considers staff, and the
     // seeded admin would otherwise be an admin who cannot use the keypad.
     const { rows: pinRow } = await query(
-      `SELECT id, (pin_hash IS NOT NULL) AS has_pin FROM users WHERE email = 'admin@melthahonda.com'`
+      `SELECT id, (pin_hash IS NOT NULL) AS has_pin FROM users WHERE email = 'admin@mortysautoparts.com'`
     );
     if (pinRow.length && !pinRow[0].has_pin) {
       const taken = await pinCollides(DEFAULT_ADMIN_PIN, pinRow[0].id);
@@ -8317,13 +8355,13 @@ async function initDb() {
   // account has no password anyone needs to keep working, so there's nothing
   // to force-reset, and doing so would be pointless churn on every boot.
   try {
-    const { rows: existing } = await query(`SELECT id FROM users WHERE email = 'walkin@melthahonda.local'`);
+    const { rows: existing } = await query(`SELECT id FROM users WHERE email = 'walkin@mortysautoparts.local'`);
     if (!existing.length) {
       const hash = await bcrypt.hash(require('crypto').randomBytes(24).toString('hex'), 10);
       const acctNo = await nextAccountNumber();
       await query(
         `INSERT INTO users (email, name, password_hash, via, is_admin, price_tier, account_number)
-           VALUES ('walkin@melthahonda.local', 'Cash Customer - Walk-in', $1, 'pos', false, 'retail', $2)`,
+           VALUES ('walkin@mortysautoparts.local', 'Cash Customer - Walk-in', $1, 'pos', false, 'retail', $2)`,
         [hash, acctNo]
       );
       console.log('[initDb] seeded "Cash Customer - Walk-in" account (' + acctNo + ')');
@@ -8944,7 +8982,7 @@ async function start() {
   // otherwise a blocked till would serve its admin panel for one heartbeat.
   await terminalHeartbeat();
   app.listen(PORT, () => {
-    console.log('[boot] Meltha Honda server listening on http://localhost:' + PORT);
+    console.log('[boot] Morty\'s Auto Parts server listening on http://localhost:' + PORT);
   });
 
   // Off-site backup: only the database-owning machine runs the schedule.

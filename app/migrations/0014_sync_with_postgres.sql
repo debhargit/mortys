@@ -5,8 +5,8 @@
 -- SQLite has no `ADD COLUMN IF NOT EXISTS`, so this runs exactly once, in order.
 --
 -- NOT applied anywhere yet — run with:
---   wrangler d1 execute meltahonda-db --local --file migrations/0014_sync_with_postgres.sql
---   wrangler d1 execute meltahonda-db          --file migrations/0014_sync_with_postgres.sql
+--   wrangler d1 execute mortysautoparts-db --local --file migrations/0014_sync_with_postgres.sql
+--   wrangler d1 execute mortysautoparts-db          --file migrations/0014_sync_with_postgres.sql
 
 -- ---- key/value config -----------------------------------------------------
 -- Replaces the server's *-config.json files, which don't exist on Workers.

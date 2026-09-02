@@ -55,7 +55,7 @@ const CAT_ADV = q1("SELECT id FROM user_categories WHERE code='service_advisor'"
 // ---- customers ----
 let r = await call('post', '/api/admin/users', { name: 'Acme Ltd', company_name: 'Acme', customer_type: 'fleet', credit_limit_usd: 5000, price_tier: 'fleet' });
 const cid = r.customer.id;
-A('customer create: synth email + account no + cents', /@walkin\.melthahonda\.local$/.test(r.customer.email) && /^C-\d{6}$/.test(r.customer.account_number) && q1('SELECT credit_limit_cents c FROM users WHERE id=?', cid).c === 500000);
+A('customer create: synth email + account no + cents', /@walkin\.mortysautoparts\.local$/.test(r.customer.email) && /^C-\d{6}$/.test(r.customer.account_number) && q1('SELECT credit_limit_cents c FROM users WHERE id=?', cid).c === 500000);
 r = await call('post', '/api/admin/users', { name: 'Dup', account_number: r.customer.account_number });
 A('customer create dup account no -> 409', st === 409);
 r = await call('get', '/api/admin/users?origin=counter');
