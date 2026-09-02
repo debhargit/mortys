@@ -2938,7 +2938,7 @@ async function renderPOS(panel){
     // the end where nobody will ever look for it.
     '<div id="posFooter" style="position:sticky;bottom:0;z-index:6;display:flex;align-items:center;gap:12px;height:30px;padding:0 12px;background:var(--navy);color:#fff;border:1px solid var(--line);border-top:0;border-radius:0 0 8px 8px;font-size:11.5px;overflow:hidden">' +
       '<span id="posFootShop" style="font-weight:800;letter-spacing:.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">' +
-        esc(POS_SHOP.name || 'Morty\'s Auto Parts Ltd') +
+        esc(POS_SHOP.name || 'Morty\'s Auto Parts') +
       '</span>' +
       '<span id="posFootUser" style="margin-left:auto;white-space:nowrap;opacity:.92;flex-shrink:0" title="Signed in">👤 ' + esc(CURRENT_ADMIN_NAME || '—') + '</span>' +
       '<span style="opacity:.3;flex-shrink:0">|</span>' +
@@ -3032,7 +3032,7 @@ async function renderPOS(panel){
   // rather than the hardcoded fallback it was built with.
   setTimeout(function(){
     var el = document.getElementById('posFootShop');
-    if (el && document.body.contains(el)) el.textContent = POS_SHOP.name || 'Morty\'s Auto Parts Ltd';
+    if (el && document.body.contains(el)) el.textContent = POS_SHOP.name || 'Morty\'s Auto Parts';
   }, 1500);
 
   // Its own function because loadGrid() has four exits — searching, failed,
@@ -4661,7 +4661,7 @@ function posCartPrint(){
   }).join('');
   var body =
     '<div style="font-family:system-ui,Segoe UI,Arial,sans-serif;padding:22px;max-width:760px;margin:0 auto">' +
-      '<h2 style="margin:0 0 2px">' + esc(POS_SHOP.name || 'Morty\'s Auto Parts Ltd') + '</h2>' +
+      '<h2 style="margin:0 0 2px">' + esc(POS_SHOP.name || 'Morty\'s Auto Parts') + '</h2>' +
       '<div style="color:#555;font-size:12px">Cart preview · ' + esc(new Date().toLocaleString()) + '</div>' +
       (POS.tag ? '<div style="margin-top:6px;font-weight:700">🏷️ ' + esc(POS.tag) + '</div>' : '') +
       ((POS.custName || (POS.customer && POS.customer.name)) ? '<div style="margin-top:6px">Customer: <b>' + esc(POS.custName || POS.customer.name) + '</b></div>' : '') +
@@ -6196,7 +6196,7 @@ function posDocLabel(d){
 // Receipt-style/Invoice-style quote buttons use), so this reuses it
 // instead of fixing a fourth copy of the same conversion by hand.
 function posPrintQuote(q, shop){
-  var d = posQuoteToDocData(q, shop || { name:'Morty\'s Auto Parts Ltd', address:'112C Waltham Park Road, Kingston', country:'Jamaica', phone:'(876) 758-5590' });
+  var d = posQuoteToDocData(q, shop || { name:'Morty\'s Auto Parts', address:'51 Red Hills Road, Kingston', country:'Jamaica', phone:'(876) 905-4111' });
   var s = d.sale;
   var unpriced = d.items.filter(function(it){ return !(it.unit_price_cents > 0); }).length;
   posPrintWindow('Quote ' + s.receipt_number, POS_A4_CSS,
@@ -6232,7 +6232,7 @@ function posPrintQuote(q, shop){
         '<b>' + unpriced + ' item' + (unpriced === 1 ? '' : 's') + ' still to be priced.</b> We will confirm those prices and availability before the order is placed.</div>' : '') +
       (s.notes ? '<div style="margin-top:12px;font-size:10.5px"><b>Notes:</b> ' + esc(s.notes) + '</div>' : '') +
       '<div class="foot">This is a quotation, not an invoice. Prices hold until ' + esc(s.valid_until || 'the date above') +
-        ' and are subject to stock being available at the time of order. — ' + esc((d.shop && d.shop.phone) || '(876) 758-5590') + '</div>' +
+        ' and are subject to stock being available at the time of order. — ' + esc((d.shop && d.shop.phone) || '(876) 905-4111') + '</div>' +
     '</div>'
   );
 }
@@ -6554,7 +6554,7 @@ function posQuoteToDocData(q, shop){
 // shop_settings row every server-side print endpoint reads (see
 // getShopSettings()/shopSettingsToShop() in server.js) so the two can't
 // drift the way the four independent hardcoded copies used to.
-var POS_SHOP = { name: 'Morty\'s Auto Parts Ltd', address: '112C Waltham Park Road, Kingston', country: 'Jamaica', phone: '(876) 758-5590',
+var POS_SHOP = { name: 'Morty\'s Auto Parts', address: '51 Red Hills Road, Kingston', country: 'Jamaica', phone: '(876) 905-4111',
   email: null, website: null, logo_url: null, print_logo: true, default_print_template: 'receipt',
   invoice_notice: null, receipt_notice: null, statement_notice: null };
 function loadShopSettingsIntoPosShop(){
@@ -10841,7 +10841,7 @@ function printTill(r){
   var body =
     '<div style="width:76mm;margin:0 auto;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;padding:8px 0">' +
       '<div style="text-align:center;font-weight:700;font-size:13px">MORTY\'S AUTO PARTS</div>' +
-      '<div style="text-align:center;font-size:10px">112C Waltham Park Road, Kingston</div>' +
+      '<div style="text-align:center;font-size:10px">51 Red Hills Road, Kingston</div>' +
       '<div style="text-align:center;margin:6px 0;font-weight:700;font-size:14px">' + esc(r.kind) + ' REPORT' +
         (r.kind === 'X' ? ' (LIVE)' : '') + '</div>' +
       '<div style="font-size:10px">Session #' + esc(String(r.session.id)) + '</div>' +

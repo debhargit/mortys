@@ -319,7 +319,7 @@ export default function mount(app) {
   // wherever they publish the zip (GitHub release, R2, a share…).
   app.get('/api/admin/local-server', adminMw, async (c) => {
     const env = c.env || {};
-    let shopName = 'Morty\'s Auto Parts Ltd', shopEmail = '';
+    let shopName = 'Morty\'s Auto Parts', shopEmail = '';
     try { const s = await getShopSettings(c.env); shopName = s.company_name || shopName; shopEmail = s.email || ''; }
     catch { /* fallback names */ }
     return c.json({

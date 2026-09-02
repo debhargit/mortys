@@ -1369,10 +1369,10 @@ CREATE INDEX IF NOT EXISTS idx_account_payments_customer ON account_payments (cu
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS shop_settings (
   id                     SERIAL PRIMARY KEY,
-  company_name           TEXT NOT NULL DEFAULT 'Morty''s Auto Parts Ltd',
-  address                TEXT NOT NULL DEFAULT '112C Waltham Park Road, Kingston',
+  company_name           TEXT NOT NULL DEFAULT 'Morty''s Auto Parts',
+  address                TEXT NOT NULL DEFAULT '51 Red Hills Road, Kingston',
   country                TEXT NOT NULL DEFAULT 'Jamaica',
-  phone                  TEXT NOT NULL DEFAULT '(876) 758-5590',
+  phone                  TEXT NOT NULL DEFAULT '(876) 905-4111',
   email                  TEXT,
   website                TEXT,
   logo_url               TEXT,
@@ -1396,13 +1396,13 @@ INSERT INTO shop_settings (id, website)
 -- Rebrand (2026): move the singleton row off the old brand ONLY where it
 -- still holds the pre-rebrand default -- i.e. the operator never edited it
 -- in Settings. A customised name/site is left alone.
-UPDATE shop_settings SET company_name = 'Morty''s Auto Parts Ltd'
+UPDATE shop_settings SET company_name = 'Morty''s Auto Parts'
   WHERE company_name = 'Meltha Honda Sales & Servs Ltd';
 UPDATE shop_settings SET website = 'https://mortysautoparts.com'
   WHERE website IN ('https://melthahonda.miamimistress.com', 'https://melthahonda.com');
-UPDATE shop_settings SET address = '112C Waltham Park Road, Kingston'
+UPDATE shop_settings SET address = '51 Red Hills Road, Kingston'
   WHERE address = '127 Hagley Park Road, Kingston 11';
-UPDATE shop_settings SET phone = '(876) 758-5590'
+UPDATE shop_settings SET phone = '(876) 905-4111'
   WHERE phone = '(876) 758-8503';
 
 -- Rebrand (2026): the synthetic walk-in / no-email customer domain moved from

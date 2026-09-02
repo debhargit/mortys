@@ -8,7 +8,7 @@ const html = await (await fetch('https://mortysautoparts.com/admin')).text();
 
 const J = (o, code = 200) => new Response(JSON.stringify(o), { status: code, headers: { 'content-type': 'application/json' } });
 const R = {
-  '/api/me': J({ user: { id: 1, email: 'admin@mortysautoparts.com', name: 'Admin', is_admin: true, admin_role: 'manager', phone: '(876) 758-5590', perms: {}, perms_full: true } }),
+  '/api/me': J({ user: { id: 1, email: 'admin@mortysautoparts.com', name: 'Admin', is_admin: true, admin_role: 'manager', phone: '(876) 905-4111', perms: {}, perms_full: true } }),
   '/api/admin/roles/mine': J({ role: { code: 'manager', label: 'Manager', can_manage: true, hidden_tabs: [], rank: 10 } }),
   '/api/admin/me/ui-prefs': J({ ok: true, prefs: {}, forced_favs: null, favs_locked: false }),
   '/api/admin/summary': J({ new_inquiries: 0, pending_appointments: 0, pending_notifications: 0, pending_reviews: 0, pending_orders: 0, low_stock_count: 0 }),

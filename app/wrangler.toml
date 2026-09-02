@@ -17,7 +17,7 @@ database_id = "53b55748-5ae3-4fc7-85d1-8d463891a3ef"
 # any of these without touching code.
 [vars]
 ORDER_NOTIFY_TO = "admin@mortysautoparts.com"
-ORDER_NOTIFY_SMS = "876-758-5590"
+ORDER_NOTIFY_SMS = "876-905-4111"
 EMAIL_FROM = "Morty's Auto Parts <noreply@mortysautoparts.com>"
 # The hosted site is HTTPS-only, so the session cookie must carry Secure.
 # (_lib/session.js reads this; unset = no Secure flag.)

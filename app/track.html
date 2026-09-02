@@ -83,7 +83,7 @@
       <button type="submit" id="lookupBtn">Look up my work order</button>
     </form>
     <div class="err" id="errMsg"></div>
-    <div class="hint">Don't have your WO number? Call us at <a href="tel:+18767585590">(876) 758-5590</a>.</div>
+    <div class="hint">Don't have your WO number? Call us at <a href="tel:+18769054111">(876) 905-4111</a>.</div>
   </div>
 
   <div class="result" id="result"></div>
@@ -173,8 +173,8 @@ function renderResult(w){
     (w.work_performed ? '<div class="complaint"><b>Work performed</b>' + esc(w.work_performed) + '</div>' : '') +
     totalsHTML +
     '<div class="actions">' +
-      '<a class="call" href="tel:+18767585590">📞 Call shop</a>' +
-      '<a class="chat" href="https://wa.me/18767585590?text=' + encodeURIComponent('Hi, checking on work order ' + w.wo_number) + '" target="_blank" rel="noopener">💬 WhatsApp</a>' +
+      '<a class="call" href="tel:+18769054111">📞 Call shop</a>' +
+      '<a class="chat" href="https://wa.me/18769054111?text=' + encodeURIComponent('Hi, checking on work order ' + w.wo_number) + '" target="_blank" rel="noopener">💬 WhatsApp</a>' +
     '</div>';
   document.getElementById('result').scrollIntoView({ behavior: 'smooth' });
 }

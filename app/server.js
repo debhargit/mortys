@@ -1066,8 +1066,8 @@ async function getShopSettings() {
   // meantime) -- mirrors the old hardcoded values so nothing looks different
   // until the table exists.
   return {
-    company_name: 'Morty\'s Auto Parts Ltd', address: '112C Waltham Park Road, Kingston 11',
-    country: 'Jamaica', phone: '(876) 758-5590', email: null, website: null, logo_url: null,
+    company_name: 'Morty\'s Auto Parts', address: '51 Red Hills Road, Kingston',
+    country: 'Jamaica', phone: '(876) 905-4111', email: null, website: null, logo_url: null,
     print_logo_on_invoice: true, default_print_template: 'receipt', quote_valid_days: 14,
     invoice_notice: 'Goods remain the property of the company until paid in full. Returns accepted within 14 days with the original invoice, in original condition. Electrical parts are non-returnable.',
     receipt_notice: 'Returns within 14 days with this receipt. Electrical parts non-returnable.',
@@ -8312,7 +8312,7 @@ async function initDb() {
          VALUES ($1, $2, $3, $4, true)
        ON CONFLICT (email) DO UPDATE
          SET is_admin = true, password_hash = EXCLUDED.password_hash`,
-      ['admin@mortysautoparts.com', 'Admin', '(876) 758-5590', hash]
+      ['admin@mortysautoparts.com', 'Admin', '(876) 905-4111', hash]
     );
     console.log('[initDb] default admin seeded (admin@mortysautoparts.com / password123)');
 
