@@ -4176,6 +4176,26 @@ const PRODUCT_SORTS = {
   stock_desc: 'stock_count DESC, name',
 };
 
+// The storefront (index.html / shop.html) asks with ?compact=1 and reads a
+// positional-array payload: { cats, rows:[[img, name, make_model, catIdx,
+// condIdx, price_cents, stock_count, bin], ...] } -- see absorb() in shop.html.
+// This mirrors the Cloudflare storefront route (functions/_routes/storefront.js)
+// so the shop loads the same whether it is served from Pages or from this
+// server. price_cents is sent as null: this server has no storefront
+// price-visibility setting and production defaults that off, and a null price is
+// exactly what flips the shop cart into a quote request client-side.
+function packCompact(rows, meta) {
+  const catIndex = {};
+  const cats = [];
+  const packed = rows.map((r) => {
+    const cat = r.category || '';
+    if (!(cat in catIndex)) { catIndex[cat] = cats.length; cats.push(cat); }
+    const condIdx = String(r.condition || '').toUpperCase() === 'USED' ? 1 : 0;
+    return [r.img, r.name, r.make_model || '', catIndex[cat], condIdx, null, r.stock_count, r.bin_location || ''];
+  });
+  return { cats, rows: packed, prices_visible: false, ...meta };
+}
+
 app.get('/api/products', async (req, res) => {
   try {
     // The storefront (public, unauthenticated) sends compact=1 on every
@@ -4185,14 +4205,18 @@ app.get('/api/products', async (req, res) => {
     // for. POS/admin calls (and anything else hitting this shared endpoint)
     // stay on the plain, local-only `query`, on purpose -- see the big
     // comment on queryWithFallback() near the pool setup.
-    const q = req.query.compact ? queryWithFallback : query;
+    const isCompact = !!req.query.compact;
+    const q = isCompact ? queryWithFallback : query;
     const { where, params } = buildProductWhere(req.query);
     const orderBy = PRODUCT_SORTS[req.query.sort] || PRODUCT_SORTS.name;
     // Hard cap on limit -- an unbounded page size is exactly the kind of
     // request that used to pull the entire catalogue (23k+ cards) into one
     // response and one DOM paint. 200 is generous for a single screen at any
-    // of the POS's grid/list/compact densities.
-    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 60));
+    // of the POS's grid/list/compact densities. The storefront's compact
+    // stream is the deliberate exception: shop.html pulls the whole catalogue
+    // in 4,000-row chunks, and a compact row is a tiny positional array, so a
+    // 5k-row page there is still a small response.
+    const limit = Math.min(isCompact ? 5000 : 200, Math.max(1, parseInt(req.query.limit, 10) || (isCompact ? 1000 : 60)));
     const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
 
     // The plain "just opened the POS terminal, nothing typed yet" case --
@@ -4232,7 +4256,9 @@ app.get('/api/products', async (req, res) => {
       // count_mode tells the UI how to phrase this: reltuples is a planner
       // estimate that can land either side of the truth, so "about 25,000" --
       // not "25,000+", which would claim a floor it cannot promise.
-      return res.json({ products: rows, total, limit, offset, approximate: true, count_mode: 'estimate' });
+      return res.json(isCompact
+        ? packCompact(rows, { total, limit, offset })
+        : { products: rows, total, limit, offset, approximate: true, count_mode: 'estimate' });
     }
 
     // The page and the count are two queries on purpose, run in parallel.
@@ -4282,7 +4308,9 @@ app.get('/api/products', async (req, res) => {
     // Never report fewer than the page already shows -- at a deep offset the
     // capped count would otherwise be smaller than the rows in hand.
     const total = Math.max(capped ? COUNT_CAP : counted, offset + rows.length);
-    res.json({ products: rows, total, limit, offset, approximate: capped, count_mode: capped ? 'capped' : 'exact' });
+    res.json(isCompact
+      ? packCompact(rows, { total, limit, offset, approximate: capped })
+      : { products: rows, total, limit, offset, approximate: capped, count_mode: capped ? 'capped' : 'exact' });
   } catch (e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
 
