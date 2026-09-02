@@ -1938,11 +1938,16 @@ async function renderProducts(panel){
     };
     posModal('✎ Edit part',
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line)">' +
-        '<span style="display:flex;gap:6px">' +
+        '<span style="display:flex;gap:6px;flex-shrink:0">' +
           '<button type="button" class="btn" id="pePrev" title="Edit the previous part in the list (Alt+←)">‹ Prev</button>' +
           '<button type="button" class="btn" id="peNext" title="Edit the next part in the list (Alt+→)">Next ›</button>' +
         '</span>' +
-        '<span id="pePos" style="font-size:11.5px;color:var(--muted);font-weight:700"></span>' +
+        '<span style="position:relative;flex:1;min-width:0">' +
+          '<input id="peJump" placeholder="Jump to another part — name, SKU or vehicle…" autocomplete="off" ' +
+            'style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:6px;font-size:12.5px"/>' +
+          '<div id="peJumpRes" style="display:none;position:absolute;left:0;right:0;top:calc(100% + 3px);z-index:5;background:#fff;border:1px solid var(--line);border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.14);max-height:280px;overflow:auto"></div>' +
+        '</span>' +
+        '<span id="pePos" style="font-size:11.5px;color:var(--muted);font-weight:700;flex-shrink:0;white-space:nowrap"></span>' +
       '</div>' +
       '<div style="display:flex;gap:16px;align-items:flex-start">' +
         '<img src="/' + encodeURI(p.img) + '" onerror="this.style.display=\'none\'" style="width:120px;height:120px;object-fit:cover;border-radius:8px;border:1px solid var(--line);flex-shrink:0"/>' +
@@ -1999,6 +2004,49 @@ async function renderProducts(panel){
       };
       document.addEventListener('keydown', window.__peKeyHandler);
     }
+
+    // Live "jump to another part" search -- switch the editor to any part in
+    // the catalogue without closing it and going back to the table. Picking a
+    // result closes and re-opens the editor on that row, same as Prev/Next, so
+    // an unsaved edit is dropped exactly the way Prev/Next already drops it.
+    var peJump = document.getElementById('peJump');
+    var peJumpRes = document.getElementById('peJumpRes');
+    var peJumpTimer = null, peJumpSeq = 0;
+    var peJumpHide = function(){ peJumpRes.style.display = 'none'; peJumpRes.innerHTML = ''; peJumpRes._rows = null; };
+    var peJumpPick = function(row){ if (!row) return; peJumpHide(); posCloseModal(); productEditModal(row, after); };
+    var peJumpRender = function(rows){
+      peJumpRes._rows = rows;
+      if (!rows.length){
+        peJumpRes.innerHTML = '<div style="padding:9px 11px;font-size:12px;color:var(--muted)">No matches</div>';
+      } else {
+        peJumpRes.innerHTML = rows.map(function(r, i){
+          return '<div class="peJumpRow" data-i="' + i + '" style="padding:8px 11px;cursor:pointer;border-bottom:1px solid var(--line)' + (r.img === p.img ? ';opacity:.45' : '') + '">' +
+            '<div style="font-size:12.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(r.name || r.img) + '</div>' +
+            '<div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(r.img) + (r.make_model ? ' · ' + esc(r.make_model) : '') + '</div>' +
+          '</div>';
+        }).join('');
+        Array.prototype.forEach.call(peJumpRes.querySelectorAll('.peJumpRow'), function(el){
+          // mousedown (not click) so it fires before the input's blur-hide
+          el.addEventListener('mousedown', function(ev){ ev.preventDefault(); peJumpPick(rows[+el.getAttribute('data-i')]); });
+        });
+      }
+      peJumpRes.style.display = 'block';
+    };
+    var peJumpRun = function(){
+      var qv = peJump.value.trim();
+      if (qv.length < 2){ peJumpHide(); return; }
+      var seq = ++peJumpSeq;
+      api('/api/products?limit=12&q=' + encodeURIComponent(qv)).then(function(resp){
+        if (seq !== peJumpSeq || !document.getElementById('peJump')) return;
+        peJumpRender((resp && resp.products) || []);
+      }).catch(function(){ if (seq === peJumpSeq) peJumpHide(); });
+    };
+    peJump.addEventListener('input', function(){ clearTimeout(peJumpTimer); peJumpTimer = setTimeout(peJumpRun, 200); });
+    peJump.addEventListener('keydown', function(e){
+      if (e.key === 'Enter'){ e.preventDefault(); var rs = peJumpRes._rows; peJumpPick(rs && rs[0]); }
+      else if (e.key === 'Escape' && peJumpRes.style.display === 'block'){ e.stopPropagation(); peJumpHide(); }
+    });
+    peJump.addEventListener('blur', function(){ setTimeout(peJumpHide, 150); });
 
     var msg = document.getElementById('peMsg');
     document.getElementById('peSave').addEventListener('click', async function(){
