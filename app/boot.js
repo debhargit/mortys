@@ -195,7 +195,7 @@ function networkCidr(address, netmask) {
 //      address is never touched -- someone chose that on purpose.
 //
 //   3. Server build whose bundled database has been opened to the LAN (a
-//      pg_hba.conf line tagged vision-lan-*, or legacy meltha-lan-*): rewrite
+//      pg_hba.conf line tagged vision-lan-*): rewrite
 //      that line's subnet to the current one and reload PostgreSQL. It only
 //      maintains a rule that already exists -- it never opens a database that
 //      is still loopback-only.
@@ -262,7 +262,7 @@ async function refreshNetworkConfig() {
         const lines = fs.readFileSync(hbaPath, 'utf8').split(/\r?\n/);
         let changed = false;
         const next = lines.map((ln) => {
-          if (!/(?:vision|meltha)-lan-(test|auto)/.test(ln)) return ln;
+          if (!/vision-lan-(test|auto)/.test(ln)) return ln;
           // Only the address/CIDR column is rewritten; the connection type
           // (host / hostssl), database, user and auth method the opener chose
           // are left exactly as they are.
@@ -538,7 +538,7 @@ async function ensureDatabase(conn) {
 
 // ------------------------------------------------------------- discovery --
 // server.js already speaks a tiny UDP protocol on port 41235: it broadcasts
-// MELTHAHONDA_ANNOUNCE every few seconds and answers MELTHAHONDA_DISCOVER
+// VISIONAUTO_ANNOUNCE every few seconds and answers VISIONAUTO_DISCOVER
 // queries with the same payload. That exists so Admin -> Setup can list the
 // machines on the LAN, and it costs nothing to reuse here: a new till can find
 // the shop's server by asking the network instead of by someone reading an IP
@@ -579,7 +579,7 @@ function discoverServer(timeoutMs) {
     sock.on('message', (msg) => {
       let data;
       try { data = JSON.parse(msg.toString()); } catch (_) { return; }
-      if (!data || data.type !== 'MELTHAHONDA_ANNOUNCE' || !data.host) return;
+      if (!data || data.type !== 'VISIONAUTO_ANNOUNCE' || !data.host) return;
       if (found.some((f) => f.host === data.host)) return;
       found.push({
         host: data.host, port: data.port, name: data.name || data.host,
@@ -595,7 +595,7 @@ function discoverServer(timeoutMs) {
       try {
         sock.setBroadcast(true);
         const query = Buffer.from(JSON.stringify({
-          type: 'MELTHAHONDA_DISCOVER', instanceId: 'portable-boot-' + process.pid,
+          type: 'VISIONAUTO_DISCOVER', instanceId: 'portable-boot-' + process.pid,
         }));
         sock.send(query, 41235, '255.255.255.255');
       } catch (e) {

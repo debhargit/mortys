@@ -549,7 +549,7 @@ let discoverySocket = null;
 
 function announcePayload() {
   return {
-    type: 'MELTHAHONDA_ANNOUNCE', instanceId: INSTANCE_ID, name: machineName(),
+    type: 'VISIONAUTO_ANNOUNCE', instanceId: INSTANCE_ID, name: machineName(),
     host: primaryLocalIPv4(), port: PORT,
     has_local_db: LOCAL_SERVER_STATUS.reachable, db_exists: LOCAL_SERVER_STATUS.db_exists,
     time: Date.now(),
@@ -568,9 +568,9 @@ function startDiscoveryService() {
       let data;
       try { data = JSON.parse(msg.toString()); } catch (_) { return; }
       if (!data || data.instanceId === INSTANCE_ID) return; // ignore our own traffic
-      if (data.type === 'MELTHAHONDA_DISCOVER') {
+      if (data.type === 'VISIONAUTO_DISCOVER') {
         try { sock.send(Buffer.from(JSON.stringify(announcePayload())), rinfo.port, rinfo.address); } catch (_) {}
-      } else if (data.type === 'MELTHAHONDA_ANNOUNCE' && data.host && data.port) {
+      } else if (data.type === 'VISIONAUTO_ANNOUNCE' && data.host && data.port) {
         SEEN_SERVERS.set(data.host + ':' + data.port, {
           name: data.name || data.host, host: data.host, port: data.port,
           has_local_db: !!data.has_local_db, db_exists: !!data.db_exists,
@@ -598,7 +598,7 @@ startDiscoveryService();
 function sendDiscoveryQuery() {
   if (!discoverySocket) return;
   try {
-    discoverySocket.send(Buffer.from(JSON.stringify({ type: 'MELTHAHONDA_DISCOVER', instanceId: INSTANCE_ID })), DISCOVERY_PORT, '255.255.255.255');
+    discoverySocket.send(Buffer.from(JSON.stringify({ type: 'VISIONAUTO_DISCOVER', instanceId: INSTANCE_ID })), DISCOVERY_PORT, '255.255.255.255');
   } catch (_) {}
 }
 
