@@ -49,6 +49,31 @@ for (const name of fs.readdirSync(ROOT)) {
   console.log('copied ' + name);
 }
 
+// app/assets/ is the one place a front-end .js belongs in the deploy: the
+// storefront pages load <script src="assets/…">, and server.js serves it via a
+// dedicated express.static('/assets') mount. Mirror that here — copy the whole
+// tree, .js included, which the top-level COPY_EXT rule deliberately excludes.
+const ASSET_SRC = path.join(ROOT, 'assets');
+const ASSET_DST = path.join(PUB, 'assets');
+function syncDir(srcDir, dstDir, rel = '') {
+  if (!fs.existsSync(srcDir)) return;
+  for (const name of fs.readdirSync(srcDir)) {
+    const s = path.join(srcDir, name);
+    const d = path.join(dstDir, name);
+    const st = fs.statSync(s);
+    if (st.isDirectory()) { syncDir(s, d, path.join(rel, name)); continue; }
+    if (sha(s) === sha(d)) { unchanged++; continue; }
+    drift++;
+    const label = 'assets/' + path.join(rel, name).replace(/\\/g, '/');
+    if (CHECK) { console.log('DRIFT  ' + label + (fs.existsSync(d) ? ' (differs)' : ' (missing in public/)')); continue; }
+    fs.mkdirSync(dstDir, { recursive: true });
+    fs.copyFileSync(s, d);
+    copied++;
+    console.log('copied ' + label);
+  }
+}
+syncDir(ASSET_SRC, ASSET_DST);
+
 if (CHECK) {
   console.log(`\n${drift} file(s) out of date in public/, ${unchanged} up to date.`);
   process.exit(drift ? 1 : 0);
