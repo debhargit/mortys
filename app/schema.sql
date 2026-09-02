@@ -1243,14 +1243,15 @@ BEGIN
     ALTER TABLE users ADD CONSTRAINT users_admin_role_check CHECK (admin_role IN ('owner','manager','cashier'));
   END IF;
 END $$;
--- Rebrand (2026): the default admin address moved from melthahonda.com to
--- visionautosolutions.com. Rename the existing row on installs that predate
--- the change so the seed's ON CONFLICT (email) still matches and no second
--- admin account is created. No-op on fresh databases, and skipped if the
--- new address is already present (email is UNIQUE -- a blind UPDATE would
--- abort the whole schema apply).
+-- Rebrand (2026): the default admin address moved to visionautosolutions.com,
+-- first from melthahonda.com and then from a short-lived mortysautoparts.com
+-- phase. Rename the existing row on installs that predate the final change so
+-- the seed's ON CONFLICT (email) still matches and no second admin account is
+-- created. No-op on fresh databases, and skipped if the new address is already
+-- present (email is UNIQUE -- a blind UPDATE would abort the whole schema
+-- apply).
 UPDATE users SET email = 'admin@visionautosolutions.com'
-  WHERE email = 'admin@melthahonda.com'
+  WHERE email IN ('admin@melthahonda.com', 'admin@mortysautoparts.com')
     AND NOT EXISTS (SELECT 1 FROM users u2 WHERE u2.email = 'admin@visionautosolutions.com');
 
 -- The default seeded admin account is the shop owner.
@@ -1393,29 +1394,31 @@ INSERT INTO shop_settings (id, website)
   SELECT 1, 'https://visionautosolutions.com'
   WHERE NOT EXISTS (SELECT 1 FROM shop_settings);
 
--- Rebrand (2026): move the singleton row off the old brand ONLY where it
--- still holds the pre-rebrand default -- i.e. the operator never edited it
--- in Settings. A customised name/site is left alone.
+-- Rebrand (2026): move the singleton row off an old brand ONLY where it
+-- still holds a pre-rebrand default -- i.e. the operator never edited it
+-- in Settings. A customised name/site is left alone. Covers both prior
+-- brands: Meltha Honda, then the short-lived Morty's Auto Parts.
 UPDATE shop_settings SET company_name = 'Vision Auto Solutions Ltd'
-  WHERE company_name = 'Meltha Honda Sales & Servs Ltd';
+  WHERE company_name IN ('Meltha Honda Sales & Servs Ltd', 'Morty''s Auto Parts Ltd');
 UPDATE shop_settings SET website = 'https://visionautosolutions.com'
-  WHERE website IN ('https://melthahonda.miamimistress.com', 'https://melthahonda.com');
+  WHERE website IN ('https://melthahonda.miamimistress.com', 'https://melthahonda.com',
+                    'https://mortysautoparts.com', 'https://www.mortysautoparts.com');
 UPDATE shop_settings SET address = '112C Waltham Park Road, Kingston'
   WHERE address = '127 Hagley Park Road, Kingston 11';
 UPDATE shop_settings SET phone = '(876) 758-5590'
   WHERE phone = '(876) 758-8503';
 
--- Rebrand (2026): the synthetic walk-in / no-email customer domain moved from
--- @walkin.melthahonda.local to @walkin.visionautosolutions.local. Rename the
--- existing rows (the singleton "walkin@" record and every counter-created
--- customer minted without a real email) so the code that looks them up by the
--- new address keeps matching. Guarded so it is a no-op once migrated, and so
--- the singleton rename is skipped if the new address somehow already exists
--- (email is UNIQUE).
-UPDATE users SET email = regexp_replace(email, '@walkin\.melthahonda\.local$', '@walkin.visionautosolutions.local')
-  WHERE email LIKE '%@walkin.melthahonda.local';
+-- Rebrand (2026): the synthetic walk-in / no-email customer domain moved to
+-- @walkin.visionautosolutions.local, from @walkin.melthahonda.local and then
+-- @walkin.mortysautoparts.local. Rename the existing rows (the singleton
+-- "walkin@" record and every counter-created customer minted without a real
+-- email) so the code that looks them up by the new address keeps matching.
+-- Guarded so it is a no-op once migrated, and so the singleton rename is
+-- skipped if the new address somehow already exists (email is UNIQUE).
+UPDATE users SET email = regexp_replace(email, '@walkin\.(melthahonda|mortysautoparts)\.local$', '@walkin.visionautosolutions.local')
+  WHERE email LIKE '%@walkin.melthahonda.local' OR email LIKE '%@walkin.mortysautoparts.local';
 UPDATE users SET email = 'walkin@visionautosolutions.local'
-  WHERE email = 'walkin@melthahonda.local'
+  WHERE email IN ('walkin@melthahonda.local', 'walkin@mortysautoparts.local')
     AND NOT EXISTS (SELECT 1 FROM users u2 WHERE u2.email = 'walkin@visionautosolutions.local');
 
 -- =============================================================================
