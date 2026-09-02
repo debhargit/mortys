@@ -94,6 +94,14 @@
   .sidebar .item .star.on{color:#ffb703}
   .sidebar .item .lbl{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .sidebar .empty-fav{padding:5px 18px;font-size:11px;color:#64748b;font-style:italic}
+  /* Account footer — pinned to the bottom of the nav rail */
+  .sidebar .sb-foot{position:sticky;bottom:0;margin-top:12px;padding:10px 14px 14px;background:#0b1b2b;border-top:1px solid rgba(255,255,255,.12)}
+  .sidebar .sb-who{display:flex;align-items:baseline;gap:6px;font-size:12px;font-weight:700;color:#cbd5e1;margin-bottom:7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sidebar .sb-who small{color:#94a3b8;font-weight:600;text-transform:capitalize}
+  .sidebar .sb-signout{width:100%;padding:8px 10px;background:rgba(214,40,40,.16);color:#fecaca;border:1px solid rgba(214,40,40,.4);border-radius:6px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit}
+  .sidebar .sb-signout:hover{background:rgba(214,40,40,.30);color:#fff}
+  .sidebar .sb-signin{background:rgba(14,165,233,.18);color:#bae6fd;border-color:rgba(14,165,233,.45)}
+  .sidebar .sb-signin:hover{background:rgba(14,165,233,.32);color:#fff}
   .content-area{padding:18px 22px;min-width:0}
   .menu-toggle{display:none}
   .wrap{transition:grid-template-columns .15s}
@@ -921,6 +929,20 @@ function buildSidebar(){
     });
     html += '</div></div>';
   });
+  // Account footer: who's signed in + Sign out, pinned at the bottom of the
+  // rail (mirrors the header control, closer to hand). Shows Sign in instead
+  // when there is no session -- e.g. it lapsed and the modal is up.
+  if (CURRENT_ADMIN_ID) {
+    html += '<div class="sb-foot">' +
+      '<div class="sb-who" title="' + esc(String(CURRENT_ADMIN_NAME || '')) + '">' +
+        '👤 <span class="lbl" style="flex:1;overflow:hidden;text-overflow:ellipsis">' + esc(String(CURRENT_ADMIN_NAME || 'Signed in')) + '</span>' +
+        '<small>' + esc(String(CURRENT_ADMIN_ROLE || '')) + '</small>' +
+      '</div>' +
+      '<button type="button" class="sb-signout" id="sbSignout">⎋ Sign out</button>' +
+    '</div>';
+  } else {
+    html += '<div class="sb-foot"><button type="button" class="sb-signout sb-signin" id="sbSignin">🔑 Sign in</button></div>';
+  }
   sb.innerHTML = html;
   // Wire item clicks
   sb.querySelectorAll('[data-go]').forEach(function(b){
@@ -945,6 +967,14 @@ function buildSidebar(){
   });
   var sbBtn = document.getElementById('sbCollapseBtn');
   if (sbBtn) sbBtn.addEventListener('click', toggleSidebarCollapse);
+  // Account footer: reuse the header's handlers so there's one code path.
+  var sbSo = document.getElementById('sbSignout');
+  if (sbSo) sbSo.addEventListener('click', function(){ var h = document.getElementById('signoutBtn'); if (h) h.click(); });
+  var sbSi = document.getElementById('sbSignin');
+  if (sbSi) sbSi.addEventListener('click', function(){
+    var bg = document.getElementById('signinBg'); if (bg) bg.classList.add('show');
+    var em = document.getElementById('adEmail'); if (em) setTimeout(function(){ try { em.focus(); } catch (_) {} }, 50);
+  });
 }
 
 // Overlay click closes mobile sidebar
