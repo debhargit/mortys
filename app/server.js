@@ -3674,7 +3674,7 @@ const PIN_MIN = 4, PIN_MAX = 8;
 // moment a till is set up. Set once, on an account that has none -- never reset
 // on later boots, or a shop that changed it would find the factory PIN back
 // every morning. Change it in Settings -> Users & Staff.
-const DEFAULT_ADMIN_PIN = String(process.env.MH_DEFAULT_ADMIN_PIN || '1010').trim();
+const DEFAULT_ADMIN_PIN = String(process.env.MH_DEFAULT_ADMIN_PIN || '2240').trim();
 
 // Verification has to compare against every staff PIN, because the whole point
 // is that the person types a PIN and nothing else -- there is no user name to

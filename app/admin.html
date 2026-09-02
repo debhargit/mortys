@@ -1937,6 +1937,13 @@ async function renderProducts(panel){
       '</select></div>';
     };
     posModal('✎ Edit part',
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line)">' +
+        '<span style="display:flex;gap:6px">' +
+          '<button type="button" class="btn" id="pePrev" title="Edit the previous part in the list (Alt+←)">‹ Prev</button>' +
+          '<button type="button" class="btn" id="peNext" title="Edit the next part in the list (Alt+→)">Next ›</button>' +
+        '</span>' +
+        '<span id="pePos" style="font-size:11.5px;color:var(--muted);font-weight:700"></span>' +
+      '</div>' +
       '<div style="display:flex;gap:16px;align-items:flex-start">' +
         '<img src="/' + encodeURI(p.img) + '" onerror="this.style.display=\'none\'" style="width:120px;height:120px;object-fit:cover;border-radius:8px;border:1px solid var(--line);flex-shrink:0"/>' +
         '<div style="flex:1;min-width:0">' +
@@ -1960,11 +1967,7 @@ async function renderProducts(panel){
           sect('Status',
             '<div style="grid-column:1/-1"><label style="display:inline-flex;align-items:center;gap:7px;font-size:13px"><input type="checkbox" id="peActive"' + (p.is_active === false ? '' : ' checked') + '/> Listed / active</label></div>') +
           '<div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:6px">' +
-            '<span style="display:flex;gap:6px;align-items:center">' +
-              '<button type="button" class="btn" id="pePrev" title="Edit the previous part in the list (Alt+←)">‹ Prev</button>' +
-              '<button type="button" class="btn" id="peNext" title="Edit the next part in the list (Alt+→)">Next ›</button>' +
-              '<button type="button" class="btn" id="peDelete" style="background:#fee2e2;color:#b91c1c;margin-left:6px">🗑 Delete part</button>' +
-            '</span>' +
+            '<button type="button" class="btn" id="peDelete" style="background:#fee2e2;color:#b91c1c">🗑 Delete part</button>' +
             '<span><span id="peMsg" style="font-size:12.5px;margin-right:8px"></span><button type="button" class="btn ok" id="peSave">Save changes</button></span>' +
           '</div>' +
         '</div>' +
@@ -1980,9 +1983,11 @@ async function renderProducts(panel){
       if (n) { posCloseModal(); productEditModal(n, after); }
     };
     var pePrevBtn = document.getElementById('pePrev'), peNextBtn = document.getElementById('peNext');
+    var pePosEl = document.getElementById('pePos');
     if (window.__peKeyHandler) { document.removeEventListener('keydown', window.__peKeyHandler); window.__peKeyHandler = null; }
-    if (peIdx < 0) { pePrevBtn.style.display = 'none'; peNextBtn.style.display = 'none'; }
+    if (peIdx < 0) { pePrevBtn.style.display = 'none'; peNextBtn.style.display = 'none'; if (pePosEl) pePosEl.textContent = ''; }
     else {
+      if (pePosEl) pePosEl.textContent = (peIdx + 1) + ' of ' + PROD_STATE.rows.length + (PROD_STATE.rows.length >= PROD_PAGE_SIZE ? '+ loaded' : '');
       pePrevBtn.disabled = peIdx <= 0;
       peNextBtn.disabled = peIdx >= PROD_STATE.rows.length - 1;
       pePrevBtn.addEventListener('click', function(){ peGo(-1); });
