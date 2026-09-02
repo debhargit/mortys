@@ -19,6 +19,9 @@ database_id = "53b55748-5ae3-4fc7-85d1-8d463891a3ef"
 ORDER_NOTIFY_TO = "admin@visionautosolutions.com"
 ORDER_NOTIFY_SMS = "876-758-5590"
 EMAIL_FROM = "Vision Auto Solutions <noreply@visionautosolutions.com>"
+# The hosted site is HTTPS-only, so the session cookie must carry Secure.
+# (_lib/session.js reads this; unset = no Secure flag.)
+COOKIE_SECURE = "true"
 
 # Settings -> "Local / offline server" download panel (functions/_routes/
 # admin_misc.js GET /api/admin/local-server). Publish the portable-edition
