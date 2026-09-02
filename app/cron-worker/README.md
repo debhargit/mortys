@@ -1,4 +1,4 @@
-# meltahonda-cron
+# visionautosolutions-cron
 
 Pages Functions can't own Cron Triggers, so this ~40-line Worker holds the
 schedule and calls the Pages deployment's `/api/cron/*` endpoints
@@ -47,7 +47,7 @@ the `*.pages.dev` URL: edit `[vars]` or `npx wrangler deploy --var PAGES_ORIGIN:
 curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://visionautosolutions.com/api/cron/low-stock-digest
 
 # or through the worker's manual kick
-curl "https://meltahonda-cron.<subdomain>.workers.dev/?key=$CRON_SECRET&job=_all"
+curl "https://visionautosolutions-cron.<subdomain>.workers.dev/?key=$CRON_SECRET&job=_all"
 
 # local: wrangler dev then trigger the scheduled handler
 npx wrangler dev --test-scheduled
