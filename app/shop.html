@@ -1838,13 +1838,21 @@ document.addEventListener('DOMContentLoaded', function(){
     if (live <= 4) return {level:'low', count:live, label:'Low Stock'};
     return {level:'in', label:'In Stock'};
   }
-  // Card blurb. This was the flat string "In-stock at our Kingston counter"
-  // printed on every card, which contradicted the Out of Stock badge sitting
-  // directly above it on the ~18,800 parts that are currently at zero.
-  function descFor(st){
-    if (st.level === 'out') return 'Not on the shelf right now — we can source it. Call to check.';
-    if (st.level === 'unknown') return 'Call the counter to confirm availability and fitment.';
-    return 'In stock at our Kingston counter. Call to confirm fitment.';
+  // Card description: the actual part — condition, category, what it fits and
+  // (when it reads like a code rather than a photo filename) its part number.
+  // A short stock-aware clause is appended only when the part is off the shelf
+  // or unconfirmed, so it never contradicts the "In Stock" badge above it.
+  function descFor(p, st){
+    p = p || {};
+    var cond = p.b === 'USED' ? 'Used' : 'New';
+    var cat = p.c ? p.c.charAt(0).toUpperCase() + p.c.slice(1) : '';
+    var segs = [cond + (cat ? ' · ' + cat : '')];
+    if (p.m) segs.push('fits ' + p.m);
+    if (p.i && p.i.indexOf('/') === -1 && !/\.(jpe?g|png|webp|gif|svg)$/i.test(p.i)) segs.push('No. ' + p.i);
+    var line = segs.join(' · ');
+    if (st && st.level === 'out') return line + ' — not on the shelf now; we can source it.';
+    if (st && st.level === 'unknown') return line + ' — call to confirm availability.';
+    return line;
   }
   function stockBadgeHTML(st){
     var txt = (st.level === 'low') ? 'Only ' + st.count + ' left' : st.label;
@@ -2165,7 +2173,7 @@ document.addEventListener('DOMContentLoaded', function(){
             '<div class="make">' + p.m + '</div>' +
             '<h5>' + p.n + '</h5>' +
             urgencyHTML(p, st) +
-            '<p class="desc">' + descFor(st) + '</p>' +
+            '<p class="desc">' + descFor(p, st) + '</p>' +
             '<div class="foot">' + priceBlock + buttonHTML(p, usd, inCart, st) + '</div>' +
           '</div>' +
         '</article>';
@@ -3169,7 +3177,7 @@ document.addEventListener('DOMContentLoaded', function(){
             var btn = usd
               ? '<button class="add ' + (inCart?'in':'') + '" data-img="' + esc(p.i) + '">' + (inCart ? '✓ Added' : '+ Add') + '</button>'
               : '<button class="add quote ' + (inCart?'in':'') + '" data-img="' + esc(p.i) + '">' + (inCart ? '✓ Added' : '+ Get Quote') + '</button>';
-            return '<article class="part"><div class="img"><span class="badge ' + (p.b==='USED'?'used':'') + '">' + p.b + '</span><img src="' + photoOf(p.i) + '" alt="' + p.n + '" loading="lazy" onerror="this.style.opacity=0.25"/></div><div class="body"><div class="make">' + p.m + '</div><h5>' + p.n + '</h5><p class="desc">' + descFor(st) + '</p><div class="foot">' + priceBlock + btn + '</div></div></article>';
+            return '<article class="part"><div class="img"><span class="badge ' + (p.b==='USED'?'used':'') + '">' + p.b + '</span><img src="' + photoOf(p.i) + '" alt="' + p.n + '" loading="lazy" onerror="this.style.opacity=0.25"/></div><div class="body"><div class="make">' + p.m + '</div><h5>' + p.n + '</h5><p class="desc">' + descFor(p, st) + '</p><div class="foot">' + priceBlock + btn + '</div></div></article>';
           }).join('');
           document.getElementById('partsCount').textContent = matched.length + ' items';
           g.querySelectorAll('.add').forEach(function(b){ b.addEventListener('click', function(){ addToCart(b.dataset.img); }); });
@@ -3369,7 +3377,7 @@ document.addEventListener('DOMContentLoaded', function(){
             var btn = usd
               ? '<button class="add ' + (inCart?'in':'') + '" data-img="' + esc(p.i) + '">' + (inCart ? '✓ Added' : '+ Add') + '</button>'
               : '<button class="add quote ' + (inCart?'in':'') + '" data-img="' + esc(p.i) + '">' + (inCart ? '✓ Added' : '+ Get Quote') + '</button>';
-            return '<article class="part"><div class="img"><span class="badge ' + (p.b==='USED'?'used':'') + '">' + p.b + '</span><img src="' + photoOf(p.i) + '" alt="' + p.n + '" loading="lazy" onerror="this.style.opacity=0.25"/></div><div class="body"><div class="make">' + p.m + '</div><h5>' + p.n + '</h5><p class="desc">' + descFor(st) + '</p><div class="foot">' + priceBlock + btn + '</div></div></article>';
+            return '<article class="part"><div class="img"><span class="badge ' + (p.b==='USED'?'used':'') + '">' + p.b + '</span><img src="' + photoOf(p.i) + '" alt="' + p.n + '" loading="lazy" onerror="this.style.opacity=0.25"/></div><div class="body"><div class="make">' + p.m + '</div><h5>' + p.n + '</h5><p class="desc">' + descFor(p, st) + '</p><div class="foot">' + priceBlock + btn + '</div></div></article>';
           }).join('');
           document.getElementById('partsCount').textContent = matched.length + ' items';
           g.querySelectorAll('.add').forEach(function(b){ b.addEventListener('click', function(){ addToCart(b.dataset.img); }); });
@@ -3572,7 +3580,7 @@ document.addEventListener('DOMContentLoaded', function(){
       var priceBlock = '<span class="price">' + fmt(usd) + (usd ? '<span class="alt">' + altFmt(usd) + '</span>' : '') + '</span>';
       return '<article class="part' + (st.level==='out'?' outstock':'') + '">' +
         '<div class="img"><span class="badge ' + (p.b==='USED'?'used':'') + '">' + p.b + '</span>' + stockBadgeHTML(st) + '<img src="' + photoOf(p.i) + '" alt="' + p.n + '" loading="lazy" onerror="this.style.opacity=0.25"/></div>' +
-        '<div class="body"><div class="make">' + p.m + '</div><h5>' + p.n + '</h5>' + urgencyHTML(p, st) + '<p class="desc">' + descFor(st) + '</p><div class="foot">' + priceBlock + buttonHTML(p, usd, inCart, st) + '</div></div>' +
+        '<div class="body"><div class="make">' + p.m + '</div><h5>' + p.n + '</h5>' + urgencyHTML(p, st) + '<p class="desc">' + descFor(p, st) + '</p><div class="foot">' + priceBlock + buttonHTML(p, usd, inCart, st) + '</div></div>' +
       '</article>';
     }).join('');
     fg.querySelectorAll('.add:not(.notify)').forEach(function(b){ b.addEventListener('click', function(){ addToCart(b.dataset.img); }); });
