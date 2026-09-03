@@ -28,7 +28,7 @@ COOKIE_SECURE = "true"
 # zip somewhere the shop can reach (a GitHub release asset, an R2 public
 # bucket, a file share) and point this at it. Leave blank and the panel
 # shows the build-it-yourself steps instead of a download button.
-# LOCAL_SERVER_URL     = "https://github.com/debhargit/meltha/releases/download/portable-vX/MortysAutoParts-portable.zip"
+# LOCAL_SERVER_URL     = "https://github.com/debhargit/mortys/releases/download/portable-vX/MortysAutoParts-portable.zip"
 # LOCAL_SERVER_VERSION = "X.Y.Z"
 # LOCAL_SERVER_SIZE    = "~240 MB"
 # LOCAL_SERVER_SHA256  = "<sha256 of the zip>"

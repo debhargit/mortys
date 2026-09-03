@@ -238,7 +238,7 @@ against the Express server.
 
 ```bash
 npm i -D wrangler                    # not bundled; add to devDependencies
-npx wrangler login                   # browser OAuth, debhargithud@gmail.com
+npx wrangler login                   # browser OAuth, debhargithub@gmail.com
 npx wrangler d1 create mortysautoparts-db # if not already on the account
 npx wrangler d1 migrations apply mortysautoparts-db --local   # 0001 … 0020, in order
 npm run cf:dev                       # cf:build + wrangler pages dev public --d1 DB=mortysautoparts-db

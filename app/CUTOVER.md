@@ -11,7 +11,7 @@ then it stops taking writes.
 
 ## 0. Prerequisites (one-time, on the Cloudflare account)
 
-- `npx wrangler login` (browser OAuth, `debhargithud@gmail.com`).
+- `npx wrangler login` (browser OAuth, `debhargithub@gmail.com`).
 - D1 database `mortysautoparts-db` exists (id in `wrangler.toml`). If not:
   `npx wrangler d1 create mortysautoparts-db` and paste the id.
 - **R2** opt-in (dashboard) → `npx wrangler r2 bucket create mortysautoparts-uploads`,
