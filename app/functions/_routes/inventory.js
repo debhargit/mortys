@@ -86,17 +86,28 @@ export default function mount(app) {
     const db = d1(c.env);
     const me = c.get('user');
     const b = await c.req.json().catch(() => ({}));
-    if ((b.price_usd != null || b.cost_usd != null) && !userCan(me, 'inventory.edit_price'))
+    if ((b.price_usd != null || b.cost_usd != null || b.list_price_usd != null) && !userCan(me, 'inventory.edit_price'))
       return c.json({ error: 'Your account is not allowed to edit product pricing.' }, 403);
     if (b.stock_count != null && !userCan(me, 'inventory.adjust_stock'))
       return c.json({ error: 'Your account is not allowed to adjust stock counts.' }, 403);
 
     const sets = []; const vals = [];
     const put = (frag, v) => { sets.push(frag); vals.push(v); };
+    const numOrNull = (v) => (v === '' || v == null || !Number.isFinite(Number(v)) ? null : Number(v));
+    const intOrNull = (v) => (v === '' || v == null ? null : parseInt(v, 10));
     if (b.stock_count != null) put('stock_count = ?', parseInt(b.stock_count, 10));
     if (b.price_usd != null) put('price_cents = ?', usdToCents(b.price_usd));
     if (b.cost_usd != null) put('cost_cents = ?', b.cost_usd === '' ? null : usdToCents(b.cost_usd));
+    if (b.list_price_usd != null) put('list_price_cents = ?', b.list_price_usd === '' ? null : usdToCents(b.list_price_usd));
+    if (b.markup_pct !== undefined) put('markup_pct = ?', numOrNull(b.markup_pct));
     if (b.supplier_id !== undefined) put('supplier_id = ?', b.supplier_id ? parseInt(b.supplier_id, 10) : null);
+    if (b.supplier_part_no !== undefined) put('supplier_part_no = ?', String(b.supplier_part_no || '').trim() || null);
+    if (b.costing_method !== undefined) put('costing_method = ?', String(b.costing_method || '').trim() || null);
+    if (b.stock_uom !== undefined) put('stock_uom = ?', String(b.stock_uom || '').trim() || null);
+    if (b.purchase_uom !== undefined) put('purchase_uom = ?', String(b.purchase_uom || '').trim() || null);
+    if (b.units_per_purchase !== undefined) put('units_per_purchase = ?', numOrNull(b.units_per_purchase));
+    if (b.warranty_days !== undefined) put('warranty_days = ?', intOrNull(b.warranty_days));
+    if (b.serial_required !== undefined) put('serial_required = ?', toBit(b.serial_required));
     if (b.low_threshold != null) put('low_threshold = ?', Math.max(0, parseInt(b.low_threshold, 10) || 0));
     if (b.is_active != null) put('is_active = ?', toBit(b.is_active));
     if (b.name != null) put('name = ?', String(b.name));
@@ -141,14 +152,27 @@ export default function mount(app) {
       ? b.condition.toUpperCase() : 'USED';
     const exists = await db.one('SELECT img FROM products WHERE img = ?', img);
     if (exists) return c.json({ error: 'A product with that image key already exists' }, 409);
+    const nn = (v) => (v === '' || v == null || !Number.isFinite(Number(v)) ? null : Number(v));
+    const trimOrNull = (v) => (v && String(v).trim() ? String(v).trim() : null);
     await db.run(
-      `INSERT INTO products (img, name, make_model, category, condition, price_cents, stock_count, low_threshold, location, bin_location)
-         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO products
+         (img, name, make_model, category, condition, price_cents, cost_cents, list_price_cents,
+          stock_count, low_threshold, location, bin_location, sku, barcode, supplier_id, supplier_part_no,
+          markup_pct, costing_method, warranty_days, serial_required, stock_uom, purchase_uom, units_per_purchase)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       img, b.name, b.make_model || '', b.category, condition,
       b.price_usd ? usdToCents(b.price_usd) : null,
+      b.cost_usd ? usdToCents(b.cost_usd) : null,
+      b.list_price_usd ? usdToCents(b.list_price_usd) : null,
       b.stock_count != null ? parseInt(b.stock_count, 10) : 1,
       b.low_threshold != null ? parseInt(b.low_threshold, 10) : 0,
       b.location || null, b.bin_location || null,
+      trimOrNull(b.sku), trimOrNull(b.barcode),
+      b.supplier_id ? parseInt(b.supplier_id, 10) : null, trimOrNull(b.supplier_part_no),
+      nn(b.markup_pct), trimOrNull(b.costing_method),
+      b.warranty_days === '' || b.warranty_days == null ? null : parseInt(b.warranty_days, 10),
+      toBit(b.serial_required || 0),
+      trimOrNull(b.stock_uom), trimOrNull(b.purchase_uom), nn(b.units_per_purchase),
     );
     return c.json({ ok: true, img });
   });
@@ -224,13 +248,18 @@ export default function mount(app) {
       stock_count: (v) => parseInt(v, 10), low_threshold: (v) => parseInt(v, 10),
       is_active: toBit, sku: null, barcode: null,
       supplier_id: (v) => (v ? parseInt(v, 10) : null),
+      supplier_part_no: (v) => (String(v || '').trim() || null),
       warranty_days: (v) => (v === '' || v == null ? null : parseInt(v, 10)),
       serial_required: toBit, weight_kg: num, dim_cm: null,
       bin_location: null, min_stock: (v) => (v === '' || v == null ? null : parseInt(v, 10)),
       markup_pct: num,
-      price_usd: null, cost_usd: null, core_charge_usd: null, env_fee_usd: null,
+      costing_method: (v) => (String(v || '').trim() || null),
+      stock_uom: (v) => (String(v || '').trim() || null),
+      purchase_uom: (v) => (String(v || '').trim() || null),
+      units_per_purchase: num,
+      price_usd: null, cost_usd: null, list_price_usd: null, core_charge_usd: null, env_fee_usd: null,
     };
-    const CENTS = { price_usd: 'price_cents', cost_usd: 'cost_cents', core_charge_usd: 'core_charge_cents', env_fee_usd: 'env_fee_cents' };
+    const CENTS = { price_usd: 'price_cents', cost_usd: 'cost_cents', list_price_usd: 'list_price_cents', core_charge_usd: 'core_charge_cents', env_fee_usd: 'env_fee_cents' };
     const sets = []; const vals = [];
     for (const [f, tf] of Object.entries(MAP)) {
       if (b[f] === undefined) continue;
@@ -264,6 +293,8 @@ export default function mount(app) {
               p.sku, p.barcode, p.core_charge_cents / 100.0 AS core_charge_usd,
               p.env_fee_cents / 100.0 AS env_fee_usd, p.warranty_days, p.serial_required,
               p.weight_kg, p.dim_cm, p.bin_location, p.markup_pct,
+              p.list_price_cents / 100.0 AS list_price_usd, p.costing_method, p.supplier_part_no,
+              p.stock_uom, p.purchase_uom, p.units_per_purchase,
               p.supplier_id, s.name AS supplier_name
          FROM products p LEFT JOIN suppliers s ON s.id = p.supplier_id
          ${where.length ? 'WHERE ' + where.join(' AND ') : ''}

@@ -556,6 +556,14 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS weight_kg       NUMERIC(8,3);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS dim_cm          TEXT;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS min_stock       INTEGER;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS markup_pct      NUMERIC(6,2);
+-- 0034: reference list price, per-part costing-method label, supplier's own
+-- part number, and stocking vs. purchasing unit of measure.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS list_price_usd     NUMERIC(10,2);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS costing_method     TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS supplier_part_no   TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_uom          TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS purchase_uom       TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS units_per_purchase NUMERIC(10,3);
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON products (barcode);
 CREATE INDEX IF NOT EXISTS idx_products_sku     ON products (sku);
 

@@ -279,7 +279,7 @@
 
 <header class="top">
   <div style="display:flex;align-items:center;gap:14px">
-    <div style="width:34px;height:34px;border-radius:8px;background:linear-gradient(160deg,#0ea5e9 52%,#d62828 52%);display:grid;place-items:center;color:#fff;font-weight:800;font-size:13px;letter-spacing:.5px;flex-shrink:0;text-shadow:0 1px 2px rgba(0,0,0,.3)">MH</div>
+    <img src="mortys-logo.svg" alt="Morty's Auto Parts" style="width:34px;height:34px;border-radius:8px;flex-shrink:0" />
     <h1>Morty's Auto Parts · Admin</h1>
     <a class="home" href="/">← Public site</a>
   </div>
@@ -1698,6 +1698,21 @@ async function renderProducts(panel){
   // any part added through this form) silently misses every existing row.
   var cats = POS_CATEGORIES;
   var locs = ['Main Warehouse','Service Bay','Branch B','Showroom','Receiving','Other'];
+  // Shared by the "+ Add new part" form and the "✎ Edit part" modal below.
+  var UOM_OPTS = ['each','pair','set','kit','box','case','carton','litre','gallon','metre','foot','roll','pack'];
+  var COSTING_OPTS = [['','—'],['average','Weighted average'],['fifo','FIFO'],['standard','Standard cost'],['last','Last cost']];
+  var partSuppliers = [];
+  try { partSuppliers = (await api('/api/admin/suppliers?active=true')).suppliers || []; } catch (_) {}
+  var supplierOptions = function(selId){
+    return '<option value="">— none —</option>' + partSuppliers.map(function(s){
+      return '<option value="' + s.id + '"' + (String(s.id) === String(selId == null ? '' : selId) ? ' selected' : '') + '>' + esc(s.name) + '</option>';
+    }).join('');
+  };
+  var uomOptions = function(sel){
+    return '<option value="">—</option>' + UOM_OPTS.map(function(u){
+      return '<option value="' + u + '"' + (u === (sel || '') ? ' selected' : '') + '>' + u + '</option>';
+    }).join('');
+  };
   var addPanel =
     '<div style="padding:8px 16px;background:var(--card-soft);border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
       '<label class="btn" style="background:#fef3c7;color:#92400e;cursor:pointer;margin:0">📥 Import inventory<input type="file" id="invImportInput" accept=".csv,.tsv,.txt,.xlsx,.xlsm" style="display:none"/></label>' +
@@ -1709,19 +1724,40 @@ async function renderProducts(panel){
       '<div style="padding:16px 18px">' +
         '<form id="newProdForm" onsubmit="event.preventDefault();submitNewProduct();" enctype="multipart/form-data" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:880px">' +
           '<div style="grid-column:1/-1" id="npImageWidget"></div>' +
+          '<div style="grid-column:1/-1;position:relative">' +
+            '<label class="lbl">Copy from an existing part <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional — prefills the fields below)</span></label>' +
+            '<input id="npCopy" placeholder="🔎 search a part to copy its details…" autocomplete="off" class="fld"/>' +
+            '<div id="npCopyResults" style="display:none;position:absolute;z-index:60;left:0;right:0;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 14px 36px rgba(0,0,0,.30);max-height:min(46vh,340px);overflow-y:auto"></div>' +
+          '</div>' +
           '<div><label class="lbl">Part name *</label><input id="npName" required placeholder="e.g. AC Compressor" class="fld"/></div>' +
           '<div><label class="lbl">Vehicle / fitment</label><input id="npMakeModel" placeholder="e.g. 2020 Honda Accord" class="fld"/></div>' +
           '<div><label class="lbl">Category *</label><select id="npCategory" required class="fld">' +
             cats.map(function(c){ return '<option value="' + c[0] + '">' + c[1] + '</option>'; }).join('') +
           '</select></div>' +
           '<div><label class="lbl">Condition</label><select id="npCondition" class="fld"><option value="USED" selected>USED</option><option value="NEW">NEW</option></select></div>' +
-          '<div><label class="lbl">Price (USD)</label><input id="npPrice" type="number" step="0.01" min="0" placeholder="0.00" class="fld"/></div>' +
+          '<div><label class="lbl">SKU</label><input id="npSku" placeholder="internal code" class="fld"/></div>' +
+          '<div><label class="lbl">Barcode</label><input id="npBarcode" placeholder="UPC / EAN" class="fld"/></div>' +
+          '<div><label class="lbl">Cost / buy price (USD)</label><input id="npCost" type="number" step="0.01" min="0" placeholder="0.00" class="fld"/></div>' +
+          '<div><label class="lbl">Markup %</label><input id="npMarkup" type="number" step="0.1" min="0" placeholder="e.g. 35" class="fld"/></div>' +
+          '<div><label class="lbl">Sell price / retail (USD)</label><input id="npPrice" type="number" step="0.01" min="0" placeholder="auto from cost × markup" class="fld"/></div>' +
+          '<div><label class="lbl">List / MSRP (USD)</label><input id="npList" type="number" step="0.01" min="0" placeholder="reference" class="fld"/></div>' +
           '<div><label class="lbl">Stock count</label><input id="npStock" type="number" min="0" value="1" class="fld"/></div>' +
+          '<div><label class="lbl">Low-stock threshold</label><input id="npLow" type="number" min="0" placeholder="0" class="fld"/></div>' +
+          '<div><label class="lbl">Stock unit</label><select id="npStockUom" class="fld">' + uomOptions('each') + '</select></div>' +
+          '<div><label class="lbl">Purchase unit</label><select id="npPurchUom" class="fld">' + uomOptions('') + '</select></div>' +
+          '<div><label class="lbl">Units per purchase</label><input id="npUnitsPerPurch" type="number" step="0.001" min="0" placeholder="e.g. 12 per box" class="fld"/></div>' +
+          '<div><label class="lbl">Costing method</label><select id="npCosting" class="fld">' +
+            COSTING_OPTS.map(function(o){ return '<option value="' + o[0] + '">' + o[1] + '</option>'; }).join('') +
+          '</select></div>' +
+          '<div><label class="lbl">Supplier</label><select id="npSupplier" class="fld">' + supplierOptions('') + '</select></div>' +
+          '<div><label class="lbl">Supplier part #</label><input id="npSupPartNo" placeholder="vendor catalogue no." class="fld"/></div>' +
+          '<div><label class="lbl">Warranty (days)</label><input id="npWarranty" type="number" min="0" placeholder="e.g. 90" class="fld"/></div>' +
           '<div><label class="lbl">Bin / Rack</label><input id="npBin" placeholder="e.g. A-12" class="fld"/></div>' +
           '<div><label class="lbl">📍 Location</label>' +
             '<select id="npLocation" class="fld">' +
               locs.map(function(l){ return '<option value="' + l + '">' + l + '</option>'; }).join('') +
             '</select></div>' +
+          '<div style="grid-column:1/-1"><label style="display:inline-flex;align-items:center;gap:7px;font-size:13px"><input type="checkbox" id="npSerial"/> Serial number required at sale</label></div>' +
           '<div id="npMsg" style="grid-column:1/-1;display:none;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
           '<button type="submit" id="npSubmit" style="grid-column:1/-1;background:var(--red);color:#fff;border:0;border-radius:7px;padding:11px 22px;font-weight:700;cursor:pointer;font-size:14px;font-family:inherit;margin-top:6px">Add Part to Inventory</button>' +
         '</form>' +
@@ -1739,6 +1775,100 @@ async function renderProducts(panel){
 
   panel.innerHTML = addPanel + toolbar + '<div id="prodList"></div>';
   mountImageWidget('npImageWidget', 'npPhotoHidden');
+
+  // "+ Add new part" helpers: retail auto-fills from cost × markup (until the
+  // user types a price), and a live search prefills the whole form from an
+  // existing part — same keyboard model as the "Find another part" box in the
+  // edit modal (↑/↓ to move, Enter to pick).
+  (function(){
+    var cost = document.getElementById('npCost'), mk = document.getElementById('npMarkup'), price = document.getElementById('npPrice');
+    if (cost && mk && price) {
+      var touched = false;
+      price.addEventListener('input', function(){ touched = (price.value.trim() !== ''); });
+      var recalc = function(){
+        if (touched) return;
+        var c2 = parseFloat(cost.value), m = parseFloat(mk.value);
+        if (isFinite(c2) && isFinite(m)) price.value = (Math.round(c2 * (1 + m / 100) * 100) / 100).toFixed(2);
+      };
+      cost.addEventListener('input', recalc);
+      mk.addEventListener('input', recalc);
+    }
+    var jin = document.getElementById('npCopy'), jout = document.getElementById('npCopyResults');
+    if (!jin || !jout) return;
+    var jd = null, jseq = 0, jrows = [], jsel = -1;
+    var setV = function(id, v){ var el = document.getElementById(id); if (el && v != null && v !== '') el.value = v; };
+    var setChk = function(id, v){ var el = document.getElementById(id); if (el) el.checked = !!v; };
+    var hl = function(){
+      var k = jout.children;
+      for (var i = 0; i < k.length; i++) k[i].style.background = (i === jsel) ? 'var(--hover)' : 'var(--card)';
+      if (jsel >= 0 && k[jsel]) k[jsel].scrollIntoView({ block: 'nearest' });
+    };
+    var render = function(){
+      if (!jrows.length) { jout.style.display = 'none'; jout.innerHTML = ''; jsel = -1; return; }
+      jout.innerHTML = jrows.map(function(x, i){
+        return '<button type="button" data-i="' + i + '" style="display:flex;gap:9px;width:100%;text-align:left;border:0;border-bottom:1px solid var(--hover);background:var(--card);color:var(--ink);padding:8px 10px;cursor:pointer;font-family:inherit;font-size:12px">' +
+          '<code style="flex-shrink:0;font-weight:700;max-width:170px;word-break:break-all">' + esc(x.sku || x.img) + '</code>' +
+          '<span style="flex:1;min-width:0;font-weight:600">' + esc(x.name || '') +
+            (x.make_model ? ' <span style="font-weight:400;color:var(--muted)">— ' + esc(x.make_model) + '</span>' : '') + '</span>' +
+        '</button>';
+      }).join('');
+      jout.style.display = 'block';
+      jout.querySelectorAll('button').forEach(function(b){
+        b.addEventListener('mousedown', function(e){ e.preventDefault(); pick(jrows[parseInt(b.dataset.i, 10)]); });
+        b.addEventListener('mouseenter', function(){ jsel = parseInt(b.dataset.i, 10); hl(); });
+      });
+      jsel = 0; hl();
+    };
+    var pick = async function(x){
+      if (!x) return;
+      jin.value = ''; jrows = []; render();
+      var p = x;
+      try { var full = (await api('/api/admin/products/' + encodeURIComponent(x.img))).product; if (full) p = Object.assign({}, x, full); } catch (_) {}
+      setV('npName', p.name); setV('npMakeModel', p.make_model);
+      var catSel = document.getElementById('npCategory'); if (catSel && p.category) catSel.value = p.category;
+      var condSel = document.getElementById('npCondition'); if (condSel && p.condition) condSel.value = p.condition;
+      setV('npCost', p.cost_usd); setV('npMarkup', p.markup_pct); setV('npPrice', p.price_usd);
+      setV('npList', p.list_price_usd); setV('npLow', p.low_threshold);
+      setV('npStockUom', p.stock_uom || 'each'); setV('npPurchUom', p.purchase_uom);
+      setV('npUnitsPerPurch', p.units_per_purchase);
+      var costSel = document.getElementById('npCosting'); if (costSel) costSel.value = p.costing_method || '';
+      var supSel = document.getElementById('npSupplier'); if (supSel) supSel.value = p.supplier_id || '';
+      setV('npSupPartNo', p.supplier_part_no); setV('npWarranty', p.warranty_days);
+      setV('npBin', p.bin_location);
+      var locSel = document.getElementById('npLocation'); if (locSel && p.location) locSel.value = p.location;
+      setChk('npSerial', p.serial_required);
+      posToast('Copied details from ' + (p.name || p.img) + ' — set a fresh SKU, photo and stock.');
+      var nn = document.getElementById('npName'); if (nn) nn.focus();
+    };
+    var run = function(){
+      var q = jin.value.trim();
+      clearTimeout(jd);
+      if (q.length < 2) { jrows = []; render(); return; }
+      jd = setTimeout(async function(){
+        var seq = ++jseq;
+        try {
+          var r = await api('/api/products?limit=40&offset=0&q=' + encodeURIComponent(q));
+          if (seq !== jseq) return;
+          jrows = r.products || []; render();
+        } catch (e) { if (seq === jseq) { jrows = []; render(); } }
+      }, 220);
+    };
+    jin.addEventListener('input', run);
+    jin.addEventListener('keydown', function(e){
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (!jrows.length) return;
+        e.preventDefault();
+        jsel = Math.max(0, Math.min(jrows.length - 1, (jsel < 0 ? 0 : jsel) + (e.key === 'ArrowDown' ? 1 : -1)));
+        hl();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (jrows.length) pick(jrows[jsel >= 0 ? jsel : 0]);
+      } else if (e.key === 'Escape') {
+        jin.value = ''; jrows = []; render();
+      }
+    });
+    jin.addEventListener('blur', function(){ setTimeout(function(){ jout.style.display = 'none'; }, 120); });
+  })();
 
   // load() below is a hoisted function declaration, so passing it here before
   // its definition is fine -- it gives the importer a way to refresh the list
@@ -1939,14 +2069,27 @@ async function renderProducts(panel){
             '<div style="grid-column:1/-1"><label class="lbl">Vehicle / fitment</label><input id="peMakeModel" class="fld" value="' + esc(p.make_model || '') + '"/></div>' +
             selFld('Category', 'peCategory', p.category, cats) +
             selFld('Condition', 'peCondition', p.condition, [['USED','USED'],['NEW','NEW']])) +
-          sect('Pricing & stock',
-            fld('Sell price (USD)', 'pePrice', p.price_usd, 'type="number" step="0.01" min="0" placeholder="no price"') +
+          sect('Pricing',
             fld('Cost / buy price (USD)', 'peCost', p.cost_usd, 'type="number" step="0.01" min="0" placeholder="unknown"') +
+            fld('Markup %', 'peMarkup', p.markup_pct, 'type="number" step="0.1" min="0" placeholder="e.g. 35"') +
+            fld('Sell price / retail (USD)', 'pePrice', p.price_usd, 'type="number" step="0.01" min="0" placeholder="auto from cost × markup"') +
+            fld('List / MSRP (USD)', 'peList', p.list_price_usd, 'type="number" step="0.01" min="0" placeholder="reference"')) +
+          sect('Stock',
             fld('Stock count', 'peStock', p.stock_count, 'type="number" min="0"') +
-            fld('Low-stock threshold', 'peLow', p.low_threshold, 'type="number" min="0"')) +
+            fld('Low-stock threshold', 'peLow', p.low_threshold, 'type="number" min="0"') +
+            selFld('Stock unit', 'peStockUom', p.stock_uom || 'each', [['','—']].concat(UOM_OPTS)) +
+            selFld('Purchase unit', 'pePurchUom', p.purchase_uom, [['','—']].concat(UOM_OPTS)) +
+            fld('Units per purchase', 'peUnitsPerPurch', p.units_per_purchase, 'type="number" step="0.001" min="0" placeholder="e.g. 12 per box"') +
+            selFld('Costing method', 'peCosting', p.costing_method, COSTING_OPTS)) +
+          sect('Supplier',
+            '<div style="grid-column:1/-1"><label class="lbl">Supplier</label><select id="peSupplier" class="fld">' + supplierOptions(p.supplier_id) + '</select></div>' +
+            fld('Supplier part #', 'peSupPartNo', p.supplier_part_no, 'placeholder="vendor catalogue no."')) +
           sect('Location',
             selFld('Location', 'peLocation', p.location, locs) +
             fld('Bin / Rack', 'peBin', p.bin_location, 'placeholder="e.g. A-12"')) +
+          sect('Warranty & serial',
+            fld('Warranty (days)', 'peWarranty', p.warranty_days, 'type="number" min="0" placeholder="e.g. 90"') +
+            '<div><label class="lbl">Serial number</label><label style="display:inline-flex;align-items:center;gap:7px;font-size:13px;padding-top:6px"><input type="checkbox" id="peSerial"' + (p.serial_required ? ' checked' : '') + '/> required at sale</label></div>') +
           sect('Status',
             '<div style="grid-column:1/-1"><label style="display:inline-flex;align-items:center;gap:7px;font-size:13px"><input type="checkbox" id="peActive"' + (p.is_active === false ? '' : ' checked') + '/> Listed / active</label></div>') +
           '<div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:6px">' +
@@ -2053,6 +2196,22 @@ async function renderProducts(panel){
       jin.addEventListener('focus', function(){ if (jrows.length) { place(); jout.style.display = 'block'; } });
     })();
 
+    // Retail auto-fills from cost × (1 + markup%) until the user types a price
+    // by hand — the usual parts-counter default.
+    (function(){
+      var cost = document.getElementById('peCost'), mk = document.getElementById('peMarkup'), price = document.getElementById('pePrice');
+      if (!cost || !mk || !price) return;
+      var touched = (price.value || '').trim() !== '';
+      price.addEventListener('input', function(){ touched = (price.value.trim() !== ''); });
+      var recalc = function(){
+        if (touched) return;
+        var c2 = parseFloat(cost.value), m = parseFloat(mk.value);
+        if (isFinite(c2) && isFinite(m)) price.value = (Math.round(c2 * (1 + m / 100) * 100) / 100).toFixed(2);
+      };
+      cost.addEventListener('input', recalc);
+      mk.addEventListener('input', recalc);
+    })();
+
     var msg = document.getElementById('peMsg');
     document.getElementById('peSave').addEventListener('click', async function(){
       var raw = (document.getElementById('pePrice').value || '').trim();
@@ -2068,10 +2227,21 @@ async function renderProducts(panel){
         location: document.getElementById('peLocation').value,
         bin_location: document.getElementById('peBin').value.trim(),
         is_active: document.getElementById('peActive').checked,
+        supplier_id: document.getElementById('peSupplier').value || '',
+        supplier_part_no: document.getElementById('peSupPartNo').value.trim(),
+        costing_method: document.getElementById('peCosting').value,
+        stock_uom: document.getElementById('peStockUom').value,
+        purchase_uom: document.getElementById('pePurchUom').value,
+        serial_required: document.getElementById('peSerial').checked,
+        markup_pct: (document.getElementById('peMarkup').value || '').trim(),
+        warranty_days: (document.getElementById('peWarranty').value || '').trim(),
+        units_per_purchase: (document.getElementById('peUnitsPerPurch').value || '').trim(),
       };
       if (raw !== '') body.price_usd = Number(raw);
       var rawCost = (document.getElementById('peCost').value || '').trim();
       if (rawCost !== '') body.cost_usd = Number(rawCost);
+      var rawList = (document.getElementById('peList').value || '').trim();
+      if (rawList !== '') body.list_price_usd = Number(rawList);
       msg.textContent = 'Saving…'; msg.style.color = 'var(--muted)';
       try {
         await api('/api/admin/products/' + encodeURIComponent(p.img), { method: 'PATCH', body: body });
@@ -2673,6 +2843,22 @@ async function renderPOS(panel){
   var machine = null;
   try { machine = await api('/api/admin/settings/machine'); } catch (_) {}
 
+  // Compact terminal identity for the #posFooter status strip — a trimmed-down
+  // version of the fuller badge in #posBar: which register this is, and how it
+  // is reaching the app (Internet / Local / Local · server).
+  var termInfo = (function(){
+    var host = (location.hostname || '').toLowerCase();
+    var isCloud = (machine && (machine.cloud === true || machine.mode === 'internet')) ||
+      host === 'mortysautoparts.com' || host === 'www.mortysautoparts.com' || /\.pages\.dev$/.test(host);
+    var isLanHost = host === 'localhost' || host === '127.0.0.1' || /\.local$/.test(host) ||
+      /^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+    var name = (machine && machine.name) || (isCloud ? (host || 'mortysautoparts.com') : (host || 'This terminal'));
+    if (isCloud) return { name: name, dot: '#38bdf8', label: 'Internet' };
+    if (machine && machine.local_db && machine.local_db.reachable) return { name: name, dot: '#4ade80', label: 'Local · server' };
+    if (isLanHost) return { name: name, dot: '#fbbf24', label: 'Local' };
+    return { name: name, dot: '#fca5a5', label: 'Local' };
+  })();
+
   // Every ticket needs a real customer_id to attach to (credit/discount
   // limits, loyalty, and receipts all key off it) -- a brand-new ticket
   // defaults to the seeded "Cash Customer - Walk-in" account rather than
@@ -3001,6 +3187,16 @@ async function renderPOS(panel){
       '<span id="posFootShop" style="font-weight:800;letter-spacing:.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">' +
         esc(POS_SHOP.name || 'Morty\'s Auto Parts') +
       '</span>' +
+      '<span style="opacity:.3;flex-shrink:0">|</span>' +
+      // Current terminal — mirrors the badge in #posBar so the register is
+      // identified at both ends of the screen.
+      '<span id="posFootTerm" style="white-space:nowrap;opacity:.92;flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis;display:inline-flex;align-items:center;gap:4px" title="This terminal — ' + esc(termInfo.name) + ' (' + esc(termInfo.label) + ')">' +
+        '🖥 <span style="overflow:hidden;text-overflow:ellipsis">' + esc(termInfo.name) + '</span>' +
+        '<span style="width:6px;height:6px;border-radius:50%;background:' + termInfo.dot + ';flex-shrink:0"></span>' + esc(termInfo.label) +
+      '</span>' +
+      '<span style="opacity:.3;flex-shrink:0">|</span>' +
+      // Cash-drawer shift status (same source as #posBar\'s shift button).
+      '<span id="posFootShift" style="white-space:nowrap;flex-shrink:0;font-weight:700;color:' + (shiftSession ? '#4ade80' : '#fca5a5') + '" title="' + (shiftSession ? esc('Cash-drawer shift #' + shiftSession.id + ' open · float ' + fmtMoney(shiftSession.opening_float)) : 'No cash-drawer shift is open') + '">🗄 ' + (shiftSession ? 'Shift open' : 'No shift open') + '</span>' +
       '<span id="posFootUser" style="margin-left:auto;white-space:nowrap;opacity:.92;flex-shrink:0" title="Signed in">👤 ' + esc(CURRENT_ADMIN_NAME || '—') + '</span>' +
       '<span style="opacity:.3;flex-shrink:0">|</span>' +
       '<span id="posFootCount" style="white-space:nowrap;opacity:.92;flex-shrink:0">—</span>' +
@@ -12320,6 +12516,20 @@ async function submitNewProduct(){
     fd.append('stock_count', document.getElementById('npStock').value || '0');
     fd.append('bin_location', document.getElementById('npBin').value.trim());
     fd.append('location', document.getElementById('npLocation').value);
+    fd.append('sku', document.getElementById('npSku').value.trim());
+    fd.append('barcode', document.getElementById('npBarcode').value.trim());
+    fd.append('cost_usd', document.getElementById('npCost').value || '');
+    fd.append('markup_pct', document.getElementById('npMarkup').value || '');
+    fd.append('list_price_usd', document.getElementById('npList').value || '');
+    fd.append('low_threshold', document.getElementById('npLow').value || '');
+    fd.append('stock_uom', document.getElementById('npStockUom').value || '');
+    fd.append('purchase_uom', document.getElementById('npPurchUom').value || '');
+    fd.append('units_per_purchase', document.getElementById('npUnitsPerPurch').value || '');
+    fd.append('costing_method', document.getElementById('npCosting').value || '');
+    fd.append('supplier_id', document.getElementById('npSupplier').value || '');
+    fd.append('supplier_part_no', document.getElementById('npSupPartNo').value.trim());
+    fd.append('warranty_days', document.getElementById('npWarranty').value || '');
+    fd.append('serial_required', document.getElementById('npSerial').checked ? '1' : '0');
     var res = await fetch('/api/admin/products', { method:'POST', body: fd, credentials:'same-origin' });
     var data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Save failed');

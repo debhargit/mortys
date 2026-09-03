@@ -140,14 +140,17 @@ export default function mount(app) {
     const row = await d1(c.env).one(
       `SELECT p.img, p.name, p.make_model, p.category, p.condition,
               p.price_cents / 100.0 AS price_usd, p.cost_cents / 100.0 AS cost_usd,
+              p.list_price_cents / 100.0 AS list_price_usd, p.markup_pct, p.costing_method,
               p.stock_count, p.low_threshold, p.is_active, p.sku, p.barcode,
+              p.warranty_days, p.serial_required,
+              p.stock_uom, p.purchase_uom, p.units_per_purchase, p.supplier_part_no,
               p.location, p.bin_location, p.supplier_id, s.name AS supplier_name
          FROM products p LEFT JOIN suppliers s ON s.id = p.supplier_id
         WHERE p.img = ?`,
       c.req.param('img')
     );
     if (!row) return c.json({ error: 'Not found' }, 404);
-    boolify(row, ['is_active']);
+    boolify(row, ['is_active', 'serial_required']);
     return c.json({ product: row });
   });
 
