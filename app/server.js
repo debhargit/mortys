@@ -3965,8 +3965,13 @@ app.get('/api/admin/products/:img', requireAdmin, async (req, res) => {
   const { rows } = await query(
     `SELECT p.img, p.name, p.make_model, p.category, p.condition,
             p.price_usd::float AS price_usd, p.cost_usd::float AS cost_usd,
-            p.stock_count, p.low_threshold, p.is_active, p.sku, p.barcode,
-            p.location, p.bin_location, p.supplier_id, s.name AS supplier_name
+            p.list_price_usd::float AS list_price_usd, p.trade_price_usd::float AS trade_price_usd,
+            p.core_charge_usd::float AS core_charge_usd, p.env_fee_usd::float AS env_fee_usd,
+            p.markup_pct::float AS markup_pct, p.cost_method, p.stock_unit,
+            p.warranty_days, p.serial_required,
+            p.stock_count, p.low_threshold, p.min_stock, p.is_active, p.sku, p.barcode,
+            p.location, p.bin_location,
+            p.supplier_id, p.supplier_sku, s.name AS supplier_name
        FROM products p LEFT JOIN suppliers s ON s.id = p.supplier_id
       WHERE p.img = $1`, [req.params.img]);
   if (!rows.length) return res.status(404).json({ error: 'Not found' });
@@ -3975,15 +3980,28 @@ app.get('/api/admin/products/:img', requireAdmin, async (req, res) => {
 
 app.patch('/api/admin/products/:img', requireAdmin, async (req, res) => {
   const b = req.body || {};
-  if ((b.price_usd != null || b.cost_usd != null) && !(await userCan(req, 'inventory.edit_price')))
+  const PRICE_FIELDS = ['price_usd', 'cost_usd', 'list_price_usd', 'trade_price_usd', 'core_charge_usd', 'env_fee_usd', 'markup_pct'];
+  if (PRICE_FIELDS.some((f) => b[f] != null) && !(await userCan(req, 'inventory.edit_price')))
     return res.status(403).json({ error: 'Your account is not allowed to edit product pricing.' });
   if (b.stock_count != null && !(await userCan(req, 'inventory.adjust_stock')))
     return res.status(403).json({ error: 'Your account is not allowed to adjust stock counts.' });
   const sets = []; const params = [];
+  // dollars-or-blank -> Number or NULL
+  const money = (v) => (v === '' || v == null ? null : Number(v));
   if (b.stock_count != null){ params.push(parseInt(b.stock_count, 10)); sets.push(`stock_count = $${params.length}`); }
   if (b.price_usd != null){ params.push(Number(b.price_usd)); sets.push(`price_usd = $${params.length}`); }
-  if (b.cost_usd != null){ params.push(b.cost_usd === '' ? null : Number(b.cost_usd)); sets.push(`cost_usd = $${params.length}`); }
+  if (b.cost_usd != null){ params.push(money(b.cost_usd)); sets.push(`cost_usd = $${params.length}`); }
+  if (b.list_price_usd != null){ params.push(money(b.list_price_usd)); sets.push(`list_price_usd = $${params.length}`); }
+  if (b.trade_price_usd != null){ params.push(money(b.trade_price_usd)); sets.push(`trade_price_usd = $${params.length}`); }
+  if (b.core_charge_usd != null){ params.push(money(b.core_charge_usd)); sets.push(`core_charge_usd = $${params.length}`); }
+  if (b.env_fee_usd != null){ params.push(money(b.env_fee_usd)); sets.push(`env_fee_usd = $${params.length}`); }
+  if (b.markup_pct != null){ params.push(money(b.markup_pct)); sets.push(`markup_pct = $${params.length}`); }
+  if (b.cost_method !== undefined){ params.push(String(b.cost_method || '').trim() || null); sets.push(`cost_method = $${params.length}`); }
+  if (b.stock_unit !== undefined){ params.push(String(b.stock_unit || '').trim() || null); sets.push(`stock_unit = $${params.length}`); }
+  if (b.warranty_days !== undefined){ params.push(b.warranty_days === '' || b.warranty_days == null ? null : Math.max(0, parseInt(b.warranty_days, 10) || 0)); sets.push(`warranty_days = $${params.length}`); }
+  if (b.serial_required !== undefined){ params.push(!!b.serial_required); sets.push(`serial_required = $${params.length}`); }
   if (b.supplier_id !== undefined){ params.push(b.supplier_id ? parseInt(b.supplier_id, 10) : null); sets.push(`supplier_id = $${params.length}`); }
+  if (b.supplier_sku !== undefined){ params.push(String(b.supplier_sku || '').trim() || null); sets.push(`supplier_sku = $${params.length}`); }
   if (b.low_threshold != null){ params.push(Math.max(0, parseInt(b.low_threshold, 10) || 0)); sets.push(`low_threshold = $${params.length}`); }
   if (b.is_active != null){ params.push(!!b.is_active); sets.push(`is_active = $${params.length}`); }
   if (b.name != null){ params.push(String(b.name)); sets.push(`name = $${params.length}`); }
@@ -6279,7 +6297,8 @@ app.delete('/api/admin/suppliers/:id', requireManager, async (req, res) => {
 // Extended product PATCH (the existing endpoint only handles a few fields)
 app.patch('/api/admin/products-ext/:img', requireAdmin, async (req, res) => {
   const fields = ['name','make_model','category','condition','price_usd','stock_count','low_threshold','is_active',
-    'sku','barcode','supplier_id','cost_usd','core_charge_usd','env_fee_usd','warranty_days','serial_required',
+    'sku','barcode','supplier_id','supplier_sku','cost_usd','list_price_usd','trade_price_usd',
+    'core_charge_usd','env_fee_usd','warranty_days','serial_required','cost_method','stock_unit',
     'weight_kg','dim_cm','bin_location','min_stock','markup_pct'];
   const sets = []; const vals = [];
   for (const f of fields) if (req.body && req.body[f] !== undefined) { sets.push(`${f} = $${sets.length+1}`); vals.push(req.body[f]); }
@@ -6306,9 +6325,11 @@ app.get('/api/admin/products-ext', requireAdmin, async (req, res) => {
   const { rows } = await query(
     `SELECT p.img, p.name, p.make_model, p.category, p.condition,
             p.price_usd::float AS price_usd, p.cost_usd::float AS cost_usd,
+            p.list_price_usd::float AS list_price_usd, p.trade_price_usd::float AS trade_price_usd,
             p.stock_count, p.low_threshold, p.min_stock, p.is_active,
             p.sku, p.barcode, p.core_charge_usd::float AS core_charge_usd,
             p.env_fee_usd::float AS env_fee_usd, p.warranty_days, p.serial_required,
+            p.cost_method, p.stock_unit, p.supplier_sku,
             p.weight_kg::float AS weight_kg, p.dim_cm, p.bin_location, p.markup_pct::float AS markup_pct,
             p.supplier_id, s.name AS supplier_name
        FROM products p LEFT JOIN suppliers s ON s.id = p.supplier_id

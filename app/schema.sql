@@ -560,6 +560,21 @@ CREATE INDEX IF NOT EXISTS idx_products_barcode ON products (barcode);
 CREATE INDEX IF NOT EXISTS idx_products_sku     ON products (sku);
 
 -- =============================================================================
+--  Industry-standard part-department pricing / costing / stocking fields,
+--  surfaced in the admin "Edit part" modal. list_price_usd = MSRP / list;
+--  trade_price_usd = wholesale / trade-tier price (sits alongside the existing
+--  retail price_usd and cost_usd). cost_method is the valuation basis
+--  ('last' | 'average' | 'standard' | 'fifo'); stock_unit is the selling /
+--  stocking unit of measure ('EACH','PAIR','SET','KIT','BOX','CASE',...);
+--  supplier_sku is the vendor's own part number for the linked supplier_id.
+-- =============================================================================
+ALTER TABLE products ADD COLUMN IF NOT EXISTS list_price_usd  NUMERIC(10,2);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS trade_price_usd NUMERIC(10,2);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_method     TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_unit      TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS supplier_sku    TEXT;
+
+-- =============================================================================
 --  PRODUCT SEARCH PERFORMANCE (P2, 2026-08-18)
 --
 --  GET /api/products matches search terms with lower(col) LIKE '%term%' --

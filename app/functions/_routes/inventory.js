@@ -224,13 +224,21 @@ export default function mount(app) {
       stock_count: (v) => parseInt(v, 10), low_threshold: (v) => parseInt(v, 10),
       is_active: toBit, sku: null, barcode: null,
       supplier_id: (v) => (v ? parseInt(v, 10) : null),
+      supplier_sku: (v) => (v == null ? null : String(v).trim() || null),
       warranty_days: (v) => (v === '' || v == null ? null : parseInt(v, 10)),
       serial_required: toBit, weight_kg: num, dim_cm: null,
       bin_location: null, min_stock: (v) => (v === '' || v == null ? null : parseInt(v, 10)),
       markup_pct: num,
+      cost_method: (v) => (v == null ? null : String(v).trim() || null),
+      stock_unit: (v) => (v == null ? null : String(v).trim() || null),
       price_usd: null, cost_usd: null, core_charge_usd: null, env_fee_usd: null,
+      list_price_usd: null, trade_price_usd: null,
     };
-    const CENTS = { price_usd: 'price_cents', cost_usd: 'cost_cents', core_charge_usd: 'core_charge_cents', env_fee_usd: 'env_fee_cents' };
+    const CENTS = {
+      price_usd: 'price_cents', cost_usd: 'cost_cents',
+      core_charge_usd: 'core_charge_cents', env_fee_usd: 'env_fee_cents',
+      list_price_usd: 'list_price_cents', trade_price_usd: 'trade_price_cents',
+    };
     const sets = []; const vals = [];
     for (const [f, tf] of Object.entries(MAP)) {
       if (b[f] === undefined) continue;
@@ -260,9 +268,11 @@ export default function mount(app) {
     const rows = await d1(c.env).many(
       `SELECT p.img, p.name, p.make_model, p.category, p.condition,
               p.price_cents / 100.0 AS price_usd, p.cost_cents / 100.0 AS cost_usd,
+              p.list_price_cents / 100.0 AS list_price_usd, p.trade_price_cents / 100.0 AS trade_price_usd,
               p.stock_count, p.low_threshold, p.min_stock, p.is_active,
               p.sku, p.barcode, p.core_charge_cents / 100.0 AS core_charge_usd,
               p.env_fee_cents / 100.0 AS env_fee_usd, p.warranty_days, p.serial_required,
+              p.cost_method, p.stock_unit, p.supplier_sku,
               p.weight_kg, p.dim_cm, p.bin_location, p.markup_pct,
               p.supplier_id, s.name AS supplier_name
          FROM products p LEFT JOIN suppliers s ON s.id = p.supplier_id
