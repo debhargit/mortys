@@ -9,12 +9,12 @@
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Vision Auto Solutions Ltd" />
 <meta property="og:title" content="Vision Auto Solutions Ltd — Auto Parts & Accessories · Kingston" />
-<meta property="og:description" content="Genuine auto parts & accessories in Kingston, Jamaica — wheels, tires, audio, tint, brakes, suspension, batteries, lights. Family-run since 2017." />
+<meta property="og:description" content="Affordable OEM & aftermarket auto parts & accessories in Kingston, Jamaica — wheels, tires, audio, tint, brakes, suspension, batteries, lights. Family-run since 2017." />
 <meta property="og:url" content="https://visionautosolutions.com/" />
 <meta property="og:image" content="https://visionautosolutions.com/brakes.jpg" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="Vision Auto Solutions Ltd — Auto Parts & Accessories · Kingston" />
-<meta name="twitter:description" content="Genuine auto parts & accessories in Kingston, Jamaica — wheels, tires, audio, tint, brakes, suspension, batteries, lights. Family-run since 2017." />
+<meta name="twitter:description" content="Affordable OEM & aftermarket auto parts & accessories in Kingston, Jamaica — wheels, tires, audio, tint, brakes, suspension, batteries, lights. Family-run since 2017." />
 <meta name="twitter:image" content="https://visionautosolutions.com/brakes.jpg" />
 <script type="application/ld+json">
 {
@@ -40,9 +40,7 @@
     "ratingValue": "4.8",
     "reviewCount": "120",
     "bestRating": "5"
-  },
-  "department": [
-    { "@type": "AutoRepair", "name": "Vision Auto Solutions Service & Repair Center" }  ]
+  }
 }
 </script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Bebas+Neue&display=swap" rel="stylesheet">
@@ -143,7 +141,7 @@ nav.primary a:hover::after{content:"";position:absolute;left:0;right:0;bottom:0;
 .hero .slide.active{opacity:1}
 .hero::after{content:"";position:absolute;inset:0;background:linear-gradient(133deg,rgba(10,10,12,.95) 0%,rgba(10,10,12,.85) 38%,rgba(10,10,12,.25) 65%,rgba(10,10,12,0) 100%);z-index:2}
 /* Desktop hero — full 520px stage with vertically centered content. Promo image is hidden on desktop (mobile-only). */
-.hero-content{position:relative;z-index:3;display:flex;align-items:center;min-height:520px;padding:60px 0}
+.hero-content{position:relative;z-index:3;display:flex;align-items:center;min-height:520px;padding:28px 0}
 .hero-inner{max-width:640px}
 .hero .eyebrow{display:inline-block;background:var(--red);color:#fff;padding:6px 14px;border-radius:4px;font-size:.74rem;font-weight:800;letter-spacing:.16em;text-transform:uppercase;margin-bottom:18px}
 .hero h1{font-family:'Bebas Neue',sans-serif;font-size:4.4rem;line-height:.98;letter-spacing:.01em;margin-bottom:18px}
@@ -176,10 +174,10 @@ nav.primary a:hover::after{content:"";position:absolute;left:0;right:0;bottom:0;
   /* Hero stage — brakes promo is HIDDEN on desktop. Only the eyebrow chip and the
      centered text block remain. */
   .hero{min-height:600px;padding:0;margin:0}
-  .hero-content{min-height:600px;padding:64px 0 70px;margin:0}
-  /* Container keeps side padding only — NOT position:relative; absolute children
-     anchor to .hero-content (which has position:relative from base CSS). */
-  .hero-content > .container{padding:0 24px}
+  .hero-content{min-height:600px;padding:28px 0 44px;margin:0}
+  /* Container runs edge-to-edge; inner blocks keep their own max-widths so text
+     stays centred. NOT position:relative — absolute children anchor to .hero-content. */
+  .hero-content > .container{padding:0;max-width:none;width:100%}
   /* Text block spans the container, content centered */
   .hero-inner{max-width:none;width:100%;text-align:center;margin:0 auto}
   /* Eyebrow chip pinned to the top edge of the hero, comfortably above the centered text. */
@@ -235,18 +233,18 @@ nav.primary a:hover::after{content:"";position:absolute;left:0;right:0;bottom:0;
 
   /* Hero content — plain block flow so float:right on the image lets the H1 text wrap beside it.
        Row 1: eyebrow centered, full width.
-       Row 2: image floats RIGHT, H1 "Genuine parts. Real prices." flows beside it (in line).
+       Row 2: image floats LEFT, H1 "Every part, every budget." flows beside it (in line).
        Row 3+: lead, buttons, stats clear:both and span full width, centered. */
   .hero-content{display:block;padding:0;margin:0;min-height:0}
   .hero-content > .container{padding:0;margin:0;max-width:none;width:100%}
-  .hero-inner{display:block;max-width:100%;padding:14px 14px 18px;margin:0;box-sizing:border-box;text-align:left}
+  .hero-inner{display:block;max-width:100%;padding:6px 0 16px;margin:0;box-sizing:border-box;text-align:left}
 
   /* 1) Eyebrow — block element, centered horizontally on the screen */
   .hero .eyebrow{display:block;width:fit-content;margin:0 auto 10px;font-size:.7rem;padding:5px 12px;letter-spacing:.14em;text-align:center}
 
-  /* 2) Image — FLOATS RIGHT as a HORIZONTAL letterbox that mirrors the height of the 2-line H1.
-     Stretched wider so it sits right up against the headline on the left */
-  .hero-promo{display:block;float:right;width:46vw;max-width:260px;height:60px;margin:2px 0 8px 6px;padding:0;border:0;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,.25);background:#fff;text-decoration:none;line-height:0;position:static;overflow:hidden}
+  /* 2) Image — FLOATS LEFT as a HORIZONTAL letterbox that mirrors the height of the 2-line H1.
+     Stretched wider so it sits right up against the headline on the right */
+  .hero-promo{display:block;float:left;width:46vw;max-width:260px;height:60px;margin:2px 6px 8px 0;padding:0;border:0;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,.25);background:#fff;text-decoration:none;line-height:0;position:static;overflow:hidden}
   .hero-promo img{display:block;width:100%;height:100%;max-width:none;object-fit:cover;object-position:center}
   .hero-promo:hover{transform:none;box-shadow:0 3px 10px rgba(214,31,43,.35)}
 
@@ -269,8 +267,8 @@ nav.primary a:hover::after{content:"";position:absolute;left:0;right:0;bottom:0;
 }
 @media(max-width:760px){
   /* Slightly tighter on smaller phones */
-  .hero-inner{padding:12px 12px 16px}
-  .hero-promo{width:48vw;max-width:240px;height:54px;margin:2px 0 8px 5px;border-radius:5px}
+  .hero-inner{padding:6px 0 16px}
+  .hero-promo{width:48vw;max-width:240px;height:54px;margin:2px 5px 8px 0;border-radius:5px}
   .hero h1{font-size:1.55rem}
   .hero p.lead{font-size:.86rem;margin:12px auto}
   .hero-stats .stat .n{font-size:1.1rem}
@@ -280,8 +278,8 @@ nav.primary a:hover::after{content:"";position:absolute;left:0;right:0;bottom:0;
   .section-head h2{font-size:1.8rem}
 }
 @media(max-width:480px){
-  .hero-inner{padding:10px 10px 14px}
-  .hero-promo{width:50vw;max-width:220px;height:46px;margin:2px 0 8px 4px;border-radius:4px}
+  .hero-inner{padding:6px 0 14px}
+  .hero-promo{width:50vw;max-width:220px;height:46px;margin:2px 4px 8px 0;border-radius:4px}
   .hero h1{font-size:1.32rem}
   .hero .eyebrow{font-size:.6rem;padding:3px 9px;letter-spacing:.1em}
   .hero p.lead{font-size:.78rem;line-height:1.45}
@@ -380,7 +378,7 @@ form textarea{resize:vertical;min-height:110px}
 
 /* -------------------- FOOTER -------------------- */
 footer{background:var(--black);color:#cdd5e2;padding:60px 0 24px}
-.foot-grid{display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr;gap:32px;margin-bottom:36px}
+.foot-grid{display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:32px;margin-bottom:36px}
 footer h4{font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:.06em;color:#fff;margin-bottom:14px}
 footer a{display:block;color:#cdd5e2;text-decoration:none;font-size:.88rem;padding:4px 0;transition:.2s}
 footer a:hover{color:var(--yellow)}
@@ -427,7 +425,7 @@ footer .socials a:hover{background:var(--red)}
 <body>
 
 <!-- Promo bar -->
-<div class="promobar"><span>★ <b>Genuine Parts</b></span><span>★ <b>Same-Day Fitting</b></span><span>★ <b>Islandwide Delivery</b></span></div>
+<div class="promobar"><span>★ <b>OEM &amp; Aftermarket</b></span><span>★ <b>Best Prices in Kingston</b></span><span>★ <b>Islandwide Delivery</b></span></div>
 
 <!-- Topbar -->
 <div class="topbar"><div class="container">
@@ -477,12 +475,12 @@ footer .socials a:hover{background:var(--red)}
   <a href="shop.html?f=brakes" class="hero-banner" aria-label="ADVICS brake rebates — shop now"><span>⚡ HOT DEAL</span> <b>ADVICS Brake Rebates</b> — pads, rotors &amp; fluid · <em>Tap to shop</em></a>
   <div class="hero-content"><div class="container">
     <div class="hero-inner">
-      <span class="eyebrow">Kingston · Auto Parts &amp; Accessories</span>
+      <span class="eyebrow">OEM &amp; Aftermarket Parts · Kingston</span>
       <a href="shop.html?f=brakes" class="hero-promo" aria-label="ADVICS brake rebates — shop now">
         <img src="brakes.jpg" alt="ADVICS brake rotors, pads &amp; fluid · Instant Rebates">
       </a>
-      <h1>Genuine parts.<em>Real prices.</em></h1>
-      <p class="lead">Kingston's specialist in genuine auto parts for Toyota, Suzuki, Mitsubishi, Subaru, Nissan, Honda &amp; Mazda — with computerized parts locating, free battery check, free tyre change with purchase, and full servicing from our Waltham Park Road location.</p>
+      <h1>Every part,<em>every budget.</em></h1>
+      <p class="lead">OEM and aftermarket parts for Toyota, Suzuki, Mitsubishi, Subaru, Nissan, Honda &amp; Mazda — thousands in stock at prices that actually make sense, with fast counter pickup and islandwide delivery from our Waltham Park Road shop.</p>
       <div class="hero-cta">
         <a href="shop.html" class="btn btn-yellow">🛒 Shop Full Catalog</a>
         <a href="#contact" class="btn btn-red">📋 Request a Part</a>
@@ -500,11 +498,11 @@ footer .socials a:hover{background:var(--red)}
 
 <!-- STRIP -->
 <div class="strip"><div class="container"><div class="row">
-  <div class="pill"><span class="ic">⚡</span> SAME-DAY FITTING</div>
+  <div class="pill"><span class="ic">⚡</span> SAME-DAY PICKUP</div>
   <div class="pill"><span class="ic">🚚</span> ISLANDWIDE DELIVERY</div>
-  <div class="pill"><span class="ic">🔧</span> EXPERT INSTALL</div>
+  <div class="pill"><span class="ic">🔩</span> OEM &amp; AFTERMARKET</div>
   <div class="pill"><span class="ic">💰</span> PRICE-MATCH GUARANTEE</div>
-  <div class="pill"><span class="ic">✅</span> 100% GENUINE</div>
+  <div class="pill"><span class="ic">✅</span> QUALITY CHECKED</div>
 </div></div></div>
 
 <!-- MARKETPLACE — three community boards -->
@@ -592,7 +590,7 @@ footer .socials a:hover{background:var(--red)}
       </a>
       <a class="cat" href="shop.html">
         <div class="img" style="background-image:url('https://images.unsplash.com/photo-1581234692050-7a45ed91c5e7?auto=format&fit=crop&w=900&q=80')"><div class="icbox">🧰</div></div>
-        <div class="body"><h3>Engine &amp; Filters</h3><p>Oil, air &amp; cabin filters · spark plugs · belts · hoses · gaskets. Genuine OEM &amp; aftermarket.</p><div class="price">From J$650</div></div>
+        <div class="body"><h3>Engine &amp; Filters</h3><p>Oil, air &amp; cabin filters · spark plugs · belts · hoses · gaskets. OEM &amp; aftermarket.</p><div class="price">From J$650</div></div>
       </a>
       <a class="cat" href="shop.html">
         <div class="img" style="background-image:url('https://images.unsplash.com/photo-1486754735734-325b5831c3ad?auto=format&fit=crop&w=900&q=80')"><div class="icbox">🧴</div></div>
@@ -745,9 +743,9 @@ footer .socials a:hover{background:var(--red)}
       <div class="img-side" style="aspect-ratio:5/4;background-size:cover;background-position:center;border-radius:14px;border:6px solid var(--black);background-image:url('https://images.unsplash.com/photo-1632823469850-1b7b1e8b7e3e?auto=format&fit=crop&w=1000&q=80')"></div>
       <div>
         <span style="color:var(--red);font-size:.8rem;letter-spacing:.2em;text-transform:uppercase;font-weight:800">About us</span>
-        <h2 style="font-family:'Bebas Neue';font-size:2.6rem;line-height:1;letter-spacing:.02em;color:var(--black);margin:8px 0 16px">Seven years of <em style="font-style:normal;color:var(--red)">genuine parts</em>.</h2>
+        <h2 style="font-family:'Bebas Neue';font-size:2.6rem;line-height:1;letter-spacing:.02em;color:var(--black);margin:8px 0 16px">Seven years of <em style="font-style:normal;color:var(--red)">parts you can afford</em>.</h2>
         <p style="color:var(--ink-soft);margin-bottom:14px">Vision Auto Solutions Co Ltd has been operating for 7 years from 112C Waltham Park Road, Kingston. We specialise in the sale of new auto parts and supplies for Toyota, Suzuki, Mitsubishi, Subaru, Nissan, Honda &amp; Mazda.</p>
-        <p style="color:var(--ink-soft);margin-bottom:24px">We offer computerized parts locating, free battery check, and free tyre change with purchase. Our general auto servicing includes front end, brake repair, shocks, struts, pressing in &amp; out bushing, joints, and injector cleaning.</p>
+        <p style="color:var(--ink-soft);margin-bottom:24px">We offer computerized parts locating and same-day counter pickup, keeping OEM and aftermarket parts for front end, brakes, shocks, struts, bushings, joints and more in stock for every make we carry.</p>
         <a href="#contact" class="btn btn-primary">Visit our Waltham Park Road shop</a>
       </div>
     </div>
@@ -769,7 +767,7 @@ footer .socials a:hover{background:var(--red)}
       </div>
       <div class="testimonial">
         <div class="stars">★★★★★</div>
-        <p class="text">"Needed front pads and rotors for my Civic in a hurry. Vision Auto had everything genuine in stock, gave me the best price in town, and had the car back to me the same afternoon. Proper service."</p>
+        <p class="text">"Needed front pads and rotors for my Civic in a hurry. Vision Auto had everything in stock, gave me the best price in town, and I was sorted the same afternoon. Proper service."</p>
         <div class="who"><div class="av">RC</div><div><div class="nm">Ryan C.</div><div class="car">Brakes &amp; parts · Honda Civic</div></div></div>
       </div>
       <div class="testimonial">
@@ -844,23 +842,13 @@ footer .socials a:hover{background:var(--red)}
             <div style="font-size:.66rem;letter-spacing:.16em;color:var(--yellow);font-weight:800">AUTO SOLUTIONS LTD</div>
           </div>
         </div>
-        <p style="font-size:.88rem;opacity:.85;line-height:1.6">Kingston's home for genuine auto parts and accessories — wheels, tires, audio, tint, brakes, suspension, lighting and more. Family-run since 2017.</p>
+        <p style="font-size:.88rem;opacity:.85;line-height:1.6">Kingston's home for affordable auto parts and accessories — OEM and aftermarket wheels, tires, audio, tint, brakes, suspension, lighting and more. Family-run since 2017.</p>
       </div>
       <div>
         <h4>Shop</h4>
         <a href="#categories">Tires</a>
         <a href="#categories">Brakes &amp; Suspension</a>
         <a href="#categories">Lighting</a>
-      </div>
-      <div>
-        <h4>Services</h4>
-        <a href="#contact">Brake Repair</a>
-        <a href="#contact">Shocks &amp; Struts</a>
-        <a href="#contact">Front End</a>
-        <a href="#contact">Injector Cleaning</a>
-        <a href="#contact">Bushing Press In/Out</a>
-        <a href="#contact">Free Battery Check</a>
-        <a href="#contact">Free Tyre Change w/ Purchase</a>
       </div>
       <div>
         <h4>Contact</h4>
@@ -991,7 +979,7 @@ function loadFeatured(){
             (showCat?'<div class="tag">'+esc(titleCase(cat))+'</div>':'')+
           '</div>'+
           '<div class="body">'+
-            '<div class="brand">'+esc(generic?'Genuine part':titleCase(make))+'</div>'+
+            '<div class="brand">'+esc(generic?'Aftermarket':titleCase(make))+'</div>'+
             '<h4>'+esc(name)+'</h4>'+
             '<div class="price" style="font-size:.95rem;line-height:1.3">In stock — call for price</div>'+
             '<a class="btn-sm">Get Quote</a>'+
@@ -1011,7 +999,7 @@ else loadFeatured();
 document.querySelectorAll('nav.primary a').forEach(a=>a.addEventListener('click',()=>{document.querySelector('nav.primary').classList.remove('open')}));
 </script>
 
-<!-- Vision Auto enhancement bundle: fitment finder, service booking, loyalty rewards, compare, quick reorder, bundle pricing -->
+<!-- Vision Auto enhancement bundle: fitment finder, loyalty rewards, compare, quick reorder, bundle pricing -->
 <script src="assets/sp-enhancements.js"></script>
 
 </body>
