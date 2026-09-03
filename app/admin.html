@@ -2721,7 +2721,17 @@ function posMoney(cents){
 //  the ones that get stored.
 // -----------------------------------------------------------------------------
 function posLineGross(i){ return (Number(i.price) || 0) * (Number(i.qty) || 0); }
-function posLineDisc(i){ return Math.min(posLineGross(i), Math.max(0, Number(i.disc) || 0)); }
+// Per-line discount is entered either as a flat amount (i.disc) or, when
+// i.discMode === 'pct', as a percentage of the line gross (i.discPct). Either
+// way this resolves to a dollar figure, clamped to [0, gross]; everything
+// downstream (totals, payload, receipt) reads it through here.
+function posLineDisc(i){
+  var gross = posLineGross(i);
+  var raw = i && i.discMode === 'pct'
+    ? gross * (Math.max(0, Number(i.discPct) || 0) / 100)
+    : Math.max(0, Number(i && i.disc) || 0);
+  return Math.min(gross, Math.round(raw * 100) / 100);
+}
 function posLineNet(i){ return posLineGross(i) - posLineDisc(i); }
 
 function posTotals(){
@@ -2777,7 +2787,7 @@ function posAddToCart(p, qty){
       img: p.img, name: p.name, make_model: p.make_model, sku: p.sku || null,
       price: Number(p.price_usd) || 0, qty: qty || 1,
       location: p.location, bin_location: p.bin_location,
-      stock_count: p.stock_count, disc: 0, discNote: '',
+      stock_count: p.stock_count, disc: 0, discPct: 0, discMode: 'amt', discNote: '',
     });
   }
   posSaveState();
@@ -3631,7 +3641,7 @@ async function renderPOS(panel){
         '<span style="flex:1;min-width:0">DESCRIPTION</span>' +
         '<span style="width:58px;flex-shrink:0;text-align:center">QTY</span>' +
         '<span style="width:90px;flex-shrink:0;text-align:right">UNIT</span>' +
-        '<span style="width:86px;flex-shrink:0;text-align:right">DISC</span>' +
+        '<span style="width:128px;flex-shrink:0;text-align:right">DISC $ / %</span>' +
         '<span style="width:104px;flex-shrink:0;text-align:right">EXTENDED</span>' +
         '<span style="width:26px;flex-shrink:0"></span>' +
       '</div>';
@@ -3661,9 +3671,16 @@ async function renderPOS(panel){
           '<input type="number" min="0" step="0.01" value="' + (i.price > 0 ? i.price : '') + '" placeholder="price" data-pidx="' + idx + '" class="posPrice" ' +
             'style="width:86px;padding:4px;border:1px solid ' + (i.price > 0 ? 'var(--line)' : '#818cf8') + ';border-radius:5px;font-size:' + posFS(12) + ';font-weight:700;text-align:right;font-family:inherit"/>' +
         '</span>' +
-        '<span style="width:86px;flex-shrink:0;text-align:right">' +
-          '<input type="number" min="0" step="0.01" value="' + (d > 0 ? d : '') + '" placeholder="− disc" data-didx="' + idx + '" class="posDisc" ' +
-            'style="width:82px;padding:4px;border:1px solid ' + (d > 0 ? '#fca5a5' : 'var(--line)') + ';border-radius:5px;font-size:' + posFS(11) + ';font-weight:700;text-align:right;color:#b91c1c;font-family:inherit"/>' +
+        '<span style="width:128px;flex-shrink:0;display:flex;gap:3px;align-items:center;justify-content:flex-end">' +
+          '<select class="posDiscMode" data-dmidx="' + idx + '" title="Enter the discount as a dollar amount or a percent of this line" ' +
+            'style="width:38px;padding:4px 2px;border:1px solid var(--line);border-radius:5px;font-size:' + posFS(11) + ';font-weight:800;font-family:inherit;background:#fff;color:#111">' +
+            '<option value="amt"' + (i.discMode === 'pct' ? '' : ' selected') + '>$</option>' +
+            '<option value="pct"' + (i.discMode === 'pct' ? ' selected' : '') + '>%</option>' +
+          '</select>' +
+          '<input type="number" min="0" step="' + (i.discMode === 'pct' ? '0.1' : '0.01') + '" ' +
+            'value="' + (i.discMode === 'pct' ? (Number(i.discPct) > 0 ? i.discPct : '') : (d > 0 ? d : '')) + '" ' +
+            'placeholder="' + (i.discMode === 'pct' ? '− %' : '− $') + '" data-didx="' + idx + '" class="posDisc" ' +
+            'style="width:72px;padding:4px;border:1px solid ' + (d > 0 ? '#fca5a5' : 'var(--line)') + ';border-radius:5px;font-size:' + posFS(11) + ';font-weight:700;text-align:right;color:#b91c1c;font-family:inherit"/>' +
         '</span>' +
         '<b style="width:104px;flex-shrink:0;text-align:right;font-weight:800;font-size:' + cFS + '">' +
           (i.price > 0 ? fmtMoney(net) : '—') + '</b>' +
@@ -3716,9 +3733,12 @@ async function renderPOS(panel){
             'style="width:72px;padding:4px;border:1px solid ' + (i.price > 0 ? 'var(--line)' : '#818cf8') + ';border-radius:4px;font-size:12px;text-align:right"/>' +
           '<span style="font-size:11px;color:var(--muted)">×</span>' +
           '<input type="number" min="1" value="' + i.qty + '" data-idx="' + idx + '" class="posQty" style="width:46px;padding:4px;border:1px solid var(--line);border-radius:4px;font-size:12px;text-align:center"/>' +
-          '<span style="font-size:11px;color:#b91c1c" title="Discount on this line">−$</span>' +
-          '<input type="number" min="0" step="0.01" value="' + (d > 0 ? d : '') + '" placeholder="0" data-didx="' + idx + '" class="posDisc" ' +
-            'style="width:58px;padding:4px;border:1px solid ' + (d > 0 ? '#fca5a5' : 'var(--line)') + ';border-radius:4px;font-size:12px;text-align:right"/>' +
+          '<select class="posDiscMode" data-dmidx="' + idx + '" title="Discount as amount or percent" style="padding:4px 2px;border:1px solid var(--line);border-radius:4px;font-size:11px;font-weight:800;background:#fff;color:#111">' +
+            '<option value="amt"' + (i.discMode === 'pct' ? '' : ' selected') + '>−$</option>' +
+            '<option value="pct"' + (i.discMode === 'pct' ? ' selected' : '') + '>−%</option>' +
+          '</select>' +
+          '<input type="number" min="0" step="' + (i.discMode === 'pct' ? '0.1' : '0.01') + '" value="' + (i.discMode === 'pct' ? (Number(i.discPct) > 0 ? i.discPct : '') : (d > 0 ? d : '')) + '" placeholder="0" data-didx="' + idx + '" class="posDisc" ' +
+            'style="width:52px;padding:4px;border:1px solid ' + (d > 0 ? '#fca5a5' : 'var(--line)') + ';border-radius:4px;font-size:12px;text-align:right"/>' +
           '<b style="margin-left:auto;font-size:12.5px">' + (i.price > 0 ? fmtMoney(net) : '—') + '</b>' +
         '</div>' +
         (d > 0
@@ -3806,12 +3826,27 @@ async function renderPOS(panel){
         drawCart();
       });
     });
+    items.querySelectorAll('.posDiscMode').forEach(function(sel){
+      sel.addEventListener('change', function(){
+        var line = POS.cart[parseInt(sel.getAttribute('data-dmidx'), 10)];
+        if (!line) return;
+        line.discMode = sel.value === 'pct' ? 'pct' : 'amt';
+        // Keep whichever raw value the operator already typed; the other stays
+        // put so a mis-click on the toggle is trivially reversible.
+        drawCart();
+      });
+    });
     items.querySelectorAll('.posDisc').forEach(function(inp){
       inp.addEventListener('change', async function(){
         var idx = parseInt(inp.getAttribute('data-didx'), 10);
         var line = POS.cart[idx];
-        var want = Math.max(0, Number(inp.value) || 0);
-        var was = line.disc || 0;
+        var raw = Math.max(0, Number(inp.value) || 0);
+        var isPct = line.discMode === 'pct';
+        var gross = (Number(line.price) || 0) * (Number(line.qty) || 1);
+        // Resolve both the new and previous entry to dollars so the cap check
+        // and the "went up" test work the same whether this line is $ or %.
+        var want = isPct ? Math.round(gross * raw / 100 * 100) / 100 : raw;
+        var was = posLineDisc(line);
 
         // The customer's discount_limit_pct is the ceiling a cashier may give
         // on their own. Past it, a manager PIN authorises this one line --
@@ -3820,8 +3855,7 @@ async function renderPOS(panel){
         // discount. Owners and managers are never asked; they already hold the
         // authority the prompt would be checking for.
         var cap = POS.customer && POS.customer.discount_limit_pct;
-        var lineTotal = (Number(line.price) || 0) * (Number(line.qty) || 1);
-        var capValue = (cap != null && lineTotal > 0) ? (lineTotal * Number(cap) / 100) : null;
+        var capValue = (cap != null && gross > 0) ? (gross * Number(cap) / 100) : null;
 
         if (capValue != null && want > capValue + 0.001 && want > was &&
             !['owner', 'manager'].includes(CURRENT_ADMIN_ROLE)) {
@@ -3830,13 +3864,13 @@ async function renderPOS(panel){
             title: 'Manager approval needed',
             detail: 'Discount above this customer’s ' + cap + '% limit (' + fmtMoney(capValue) + ' on this line).',
           });
-          if (!appr) { inp.value = was > 0 ? was : ''; return; }  // declined -- put it back
+          if (!appr) { drawCart(); return; }  // declined -- redraw restores the old value
           line.discApprovedBy = appr.name;
           // Recorded on the line so the reason prints on the invoice and the
           // approval is not just a thing that happened on a screen.
           line.discNote = (line.discNote ? line.discNote + ' — ' : '') + 'approved by ' + appr.name;
         }
-        line.disc = want;
+        if (isPct) line.discPct = raw; else line.disc = raw;
         drawCart();
       });
     });
@@ -3879,7 +3913,7 @@ async function renderPOS(panel){
       });
     };
     if (!can('pos.ticket_discount')) apply('#posOrderDisc,#posOrderDiscMode', 'disable');
-    if (!can('pos.line_discount'))   apply('.posDisc', 'disable');
+    if (!can('pos.line_discount'))   apply('.posDisc,.posDiscMode', 'disable');
     if (!can('pos.price_override'))  apply('.posPrice', 'readonly');
     if (!can('pos.qty_update'))      apply('.posQty', 'disable');
     if (!can('pos.no_tax'))          apply('#posTaxToggle', 'disable');
