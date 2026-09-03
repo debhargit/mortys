@@ -40,9 +40,7 @@
     "ratingValue": "4.8",
     "reviewCount": "120",
     "bestRating": "5"
-  },
-  "department": [
-    { "@type": "AutoRepair", "name": "Morty's Auto Parts Service & Repair Center" }  ]
+  }
 }
 </script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Bebas+Neue&display=swap" rel="stylesheet">
@@ -343,17 +341,6 @@ section.alt{background:var(--paper)}
 @media(max-width:680px){.products{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:380px){.products{grid-template-columns:1fr}}
 
-/* -------------------- INSTALL / FITMENT -------------------- */
-.fitment{display:grid;grid-template-columns:repeat(2,1fr);gap:40px;align-items:center}
-.fitment .img-side{aspect-ratio:5/4;background-size:cover;background-position:center;border-radius:14px;border:6px solid var(--black)}
-.fitment h2{font-family:'Bebas Neue',sans-serif;font-size:3rem;line-height:1;letter-spacing:.02em;color:var(--black);margin-bottom:16px}
-.fitment h2 em{font-style:normal;color:var(--red)}
-.fitment p{color:var(--ink-soft);margin-bottom:12px}
-.fitment ul{list-style:none;margin:16px 0 24px}
-.fitment ul li{padding:8px 0;display:flex;align-items:center;gap:10px;color:var(--ink);font-weight:600}
-.fitment ul li::before{content:"✓";color:var(--red);font-weight:900;background:rgba(214,31,43,.1);width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:.78rem;flex-shrink:0}
-@media(max-width:840px){.fitment{grid-template-columns:1fr;gap:24px}.fitment h2{font-size:2.2rem}}
-
 /* -------------------- BRANDS STRIP -------------------- */
 .brand-strip{background:#fff;padding:50px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
 .brand-list{display:flex;justify-content:space-around;align-items:center;flex-wrap:wrap;gap:24px}
@@ -391,7 +378,7 @@ form textarea{resize:vertical;min-height:110px}
 
 /* -------------------- FOOTER -------------------- */
 footer{background:var(--black);color:#cdd5e2;padding:60px 0 24px}
-.foot-grid{display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr;gap:32px;margin-bottom:36px}
+.foot-grid{display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:32px;margin-bottom:36px}
 footer h4{font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:.06em;color:#fff;margin-bottom:14px}
 footer a{display:block;color:#cdd5e2;text-decoration:none;font-size:.88rem;padding:4px 0;transition:.2s}
 footer a:hover{color:var(--yellow)}
@@ -438,7 +425,7 @@ footer .socials a:hover{background:var(--red)}
 <body>
 
 <!-- Promo bar -->
-<div class="promobar"><span>★ <b>Genuine Parts</b></span><span>★ <b>Same-Day Fitting</b></span><span>★ <b>Islandwide Delivery</b></span></div>
+<div class="promobar"><span>★ <b>Genuine Parts</b></span><span>★ <b>Price-Match Guarantee</b></span><span>★ <b>Islandwide Delivery</b></span></div>
 
 <!-- Topbar -->
 <div class="topbar"><div class="container">
@@ -472,7 +459,6 @@ footer .socials a:hover{background:var(--red)}
   <nav class="primary">
     <a href="shop.html"><span>🛒</span>Shop</a>
     <a href="#categories"><span>🧩</span>Categories</a>
-    <a href="#fitment"><span>🔧</span>Fitment</a>
     <a href="#about"><span>ℹ️</span>About</a>
     <a href="#contact"><span>✉️</span>Contact</a>
     <a href="/account.html"><span>👤</span>My Account</a>
@@ -494,11 +480,10 @@ footer .socials a:hover{background:var(--red)}
         <img src="brakes.jpg" alt="ADVICS brake rotors, pads &amp; fluid · Instant Rebates">
       </a>
       <h1>Genuine parts.<em>Real prices.</em></h1>
-      <p class="lead">Kingston's specialist in genuine auto parts for Toyota, Suzuki, Mitsubishi, Subaru, Nissan, Honda &amp; Mazda — with computerized parts locating, free battery check, free tyre change with purchase, and full servicing from our Red Hills Road location.</p>
+      <p class="lead">Kingston's specialist in genuine auto parts for Toyota, Suzuki, Mitsubishi, Subaru, Nissan, Honda &amp; Mazda — with computerized parts locating and fast islandwide delivery from our Red Hills Road location.</p>
       <div class="hero-cta">
         <a href="shop.html" class="btn btn-yellow">🛒 Shop Full Catalog</a>
         <a href="#contact" class="btn btn-red">📋 Request a Part</a>
-        <a href="#fitment" class="btn btn-red">🔧 Book a Fitment</a>
       </div>
       <div class="hero-stats">
         <div class="stat"><div class="n">10K+</div><div class="l">Parts in stock</div></div>
@@ -513,9 +498,9 @@ footer .socials a:hover{background:var(--red)}
 
 <!-- STRIP -->
 <div class="strip"><div class="container"><div class="row">
-  <div class="pill"><span class="ic">⚡</span> SAME-DAY FITTING</div>
+  <div class="pill"><span class="ic">⚡</span> SAME-DAY PICKUP</div>
   <div class="pill"><span class="ic">🚚</span> ISLANDWIDE DELIVERY</div>
-  <div class="pill"><span class="ic">🔧</span> EXPERT INSTALL</div>
+  <div class="pill"><span class="ic">🧩</span> 10,000+ PARTS IN STOCK</div>
   <div class="pill"><span class="ic">💰</span> PRICE-MATCH GUARANTEE</div>
   <div class="pill"><span class="ic">✅</span> 100% GENUINE</div>
 </div></div></div>
@@ -580,7 +565,7 @@ footer .socials a:hover{background:var(--red)}
     <div class="section-head">
       <span class="eyebrow">Shop by category</span>
       <h2>Everything for your <em>ride</em></h2>
-      <p>From everyday maintenance to performance upgrades and styling — we stock and fit it all under one roof.</p>
+      <p>From everyday maintenance to performance upgrades and styling — we stock it all under one roof.</p>
     </div>
     <div class="cats">
       <a class="cat" href="shop.html">
@@ -597,7 +582,7 @@ footer .socials a:hover{background:var(--red)}
       </a>
       <a class="cat" href="shop.html">
         <div class="img" style="background-image:url('https://images.unsplash.com/photo-1591768793355-74d04bb6608f?auto=format&fit=crop&w=900&q=80')"><div class="icbox">🪟</div></div>
-        <div class="body"><h3>Window Tint</h3><p>Ceramic &amp; carbon film with lifetime warranty. Professional install in &lt; 3 hours.</p><div class="price">From J$15,000 (full car)</div></div>
+        <div class="body"><h3>Window Tint</h3><p>Ceramic &amp; carbon film with lifetime warranty. Pre-cut kits for most makes.</p><div class="price">From J$15,000 (full car)</div></div>
       </a>
       <a class="cat" href="shop.html">
         <div class="img" style="background-image:url('https://images.unsplash.com/photo-1606016159991-dfe4f2746ad5?auto=format&fit=crop&w=900&q=80')"><div class="icbox">🛑</div></div>
@@ -609,7 +594,7 @@ footer .socials a:hover{background:var(--red)}
       </a>
       <a class="cat" href="shop.html">
         <div class="img" style="background-image:url('https://images.unsplash.com/photo-1565689157206-0fddef7589a2?auto=format&fit=crop&w=900&q=80')"><div class="icbox">🔋</div></div>
-        <div class="body"><h3>Batteries</h3><p>AGM, EFB and standard lead-acid. 2-year warranty. Free installation in-branch.</p><div class="price">From J$11,500</div></div>
+        <div class="body"><h3>Batteries</h3><p>AGM, EFB and standard lead-acid. 2-year warranty. Trade-in credit on your old unit.</p><div class="price">From J$11,500</div></div>
       </a>
       <a class="cat" href="shop.html">
         <div class="img" style="background-image:url('https://images.unsplash.com/photo-1607853202273-797f1c22a38e?auto=format&fit=crop&w=900&q=80')"><div class="icbox">💡</div></div>
@@ -617,7 +602,7 @@ footer .socials a:hover{background:var(--red)}
       </a>
       <a class="cat" href="shop.html">
         <div class="img" style="background-image:url('https://images.unsplash.com/photo-1577494037925-91d5b2c4ec33?auto=format&fit=crop&w=900&q=80')"><div class="icbox">🛡️</div></div>
-        <div class="body"><h3>Alarms &amp; Security</h3><p>Remote starts, immobilizers, GPS trackers, dashcam systems. Pro install.</p><div class="price">From J$14,500</div></div>
+        <div class="body"><h3>Alarms &amp; Security</h3><p>Remote starts, immobilizers, GPS trackers, dashcam systems.</p><div class="price">From J$14,500</div></div>
       </a>
       <a class="cat" href="shop.html">
         <div class="img" style="background-image:url('https://images.unsplash.com/photo-1581234692050-7a45ed91c5e7?auto=format&fit=crop&w=900&q=80')"><div class="icbox">🧰</div></div>
@@ -660,7 +645,7 @@ footer .socials a:hover{background:var(--red)}
           <div class="brand">Bridgestone</div>
           <h4>Turanza T005 · 205/55 R16</h4>
           <div class="stars">★★★★★ <span>(96)</span></div>
-          <div class="price">J$16,500<small>each · free fitting &amp; balance</small></div>
+          <div class="price">J$16,500<small>each · 205/55 R16</small></div>
           <a class="btn-sm">Get Quote</a>
         </div>
       </div>
@@ -680,7 +665,7 @@ footer .socials a:hover{background:var(--red)}
           <div class="brand">Pioneer</div>
           <h4>DMH-1500NEX 7" Touchscreen Receiver · CarPlay/Android Auto</h4>
           <div class="stars">★★★★★ <span>(72)</span></div>
-          <div class="price">J$48,500<small>fits most makes · install J$5,000</small></div>
+          <div class="price">J$48,500<small>fits most makes · CarPlay &amp; Android Auto</small></div>
           <a class="btn-sm">Get Quote</a>
         </div>
       </div>
@@ -690,7 +675,7 @@ footer .socials a:hover{background:var(--red)}
           <div class="brand">SunSafe Pro</div>
           <h4>Ceramic Window Tint · Full Vehicle (lifetime warranty)</h4>
           <div class="stars">★★★★★ <span>(120)</span></div>
-          <div class="price">J$22,500 <del>J$28,000</del><small>installed · 99% UV blocking</small></div>
+          <div class="price">J$22,500 <del>J$28,000</del><small>full vehicle kit · 99% UV blocking</small></div>
           <a class="btn-sm">Get Quote</a>
         </div>
       </div>
@@ -700,7 +685,7 @@ footer .socials a:hover{background:var(--red)}
           <div class="brand">Bosch</div>
           <h4>QuietCast Premium Front Brake Pad Set</h4>
           <div class="stars">★★★★★ <span>(58)</span></div>
-          <div class="price">J$6,800<small>fits most sedans · install J$3,500</small></div>
+          <div class="price">J$6,800<small>fits most sedans · ceramic compound</small></div>
           <a class="btn-sm">Get Quote</a>
         </div>
       </div>
@@ -710,7 +695,7 @@ footer .socials a:hover{background:var(--red)}
           <div class="brand">Bilstein</div>
           <h4>B6 Heavy Duty Shock Absorber (set of 4)</h4>
           <div class="stars">★★★★★ <span>(22)</span></div>
-          <div class="price">J$54,000<small>install J$8,500 · 2-yr warranty</small></div>
+          <div class="price">J$54,000<small>set of 4 · 2-yr warranty</small></div>
           <a class="btn-sm">Get Quote</a>
         </div>
       </div>
@@ -720,7 +705,7 @@ footer .socials a:hover{background:var(--red)}
           <div class="brand">AC Delco</div>
           <h4>AGM 12V Maintenance-Free Battery · 600 CCA</h4>
           <div class="stars">★★★★☆ <span>(41)</span></div>
-          <div class="price">J$16,800<small>2-yr warranty · free install</small></div>
+          <div class="price">J$16,800<small>2-yr warranty · 600 CCA</small></div>
           <a class="btn-sm">Get Quote</a>
         </div>
       </div>
@@ -735,12 +720,12 @@ footer .socials a:hover{background:var(--red)}
         </div>
       </div>
       <div class="product" onclick="quickQuote('Viper SmartStart Alarm + Remote Start')">
-        <div class="img" style="background-image:url('https://images.unsplash.com/photo-1577494037925-91d5b2c4ec33?auto=format&fit=crop&w=600&q=80')"><div class="tag">Pro Install</div></div>
+        <div class="img" style="background-image:url('https://images.unsplash.com/photo-1577494037925-91d5b2c4ec33?auto=format&fit=crop&w=600&q=80')"><div class="tag">2-Way</div></div>
         <div class="body">
           <div class="brand">Viper</div>
           <h4>SmartStart 5706V · 2-way Alarm + Remote Start</h4>
           <div class="stars">★★★★★ <span>(29)</span></div>
-          <div class="price">J$32,500<small>installed · phone control</small></div>
+          <div class="price">J$32,500<small>2-way · phone control</small></div>
           <a class="btn-sm">Get Quote</a>
         </div>
       </div>
@@ -750,7 +735,7 @@ footer .socials a:hover{background:var(--red)}
           <div class="brand">Mobil 1</div>
           <h4>Advanced Full Synthetic 5W-30 · 4L jug</h4>
           <div class="stars">★★★★★ <span>(88)</span></div>
-          <div class="price">J$8,900<small>oil + filter change J$11,500</small></div>
+          <div class="price">J$8,900<small>full synthetic · 4L jug</small></div>
           <a class="btn-sm">Get Quote</a>
         </div>
       </div>
@@ -773,40 +758,12 @@ footer .socials a:hover{background:var(--red)}
   </div>
 </section>
 
-<!-- FITMENT / INSTALL -->
-<section id="fitment">
-  <div class="container">
-    <div class="fitment">
-      <div class="img-side" style="background-image:url('https://images.unsplash.com/photo-1635770312253-9a92f5cd6c1a?auto=format&fit=crop&w=1000&q=80')"></div>
-      <div>
-        <span style="color:var(--red);font-size:.8rem;letter-spacing:.2em;text-transform:uppercase;font-weight:800">Fitment &amp; Install</span>
-        <h2>We fit what we <em>sell</em>.</h2>
-        <p>Buying parts is only half the job — getting them in correctly is the other half. Our on-site workshop fits, balances, aligns and programs everything we stock, so you walk out ready to drive.</p>
-        <ul>
-          <li>Wheel mounting &amp; computerised balancing</li>
-          <li>4-wheel alignment with digital report</li>
-          <li>Tire fitting &amp; nitrogen fill</li>
-          <li>Brake pad &amp; rotor replacement</li>
-          <li>Suspension &amp; shock install</li>
-          <li>Audio head-unit &amp; speaker install</li>
-          <li>Tint film application (3-hour turnaround)</li>
-          <li>Battery testing &amp; replacement</li>
-          <li>Alarm, remote-start &amp; dashcam fitting</li>
-          <li>Oil &amp; filter service</li>
-        </ul>
-        <a href="#contact" class="btn btn-red">Book a Fitment</a>
-        <a href="tel:+18769054111" class="btn btn-ghost" style="color:var(--ink);border-color:var(--black);margin-left:8px">Call Workshop</a>
-      </div>
-    </div>
-  </div>
-</section>
-
 <!-- BRANDS STRIP -->
 <section class="alt" id="brands" style="padding:60px 0">
   <div class="container">
     <div class="section-head" style="margin-bottom:24px">
-      <span class="eyebrow">Vehicles we service</span>
-      <h2>Makes we <em>specialise</em> in</h2>
+      <span class="eyebrow">Makes we carry</span>
+      <h2>Parts we <em>specialise</em> in</h2>
     </div>
     <div class="brand-list">
       <div class="b">TOYOTA</div><div class="b">SUZUKI</div><div class="b">MITSUBISHI</div><div class="b">SUBARU</div>
@@ -824,7 +781,7 @@ footer .socials a:hover{background:var(--red)}
         <span style="color:var(--red);font-size:.8rem;letter-spacing:.2em;text-transform:uppercase;font-weight:800">About us</span>
         <h2 style="font-family:'Bebas Neue';font-size:2.6rem;line-height:1;letter-spacing:.02em;color:var(--black);margin:8px 0 16px">Seven years of <em style="font-style:normal;color:var(--red)">genuine parts</em>.</h2>
         <p style="color:var(--ink-soft);margin-bottom:14px">Morty's Auto Parts has been operating for 7 years from 51 Red Hills Road, Kingston. We specialise in the sale of new auto parts and supplies for Toyota, Suzuki, Mitsubishi, Subaru, Nissan, Honda &amp; Mazda.</p>
-        <p style="color:var(--ink-soft);margin-bottom:24px">We offer computerized parts locating, free battery check, and free tyre change with purchase. Our general auto servicing includes front end, brake repair, shocks, struts, pressing in &amp; out bushing, joints, and injector cleaning.</p>
+        <p style="color:var(--ink-soft);margin-bottom:24px">We offer computerized parts locating and can source hard-to-find OEM and aftermarket parts — front end, brakes, shocks, struts, bushings, joints, filters and more — for most Japanese makes within 24–48 hours.</p>
         <a href="#contact" class="btn btn-primary">Visit our Red Hills Road shop</a>
       </div>
     </div>
@@ -841,18 +798,18 @@ footer .socials a:hover{background:var(--red)}
     <div class="testimonials">
       <div class="testimonial">
         <div class="stars">★★★★★</div>
-        <p class="text">"Bought a set of 18-inch rims and 4 Bridgestones from Morty's Auto. Price was the best I found in Kingston, install was done in under 2 hours, and the alignment they threw in was spot on. Definitely my go-to from now on."</p>
+        <p class="text">"Bought a set of 18-inch rims and 4 Bridgestones from Morty's Auto. Best price I found in Kingston and they had every size in stock. Definitely my go-to from now on."</p>
         <div class="who"><div class="av">DM</div><div><div class="nm">Damion M.</div><div class="car">Rims &amp; tires · Toyota Axio</div></div></div>
       </div>
       <div class="testimonial">
         <div class="stars">★★★★★</div>
-        <p class="text">"Came in for ceramic tint and ended up doing the JBL speaker upgrade too. Tint looks factory-perfect after a year, no peel, and the audio quality is night-and-day. Real professional crew on the install side."</p>
+        <p class="text">"Picked up ceramic tint film and a JBL speaker set. Genuine stock, sharp prices, and the staff knew exactly which parts fit my Civic. Sorted in one trip."</p>
         <div class="who"><div class="av">RC</div><div><div class="nm">Ryan C.</div><div class="car">Tint &amp; audio · Honda Civic</div></div></div>
       </div>
       <div class="testimonial">
         <div class="stars">★★★★★</div>
-        <p class="text">"Battery died on me on a Saturday morning. Called Morty's Auto — they had the exact AGM I needed, installed it on the spot, and even tested the alternator for free. In and out in 30 minutes. These guys move fast."</p>
-        <div class="who"><div class="av">SJ</div><div><div class="nm">Shaneka J.</div><div class="car">Battery replacement · Nissan Note</div></div></div>
+        <p class="text">"Battery died on me on a Saturday morning. Called Morty's Auto — they had the exact AGM I needed in stock and held it at the counter till I got there. In and out in 30 minutes. These guys move fast."</p>
+        <div class="who"><div class="av">SJ</div><div><div class="nm">Shaneka J.</div><div class="car">Battery · Nissan Note</div></div></div>
       </div>
     </div>
   </div>
@@ -903,7 +860,7 @@ footer .socials a:hover{background:var(--red)}
           <option>Interior &amp; mats</option>
           <option>Other / not sure</option>
         </select></div>
-        <div class="row2"><div class="field"><label>Vehicle make / model</label><input name="vehicle" placeholder="e.g. Toyota Axio 2019"></div><div class="field"><label>Need fitment?</label><select name="fitment"><option>Yes — book it</option><option>No, just the part</option><option>Not sure</option></select></div></div>
+        <div class="field"><label>Vehicle make / model</label><input name="vehicle" placeholder="e.g. Toyota Axio 2019"></div>
         <div class="field"><label>Tell us more *</label><textarea required name="msg" placeholder="What exactly are you looking for? Specific brand, size, model — and when do you need it?"></textarea></div>
         <button class="btn btn-red" type="submit" style="width:100%">Send Inquiry</button>
         <p style="font-size:.78rem;color:var(--ink-soft);margin-top:10px;text-align:center">We'll respond within one business day. Or call us directly: <a href="tel:+18769054111" style="color:var(--red);font-weight:700">876-905-4111</a></p>
@@ -934,16 +891,6 @@ footer .socials a:hover{background:var(--red)}
         <a href="#categories">Tint</a>
         <a href="#categories">Brakes &amp; Suspension</a>
         <a href="#categories">Lighting &amp; Alarms</a>
-      </div>
-      <div>
-        <h4>Services</h4>
-        <a href="#fitment">Brake Repair</a>
-        <a href="#fitment">Shocks &amp; Struts</a>
-        <a href="#fitment">Front End</a>
-        <a href="#fitment">Injector Cleaning</a>
-        <a href="#fitment">Bushing Press In/Out</a>
-        <a href="#fitment">Free Battery Check</a>
-        <a href="#fitment">Free Tyre Change w/ Purchase</a>
       </div>
       <div>
         <h4>Contact</h4>
@@ -977,8 +924,8 @@ footer .socials a:hover{background:var(--red)}
 /* ---------- LEAD FORM ---------- */
 /* Posts to the same /api/inquiry endpoint the parts desk reads in
    admin.html → Inquiries (parts_inquiries table). The contact form has
-   fields the table has no column for (email, "looking for" category,
-   fitment) so those are folded into part_description as labelled lines. */
+   fields the table has no column for (email, "looking for" category)
+   so those are folded into part_description as labelled lines. */
 async function leadSubmit(){
   const f=document.getElementById('leadForm');
   const fd=new FormData(f);
@@ -989,7 +936,6 @@ async function leadSubmit(){
   const descLines=[];
   if(data.interest) descLines.push('Looking for: '+data.interest);
   if(data.msg)      descLines.push(data.msg);
-  if(data.fitment)  descLines.push('Fitment: '+data.fitment);
   if(data.email)    descLines.push('Email: '+data.email);
   const body={
     name:name,
@@ -1026,7 +972,7 @@ function quickQuote(productName){
   document.getElementById('contact').scrollIntoView({behavior:'smooth'});
   setTimeout(()=>{
     const msg=document.querySelector('[name="msg"]');
-    if(msg){msg.value="I'm interested in: "+productName+".\n\nPlease send me availability, exact price, and fitment options.";msg.focus()}
+    if(msg){msg.value="I'm interested in: "+productName+".\n\nPlease send me availability, exact price, and pickup or delivery options.";msg.focus()}
   },600);
 }
 window.quickQuote=quickQuote;
@@ -1035,7 +981,7 @@ window.quickQuote=quickQuote;
 document.querySelectorAll('nav.primary a').forEach(a=>a.addEventListener('click',()=>{document.querySelector('nav.primary').classList.remove('open')}));
 </script>
 
-<!-- Morty's Auto enhancement bundle: fitment finder, service booking, loyalty rewards, compare, quick reorder, bundle pricing -->
+<!-- Morty's Auto enhancement bundle: vehicle/parts finder, loyalty rewards, compare, quick reorder, bundle pricing -->
 <script src="assets/sp-enhancements.js"></script>
 
 </body>

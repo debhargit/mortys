@@ -2,7 +2,7 @@
 //   POST /api/auth/signup, POST /api/auth/reset-default-admin, PATCH /api/me
 //   POST /api/checkout, GET /api/orders, GET /api/orders/:id
 //   GET  /api/points, GET /api/config, GET /api/vin/:vin
-//   POST /api/newsletter, POST /api/service, POST /api/coupon/validate
+//   POST /api/newsletter, POST /api/coupon/validate
 //   GET/POST/DELETE /api/vehicles[/:id]         (saved_vehicles)
 //   GET/POST/DELETE /api/my-addresses[/:id]
 //   GET/POST /api/my-messages
@@ -280,22 +280,6 @@ export default function mount(app) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return c.json({ error: 'Valid email required' }, 400);
     await d1(c.env).run('INSERT OR IGNORE INTO newsletter_subscribers (email, source) VALUES (?, ?)', email, b.source || null);
     return c.json({ ok: true });
-  });
-
-  // ---- service booking ----------------------------------
-  app.post('/api/service', async (c) => {
-    const db = d1(c.env);
-    const b = await c.req.json().catch(() => ({}));
-    if (!b.name || !b.phone) return c.json({ error: 'name and phone are required' }, 400);
-    let uid = null;
-    try { const u = await currentUser(c.req.raw, c.env); uid = u ? u.id : null; } catch { /* anon booking */ }
-    const r = await db.run(
-      `INSERT INTO service_appointments
-         (user_id, name, phone, email, vehicle_make, vehicle_model, vehicle_year, service_type, preferred_date, time_slot, notes)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-      uid, b.name, b.phone, b.email || null, b.make || null, b.model || null,
-      b.year ? parseInt(b.year, 10) : null, b.service_type || null, b.preferred_date || null, b.time_slot || null, b.notes || null);
-    return c.json({ id: r.meta ? r.meta.last_row_id : undefined });
   });
 
   // ---- VIN decode (NHTSA proxy) -----------------------

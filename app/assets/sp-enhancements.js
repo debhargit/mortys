@@ -7,12 +7,11 @@
    ---------------------------------------------------------------------
    Features:
      1. Vehicle Fitment Finder      (year / make / model selector)
-     2. Service Booking Widget      (install / fitting appointments)
-     3. Loyalty Rewards             (points by phone, redeemable)
-     4. Quick Reorder               (past inquiries, 1-click resend)
-     5. Compare Products            (side-by-side, up to 3 items)
-     6. Bundle / Multi-buy Pricing  (4-tire discount, etc.)
-     7. Floating "Help me find a part" launcher
+     2. Loyalty Rewards             (points by phone, redeemable)
+     3. Quick Reorder               (past inquiries, 1-click resend)
+     4. Compare Products            (side-by-side, up to 3 items)
+     5. Bundle / Multi-buy Pricing  (4-tire discount, etc.)
+     6. Floating "Help me find a part" launcher
    ---------------------------------------------------------------------
    No external dependencies. Browser-only. localStorage backed.
    Multi-tenant safe — keys are namespaced under sp_*.
@@ -93,16 +92,6 @@ const STYLES = `
 
 .sp-loyalty-row{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:#fafbfc;border-radius:10px;margin-bottom:8px;font-size:13px}
 .sp-loyalty-row .pts{font-family:'Bebas Neue',sans-serif;font-size:1.2rem;color:#d61f2b;letter-spacing:.04em}
-
-.sp-svc-tile{border:1.5px solid #e2e5e8;border-radius:10px;padding:14px;cursor:pointer;display:flex;align-items:center;gap:10px;transition:.15s}
-.sp-svc-tile:hover{border-color:#d61f2b;background:#fffaf9}
-.sp-svc-tile.on{border-color:#d61f2b;background:#fff1f2}
-.sp-svc-tile .em{font-size:24px}
-.sp-svc-tile .lbl{font-weight:700;font-size:14px}
-.sp-svc-tile .pr{font-size:11px;color:#5a6470}
-
-.sp-svc-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
-@media(max-width:520px){.sp-svc-grid{grid-template-columns:1fr}}
 
 .sp-empty{text-align:center;padding:30px;color:#5a6470;font-size:13px}
 .sp-empty .ic{font-size:36px;display:block;margin-bottom:8px;opacity:.5}
@@ -234,118 +223,6 @@ function renderVehiclePill(){
   host.appendChild(pill);
 }
 
-/* ---------- SERVICE BOOKING ---------- */
-const SERVICES = [
-  { id:'tires',    em:'🛞', lbl:'Tire fitting',        from:'J$500/wheel' },
-  { id:'rims',     em:'⚙️', lbl:'Rim swap',             from:'J$1,200/wheel' },
-  { id:'brakes',   em:'🛑', lbl:'Brake service',        from:'J$3,500/axle' },
-  { id:'audio',    em:'🔊', lbl:'Audio install',        from:'From J$3,000' },
-  { id:'tint',     em:'🪟', lbl:'Window tint',          from:'2-4 hours' },
-  { id:'battery',  em:'🔋', lbl:'Battery + install',    from:'Free w/ purchase' },
-  { id:'lighting', em:'💡', lbl:'Lighting install',     from:'J$2,000+' },
-  { id:'alarm',    em:'🛡️', lbl:'Alarm / remote start', from:'J$4,500+' },
-  { id:'suspension',em:'🏎️', lbl:'Suspension work',     from:'Quote on site' },
-  { id:'inspect',  em:'🔎', lbl:'Pre-purchase inspection', from:'J$5,000' }
-];
-
-function openBooking(preselectId){
-  const v = loadVehicle();
-  const mdl = $('#spBookingModal') || makeBookingModal();
-  // reset state
-  $('#spSvcGrid', mdl).querySelectorAll('.sp-svc-tile').forEach(t => t.classList.remove('on'));
-  if(preselectId){
-    const tile = $('#spSvcGrid', mdl).querySelector(`[data-svc="${preselectId}"]`);
-    if(tile) tile.classList.add('on');
-  }
-  // prefill
-  if(v && v.year){
-    $('#spBkVehicle', mdl).value = `${v.year} ${v.make} ${v.model||''}`.trim();
-  }
-  // default date = tomorrow
-  const tom = new Date(); tom.setDate(tom.getDate()+1);
-  $('#spBkDate', mdl).value = tom.toISOString().slice(0,10);
-  $('#spBkDate', mdl).min  = new Date().toISOString().slice(0,10);
-  $('#spBkTime', mdl).value = '10:00';
-  mdl.classList.add('open');
-}
-
-function makeBookingModal(){
-  const m = el('div', { id:'spBookingModal', class:'sp-modal' });
-  m.innerHTML = `
-    <div class="sp-modal-inner">
-      <div class="sp-modal-head">
-        <div><h3>📅 Book a Service Appointment</h3><p>Pick the service, your car, and a slot. We'll WhatsApp confirm within an hour.</p></div>
-        <button class="sp-close" data-act="close">×</button>
-      </div>
-      <div class="sp-modal-body">
-        <label style="display:block;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#5a6470;margin-bottom:6px">Service needed</label>
-        <div class="sp-svc-grid" id="spSvcGrid">
-          ${SERVICES.map(s => `
-            <div class="sp-svc-tile" data-svc="${s.id}" onclick="this.parentElement.querySelectorAll('.sp-svc-tile').forEach(x=>x.classList.remove('on'));this.classList.add('on')">
-              <div class="em">${s.em}</div>
-              <div><div class="lbl">${s.lbl}</div><div class="pr">${s.from}</div></div>
-            </div>
-          `).join('')}
-        </div>
-        <div class="sp-row">
-          <div class="sp-field"><label>Your name</label><input id="spBkName" placeholder="Full name"></div>
-          <div class="sp-field"><label>WhatsApp / phone</label><input id="spBkPhone" placeholder="876-xxx-xxxx"></div>
-        </div>
-        <div class="sp-field"><label>Vehicle</label><input id="spBkVehicle" placeholder="Year Make Model"></div>
-        <div class="sp-row">
-          <div class="sp-field"><label>Preferred date</label><input id="spBkDate" type="date"></div>
-          <div class="sp-field"><label>Preferred time</label><input id="spBkTime" type="time"></div>
-        </div>
-        <div class="sp-field"><label>Notes (optional)</label><textarea id="spBkNotes" rows="2" placeholder="Anything we should know"></textarea></div>
-      </div>
-      <div class="sp-modal-foot">
-        <button class="sp-btn sp-btn-ghost" data-act="close">Cancel</button>
-        <button class="sp-btn sp-btn-gold" data-act="wa">Send via WhatsApp</button>
-        <button class="sp-btn sp-btn-primary" data-act="save">Book Appointment</button>
-      </div>
-    </div>`;
-  document.body.appendChild(m);
-  m.addEventListener('click', (e) => {
-    const a = e.target.dataset && e.target.dataset.act;
-    if(a === 'close' || e.target === m) m.classList.remove('open');
-    if(a === 'save' || a === 'wa'){
-      const tile = $('#spSvcGrid', m).querySelector('.sp-svc-tile.on');
-      if(!tile){ toast('Pick a service', 'err'); return; }
-      const svc = SERVICES.find(s => s.id === tile.dataset.svc);
-      const data = {
-        id: 'BK-' + Date.now().toString(36).toUpperCase(),
-        service: svc.lbl, serviceId: svc.id,
-        name:  $('#spBkName', m).value.trim(),
-        phone: $('#spBkPhone', m).value.trim(),
-        vehicle: $('#spBkVehicle', m).value.trim(),
-        date:  $('#spBkDate', m).value,
-        time:  $('#spBkTime', m).value,
-        notes: $('#spBkNotes', m).value.trim(),
-        createdAt: new Date().toISOString()
-      };
-      if(!data.name || !data.phone || !data.date){ toast('Name, phone and date are required', 'err'); return; }
-      const list = r('sp_bookings', []);
-      list.push(data);
-      w('sp_bookings', list);
-      // Multi-tenant write so manager dashboards see this too
-      const co = r('phi_co_speed-plus_bookings', []);
-      co.push(data);
-      w('phi_co_speed-plus_bookings', co);
-
-      // Loyalty: +25 points for booking
-      addPoints(data.phone, 25, 'Service booking: ' + svc.lbl);
-
-      if(a === 'wa'){
-        const msg = `Hi Morty's Auto, I'd like to book a ${svc.lbl}:\n\n• Name: ${data.name}\n• Phone: ${data.phone}\n• Vehicle: ${data.vehicle||'—'}\n• When: ${data.date} at ${data.time}\n${data.notes? '• Notes: '+data.notes+'\n':''}\nRef: ${data.id}`;
-        window.open(`https://wa.me/18765550200?text=${encodeURIComponent(msg)}`, '_blank');
-      }
-      toast('Booking saved · ref ' + data.id, 'ok');
-      m.classList.remove('open');
-    }
-  });
-  return m;
-}
-
 /* ---------- LOYALTY REWARDS ---------- */
 // keyed by phone number. Stores { phone, points, history:[{ts, delta, note}] }
 function loyaltyGet(phone){
@@ -423,10 +300,9 @@ function renderLoyaltyInner(m, rec){
     inner.innerHTML = `<div class="sp-empty"><span class="ic">🎟</span>Enter your phone to see your points balance.</div>
       <div style="font-size:12px;color:#5a6470;background:#fafbfc;padding:12px;border-radius:8px;margin-top:8px">
         <b>How to earn:</b><br>
-        • +25 points per service booking<br>
         • +100 points per completed purchase (J$1 = 1 pt)<br>
         • +50 points for product reviews<br>
-        <b>Redeem:</b> 500 pts = J$500 off · 2000 pts = J$2,500 off · 5000 pts = free install
+        <b>Redeem:</b> 500 pts = J$500 off · 2000 pts = J$2,500 off · 5000 pts = J$7,000 off
       </div>`;
     return;
   }
@@ -735,7 +611,7 @@ else boot();
 
 /* ---------- EXPORT ---------- */
 window.spEnh = {
-  openFitment, openBooking, openRewards, openCompare, openHistory,
+  openFitment, openRewards, openCompare, openHistory,
   loadVehicle, saveVehicle,
   addPoints, loyaltyGet, loyaltyAll,
   computeBundle, renderFabBadges
@@ -751,7 +627,7 @@ if(document.readyState === 'loading') document.addEventListener('DOMContentLoade
 else boot();
 
 window.spEnh = {
-  openFitment, openBooking, openRewards, openCompare, openHistory,
+  openFitment, openRewards, openCompare, openHistory,
   loadVehicle, saveVehicle,
   addPoints, loyaltyGet, loyaltyAll,
   computeBundle, renderFabBadges

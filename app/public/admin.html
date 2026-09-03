@@ -713,27 +713,12 @@ var SIDEBAR_GROUPS = [
     { tab:'dashboard', label:'📊 Dashboard' },
     { tab:'reports', label:'📑 Reports' },
   ]},
-  // "🔧 Service Center" and "🚗 Cars & Vehicles" were hidden from the admin
-  // sidebar per request (2026-08-18). They are back as `optional` groups:
-  // buildSidebar() leaves them out unless the signed-in user turns on
-  // "Show the Service Centre & Vehicles menus" in Settings → My Preferences
-  // (POS_PREFS.showExtraMenus). Renderers/routes for every tab here already
-  // exist further down this file.
-  { title: '🔧 Service Center', optional: true, items: [
-    { tab:'appointments', label:'📅 Service Appointments' },
-    { tab:'schedule', label:'🗓 Weekly Schedule' },
-    { tab:'workorders', label:'🛠 Work Orders' },
-    { tab:'requisitions', label:'📝 Service Quotes (Req.)' },
-    { tab:'services', label:'📋 Services Catalog' },
-    { tab:'timeclock', label:'⏱ Time Clock' },
-    { tab:'mechanics', label:'👷 Mechanics' },
-    { tab:'laborstd', label:'📚 Labor Standards' },
-  ]},
-  { title: '🚗 Cars & Vehicles', optional: true, items: [
-    { tab:'inspections', label:'🔍 Inspections' },
-    { tab:'vehiclehistory', label:'🚗 Vehicle Lookup' },
-    { tab:'maintdue', label:'🔔 Maintenance Due' },
-  ]},
+  // The "🔧 Service Center" and "🚗 Cars & Vehicles" sidebar groups were
+  // removed (2026-09-03) — this location no longer offers vehicle servicing.
+  // The tab renderers and /api/admin/{mechanics,services,work-orders,…}
+  // routes still exist further down / in functions/_routes/service.js, since
+  // the Deliveries / Cash-drawer / Parts-Requisition pickers and POS reps
+  // share the `mechanics` staff table; they are just no longer linked here.
   { title: '📦 Parts Department', items: [
     { tab:'products', label:'📦 Products / Stock' },
     { tab:'warehouse', label:'🏗 Warehouse' },
@@ -868,15 +853,9 @@ function buildSidebar(){
   // POS Terminal in the sidebar (renderPOS refuses it too).
   if (!can('pos.access') && hide.indexOf('pos') === -1) hide.push('pos');
   if (!can('reports.view') && hide.indexOf('reports') === -1) hide.push('reports');
-  // `optional` groups (Service Centre, Cars & Vehicles) are off unless the
-  // signed-in user enabled them in My Preferences, OR their role turns them
-  // on for everyone (roles.show_extra_menus — e.g. a Service Advisor role).
-  var showExtra = !!(typeof POS_PREFS !== 'undefined' && POS_PREFS && POS_PREFS.showExtraMenus) ||
-                  !!(MY_ROLE && MY_ROLE.show_extra_menus);
   var groups = SIDEBAR_GROUPS
-    .filter(function(g){ return showExtra || !g.optional; })
     .map(function(g){
-      return { title: g.title, optional: g.optional,
+      return { title: g.title,
                items: hide.length ? g.items.filter(function(it){ return hide.indexOf(it.tab) === -1; }) : g.items.slice() };
     })
     .filter(function(g){ return g.items.length > 0; });
@@ -1938,11 +1917,15 @@ async function renderProducts(panel){
     };
     posModal('✎ Edit part',
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line)">' +
-        '<span style="display:flex;gap:6px">' +
+        '<span style="display:flex;gap:6px;flex-shrink:0">' +
           '<button type="button" class="btn" id="pePrev" title="Edit the previous part in the list (Alt+←)">‹ Prev</button>' +
           '<button type="button" class="btn" id="peNext" title="Edit the next part in the list (Alt+→)">Next ›</button>' +
         '</span>' +
-        '<span id="pePos" style="font-size:11.5px;color:var(--muted);font-weight:700"></span>' +
+        '<div style="position:relative;flex:1;min-width:130px">' +
+          '<input id="peJump" placeholder="🔎 Find another part to edit…" autocomplete="off" style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;font-family:inherit;background:var(--card);color:var(--ink)"/>' +
+          '<div id="peJumpResults" style="display:none;position:fixed;z-index:130;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 14px 36px rgba(0,0,0,.30);max-height:min(50vh,380px);overflow-y:auto;overscroll-behavior:contain"></div>' +
+        '</div>' +
+        '<span id="pePos" style="font-size:11.5px;color:var(--muted);font-weight:700;flex-shrink:0"></span>' +
       '</div>' +
       '<div style="display:flex;gap:16px;align-items:flex-start">' +
         '<img src="/' + encodeURI(p.img) + '" onerror="this.style.display=\'none\'" style="width:120px;height:120px;object-fit:cover;border-radius:8px;border:1px solid var(--line);flex-shrink:0"/>' +
@@ -1999,6 +1982,76 @@ async function renderProducts(panel){
       };
       document.addEventListener('keydown', window.__peKeyHandler);
     }
+
+    // Live search: jump straight to editing any other part, no trip back to the
+    // table. Independent of Prev/Next, which only walk the loaded page.
+    (function(){
+      var jin = document.getElementById('peJump');
+      var jout = document.getElementById('peJumpResults');
+      if (!jin || !jout) return;
+      var jd = null, jseq = 0, jrows = [], jsel = -1;
+      var place = function(){
+        var r = jin.getBoundingClientRect();
+        jout.style.left = Math.round(r.left) + 'px';
+        jout.style.top = Math.round(r.bottom + 4) + 'px';
+        jout.style.width = Math.round(r.width) + 'px';
+      };
+      var hl = function(){
+        var k = jout.children;
+        for (var i = 0; i < k.length; i++) k[i].style.background = (i === jsel) ? 'var(--hover)' : 'var(--card)';
+        if (jsel >= 0 && k[jsel]) k[jsel].scrollIntoView({ block: 'nearest' });
+      };
+      var render = function(){
+        if (!jrows.length) { jout.style.display = 'none'; jout.innerHTML = ''; jsel = -1; return; }
+        jout.innerHTML = jrows.map(function(x, i){
+          return '<button type="button" data-i="' + i + '" style="display:flex;gap:9px;width:100%;text-align:left;border:0;border-bottom:1px solid var(--hover);background:var(--card);color:var(--ink);padding:8px 10px;cursor:pointer;font-family:inherit;font-size:12px">' +
+            '<code style="flex-shrink:0;font-weight:700;max-width:170px;word-break:break-all">' + esc(posPartNo(x)) + '</code>' +
+            '<span style="flex:1;min-width:0;font-weight:600">' + esc(x.name || '') +
+              (x.make_model ? ' <span style="font-weight:400;color:var(--muted)">— ' + esc(x.make_model) + '</span>' : '') + '</span>' +
+            '<small style="flex-shrink:0;color:var(--muted)">' + (x.stock_count || 0) + '</small>' +
+          '</button>';
+        }).join('');
+        place();
+        jout.style.display = 'block';
+        jout.querySelectorAll('button').forEach(function(b){
+          b.addEventListener('mousedown', function(e){ e.preventDefault(); pick(jrows[parseInt(b.dataset.i, 10)]); });
+          b.addEventListener('mouseenter', function(){ jsel = parseInt(b.dataset.i, 10); hl(); });
+        });
+        jsel = 0; hl();
+      };
+      var pick = function(x){ if (!x) return; posCloseModal(); productEditModal(x, after); };
+      var run = function(){
+        var q = jin.value.trim();
+        clearTimeout(jd);
+        if (q.length < 2) { jrows = []; render(); return; }
+        jd = setTimeout(async function(){
+          var seq = ++jseq;
+          try {
+            var r = await api('/api/products?limit=50&offset=0&q=' + encodeURIComponent(q));
+            if (seq !== jseq) return;
+            jrows = (r.products || []).filter(function(x){ return x.img !== p.img; });
+            render();
+          } catch (e) { if (seq === jseq) { jrows = []; render(); } }
+        }, 220);
+      };
+      jin.addEventListener('input', run);
+      jin.addEventListener('keydown', function(e){
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          if (!jrows.length) return;
+          e.preventDefault();
+          jsel = Math.max(0, Math.min(jrows.length - 1, (jsel < 0 ? 0 : jsel) + (e.key === 'ArrowDown' ? 1 : -1)));
+          hl();
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          if (jrows.length) pick(jrows[jsel >= 0 ? jsel : 0]);
+        } else if (e.key === 'Escape') {
+          jin.value = ''; jrows = []; render();
+        }
+      });
+      // mousedown on a result fires before blur, so the pick still lands.
+      jin.addEventListener('blur', function(){ setTimeout(function(){ jout.style.display = 'none'; }, 120); });
+      jin.addEventListener('focus', function(){ if (jrows.length) { place(); jout.style.display = 'block'; } });
+    })();
 
     var msg = document.getElementById('peMsg');
     document.getElementById('peSave').addEventListener('click', async function(){
@@ -2280,7 +2333,6 @@ function posLoadPrefs(){
     favs: null,                // null = not yet migrated from the old key
     sidebarCollapsed: null,
     landingTab: null,          // null = the app default (POS Terminal)
-    showExtraMenus: false,     // Service Centre + Cars & Vehicles sidebar groups
   };
   try {
     // Falls back to the old shared key so nobody's existing setup is wiped by
@@ -2297,7 +2349,6 @@ function posLoadPrefs(){
       if (Array.isArray(s.favs)) d.favs = s.favs;
       if (typeof s.sidebarCollapsed === 'boolean') d.sidebarCollapsed = s.sidebarCollapsed;
       if (s.landingTab) d.landingTab = s.landingTab;
-      if (typeof s.showExtraMenus === 'boolean') d.showExtraMenus = s.showExtraMenus;
     }
   } catch (_) {}
   // Pick up whatever the old single-purpose keys hold, so nobody's existing
@@ -2334,7 +2385,6 @@ function posApplyPrefs(s){
   if (Array.isArray(s.favs)) POS_PREFS.favs = s.favs;
   if (typeof s.sidebarCollapsed === 'boolean') POS_PREFS.sidebarCollapsed = s.sidebarCollapsed;
   if (s.landingTab) POS_PREFS.landingTab = s.landingTab;
-  if (typeof s.showExtraMenus === 'boolean') POS_PREFS.showExtraMenus = s.showExtraMenus;
 }
 
 // Puts the non-POS settings on screen. Called once the server's copy has
@@ -2467,11 +2517,22 @@ function posHighlightSel(){
   var rows = results.querySelectorAll('[data-img]');
   rows.forEach(function(row, i){
     if (i === POS_SEL_INDEX) {
-      row.style.outline = '2px solid var(--red)';
-      row.style.outlineOffset = '-2px';
+      row.style.outline = '3px solid var(--red)';
+      row.style.outlineOffset = '-3px';
+      row.style.background = 'rgba(220,38,38,.16)';
+      row.style.boxShadow = 'inset 6px 0 0 0 var(--red), 0 0 0 3px rgba(220,38,38,.32), 0 8px 22px rgba(0,0,0,.30)';
+      row.style.borderRadius = '8px';
+      row.style.position = 'relative';
+      row.style.zIndex = '3';
+      row.style.scrollMarginTop = '10px';
+      row.style.scrollMarginBottom = '10px';
       row.scrollIntoView({ block: 'nearest' });
     } else {
       row.style.outline = 'none';
+      row.style.background = '';
+      row.style.boxShadow = '';
+      row.style.borderRadius = '';
+      row.style.zIndex = '';
     }
   });
 }
@@ -2894,7 +2955,7 @@ async function renderPOS(panel){
                 '</div>' +
                 '<span id="posCartSearchMsg" style="font-size:11.5px;color:var(--muted);white-space:nowrap;min-width:90px;text-align:right"></span>' +
               '</div>' +
-              '<div id="posCartSearchResults" style="margin-top:8px;max-height:360px;overflow-y:auto;display:none;border:1px solid var(--line);border-radius:7px;background:var(--card)"></div>' +
+              '<div id="posCartSearchResults" style="margin-top:8px;max-height:min(60vh,520px);overflow-y:auto;overscroll-behavior:contain;display:none;border:1px solid var(--line);border-radius:7px;background:var(--card)"></div>' +
             '</div>'
           : '') +
         '<div id="posCartItems" style="flex:1;overflow-y:auto;padding:8px 12px;' + (POS.collapsed ? 'display:none' : '') + '"></div>' +
@@ -3801,7 +3862,7 @@ async function renderPOS(panel){
     var csMsg = document.getElementById('posCartSearchMsg');
 
     // Paints the arrow-key selection and keeps it on screen. The results box is
-    // capped (max-height:34vh) with its own scrollbar, so without scrollIntoView
+    // capped (max-height:min(60vh,520px)) with its own scrollbar, so without scrollIntoView
     // the highlight walks off the bottom of the list and the operator loses it.
     function csHighlight(){
       var kids = csOut.children;
@@ -3857,7 +3918,7 @@ async function renderPOS(panel){
     // stock_status / sort -- these map straight onto it.
     function csQuery(q){
       var f = POS_CART_FILTER;
-      var p = ['limit=9', 'offset=0'];
+      var p = ['limit=50', 'offset=0'];
       if (q) p.push('q=' + encodeURIComponent(q));
       if (f.category) p.push('category=' + encodeURIComponent(f.category));
       if (f.brand)    p.push('make_model=' + encodeURIComponent(f.brand));
@@ -3882,7 +3943,11 @@ async function renderPOS(panel){
           if (seq !== csSeq) return;                 // a newer keystroke already won
           csRows = r.products || [];
           csRender();
-          csMsg.textContent = csRows.length ? (r.total + (r.count_mode === 'capped' ? '+' : '') + ' found') : 'no match';
+          csMsg.textContent = csRows.length
+            ? (r.total > csRows.length
+                ? 'showing ' + csRows.length + ' of ' + r.total + (r.count_mode === 'capped' ? '+' : '') + ' — refine to narrow'
+                : csRows.length + ' found')
+            : 'no match';
         } catch (e) {
           if (seq !== csSeq) return;
           csRows = []; csRender();
@@ -4239,6 +4304,29 @@ async function renderPOS(panel){
   });
 
   document.getElementById('posSearch').addEventListener('input', drawGrid);
+  // ↑/↓ from inside the search box walk the results list and Enter adds the
+  // highlighted part -- without needing Legacy keys mode or moving focus off
+  // the box (the global counter shortcuts skip arrows while a field is
+  // focused). Mirrors the full-cart search.
+  document.getElementById('posSearch').addEventListener('keydown', function(e){
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Enter') return;
+    var results = document.getElementById('posResults');
+    var products = (results && results.__posProducts) || [];
+    if (!products.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      POS_SEL_INDEX = Math.min(products.length - 1, POS_SEL_INDEX + 1);
+      posHighlightSel();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      POS_SEL_INDEX = Math.max(0, POS_SEL_INDEX - 1);
+      posHighlightSel();
+    } else if (e.key === 'Enter' && POS_SEL_INDEX >= 0 && POS_SEL_INDEX < products.length) {
+      e.preventDefault();
+      posAddToCart(products[POS_SEL_INDEX], 1);
+      drawCart();
+    }
+  });
   document.getElementById('posCat').addEventListener('change', drawGrid);
   document.getElementById('posCondition').addEventListener('change', drawGrid);
   document.getElementById('posStock').addEventListener('change', drawGrid);
@@ -9060,11 +9148,9 @@ async function renderMyPrefs(panel){
   SIDEBAR_GROUPS.forEach(function(g){ g.items.forEach(function(i){ tabs.push(i); }); });
   var hidden = (MY_ROLE && Array.isArray(MY_ROLE.hidden_tabs)) ? MY_ROLE.hidden_tabs : [];
   // The landing-screen picker only offers screens that are actually in this
-  // user's sidebar right now -- role-hidden tabs and the optional Service
-  // Centre / Vehicles groups (unless they turned those on) are left out.
+  // user's sidebar right now -- role-hidden tabs are left out.
   var landingTabs = [];
   SIDEBAR_GROUPS.forEach(function(g){
-    if (g.optional && !POS_PREFS.showExtraMenus) return;
     g.items.forEach(function(i){ if (hidden.indexOf(i.tab) === -1) landingTabs.push(i); });
   });
   var visible = landingTabs;
@@ -9092,10 +9178,6 @@ async function renderMyPrefs(panel){
                 return '<option value="' + esc(t.tab) + '"' + (POS_PREFS.landingTab === t.tab ? ' selected' : '') + '>' + esc(t.label) + '</option>';
               }).join('') +
             '</select></div>' +
-          '<div style="grid-column:1/-1"><label style="display:inline-flex;align-items:center;gap:6px;font-size:13px">' +
-            '<input type="checkbox" id="mpExtraMenus"' + (POS_PREFS.showExtraMenus ? ' checked' : '') + '/> Show the Service Centre &amp; Vehicles menus</label>' +
-            '<div style="font-size:11.5px;color:var(--muted);margin-top:2px">Extra sidebar sections: appointments, weekly schedule, work orders, service quotes, services catalog, time clock, mechanics, labor standards, inspections, vehicle lookup, maintenance due. Hidden by default.</div>' +
-          '</div>' +
         '</div></div>' +
 
       '<div class="panel" style="margin-bottom:14px"><div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">💵 POS terminal</div>' +
@@ -9143,7 +9225,6 @@ async function renderMyPrefs(panel){
     POS_PREFS.theme = document.getElementById('mpTheme').value;
     POS_PREFS.sidebarCollapsed = document.getElementById('mpSidebar').value === '1';
     POS_PREFS.landingTab = document.getElementById('mpLanding').value || null;
-    POS_PREFS.showExtraMenus = document.getElementById('mpExtraMenus').checked;
     POS_PREFS.view = document.getElementById('mpView').value;
     POS_PREFS.fontSize = document.getElementById('mpFont').value;
     POS_PREFS.legacyKeys = document.getElementById('mpLegacy').checked;
@@ -9168,7 +9249,7 @@ async function renderMyPrefs(panel){
     if (!confirm('Reset your preferences to the defaults?')) return;
     POS_PREFS = { view:'grid', fontSize:'md', legacyKeys:false,
                   columns:{ bin:true, qty:true, price:true },
-                  theme:'light', favs:[], sidebarCollapsed:false, landingTab:null, showExtraMenus:false };
+                  theme:'light', favs:[], sidebarCollapsed:false, landingTab:null };
     try { localStorage.setItem(FAV_KEY, '[]'); } catch (_) {}
     posSavePrefs();
     await posFlushPrefs();
@@ -9295,11 +9376,6 @@ async function renderRoles(panel, openCode){
         '<span><span class="t">Counts as a manager</span>' +
         '<span class="d">Passes the manager-only checks on the server — receiving stock, editing pricing, issuing refunds, managing staff. The screen list below still controls the sidebar.</span></span>' +
       '</label>' +
-      '<label class="qbo-switch">' +
-        '<input type="checkbox" class="qbo-eservice"' + (role.show_extra_menus ? ' checked' : '') + '/>' +
-        '<span><span class="t">Show the Service Centre &amp; Vehicles menus by default</span>' +
-        '<span class="d">Work Orders, Appointments, Mechanics, Inspections, Vehicle Lookup and the rest — normally each user turns these on in My Preferences; tick this to give everyone on this role the service menus automatically.</span></span>' +
-      '</label>' +
       '<div class="qbo-sec">Screens this role can open</div>' +
       cats +
       '<div class="qbo-foot">' +
@@ -9348,7 +9424,6 @@ async function renderRoles(panel, openCode){
           '<div><label class="lbl">Role name</label><input id="nrLabel" class="fld" placeholder="e.g. Supervisor"/></div>' +
           '<div><label class="lbl">Seniority <span style="text-transform:none;letter-spacing:0;font-weight:400">(lower = more senior)</span></label><input id="nrRank" type="number" class="fld" value="50" style="width:120px"/></div>' +
           '<label style="display:inline-flex;align-items:center;gap:7px;font-size:13px;padding-bottom:9px"><input type="checkbox" id="nrManage"/> Counts as a manager</label>' +
-          '<label style="display:inline-flex;align-items:center;gap:7px;font-size:13px;padding-bottom:9px"><input type="checkbox" id="nrService"/> Show Service Centre menus by default</label>' +
           '<button class="qbo-btn" id="nrCreate" type="submit" style="margin-bottom:1px">Create role</button>' +
           '<button class="qbo-btn ghost" id="nrCancel" type="button" style="margin-bottom:1px">Cancel</button>' +
           '<span id="nrMsg" class="qbo-msg" style="margin-left:4px"></span>' +
@@ -9416,7 +9491,6 @@ async function renderRoles(panel, openCode){
       var msg = ed.querySelector('.qbo-msg');
       var body = {
         can_manage: ed.querySelector('.qbo-emanage').checked,
-        show_extra_menus: !!(ed.querySelector('.qbo-eservice') || {}).checked,
         hidden_tabs: Array.prototype.filter.call(ed.querySelectorAll('.qbo-tab'), function(x){ return !x.checked; })
                           .map(function(x){ return x.value; }),
       };
@@ -9454,7 +9528,6 @@ async function submitRole(panel){
       label: label,
       rank: parseInt(document.getElementById('nrRank').value, 10) || 50,
       can_manage: document.getElementById('nrManage').checked,
-      show_extra_menus: !!(document.getElementById('nrService') || {}).checked,
     }});
     renderRoles(panel, res && res.role && res.role.code);
   } catch (e) { msg.textContent = e.message; msg.style.color = 'var(--red)'; }
