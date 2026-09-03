@@ -86,17 +86,30 @@ export default function mount(app) {
     const db = d1(c.env);
     const me = c.get('user');
     const b = await c.req.json().catch(() => ({}));
-    if ((b.price_usd != null || b.cost_usd != null) && !userCan(me, 'inventory.edit_price'))
+    const PRICE_FIELDS = ['price_usd', 'cost_usd', 'list_price_usd', 'trade_price_usd', 'core_charge_usd', 'env_fee_usd', 'markup_pct'];
+    if (PRICE_FIELDS.some((f) => b[f] != null) && !userCan(me, 'inventory.edit_price'))
       return c.json({ error: 'Your account is not allowed to edit product pricing.' }, 403);
     if (b.stock_count != null && !userCan(me, 'inventory.adjust_stock'))
       return c.json({ error: 'Your account is not allowed to adjust stock counts.' }, 403);
 
     const sets = []; const vals = [];
     const put = (frag, v) => { sets.push(frag); vals.push(v); };
+    const cents = (v) => (v === '' || v == null ? null : usdToCents(v));
     if (b.stock_count != null) put('stock_count = ?', parseInt(b.stock_count, 10));
     if (b.price_usd != null) put('price_cents = ?', usdToCents(b.price_usd));
-    if (b.cost_usd != null) put('cost_cents = ?', b.cost_usd === '' ? null : usdToCents(b.cost_usd));
+    if (b.cost_usd != null) put('cost_cents = ?', cents(b.cost_usd));
+    if (b.list_price_usd != null) put('list_price_cents = ?', cents(b.list_price_usd));
+    if (b.trade_price_usd != null) put('trade_price_cents = ?', cents(b.trade_price_usd));
+    // core_charge_cents / env_fee_cents are NOT NULL DEFAULT 0 — blank clears to 0, not NULL
+    if (b.core_charge_usd != null) put('core_charge_cents = ?', cents(b.core_charge_usd) || 0);
+    if (b.env_fee_usd != null) put('env_fee_cents = ?', cents(b.env_fee_usd) || 0);
+    if (b.markup_pct != null) put('markup_pct = ?', num(b.markup_pct));
+    if (b.cost_method !== undefined) put('cost_method = ?', String(b.cost_method || '').trim() || null);
+    if (b.stock_unit !== undefined) put('stock_unit = ?', String(b.stock_unit || '').trim() || null);
+    if (b.warranty_days !== undefined) put('warranty_days = ?', b.warranty_days === '' || b.warranty_days == null ? null : Math.max(0, parseInt(b.warranty_days, 10) || 0));
+    if (b.serial_required !== undefined) put('serial_required = ?', toBit(b.serial_required));
     if (b.supplier_id !== undefined) put('supplier_id = ?', b.supplier_id ? parseInt(b.supplier_id, 10) : null);
+    if (b.supplier_sku !== undefined) put('supplier_sku = ?', String(b.supplier_sku || '').trim() || null);
     if (b.low_threshold != null) put('low_threshold = ?', Math.max(0, parseInt(b.low_threshold, 10) || 0));
     if (b.is_active != null) put('is_active = ?', toBit(b.is_active));
     if (b.name != null) put('name = ?', String(b.name));
@@ -239,10 +252,12 @@ export default function mount(app) {
       core_charge_usd: 'core_charge_cents', env_fee_usd: 'env_fee_cents',
       list_price_usd: 'list_price_cents', trade_price_usd: 'trade_price_cents',
     };
+    // core_charge_cents / env_fee_cents are NOT NULL DEFAULT 0 — blank clears to 0.
+    const NOT_NULL_CENTS = new Set(['core_charge_usd', 'env_fee_usd']);
     const sets = []; const vals = [];
     for (const [f, tf] of Object.entries(MAP)) {
       if (b[f] === undefined) continue;
-      if (CENTS[f]) { sets.push(`${CENTS[f]} = ?`); vals.push(usdToCents(b[f])); }
+      if (CENTS[f]) { sets.push(`${CENTS[f]} = ?`); vals.push(usdToCents(b[f]) ?? (NOT_NULL_CENTS.has(f) ? 0 : null)); }
       else { sets.push(`${f} = ?`); vals.push(tf ? tf(b[f]) : b[f]); }
     }
     if (!sets.length) return c.json({ error: 'Nothing to update' }, 400);

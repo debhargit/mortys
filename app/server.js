@@ -3993,8 +3993,8 @@ app.patch('/api/admin/products/:img', requireAdmin, async (req, res) => {
   if (b.cost_usd != null){ params.push(money(b.cost_usd)); sets.push(`cost_usd = $${params.length}`); }
   if (b.list_price_usd != null){ params.push(money(b.list_price_usd)); sets.push(`list_price_usd = $${params.length}`); }
   if (b.trade_price_usd != null){ params.push(money(b.trade_price_usd)); sets.push(`trade_price_usd = $${params.length}`); }
-  if (b.core_charge_usd != null){ params.push(money(b.core_charge_usd)); sets.push(`core_charge_usd = $${params.length}`); }
-  if (b.env_fee_usd != null){ params.push(money(b.env_fee_usd)); sets.push(`env_fee_usd = $${params.length}`); }
+  if (b.core_charge_usd != null){ params.push(money(b.core_charge_usd) ?? 0); sets.push(`core_charge_usd = $${params.length}`); }
+  if (b.env_fee_usd != null){ params.push(money(b.env_fee_usd) ?? 0); sets.push(`env_fee_usd = $${params.length}`); }
   if (b.markup_pct != null){ params.push(money(b.markup_pct)); sets.push(`markup_pct = $${params.length}`); }
   if (b.cost_method !== undefined){ params.push(String(b.cost_method || '').trim() || null); sets.push(`cost_method = $${params.length}`); }
   if (b.stock_unit !== undefined){ params.push(String(b.stock_unit || '').trim() || null); sets.push(`stock_unit = $${params.length}`); }
