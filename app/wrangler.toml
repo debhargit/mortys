@@ -9,9 +9,9 @@ pages_build_output_dir = "public"
 binding = "DB"
 database_name = "mortysautoparts-db"
 migrations_dir = "migrations"
-# mortysautoparts-db on the haldaneharrison46@gmail.com account
-# (9a6d4645171dc984e737d3544ff01a37). Created 2026-09-01.
-database_id = "53b55748-5ae3-4fc7-85d1-8d463891a3ef"
+# mortysautoparts-db on the debhargithub@gmail.com account
+# (ce557e06f410b0e79dbd1cbe3adeef8b). Created 2026-09-03.
+database_id = "bf998f24-7329-467f-959e-898589aa5c17"
 
 # Where new-order alerts go, and the From line for outbound email. Override
 # any of these without touching code.
