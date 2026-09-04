@@ -27,7 +27,7 @@ async function cookieFor(userId) { return (await sessionCookie(ENV, { userId, ep
 const routes = [];
 const app = {};
 for (const v of ['get', 'post', 'patch', 'delete', 'put']) app[v] = (p, ...r) => routes.push({ v, p, mws: r.slice(0, -1), h: r[r.length - 1] });
-for (const mod of ['auth', 'storefront', 'customer', 'admin_crm', 'admin_users']) {
+for (const mod of ['auth', 'storefront', 'customer', 'shipping', 'admin_crm', 'admin_users']) {
   (await import(APP + 'functions/_routes/' + mod + '.js')).default(app);
 }
 console.log('mounted', routes.length);
@@ -216,6 +216,51 @@ r = await call('get', '/api/orders/' + guestOrderId + '/print?email=walkup@examp
 n++; A('/api/orders/:id/print?email= -> order + items for the guest', st === 200 && r.order && r.order.id === guestOrderId && Array.isArray(r.items) && r.items.length === 1);
 r = await call('get', '/api/orders/' + guestOrderId + '/print?email=someone@else.com', { user: undefined });
 n++; A('/api/orders/:id/print -> 403 on a wrong email', st === 403);
+
+// ---- 4g. shipping: live rate quote + signed token + booking -------------
+sdb.prepare("UPDATE shop_settings SET carrier_knutsford_enabled = 1, carrier_manual_enabled = 1, ship_local_flat_usd = 1200, ship_origin_parish = 'St. Andrew' WHERE id = 1").run();
+r = await call('get', '/api/config');
+n++; A('config: knutsford + manual in the enabled carrier list', Array.isArray(r.shipping.carriers) && r.shipping.carriers.includes('knutsford') && r.shipping.carriers.includes('manual'));
+
+r = await call('post', '/api/shipping/quote', { user: undefined, body: { parish: 'St. Ann', items: [{ img: 'qz-1', qty: 2 }] } });
+n++; A('/api/shipping/quote -> knutsford + manual quotes, each with a token', st === 200 && r.quotes.length >= 2 &&
+  r.quotes.some((x) => x.carrier === 'knutsford') && r.quotes.some((x) => x.carrier === 'manual') &&
+  r.quotes.every((x) => typeof x.token === 'string' && x.token.includes('.')));
+const knut = r.quotes.find((x) => x.carrier === 'knutsford');
+
+r = await call('post', '/api/shipping/quote', { user: undefined, body: { items: [{ img: 'qz-1', qty: 1 }] } });
+n++; A('/api/shipping/quote -> 400 without a parish', st === 400);
+
+// checkout trusting the signed quote token: fee + carrier come from the token
+sdb.prepare('DELETE FROM cart_items').run();
+sdb.prepare("INSERT INTO cart_items (user_id, product_img, qty) VALUES (501,'qz-1',2)").run();
+r = await call('post', '/api/checkout', { user: { id: 501, show_prices: 1 }, body: {
+  payment_method: 'cash_pickup', fulfilment: 'shipping',
+  ship_name: 'Dee', ship_line1: '1 Main St', ship_parish: 'St. Ann',
+  ship_carrier: 'manual', ship_fee_usd: 1,          // ignored — token wins
+  ship_quote_token: knut.token,
+} });
+n++; A('/api/checkout -> trusts the quote token (carrier + fee from token, shipment booked)', (() => {
+  if (st !== 200) return false;
+  const o = q1('SELECT ship_carrier, ship_fee_cents, fulfilment, tracking_number, ship_status FROM orders WHERE id = ?', r.order_id);
+  return o && o.ship_carrier === 'knutsford' && o.ship_fee_cents === Math.round(knut.amount * 100) &&
+    o.fulfilment === 'shipping' && !!o.tracking_number && o.ship_status === 'booked' &&
+    Math.abs(r.total_usd - (90 + knut.amount)) < 0.01;
+})());
+const shipOrderId = r.order_id;
+sdb.prepare("UPDATE orders SET customer_email = 'dee@example.com' WHERE id = ?").run(shipOrderId);
+
+r = await call('get', '/api/orders/' + shipOrderId + '/label?email=dee@example.com', { user: undefined });
+n++; A('/api/orders/:id/label -> 404 for a carrier with no label bytes (manual/knutsford)', st === 404);
+
+r = await call('get', '/api/orders/' + shipOrderId + '/tracking?email=dee@example.com', { user: undefined });
+n++; A('/api/orders/:id/tracking -> returns the tracking number + a status', st === 200 && r.tracking_number && typeof r.status === 'string');
+
+r = await call('post', '/api/admin/orders/' + shipOrderId + '/ship', { user: { id: 900 } });
+n++; A('POST /api/admin/orders/:id/ship -> re-books (ok)', st === 200 && r.ok === true && !!r.tracking_number);
+
+sdb.prepare("UPDATE shop_settings SET carrier_knutsford_enabled = 0, ship_local_flat_usd = 0 WHERE id = 1").run();
+sdb.prepare('DELETE FROM cart_items').run();
 
 // ---- 4c. flip back OFF for the rest of the suite -------------------------
 sdb.prepare("UPDATE shop_settings SET storefront_prices = 0 WHERE id = 1").run();

@@ -17,6 +17,7 @@ import mountMedia from './_routes/media.js';            // Phase 7 (R2 uploads +
 import mountCrm from './_routes/crm.js';                // Phase 8 (customer reminders CRUD)
 import mountCron from './_routes/cron.js';              // Phase 8 (scheduled-job endpoints)
 import mountCustomer from './_routes/customer.js';      // Phase 10 (checkout, account, signup)
+import mountShipping from './_routes/shipping.js';      // storefront carrier rates / labels / tracking
 import mountAdminCrm from './_routes/admin_crm.js';    // Phase 11 (admin CRM + storefront-admin)
 import mountAdminUsers from './_routes/admin_users.js'; // Phase 12 (users / staff / roles)
 import mountService from './_routes/service.js'; // Phase 13 (service centre)
@@ -36,6 +37,7 @@ mountMedia(app);
 mountCrm(app);
 mountCron(app);
 mountCustomer(app);
+mountShipping(app);
 mountAdminCrm(app);
 mountAdminUsers(app);
 mountService(app);

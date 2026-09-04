@@ -10,7 +10,7 @@ const APP_DIR = fileURLToPath(APP);                          // native path
 process.chdir(APP_DIR);
 const B = APP + 'functions';
 
-const ROUTE_MODS = ['auth', 'storefront', 'admin', 'pos', 'pos_txn', 'inventory', 'media', 'crm', 'cron', 'customer', 'admin_crm', 'admin_users', 'service', 'ops', 'reports', 'admin_misc'];
+const ROUTE_MODS = ['auth', 'storefront', 'admin', 'pos', 'pos_txn', 'inventory', 'media', 'crm', 'cron', 'customer', 'shipping', 'admin_crm', 'admin_users', 'service', 'ops', 'reports', 'admin_misc'];
 let fails = 0;
 const bad = (m) => { console.log('FAIL  ' + m); fails++; };
 const ok = (m) => console.log('ok    ' + m);

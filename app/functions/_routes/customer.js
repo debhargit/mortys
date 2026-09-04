@@ -18,6 +18,8 @@ import { sessionCookie } from '../_lib/session.js';
 import { publicUser } from './auth.js';
 import { sendEmail, templates } from '../_lib/mailer.js';
 import { getShopSettings } from '../_lib/shop.js';
+import { verifyQuote } from '../_lib/carriers/index.js';
+import { bookShipment } from './shipping.js';
 
 const POINTS_USD_RATE = 0.05;
 const r2 = (n) => Math.round(n * 100) / 100;
@@ -82,11 +84,16 @@ function enabledCarriers(s) {
 // cols } where `cols` is the exact set of orders columns to write. A pickup
 // order writes nothing but the default 'pickup'. The fee is trusted from the
 // client for now (clamped >= 0); Phase 3 swaps it for a signed quote token.
-function parseShip(b) {
+// `trusted` is the verified /api/shipping/quote token payload, when present:
+// { carrier, service, amount }. It wins over the raw client fee/carrier so a
+// shopper can't hand-edit the freight down.
+function parseShip(b, trusted) {
   const ful = ['pickup', 'delivery', 'shipping'].includes(b.fulfilment) ? b.fulfilment : 'pickup';
   if (ful === 'pickup') return { fulfilment: 'pickup', fee: 0, cols: { fulfilment: 'pickup' } };
   const s = (v, n = 200) => (v == null ? null : (String(v).trim().slice(0, n) || null));
-  const fee = Math.max(0, r2(Number(b.ship_fee_usd) || 0));
+  const fee = trusted ? Math.max(0, r2(trusted.amount)) : Math.max(0, r2(Number(b.ship_fee_usd) || 0));
+  const carrier = trusted && CARRIERS.includes(trusted.carrier) ? trusted.carrier
+    : (CARRIERS.includes(b.ship_carrier) ? b.ship_carrier : 'manual');
   return {
     fulfilment: ful,
     fee,
@@ -99,8 +106,8 @@ function parseShip(b) {
       ship_city: s(b.ship_city, 80),
       ship_parish: PARISHES.includes(b.ship_parish) ? b.ship_parish : null,
       ship_instructions: s(b.ship_instructions, 600),
-      ship_carrier: CARRIERS.includes(b.ship_carrier) ? b.ship_carrier : 'manual',
-      ship_service: s(b.ship_service, 80),
+      ship_carrier: carrier,
+      ship_service: (trusted && trusted.service) ? String(trusted.service).slice(0, 80) : s(b.ship_service, 80),
       ship_fee_cents: cents(fee),
     },
   };
@@ -251,7 +258,7 @@ export default function mount(app) {
     if (!['cash_pickup', 'bank_transfer', 'stripe'].includes(method)) return c.json({ error: 'Invalid payment_method' }, 400);
     if (method === 'stripe') return c.json({ error: 'Online card payment is not available' }, 400);
 
-    const ship = parseShip(b);
+    const ship = parseShip(b, await verifyQuote(c.env, b.ship_quote_token));
     const shipErr = shipError(ship);
     if (shipErr) return c.json({ error: shipErr, code: 'ship_incomplete' }, 400);
 
@@ -320,9 +327,16 @@ export default function mount(app) {
       c.executionCtx?.waitUntil?.(sendEmail(c.env, { to: u.email, ...templates.orderEmail({ name: u.name, orderId, items: li, total: grandTotal }) }).catch(() => {}));
     }
 
+    let shipResult = null;
+    if (ship.fulfilment !== 'pickup') {
+      shipResult = await bookShipment(c.env, orderId).catch(() => null);
+    }
+
     return c.json({
       order_id: orderId, subtotal_usd: subtotal, total_usd: grandTotal, ship_fee_usd: ship.fee, fulfilment: ship.fulfilment,
       status: 'pending', payment_method: method, checkout_url: null,
+      tracking_number: shipResult && shipResult.tracking_number || null,
+      ship_status: shipResult ? shipResult.ship_status : null,
       points_redeemed: redeemPts, points_discount_usd: pointsDiscount, points_earned: earnedPoints,
       coupon_code: couponCode, coupon_discount_usd: couponDiscount,
     });
@@ -351,7 +365,7 @@ export default function mount(app) {
     const method = b.payment_method || 'cash_pickup';
     if (!['cash_pickup', 'bank_transfer'].includes(method)) return c.json({ error: 'Invalid payment_method' }, 400);
 
-    const ship = parseShip(b);
+    const ship = parseShip(b, await verifyQuote(c.env, b.ship_quote_token));
     const shipErr = shipError(ship);
     if (shipErr) return c.json({ error: shipErr, code: 'ship_incomplete' }, 400);
 
@@ -407,9 +421,16 @@ export default function mount(app) {
       c.executionCtx?.waitUntil?.(sendEmail(c.env, { to: email, ...templates.orderEmail({ name, orderId, items: li, total: grandTotal }) }).catch(() => {}));
     }
 
+    let shipResult = null;
+    if (ship.fulfilment !== 'pickup') {
+      shipResult = await bookShipment(c.env, orderId).catch(() => null);
+    }
+
     return c.json({
       order_id: orderId, subtotal_usd: subtotal, total_usd: grandTotal, ship_fee_usd: ship.fee, fulfilment: ship.fulfilment,
       status: 'pending', payment_method: method, checkout_url: null,
+      tracking_number: shipResult && shipResult.tracking_number || null,
+      ship_status: shipResult ? shipResult.ship_status : null,
       coupon_code: couponCode, coupon_discount_usd: couponDiscount,
     });
   });

@@ -52,6 +52,21 @@ COOKIE_SECURE = "true"
 # [[send_email]]
 # name = "EMAIL"
 
+# Storefront carrier integration (functions/_lib/carriers/*). Non-secret bits
+# — shipper origin address, per-carrier on/off + account numbers — live in the
+# shop_settings row (Admin -> Settings). API credentials are secrets:
+#   npx wrangler pages secret put DHL_API_KEY     --project-name mortysautoparts
+#   npx wrangler pages secret put DHL_API_SECRET  --project-name mortysautoparts
+#   npx wrangler pages secret put DHL_ACCOUNT     --project-name mortysautoparts
+#   npx wrangler pages secret put FEDEX_CLIENT_ID     --project-name mortysautoparts
+#   npx wrangler pages secret put FEDEX_CLIENT_SECRET --project-name mortysautoparts
+#   npx wrangler pages secret put FEDEX_ACCOUNT       --project-name mortysautoparts
+# Optional: DHL_TEST=1 / FEDEX_SANDBOX=1 (or DHL_BASE / FEDEX_BASE) to hit the
+# carriers' test endpoints. Missing creds -> that carrier just returns no rates
+# and refuses to book; Knutsford + "manual" keep working with a table rate and a
+# local tracking string. Carrier labels are stored base64 on the order row
+# (orders.label_data) until the R2 UPLOADS bucket below is enabled.
+
 # Binary uploads (Phase 7). functions/_lib/uploads.js reads/writes this bucket;
 # functions/_routes/media.js serves GET /uploads/*. While the binding is
 # absent, upload endpoints return a clean 501 and nothing else is affected.

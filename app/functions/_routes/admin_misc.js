@@ -55,8 +55,14 @@ export default function mount(app) {
     const fields = ['company_name', 'address', 'country', 'phone', 'email', 'website',
       'print_logo_on_invoice', 'default_print_template', 'quote_valid_days',
       'invoice_notice', 'receipt_notice', 'statement_notice', 'storefront_prices',
-      'pos_enforce_login', 'pos_enforce_customer', 'pos_default_fulfilment'];
-    const BITS = ['print_logo_on_invoice', 'storefront_prices', 'pos_enforce_login', 'pos_enforce_customer'];
+      'pos_enforce_login', 'pos_enforce_customer', 'pos_default_fulfilment',
+      'ship_origin_name', 'ship_origin_phone', 'ship_origin_line1', 'ship_origin_line2',
+      'ship_origin_city', 'ship_origin_parish', 'ship_origin_country',
+      'carrier_dhl_enabled', 'carrier_dhl_account', 'carrier_fedex_enabled', 'carrier_fedex_account',
+      'carrier_knutsford_enabled', 'carrier_manual_enabled',
+      'ship_default_weight_kg', 'ship_local_flat_usd'];
+    const BITS = ['print_logo_on_invoice', 'storefront_prices', 'pos_enforce_login', 'pos_enforce_customer',
+      'carrier_dhl_enabled', 'carrier_fedex_enabled', 'carrier_knutsford_enabled', 'carrier_manual_enabled'];
     const sets = []; const vals = [];
     for (const f of fields) if (b[f] !== undefined) { sets.push(`${f} = ?`); vals.push(BITS.includes(f) ? (b[f] ? 1 : 0) : b[f]); }
     if (!sets.length) return c.json({ error: 'Nothing to update' }, 400);

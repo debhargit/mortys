@@ -1496,7 +1496,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
   // FULFILMENT / SHIPPING state — mirrors the POS tender modal's ship block.
   // In memory only; recipient name/phone seed from a restored guest contact.
-  var SHIP = { fulfilment:'pickup', name:'', phone:'', line1:'', line2:'', city:'', parish:'', carrier:'', service:'', fee:'', instructions:'' };
+  var SHIP = { fulfilment:'pickup', name:'', phone:'', line1:'', line2:'', city:'', parish:'', carrier:'', service:'', fee:'', instructions:'', quoteToken:'' };
   try {
     var _g = JSON.parse(localStorage.getItem('mh_guest') || '{}');
     if (_g && _g.name) SHIP.name = _g.name;
@@ -1508,7 +1508,7 @@ document.addEventListener('DOMContentLoaded', function(){
   function shipFeeNum(){ return SHIP.fulfilment === 'pickup' ? 0 : Math.max(0, Number(SHIP.fee) || 0); }
   function shipPayload(){
     if (SHIP.fulfilment === 'pickup') return { fulfilment:'pickup' };
-    return {
+    var p = {
       fulfilment: SHIP.fulfilment,
       ship_name: SHIP.name, ship_phone: SHIP.phone,
       ship_line1: SHIP.line1, ship_line2: SHIP.line2,
@@ -1516,6 +1516,8 @@ document.addEventListener('DOMContentLoaded', function(){
       ship_carrier: SHIP.carrier || 'manual', ship_service: SHIP.service,
       ship_fee_usd: shipFeeNum(), ship_instructions: SHIP.instructions
     };
+    if (SHIP.quoteToken) p.ship_quote_token = SHIP.quoteToken;   // server trusts this over the raw fee
+    return p;
   }
   // Client-side mirror of the server's shipError() so we can point at the field.
   function shipClientError(){
@@ -1694,20 +1696,66 @@ document.addEventListener('DOMContentLoaded', function(){
           '<div style="display:flex;align-items:center;gap:3px"><span style="font-size:12px;color:#6b7280">Fee $</span><input id="shFee" class="shFld" type="number" min="0" step="0.01" placeholder="0.00" value="' + esc(String(SHIP.fee || '')) + '" style="text-align:right"/></div>' +
         '</div>' +
         '<input id="shInstr" class="shFld" placeholder="Delivery instructions (optional)" value="' + esc(SHIP.instructions || '') + '"/>' +
+        '<button type="button" id="shRateBtn" class="btn" style="justify-self:start;font-size:12px;background:var(--navy);color:#fff">Get live rates</button>' +
+        '<div id="shRates" style="display:grid;gap:5px"></div>' +
       '</div>';
     }
     box.innerHTML = h;
     box.querySelectorAll('.shFul').forEach(function(btn){
-      btn.addEventListener('click', function(){ SHIP.fulfilment = btn.dataset.ful; renderShip(true); renderCart(); });
+      btn.addEventListener('click', function(){ SHIP.fulfilment = btn.dataset.ful; SHIP.quoteToken = ''; _shipRates = null; renderShip(true); renderCart(); });
     });
+    // Editing any field by hand invalidates a live quote (its token no longer
+    // matches the address/carrier), so drop it and fall back to the typed fee.
     var fields = { shName:'name', shPhone:'phone', shLine1:'line1', shLine2:'line2', shCity:'city', shParish:'parish', shCarrier:'carrier', shInstr:'instructions' };
     Object.keys(fields).forEach(function(id){
       var el = document.getElementById(id);
-      if (el) el.addEventListener('input', function(){ SHIP[fields[id]] = el.value; });
+      if (el) el.addEventListener('input', function(){ SHIP[fields[id]] = el.value; if (id === 'shParish' || id === 'shCarrier') SHIP.quoteToken = ''; });
     });
     if (carriers.length <= 1 && ful !== 'pickup' && !SHIP.carrier) SHIP.carrier = carriers[0] || 'manual';
     var feeEl = document.getElementById('shFee');
-    if (feeEl) feeEl.addEventListener('input', function(){ SHIP.fee = feeEl.value; renderCart(); });
+    if (feeEl) feeEl.addEventListener('input', function(){ SHIP.fee = feeEl.value; SHIP.quoteToken = ''; renderCart(); });
+    var rb = document.getElementById('shRateBtn');
+    if (rb) rb.addEventListener('click', fetchShipRates);
+    renderShipRates();
+  }
+
+  var _shipRates = null;   // last /api/shipping/quote result
+  function renderShipRates(){
+    var box = document.getElementById('shRates');
+    if (!box) return;
+    if (!_shipRates){ box.innerHTML = ''; return; }
+    if (!_shipRates.length){ box.innerHTML = '<div style="font-size:11.5px;color:#6b7280">No live rates — enter a carrier and fee above.</div>'; return; }
+    box.innerHTML = _shipRates.map(function(q, i){
+      var on = SHIP.quoteToken === q.token;
+      return '<button type="button" class="shRate" data-i="' + i + '" style="text-align:left;border:2px solid ' + (on?'var(--navy)':'#d1d5db') + ';border-radius:7px;padding:7px 9px;background:' + (on?'rgba(11,27,43,.05)':'transparent') + ';cursor:pointer;font-family:inherit;font-size:12.5px">' +
+        '<b>' + esc(q.service_label || q.carrier) + '</b> — ' + esc(String(q.currency || '')) + ' ' + Number(q.amount).toLocaleString('en-US') +
+        (q.eta_days ? ' <span style="color:#6b7280">· ~' + q.eta_days + 'd</span>' : '') + '</button>';
+    }).join('');
+    box.querySelectorAll('.shRate').forEach(function(bt){
+      bt.addEventListener('click', function(){
+        var q = _shipRates[+bt.dataset.i];
+        SHIP.carrier = q.carrier; SHIP.service = q.service || ''; SHIP.fee = q.amount; SHIP.quoteToken = q.token;
+        renderShip(true); renderCart();
+      });
+    });
+  }
+  async function fetchShipRates(){
+    var rb = document.getElementById('shRateBtn');
+    if (!SHIP.parish){ if (rb) rb.textContent = 'Choose a parish first'; return; }
+    if (rb){ rb.disabled = true; rb.textContent = 'Getting rates…'; }
+    try {
+      var res = await fetch('/api/shipping/quote', {
+        method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin',
+        body: JSON.stringify({
+          parish: SHIP.parish, city: SHIP.city, country: 'JM',
+          items: Object.keys(cart).map(function(img){ return { img: img, qty: cart[img] }; })
+        })
+      });
+      var d = await res.json();
+      _shipRates = (d && d.quotes) || [];
+    } catch(e){ _shipRates = []; }
+    if (rb){ rb.disabled = false; rb.textContent = 'Refresh rates'; }
+    renderShipRates();
   }
 
   function renderCart(){
@@ -3185,8 +3233,8 @@ document.addEventListener('DOMContentLoaded', function(){
       // The order owns these now — clear them so the next order starts fresh.
       orderPhotos.forEach(function(p){ try { URL.revokeObjectURL(p.url); } catch(e){} });
       orderPhotos = [];
-      SHIP.fulfilment = 'pickup'; SHIP.fee = ''; SHIP.carrier = ''; SHIP.service = ''; SHIP.instructions = '';
-      _shipRenderedFor = null;
+      SHIP.fulfilment = 'pickup'; SHIP.fee = ''; SHIP.carrier = ''; SHIP.service = ''; SHIP.instructions = ''; SHIP.quoteToken = '';
+      _shipRates = null; _shipRenderedFor = null;
       // renderCart() bails out early once the cart is empty, so clear the strip
       // here rather than relying on it.
       renderPhotoStrip();
