@@ -3250,6 +3250,11 @@ async function renderPOS(panel){
       '<span style="opacity:.3;flex-shrink:0">|</span>' +
       // Cash-drawer shift status (same source as #posBar\'s shift button).
       '<span id="posFootShift" style="white-space:nowrap;flex-shrink:0;font-weight:700;color:' + (shiftSession ? '#4ade80' : '#fca5a5') + '" title="' + (shiftSession ? esc('Cash-drawer shift #' + shiftSession.id + ' open · float ' + fmtMoney(shiftSession.opening_float)) : 'No cash-drawer shift is open') + '">🗄 ' + (shiftSession ? 'Shift open' : 'No shift open') + '</span>' +
+      '<span style="opacity:.3;flex-shrink:0">|</span>' +
+      // Cart item count -- always on screen. The #posCartBadge in the cart
+      // header is clipped when the cart is collapsed to a strip so the parts
+      // search can have the whole width; this one never goes away.
+      '<span id="posFootCart" style="white-space:nowrap;flex-shrink:0;font-weight:800" title="Items in the cart">🛒 <span id="posFootCartN">0</span></span>' +
       '<span id="posFootUser" style="margin-left:auto;white-space:nowrap;opacity:.92;flex-shrink:0" title="Signed in">👤 ' + esc(CURRENT_ADMIN_NAME || '—') + '</span>' +
       '<span style="opacity:.3;flex-shrink:0">|</span>' +
       '<span id="posFootCount" style="white-space:nowrap;opacity:.92;flex-shrink:0">—</span>' +
@@ -3753,8 +3758,11 @@ async function renderPOS(panel){
 
   function drawCart(){
     posSaveState();
+    var cartN = POS.cart.reduce(function(s,i){ return s + i.qty; }, 0);
     var badge = document.getElementById('posCartBadge');
-    if (badge) badge.textContent = POS.cart.reduce(function(s,i){ return s + i.qty; }, 0);
+    if (badge) badge.textContent = cartN;
+    var footN = document.getElementById('posFootCartN');
+    if (footN) footN.textContent = cartN;
     if (POS.collapsed) return;
 
     var items = document.getElementById('posCartItems');
