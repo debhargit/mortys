@@ -1093,9 +1093,6 @@
           <label class="sb-field"><span>Price</span>
             <select id="fPrice"><option value="all">Any</option><option value="priced">Priced only</option><option value="quote">Call for price</option><option value="lt50">Under $50</option><option value="50to200">$50 – $200</option><option value="gt200">Over $200</option></select>
           </label>
-          <label class="sb-field"><span>Bin</span>
-            <input id="fBin" type="search" placeholder="e.g. D-08" autocomplete="off"/>
-          </label>
         </div>
 
         <div class="sb-sec">
@@ -2016,7 +2013,8 @@ document.addEventListener('DOMContentLoaded', function(){
     return line;
   }
   function stockBadgeHTML(st){
-    var txt = (st.level === 'low') ? 'Only ' + st.count + ' left' : st.label;
+    // Storefront shows availability, never the on-hand count.
+    var txt = (st.level === 'low') ? 'Low stock' : st.label;
     return '<span class="stock ' + st.level + '">' + txt + '</span>';
   }
   // No urgency badge. This hashed the image filename and presented the result
@@ -2277,9 +2275,6 @@ document.addEventListener('DOMContentLoaded', function(){
         var badgeCls = p.b === 'USED' ? 'used' : 'new';
         var btnLabel = inCart ? '✓ In Cart' : (st.level === 'out' ? 'Notify Me' : 'Add to Cart');
         var btnClass = 'add' + (inCart ? ' in' : '') + (st.level === 'out' ? ' notify' : '');
-        var qty = liveStock[p.i];
-        var qtyTxt = qty === undefined ? '—' : qty;
-        var qtyCol = st.level === 'out' ? '#b91c1c' : (st.level === 'low' ? '#b45309' : '#166534');
         return '<tr>' +
           '<td style="color:var(--muted);font-size:11px;text-align:center">' + rowNum + '</td>' +
           '<td><img class="c-img" src="' + photoOf(p.i) + '" alt="' + esc(p.n) + '" loading="lazy" onerror="this.style.opacity=.2"/></td>' +
@@ -2287,8 +2282,6 @@ document.addEventListener('DOMContentLoaded', function(){
           '<td style="font-size:12px;color:var(--muted);max-width:160px">' + esc(p.m) + '</td>' +
           '<td><span style="font-size:11px;color:var(--muted)">' + catLabel(p.c) + '</span></td>' +
           '<td><span class="c-badge ' + badgeCls + '">' + p.b + '</span></td>' +
-          '<td style="text-align:center;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px">' + (p.bin ? esc(p.bin) : '<span style="color:var(--muted)">—</span>') + '</td>' +
-          '<td style="text-align:center;font-weight:800;font-size:12.5px;color:' + qtyCol + '">' + qtyTxt + '</td>' +
           '<td class="c-price">' + fmt(usd) + '</td>' +
           '<td class="c-act"><button class="' + btnClass + '" data-img="' + esc(p.i) + '">' + btnLabel + '</button></td>' +
         '</tr>';
@@ -2302,8 +2295,6 @@ document.addEventListener('DOMContentLoaded', function(){
             '<th>Vehicle / Fitment</th>' +
             '<th>Category</th>' +
             '<th>Cond.</th>' +
-            '<th style="text-align:center">Bin</th>' +
-            '<th style="text-align:center">Qty</th>' +
             '<th style="text-align:right">Price</th>' +
             '<th style="text-align:right">Action</th>' +
           '</tr></thead>' +
@@ -2779,7 +2770,7 @@ document.addEventListener('DOMContentLoaded', function(){
     // Build info column
     var info = document.getElementById('pdInfo');
     var stockTxt = st.level === 'out' ? '<span style="color:#b91c1c;font-weight:700">Out of Stock</span>'
-                : st.level === 'low' ? '<span style="color:#b45309;font-weight:700">Low — only ' + st.count + ' left</span>'
+                : st.level === 'low' ? '<span style="color:#b45309;font-weight:700">Low stock</span>'
                 : '<span style="color:#15803d;font-weight:700">In Stock at Kingston counter</span>';
     var actions = st.level === 'out'
       ? '<button class="add" type="button" data-pdnotify="' + esc(img) + '" style="background:#6366f1">🔔 Notify me</button>'
@@ -4229,19 +4220,18 @@ document.addEventListener('DOMContentLoaded', function(){
         var cat = String(r.category || '').toLowerCase();
         var name = r.name || img;
         var make = r.make_model || '';
-        var bin = r.bin_location || '';
         return {
           n: name,
           m: make,
           c: VALID_CATS[cat] ? cat : 'accessories',
           b: r.condition === 'USED' ? 'USED' : 'NEW',
           i: img,
-          bin: bin,
+          bin: '',   // bin location is warehouse-internal — not shown or searchable on the storefront
           // Precomputed lowercase haystack. Building this once at load is what
           // makes search fast -- the old filter concatenated and lowercased
           // three fields for all 23k parts on every keystroke. Part number is
           // included because that is what customers actually search by.
-          s: (name + ' ' + make + ' ' + cat + ' ' + img + ' ' + bin).toLowerCase()
+          s: (name + ' ' + make + ' ' + cat + ' ' + img).toLowerCase()
         };
       });
       // `parts` starts empty now, so this only matters if a retry ever
