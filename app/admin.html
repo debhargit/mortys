@@ -5522,7 +5522,7 @@ function posSaveCartAsOrder(after){
               ['Own van / driver','Courier','Bus / parcel service','Customer collects from depot','Other']
                 .map(function(m){ return '<option' + (sh.method === m ? ' selected' : '') + '>' + m + '</option>'; }).join('') +
             '</select></div>' +
-          '<div><label class="lbl">Fee (USD)</label><input id="soFee" type="number" step="0.01" min="0" class="fld" value="' + (sh.fee != null && sh.fee !== '' ? sh.fee : '') + '"/></div>' +
+          '<div><label class="lbl">Fee</label><input id="soFee" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00" class="fld" value="' + (sh.fee ? sh.fee : '') + '"/></div>' +
         '</div>' +
         '<div id="soCourierBox" style="display:none;margin-top:8px;border-top:1px dashed var(--line);padding-top:8px">' +
           '<label class="lbl">Courier company</label>' +
@@ -5603,7 +5603,8 @@ function posSaveCartAsOrder(after){
     };
     if (f !== 'pickup') {
       body.ship_method = soMethodSel.value || null;
-      body.ship_fee_usd = Number(document.getElementById('soFee').value) || 0;
+      // Lenient parse -- the operator may type "1,500" or "$1500.00".
+      body.ship_fee_usd = parseFloat(String(document.getElementById('soFee').value).replace(/[^0-9.]/g, '')) || 0;
       body.ship_name = g('soName') || null; body.ship_phone = g('soPhone') || null;
       body.ship_line1 = g('soL1') || null;  body.ship_line2 = g('soL2') || null;
       body.ship_city = g('soCity') || null; body.ship_parish = g('soParish') || null;
