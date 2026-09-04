@@ -4095,31 +4095,52 @@ async function renderPOS(panel){
     // capped (max-height:min(60vh,520px)) with its own scrollbar, so without scrollIntoView
     // the highlight walks off the bottom of the list and the operator loses it.
     function csHighlight(){
-      var kids = csOut.children;
+      // Only the result rows carry selection; the sticky header is skipped so
+      // csSel stays a straight index into csRows.
+      var kids = csOut.querySelectorAll('.csPick');
       for (var i = 0; i < kids.length; i++){
         var on = (i === csSel);
-        kids[i].style.background = on ? 'var(--hover)' : 'var(--card)';
-        kids[i].style.boxShadow = on ? 'inset 3px 0 0 var(--red)' : 'none';
+        kids[i].style.background = on ? 'rgba(220,38,38,.16)' : 'var(--card)';
+        kids[i].style.boxShadow = on ? 'inset 4px 0 0 var(--red)' : 'none';
       }
       if (csSel >= 0 && kids[csSel]) kids[csSel].scrollIntoView({ block: 'nearest' });
     }
 
+    // Column layout, shared by the header and every row so they line up. SKU is
+    // a fixed 20-character monospace column that wraps (not truncates) when the
+    // part number runs longer.
+    var CS_COL = {
+      sku:  'width:20ch;min-width:20ch;flex-shrink:0;white-space:normal;word-break:break-all;overflow-wrap:anywhere',
+      desc: 'flex:1;min-width:0;word-break:break-word',
+      fit:  'width:150px;flex-shrink:0;word-break:break-word',
+      bin:  'width:92px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap',
+      qty:  'width:44px;flex-shrink:0;text-align:center',
+      price:'width:74px;flex-shrink:0;text-align:right',
+    };
+
     function csRender(){
       if (!csRows.length) { csOut.style.display = 'none'; csOut.innerHTML = ''; csSel = -1; return; }
-      csOut.innerHTML = csRows.map(function(p, i){
+      var header =
+        '<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 11px;background:var(--card-soft2);' +
+          'border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;box-shadow:0 3px 8px rgba(0,0,0,.14);' +
+          'border-radius:6px 6px 0 0;font-size:' + posFS(10) + ';font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)">' +
+          '<span style="' + CS_COL.sku + '">SKU</span>' +
+          '<span style="' + CS_COL.desc + '">Description</span>' +
+          '<span style="' + CS_COL.fit + '">Vehicle / Fitment</span>' +
+          '<span style="' + CS_COL.bin + '">Bin</span>' +
+          '<span style="' + CS_COL.qty + '">Qty</span>' +
+          '<span style="' + CS_COL.price + '">Price</span>' +
+        '</div>';
+      csOut.innerHTML = header + csRows.map(function(p, i){
         var usd = p.price_usd != null ? Number(p.price_usd) : null;
-        var place = (p.location ? '📍 ' + esc(p.location) : '') +
-                    (p.location && p.bin_location ? '  ' : '') +
-                    (p.bin_location ? '🗂 ' + esc(p.bin_location) : '');
-        return '<button type="button" class="csPick" data-i="' + i + '" style="display:flex;width:100%;gap:10px;align-items:center;text-align:left;border:0;border-bottom:1px solid var(--hover);background:var(--card);color:var(--ink);padding:9px 11px;cursor:pointer;font-family:inherit">' +
-          '<code style="flex-shrink:0;font-size:' + posFS(12) + ';font-weight:700;color:var(--ink);word-break:break-all;max-width:190px">' + esc(posPartNo(p)) + '</code>' +
-          '<span style="flex:1;min-width:0;font-size:' + posFS(12) + ';font-weight:600;word-break:break-word;color:var(--ink)">' + esc(p.name) +
-            (p.make_model ? ' <span style="font-weight:400;color:var(--muted)">— ' + esc(p.make_model) + '</span>' : '') + '</span>' +
-          (place
-            ? '<small style="flex-shrink:0;color:#0891b2;font-weight:700;font-size:' + posFS(10.5) + ';max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc((p.location || '') + (p.location && p.bin_location ? ' · ' : '') + (p.bin_location || '')) + '">' + place + '</small>'
-            : '') +
-          '<small style="flex-shrink:0;color:' + posStockColor(p.stock_level) + ';font-weight:700;font-size:' + posFS(11) + '">' + (p.stock_count || 0) + '</small>' +
-          '<b style="flex-shrink:0;color:var(--red);font-size:' + posFS(12.5) + ';min-width:70px;text-align:right">' + (usd ? fmtMoney(usd) : '—') + '</b>' +
+        var bin = p.bin_location || p.location || '—';
+        return '<button type="button" class="csPick" data-i="' + i + '" style="display:flex;width:100%;gap:10px;align-items:flex-start;text-align:left;border:0;border-bottom:1px solid var(--hover);background:var(--card);color:var(--ink);padding:8px 11px;cursor:pointer;font-family:inherit">' +
+          '<code style="' + CS_COL.sku + ';font-size:' + posFS(12) + ';font-weight:700;color:var(--ink);line-height:1.3">' + esc(posPartNo(p)) + '</code>' +
+          '<span style="' + CS_COL.desc + ';font-size:' + posFS(12) + ';font-weight:600;color:var(--ink)">' + esc(p.name) + '</span>' +
+          '<span style="' + CS_COL.fit + ';font-size:' + posFS(11) + ';font-weight:700;color:var(--muted)" title="' + esc(p.make_model || '') + '">' + esc(p.make_model || '—') + '</span>' +
+          '<span style="' + CS_COL.bin + ';font-size:' + posFS(10.5) + ';color:#0891b2;font-weight:700" title="' + esc((p.location || '') + (p.location && p.bin_location ? ' · ' : '') + (p.bin_location || '')) + '">' + esc(bin) + '</span>' +
+          '<span style="' + CS_COL.qty + ';font-size:' + posFS(11) + ';font-weight:700;color:' + posStockColor(p.stock_level) + '">' + (p.stock_count || 0) + '</span>' +
+          '<b style="' + CS_COL.price + ';font-size:' + posFS(12) + ';color:var(--red)">' + (usd ? fmtMoney(usd) : '—') + '</b>' +
         '</button>';
       }).join('');
       csOut.style.display = 'block';
