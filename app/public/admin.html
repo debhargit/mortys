@@ -3069,11 +3069,11 @@ async function renderPOS(panel){
         '</div>' +
         '<div style="flex-shrink:0">' +
         '<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;flex-wrap:wrap">' +
-          '<input id="posScan" placeholder="⎾⏋ Scan, or qty*code → Enter" title="Type a quantity, *, then the barcode/part no. (e.g. 3*BMP-001) to add several units in one scan" autocomplete="off" style="width:230px;padding:9px 11px;border:2px solid #0891b2;border-radius:6px;font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace"/>' +
-          '<div style="position:relative;flex:1;min-width:190px">' +
+          '<div style="position:relative;width:230px;flex-shrink:0">' +
             '<span aria-hidden="true" style="position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:14px;opacity:.55;pointer-events:none">🔍</span>' +
-            '<input id="posSearch" placeholder="Search part no., name or vehicle… (commas for multi-term)" autocomplete="off" style="width:100%;padding:9px 11px 9px 32px;border:1px solid var(--line);border-radius:6px;font-size:13px"/>' +
+            '<input id="posScan" placeholder="Scan, or qty*code → Enter" title="Type a quantity, *, then the barcode/part no. (e.g. 3*BMP-001) to add several units in one scan" autocomplete="off" style="width:100%;padding:9px 11px 9px 32px;border:2px solid #0891b2;border-radius:6px;font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace"/>' +
           '</div>' +
+          '<input id="posSearch" placeholder="Search part no., name or vehicle… (commas for multi-term)" autocomplete="off" style="flex:1;min-width:190px;padding:9px 11px;border:1px solid var(--line);border-radius:6px;font-size:13px"/>' +
           '<div class="posViewGroup" role="group" aria-label="List view">' +
             posViewBtn('grid', '▦', 'Grid view') + posViewBtn('list', '☰', 'List view') + posViewBtn('compact', '≡', 'Compact list view') +
           '</div>' +
@@ -4614,22 +4614,34 @@ async function renderPOS(panel){
   });
 
   document.getElementById('posSearch').addEventListener('input', drawGrid);
-  // ↑/↓ while the cursor is in the search box scroll the results list itself,
-  // so you can read down a long match set without moving focus off the box
-  // (the global counter shortcuts skip arrows while a field is focused).
-  // Enter still adds a part highlighted via Legacy keys mode.
+  // ↑/↓ from inside the search box walk the results list and Enter adds the
+  // highlighted part -- without needing Legacy keys mode or moving focus off
+  // the box (the global counter shortcuts skip arrows while a field is
+  // focused).
   document.getElementById('posSearch').addEventListener('keydown', function(e){
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Enter') return;
     var results = document.getElementById('posResults');
     var products = (results && results.__posProducts) || [];
-    if (e.key === 'Enter') {
-      if (POS_SEL_INDEX >= 0 && POS_SEL_INDEX < products.length) {
-        e.preventDefault();
-        posAddToCart(products[POS_SEL_INDEX], 1);
-        drawCart();
-      }
-      return;
+    if (!products.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      POS_SEL_INDEX = Math.min(products.length - 1, POS_SEL_INDEX + 1);
+      posHighlightSel();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      POS_SEL_INDEX = Math.max(0, POS_SEL_INDEX - 1);
+      posHighlightSel();
+    } else if (e.key === 'Enter' && POS_SEL_INDEX >= 0 && POS_SEL_INDEX < products.length) {
+      e.preventDefault();
+      posAddToCart(products[POS_SEL_INDEX], 1);
+      drawCart();
     }
+  });
+  // ↑/↓ while the cursor is in the scan box scroll the results list itself,
+  // so the operator can read down a long match set without moving focus off
+  // the box they're keying part numbers into.
+  document.getElementById('posScan').addEventListener('keydown', function(e){
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
     var scroll = document.getElementById('posResultsScroll');
     if (!scroll) return;
     e.preventDefault();
