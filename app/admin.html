@@ -1136,10 +1136,13 @@ async function renderInquiryEditor(panel, id){
   function recalc(){
     var total = 0;
     panel.querySelectorAll('.inqLine').forEach(function(tr){
-      var qty = parseInt(tr.querySelector('.il-qty').value, 10) || 0;
+      // A blank / invalid quantity counts as 1 -- the line was added because
+      // the customer wants the part, so "no number" means one, not zero.
+      var qty = parseInt(tr.querySelector('.il-qty').value, 10);
+      if (!(qty > 0)) qty = 1;
       var pr = parseFloat(tr.querySelector('.il-price').value);
       var cell = tr.querySelector('.il-total');
-      if (isFinite(pr) && pr >= 0 && qty > 0){ var lt = pr * qty; total += lt; cell.textContent = fmtMoney(lt); }
+      if (isFinite(pr) && pr >= 0){ var lt = pr * qty; total += lt; cell.textContent = fmtMoney(lt); }
       else cell.textContent = '—';
     });
     var tEl = panel.querySelector('#inqTotal');
@@ -1147,6 +1150,11 @@ async function renderInquiryEditor(panel, id){
   }
   function wireLine(tr){
     tr.querySelectorAll('.il-qty,.il-price').forEach(function(el){ el.addEventListener('input', recalc); });
+    // Normalise a left-blank quantity back to 1 once the operator leaves the field.
+    tr.querySelector('.il-qty').addEventListener('change', function(){
+      if (!(parseInt(this.value, 10) > 0)) this.value = 1;
+      recalc();
+    });
     tr.querySelector('.il-del').addEventListener('click', function(){ tr.remove(); recalc(); });
   }
   panel.querySelectorAll('.inqLine').forEach(wireLine);
