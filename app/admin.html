@@ -11210,6 +11210,10 @@ var REPORT_DEFS = [
   { key:'returns',     label:'↩️ Returns & Refunds',     group:'Sales' },
   { key:'tax',         label:'🧮 Tax Collected',         group:'Sales' },
   { key:'orders',      label:'🛒 Online Orders',         group:'Sales' },
+  { key:'pos-orders',  label:'💵 POS Orders / Cashier',  group:'Sales' },
+  { key:'sales-reps',  label:'🧑‍💼 Sales by Rep',        group:'Sales' },
+  { key:'margin',      label:'📈 Gross Margin',          group:'Sales' },
+  { key:'valuation',   label:'💰 Stock Valuation',       group:'Operations' },
   { key:'workorders',  label:'🛠 Service / Work Orders', group:'Operations' },
   { key:'purchasing',  label:'📥 Purchasing & Receiving',group:'Operations' },
   { key:'inventory',   label:'🏗 Inventory Position',    group:'Operations', dated:false },
@@ -11224,7 +11228,10 @@ var RPT_CURRENT = 'z';
 // Which till session the Z report is pinned to. null = most recent close.
 var RPT_SESSION_ID = null;
 
-function rMoney(v){ return v == null ? '—' : fmtMoney(v); }
+// Reports are read in Jamaican dollars — the catalogue and every POS figure
+// is J$. Display only; the stored values are unchanged.
+function rMoney(v){ return v == null ? '—' : 'J$' + Number(v).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function rPct(v){ return v == null ? '—' : Number(v).toFixed(1) + '%'; }
 function rNum(v){ return v == null ? '—' : Number(v).toLocaleString('en-US'); }
 function rHours(v){ return v == null ? '—' : Number(v).toFixed(2); }
 
@@ -11606,13 +11613,98 @@ var RPT_RENDERERS = {
         tile('orders', rNum(r.totals.n)) + tile('revenue', rMoney(r.totals.total)) + tile('avg order', rMoney(r.totals.avg_order)) +
       '</div></div>' +
       rptGrid(
-        rptTable('📌 By status', [{ k:'status', label:'Status' }, { k:'n', label:'Orders', num:true }, { k:'total', label:'Total', money:true }], r.by_status) +
-        rptTable('💳 By payment', [{ k:'payment_method', label:'Method' }, { k:'payment_status', label:'State' }, { k:'n', label:'Orders', num:true }, { k:'total', label:'Total', money:true }], r.by_payment)
+        rptTable('🧾 By source', [{ k:'source', label:'Source' }, { k:'n', label:'Orders', num:true }, { k:'open', label:'Still open', num:true }, { k:'total', label:'Total', money:true }],
+          (r.by_source || []).map(function(x){ return { source: x.source === 'pos' ? 'POS (order-first)' : 'Storefront', n: x.n, open: x.open, total: x.total }; })) +
+        rptTable('📌 By status', [{ k:'status', label:'Status' }, { k:'n', label:'Orders', num:true }, { k:'total', label:'Total', money:true }], r.by_status)
       ) +
       rptGrid(
-        rptTable('📅 By day', [{ k:'day', label:'Day' }, { k:'n', label:'Orders', num:true }, { k:'total', label:'Total', money:true }], r.by_day) +
-        rptTable('🔥 Top products', [{ k:'name', label:'Product' }, { k:'units', label:'Units', num:true }, { k:'revenue', label:'Revenue', money:true }], r.top_products)
-      );
+        rptTable('💳 By payment', [{ k:'payment_method', label:'Method' }, { k:'payment_status', label:'State' }, { k:'n', label:'Orders', num:true }, { k:'total', label:'Total', money:true }], r.by_payment) +
+        rptTable('📅 By day', [{ k:'day', label:'Day' }, { k:'n', label:'Orders', num:true }, { k:'total', label:'Total', money:true }], r.by_day)
+      ) +
+      '<div style="padding:0 18px 22px">' +
+        rptTable('🔥 Top products', [{ k:'name', label:'Product' }, { k:'units', label:'Units', num:true }, { k:'revenue', label:'Revenue', money:true }], r.top_products) +
+      '</div>';
+  },
+
+  'pos-orders': function(r){
+    return '<div style="padding:16px 18px 4px"><div class="tiles" style="grid-template-columns:repeat(5,1fr);margin-bottom:16px">' +
+        tile('pending now', rNum(r.pending.n)) + tile('pending value', rMoney(r.pending.total)) +
+        tile('invoiced (range)', rNum(r.converted.n)) + tile('invoiced value', rMoney(r.converted.total)) +
+        tile('avg hrs to invoice', r.avg_hours_to_invoice == null ? '—' : Number(r.avg_hours_to_invoice).toFixed(1)) +
+      '</div></div>' +
+      rptGrid(
+        rptTable('🧑‍💼 By operator', [{ k:'operator', label:'Took the order' }, { k:'pending', label:'Pending', num:true }, { k:'invoiced', label:'Invoiced', num:true }, { k:'total', label:'Value', money:true }], r.by_taker) +
+        rptTable('⏳ Pending — aging', [{ k:'bucket', label:'Waiting' }, { k:'n', label:'Orders', num:true }, { k:'total', label:'Value', money:true }], r.aging, 'Nothing pending.')
+      ) +
+      '<div style="padding:0 18px 22px">' +
+        rptTable('Summary', [{ k:'label', label:'' }, { k:'n', label:'Count', num:true }, { k:'total', label:'Value', money:true }], [
+          { label:'Pending (all-time)', n:r.pending.n, total:r.pending.total },
+          { label:'Invoiced by a cashier (range)', n:r.converted.n, total:r.converted.total },
+          { label:'Cancelled (range)', n:r.cancelled.n, total:r.cancelled.total },
+        ]) +
+      '</div>';
+  },
+
+  'sales-reps': function(r){
+    var reps = r.reps || [];
+    var tot = reps.reduce(function(a, x){ a.revenue += x.revenue; a.cost += x.cost; a.units += x.units; a.tickets += x.tickets; return a; },
+      { revenue:0, cost:0, units:0, tickets:0 });
+    var gross = tot.revenue - tot.cost;
+    return '<div style="padding:16px 18px 4px"><div class="tiles" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">' +
+        tile('reps selling', rNum(reps.filter(function(x){ return x.rep !== '(no rep)'; }).length)) +
+        tile('revenue', rMoney(tot.revenue)) + tile('gross margin', rMoney(gross)) +
+        tile('margin %', tot.revenue > 0 ? rPct((gross / tot.revenue) * 100) : '—') +
+      '</div></div>' +
+      '<div style="padding:0 18px 22px">' +
+        rptTable('By sales rep', [
+          { k:'rep', label:'Rep' }, { k:'tickets', label:'Tickets', num:true }, { k:'units', label:'Units', num:true },
+          { k:'revenue', label:'Revenue', money:true }, { k:'discount', label:'Disc.', money:true },
+          { k:'cost', label:'Cost', money:true }, { k:'margin', label:'Gross', money:true },
+          { k:'margin_pct', label:'Margin %' },
+        ], reps.map(function(x){ return Object.assign({}, x, { margin_pct: x.margin_pct == null ? '—' : x.margin_pct + '%' }); }),
+        'No sales in this range.') +
+        '<p style="font-size:11.5px;color:var(--muted);margin:8px 2px">Margin uses the cost on each product record — mostly the import placeholder until costs are set.</p>' +
+      '</div>';
+  },
+
+  margin: function(r){
+    var t = r.totals;
+    return '<div style="padding:16px 18px 4px"><div class="tiles" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">' +
+        tile('revenue', rMoney(t.revenue)) + tile('cost of goods', rMoney(t.cost)) +
+        tile('gross profit', rMoney(t.gross)) + tile('margin %', t.margin_pct == null ? '—' : rPct(t.margin_pct)) +
+      '</div></div>' +
+      '<div style="padding:0 18px 8px">' +
+        rptTable('📂 By category', [
+          { k:'category', label:'Category' }, { k:'units', label:'Units', num:true },
+          { k:'revenue', label:'Revenue', money:true }, { k:'cost', label:'Cost', money:true },
+          { k:'gross', label:'Gross', money:true }, { k:'margin_pct', label:'Margin %' },
+        ], (r.by_category || []).map(function(x){ return Object.assign({}, x, { margin_pct: x.margin_pct == null ? '—' : x.margin_pct + '%' }); })) +
+      '</div>' +
+      '<div style="padding:0 18px 22px">' +
+        rptTable('🔩 By product (top 60 by revenue)', [
+          { k:'name', label:'Product' }, { k:'units', label:'Units', num:true },
+          { k:'revenue', label:'Revenue', money:true }, { k:'cost', label:'Cost', money:true },
+          { k:'gross', label:'Gross', money:true }, { k:'margin_pct', label:'Margin %' },
+        ], (r.by_product || []).map(function(x){ return Object.assign({}, x, { margin_pct: x.margin_pct == null ? '—' : x.margin_pct + '%' }); })) +
+      '</div>';
+  },
+
+  valuation: function(r){
+    var t = r.totals;
+    return '<div style="padding:16px 18px 4px"><div class="tiles" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">' +
+        tile('lines in stock', rNum(t.lines)) + tile('units', rNum(t.units)) +
+        tile('stock at cost', rMoney(t.cost_value)) + tile('at retail', rMoney(t.retail_value)) +
+      '</div></div>' +
+      rptGrid(
+        rptTable('📂 Value by category', [{ k:'category', label:'Category' }, { k:'lines', label:'Lines', num:true }, { k:'units', label:'Units', num:true }, { k:'cost_value', label:'At cost', money:true }, { k:'retail_value', label:'At retail', money:true }], r.by_category) +
+        rptTable('📍 Value by location', [{ k:'location', label:'Location' }, { k:'lines', label:'Lines', num:true }, { k:'units', label:'Units', num:true }, { k:'cost_value', label:'At cost', money:true }], r.by_location)
+      ) +
+      '<div style="padding:0 18px 22px">' +
+        rptTable('🪦 Dead stock — no sale in this range (top 100 by tied-up cost)', [
+          { k:'sku', label:'SKU' }, { k:'name', label:'Part' }, { k:'category', label:'Cat.' },
+          { k:'location', label:'Loc.' }, { k:'stock_count', label:'On hand', num:true }, { k:'tied_up_cost', label:'Tied-up cost', money:true },
+        ], r.dead_stock, 'Every stocked part sold at least once in this range.') +
+      '</div>';
   },
 
   workorders: function(r){

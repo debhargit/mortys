@@ -202,8 +202,12 @@ export default function mount(app) {
     const db = d1(c.env);
     const { from, to } = range(c);
     const p = [from, to];
-    const [totals, byStatus, byPayment, byDay, top] = await Promise.all([
+    const [totals, bySource, byStatus, byPayment, byDay, top] = await Promise.all([
       db.one(`SELECT COUNT(*) AS n, COALESCE(SUM(total_cents),0)/100.0 AS total FROM orders WHERE date(created_at) BETWEEN ? AND ?`, ...p),
+      db.many(`SELECT COALESCE(NULLIF(source,''),'storefront') AS source, COUNT(*) AS n,
+                      SUM(CASE WHEN status IN ('pending','invoicing') THEN 1 ELSE 0 END) AS open,
+                      COALESCE(SUM(total_cents),0)/100.0 AS total
+                 FROM orders WHERE date(created_at) BETWEEN ? AND ? GROUP BY source ORDER BY total DESC`, ...p),
       db.many(`SELECT status, COUNT(*) AS n, COALESCE(SUM(total_cents),0)/100.0 AS total FROM orders WHERE date(created_at) BETWEEN ? AND ? GROUP BY status ORDER BY total DESC`, ...p),
       db.many(`SELECT payment_method, payment_status, COUNT(*) AS n, COALESCE(SUM(total_cents),0)/100.0 AS total
                  FROM orders WHERE date(created_at) BETWEEN ? AND ? GROUP BY payment_method, payment_status ORDER BY total DESC`, ...p),
@@ -212,7 +216,7 @@ export default function mount(app) {
                  FROM order_items oi JOIN orders o ON o.id = oi.order_id LEFT JOIN products pr ON pr.img = oi.product_img
                 WHERE date(o.created_at) BETWEEN ? AND ? GROUP BY COALESCE(pr.name, oi.product_img) ORDER BY revenue DESC LIMIT 25`, ...p),
     ]);
-    return c.json({ from, to, totals: { ...totals, avg_order: totals.n ? totals.total / totals.n : 0 }, by_status: byStatus, by_payment: byPayment, by_day: byDay, top_products: top });
+    return c.json({ from, to, totals: { ...totals, avg_order: totals.n ? totals.total / totals.n : 0 }, by_source: bySource, by_status: byStatus, by_payment: byPayment, by_day: byDay, top_products: top });
   });
 
   app.get('/api/admin/reports/workorders', adminMw, async (c) => {
@@ -293,5 +297,132 @@ export default function mount(app) {
       db.one(`SELECT COUNT(*) AS n FROM newsletter_subscribers WHERE date(subscribed_at) BETWEEN ? AND ?`, ...p),
     ]);
     return c.json({ from, to, new_customers: newUsers.n, top_customers: topPos, loyalty, newsletter_signups: newsletter.n });
+  });
+
+  // ---- POS orders / cashier (order-first checkout) -----------------------
+  app.get('/api/admin/reports/pos-orders', adminMw, async (c) => {
+    const db = d1(c.env);
+    const { from, to } = range(c);
+    const p = [from, to];
+    const [pending, converted, cancelled, byTaker, aging, speed] = await Promise.all([
+      db.one(`SELECT COUNT(*) AS n, COALESCE(SUM(total_cents),0)/100.0 AS total FROM orders WHERE source='pos' AND status='pending'`),
+      db.one(`SELECT COUNT(*) AS n, COALESCE(SUM(total_cents),0)/100.0 AS total FROM orders WHERE source='pos' AND status='completed' AND date(created_at) BETWEEN ? AND ?`, ...p),
+      db.one(`SELECT COUNT(*) AS n, COALESCE(SUM(total_cents),0)/100.0 AS total FROM orders WHERE source='pos' AND status='cancelled' AND date(created_at) BETWEEN ? AND ?`, ...p),
+      db.many(`SELECT COALESCE(u.name,'-') AS operator,
+                      SUM(CASE WHEN o.status='pending' THEN 1 ELSE 0 END) AS pending,
+                      SUM(CASE WHEN o.status='completed' AND date(o.created_at) BETWEEN ? AND ? THEN 1 ELSE 0 END) AS invoiced,
+                      COALESCE(SUM(CASE WHEN o.status IN ('pending','completed') THEN o.total_cents ELSE 0 END),0)/100.0 AS total
+                 FROM orders o LEFT JOIN users u ON u.id = o.taken_by
+                WHERE o.source='pos' GROUP BY u.name ORDER BY total DESC`, ...p),
+      db.many(`SELECT CASE
+                        WHEN julianday('now') - julianday(created_at) < 1 THEN 'under 1 day'
+                        WHEN julianday('now') - julianday(created_at) < 3 THEN '1-3 days'
+                        WHEN julianday('now') - julianday(created_at) < 7 THEN '3-7 days'
+                        ELSE 'over 7 days' END AS bucket,
+                      COUNT(*) AS n, COALESCE(SUM(total_cents),0)/100.0 AS total
+                 FROM orders WHERE source='pos' AND status='pending' GROUP BY bucket ORDER BY MIN(created_at)`),
+      db.one(`SELECT AVG((julianday(s.created_at) - julianday(o.created_at)) * 24) AS hours
+                FROM orders o JOIN pos_sales s ON s.id = o.converted_sale_id
+               WHERE o.source='pos' AND date(o.created_at) BETWEEN ? AND ?`, ...p),
+    ]);
+    return c.json({ from, to, pending, converted, cancelled, by_taker: byTaker, aging, avg_hours_to_invoice: speed && speed.hours != null ? Number(speed.hours) : null });
+  });
+
+  // ---- sales by rep ----------------------------------------------------
+  app.get('/api/admin/reports/sales-reps', adminMw, async (c) => {
+    const db = d1(c.env);
+    const { from, to } = range(c);
+    const p = [from, to];
+    const rows = await db.many(
+      `SELECT COALESCE(NULLIF(ps.sales_rep_name,''),'(no rep)') AS rep,
+              COUNT(DISTINCT ps.id) AS tickets,
+              COALESCE(SUM(i.qty),0) AS units,
+              COALESCE(SUM(i.total_cents),0)/100.0 AS revenue,
+              COALESCE(SUM(i.discount_cents),0)/100.0 AS discount,
+              COALESCE(SUM(i.qty * COALESCE(pr.cost_cents,0)),0)/100.0 AS cost
+         FROM pos_sales ps
+         JOIN pos_sale_items i ON i.sale_id = ps.id
+         LEFT JOIN products pr ON pr.img = i.product_img
+        WHERE ps.voided = 0 AND date(ps.created_at) BETWEEN ? AND ?
+        GROUP BY rep ORDER BY revenue DESC`, ...p);
+    for (const r of rows) {
+      r.margin = Math.round((r.revenue - r.cost) * 100) / 100;
+      r.margin_pct = r.revenue > 0 ? Math.round((r.margin / r.revenue) * 1000) / 10 : null;
+    }
+    return c.json({ from, to, reps: rows });
+  });
+
+  // ---- gross margin (by product / category) --------------------------
+  app.get('/api/admin/reports/margin', adminMw, async (c) => {
+    const db = d1(c.env);
+    const { from, to } = range(c);
+    const p = [from, to];
+    const marginRows = (rows) => {
+      for (const r of rows) {
+        r.gross = Math.round((r.revenue - r.cost) * 100) / 100;
+        r.margin_pct = r.revenue > 0 ? Math.round((r.gross / r.revenue) * 1000) / 10 : null;
+      }
+      return rows;
+    };
+    const [byProduct, byCategory, totals] = await Promise.all([
+      db.many(`SELECT i.description AS name, COALESCE(SUM(i.qty),0) AS units,
+                      COALESCE(SUM(i.total_cents),0)/100.0 AS revenue,
+                      COALESCE(SUM(i.qty * COALESCE(pr.cost_cents,0)),0)/100.0 AS cost
+                 FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+                 LEFT JOIN products pr ON pr.img = i.product_img
+                WHERE ps.voided = 0 AND date(ps.created_at) BETWEEN ? AND ?
+                GROUP BY i.description ORDER BY revenue DESC LIMIT 60`, ...p),
+      db.many(`SELECT COALESCE(pr.category,'-') AS category, COALESCE(SUM(i.qty),0) AS units,
+                      COALESCE(SUM(i.total_cents),0)/100.0 AS revenue,
+                      COALESCE(SUM(i.qty * COALESCE(pr.cost_cents,0)),0)/100.0 AS cost
+                 FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+                 LEFT JOIN products pr ON pr.img = i.product_img
+                WHERE ps.voided = 0 AND date(ps.created_at) BETWEEN ? AND ?
+                GROUP BY pr.category ORDER BY revenue DESC`, ...p),
+      db.one(`SELECT COALESCE(SUM(i.total_cents),0)/100.0 AS revenue,
+                     COALESCE(SUM(i.qty * COALESCE(pr.cost_cents,0)),0)/100.0 AS cost
+                FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+                LEFT JOIN products pr ON pr.img = i.product_img
+               WHERE ps.voided = 0 AND date(ps.created_at) BETWEEN ? AND ?`, ...p),
+    ]);
+    const gross = Math.round(((totals.revenue || 0) - (totals.cost || 0)) * 100) / 100;
+    return c.json({
+      from, to,
+      totals: { revenue: totals.revenue || 0, cost: totals.cost || 0, gross,
+                margin_pct: totals.revenue > 0 ? Math.round((gross / totals.revenue) * 1000) / 10 : null },
+      by_product: marginRows(byProduct), by_category: marginRows(byCategory),
+    });
+  });
+
+  // ---- stock valuation + dead stock ---------------------------------
+  app.get('/api/admin/reports/valuation', adminMw, async (c) => {
+    const db = d1(c.env);
+    const { from, to } = range(c);
+    const p = [from, to];
+    const [totals, byCategory, byLocation, dead] = await Promise.all([
+      db.one(`SELECT COUNT(*) AS lines, COALESCE(SUM(stock_count),0) AS units,
+                     COALESCE(SUM(stock_count * price_cents),0)/100.0 AS retail_value,
+                     COALESCE(SUM(stock_count * COALESCE(cost_cents,0)),0)/100.0 AS cost_value
+                FROM products WHERE is_active = 1 AND stock_count > 0`),
+      db.many(`SELECT COALESCE(category,'-') AS category, COUNT(*) AS lines, COALESCE(SUM(stock_count),0) AS units,
+                      COALESCE(SUM(stock_count * COALESCE(cost_cents,0)),0)/100.0 AS cost_value,
+                      COALESCE(SUM(stock_count * price_cents),0)/100.0 AS retail_value
+                 FROM products WHERE is_active = 1 AND stock_count > 0 GROUP BY category ORDER BY cost_value DESC`),
+      db.many(`SELECT COALESCE(NULLIF(location,''),'-') AS location, COUNT(*) AS lines, COALESCE(SUM(stock_count),0) AS units,
+                      COALESCE(SUM(stock_count * COALESCE(cost_cents,0)),0)/100.0 AS cost_value
+                 FROM products WHERE is_active = 1 AND stock_count > 0 GROUP BY location ORDER BY cost_value DESC`),
+      db.many(`SELECT pr.sku, pr.name, pr.category, pr.location, pr.stock_count,
+                      pr.stock_count * COALESCE(pr.cost_cents,0) / 100.0 AS tied_up_cost
+                 FROM products pr
+                WHERE pr.is_active = 1 AND pr.stock_count > 0
+                  AND NOT EXISTS (SELECT 1 FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+                                   WHERE i.product_img = pr.img AND ps.voided = 0 AND date(ps.created_at) BETWEEN ? AND ?)
+                ORDER BY tied_up_cost DESC LIMIT 100`, ...p),
+    ]);
+    return c.json({
+      from, to,
+      totals: { ...totals, potential_gross: (totals.retail_value || 0) - (totals.cost_value || 0) },
+      by_category: byCategory, by_location: byLocation, dead_stock: dead,
+    });
   });
 }
