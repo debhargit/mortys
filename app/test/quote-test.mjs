@@ -210,6 +210,18 @@ const guestOrderId = r.order_id;
 r = await call('post', '/api/checkout/guest', { user: undefined, body: { name: '', items: [{ img: 'qz-1', qty: 1 }] } });
 n++; A('/api/checkout/guest -> 400 without a name', st === 400);
 
+// ---- 4e2. "email me an invoice" payment method ------------------------
+sdb.prepare('DELETE FROM cart_items').run();
+sdb.prepare("INSERT INTO cart_items (user_id, product_img, qty) VALUES (501,'qz-1',1)").run();
+r = await call('post', '/api/checkout', { user: { id: 501, show_prices: 1 }, body: { payment_method: 'invoice_email' } });
+n++; A('/api/checkout -> accepts payment_method=invoice_email', st === 200 && r.payment_method === 'invoice_email' &&
+  q1('SELECT payment_method FROM orders WHERE id = ?', r.order_id).payment_method === 'invoice_email');
+r = await call('post', '/api/checkout/guest', { user: undefined, body: { name: 'No Mail', phone: '876-555-7777', payment_method: 'invoice_email', items: [{ img: 'qz-1', qty: 1 }] } });
+n++; A('/api/checkout/guest -> 400 invoice_email without an email', st === 400);
+r = await call('post', '/api/checkout/guest', { user: undefined, body: { name: 'Has Mail', email: 'hm@example.com', payment_method: 'invoice_email', items: [{ img: 'qz-1', qty: 1 }] } });
+n++; A('/api/checkout/guest -> invoice_email OK with an email', st === 200 && r.payment_method === 'invoice_email');
+sdb.prepare('DELETE FROM cart_items').run();
+
 // ---- 4f. /api/orders/:id/print — guest reads their order by contact ----
 sdb.prepare("UPDATE orders SET customer_email = 'walkup@example.com' WHERE id = ?").run(guestOrderId);
 r = await call('get', '/api/orders/' + guestOrderId + '/print?email=walkup@example.com', { user: undefined });

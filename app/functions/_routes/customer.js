@@ -255,7 +255,7 @@ export default function mount(app) {
     const uid = c.get('user').id;
     const b = await c.req.json().catch(() => ({}));
     const method = b.payment_method || 'cash_pickup';
-    if (!['cash_pickup', 'bank_transfer', 'stripe'].includes(method)) return c.json({ error: 'Invalid payment_method' }, 400);
+    if (!['cash_pickup', 'bank_transfer', 'stripe', 'invoice_email'].includes(method)) return c.json({ error: 'Invalid payment_method' }, 400);
     if (method === 'stripe') return c.json({ error: 'Online card payment is not available' }, 400);
 
     const ship = parseShip(b, await verifyQuote(c.env, b.ship_quote_token));
@@ -324,7 +324,10 @@ export default function mount(app) {
     const u = await db.one('SELECT email, name FROM users WHERE id = ?', uid);
     if (u && u.email) {
       const li = items.map((it) => ({ product_img: it.product_img, qty: it.qty, price_usd: it.price_usd, name: it.name, make_model: it.make_model }));
-      c.executionCtx?.waitUntil?.(sendEmail(c.env, { to: u.email, ...templates.orderEmail({ name: u.name, orderId, items: li, total: grandTotal }) }).catch(() => {}));
+      const tpl = method === 'invoice_email'
+        ? templates.invoiceEmail({ name: u.name, orderId, items: li, total: grandTotal, payUrl: `https://mortsautoparts.com/order-print.html?order=${orderId}` })
+        : templates.orderEmail({ name: u.name, orderId, items: li, total: grandTotal });
+      c.executionCtx?.waitUntil?.(sendEmail(c.env, { to: u.email, ...tpl }).catch(() => {}));
     }
 
     let shipResult = null;
@@ -363,7 +366,8 @@ export default function mount(app) {
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return c.json({ error: 'That email address looks wrong' }, 400);
 
     const method = b.payment_method || 'cash_pickup';
-    if (!['cash_pickup', 'bank_transfer'].includes(method)) return c.json({ error: 'Invalid payment_method' }, 400);
+    if (!['cash_pickup', 'bank_transfer', 'invoice_email'].includes(method)) return c.json({ error: 'Invalid payment_method' }, 400);
+    if (method === 'invoice_email' && !email) return c.json({ error: 'An email address is required to receive an invoice.' }, 400);
 
     const ship = parseShip(b, await verifyQuote(c.env, b.ship_quote_token));
     const shipErr = shipError(ship);
@@ -418,7 +422,10 @@ export default function mount(app) {
 
     if (email) {
       const li = items.map((it) => ({ product_img: it.product_img, qty: it.qty, price_usd: it.price_usd, name: it.name, make_model: it.make_model }));
-      c.executionCtx?.waitUntil?.(sendEmail(c.env, { to: email, ...templates.orderEmail({ name, orderId, items: li, total: grandTotal }) }).catch(() => {}));
+      const tpl = method === 'invoice_email'
+        ? templates.invoiceEmail({ name, orderId, items: li, total: grandTotal, payUrl: `https://mortsautoparts.com/order-print.html?order=${orderId}&email=${encodeURIComponent(email)}` })
+        : templates.orderEmail({ name, orderId, items: li, total: grandTotal });
+      c.executionCtx?.waitUntil?.(sendEmail(c.env, { to: email, ...tpl }).catch(() => {}));
     }
 
     let shipResult = null;

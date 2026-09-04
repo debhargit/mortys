@@ -145,6 +145,30 @@ function orderEmail({ name, orderId, items = [], total } = {}) {
   };
 }
 
+// "Email me an invoice to pay" checkout option. The order is placed unpaid and
+// this goes out with the amount due and how to settle it. Amounts are shown in
+// J$ to match the storefront (see the storefront currency note).
+function invoiceEmail({ name, orderId, items = [], total, payUrl } = {}) {
+  const greeting = name ? `Hi ${name},` : 'Hi there,';
+  const jmd = (n) => 'J$' + Math.round(Number(n) || 0).toLocaleString('en-US');
+  const rows = items.map((i) =>
+    `<tr><td style="padding:6px 0;border-bottom:1px solid #e5e7eb">${escapeHtml(i.name || i.product_img)}<br/><small style="color:#6b7280">${escapeHtml(i.make_model || '')}</small></td><td style="padding:6px 0;border-bottom:1px solid #e5e7eb;text-align:right">&times; ${i.qty}</td><td style="padding:6px 0;border-bottom:1px solid #e5e7eb;text-align:right">${jmd(i.price_usd)}</td></tr>`
+  ).join('');
+  return {
+    subject: `Invoice for order #${orderId} - Morty's Auto Parts`,
+    text: `${greeting}\n\nHere's your invoice for order #${orderId}.\n\nAmount due: ${jmd(total)}\n\nHow to pay:\n  - Bank transfer (reply for account details), or\n  - Pay at the counter: 51 Red Hills Road, Kingston.\nQuote order #${orderId} with your payment.\n${payUrl ? '\nFull invoice: ' + payUrl + '\n' : ''}\nQuestions? +1 876-905-4111.`,
+    html: shell('Invoice', `
+      <h2 style="margin:0 0 8px;font-size:20px">${escapeHtml(greeting)}</h2>
+      <p>Here's your invoice for <b>order #${escapeHtml(orderId)}</b>. The order is reserved; it isn't paid yet.</p>
+      <table width="100%" cellpadding="0" cellspacing="0" style="margin:14px 0;font-size:13px"><thead><tr><th align="left" style="padding:6px 0;border-bottom:2px solid #0b1b2b;color:#6b7280">Item</th><th align="right" style="padding:6px 0;border-bottom:2px solid #0b1b2b;color:#6b7280">Qty</th><th align="right" style="padding:6px 0;border-bottom:2px solid #0b1b2b;color:#6b7280">Price</th></tr></thead><tbody>${rows}</tbody></table>
+      <p style="font-size:16px"><b>Amount due: ${jmd(total)}</b></p>
+      <p><b>How to pay</b><br/>Bank transfer (reply to this email for account details), or pay at the counter - 51 Red Hills Road, Kingston. Quote order #${escapeHtml(orderId)} with your payment.</p>
+      ${payUrl ? `<p><a href="${escapeHtml(payUrl)}" style="display:inline-block;background:#d62828;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700">View / print invoice</a></p>` : ''}
+      <p style="color:#6b7280;font-size:13px">Questions? Reply here or call <b>+1 876-905-4111</b>.</p>
+    `),
+  };
+}
+
 function backInStockEmail({ product_name, price_usd } = {}) {
   const priceText = price_usd ? `$${Number(price_usd).toFixed(2)} USD` : '';
   return {
@@ -160,4 +184,4 @@ function backInStockEmail({ product_name, price_usd } = {}) {
   };
 }
 
-export const templates = { welcomeEmail, orderEmail, backInStockEmail };
+export const templates = { welcomeEmail, orderEmail, invoiceEmail, backInStockEmail };

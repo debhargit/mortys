@@ -1312,8 +1312,10 @@ document.addEventListener('DOMContentLoaded', function(){
       +       '<label class="active"><span class="row"><input type="radio" name="payMethod" value="cash_pickup" checked/> 💵 Cash on pickup</span><small>Pay at the counter when you collect.</small></label>'
       +       '<label><span class="row"><input type="radio" name="payMethod" value="bank_transfer"/> 🏦 Bank transfer</span><small>Account details come with your confirmation.</small></label>'
       +       '<label id="payCardOpt" style="display:none"><span class="row"><input type="radio" name="payMethod" value="stripe"/> 💳 Card online</span><small>Pay now by card.</small></label>'
+      +       '<label><span class="row"><input type="radio" name="payMethod" value="invoice_email"/> 📧 Email me an invoice</span><small>We\'ll email a payable invoice — settle by transfer or at the counter.</small></label>'
       +     '</div>'
       +     '<button id="cartCheckout" type="button" style="width:100%;background:var(--red);color:#fff;border:0;border-radius:8px;padding:12px;font-weight:800;cursor:pointer;font-family:inherit;font-size:14.5px"><span id="checkoutLabel">Checkout</span></button>'
+      +     '<button id="quoteToggle" type="button" style="display:none;width:100%;background:none;border:0;color:#6b7280;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;padding:8px 0 0;text-decoration:underline"></button>'
       +   '</div>'
       + '</aside>'
       + '<button id="cartFab" class="cart-fab" type="button" aria-label="Open cart"><svg viewBox="0 0 24 24"><path d="M7 18a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm10 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM1 2h3.27l1.34 7.16h12.27l1.39-7.16H22l-1.7 8.74a2 2 0 0 1-1.96 1.6H6.92l-.42 2.16H20v2H5.27c-.94 0-1.66-.86-1.48-1.78L5.27 9.16 3.43 2H1V2z"/></svg><span class="cb" id="cartFabBadge">0</span></button>'
@@ -1613,11 +1615,11 @@ document.addEventListener('DOMContentLoaded', function(){
       return q == null || q < cart[img];
     });
   }
-  // The cart is a saved order (no online payment) whenever any line still
-  // needs a price or a stock check; otherwise it checks out and is paid for.
-  // Price + stock are the only gate -- there is no separate ordering switch.
+  // The cart is a quote request (no online payment) when the shopper asked for
+  // one, or when a line still needs a price or a stock check.
+  var quoteMode = false;   // shopper chose "Request a Quote instead"
   function cartIsQuote(){
-    return cartQuoteLines().length > 0;
+    return quoteMode || cartQuoteLines().length > 0;
   }
   // The parts the customer wants, in the shape /api/inquiry stores.
   function cartQuoteItems(){
@@ -1632,7 +1634,7 @@ document.addEventListener('DOMContentLoaded', function(){
   function updateCheckoutLabel(){
     var quote = cartIsQuote();
     var lbl = document.getElementById('checkoutLabel');
-    if (lbl) lbl.textContent = quote ? 'Save My Order' : 'Checkout via WhatsApp';
+    if (lbl) lbl.textContent = quote ? 'Request for Quote' : 'Checkout via WhatsApp';
     var btn = document.getElementById('cartCheckout');
     if (btn) btn.style.background = quote ? 'var(--navy)' : 'var(--red)';
     ['couponInput','couponApply','ptRedeem','couponApplied'].forEach(function(id){
@@ -1651,6 +1653,14 @@ document.addEventListener('DOMContentLoaded', function(){
     if (shipBox) shipBox.style.display = quote ? 'none' : '';
     var gHint = document.getElementById('guestHint');
     if (gHint) gHint.textContent = quote ? 'Where should we send your quote?' : 'Where should we send your confirmation?';
+    // "Request a quote instead" toggle — only meaningful when the cart could
+    // otherwise be checked out (every line priced + in stock).
+    var qt = document.getElementById('quoteToggle');
+    if (qt){
+      var forced = cartQuoteLines().length > 0;
+      qt.style.display = forced ? 'none' : '';
+      qt.textContent = quoteMode ? '← Back to checkout' : 'Prefer a quote? Request one instead';
+    }
   }
 
   // Fulfilment picker + address fields. Rebuilt only when the fulfilment tab
@@ -1808,19 +1818,20 @@ document.addEventListener('DOMContentLoaded', function(){
       var amtEl = document.getElementById('couponAppliedAmt');
       if (amtEl) amtEl.textContent = fmt(disc);
     }
-    // A saved-order cart has no payable total — some line still needs a price
-    // or a stock check. Say what happens next instead.
+    // A quote cart has no payable total — the shopper asked for a quote, or a
+    // line still needs a price / stock check. Say what happens next instead.
     var quoteLines = cartQuoteLines().length;
-    var shipFee = quoteLines ? 0 : shipFeeNum();
+    var isQuote = cartIsQuote();
+    var shipFee = isQuote ? 0 : shipFeeNum();
     var shipLine = shipFee > 0
       ? '<div class="ship-line"><span>Shipping (' + (CARRIER_LABELS[SHIP.carrier] || SHIP.carrier || SHIP.fulfilment) + ')</span><b>' + fmt(shipFee) + '</b></div>'
       : '';
-    if (quoteLines){
+    if (isQuote){
       document.getElementById('cartTotal').innerHTML =
-        '<div><div class="lbl">Total</div><div style="font-size:11.5px;color:#6b7280;font-weight:600">' +
-          quoteLines + ' of ' + items.length + ' need a price or stock check' +
-        '</div></div>' +
-        '<div style="text-align:right"><b style="font-size:13.5px">We\'ll save your order</b>' +
+        '<div><div class="lbl">Total</div>' +
+          (quoteLines ? '<div style="font-size:11.5px;color:#6b7280;font-weight:600">' + quoteLines + ' of ' + items.length + ' need a price or stock check</div>' : '') +
+        '</div>' +
+        '<div style="text-align:right"><b style="font-size:13.5px">We\'ll send you a quote</b>' +
           (displayTotal ? '<div class="alt">' + fmt(displayTotal) + ' priced so far</div>' : '') +
         '</div>';
     } else {
@@ -3025,6 +3036,11 @@ document.addEventListener('DOMContentLoaded', function(){
   var couponInp = document.getElementById('couponInput');
   if (couponInp) couponInp.addEventListener('keypress', function(e){ if (e.key === 'Enter'){ e.preventDefault(); couponBtn && couponBtn.click(); } });
 
+  (function(){
+    var qt = document.getElementById('quoteToggle');
+    if (qt) qt.addEventListener('click', function(){ quoteMode = !quoteMode; renderCart(); });
+  })();
+
   document.getElementById('cartCheckout').addEventListener('click', async function(){
     var items = Object.keys(cart);
     if (items.length === 0) return;
@@ -3123,6 +3139,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
       if (quoteId){
         cart = {};
+        quoteMode = false;
         orderPhotos.forEach(function(p){ try { URL.revokeObjectURL(p.url); } catch(e){} });
         orderPhotos = [];
         renderPhotoStrip();
@@ -3162,9 +3179,11 @@ document.addEventListener('DOMContentLoaded', function(){
         var gEmail = (document.getElementById('guestEmail') || {}).value || '';
         var gPhone = (document.getElementById('guestPhone') || {}).value || '';
         gName = gName.trim(); gEmail = gEmail.trim(); gPhone = gPhone.trim();
-        if (!gName || (!gEmail && !gPhone)){
+        if (!gName || (!gEmail && !gPhone) || (method === 'invoice_email' && !gEmail)){
           if (errEl){
-            errEl.textContent = !gName ? 'Please enter your name.' : 'Add an email or phone so we can confirm your order.';
+            errEl.textContent = !gName ? 'Please enter your name.'
+              : (method === 'invoice_email' && !gEmail) ? 'Add an email address to receive your invoice.'
+              : 'Add an email or phone so we can confirm your order.';
             errEl.style.display = 'block';
           }
           var gb = document.getElementById('guestBox');
@@ -3219,9 +3238,14 @@ document.addEventListener('DOMContentLoaded', function(){
     } else {
       msg += "\nCollection: counter pickup";
     }
-    msg += "\nPayment: " + (method === 'bank_transfer' ? 'Bank transfer' : 'Cash on pickup');
+    msg += "\nPayment: " + (method === 'bank_transfer' ? 'Bank transfer' : method === 'invoice_email' ? 'Invoice by email' : 'Cash on pickup');
     msg += "\nTotal: " + fmt(total + shipFeeW) + "\n\nThank you!";
-    window.open('https://wa.me/18769054111?text=' + encodeURIComponent(msg), '_blank', 'noopener');
+    // "Email me an invoice" that the backend accepted needs no WhatsApp hand-off
+    // — the invoice email is on its way. Only fall back to WhatsApp if the order
+    // didn't record (backend offline).
+    if (!(orderId && method === 'invoice_email')){
+      window.open('https://wa.me/18769054111?text=' + encodeURIComponent(msg), '_blank', 'noopener');
+    }
     if (orderId){
       // Pop the receipt (+ shipping label for a courier order) and fire the
       // print dialog. A blocked popup is harmless — the WhatsApp tab already
@@ -3235,6 +3259,7 @@ document.addEventListener('DOMContentLoaded', function(){
       orderPhotos = [];
       SHIP.fulfilment = 'pickup'; SHIP.fee = ''; SHIP.carrier = ''; SHIP.service = ''; SHIP.instructions = ''; SHIP.quoteToken = '';
       _shipRates = null; _shipRenderedFor = null;
+      quoteMode = false;
       // renderCart() bails out early once the cart is empty, so clear the strip
       // here rather than relying on it.
       renderPhotoStrip();
@@ -3275,8 +3300,10 @@ document.addEventListener('DOMContentLoaded', function(){
       // A quote cart isn't being paid for yet, so the payment method has no
       // say over the button -- updateCheckoutLabel() owns it in that case.
       if (cartIsQuote()){ btn.classList.remove('stripe'); updateCheckoutLabel(); return; }
+      btn.classList.remove('stripe');
       if (method === 'stripe'){ btn.classList.add('stripe'); lbl.textContent = 'Pay with card →'; }
-      else { btn.classList.remove('stripe'); lbl.textContent = 'Checkout via WhatsApp'; }
+      else if (method === 'invoice_email'){ lbl.textContent = 'Email my invoice'; }
+      else { lbl.textContent = 'Checkout via WhatsApp'; }
     }
     document.querySelectorAll('input[name="payMethod"]').forEach(function(r){
       r.addEventListener('change', updatePay);
