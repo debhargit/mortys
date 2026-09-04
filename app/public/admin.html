@@ -144,6 +144,33 @@
   body.pos-fullscreen .wrap { max-width:none; }
   body.pos-fullscreen .content-area { padding:0 8px 8px; }
 
+  /* Big red X to leave the full-screen POS terminal. Only visible in
+     fullscreen; fixed to the top-right corner above everything. */
+  #posCloseTerminal{
+    position:fixed; top:10px; right:12px; z-index:100000; display:none;
+    width:46px; height:46px; border:0; border-radius:50%; cursor:pointer;
+    background:#d62828; color:#fff; font:800 26px/1 system-ui,sans-serif;
+    align-items:center; justify-content:center; padding:0;
+    box-shadow:0 4px 16px rgba(214,40,40,.55), 0 0 0 3px rgba(255,255,255,.85);
+    transition:transform .12s ease, background .12s ease, box-shadow .12s ease;
+  }
+  body.pos-fullscreen #posCloseTerminal{ display:flex; }
+  #posCloseTerminal:hover, #posCloseTerminal:focus-visible{
+    background:#a31f1f; transform:scale(1.14); outline:0;
+    box-shadow:0 8px 24px rgba(163,31,31,.7), 0 0 0 4px rgba(255,255,255,.95);
+  }
+  #posCloseTerminal::after{
+    content:"Close terminal"; position:absolute; top:50%; right:56px;
+    transform:translateY(-50%) scale(.9); transform-origin:right center;
+    background:#0a0a0c; color:#fff; font:700 12.5px/1 system-ui,sans-serif;
+    letter-spacing:.02em; padding:7px 11px; border-radius:7px; white-space:nowrap;
+    box-shadow:0 6px 18px rgba(0,0,0,.35); opacity:0; pointer-events:none;
+    transition:opacity .12s ease, transform .12s ease;
+  }
+  #posCloseTerminal:hover::after, #posCloseTerminal:focus-visible::after{
+    opacity:1; transform:translateY(-50%) scale(1);
+  }
+
   .tiles{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:24px}
   @media(max-width:900px){.tiles{grid-template-columns:repeat(3,1fr)}}
   @media(max-width:540px){.tiles{grid-template-columns:repeat(2,1fr)}}
@@ -4693,6 +4720,18 @@ async function renderPOS(panel){
     } catch (_) {}
   }
   fsBtn.addEventListener('click', function(){ posSetFullscreen(!posInFullscreen()); });
+  // Corner ✕ to leave the terminal. Created once, lives on <body> so a POS
+  // re-render never drops it; CSS shows it only while body.pos-fullscreen.
+  if (!document.getElementById('posCloseTerminal')) {
+    var xBtn = document.createElement('button');
+    xBtn.id = 'posCloseTerminal';
+    xBtn.type = 'button';
+    xBtn.textContent = '×';
+    xBtn.title = 'Close POS terminal';
+    xBtn.setAttribute('aria-label', 'Close POS terminal');
+    xBtn.addEventListener('click', function(){ posSetFullscreen(false); });
+    document.body.appendChild(xBtn);
+  }
   // POS.cartFull persists across reloads, but the body.pos-fullscreen class --
   // which hides the page chrome so the shell can fill the viewport, top edge to
   // bottom edge, the same span the sidebar occupies -- is only ever set by the
