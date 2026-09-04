@@ -5440,12 +5440,13 @@ async function posSaveCartAsQuote(after){
       notes: POS.notes || null,
     }});
     var unpriced = POS.cart.filter(function(i){ return !(i.price > 0); }).length;
-    if (await posConfirm('Quote ' + resp.quote_number + ' saved — ' + posCents(resp.total_cents) +
-        (unpriced ? '\n\n' + unpriced + ' line' + (unpriced === 1 ? '' : 's') + ' saved with no price; open the quote to fill them in once you have costs.' : '') +
-        '\n\nPrint it now?', { ok:'Print', cancel:'Not now' })) {
+    posToast('Quote ' + resp.quote_number + ' saved — ' + posCents(resp.total_cents) +
+      (unpriced ? ' · ' + unpriced + ' line' + (unpriced === 1 ? '' : 's') + ' still to price' : ''));
+    // Print straight away -- no "print it now?" prompt to click through.
+    try {
       var q = await api('/api/admin/pos/quotes/' + resp.id);
       posPrintQuote(q.quote, q.shop);
-    }
+    } catch (_) {}
     posResetTicket();
     if (after) after();
   } catch (e) {
@@ -7224,7 +7225,12 @@ function posQuoteToDocData(q, shop){
     fulfilment: 'pickup', voided: false, tax_exempt: false, notes: q.notes,
   };
   var mappedItems = items.map(function(it){
-    var cents = Number(it.unit_price_cents) || 0, qty = it.qty || 1;
+    // Stored lines are exactly what posCartPayload() sends: unit_price_usd
+    // (dollars) and qty -- NOT the _cents field names. Reading unit_price_cents
+    // off them was always undefined, which printed every priced quote at $0.
+    var qty = Number(it.qty); if (!(qty > 0)) qty = 1;
+    var cents = Number(it.unit_price_cents);
+    if (!(cents > 0)) cents = Math.round((Number(it.unit_price_usd) || 0) * 100);
     return {
       description: it.description || it.product_img || '', product_img: it.product_img || null,
       sku: it.sku || null, qty: qty, unit_price_cents: cents, discount_cents: 0,
