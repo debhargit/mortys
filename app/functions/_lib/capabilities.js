@@ -3,6 +3,8 @@
 // (guards.js) enforces it as a deny-list.
 export const CAPABILITIES = [
   { key: 'pos.access',             group: 'POS',       label: 'Open the POS terminal' },
+  { key: 'pos.finalise_invoice',   group: 'POS',       label: 'Ring a sale / invoice at checkout (off = checkout saves an order for a cashier)' },
+  { key: 'cashier.access',         group: 'POS',       label: 'Open the Cashier module (take payment on POS orders)' },
   { key: 'pos.line_discount',      group: 'POS',       label: 'Give a per-line discount' },
   { key: 'pos.ticket_discount',    group: 'POS',       label: 'Give a whole-ticket discount' },
   { key: 'pos.price_override',     group: 'POS',       label: 'Change a line’s unit price' },

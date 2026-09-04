@@ -280,6 +280,160 @@ export default function mount(app) {
   });
 
   // =====================================================================
+  //  POS ORDERS — checkout without payment; a cashier invoices them later.
+  //  The cart is stored verbatim in orders.pos_payload and replayed through
+  //  /api/admin/pos/sale at invoice time, so the sale path stays unchanged
+  //  and stock moves only when the invoice is minted.
+  // =====================================================================
+
+  app.post('/api/admin/pos/order', adminMw, async (c) => {
+    const db = d1(c.env);
+    const me = c.get('user');
+    const b = await c.req.json().catch(() => ({}));
+    const items = Array.isArray(b.items) ? b.items : [];
+    if (!items.length) return c.json({ error: 'At least one item required' }, 400);
+
+    const lineDisc = items.reduce((s, it) => s + Math.max(0, Number(it.discount_usd || 0)), 0);
+    if (lineDisc > 0 && !userCan(me, 'pos.line_discount'))
+      return c.json({ error: 'Your account is not allowed to give a per-line discount.' }, 403);
+    if (Number(b.discount_usd || 0) > 0 && !userCan(me, 'pos.ticket_discount'))
+      return c.json({ error: 'Your account is not allowed to give a whole-ticket discount.' }, 403);
+    if (b.no_tax === true && !userCan(me, 'pos.no_tax'))
+      return c.json({ error: 'Your account is not allowed to switch GCT off.' }, 403);
+
+    // Display total only -- the authoritative figures are recomputed by
+    // /pos/sale when the cashier invoices it.
+    let sub = 0;
+    for (const it of items) {
+      const gross = (Number(it.unit_price_usd) || 0) * (Number(it.qty) || 0)
+        + Number(it.core_charge_usd || 0) + Number(it.env_fee_usd || 0);
+      sub += Math.max(0, gross - Math.max(0, Number(it.discount_usd || 0)));
+    }
+    const shipFee = ['delivery', 'shipping'].includes(b.fulfilment) ? Math.max(0, r2(Number(b.ship_fee_usd) || 0)) : 0;
+    const taxable = Math.max(0, r2(sub - Math.max(0, Number(b.discount_usd || 0)) + shipFee));
+    const dispTax = b.no_tax === true ? 0 : r2(taxable * TAX_RATE);   // guide only; /pos/sale computes the real figure
+    const dispTotal = Math.max(0, r2(taxable + dispTax));
+
+    const payload = { ...b };
+    delete payload.payments; delete payload.payment_method; delete payload.amount_tendered;
+
+    let orderId;
+    try {
+      const ins = await db.run(
+        `INSERT INTO orders
+           (user_id, customer_name, customer_phone, total_cents, status, notes,
+            payment_method, payment_status, source, pos_payload, sales_rep_id, sales_rep_name,
+            ship_instructions, taken_by, created_at)
+         VALUES (?,?,?,?, 'pending', ?, 'pos_order', 'unpaid', 'pos', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        Number.isInteger(b.customer_id) ? b.customer_id : null,
+        b.customer_name || null, b.customer_phone || null, cts(dispTotal), b.notes || null,
+        JSON.stringify(payload),
+        Number.isInteger(b.sales_rep_id) ? b.sales_rep_id : null,
+        b.sales_rep_name ? String(b.sales_rep_name).slice(0, 200) : null,
+        b.ship_instructions ? String(b.ship_instructions).slice(0, 600) : null,
+        me.id,
+      );
+      orderId = ins.meta.last_row_id;
+      const stmts = items.filter((it) => it.product_img).map((it) => ({
+        sql: `INSERT OR REPLACE INTO order_items (order_id, product_img, qty, price_cents) VALUES (?,?,?,?)`,
+        binds: [orderId, it.product_img, Number(it.qty) || 1, cts(it.unit_price_usd || 0)],
+      }));
+      if (stmts.length) await db.batch(stmts);
+    } catch (e) {
+      return c.json({ error: e.message }, 500);
+    }
+    return c.json({ ok: true, order_id: orderId });
+  });
+
+  app.get('/api/admin/pos/orders', adminMw, async (c) => {
+    const status = c.req.query('status') || 'pending';
+    const rows = await d1(c.env).many(
+      `SELECT o.id, o.created_at, o.customer_name, o.customer_phone, o.total_cents / 100.0 AS total_usd,
+              o.status, o.sales_rep_name, o.ship_instructions, o.converted_sale_id, u.name AS taken_by_name,
+              (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) AS line_count,
+              (SELECT COALESCE(SUM(qty),0) FROM order_items WHERE order_id = o.id) AS unit_count
+         FROM orders o LEFT JOIN users u ON u.id = o.taken_by
+        WHERE o.source = 'pos' AND o.status = ?
+        ORDER BY o.created_at ASC LIMIT 200`, status);
+    return c.json({ orders: rows });
+  });
+
+  app.get('/api/admin/pos/orders/:id', adminMw, async (c) => {
+    const db = d1(c.env);
+    const o = await db.one("SELECT * FROM orders WHERE id = ? AND source = 'pos'", c.req.param('id'));
+    if (!o) return c.json({ error: 'Order not found' }, 404);
+    let payload = {};
+    try { payload = JSON.parse(o.pos_payload || '{}'); } catch (_) {}
+    const items = await db.many(
+      `SELECT oi.product_img, oi.qty, oi.price_cents / 100.0 AS unit_price_usd, p.name, p.sku, p.stock_count
+         FROM order_items oi LEFT JOIN products p ON p.img = oi.product_img WHERE oi.order_id = ?`, o.id);
+    delete o.pos_payload;
+    return c.json({ order: o, payload, items });
+  });
+
+  app.post('/api/admin/pos/orders/:id/cancel', adminMw, async (c) => {
+    const me = c.get('user');
+    if (!userCan(me, 'pos.finalise_invoice') && !userCan(me, 'cashier.access') && !userCan(me, 'pos.access'))
+      return c.json({ error: 'Not allowed' }, 403);
+    const r = await d1(c.env).run(
+      "UPDATE orders SET status = 'cancelled' WHERE id = ? AND source = 'pos' AND status IN ('pending','invoicing')",
+      c.req.param('id'));
+    if (!r.meta || r.meta.changes !== 1) return c.json({ error: 'Order not found or not cancellable' }, 409);
+    return c.json({ ok: true });
+  });
+
+  // Take payment: replay the stored cart through /api/admin/pos/sale (the real,
+  // unchanged path) with the cashier's payments, then link + close the order.
+  app.post('/api/admin/pos/orders/:id/invoice', adminMw, async (c) => {
+    const db = d1(c.env);
+    const me = c.get('user');
+    if (!userCan(me, 'pos.finalise_invoice') && !userCan(me, 'cashier.access'))
+      return c.json({ error: 'Your account is not allowed to take payment on POS orders.' }, 403);
+    const id = parseInt(c.req.param('id'), 10);
+    const b = await c.req.json().catch(() => ({}));
+
+    const claim = await db.run(
+      "UPDATE orders SET status = 'invoicing' WHERE id = ? AND source = 'pos' AND status = 'pending'", id);
+    if (!claim.meta || claim.meta.changes !== 1) {
+      const row = await db.one("SELECT status, converted_sale_id FROM orders WHERE id = ? AND source = 'pos'", id);
+      if (!row) return c.json({ error: 'Order not found' }, 404);
+      return c.json({ error: 'Order is already ' + row.status }, 409);
+    }
+    const ord = await db.one('SELECT pos_payload FROM orders WHERE id = ?', id);
+    let payload = {};
+    try { payload = JSON.parse(ord.pos_payload || '{}'); } catch (_) {}
+
+    const saleBody = { ...payload,
+      payments: Array.isArray(b.payments) ? b.payments : payload.payments,
+      payment_method: b.payment_method || payload.payment_method,
+      amount_tendered: b.amount_tendered != null ? b.amount_tendered : payload.amount_tendered };
+    if (b.fulfilment) saleBody.fulfilment = b.fulfilment;
+    ['ship_method', 'ship_fee_usd', 'ship_name', 'ship_phone', 'ship_line1', 'ship_line2', 'ship_city', 'ship_parish', 'ship_instructions']
+      .forEach((k) => { if (b[k] !== undefined) saleBody[k] = b[k]; });
+
+    let res, sale;
+    try {
+      res = await fetch(new URL('/api/admin/pos/sale', c.req.url).toString(), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: c.req.header('cookie') || '' },
+        body: JSON.stringify(saleBody),
+      });
+      sale = await res.json().catch(() => ({}));
+    } catch (e) {
+      await db.run("UPDATE orders SET status = 'pending' WHERE id = ?", id);
+      return c.json({ error: 'Could not reach the sale endpoint: ' + e.message }, 502);
+    }
+    if (!res.ok || !sale.ok) {
+      await db.run("UPDATE orders SET status = 'pending' WHERE id = ?", id);
+      return c.json({ error: sale.error || ('Sale failed (HTTP ' + res.status + ')') }, res.status && res.status >= 400 ? res.status : 500);
+    }
+    await db.run(
+      "UPDATE orders SET status = 'completed', payment_status = 'paid', converted_sale_id = ? WHERE id = ?",
+      sale.id, id);
+    return c.json({ ok: true, order_id: id, sale });
+  });
+
+  // =====================================================================
   //  POST /api/admin/pos/sales/:id/void
   // =====================================================================
   app.post('/api/admin/pos/sales/:id/void', adminMw, async (c) => {

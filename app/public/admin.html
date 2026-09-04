@@ -689,6 +689,7 @@ var renderers = {
   purchaseorders: renderPurchaseOrders,
   pos:           renderPOS,
   quotes:        renderQuotes,
+  cashier:       renderCashier,
   vehiclehistory: renderVehicleHistory,
   maintdue:      renderMaintDue,
   laborstd:      renderLaborStandards,
@@ -759,6 +760,7 @@ var SIDEBAR_GROUPS = [
   ]},
   { title: '💵 Sales & POS', items: [
     { tab:'pos', label:'💵 POS Terminal' },
+    { tab:'cashier', label:'💵 Cashier' },
     { tab:'quotes', label:'📝 Quotes' },
     { tab:'orders', label:'🛒 Orders' },
     { tab:'cashreport', label:'📈 Cash Report' },
@@ -880,6 +882,7 @@ function buildSidebar(){
   // POS Terminal in the sidebar (renderPOS refuses it too).
   if (!can('pos.access') && hide.indexOf('pos') === -1) hide.push('pos');
   if (!can('reports.view') && hide.indexOf('reports') === -1) hide.push('reports');
+  if (!can('cashier.access') && hide.indexOf('cashier') === -1) hide.push('cashier');
   var groups = SIDEBAR_GROUPS
     .map(function(g){
       return { title: g.title,
@@ -3958,7 +3961,11 @@ async function renderPOS(panel){
       co.disabled = unpriced > 0 || !POS.cart.length;
       co.style.opacity = co.disabled ? '.45' : '1';
       co.style.cursor = co.disabled ? 'not-allowed' : 'pointer';
-      co.title = unpriced > 0 ? 'Enter a price on every line to complete a sale' : '';
+      var asOrder = !can('pos.finalise_invoice');
+      co.innerHTML = (asOrder ? '➕ SAVE ORDER' : 'CHECKOUT') + ' <small style="opacity:.7;font-weight:600">F9</small>';
+      co.title = unpriced > 0
+        ? 'Enter a price on every line to ' + (asOrder ? 'save the order' : 'complete a sale')
+        : (asOrder ? 'Save this cart as an order for a cashier to take payment' : '');
     }
     var qb = document.getElementById('posSaveQuote');
     if (qb){
@@ -4775,6 +4782,9 @@ async function renderPOS(panel){
     if (!POS.cart.length) return posToast('Cart is empty.', true);
     if (POS.cart.some(function(i){ return !(i.price > 0); }))
       return posToast('Enter a price on every line before completing a sale, or save it as a quote instead.', true);
+    // Operators without pos.finalise_invoice don't ring the sale -- they save
+    // an order and a cashier takes payment / mints the invoice.
+    if (!can('pos.finalise_invoice')) return posSaveCartAsOrder(refreshBar);
     openTenderModal(refreshBar);
   });
   document.getElementById('posSaveQuote').addEventListener('click', function(){ posSaveCartAsQuote(refreshBar); });
@@ -5373,6 +5383,217 @@ async function posSaveCartAsQuote(after){
   } catch (e) {
     posToast('Could not save the quote: ' + e.message, true);
   }
+}
+
+// Order-first checkout: the operator confirms the customer + how the goods
+// leave (with a delivery address + special instructions), and the cart is
+// parked as a pending POS order for the Cashier module to take payment on.
+function posSaveCartAsOrder(after){
+  if (!POS.cart.length) return posToast('Cart is empty.', true);
+  if (POS.cart.some(function(i){ return !(i.price > 0); }))
+    return posToast('Enter a price on every line first.', true);
+  var t = posTotals();
+  var custName = POS.custName || (POS.customer && POS.customer.name) || 'Cash Customer – Walk-in';
+  var sh = POS.ship || {};
+  var ful0 = POS.fulfilment || 'pickup';
+  var cap = function(s){ return s.charAt(0).toUpperCase() + s.slice(1); };
+  posModal('➕ Save as order',
+    '<div style="font-size:13px;line-height:1.55">' +
+      '<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line)"><span style="color:var(--muted)">Customer</span><b>' + esc(custName) + (POS.custPhone ? ' · ' + esc(POS.custPhone) : '') + '</b></div>' +
+      '<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line)"><span style="color:var(--muted)">Cart</span><b>' + POS.cart.reduce(function(s,i){ return s + i.qty; }, 0) + ' units · ' + posCents(Math.round(t.total * 100)) + '</b></div>' +
+      (POS.rep ? '<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line)"><span style="color:var(--muted)">Sales rep</span><b>' + esc(POS.rep.name) + '</b></div>' : '') +
+      '<label class="lbl" style="margin-top:12px">How does it leave?</label>' +
+      '<select id="soFul" class="fld">' + ['pickup','delivery','shipping'].map(function(x){ return '<option value="' + x + '"' + (x === ful0 ? ' selected' : '') + '>' + cap(x) + '</option>'; }).join('') + '</select>' +
+      '<div id="soShip" style="display:' + (ful0 === 'pickup' ? 'none' : 'block') + ';margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--card-soft2)">' +
+        '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:800;margin-bottom:6px">Delivery address</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
+          '<div><label class="lbl">Recipient</label><input id="soName" class="fld" value="' + esc(sh.name || custName) + '"/></div>' +
+          '<div><label class="lbl">Phone</label><input id="soPhone" class="fld" value="' + esc(sh.phone || POS.custPhone || '') + '"/></div>' +
+        '</div>' +
+        '<label class="lbl">Address line 1</label><input id="soL1" class="fld" value="' + esc(sh.line1 || '') + '"/>' +
+        '<label class="lbl">Address line 2</label><input id="soL2" class="fld" value="' + esc(sh.line2 || '') + '"/>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
+          '<div><label class="lbl">City / Town</label><input id="soCity" class="fld" value="' + esc(sh.city || '') + '"/></div>' +
+          '<div><label class="lbl">Parish</label><input id="soParish" class="fld" value="' + esc(sh.parish || '') + '"/></div>' +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:2fr 1fr;gap:8px">' +
+          '<div><label class="lbl">Method</label><input id="soMethod" class="fld" placeholder="Own van, courier…" value="' + esc(sh.method || '') + '"/></div>' +
+          '<div><label class="lbl">Fee (USD)</label><input id="soFee" type="number" step="0.01" min="0" class="fld" value="' + (sh.fee != null && sh.fee !== '' ? sh.fee : '') + '"/></div>' +
+        '</div>' +
+      '</div>' +
+      '<label class="lbl" style="margin-top:10px">Special instructions</label>' +
+      '<textarea id="soInstr" class="fld" rows="2" placeholder="Anything the cashier or driver should know">' + esc(sh.instructions || '') + '</textarea>' +
+      '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">' +
+        '<button type="button" class="btn ghost" id="soCancel">Cancel</button>' +
+        '<button type="button" class="btn ok" id="soSave">Save order</button>' +
+      '</div>' +
+    '</div>', 520);
+  document.getElementById('soFul').addEventListener('change', function(){
+    document.getElementById('soShip').style.display = this.value === 'pickup' ? 'none' : 'block';
+  });
+  document.getElementById('soCancel').addEventListener('click', posCloseModal);
+  document.getElementById('soSave').addEventListener('click', async function(){
+    var f = document.getElementById('soFul').value;
+    var g = function(id){ var el = document.getElementById(id); return el ? el.value.trim() : ''; };
+    var body = {
+      items: posCartPayload(), discount_usd: t.orderDisc,
+      customer_id: POS.customer ? POS.customer.id : null,
+      customer_name: POS.custName || (POS.customer && POS.customer.name) || null,
+      customer_phone: POS.custPhone || null,
+      vehicle_info: POS.vehicle || null,
+      sales_rep_id: posRepIdForPayload(), sales_rep_name: POS.rep ? POS.rep.name : null,
+      notes: POS.notes || null, no_tax: !!POS.noTax, fulfilment: f,
+      ship_instructions: g('soInstr') || null,
+    };
+    if (f !== 'pickup') {
+      body.ship_method = g('soMethod') || null;
+      body.ship_fee_usd = Number(document.getElementById('soFee').value) || 0;
+      body.ship_name = g('soName') || null; body.ship_phone = g('soPhone') || null;
+      body.ship_line1 = g('soL1') || null;  body.ship_line2 = g('soL2') || null;
+      body.ship_city = g('soCity') || null; body.ship_parish = g('soParish') || null;
+    }
+    this.disabled = true; this.textContent = 'Saving…';
+    try {
+      var resp = await api('/api/admin/pos/order', { method: 'POST', body: body });
+      posCloseModal();
+      posToast('Order #' + resp.order_id + ' saved — a cashier can take payment now.');
+      posResetTicket();
+      if (after) after();
+    } catch (e) {
+      this.disabled = false; this.textContent = 'Save order';
+      posToast('Could not save the order: ' + e.message, true);
+    }
+  });
+}
+
+// ============= CASHIER — take payment on POS orders =============
+// Counter operators without pos.finalise_invoice save orders here; a cashier
+// picks one up, takes payment (replayed through the real /pos/sale path so
+// stock + the invoice are minted exactly as a normal sale), and it closes.
+var CASHIER_VIEW_ID = null;
+async function renderCashier(panel){
+  if (CASHIER_VIEW_ID) return renderCashierOrder(panel, CASHIER_VIEW_ID);
+  panel.innerHTML = '<div class="empty">Loading orders…</div>';
+  var r;
+  try { r = await api('/api/admin/pos/orders?status=pending'); }
+  catch (e) { panel.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return; }
+  var rows = r.orders || [];
+  panel.innerHTML =
+    '<div style="padding:12px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line)">' +
+      '<h3 style="margin:0;font-size:16px">💵 Cashier — orders awaiting payment</h3>' +
+      '<span style="color:var(--muted);font-size:12.5px">' + rows.length + ' pending</span>' +
+      '<button class="btn" id="cashRefresh" style="margin-left:auto;font-size:12px">↻ Refresh</button>' +
+    '</div>' +
+    (rows.length
+      ? '<table><thead><tr><th>Order</th><th>Taken</th><th>By</th><th>Customer</th><th>Leaves</th><th class="r">Units</th><th class="r">Total</th><th></th></tr></thead><tbody>' +
+        rows.map(function(o){
+          return '<tr class="cashRow" data-id="' + o.id + '" style="cursor:pointer">' +
+            '<td><b>#' + o.id + '</b></td>' +
+            '<td>' + esc(fmtDate(o.created_at)) + '</td>' +
+            '<td>' + esc(o.taken_by_name || '—') + '</td>' +
+            '<td>' + esc(o.customer_name || 'Walk-in') + (o.customer_phone ? ' · ' + esc(o.customer_phone) : '') + '</td>' +
+            '<td>' + esc(o.ship_instructions ? '📝 ' : '') + (o.sales_rep_name ? 'rep ' + esc(o.sales_rep_name) : '') + '</td>' +
+            '<td class="r">' + (o.unit_count || 0) + '</td>' +
+            '<td class="r"><b>' + fmtMoney(o.total_usd || 0) + '</b></td>' +
+            '<td class="r"><button class="btn ok" data-take="' + o.id + '" style="font-size:11.5px">Take payment ›</button></td>' +
+          '</tr>';
+        }).join('') + '</tbody></table>'
+      : '<div class="empty" style="padding:32px">No orders waiting. When a counter operator saves an order it shows up here.</div>');
+  var rf = document.getElementById('cashRefresh');
+  if (rf) rf.addEventListener('click', function(){ renderCashier(panel); });
+  panel.querySelectorAll('.cashRow, [data-take]').forEach(function(el){
+    el.addEventListener('click', function(e){
+      e.stopPropagation();
+      CASHIER_VIEW_ID = parseInt(el.getAttribute('data-id') || el.getAttribute('data-take'), 10);
+      renderCashierOrder(panel, CASHIER_VIEW_ID);
+    });
+  });
+}
+
+async function renderCashierOrder(panel, id){
+  panel.innerHTML = '<div class="empty">Loading order #' + id + '…</div>';
+  var d;
+  try { d = await api('/api/admin/pos/orders/' + id); }
+  catch (e) { panel.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return; }
+  var o = d.order, pay = d.payload || {}, items = d.items || [];
+  var guide = (o.total_cents || 0) / 100;
+  var ship = pay.fulfilment && pay.fulfilment !== 'pickup';
+  panel.innerHTML =
+    '<div style="padding:12px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line)">' +
+      '<button class="btn" id="cashBack">‹ All orders</button>' +
+      '<h3 style="margin:0;font-size:16px">Order #' + o.id + '</h3>' +
+      (o.status !== 'pending' ? badge(o.status, o.status === 'completed' ? 'ok' : 'bad') : '') +
+      '<button class="btn" id="cashCancel" style="margin-left:auto;background:#fee2e2;color:#b91c1c;font-size:11.5px">Cancel order</button>' +
+    '</div>' +
+    '<div style="padding:16px;display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:start">' +
+      '<div>' +
+        '<div style="color:var(--muted);font-size:12.5px;margin-bottom:8px">' +
+          esc(o.customer_name || 'Cash Customer – Walk-in') + (o.customer_phone ? ' · ' + esc(o.customer_phone) : '') +
+          (pay.sales_rep_name ? ' · rep ' + esc(pay.sales_rep_name) : '') +
+          (pay.vehicle_info ? ' · ' + esc(pay.vehicle_info) : '') + '</div>' +
+        '<table><thead><tr><th>Part</th><th>Description</th><th class="r">Qty</th><th class="r">Unit</th></tr></thead><tbody>' +
+          items.map(function(it){
+            return '<tr><td><code>' + esc(it.sku || it.product_img || '—') + '</code></td>' +
+              '<td>' + esc(it.name || (pay.items || []).reduce(function(a,x){ return x.product_img === it.product_img ? x.description : a; }, '') || '') + '</td>' +
+              '<td class="r">' + it.qty + '</td><td class="r">' + fmtMoney(it.unit_price_usd || 0) + '</td></tr>';
+          }).join('') + '</tbody></table>' +
+        (ship
+          ? '<div style="margin-top:12px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:12.5px">' +
+            '<b>' + esc((pay.fulfilment || '').toUpperCase()) + '</b>' + (pay.ship_method ? ' via ' + esc(pay.ship_method) : '') +
+            (pay.ship_fee_usd ? ' · fee ' + fmtMoney(pay.ship_fee_usd) : '') + '<br>' +
+            esc([pay.ship_name, pay.ship_phone].filter(Boolean).join(' · ')) + '<br>' +
+            esc([pay.ship_line1, pay.ship_line2, pay.ship_city, pay.ship_parish].filter(Boolean).join(', ')) +
+            '</div>'
+          : '') +
+        (o.ship_instructions ? '<div style="margin-top:10px;background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:9px 12px;font-size:12.5px"><b>Instructions:</b> ' + esc(o.ship_instructions) + '</div>' : '') +
+      '</div>' +
+      '<div style="border:1px solid var(--line);border-radius:10px;padding:14px;background:var(--card-soft2)">' +
+        '<div style="font-size:12px;color:var(--muted)">Amount to collect <span style="font-size:10.5px">(guide — final figure is calculated on save)</span></div>' +
+        '<div style="font-size:26px;font-weight:900;color:var(--red);margin:2px 0 12px">' + fmtMoney(guide) + '</div>' +
+        '<label class="lbl">Payment method</label>' +
+        '<select id="cashMethod" class="fld">' +
+          ['cash','card','cheque','bank','account'].map(function(m){ return '<option value="' + m + '">' + m.charAt(0).toUpperCase() + m.slice(1) + '</option>'; }).join('') +
+        '</select>' +
+        '<div id="cashCashRow"><label class="lbl">Cash tendered (USD)</label><input id="cashTendered" type="number" step="0.01" min="0" class="fld" placeholder="' + guide.toFixed(2) + '"/></div>' +
+        '<div id="cashRefRow" style="display:none"><label class="lbl">Reference</label><input id="cashRef" class="fld" placeholder="auth / cheque / PO no."/></div>' +
+        '<button class="btn ok" id="cashInvoice" style="width:100%;margin-top:12px;padding:11px;font-weight:800">✅ Take payment &amp; invoice</button>' +
+        '<div id="cashMsg" style="font-size:12px;margin-top:8px"></div>' +
+      '</div>' +
+    '</div>';
+  document.getElementById('cashBack').addEventListener('click', function(){ CASHIER_VIEW_ID = null; renderCashier(panel); });
+  var mSel = document.getElementById('cashMethod');
+  mSel.addEventListener('change', function(){
+    document.getElementById('cashCashRow').style.display = this.value === 'cash' ? 'block' : 'none';
+    document.getElementById('cashRefRow').style.display = ['card','cheque','bank','account'].indexOf(this.value) !== -1 ? 'block' : 'none';
+  });
+  document.getElementById('cashCancel').addEventListener('click', async function(){
+    if (!(await posConfirm('Cancel order #' + o.id + '? The counter operator would have to ring it again.', { ok:'Cancel order', danger:true }))) return;
+    try { await api('/api/admin/pos/orders/' + o.id + '/cancel', { method:'POST' }); CASHIER_VIEW_ID = null; renderCashier(panel); }
+    catch (e) { posToast(e.message, true); }
+  });
+  document.getElementById('cashInvoice').addEventListener('click', async function(){
+    var method = mSel.value;
+    var p = { method: method, amount_usd: null, reference: null, amount_tendered: null };
+    if (method === 'cash') {
+      var tv = document.getElementById('cashTendered').value;
+      p.amount_tendered = tv === '' ? guide : Number(tv);
+    } else {
+      p.reference = (document.getElementById('cashRef').value || '').trim() || null;
+    }
+    var msg = document.getElementById('cashMsg'); msg.style.color = 'var(--muted)'; msg.textContent = 'Posting…';
+    this.disabled = true;
+    try {
+      var res = await api('/api/admin/pos/orders/' + o.id + '/invoice', { method:'POST', body: { payments: [p] } });
+      var s = res.sale || {};
+      if (await posConfirm('Invoice ' + (s.invoice_number || '#' + s.id) + ' — ' + fmtMoney(s.total_usd || guide) +
+          (s.change_due ? '\n\nChange due: ' + fmtMoney(s.change_due) : '') + '\n\nPrint it now?', { ok:'Print', cancel:'Not now' })) {
+        try { var full = await api('/api/admin/pos/sales/' + s.id); posPrintDoc('invoice', posSaleToDocData(full, POS_SHOP)); } catch (_) {}
+      }
+      CASHIER_VIEW_ID = null; renderCashier(panel);
+    } catch (e) {
+      this.disabled = false; msg.style.color = 'var(--red)'; msg.textContent = e.message;
+    }
+  });
 }
 
 // Everything the counter saves from the POS lands here, priced or not. A quote
