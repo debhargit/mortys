@@ -5454,9 +5454,40 @@ async function posSaveCartAsQuote(after){
   }
 }
 
+// A carrier tracking number for courier orders. MAP = Morty's Auto Parts;
+// YYMMDD + 5 random base36 chars keeps them roughly sortable and unlikely
+// to collide without needing a round-trip to the server to reserve one.
+function posGenTracking(){
+  var d = new Date();
+  var p = function(n){ return String(n).padStart(2, '0'); };
+  return 'MAP-' + String(d.getFullYear()).slice(2) + p(d.getMonth() + 1) + p(d.getDate()) + '-' +
+    Math.random().toString(36).slice(2, 7).toUpperCase();
+}
+// Shapes a delivery block { name,phone,line1,line2,city,parish,method,courier,
+// tracking,instructions } into the { sale, items, shop } doc-data posDocLabel
+// expects, so a shipping label can be printed before the order even has an id.
+function posOrderLabelData(sc, ref, items){
+  return {
+    sale: {
+      receipt_number: ref,
+      tracking_number: sc.tracking || null,
+      ship_method: sc.courier ? ('Courier — ' + sc.courier) : (sc.method || 'COURIER'),
+      ship_name: sc.name || null, ship_phone: sc.phone || null,
+      ship_line1: sc.line1 || null, ship_line2: sc.line2 || null,
+      ship_city: sc.city || null, ship_parish: sc.parish || null,
+      ship_country: (POS_SHOP && POS_SHOP.country) || 'Jamaica',
+      ship_instructions: sc.instructions || null,
+      balance_due_cents: 0, created_at: new Date().toISOString(),
+    },
+    items: items || (POS.cart || []).map(function(i){ return { qty: i.qty }; }),
+    shop: POS_SHOP,
+  };
+}
+
 // Order-first checkout: the operator confirms the customer + how the goods
-// leave (with a delivery address + special instructions), and the cart is
-// parked as a pending POS order for the Cashier module to take payment on.
+// leave (delivery address, carrier, courier tracking + label, how the
+// customer is notified, special instructions), and the cart is parked as a
+// pending POS order for the Cashier module to take payment on.
 function posSaveCartAsOrder(after){
   if (!POS.cart.length) return posToast('Cart is empty.', true);
   if (POS.cart.some(function(i){ return !(i.price > 0); }))
@@ -5474,20 +5505,38 @@ function posSaveCartAsOrder(after){
       '<label class="lbl" style="margin-top:12px">How does it leave?</label>' +
       '<select id="soFul" class="fld">' + ['pickup','delivery','shipping'].map(function(x){ return '<option value="' + x + '"' + (x === ful0 ? ' selected' : '') + '>' + cap(x) + '</option>'; }).join('') + '</select>' +
       '<div id="soShip" style="display:' + (ful0 === 'pickup' ? 'none' : 'block') + ';margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--card-soft2)">' +
-        '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:800;margin-bottom:6px">Delivery address</div>' +
+        '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:800;margin-bottom:6px">Delivery address <span style="color:var(--red)">*</span></div>' +
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
-          '<div><label class="lbl">Recipient</label><input id="soName" class="fld" value="' + esc(sh.name || custName) + '"/></div>' +
-          '<div><label class="lbl">Phone</label><input id="soPhone" class="fld" value="' + esc(sh.phone || POS.custPhone || '') + '"/></div>' +
+          '<div><label class="lbl">Recipient *</label><input id="soName" class="fld" value="' + esc(sh.name || custName) + '"/></div>' +
+          '<div><label class="lbl">Phone *</label><input id="soPhone" class="fld" value="' + esc(sh.phone || POS.custPhone || '') + '"/></div>' +
         '</div>' +
-        '<label class="lbl">Address line 1</label><input id="soL1" class="fld" value="' + esc(sh.line1 || '') + '"/>' +
+        '<label class="lbl">Address line 1 *</label><input id="soL1" class="fld" value="' + esc(sh.line1 || '') + '"/>' +
         '<label class="lbl">Address line 2</label><input id="soL2" class="fld" value="' + esc(sh.line2 || '') + '"/>' +
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
-          '<div><label class="lbl">City / Town</label><input id="soCity" class="fld" value="' + esc(sh.city || '') + '"/></div>' +
-          '<div><label class="lbl">Parish</label><input id="soParish" class="fld" value="' + esc(sh.parish || '') + '"/></div>' +
+          '<div><label class="lbl">City / Town *</label><input id="soCity" class="fld" value="' + esc(sh.city || '') + '"/></div>' +
+          '<div><label class="lbl">Parish *</label><input id="soParish" class="fld" value="' + esc(sh.parish || '') + '"/></div>' +
         '</div>' +
         '<div style="display:grid;grid-template-columns:2fr 1fr;gap:8px">' +
-          '<div><label class="lbl">Method</label><input id="soMethod" class="fld" placeholder="Own van, courier…" value="' + esc(sh.method || '') + '"/></div>' +
+          '<div><label class="lbl">Carrier / method</label>' +
+            '<select id="soMethodSel" class="fld">' +
+              ['Own van / driver','Courier','Bus / parcel service','Customer collects from depot','Other']
+                .map(function(m){ return '<option' + (sh.method === m ? ' selected' : '') + '>' + m + '</option>'; }).join('') +
+            '</select></div>' +
           '<div><label class="lbl">Fee (USD)</label><input id="soFee" type="number" step="0.01" min="0" class="fld" value="' + (sh.fee != null && sh.fee !== '' ? sh.fee : '') + '"/></div>' +
+        '</div>' +
+        '<div id="soCourierBox" style="display:none;margin-top:8px;border-top:1px dashed var(--line);padding-top:8px">' +
+          '<label class="lbl">Courier company</label>' +
+          '<input id="soCourier" class="fld" placeholder="Knutsford Express, ZipMail, TARA Courier…" value="' + esc(sh.courier || '') + '"/>' +
+          '<label class="lbl" style="margin-top:6px">Tracking number <span style="font-weight:400;text-transform:none;letter-spacing:0">— auto-generated</span></label>' +
+          '<div style="display:flex;gap:6px">' +
+            '<input id="soTracking" class="fld" readonly style="font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:700" value="' + esc(sh.tracking || '') + '"/>' +
+            '<button type="button" class="btn ghost" id="soTrackGen" title="Generate a new tracking number" style="flex-shrink:0;padding:0 12px">↻</button>' +
+          '</div>' +
+          '<button type="button" class="btn" id="soLabelBtn" style="margin-top:8px;font-size:12px">🏷 Preview shipping label</button>' +
+        '</div>' +
+        '<label class="lbl" style="margin-top:8px">Notify customer by <span style="color:var(--red)">*</span></label>' +
+        '<div style="display:flex;gap:16px;font-size:12.5px;padding:3px 0 1px">' +
+          ['email,📧 Email','sms,💬 SMS','whatsapp,🟢 WhatsApp'].map(function(pp){ var a = pp.split(','); return '<label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" class="soNotify" value="' + a[0] + '"' + ((sh.notify || []).indexOf(a[0]) !== -1 ? ' checked' : '') + '/> ' + a[1] + '</label>'; }).join('') +
         '</div>' +
       '</div>' +
       '<label class="lbl" style="margin-top:10px">Special instructions</label>' +
@@ -5497,13 +5546,51 @@ function posSaveCartAsOrder(after){
         '<button type="button" class="btn ok" id="soSave">Save order</button>' +
       '</div>' +
     '</div>', 520);
-  document.getElementById('soFul').addEventListener('change', function(){
+  var soFul = document.getElementById('soFul');
+  var soMethodSel = document.getElementById('soMethodSel');
+  var soCourierBox = document.getElementById('soCourierBox');
+  var soTracking = document.getElementById('soTracking');
+  var gg = function(id){ var el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  function soCollectShip(){
+    return {
+      name: gg('soName'), phone: gg('soPhone'),
+      line1: gg('soL1'), line2: gg('soL2'), city: gg('soCity'), parish: gg('soParish'),
+      method: soMethodSel.value, courier: gg('soCourier'), tracking: soTracking.value,
+      instructions: gg('soInstr'),
+    };
+  }
+  function soSyncMethod(){
+    var isCourier = soMethodSel.value === 'Courier';
+    soCourierBox.style.display = isCourier ? 'block' : 'none';
+    if (isCourier && !soTracking.value) soTracking.value = posGenTracking();
+  }
+  soFul.addEventListener('change', function(){
     document.getElementById('soShip').style.display = this.value === 'pickup' ? 'none' : 'block';
+  });
+  soMethodSel.addEventListener('change', soSyncMethod);
+  soSyncMethod();
+  document.getElementById('soTrackGen').addEventListener('click', function(){ soTracking.value = posGenTracking(); });
+  document.getElementById('soLabelBtn').addEventListener('click', function(){
+    var sc = soCollectShip();
+    if (!sc.name || !sc.line1) return posToast('Fill in the recipient and address first.', true);
+    posDocLabel(posOrderLabelData(sc, 'DRAFT'));
   });
   document.getElementById('soCancel').addEventListener('click', posCloseModal);
   document.getElementById('soSave').addEventListener('click', async function(){
-    var f = document.getElementById('soFul').value;
-    var g = function(id){ var el = document.getElementById(id); return el ? el.value.trim() : ''; };
+    var f = soFul.value;
+    var g = gg;
+    var notify = [];
+    if (f !== 'pickup') {
+      var miss = [];
+      if (!g('soName'))   miss.push('recipient');
+      if (!g('soPhone'))  miss.push('phone');
+      if (!g('soL1'))     miss.push('address line 1');
+      if (!g('soCity'))   miss.push('city / town');
+      if (!g('soParish')) miss.push('parish');
+      if (miss.length) return posToast('Delivery address needs: ' + miss.join(', ') + '.', true);
+      notify = [].map.call(document.querySelectorAll('.soNotify:checked'), function(c){ return c.value; });
+      if (!notify.length) return posToast('Choose at least one way to notify the customer — email, SMS or WhatsApp.', true);
+    }
     var body = {
       items: posCartPayload(), discount_usd: t.orderDisc,
       customer_id: POS.customer ? POS.customer.id : null,
@@ -5515,17 +5602,32 @@ function posSaveCartAsOrder(after){
       ship_instructions: g('soInstr') || null,
     };
     if (f !== 'pickup') {
-      body.ship_method = g('soMethod') || null;
+      body.ship_method = soMethodSel.value || null;
       body.ship_fee_usd = Number(document.getElementById('soFee').value) || 0;
       body.ship_name = g('soName') || null; body.ship_phone = g('soPhone') || null;
       body.ship_line1 = g('soL1') || null;  body.ship_line2 = g('soL2') || null;
       body.ship_city = g('soCity') || null; body.ship_parish = g('soParish') || null;
+      body.notify_methods = notify;
+      if (soMethodSel.value === 'Courier') {
+        body.ship_courier = g('soCourier') || null;
+        body.tracking_number = soTracking.value || posGenTracking();
+      }
     }
     this.disabled = true; this.textContent = 'Saving…';
     try {
       var resp = await api('/api/admin/pos/order', { method: 'POST', body: body });
       posCloseModal();
-      posToast('Order #' + resp.order_id + ' saved — a cashier can take payment now.');
+      posToast('Order #' + resp.order_id + ' saved — a cashier can take payment now.' +
+        (notify.length ? ' Notify: ' + notify.join(', ') + '.' : ''));
+      // Courier order -> pop the shipping label straight away (before the
+      // cart is cleared, so the piece count is still right).
+      if (body.tracking_number) {
+        posDocLabel(posOrderLabelData({
+          name: body.ship_name, phone: body.ship_phone, line1: body.ship_line1, line2: body.ship_line2,
+          city: body.ship_city, parish: body.ship_parish, method: body.ship_method,
+          courier: body.ship_courier, tracking: body.tracking_number, instructions: body.ship_instructions,
+        }, 'Order #' + resp.order_id));
+      }
       posResetTicket();
       if (after) after();
     } catch (e) {
@@ -5609,9 +5711,13 @@ async function renderCashierOrder(panel, id){
         (ship
           ? '<div style="margin-top:12px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:12.5px">' +
             '<b>' + esc((pay.fulfilment || '').toUpperCase()) + '</b>' + (pay.ship_method ? ' via ' + esc(pay.ship_method) : '') +
+            (pay.ship_courier ? ' (' + esc(pay.ship_courier) + ')' : '') +
             (pay.ship_fee_usd ? ' · fee ' + fmtMoney(pay.ship_fee_usd) : '') + '<br>' +
             esc([pay.ship_name, pay.ship_phone].filter(Boolean).join(' · ')) + '<br>' +
             esc([pay.ship_line1, pay.ship_line2, pay.ship_city, pay.ship_parish].filter(Boolean).join(', ')) +
+            (pay.tracking_number ? '<br><span style="font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:700">🏷 ' + esc(pay.tracking_number) + '</span>' : '') +
+            (pay.notify_methods && pay.notify_methods.length ? '<br><span style="color:var(--muted)">Notify: ' + esc(pay.notify_methods.join(', ')) + '</span>' : '') +
+            (pay.tracking_number ? '<br><button type="button" class="btn" id="cashLabel" style="margin-top:6px;font-size:11.5px">🏷 Print shipping label</button>' : '') +
             '</div>'
           : '') +
         (o.ship_instructions ? '<div style="margin-top:10px;background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:9px 12px;font-size:12.5px"><b>Instructions:</b> ' + esc(o.ship_instructions) + '</div>' : '') +
@@ -5630,6 +5736,14 @@ async function renderCashierOrder(panel, id){
       '</div>' +
     '</div>';
   document.getElementById('cashBack').addEventListener('click', function(){ CASHIER_VIEW_ID = null; renderCashier(panel); });
+  var cashLabel = document.getElementById('cashLabel');
+  if (cashLabel) cashLabel.addEventListener('click', function(){
+    posDocLabel(posOrderLabelData({
+      name: pay.ship_name, phone: pay.ship_phone, line1: pay.ship_line1, line2: pay.ship_line2,
+      city: pay.ship_city, parish: pay.ship_parish, method: pay.ship_method, courier: pay.ship_courier,
+      tracking: pay.tracking_number, instructions: o.ship_instructions,
+    }, 'Order #' + o.id, items.map(function(it){ return { qty: it.qty }; })));
+  });
   var mSel = document.getElementById('cashMethod');
   mSel.addEventListener('change', function(){
     document.getElementById('cashCashRow').style.display = this.value === 'cash' ? 'block' : 'none';

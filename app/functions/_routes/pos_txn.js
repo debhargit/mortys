@@ -184,9 +184,9 @@ export default function mount(app) {
          subtotal_cents, tax_cents, tax_exempt, discount_cents, total_cents, amount_tendered_cents, change_due_cents,
          payment_method, reference, notes, loyalty_points_redeemed, loyalty_discount_cents, loyalty_points_earned,
          sales_rep_id, sales_rep_name, fulfilment, ship_method, ship_fee_cents, ship_name, ship_phone,
-         ship_line1, ship_line2, ship_city, ship_parish, ship_instructions,
+         ship_line1, ship_line2, ship_city, ship_parish, ship_instructions, tracking_number,
          payment_status, amount_paid_cents, balance_due_cents, due_date, po_number, quote_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       binds: [
         saleId, receipt, invoiceNumber, b.cashier_id || me.id, b.customer_id || null,
         b.customer_name || null, b.customer_phone || null, b.vehicle_info || null,
@@ -198,6 +198,7 @@ export default function mount(app) {
         fulfilment, ship(b.ship_method && String(b.ship_method).slice(0, 120)), cts(shipFee),
         ship(b.ship_name), ship(b.ship_phone), ship(b.ship_line1), ship(b.ship_line2),
         ship(b.ship_city), ship(b.ship_parish), ship(b.ship_instructions),
+        ship(b.tracking_number && String(b.tracking_number).slice(0, 80)),
         paymentStatus, cts(amountPaid), cts(balanceDue), dueDate,
         b.po_number ? String(b.po_number).slice(0, 60) : null,
         Number.isInteger(b.quote_id) ? b.quote_id : null,
