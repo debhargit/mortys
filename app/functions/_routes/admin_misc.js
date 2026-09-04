@@ -509,7 +509,7 @@ export default function mount(app) {
     const s = await getShopSettings(c.env);
     return c.json({
       work_order: w, labor, parts, payments, tax_label: TAX_LABEL, tax_rate: TAX_RATE,
-      shop: { name: s.company_name, address: s.address + (s.country ? ', ' + s.country : ''), phone: s.phone, website: s.website || 'https://mortysautoparts.com' },
+      shop: { name: s.company_name, address: s.address + (s.country ? ', ' + s.country : ''), phone: s.phone, website: s.website || 'https://mortsautoparts.com' },
     });
   });
 

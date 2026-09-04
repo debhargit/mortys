@@ -3,7 +3,7 @@
 // to Pages via context.next() — otherwise the static front-end in public/
 // (index.html, admin.html, images, …) would 404.
 //
-// Deployed to mortysautoparts.com 2026-08-31 (phases 1-8).
+// Deployed to mortsautoparts.com 2026-08-31 (phases 1-8).
 
 import { Hono } from 'hono';
 import { d1 } from './_lib/db.js';

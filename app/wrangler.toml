@@ -16,9 +16,9 @@ database_id = "bf998f24-7329-467f-959e-898589aa5c17"
 # Where new-order alerts go, and the From line for outbound email. Override
 # any of these without touching code.
 [vars]
-ORDER_NOTIFY_TO = "admin@mortysautoparts.com"
+ORDER_NOTIFY_TO = "admin@mortsautoparts.com"
 ORDER_NOTIFY_SMS = "876-905-4111"
-EMAIL_FROM = "Morty's Auto Parts <noreply@mortysautoparts.com>"
+EMAIL_FROM = "Morty's Auto Parts <noreply@mortsautoparts.com>"
 # The hosted site is HTTPS-only, so the session cookie must carry Secure.
 # (_lib/session.js reads this; unset = no Secure flag.)
 COOKIE_SECURE = "true"
@@ -45,7 +45,7 @@ COOKIE_SECURE = "true"
 # it just logs instead of delivering.
 #
 # To turn it on:
-#   1. npx wrangler email sending enable mortysautoparts.com
+#   1. npx wrangler email sending enable mortsautoparts.com
 #      (currently returns "Unauthorized [code: 2036]" -- Email Sending needs a
 #       one-time opt-in in the dashboard, and the API token needs its scope)
 #   2. uncomment the two lines below and redeploy

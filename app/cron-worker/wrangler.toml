@@ -15,4 +15,4 @@ compatibility_date = "2026-07-01"
 crons = ["*/15 * * * *", "0 13 * * *"]
 
 [vars]
-PAGES_ORIGIN = "https://mortysautoparts.com"
+PAGES_ORIGIN = "https://mortsautoparts.com"

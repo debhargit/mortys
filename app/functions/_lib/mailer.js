@@ -8,7 +8,7 @@
 //   const t = templates.welcomeEmail({ name, email });
 //   await sendEmail(env, { to: email, ...t });
 
-const DEFAULT_FROM = 'Morty\'s Auto Parts <noreply@mortysautoparts.com>';
+const DEFAULT_FROM = 'Morty\'s Auto Parts <noreply@mortsautoparts.com>';
 
 function parseAddr(s) {
   const m = String(s || '').match(/<([^>]+)>/);
@@ -34,7 +34,7 @@ function buildMime({ from, to, subject, text, html }) {
     `From: ${from}`,
     `To: ${to}`,
     `Subject: ${encodeHeader(subject || '')}`,
-    `Message-ID: <${Date.now()}.${Math.random().toString(36).slice(2)}@mortysautoparts.com>`,
+    `Message-ID: <${Date.now()}.${Math.random().toString(36).slice(2)}@mortsautoparts.com>`,
     `Date: ${new Date().toUTCString()}`,
     'MIME-Version: 1.0',
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
@@ -104,7 +104,7 @@ function shell(title, bodyHtml) {
         </td></tr>
         <tr><td style="padding:16px 24px;background:#0b1b2b;color:#94a3b8;font-size:12px;line-height:1.5">
           51 Red Hills Road, Kingston &middot; +1 876-905-4111<br/>
-          <a href="https://mortysautoparts.com" style="color:#ffb703;text-decoration:none">mortysautoparts.com</a>
+          <a href="https://mortsautoparts.com" style="color:#ffb703;text-decoration:none">mortsautoparts.com</a>
         </td></tr>
       </table>
     </td></tr>
@@ -120,7 +120,7 @@ function welcomeEmail({ name } = {}) {
       <h2 style="margin:0 0 8px;font-size:20px">${escapeHtml(greeting)}</h2>
       <p>Thanks for creating an account at Morty's Auto Parts.</p>
       <p>We stock new and used parts for <b>Honda</b>, <b>Toyota</b>, <b>Nissan</b>, <b>Lexus</b> and American vehicles, plus a full service &amp; repair center - including <b>wheel alignment &amp; balancing</b>.</p>
-      <p><a href="https://mortysautoparts.com" style="display:inline-block;background:#d62828;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700">Browse inventory</a></p>
+      <p><a href="https://mortsautoparts.com" style="display:inline-block;background:#d62828;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700">Browse inventory</a></p>
       <p style="color:#6b7280;font-size:13px">Questions? Just reply - we read every email.</p>
     `),
   };
@@ -149,12 +149,12 @@ function backInStockEmail({ product_name, price_usd } = {}) {
   const priceText = price_usd ? `$${Number(price_usd).toFixed(2)} USD` : '';
   return {
     subject: `${product_name} is back in stock at Morty's Auto Parts`,
-    text: `Good news - the ${product_name} you asked us to watch is back in stock${priceText ? ' (' + priceText + ')' : ''}.\n\nGrab it before it sells out again at mortysautoparts.com or call +1 876-905-4111.`,
+    text: `Good news - the ${product_name} you asked us to watch is back in stock${priceText ? ' (' + priceText + ')' : ''}.\n\nGrab it before it sells out again at mortsautoparts.com or call +1 876-905-4111.`,
     html: shell('Back in stock', `
       <h2 style="margin:0 0 8px;font-size:20px">It's back!</h2>
       <p>The <b>${escapeHtml(product_name)}</b> you asked us to watch is back in stock.</p>
       ${priceText ? `<p style="font-size:18px;color:#0b1b2b"><b>${priceText}</b></p>` : ''}
-      <p><a href="https://mortysautoparts.com#parts" style="display:inline-block;background:#d62828;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700">Shop now</a></p>
+      <p><a href="https://mortsautoparts.com#parts" style="display:inline-block;background:#d62828;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700">Shop now</a></p>
       <p style="color:#6b7280;font-size:13px">Or call <b>+1 876-905-4111</b> to reserve it.</p>
     `),
   };

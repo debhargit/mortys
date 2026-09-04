@@ -2859,10 +2859,10 @@ async function renderPOS(panel){
   var termInfo = (function(){
     var host = (location.hostname || '').toLowerCase();
     var isCloud = (machine && (machine.cloud === true || machine.mode === 'internet')) ||
-      host === 'mortysautoparts.com' || host === 'www.mortysautoparts.com' || /\.pages\.dev$/.test(host);
+      host === 'mortsautoparts.com' || host === 'www.mortsautoparts.com' || /\.pages\.dev$/.test(host);
     var isLanHost = host === 'localhost' || host === '127.0.0.1' || /\.local$/.test(host) ||
       /^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host);
-    var name = (machine && machine.name) || (isCloud ? (host || 'mortysautoparts.com') : (host || 'This terminal'));
+    var name = (machine && machine.name) || (isCloud ? (host || 'mortsautoparts.com') : (host || 'This terminal'));
     if (isCloud) return { name: name, dot: '#38bdf8', label: 'Internet' };
     if (machine && machine.local_db && machine.local_db.reachable) return { name: name, dot: '#4ade80', label: 'Local · server' };
     if (isLanHost) return { name: name, dot: '#fbbf24', label: 'Local' };
@@ -2956,21 +2956,21 @@ async function renderPOS(panel){
         ? '<button type="button" id="posShiftBtn" class="posBarBtn" style="background:rgba(22,163,74,.35)" title="Shift #' + shiftSession.id + ' open since ' + fmtDate(shiftSession.opened_at) + (shiftSession.opener_name ? ' by ' + esc(shiftSession.opener_name) : '') + '. Float ' + fmtMoney(shiftSession.opening_float) + '. Click to close.">🗄 Shift open · float ' + fmtMoney(shiftSession.opening_float) + '</button>'
         : '<button type="button" id="posShiftBtn" class="posBarBtn" style="background:rgba(220,38,38,.45)" title="No cash drawer shift is open. Click to open one with a starting float.">🗄 No shift open</button>') +
       // Terminal name + how this till is reaching the app: on the shop LAN
-      // ("Local"), or over the internet to mortysautoparts.com ("Internet").
+      // ("Local"), or over the internet to mortsautoparts.com ("Internet").
       // Detected from the machine endpoint (cloud stub sets cloud:true) with a
       // hostname fallback so it's right even if that call fails.
       (function(){
         if (!machine) return '';
         var host = (location.hostname || '').toLowerCase();
         var isCloud = machine.cloud === true || machine.mode === 'internet' ||
-          host === 'mortysautoparts.com' || host === 'www.mortysautoparts.com' || /\.pages\.dev$/.test(host);
+          host === 'mortsautoparts.com' || host === 'www.mortsautoparts.com' || /\.pages\.dev$/.test(host);
         var isLanHost = host === 'localhost' || host === '127.0.0.1' || /\.local$/.test(host) ||
           /^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host);
-        var name = esc(machine.name || (isCloud ? (host || 'mortysautoparts.com') : (host || 'This terminal')));
+        var name = esc(machine.name || (isCloud ? (host || 'mortsautoparts.com') : (host || 'This terminal')));
         var dot, label, tip, icon;
         if (isCloud) {
           icon = '🌐'; dot = '#38bdf8'; label = 'Internet';
-          tip = 'This terminal is connected over the internet to ' + (host || 'mortysautoparts.com') + '.';
+          tip = 'This terminal is connected over the internet to ' + (host || 'mortsautoparts.com') + '.';
         } else if (machine.local_db && machine.local_db.reachable) {
           icon = '🖥'; dot = '#4ade80'; label = 'Local · server';
           tip = 'This machine holds the shop database, on the local network.';
@@ -11822,7 +11822,7 @@ async function renderBackupPanel(box){
     // run — the database is Cloudflare D1, which has its own built-in backup.
     var host = (location.hostname || '').toLowerCase();
     var cloud = e.status === 501 || /not ported|D1|Cloudflare/i.test(e.message || '')
-      || host === 'mortysautoparts.com' || /\.pages\.dev$/.test(host);
+      || host === 'mortsautoparts.com' || /\.pages\.dev$/.test(host);
     if (cloud) {
       box.innerHTML = HD +
         '<div style="padding:16px 18px;font-size:13px;line-height:1.6">' +
@@ -11867,7 +11867,7 @@ async function renderBackupPanel(box){
       '<label style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;margin-bottom:10px">' +
         '<input type="checkbox" id="bkEnabled"' + (c.enabled ? ' checked' : '') + '/> Back this database up to our online server</label>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:640px">' +
-        '<div style="grid-column:1/-1"><label class="lbl">Online server URL</label><input id="bkUrl" style="' + fld + ';width:100%" value="' + esc(c.url || '') + '" placeholder="https://app.mortysautoparts.com"/></div>' +
+        '<div style="grid-column:1/-1"><label class="lbl">Online server URL</label><input id="bkUrl" style="' + fld + ';width:100%" value="' + esc(c.url || '') + '" placeholder="https://app.mortsautoparts.com"/></div>' +
         '<div style="grid-column:1/-1"><label class="lbl">Backup key <small style="color:var(--muted)">— from that server’s own Settings → Off-site backup</small></label>' +
           '<input id="bkKey" type="password" style="' + fld + ';width:100%" placeholder="' + (c.key_set ? '•••••••• (leave blank to keep)' : 'paste the key') + '"/></div>' +
         '<div><label class="lbl">Back up every</label><select id="bkEvery" style="' + fld + '">' +
