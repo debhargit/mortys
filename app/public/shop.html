@@ -1300,7 +1300,12 @@ document.addEventListener('DOMContentLoaded', function(){
       +       '<input id="guestPhone" type="tel" placeholder="Phone" autocomplete="tel" style="width:100%;padding:9px 11px;border:1px solid #d1d5db;border-radius:7px;font-size:13.5px;font-family:inherit;box-sizing:border-box"/>'
       +       '<div id="guestErr" style="display:none;color:#b91c1c;font-size:12px;margin-top:6px"></div>'
       +     '</div>'
-      +     '<label id="payStripeOpt" style="display:none;align-items:center;gap:6px;font-size:12.5px;margin-bottom:8px;color:#374151"><input type="checkbox" id="payStripeChk"/> Pay with card (Stripe)</label>'
+      +     '<div id="payMethods" class="pay-methods" style="display:none">'
+      +       '<div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700;margin-bottom:6px">Payment</div>'
+      +       '<label class="active"><span class="row"><input type="radio" name="payMethod" value="cash_pickup" checked/> 💵 Cash on pickup</span><small>Pay at the counter when you collect.</small></label>'
+      +       '<label><span class="row"><input type="radio" name="payMethod" value="bank_transfer"/> 🏦 Bank transfer</span><small>Account details come with your confirmation.</small></label>'
+      +       '<label id="payCardOpt" style="display:none"><span class="row"><input type="radio" name="payMethod" value="stripe"/> 💳 Card online</span><small>Pay now by card.</small></label>'
+      +     '</div>'
       +     '<button id="cartCheckout" type="button" style="width:100%;background:var(--red);color:#fff;border:0;border-radius:8px;padding:12px;font-weight:800;cursor:pointer;font-family:inherit;font-size:14.5px"><span id="checkoutLabel">Checkout</span></button>'
       +   '</div>'
       + '</aside>'
@@ -1595,10 +1600,12 @@ document.addEventListener('DOMContentLoaded', function(){
       if (quote) el.style.display = 'none';
       else if (id === 'couponInput' || id === 'couponApply') el.style.display = '';
     });
-    // Card payment is meaningless before there's a price. Only restore it if
-    // the backend actually reported Stripe as enabled.
-    var stripeOpt = document.getElementById('payStripeOpt');
-    if (stripeOpt) stripeOpt.style.display = (!quote && window._foxdStripeEnabled) ? '' : 'none';
+    // Payment options only make sense once the cart is payable (not a
+    // save-order). The card radio shows only if the backend reported Stripe.
+    var payMethods = document.getElementById('payMethods');
+    if (payMethods) payMethods.style.display = quote ? 'none' : '';
+    var cardOpt = document.getElementById('payCardOpt');
+    if (cardOpt) cardOpt.style.display = (!quote && window._foxdStripeEnabled) ? '' : 'none';
     var gHint = document.getElementById('guestHint');
     if (gHint) gHint.textContent = quote ? 'Where should we send your quote?' : 'Where should we send your confirmation?';
   }
