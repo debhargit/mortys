@@ -2985,7 +2985,7 @@ document.addEventListener('DOMContentLoaded', function(){
     var slider = document.getElementById('ptSlider');
     var redeemPts = slider && !slider.disabled ? parseInt(slider.value, 10) || 0 : 0;
     var couponCode = window._foxdAppliedCoupon ? window._foxdAppliedCoupon.code : null;
-    var orderId = null, checkoutUrl = null, lastResult = null;
+    var orderId = null, checkoutUrl = null, lastResult = null, printEmail = '';
     var errEl = document.getElementById('guestErr');
     if (errEl){ errEl.style.display = 'none'; errEl.textContent = ''; }
 
@@ -3131,6 +3131,7 @@ document.addEventListener('DOMContentLoaded', function(){
           }, shipPayload()));
           lastResult = gr;
           orderId = gr && gr.order_id;
+          printEmail = gEmail;
           try { localStorage.setItem('mh_guest', JSON.stringify({ name:gName, email:gEmail, phone:gPhone })); } catch(e){}
         } catch(e){
           if (errEl){ errEl.textContent = e.message || 'Could not place the order — please try WhatsApp.'; errEl.style.display = 'block'; }
@@ -3174,6 +3175,12 @@ document.addEventListener('DOMContentLoaded', function(){
     msg += "\nTotal: " + fmt(total + shipFeeW) + "\n\nThank you!";
     window.open('https://wa.me/18769054111?text=' + encodeURIComponent(msg), '_blank', 'noopener');
     if (orderId){
+      // Pop the receipt (+ shipping label for a courier order) and fire the
+      // print dialog. A blocked popup is harmless — the WhatsApp tab already
+      // opened above and the cart still clears below.
+      try {
+        window.open('/order-print.html?order=' + encodeURIComponent(orderId) + (printEmail ? '&email=' + encodeURIComponent(printEmail) : ''), '_blank', 'noopener');
+      } catch(e){}
       cart = {};
       // The order owns these now — clear them so the next order starts fresh.
       orderPhotos.forEach(function(p){ try { URL.revokeObjectURL(p.url); } catch(e){} });
