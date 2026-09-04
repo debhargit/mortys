@@ -20,6 +20,9 @@ import { sendEmail, templates } from '../_lib/mailer.js';
 import { getShopSettings } from '../_lib/shop.js';
 import { verifyQuote } from '../_lib/carriers/index.js';
 import { bookShipment } from './shipping.js';
+import { fygaroEnabled, buildCheckoutUrl } from '../_lib/fygaro.js';
+
+const SITE_BASE = 'https://mortsautoparts.com';
 
 const POINTS_USD_RATE = 0.05;
 const r2 = (n) => Math.round(n * 100) / 100;
@@ -212,8 +215,13 @@ export default function mount(app) {
     if (!showPrices) {
       try { const u = await currentUser(c.req.raw, c.env); showPrices = !!(u && (u.is_admin || u.is_staff || u.show_prices)); } catch { /* guest */ }
     }
+    const fygaro = ordering && fygaroEnabled(c.env, s);
     return c.json({
-      payments: { stripe_enabled: false, stripe_publishable_key: null, methods: ordering ? ['cash_pickup', 'bank_transfer'] : [] },
+      payments: {
+        stripe_enabled: false, stripe_publishable_key: null,
+        fygaro_enabled: !!fygaro,
+        methods: ordering ? ['cash_pickup', 'bank_transfer', ...(fygaro ? ['fygaro'] : [])] : [],
+      },
       ordering_enabled: ordering,
       show_prices: showPrices,
       shipping: {
@@ -255,8 +263,9 @@ export default function mount(app) {
     const uid = c.get('user').id;
     const b = await c.req.json().catch(() => ({}));
     const method = b.payment_method || 'cash_pickup';
-    if (!['cash_pickup', 'bank_transfer', 'stripe', 'invoice_email'].includes(method)) return c.json({ error: 'Invalid payment_method' }, 400);
+    if (!['cash_pickup', 'bank_transfer', 'stripe', 'fygaro', 'invoice_email'].includes(method)) return c.json({ error: 'Invalid payment_method' }, 400);
     if (method === 'stripe') return c.json({ error: 'Online card payment is not available' }, 400);
+    if (method === 'fygaro' && !fygaroEnabled(c.env, settings)) return c.json({ error: 'Card payment is not available right now.' }, 400);
 
     const ship = parseShip(b, await verifyQuote(c.env, b.ship_quote_token));
     const shipErr = shipError(ship);
@@ -335,9 +344,13 @@ export default function mount(app) {
       shipResult = await bookShipment(c.env, orderId).catch(() => null);
     }
 
+    const checkoutUrl = method === 'fygaro'
+      ? await buildCheckoutUrl({ env: c.env, settings, orderId, amount: grandTotal, redirectUrl: `${SITE_BASE}/order-success.html?order=${orderId}` })
+      : null;
+
     return c.json({
       order_id: orderId, subtotal_usd: subtotal, total_usd: grandTotal, ship_fee_usd: ship.fee, fulfilment: ship.fulfilment,
-      status: 'pending', payment_method: method, checkout_url: null,
+      status: 'pending', payment_method: method, checkout_url: checkoutUrl,
       tracking_number: shipResult && shipResult.tracking_number || null,
       ship_status: shipResult ? shipResult.ship_status : null,
       points_redeemed: redeemPts, points_discount_usd: pointsDiscount, points_earned: earnedPoints,
@@ -366,8 +379,9 @@ export default function mount(app) {
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return c.json({ error: 'That email address looks wrong' }, 400);
 
     const method = b.payment_method || 'cash_pickup';
-    if (!['cash_pickup', 'bank_transfer', 'invoice_email'].includes(method)) return c.json({ error: 'Invalid payment_method' }, 400);
+    if (!['cash_pickup', 'bank_transfer', 'fygaro', 'invoice_email'].includes(method)) return c.json({ error: 'Invalid payment_method' }, 400);
     if (method === 'invoice_email' && !email) return c.json({ error: 'An email address is required to receive an invoice.' }, 400);
+    if (method === 'fygaro' && !fygaroEnabled(c.env, settings)) return c.json({ error: 'Card payment is not available right now.' }, 400);
 
     const ship = parseShip(b, await verifyQuote(c.env, b.ship_quote_token));
     const shipErr = shipError(ship);
@@ -433,9 +447,13 @@ export default function mount(app) {
       shipResult = await bookShipment(c.env, orderId).catch(() => null);
     }
 
+    const checkoutUrl = method === 'fygaro'
+      ? await buildCheckoutUrl({ env: c.env, settings, orderId, amount: grandTotal, redirectUrl: `${SITE_BASE}/order-success.html?order=${orderId}` })
+      : null;
+
     return c.json({
       order_id: orderId, subtotal_usd: subtotal, total_usd: grandTotal, ship_fee_usd: ship.fee, fulfilment: ship.fulfilment,
-      status: 'pending', payment_method: method, checkout_url: null,
+      status: 'pending', payment_method: method, checkout_url: checkoutUrl,
       tracking_number: shipResult && shipResult.tracking_number || null,
       ship_status: shipResult ? shipResult.ship_status : null,
       coupon_code: couponCode, coupon_discount_usd: couponDiscount,

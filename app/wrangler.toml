@@ -67,6 +67,15 @@ COOKIE_SECURE = "true"
 # local tracking string. Carrier labels are stored base64 on the order row
 # (orders.label_data) until the R2 UPLOADS bucket below is enabled.
 
+# Fygaro hosted card checkout (functions/_lib/fygaro.js). The Payment Button
+# UUID, display currency and on/off live in shop_settings (Admin -> Settings).
+# The JWT signing secret is a wrangler secret:
+#   npx wrangler pages secret put FYGARO_JWT_SECRET --project-name mortysautoparts
+# In the Fygaro dashboard, set the button's webhook URL to
+#   https://<site>/api/webhooks/fygaro
+# and its return URL to https://<site>/order-success.html (the checkout also
+# passes redirect_url in the JWT). Optional: FYGARO_BASE to override the host.
+
 # Binary uploads (Phase 7). functions/_lib/uploads.js reads/writes this bucket;
 # functions/_routes/media.js serves GET /uploads/*. While the binding is
 # absent, upload endpoints return a clean 501 and nothing else is affected.

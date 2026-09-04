@@ -28,6 +28,8 @@ const FALLBACK = {
   carrier_manual_enabled: 1,
   ship_default_weight_kg: 2.0,
   ship_local_flat_usd: 0,
+  // Fygaro hosted card checkout (migration 0038)
+  fygaro_enabled: 0, fygaro_button_id: null, fygaro_currency: 'JMD',
 };
 
 export async function getShopSettings(env) {
@@ -38,7 +40,7 @@ export async function getShopSettings(env) {
       row.storefront_prices = !!row.storefront_prices;
       row.pos_enforce_login = !!row.pos_enforce_login;
       row.pos_enforce_customer = !!row.pos_enforce_customer;
-      for (const k of ['carrier_dhl_enabled', 'carrier_fedex_enabled', 'carrier_knutsford_enabled', 'carrier_manual_enabled']) {
+      for (const k of ['carrier_dhl_enabled', 'carrier_fedex_enabled', 'carrier_knutsford_enabled', 'carrier_manual_enabled', 'fygaro_enabled']) {
         if (k in row) row[k] = !!row[k];
       }
       return row;

@@ -1308,7 +1308,7 @@ document.addEventListener('DOMContentLoaded', function(){
       +       '<div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700;margin-bottom:6px">Payment</div>'
       +       '<label class="active"><span class="row"><input type="radio" name="payMethod" value="cash_pickup" checked/> 💵 Cash on pickup</span><small>Pay at the counter when you collect.</small></label>'
       +       '<label><span class="row"><input type="radio" name="payMethod" value="bank_transfer"/> 🏦 Bank transfer</span><small>Account details come with your confirmation.</small></label>'
-      +       '<label id="payCardOpt" style="display:none"><span class="row"><input type="radio" name="payMethod" value="stripe"/> 💳 Card online</span><small>Pay now by card.</small></label>'
+      +       '<label id="payCardOpt" style="display:none"><span class="row"><input type="radio" name="payMethod" value="fygaro"/> 💳 Credit / debit card</span><small>Pay now on Fygaro\'s secure card page.</small></label>'
       +       '<label><span class="row"><input type="radio" name="payMethod" value="invoice_email"/> 📧 Email me an invoice</span><small>We\'ll email a payable invoice — settle by transfer or at the counter.</small></label>'
       +     '</div>'
       +     '<button id="cartCheckout" type="button" style="width:100%;background:var(--red);color:#fff;border:0;border-radius:8px;padding:12px;font-weight:800;cursor:pointer;font-family:inherit;font-size:14.5px"><span id="checkoutLabel">Checkout</span></button>'
@@ -1645,7 +1645,7 @@ document.addEventListener('DOMContentLoaded', function(){
     var payMethods = document.getElementById('payMethods');
     if (payMethods) payMethods.style.display = quote ? 'none' : '';
     var cardOpt = document.getElementById('payCardOpt');
-    if (cardOpt) cardOpt.style.display = (!quote && window._foxdStripeEnabled) ? '' : 'none';
+    if (cardOpt) cardOpt.style.display = (!quote && window._foxdFygaroEnabled) ? '' : 'none';
     var shipBox = document.getElementById('shipBox');
     if (shipBox) shipBox.style.display = quote ? 'none' : '';
     var gHint = document.getElementById('guestHint');
@@ -3189,6 +3189,7 @@ document.addEventListener('DOMContentLoaded', function(){
           }, shipPayload()));
           lastResult = gr;
           orderId = gr && gr.order_id;
+          checkoutUrl = gr && gr.checkout_url;
           printEmail = gEmail;
           try { localStorage.setItem('mh_guest', JSON.stringify({ name:gName, email:gEmail, phone:gPhone })); } catch(e){}
         } catch(e){
@@ -3198,7 +3199,8 @@ document.addEventListener('DOMContentLoaded', function(){
       }
     }
     if (checkoutUrl){
-      // Stripe: hand off to hosted checkout. Server has already cleared the DB cart.
+      // Card payment: hand off to the processor's hosted page. The order is
+      // already recorded (pending/unpaid); its webhook marks it paid.
       window.location.href = checkoutUrl;
       return;
     }
@@ -3292,7 +3294,7 @@ document.addEventListener('DOMContentLoaded', function(){
       // say over the button -- updateCheckoutLabel() owns it in that case.
       if (cartIsQuote()){ btn.classList.remove('stripe'); updateCheckoutLabel(); return; }
       btn.classList.remove('stripe');
-      if (method === 'stripe'){ btn.classList.add('stripe'); lbl.textContent = 'Pay with card →'; }
+      if (method === 'fygaro'){ btn.classList.add('stripe'); lbl.textContent = 'Pay by card →'; }
       else if (method === 'invoice_email'){ lbl.textContent = 'Email my invoice'; }
       else { lbl.textContent = 'Checkout via WhatsApp'; }
     }
@@ -3307,6 +3309,7 @@ document.addEventListener('DOMContentLoaded', function(){
       .then(function(res){ return res.ok ? res.json() : null; })
       .then(function(r){
         if (r && r.payments && r.payments.stripe_enabled) window._foxdStripeEnabled = true;
+        if (r && r.payments && r.payments.fygaro_enabled) window._foxdFygaroEnabled = true;
         if (r && r.shipping) window._foxdShipping = r.shipping;
         _shipRenderedFor = null;   // force renderShip() to pick up the carrier/parish list
         updateCheckoutLabel();

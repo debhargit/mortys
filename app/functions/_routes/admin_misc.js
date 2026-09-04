@@ -60,9 +60,11 @@ export default function mount(app) {
       'ship_origin_city', 'ship_origin_parish', 'ship_origin_country',
       'carrier_dhl_enabled', 'carrier_dhl_account', 'carrier_fedex_enabled', 'carrier_fedex_account',
       'carrier_knutsford_enabled', 'carrier_manual_enabled',
-      'ship_default_weight_kg', 'ship_local_flat_usd'];
+      'ship_default_weight_kg', 'ship_local_flat_usd',
+      'fygaro_enabled', 'fygaro_button_id', 'fygaro_currency'];
     const BITS = ['print_logo_on_invoice', 'storefront_prices', 'pos_enforce_login', 'pos_enforce_customer',
-      'carrier_dhl_enabled', 'carrier_fedex_enabled', 'carrier_knutsford_enabled', 'carrier_manual_enabled'];
+      'carrier_dhl_enabled', 'carrier_fedex_enabled', 'carrier_knutsford_enabled', 'carrier_manual_enabled',
+      'fygaro_enabled'];
     const sets = []; const vals = [];
     for (const f of fields) if (b[f] !== undefined) { sets.push(`${f} = ?`); vals.push(BITS.includes(f) ? (b[f] ? 1 : 0) : b[f]); }
     if (!sets.length) return c.json({ error: 'Nothing to update' }, 400);

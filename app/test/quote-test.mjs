@@ -21,13 +21,13 @@ function makeDB(db) {
       run() { const r = db.prepare(this._sql).run(...this._b); return { success: true, meta: { last_row_id: Number(r.lastInsertRowid), changes: r.changes } }; } }; },
     async batch(s) { const o = []; for (const x of s) o.push(x.run()); return o; } };
 }
-const ENV = { DB: makeDB(sdb), ORDER_NOTIFY_TO: '', SESSION_SECRET: 'test-secret-quote' };
+const ENV = { DB: makeDB(sdb), ORDER_NOTIFY_TO: '', SESSION_SECRET: 'test-secret-quote', FYGARO_JWT_SECRET: 'test-fygaro-secret' };
 const { sessionCookie } = await import(APP + 'functions/_lib/session.js');
 async function cookieFor(userId) { return (await sessionCookie(ENV, { userId, epoch: 0 })).split(';')[0]; }
 const routes = [];
 const app = {};
 for (const v of ['get', 'post', 'patch', 'delete', 'put']) app[v] = (p, ...r) => routes.push({ v, p, mws: r.slice(0, -1), h: r[r.length - 1] });
-for (const mod of ['auth', 'storefront', 'customer', 'shipping', 'admin_crm', 'admin_users']) {
+for (const mod of ['auth', 'storefront', 'customer', 'shipping', 'payments', 'admin_crm', 'admin_users']) {
   (await import(APP + 'functions/_routes/' + mod + '.js')).default(app);
 }
 console.log('mounted', routes.length);
@@ -220,6 +220,22 @@ r = await call('post', '/api/checkout/guest', { user: undefined, body: { name: '
 n++; A('/api/checkout/guest -> 400 invoice_email without an email', st === 400);
 r = await call('post', '/api/checkout/guest', { user: undefined, body: { name: 'Has Mail', email: 'hm@example.com', payment_method: 'invoice_email', items: [{ img: 'qz-1', qty: 1 }] } });
 n++; A('/api/checkout/guest -> invoice_email OK with an email', st === 200 && r.payment_method === 'invoice_email');
+sdb.prepare('DELETE FROM cart_items').run();
+
+// ---- 4e3. Fygaro hosted card checkout --------------------------------
+r = await call('post', '/api/checkout', { user: { id: 501, show_prices: 1 }, body: { payment_method: 'fygaro', items: [] } });
+n++; A('/api/checkout -> 400 fygaro while disabled', st === 400);
+sdb.prepare("UPDATE shop_settings SET fygaro_enabled = 1, fygaro_button_id = 'btn-abc-123', fygaro_currency = 'JMD' WHERE id = 1").run();
+r = await call('get', '/api/config');
+n++; A('config: payments.fygaro_enabled + method listed', r.payments.fygaro_enabled === true && r.payments.methods.includes('fygaro'));
+sdb.prepare("INSERT INTO cart_items (user_id, product_img, qty) VALUES (501,'qz-1',2)").run();
+r = await call('post', '/api/checkout', { user: { id: 501, show_prices: 1 }, body: { payment_method: 'fygaro' } });
+n++; A('/api/checkout fygaro -> order + a hosted checkout_url with a JWT', st === 200 && r.payment_method === 'fygaro' &&
+  typeof r.checkout_url === 'string' && r.checkout_url.includes('/pb/btn-abc-123/') && /[?&]jwt=/.test(r.checkout_url) &&
+  q1('SELECT payment_status FROM orders WHERE id = ?', r.order_id).payment_status === 'unpaid');
+r = await call('post', '/api/webhooks/fygaro', { user: undefined, body: { custom_reference: String(r.order_id), status: 'approved' } });
+n++; A('/api/webhooks/fygaro -> 400 without a valid signature', st === 400);
+sdb.prepare("UPDATE shop_settings SET fygaro_enabled = 0 WHERE id = 1").run();
 sdb.prepare('DELETE FROM cart_items').run();
 
 // ---- 4f. /api/orders/:id/print — guest reads their order by contact ----
