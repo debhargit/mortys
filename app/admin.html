@@ -2528,7 +2528,7 @@ function posLoadPrefs(){
   // it was parked at, not to whoever is signed in.
   var d = {
     view: 'grid', fontSize: 'md', legacyKeys: false,
-    columns: { bin: true, qty: true, price: true },
+    columns: { fit: true, bin: true, qty: true, price: true },
     theme: null,               // null = follow whatever this machine had
     favs: null,                // null = not yet migrated from the old key
     sidebarCollapsed: null,
@@ -3096,7 +3096,7 @@ async function renderPOS(panel){
             '<button type="button" id="posColumnsBtn" class="btn ghost" style="font-size:11.5px;padding:6px 10px">🧩 Columns ▾</button>' +
             '<div id="posColumnsMenu" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(0,0,0,.22);z-index:70;padding:8px 4px;min-width:150px">' +
               '<div style="padding:2px 10px 6px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">List/Compact view</div>' +
-              ['bin,Bin location', 'qty,Qty / stock', 'price,Price'].map(function(pair){
+              ['fit,Vehicle / fitment', 'bin,Bin location', 'qty,Qty / stock', 'price,Price'].map(function(pair){
                 var parts = pair.split(','), key = parts[0], label = parts[1];
                 return '<label style="display:flex;align-items:center;gap:7px;padding:6px 10px;font-size:12.5px;cursor:pointer" onmouseover="this.style.background=\'var(--hover)\'" onmouseout="this.style.background=\'\'">' +
                   '<input type="checkbox" class="posColCk" data-col="' + key + '"' + (POS_PREFS.columns[key] ? ' checked' : '') + '/> ' + label +
@@ -3608,9 +3608,10 @@ async function renderPOS(panel){
       }).join('') +
     '</div>';
   }
-  // Shared by List and Compact -- same columns (Part No / Description / Bin /
-  // Qty / Price), Compact just tightens padding+font and drops the thumbnail
-  // so more rows fit on screen at once for scanning a large catalogue fast.
+  // Shared by List and Compact -- same columns (Part No / Description /
+  // Vehicle-Fitment / Bin / Qty / Price), Compact just tightens padding+font
+  // and drops the thumbnail so more rows fit on screen for scanning a large
+  // catalogue fast. Every column past Description is toggleable (🧩 Columns).
   function posRenderRows(products, compact){
     var pad = compact ? '5px 8px' : '9px 10px';
     var thumbSize = compact ? 0 : 34;
@@ -3628,6 +3629,7 @@ async function renderPOS(panel){
         (thumbSize ? '<span style="width:' + thumbSize + 'px;flex-shrink:0"></span>' : '') +
         '<span style="width:' + posPartNoWidth(compact) + 'px;flex-shrink:0">Part No.</span>' +
         '<span style="flex:1;min-width:0">Description</span>' +
+        (cols.fit ? '<span style="width:' + (compact ? 120 : 160) + 'px;flex-shrink:0">Vehicle / Fitment</span>' : '') +
         (cols.bin ? '<span style="width:90px;flex-shrink:0">Bin</span>' : '') +
         (cols.qty ? '<span style="width:64px;flex-shrink:0;text-align:center">Qty</span>' : '') +
         (cols.price ? '<span style="width:80px;flex-shrink:0;text-align:right">Price</span>' : '') +
@@ -3646,8 +3648,9 @@ async function renderPOS(panel){
           // (above) is what keeps the other columns pinned to the top of a
           // now-variable-height row instead of vertically centering oddly.
           '<span style="flex:1;min-width:0;font-size:' + posFS(compact?12:13) + ';font-weight:600;word-break:break-word" title="' + esc(p.name) + (p.make_model ? ' — ' + esc(p.make_model) : '') + '">' +
-            esc(p.name) + (p.make_model ? ' <span style="font-weight:700;color:var(--muted)">— ' + esc(p.make_model) + '</span>' : '') +
+            esc(p.name) + (!cols.fit && p.make_model ? ' <span style="font-weight:700;color:var(--muted)">— ' + esc(p.make_model) + '</span>' : '') +
           '</span>' +
+          (cols.fit ? '<span style="width:' + (compact ? 120 : 160) + 'px;flex-shrink:0;font-size:' + posFS(compact?11:12) + ';font-weight:700;color:var(--muted);word-break:break-word;line-height:1.3" title="' + esc(p.make_model || '') + '">' + (p.make_model ? esc(p.make_model) : '—') + '</span>' : '') +
           (cols.bin ? '<span style="width:90px;flex-shrink:0;font-size:' + posFS(compact?11:12) + ';color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(bin) + '</span>' : '') +
           (cols.qty ? '<span style="width:64px;flex-shrink:0;text-align:center;font-size:' + posFS(compact?11:12) + ';font-weight:700;color:' + posStockColor(p.stock_level) + '">' + stock + '</span>' : '') +
           (cols.price ? '<span style="width:80px;flex-shrink:0;text-align:right">' + posPriceHtml(p, posFS(compact?12:13)) + '</span>' : '') +
