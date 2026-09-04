@@ -4722,6 +4722,13 @@ async function renderPOS(panel){
   fsBtn.addEventListener('click', function(){ posSetFullscreen(!posInFullscreen()); });
   // Corner ✕ to leave the terminal. Created once, lives on <body> so a POS
   // re-render never drops it; CSS shows it only while body.pos-fullscreen.
+  // Operators who can open the Dashboard land there; those who can't (a
+  // counter-only cashier) are signed out and returned to the storefront.
+  function posCanSeeDashboard(){
+    if (MY_PERMS_FULL) return true;
+    var h = (MY_ROLE && Array.isArray(MY_ROLE.hidden_tabs)) ? MY_ROLE.hidden_tabs : [];
+    return h.indexOf('dashboard') === -1;
+  }
   if (!document.getElementById('posCloseTerminal')) {
     var xBtn = document.createElement('button');
     xBtn.id = 'posCloseTerminal';
@@ -4729,7 +4736,19 @@ async function renderPOS(panel){
     xBtn.textContent = '×';
     xBtn.title = 'Close POS terminal';
     xBtn.setAttribute('aria-label', 'Close POS terminal');
-    xBtn.addEventListener('click', function(){ posSetFullscreen(false); });
+    xBtn.addEventListener('click', async function(){
+      if (posCanSeeDashboard()) {
+        posSetFullscreen(false);
+        if (POS.cartFull) { POS.cartFull = false; posSaveState(); }
+        show('dashboard');
+        return;
+      }
+      if (!confirm('Close the terminal and exit to the website?\n\nYou will be signed out.')) return;
+      posSetFullscreen(false);
+      try { await posFlushPrefs(); } catch (_) {}
+      try { await api('/api/auth/signout', { method: 'POST' }); } catch (_) {}
+      location.href = '/';
+    });
     document.body.appendChild(xBtn);
   }
   // POS.cartFull persists across reloads, but the body.pos-fullscreen class --
