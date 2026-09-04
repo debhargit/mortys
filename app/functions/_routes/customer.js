@@ -61,6 +61,67 @@ function computeCouponDiscount(coupon, subtotal) {
   return { discount: Math.min(raw, subtotal), reason: null };
 }
 
+// ---- shipping -------------------------------------------------------
+const PARISHES = [
+  'Kingston', 'St. Andrew', 'St. Catherine', 'Clarendon', 'Manchester',
+  'St. Elizabeth', 'Westmoreland', 'Hanover', 'St. James', 'Trelawny',
+  'St. Ann', 'St. Mary', 'Portland', 'St. Thomas',
+];
+const CARRIERS = ['dhl', 'fedex', 'knutsford', 'manual'];
+
+function enabledCarriers(s) {
+  const out = [];
+  if (s.carrier_dhl_enabled) out.push('dhl');
+  if (s.carrier_fedex_enabled) out.push('fedex');
+  if (s.carrier_knutsford_enabled) out.push('knutsford');
+  if (s.carrier_manual_enabled !== false && s.carrier_manual_enabled !== 0) out.push('manual');
+  return out;
+}
+
+// Pull the fulfilment + address off a checkout body into { fulfilment, fee,
+// cols } where `cols` is the exact set of orders columns to write. A pickup
+// order writes nothing but the default 'pickup'. The fee is trusted from the
+// client for now (clamped >= 0); Phase 3 swaps it for a signed quote token.
+function parseShip(b) {
+  const ful = ['pickup', 'delivery', 'shipping'].includes(b.fulfilment) ? b.fulfilment : 'pickup';
+  if (ful === 'pickup') return { fulfilment: 'pickup', fee: 0, cols: { fulfilment: 'pickup' } };
+  const s = (v, n = 200) => (v == null ? null : (String(v).trim().slice(0, n) || null));
+  const fee = Math.max(0, r2(Number(b.ship_fee_usd) || 0));
+  return {
+    fulfilment: ful,
+    fee,
+    cols: {
+      fulfilment: ful,
+      ship_name: s(b.ship_name, 120),
+      ship_phone: s(b.ship_phone, 40),
+      ship_line1: s(b.ship_line1),
+      ship_line2: s(b.ship_line2),
+      ship_city: s(b.ship_city, 80),
+      ship_parish: PARISHES.includes(b.ship_parish) ? b.ship_parish : null,
+      ship_instructions: s(b.ship_instructions, 600),
+      ship_carrier: CARRIERS.includes(b.ship_carrier) ? b.ship_carrier : 'manual',
+      ship_service: s(b.ship_service, 80),
+      ship_fee_cents: cents(fee),
+    },
+  };
+}
+function shipError(ship) {
+  if (ship.fulfilment === 'pickup') return null;
+  if (!ship.cols.ship_line1) return 'A delivery address (street) is required.';
+  if (!ship.cols.ship_parish) return 'Please choose a parish.';
+  if (!ship.cols.ship_name) return 'A recipient name is required for delivery.';
+  return null;
+}
+// Build an `INSERT INTO orders` statement from a column->value map, so the
+// authed and guest checkout paths can share one insert with different columns.
+function orderInsertStmt(orderId, cols) {
+  const keys = Object.keys(cols);
+  return {
+    sql: `INSERT INTO orders (id, ${keys.join(', ')}) VALUES (?, ${keys.map(() => '?').join(', ')})`,
+    binds: [orderId, ...keys.map((k) => cols[k])],
+  };
+}
+
 export default function mount(app) {
   // ---- signup --------------------------------------------------------
   app.post('/api/auth/signup', async (c) => {
@@ -148,6 +209,12 @@ export default function mount(app) {
       payments: { stripe_enabled: false, stripe_publishable_key: null, methods: ordering ? ['cash_pickup', 'bank_transfer'] : [] },
       ordering_enabled: ordering,
       show_prices: showPrices,
+      shipping: {
+        carriers: enabledCarriers(s),
+        parishes: PARISHES,
+        origin_parish: s.ship_origin_parish || null,
+        local_flat_usd: Number(s.ship_local_flat_usd) || 0,
+      },
     });
   });
 
@@ -166,10 +233,9 @@ export default function mount(app) {
   });
 
   // ---- checkout ------------------------------------------------
-  // Online ordering is disabled: the storefront is quote-first now. A cart
-  // "checkout" must go to POST /api/inquiry, which files a quote request the
-  // counter prices by hand. This route stays mounted only to give a stale
-  // client a clear answer instead of silently creating an order.
+  // Checkout for a signed-in customer. Prices come from the server-side cart;
+  // shipping (fulfilment + address + fee) rides along and the fee is added to
+  // the order total after discounts. Card is still rejected (no Stripe here).
   app.post('/api/checkout', authMw, async (c) => {
     const settings = await getShopSettings(c.env);
     if (!settings.storefront_prices) {
@@ -184,6 +250,10 @@ export default function mount(app) {
     const method = b.payment_method || 'cash_pickup';
     if (!['cash_pickup', 'bank_transfer', 'stripe'].includes(method)) return c.json({ error: 'Invalid payment_method' }, 400);
     if (method === 'stripe') return c.json({ error: 'Online card payment is not available' }, 400);
+
+    const ship = parseShip(b);
+    const shipErr = shipError(ship);
+    if (shipErr) return c.json({ error: shipErr, code: 'ship_incomplete' }, 400);
 
     const items = await db.many(
       `SELECT c.product_img, c.qty, p.price_cents / 100.0 AS price_usd, p.name, p.make_model
@@ -213,12 +283,15 @@ export default function mount(app) {
       total = Math.max(0, r2(total - pointsDiscount));
     }
 
+    const merchTotal = total;                       // earns points; freight excluded
+    const grandTotal = r2(merchTotal + ship.fee);   // what the customer pays
+
     const orderId = await nextId(db, 'orders');
-    const stmts = [
-      { sql: `INSERT INTO orders (id, user_id, total_cents, notes, payment_method, coupon_code, coupon_discount_cents)
-                VALUES (?,?,?,?,?,?,?)`,
-        binds: [orderId, uid, cents(total), b.notes || null, method, couponCode, cents(couponDiscount)] },
-    ];
+    const stmts = [orderInsertStmt(orderId, {
+      user_id: uid, total_cents: cents(grandTotal), notes: b.notes || null,
+      payment_method: method, coupon_code: couponCode, coupon_discount_cents: cents(couponDiscount),
+      ...ship.cols,
+    })];
     for (const it of items) {
       stmts.push({ sql: 'INSERT INTO order_items (order_id, product_img, qty, price_cents) VALUES (?,?,?,?)',
         binds: [orderId, it.product_img, it.qty, cents(it.price_usd || 0)] });
@@ -235,7 +308,7 @@ export default function mount(app) {
     stmts.push({ sql: 'DELETE FROM cart_items WHERE user_id = ?', binds: [uid] });
     await db.batch(stmts);
 
-    const earnedPoints = Math.floor(total);
+    const earnedPoints = Math.floor(merchTotal);
     if (earnedPoints > 0) {
       await db.run("INSERT INTO points_transactions (user_id, delta, reason, reference_id) VALUES (?,?,'purchase',?)",
         uid, earnedPoints, orderId);
@@ -244,12 +317,99 @@ export default function mount(app) {
     const u = await db.one('SELECT email, name FROM users WHERE id = ?', uid);
     if (u && u.email) {
       const li = items.map((it) => ({ product_img: it.product_img, qty: it.qty, price_usd: it.price_usd, name: it.name, make_model: it.make_model }));
-      c.executionCtx?.waitUntil?.(sendEmail(c.env, { to: u.email, ...templates.orderEmail({ name: u.name, orderId, items: li, total }) }).catch(() => {}));
+      c.executionCtx?.waitUntil?.(sendEmail(c.env, { to: u.email, ...templates.orderEmail({ name: u.name, orderId, items: li, total: grandTotal }) }).catch(() => {}));
     }
 
     return c.json({
-      order_id: orderId, subtotal_usd: subtotal, total_usd: total, status: 'pending', payment_method: method,
-      checkout_url: null, points_redeemed: redeemPts, points_discount_usd: pointsDiscount, points_earned: earnedPoints,
+      order_id: orderId, subtotal_usd: subtotal, total_usd: grandTotal, ship_fee_usd: ship.fee, fulfilment: ship.fulfilment,
+      status: 'pending', payment_method: method, checkout_url: null,
+      points_redeemed: redeemPts, points_discount_usd: pointsDiscount, points_earned: earnedPoints,
+      coupon_code: couponCode, coupon_discount_usd: couponDiscount,
+    });
+  });
+
+  // Guest checkout — no account. Same body as /api/checkout plus contact
+  // (name / email / phone) and an explicit items:[{img,qty}] list, since a
+  // guest has no server-side cart. No loyalty points; coupons still apply.
+  app.post('/api/checkout/guest', async (c) => {
+    const settings = await getShopSettings(c.env);
+    if (!settings.storefront_prices) {
+      return c.json({
+        error: 'Online ordering is disabled. Please submit a quote request and the parts desk will price it and call you back.',
+        code: 'quote_only',
+      }, 400);
+    }
+    const db = d1(c.env);
+    const b = await c.req.json().catch(() => ({}));
+
+    const name = (b.name || '').trim();
+    const email = (b.email || '').trim().toLowerCase();
+    const phone = (b.phone || '').trim();
+    if (!name || (!email && !phone)) return c.json({ error: 'Name and an email or phone are required' }, 400);
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return c.json({ error: 'That email address looks wrong' }, 400);
+
+    const method = b.payment_method || 'cash_pickup';
+    if (!['cash_pickup', 'bank_transfer'].includes(method)) return c.json({ error: 'Invalid payment_method' }, 400);
+
+    const ship = parseShip(b);
+    const shipErr = shipError(ship);
+    if (shipErr) return c.json({ error: shipErr, code: 'ship_incomplete' }, 400);
+
+    const reqItems = (Array.isArray(b.items) ? b.items : []).filter((it) => it && it.img);
+    if (!reqItems.length) return c.json({ error: 'Cart is empty' }, 400);
+    const imgs = [...new Set(reqItems.map((it) => String(it.img)))].slice(0, 200);
+    const rows = await db.many(
+      `SELECT img, price_cents / 100.0 AS price_usd, name, make_model
+         FROM products WHERE img IN (${imgs.map(() => '?').join(',')})`, ...imgs);
+    const byImg = new Map(rows.map((r) => [r.img, r]));
+    const items = reqItems.map((it) => {
+      const p = byImg.get(String(it.img));
+      if (!p) return null;
+      return { product_img: p.img, qty: Math.max(1, parseInt(it.qty, 10) || 1), price_usd: p.price_usd, name: p.name, make_model: p.make_model };
+    }).filter(Boolean);
+    if (!items.length) return c.json({ error: 'None of those items are still available' }, 400);
+    if (items.some((it) => it.price_usd == null)) {
+      return c.json({ error: 'Some items in your cart are not priced — submit a quote request for the whole cart.', code: 'unpriced_items' }, 400);
+    }
+
+    const subtotal = r2(items.reduce((s, it) => s + Number(it.price_usd || 0) * it.qty, 0));
+    let total = subtotal;
+    let couponCode = null, couponDiscount = 0;
+    if (b.coupon_code) {
+      const cr = await loadCoupon(db, b.coupon_code);
+      if (cr.ok) {
+        const cd = computeCouponDiscount(cr.coupon, total);
+        if (cd.discount > 0) { couponCode = cr.coupon.code; couponDiscount = cd.discount; total = r2(total - couponDiscount); }
+      }
+    }
+    const grandTotal = r2(total + ship.fee);
+
+    const orderId = await nextId(db, 'orders');
+    const stmts = [orderInsertStmt(orderId, {
+      user_id: null, total_cents: cents(grandTotal), notes: b.notes || null,
+      payment_method: method, coupon_code: couponCode, coupon_discount_cents: cents(couponDiscount),
+      customer_name: name, customer_email: email || null, customer_phone: phone || null, source: 'storefront',
+      ...ship.cols,
+    })];
+    for (const it of items) {
+      stmts.push({ sql: 'INSERT INTO order_items (order_id, product_img, qty, price_cents) VALUES (?,?,?,?)',
+        binds: [orderId, it.product_img, it.qty, cents(it.price_usd || 0)] });
+    }
+    if (couponCode) {
+      stmts.push({ sql: `INSERT OR IGNORE INTO coupon_redemptions (coupon_code, user_id, order_id, discount_usd) VALUES (?,?,?,?)`,
+        binds: [couponCode, null, orderId, couponDiscount] });
+      stmts.push({ sql: 'UPDATE coupons SET redeemed_count = redeemed_count + 1 WHERE code = ?', binds: [couponCode] });
+    }
+    await db.batch(stmts);
+
+    if (email) {
+      const li = items.map((it) => ({ product_img: it.product_img, qty: it.qty, price_usd: it.price_usd, name: it.name, make_model: it.make_model }));
+      c.executionCtx?.waitUntil?.(sendEmail(c.env, { to: email, ...templates.orderEmail({ name, orderId, items: li, total: grandTotal }) }).catch(() => {}));
+    }
+
+    return c.json({
+      order_id: orderId, subtotal_usd: subtotal, total_usd: grandTotal, ship_fee_usd: ship.fee, fulfilment: ship.fulfilment,
+      status: 'pending', payment_method: method, checkout_url: null,
       coupon_code: couponCode, coupon_discount_usd: couponDiscount,
     });
   });
@@ -261,16 +421,47 @@ export default function mount(app) {
          FROM orders WHERE user_id = ? ORDER BY created_at DESC`, c.get('user').id);
     return c.json({ orders });
   });
+  const ORDER_DETAIL_COLS = `id, total_cents / 100.0 AS total_usd, ship_fee_cents / 100.0 AS ship_fee_usd,
+      coupon_code, coupon_discount_cents / 100.0 AS coupon_discount_usd,
+      status, payment_method, payment_status, notes, created_at,
+      customer_name, customer_email, customer_phone,
+      fulfilment, ship_name, ship_phone, ship_line1, ship_line2, ship_city, ship_parish,
+      ship_instructions, ship_carrier, ship_service, ship_status, tracking_number`;
+
   app.get('/api/orders/:id', authMw, async (c) => {
     const db = d1(c.env);
     const order = await db.one(
-      `SELECT id, total_cents / 100.0 AS total_usd, status, payment_method, payment_status, notes, created_at
-         FROM orders WHERE id = ? AND user_id = ?`, c.req.param('id'), c.get('user').id);
+      `SELECT ${ORDER_DETAIL_COLS} FROM orders WHERE id = ? AND user_id = ?`, c.req.param('id'), c.get('user').id);
     if (!order) return c.json({ error: 'Order not found' }, 404);
     const items = await db.many(
       `SELECT oi.product_img, oi.qty, oi.price_cents / 100.0 AS price_usd, p.name, p.make_model
          FROM order_items oi LEFT JOIN products p ON p.img = oi.product_img WHERE oi.order_id = ?`, c.req.param('id'));
     return c.json({ order, items });
+  });
+
+  // Order detail for the print/receipt page. No session needed: a guest passes
+  // ?email= and it must match the order's captured contact email; a signed-in
+  // customer can also read their own order this way.
+  app.get('/api/orders/:id/print', async (c) => {
+    const db = d1(c.env);
+    const id = c.req.param('id');
+    const order = await db.one(`SELECT ${ORDER_DETAIL_COLS}, user_id FROM orders WHERE id = ?`, id);
+    if (!order) return c.json({ error: 'Order not found' }, 404);
+    const email = (c.req.query('email') || '').trim().toLowerCase();
+    let ok = email && order.customer_email && email === String(order.customer_email).toLowerCase();
+    if (!ok && order.user_id != null) {
+      try { const u = await currentUser(c.req.raw, c.env); ok = !!(u && (u.id === order.user_id || u.is_admin || u.is_staff)); } catch { /* guest */ }
+    }
+    if (!ok) return c.json({ error: 'Not authorised to view this order' }, 403);
+    delete order.user_id;
+    const items = await db.many(
+      `SELECT oi.product_img, oi.qty, oi.price_cents / 100.0 AS price_usd, p.name, p.make_model
+         FROM order_items oi LEFT JOIN products p ON p.img = oi.product_img WHERE oi.order_id = ?`, id);
+    const shop = await getShopSettings(c.env);
+    return c.json({
+      order, items,
+      shop: { name: shop.company_name, address: shop.address, phone: shop.phone, email: shop.email },
+    });
   });
 
   // ---- newsletter -----------------------------------------

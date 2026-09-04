@@ -766,6 +766,10 @@
   .pay-methods small{display:block;color:var(--muted);font-weight:500;font-size:11px;margin-top:2px;margin-left:24px;line-height:1.3}
   body[data-theme="dark"] .pay-methods label{background:#0f1f33;color:#e5e7eb;border-color:rgba(255,255,255,.1)}
   body[data-theme="dark"] .pay-methods label.active{background:rgba(214,40,40,.18)}
+  /* SHIPPING */
+  .shFld{width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:7px;font-size:13px;font-family:inherit;box-sizing:border-box;background:var(--card,#fff);color:inherit}
+  #shipBox .shFul{transition:all .15s}
+  .ship-line{grid-column:1/-1;display:flex;justify-content:space-between;font-size:12px;color:#0369a1;padding:4px 0 0}
   .cart-checkout{width:100%;background:#25d366;color:#fff;border:none;padding:13px;border-radius:10px;font-weight:800;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px}
   .cart-checkout.stripe{background:#635bff}
   .cart-checkout.stripe:hover{background:#4f46e5}
@@ -1291,6 +1295,9 @@ document.addEventListener('DOMContentLoaded', function(){
       +         '<div id="photoNote" style="display:none;color:#b45309;font-size:11.5px;margin-top:6px"></div>'
       +       '</div>'
       +     '</details>'
+      // FULFILMENT — pickup (default) vs delivery / courier. Mirrors the POS
+      // tender modal. Hidden while the cart is a save-order (no shipping yet).
+      +     '<div id="shipBox" style="display:none;border-top:1px dashed var(--line);padding-top:10px;margin-bottom:10px"></div>'
       // GUEST CONTACT — shown only when nobody is signed in, so we still have a
       // way to reach the customer and the counter still gets the order.
       +     '<div id="guestBox" style="display:none;border-top:1px dashed var(--line);padding-top:10px;margin-bottom:10px">'
@@ -1486,6 +1493,38 @@ document.addEventListener('DOMContentLoaded', function(){
       b.classList.toggle('show', count > 0);
     });
   }
+
+  // FULFILMENT / SHIPPING state — mirrors the POS tender modal's ship block.
+  // In memory only; recipient name/phone seed from a restored guest contact.
+  var SHIP = { fulfilment:'pickup', name:'', phone:'', line1:'', line2:'', city:'', parish:'', carrier:'', service:'', fee:'', instructions:'' };
+  try {
+    var _g = JSON.parse(localStorage.getItem('mh_guest') || '{}');
+    if (_g && _g.name) SHIP.name = _g.name;
+    if (_g && _g.phone) SHIP.phone = _g.phone;
+  } catch(e){}
+  window._foxdShipping = null;   // { carriers, parishes, origin_parish, local_flat_usd } from /api/config
+  var PARISHES_FALLBACK = ['Kingston','St. Andrew','St. Catherine','Clarendon','Manchester','St. Elizabeth','Westmoreland','Hanover','St. James','Trelawny','St. Ann','St. Mary','Portland','St. Thomas'];
+  var CARRIER_LABELS = { dhl:'DHL Express', fedex:'FedEx', knutsford:'Knutsford Express', manual:'Other / courier' };
+  function shipFeeNum(){ return SHIP.fulfilment === 'pickup' ? 0 : Math.max(0, Number(SHIP.fee) || 0); }
+  function shipPayload(){
+    if (SHIP.fulfilment === 'pickup') return { fulfilment:'pickup' };
+    return {
+      fulfilment: SHIP.fulfilment,
+      ship_name: SHIP.name, ship_phone: SHIP.phone,
+      ship_line1: SHIP.line1, ship_line2: SHIP.line2,
+      ship_city: SHIP.city, ship_parish: SHIP.parish,
+      ship_carrier: SHIP.carrier || 'manual', ship_service: SHIP.service,
+      ship_fee_usd: shipFeeNum(), ship_instructions: SHIP.instructions
+    };
+  }
+  // Client-side mirror of the server's shipError() so we can point at the field.
+  function shipClientError(){
+    if (SHIP.fulfilment === 'pickup') return null;
+    if (!(SHIP.line1 || '').trim()) return 'Add a street address for delivery.';
+    if (!SHIP.parish) return 'Choose a parish for delivery.';
+    if (!(SHIP.name || '').trim()) return 'Add a recipient name for delivery.';
+    return null;
+  }
   function esc(s){ return String(s).replace(/"/g,'&quot;'); }
   // esc() only quotes attribute values. Anything the shopper typed that lands
   // in markup as text -- the refinement chips -- needs the angle brackets and
@@ -1606,8 +1645,69 @@ document.addEventListener('DOMContentLoaded', function(){
     if (payMethods) payMethods.style.display = quote ? 'none' : '';
     var cardOpt = document.getElementById('payCardOpt');
     if (cardOpt) cardOpt.style.display = (!quote && window._foxdStripeEnabled) ? '' : 'none';
+    var shipBox = document.getElementById('shipBox');
+    if (shipBox) shipBox.style.display = quote ? 'none' : '';
     var gHint = document.getElementById('guestHint');
     if (gHint) gHint.textContent = quote ? 'Where should we send your quote?' : 'Where should we send your confirmation?';
+  }
+
+  // Fulfilment picker + address fields. Rebuilt only when the fulfilment tab
+  // changes (or forced) — renderCart() calls this every render, and rebuilding
+  // mid-keystroke would steal focus from the address fields. Carrier is a plain
+  // pick from the enabled list and the fee is typed; a live rate lookup is
+  // wired in a later pass.
+  var _shipRenderedFor = null;
+  function renderShip(force){
+    var box = document.getElementById('shipBox');
+    if (!box) return;
+    if (!force && _shipRenderedFor === SHIP.fulfilment && box.children.length) return;
+    _shipRenderedFor = SHIP.fulfilment;
+    var cfg = window._foxdShipping || {};
+    var parishes = (cfg.parishes && cfg.parishes.length) ? cfg.parishes : PARISHES_FALLBACK;
+    var carriers = (cfg.carriers && cfg.carriers.length) ? cfg.carriers : ['manual'];
+    var ful = SHIP.fulfilment;
+    var tabs = [['pickup','🏪 Pickup'],['delivery','🚚 Delivery'],['shipping','📦 Courier']];
+    var h = '<div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#6b7280;font-weight:700;margin-bottom:6px">How is it leaving?</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:' + (ful === 'pickup' ? '0' : '8px') + '">' +
+      tabs.map(function(o){
+        var on = ful === o[0];
+        return '<button type="button" class="shFul" data-ful="' + o[0] + '" style="padding:8px 4px;border:2px solid ' + (on?'var(--navy)':'#d1d5db') + ';border-radius:7px;background:' + (on?'var(--navy)':'transparent') + ';color:' + (on?'#fff':'inherit') + ';font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">' + o[1] + '</button>';
+      }).join('') + '</div>';
+    if (ful !== 'pickup'){
+      h += '<div style="display:grid;gap:6px">' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">' +
+          '<input id="shName" class="shFld" placeholder="Recipient name" value="' + esc(SHIP.name || '') + '"/>' +
+          '<input id="shPhone" class="shFld" placeholder="Recipient phone" value="' + esc(SHIP.phone || '') + '"/>' +
+        '</div>' +
+        '<input id="shLine1" class="shFld" placeholder="Street address" value="' + esc(SHIP.line1 || '') + '"/>' +
+        '<input id="shLine2" class="shFld" placeholder="Apt / building / landmark (optional)" value="' + esc(SHIP.line2 || '') + '"/>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">' +
+          '<input id="shCity" class="shFld" placeholder="Town / city" value="' + esc(SHIP.city || '') + '"/>' +
+          '<select id="shParish" class="shFld"><option value="">— parish —</option>' +
+            parishes.map(function(p){ return '<option' + (SHIP.parish === p ? ' selected' : '') + '>' + p + '</option>'; }).join('') +
+          '</select>' +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:2fr 1fr;gap:6px">' +
+          (carriers.length > 1
+            ? '<select id="shCarrier" class="shFld">' + carriers.map(function(cc){ return '<option value="' + cc + '"' + (SHIP.carrier === cc ? ' selected' : '') + '>' + (CARRIER_LABELS[cc] || cc) + '</option>'; }).join('') + '</select>'
+            : '<input id="shCarrier" class="shFld" placeholder="Carrier / method" value="' + esc(SHIP.carrier || '') + '"/>') +
+          '<div style="display:flex;align-items:center;gap:3px"><span style="font-size:12px;color:#6b7280">Fee $</span><input id="shFee" class="shFld" type="number" min="0" step="0.01" placeholder="0.00" value="' + esc(String(SHIP.fee || '')) + '" style="text-align:right"/></div>' +
+        '</div>' +
+        '<input id="shInstr" class="shFld" placeholder="Delivery instructions (optional)" value="' + esc(SHIP.instructions || '') + '"/>' +
+      '</div>';
+    }
+    box.innerHTML = h;
+    box.querySelectorAll('.shFul').forEach(function(btn){
+      btn.addEventListener('click', function(){ SHIP.fulfilment = btn.dataset.ful; renderShip(true); renderCart(); });
+    });
+    var fields = { shName:'name', shPhone:'phone', shLine1:'line1', shLine2:'line2', shCity:'city', shParish:'parish', shCarrier:'carrier', shInstr:'instructions' };
+    Object.keys(fields).forEach(function(id){
+      var el = document.getElementById(id);
+      if (el) el.addEventListener('input', function(){ SHIP[fields[id]] = el.value; });
+    });
+    if (carriers.length <= 1 && ful !== 'pickup' && !SHIP.carrier) SHIP.carrier = carriers[0] || 'manual';
+    var feeEl = document.getElementById('shFee');
+    if (feeEl) feeEl.addEventListener('input', function(){ SHIP.fee = feeEl.value; renderCart(); });
   }
 
   function renderCart(){
@@ -1663,6 +1763,10 @@ document.addEventListener('DOMContentLoaded', function(){
     // A saved-order cart has no payable total — some line still needs a price
     // or a stock check. Say what happens next instead.
     var quoteLines = cartQuoteLines().length;
+    var shipFee = quoteLines ? 0 : shipFeeNum();
+    var shipLine = shipFee > 0
+      ? '<div class="ship-line"><span>Shipping (' + (CARRIER_LABELS[SHIP.carrier] || SHIP.carrier || SHIP.fulfilment) + ')</span><b>' + fmt(shipFee) + '</b></div>'
+      : '';
     if (quoteLines){
       document.getElementById('cartTotal').innerHTML =
         '<div><div class="lbl">Total</div><div style="font-size:11.5px;color:#6b7280;font-weight:600">' +
@@ -1674,9 +1778,10 @@ document.addEventListener('DOMContentLoaded', function(){
     } else {
       document.getElementById('cartTotal').innerHTML =
         '<div><div class="lbl">Total</div></div>' +
-        '<div style="text-align:right"><b>' + fmt(displayTotal) + '</b><div class="alt">' + altFmt(displayTotal) + '</div></div>' +
-        couponLine;
+        '<div style="text-align:right"><b>' + fmt(displayTotal + shipFee) + '</b><div class="alt">' + altFmt(displayTotal + shipFee) + '</div></div>' +
+        shipLine + couponLine;
     }
+    renderShip();
     updateCheckoutLabel();
     box.querySelectorAll('[data-inc]').forEach(function(b){ b.addEventListener('click', function(){ setQty(b.dataset.inc, cart[b.dataset.inc]+1); }); });
     box.querySelectorAll('[data-dec]').forEach(function(b){ b.addEventListener('click', function(){ setQty(b.dataset.dec, cart[b.dataset.dec]-1); }); });
@@ -2985,10 +3090,19 @@ document.addEventListener('DOMContentLoaded', function(){
       return;
     }
 
+    // Delivery / courier needs a complete address before the order can be taken.
+    var shipErr = shipClientError();
+    if (shipErr){
+      if (errEl){ errEl.textContent = shipErr; errEl.style.display = 'block'; }
+      var sbx = document.getElementById('shipBox');
+      if (sbx) sbx.scrollIntoView({ behavior:'smooth', block:'nearest' });
+      return;
+    }
+
     if (window._foxdApi){
       if (window._foxdSignedIn){
         try {
-          var r = await sendOrder('/api/checkout', { payment_method: method, redeem_points: redeemPts, coupon_code: couponCode });
+          var r = await sendOrder('/api/checkout', Object.assign({ payment_method: method, redeem_points: redeemPts, coupon_code: couponCode }, shipPayload()));
           lastResult = r;
           orderId = r && r.order_id;
           checkoutUrl = r && r.checkout_url;
@@ -3010,11 +3124,11 @@ document.addEventListener('DOMContentLoaded', function(){
           return;
         }
         try {
-          var gr = await sendOrder('/api/checkout/guest', {
+          var gr = await sendOrder('/api/checkout/guest', Object.assign({
             name: gName, email: gEmail, phone: gPhone,
             payment_method: method === 'stripe' ? 'cash_pickup' : method,
             items: items.map(function(img){ return { img: img, qty: cart[img] }; })
-          });
+          }, shipPayload()));
           lastResult = gr;
           orderId = gr && gr.order_id;
           try { localStorage.setItem('mh_guest', JSON.stringify({ name:gName, email:gEmail, phone:gPhone })); } catch(e){}
@@ -3045,14 +3159,27 @@ document.addEventListener('DOMContentLoaded', function(){
     if (vehLine) msg += "\nVehicle: " + vehLine;
     if (vehicle.vin) msg += "\nVIN: " + vehicle.vin.toUpperCase();
     if (orderPhotos.length) msg += "\n(" + orderPhotos.length + " photo" + (orderPhotos.length===1?'':'s') + " attached to order #" + (orderId || '—') + ")";
+    var shipFeeW = shipFeeNum();
+    if (SHIP.fulfilment !== 'pickup'){
+      msg += "\n\n" + (SHIP.fulfilment === 'shipping' ? 'Courier' : 'Delivery') + " to:\n" +
+        [SHIP.name, SHIP.phone].filter(Boolean).join(' · ') + "\n" +
+        [SHIP.line1, SHIP.line2, SHIP.city, SHIP.parish].filter(Boolean).join(', ');
+      if (SHIP.carrier) msg += "\nCarrier: " + (CARRIER_LABELS[SHIP.carrier] || SHIP.carrier);
+      if (SHIP.instructions) msg += "\nNote: " + SHIP.instructions;
+      if (shipFeeW > 0) msg += "\nShipping: " + fmt(shipFeeW);
+    } else {
+      msg += "\nCollection: counter pickup";
+    }
     msg += "\nPayment: " + (method === 'bank_transfer' ? 'Bank transfer' : 'Cash on pickup');
-    msg += "\nTotal: " + fmt(total) + "\n\nThank you!";
+    msg += "\nTotal: " + fmt(total + shipFeeW) + "\n\nThank you!";
     window.open('https://wa.me/18769054111?text=' + encodeURIComponent(msg), '_blank', 'noopener');
     if (orderId){
       cart = {};
       // The order owns these now — clear them so the next order starts fresh.
       orderPhotos.forEach(function(p){ try { URL.revokeObjectURL(p.url); } catch(e){} });
       orderPhotos = [];
+      SHIP.fulfilment = 'pickup'; SHIP.fee = ''; SHIP.carrier = ''; SHIP.service = ''; SHIP.instructions = '';
+      _shipRenderedFor = null;
       // renderCart() bails out early once the cart is empty, so clear the strip
       // here rather than relying on it.
       renderPhotoStrip();
@@ -3099,13 +3226,16 @@ document.addEventListener('DOMContentLoaded', function(){
     document.querySelectorAll('input[name="payMethod"]').forEach(function(r){
       r.addEventListener('change', updatePay);
     });
-    // Ask the backend whether card payment (Stripe) is available. Plain fetch --
-    // this runs before the _foxdApi helper is wired up. Whether a cart checks
-    // out or is saved is decided per-cart from price + stock, not from config.
+    // Ask the backend for card-payment availability and the shipping config
+    // (enabled carriers + parish list). Plain fetch -- this runs before the
+    // _foxdApi helper is wired up. Whether a cart checks out or is saved is
+    // decided per-cart from price + stock, not from config.
     fetch('/api/config', { credentials:'same-origin' })
       .then(function(res){ return res.ok ? res.json() : null; })
       .then(function(r){
         if (r && r.payments && r.payments.stripe_enabled) window._foxdStripeEnabled = true;
+        if (r && r.shipping) window._foxdShipping = r.shipping;
+        _shipRenderedFor = null;   // force renderShip() to pick up the carrier/parish list
         updateCheckoutLabel();
         renderCart();
       }).catch(function(){});

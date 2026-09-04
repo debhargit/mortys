@@ -18,6 +18,16 @@ const FALLBACK = {
   pos_enforce_login: 0,
   pos_enforce_customer: 0,
   pos_default_fulfilment: null,
+  // shipping (migration 0037) — origin + per-carrier switches
+  ship_origin_name: null, ship_origin_phone: null,
+  ship_origin_line1: null, ship_origin_line2: null,
+  ship_origin_city: null, ship_origin_parish: null, ship_origin_country: 'JM',
+  carrier_dhl_enabled: 0, carrier_dhl_account: null,
+  carrier_fedex_enabled: 0, carrier_fedex_account: null,
+  carrier_knutsford_enabled: 0,
+  carrier_manual_enabled: 1,
+  ship_default_weight_kg: 2.0,
+  ship_local_flat_usd: 0,
 };
 
 export async function getShopSettings(env) {
@@ -28,6 +38,9 @@ export async function getShopSettings(env) {
       row.storefront_prices = !!row.storefront_prices;
       row.pos_enforce_login = !!row.pos_enforce_login;
       row.pos_enforce_customer = !!row.pos_enforce_customer;
+      for (const k of ['carrier_dhl_enabled', 'carrier_fedex_enabled', 'carrier_knutsford_enabled', 'carrier_manual_enabled']) {
+        if (k in row) row[k] = !!row[k];
+      }
       return row;
     }
   } catch { /* table not migrated yet */ }

@@ -174,6 +174,49 @@ sdb.prepare("INSERT INTO cart_items (user_id, product_img, qty) VALUES (501,'qz-
 r = await call('post', '/api/checkout', { user: { id: 501 }, body: { payment_method: 'cash_pickup' } });
 n++; A('/api/checkout -> 400 when a cart line is unpriced', st === 400 && r.code === 'unpriced_items');
 
+// ---- 4d. shipping: fulfilment + address + fee folded into the total -----
+r = await call('get', '/api/config');
+n++; A('config: shipping block (parishes + carriers)', r.shipping && Array.isArray(r.shipping.parishes) && r.shipping.parishes.includes('Kingston') && Array.isArray(r.shipping.carriers));
+
+sdb.prepare('DELETE FROM cart_items').run();
+sdb.prepare("INSERT INTO cart_items (user_id, product_img, qty) VALUES (501,'qz-1',2)").run();
+r = await call('post', '/api/checkout', { user: { id: 501, show_prices: 1 }, body: {
+  payment_method: 'bank_transfer', fulfilment: 'delivery',
+  ship_name: 'Jane R', ship_phone: '876-555-0000', ship_line1: '5 Hope Rd', ship_parish: 'St. Andrew',
+  ship_carrier: 'manual', ship_fee_usd: 15,
+} });
+n++; A('/api/checkout delivery -> total = merch + shipping fee', st === 200 && Math.abs(r.total_usd - 105) < 0.01 && Math.abs(r.ship_fee_usd - 15) < 0.01 && r.fulfilment === 'delivery');
+n++; A('/api/checkout delivery -> ship_* persisted on the order row', (() => {
+  const o = q1('SELECT fulfilment, ship_fee_cents, ship_line1, ship_parish, ship_carrier FROM orders WHERE id = ?', r.order_id);
+  return o && o.fulfilment === 'delivery' && o.ship_fee_cents === 1500 && o.ship_line1 === '5 Hope Rd' && o.ship_parish === 'St. Andrew' && o.ship_carrier === 'manual';
+})());
+
+sdb.prepare("INSERT INTO cart_items (user_id, product_img, qty) VALUES (501,'qz-1',1)").run();
+r = await call('post', '/api/checkout', { user: { id: 501, show_prices: 1 }, body: { payment_method: 'cash_pickup', fulfilment: 'delivery', ship_fee_usd: 10 } });
+n++; A('/api/checkout delivery without an address -> 400 ship_incomplete', st === 400 && r.code === 'ship_incomplete');
+sdb.prepare('DELETE FROM cart_items').run();
+
+// ---- 4e. guest checkout: no session, explicit items, no points ---------
+r = await call('post', '/api/checkout/guest', { user: undefined, body: {
+  name: 'Walk Up', phone: '876-555-1212', payment_method: 'cash_pickup',
+  items: [{ img: 'qz-1', qty: 2 }],
+} });
+n++; A('/api/checkout/guest -> 200, order for qz-1 x2', st === 200 && r.order_id > 0 && Math.abs(r.total_usd - 90) < 0.01);
+n++; A('/api/checkout/guest -> guest order row (user_id NULL, contact + source)', (() => {
+  const o = q1('SELECT user_id, customer_name, customer_phone, source, fulfilment FROM orders WHERE id = ?', r.order_id);
+  return o && o.user_id === null && o.customer_name === 'Walk Up' && o.customer_phone === '876-555-1212' && o.source === 'storefront' && o.fulfilment === 'pickup';
+})());
+const guestOrderId = r.order_id;
+r = await call('post', '/api/checkout/guest', { user: undefined, body: { name: '', items: [{ img: 'qz-1', qty: 1 }] } });
+n++; A('/api/checkout/guest -> 400 without a name', st === 400);
+
+// ---- 4f. /api/orders/:id/print — guest reads their order by contact ----
+sdb.prepare("UPDATE orders SET customer_email = 'walkup@example.com' WHERE id = ?").run(guestOrderId);
+r = await call('get', '/api/orders/' + guestOrderId + '/print?email=walkup@example.com', { user: undefined });
+n++; A('/api/orders/:id/print?email= -> order + items for the guest', st === 200 && r.order && r.order.id === guestOrderId && Array.isArray(r.items) && r.items.length === 1);
+r = await call('get', '/api/orders/' + guestOrderId + '/print?email=someone@else.com', { user: undefined });
+n++; A('/api/orders/:id/print -> 403 on a wrong email', st === 403);
+
 // ---- 4c. flip back OFF for the rest of the suite -------------------------
 sdb.prepare("UPDATE shop_settings SET storefront_prices = 0 WHERE id = 1").run();
 sdb.prepare('DELETE FROM cart_items').run();
