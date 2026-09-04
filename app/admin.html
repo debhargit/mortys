@@ -7858,7 +7858,9 @@ var DASH_CSS =
   '.dash{padding:18px 20px 28px;color:var(--ink)}' +
   '.dash-hd{font-size:13px;color:var(--muted);margin-bottom:14px}.dash-hd b{color:var(--heading);font-size:15px}' +
   '.dash-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:18px}' +
-  '.dash-kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px 18px}' +
+  '.dash-kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px 18px;text-align:left;font-family:inherit;color:inherit;width:100%}' +
+  'button.dash-kpi{cursor:pointer;transition:border-color .12s,transform .12s}' +
+  'button.dash-kpi:hover{border-color:var(--sky);transform:translateY(-1px)}' +
   '.dash-kpi.accent{border-color:#0891b2}' +
   '.dash-kpi-l{font-size:10.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);font-weight:700}' +
   '.dash-kpi-v{font-size:26px;font-weight:800;color:var(--heading);line-height:1.1;margin-top:6px}' +
@@ -7903,12 +7905,13 @@ async function renderDashboard(panel){
   var greet = hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening';
   var dateStr = now.toLocaleDateString('en-JM', { weekday:'long', month:'long', day:'numeric' });
 
-  function kpi(label, value, sub, accent){
-    return '<div class="dash-kpi' + (accent ? ' accent' : '') + '">' +
+  function kpi(label, value, sub, accent, reportKey){
+    var tag = reportKey ? 'button type="button"' : 'div';
+    return '<' + tag + ' class="dash-kpi' + (accent ? ' accent' : '') + '"' + (reportKey ? ' data-report="' + reportKey + '"' : '') + '>' +
       '<div class="dash-kpi-l">' + esc(label) + '</div>' +
       '<div class="dash-kpi-v">' + value + '</div>' +
       (sub ? '<div class="dash-kpi-s">' + sub + '</div>' : '') +
-    '</div>';
+    '</' + (reportKey ? 'button' : 'div') + '>';
   }
   function alertChip(icon, n, label, tab, level){
     if (!n) return '';
@@ -7949,12 +7952,12 @@ async function renderDashboard(panel){
       '<div class="dash-kpis">' +
         kpi('Sales today', fmtMoney(sa.today || 0),
             (sa.today_n || 0) + ' ' + ((sa.today_n === 1) ? 'sale' : 'sales') +
-            (sa.today_n ? ' · avg ' + fmtMoney(sa.avg_today || 0) : ''), true) +
-        kpi('Last 7 days', fmtMoney(sa.week || 0), (sa.week_n || 0) + ' sales') +
-        kpi('Last 30 days', fmtMoney(sa.month || 0), (sa.month_n || 0) + ' sales') +
+            (sa.today_n ? ' · avg ' + fmtMoney(sa.avg_today || 0) : ''), true, 'sales') +
+        kpi('Last 7 days', fmtMoney(sa.week || 0), (sa.week_n || 0) + ' sales', false, 'sales') +
+        kpi('Last 30 days', fmtMoney(sa.month || 0), (sa.month_n || 0) + ' sales', false, 'sales') +
         kpi('Accounts receivable', fmtMoney(ar.total_owed || 0),
             (ar.customers_owing || 0) + ' ' + ((ar.customers_owing === 1) ? 'account' : 'accounts') + ' owing',
-            (ar.total_owed || 0) > 0) +
+            (ar.total_owed || 0) > 0, 'customer-detail') +
       '</div>' +
 
       (alerts
@@ -8033,6 +8036,10 @@ async function renderDashboard(panel){
 
   panel.querySelectorAll('.dash-alert[data-go]').forEach(function(b){
     b.addEventListener('click', function(){ show(b.getAttribute('data-go')); });
+  });
+  // KPI cards drill into the matching report.
+  panel.querySelectorAll('.dash-kpi[data-report]').forEach(function(b){
+    b.addEventListener('click', function(){ RPT_CURRENT = b.getAttribute('data-report'); show('reports'); });
   });
   panel.querySelectorAll('.dash-recent-row').forEach(function(row){
     row.addEventListener('click', function(){
@@ -11528,28 +11535,39 @@ async function renderPartsReqDetail(panel, id){
 // fmtMoney() without caring which one is serving.
 
 var REPORT_DEFS = [
-  { key:'z',           label:'🧾 Z Report (End of Day)', group:'Till' },
-  { key:'x',           label:'👁 X Report (Live Till)',  group:'Till',      dated:false },
-  { key:'sales',       label:'💵 Sales Summary',         group:'Sales' },
-  { key:'products',    label:'📦 Products & Categories', group:'Sales' },
-  { key:'returns',     label:'↩️ Returns & Refunds',     group:'Sales' },
-  { key:'tax',         label:'🧮 Tax Collected',         group:'Sales' },
-  { key:'orders',      label:'🛒 Online Orders',         group:'Sales' },
-  { key:'pos-orders',  label:'💵 POS Orders / Cashier',  group:'Sales' },
-  { key:'sales-reps',  label:'🧑‍💼 Sales by Rep',        group:'Sales' },
-  { key:'margin',      label:'📈 Gross Margin',          group:'Sales' },
-  { key:'valuation',   label:'💰 Stock Valuation',       group:'Operations' },
-  { key:'workorders',  label:'🛠 Service / Work Orders', group:'Operations' },
-  { key:'purchasing',  label:'📥 Purchasing & Receiving',group:'Operations' },
-  { key:'inventory',   label:'🏗 Inventory Position',    group:'Operations', dated:false },
-  { key:'labour',      label:'⏱ Labour Hours',           group:'Operations' },
-  { key:'customers',   label:'👥 Customers & Loyalty',   group:'Operations' },
+  { key:'__overview',  label:'▦ Overview',               group:'',          dated:false, blurb:'Every report, one click away.' },
+  { key:'z',           label:'🧾 Z Report (End of Day)', group:'Till',      blurb:'End-of-day till close: sales, tenders, cash count.' },
+  { key:'x',           label:'👁 X Report (Live Till)',  group:'Till',      dated:false, blurb:'Live snapshot of the open drawer.' },
+  { key:'sales',       label:'💵 Sales Summary',         group:'Sales',     blurb:'Net sales, tenders, by day / hour / cashier.' },
+  { key:'products',    label:'📦 Products & Categories', group:'Sales',     blurb:'Top sellers and category revenue.' },
+  { key:'returns',     label:'↩️ Returns & Refunds',     group:'Sales',     blurb:'Refunds by method and reason.' },
+  { key:'tax',         label:'🧮 Tax Collected',         group:'Sales',     blurb:'GCT charged, POS + service, net of refunds.' },
+  { key:'orders',      label:'🛒 Online Orders',         group:'Sales',     blurb:'Storefront + POS orders by source / status / day.' },
+  { key:'order-ledger',label:'📋 Order Ledger',          group:'Sales',     blurb:'Every order as a line, with fulfilment + carrier.' },
+  { key:'pos-orders',  label:'💵 POS Orders / Cashier',  group:'Sales',     blurb:'Order-first checkout aging and speed to invoice.' },
+  { key:'sales-reps',  label:'🧑‍💼 Sales by Rep',        group:'Sales',     blurb:'Tickets, revenue and margin per rep.' },
+  { key:'margin',      label:'📈 Gross Margin',          group:'Sales',     blurb:'Revenue vs. cost by product and category.' },
+  { key:'valuation',   label:'💰 Stock Valuation',       group:'Operations',blurb:'Stock at cost / retail, by category and location.' },
+  { key:'supplier',    label:'🏭 Suppliers',             group:'Operations',blurb:'POs, receipts, SKUs and stock value per supplier.' },
+  { key:'workorders',  label:'🛠 Service / Work Orders', group:'Operations',blurb:'Work-order volume, labour, parts, payments.' },
+  { key:'purchasing',  label:'📥 Purchasing & Receiving',group:'Operations',blurb:'Purchase orders by status and supplier.' },
+  { key:'inventory',   label:'🏗 Inventory Position',    group:'Operations',dated:false, blurb:'Valuation, category mix and low-stock list.' },
+  { key:'inventory-custom', label:'🧰 Custom Inventory',  group:'Operations',dated:false, blurb:'Pick your own columns and filters.' },
+  { key:'warehouse',   label:'🏬 Warehouse Activity',    group:'Operations',blurb:'Stock movements, bin occupancy, recent counts.' },
+  { key:'labour',      label:'⏱ Labour Hours',           group:'Operations',blurb:'Clocked hours by mechanic and day.' },
+  { key:'customers',   label:'👥 Customers & Loyalty',   group:'Operations',blurb:'New signups, top spenders, loyalty movement.' },
+  { key:'customer-detail', label:'👤 Customer Detail',   group:'Operations',blurb:'Per-customer orders, POS spend, points, tier.' },
+  { key:'users-staff', label:'🧑‍🔧 Users & Staff',        group:'Admin',     blurb:'Staff roster, roles, PIN status, last seen.' },
+  { key:'setup-config',label:'⚙️ Setup / Configuration', group:'Admin',     dated:false, blurb:'Read-only snapshot of every setting and role.' },
+  { key:'audit-log',   label:'📜 Audit Log',             group:'Admin',     blurb:'Merged activity feed: stock, loyalty, voids, orders.' },
 ];
 
 // Tables rendered by the current report, kept so "Export CSV" can serialise
 // exactly what is on screen rather than re-querying.
 var RPT_TABLES = [];
-var RPT_CURRENT = 'z';
+var RPT_CURRENT = '__overview';
+// Custom Inventory report picker state (persists while the Reports tab is open).
+var INV_CUSTOM = { cols: ['category', 'stock', 'retail'], category: '', supplier_id: '', stock: 'all', active: '1' };
 // Which till session the Z report is pinned to. null = most recent close.
 var RPT_SESSION_ID = null;
 
@@ -11586,6 +11604,7 @@ function rptGrid(html){
 }
 
 function rptCsv(){
+  if (RPT_CURRENT === '__overview') return alert('Pick a report first.');
   if (!RPT_TABLES.length) return alert('Nothing to export yet.');
   var out = [];
   RPT_TABLES.forEach(function(t){
@@ -11612,12 +11631,13 @@ function rptCsv(){
 async function renderReports(panel){
   var today = new Date().toISOString().slice(0, 10);
   var groups = {};
-  REPORT_DEFS.forEach(function(d){ (groups[d.group] = groups[d.group] || []).push(d); });
+  REPORT_DEFS.forEach(function(d){ if (d.key === '__overview') return; (groups[d.group] = groups[d.group] || []).push(d); });
 
   panel.innerHTML =
     '<div style="display:grid;grid-template-columns:210px 1fr;gap:0;align-items:start">' +
       '<div class="panel" style="margin:16px 0 18px 18px">' +
         '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">📑 Reports</div>' +
+        '<button class="rptPick" data-key="__overview" style="display:block;width:100%;text-align:left;padding:9px 14px;font-size:12.5px;font-weight:700;background:none;border:0;border-left:3px solid transparent;border-bottom:1px solid var(--line);cursor:pointer;font-family:inherit;color:inherit">▦ Overview</button>' +
         Object.keys(groups).map(function(g){
           return '<div style="padding:8px 14px 2px;font-size:10px;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);font-weight:700">' + esc(g) + '</div>' +
             groups[g].map(function(d){
@@ -11645,8 +11665,54 @@ async function renderReports(panel){
       var on = b.getAttribute('data-key') === RPT_CURRENT;
       b.style.borderLeftColor = on ? 'var(--sky)' : 'transparent';
       b.style.background = on ? 'rgba(14,165,233,.10)' : 'none';
-      b.style.fontWeight = on ? '700' : '400';
+      b.style.fontWeight = (on || b.getAttribute('data-key') === '__overview') ? '700' : '400';
     });
+  }
+
+  var INV_ALL_COLS = ['sku', 'barcode', 'category', 'bin', 'supplier', 'stock', 'threshold', 'cost', 'retail', 'margin', 'age'];
+  function rptInvQS(){
+    var p = ['cols=' + encodeURIComponent(INV_CUSTOM.cols.join(','))];
+    if (INV_CUSTOM.category) p.push('category=' + encodeURIComponent(INV_CUSTOM.category));
+    if (INV_CUSTOM.supplier_id) p.push('supplier_id=' + encodeURIComponent(INV_CUSTOM.supplier_id));
+    p.push('stock=' + INV_CUSTOM.stock, 'active=' + INV_CUSTOM.active);
+    return p.join('&');
+  }
+  function rptInvPicker(show, facets){
+    var el = document.getElementById('invPicker');
+    if (!show){ if (el) el.remove(); return; }
+    var body = document.getElementById('rptBody');
+    if (!body) return;
+    if (!el){ el = document.createElement('div'); el.id = 'invPicker'; el.style.cssText = 'padding:12px 18px;border-bottom:1px solid var(--line)'; body.parentNode.insertBefore(el, body); }
+    var cats = (facets && facets.categories) || INV_CUSTOM._cats || [];
+    var sups = (facets && facets.suppliers) || INV_CUSTOM._sups || [];
+    INV_CUSTOM._cats = cats; INV_CUSTOM._sups = sups;
+    el.innerHTML =
+      '<div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700;margin-bottom:6px">Columns</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px">' +
+        INV_ALL_COLS.map(function(k){
+          return '<label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" class="invCol" value="' + k + '"' + (INV_CUSTOM.cols.indexOf(k) !== -1 ? ' checked' : '') + '/>' + k + '</label>';
+        }).join('') +
+      '</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end">' +
+        '<label class="lbl" style="margin:0">Category<br><select id="invCat" class="fld" style="width:150px"><option value="">Any</option>' +
+          cats.map(function(x){ return '<option' + (INV_CUSTOM.category === x ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('') + '</select></label>' +
+        '<label class="lbl" style="margin:0">Supplier<br><select id="invSup" class="fld" style="width:170px"><option value="">Any</option>' +
+          sups.map(function(x){ return '<option value="' + x.id + '"' + (String(INV_CUSTOM.supplier_id) === String(x.id) ? ' selected' : '') + '>' + esc(x.name) + '</option>'; }).join('') + '</select></label>' +
+        '<label class="lbl" style="margin:0">Stock<br><select id="invStock" class="fld" style="width:110px">' +
+          ['all', 'in', 'low', 'out'].map(function(x){ return '<option' + (INV_CUSTOM.stock === x ? ' selected' : '') + '>' + x + '</option>'; }).join('') + '</select></label>' +
+        '<label class="lbl" style="margin:0">Active<br><select id="invActive" class="fld" style="width:110px">' +
+          [['1', 'active'], ['0', 'inactive'], ['all', 'all']].map(function(x){ return '<option value="' + x[0] + '"' + (INV_CUSTOM.active === x[0] ? ' selected' : '') + '>' + x[1] + '</option>'; }).join('') + '</select></label>' +
+        '<button class="btn ok" id="invApply">Apply</button>' +
+      '</div>';
+    el.querySelector('#invApply').onclick = function(){
+      INV_CUSTOM.cols = Array.prototype.map.call(el.querySelectorAll('.invCol:checked'), function(x){ return x.value; });
+      if (!INV_CUSTOM.cols.length) INV_CUSTOM.cols = ['category', 'stock', 'retail'];
+      INV_CUSTOM.category = el.querySelector('#invCat').value;
+      INV_CUSTOM.supplier_id = el.querySelector('#invSup').value;
+      INV_CUSTOM.stock = el.querySelector('#invStock').value;
+      INV_CUSTOM.active = el.querySelector('#invActive').value;
+      run();
+    };
   }
 
   Array.prototype.forEach.call(panel.querySelectorAll('.rptPick'), function(b){
@@ -11674,12 +11740,24 @@ async function renderReports(panel){
 
   async function run(){
     var box = document.getElementById('rptBody');
+    // The overview landing page is pure client-side — no fetch, no date range.
+    if (RPT_CURRENT === '__overview') {
+      RPT_TABLES = []; LAST = null;
+      rptInvPicker(false);
+      box.innerHTML = RPT_RENDERERS.__overview();
+      Array.prototype.forEach.call(box.querySelectorAll('[data-rptopen]'), function(b){
+        b.onclick = function(){ RPT_CURRENT = b.getAttribute('data-rptopen'); markActive(); run(); };
+      });
+      return;
+    }
     var def = REPORT_DEFS.filter(function(d){ return d.key === RPT_CURRENT; })[0];
     var range = '?from=' + document.getElementById('rptFrom').value + '&to=' + document.getElementById('rptTo').value;
     var qs = def.dated === false ? '' : range;
     // The Z endpoint keys off a session, not a date range -- the range here
     // only decides which sessions the picker offers.
     if (RPT_CURRENT === 'z') qs = RPT_SESSION_ID ? '?session_id=' + RPT_SESSION_ID : '';
+    if (RPT_CURRENT === 'inventory-custom') qs = '?' + rptInvQS();
+    rptInvPicker(RPT_CURRENT === 'inventory-custom');
     box.innerHTML = '<div class="empty">Loading…</div>';
     RPT_TABLES = [];
     var r;
@@ -11690,6 +11768,7 @@ async function renderReports(panel){
       return;
     }
     LAST = r;
+    if (RPT_CURRENT === 'inventory-custom') rptInvPicker(true, r.facets);
 
     var head = '';
     if (RPT_CURRENT === 'z') {
@@ -12089,6 +12168,142 @@ var RPT_RENDERERS = {
       '<div style="padding:0 18px 22px">' +
         rptTable('🏆 Top customers (counter spend)', [{ k:'customer', label:'Customer' }, { k:'visits', label:'Visits', num:true }, { k:'spend', label:'Spend', money:true }], r.top_customers) +
       '</div>';
+  },
+
+  __overview: function(){
+    var groups = {};
+    REPORT_DEFS.forEach(function(d){ if (d.key === '__overview') return; (groups[d.group] = groups[d.group] || []).push(d); });
+    return '<div style="padding:8px 18px 22px">' +
+      Object.keys(groups).map(function(g){
+        return '<div style="font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);font-weight:700;margin:16px 0 8px">' + esc(g) + '</div>' +
+          '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px">' +
+            groups[g].map(function(d){
+              return '<button type="button" data-rptopen="' + d.key + '" style="text-align:left;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;cursor:pointer;font-family:inherit;color:inherit">' +
+                '<div style="font-weight:700;font-size:13px;margin-bottom:3px">' + esc(d.label) + '</div>' +
+                '<div style="font-size:11.5px;color:var(--muted);line-height:1.35">' + esc(d.blurb || '') + '</div>' +
+              '</button>';
+            }).join('') +
+          '</div>';
+      }).join('') +
+    '</div>';
+  },
+
+  supplier: function(r){
+    return '<div style="padding:16px 18px 4px"><div class="tiles" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px">' +
+        tile('suppliers', rNum(r.totals.suppliers)) + tile('PO value in range', rMoney(r.totals.po_value)) + tile('stock at cost', rMoney(r.totals.stock_cost)) +
+      '</div></div><div style="padding:0 18px 22px">' +
+      rptTable('🏭 By supplier', [
+        { k:'name', label:'Supplier' }, { k:'contact_name', label:'Contact' }, { k:'phone', label:'Phone' },
+        { k:'pos', label:'POs', num:true }, { k:'po_value', label:'PO value', money:true }, { k:'received_value', label:'Received', money:true },
+        { k:'skus', label:'SKUs', num:true }, { k:'stock_cost', label:'Stock @ cost', money:true }, { k:'last_po', label:'Last PO' },
+      ], r.suppliers) + '</div>';
+  },
+
+  'customer-detail': function(r){
+    return '<div style="padding:16px 18px 4px"><div class="tiles" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px">' +
+        tile('new in range', rNum(r.tiles.new_customers)) + tile('active buyers', rNum(r.tiles.active_buyers)) + tile('newsletter', rNum(r.tiles.newsletter)) +
+      '</div></div>' +
+      rptGrid(rptTable('🏷 By tier', [{ k:'tier', label:'Tier' }, { k:'n', label:'Customers', num:true }], r.by_tier) + '<div></div>') +
+      '<div style="padding:0 18px 22px">' +
+      rptTable('👤 Customers (top 100 by spend)', [
+        { k:'name', label:'Name' }, { k:'account_number', label:'Acct' }, { k:'tier', label:'Tier' }, { k:'joined', label:'Joined' },
+        { k:'orders', label:'Orders', num:true }, { k:'order_spend', label:'Online spend', money:true }, { k:'pos_spend', label:'Counter spend', money:true }, { k:'points', label:'Points', num:true },
+      ], r.customers) + '</div>';
+  },
+
+  'order-ledger': function(r){
+    return '<div style="padding:16px 18px 4px"><div class="tiles" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">' +
+        tile('orders', rNum(r.tiles.n)) + tile('revenue', rMoney(r.tiles.revenue)) + tile('unpaid', rMoney(r.tiles.unpaid)) + tile('shipping billed', rMoney(r.tiles.shipping)) +
+      '</div></div>' +
+      rptGrid(
+        rptTable('📦 By fulfilment', [{ k:'fulfilment', label:'Fulfilment' }, { k:'n', label:'Orders', num:true }, { k:'ship_fee', label:'Ship fee', money:true }, { k:'total', label:'Total', money:true }], r.by_fulfilment) +
+        rptTable('🚚 By carrier', [{ k:'carrier', label:'Carrier' }, { k:'n', label:'Orders', num:true }, { k:'tracked', label:'Tracked', num:true }, { k:'ship_fee', label:'Ship fee', money:true }], r.by_carrier)
+      ) +
+      '<div style="padding:0 18px 22px">' +
+      rptTable('📋 Orders', [
+        { k:'id', label:'#' }, { k:'day', label:'Date' }, { k:'source', label:'Source' }, { k:'customer', label:'Customer' },
+        { k:'status', label:'Status' }, { k:'payment_method', label:'Pay' }, { k:'payment_status', label:'Paid?' },
+        { k:'fulfilment', label:'Fulfilment' }, { k:'ship_carrier', label:'Carrier' }, { k:'tracking_number', label:'Tracking' },
+        { k:'ship_fee', label:'Ship', money:true }, { k:'total', label:'Total', money:true },
+      ], r.orders) + '</div>';
+  },
+
+  'users-staff': function(r){
+    return '<div style="padding:16px 18px 4px"><div class="tiles" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px">' +
+        tile('total staff', rNum(r.tiles.total)) + tile('active', rNum(r.tiles.active)) + tile('disabled', rNum(r.tiles.disabled)) +
+      '</div></div>' +
+      rptGrid(
+        rptTable('🔐 By role', [{ k:'role', label:'Role' }, { k:'n', label:'People', num:true }], r.by_role) +
+        rptTable('📋 Role definitions', [{ k:'label', label:'Role' }, { k:'code', label:'Code' }, { k:'rank', label:'Rank', num:true }, { k:'hidden_tabs', label:'Hidden tabs', num:true }], r.roles)
+      ) +
+      '<div style="padding:0 18px 22px">' +
+      rptTable('🧑‍🔧 Staff', [
+        { k:'name', label:'Name' }, { k:'email', label:'Email' }, { k:'employee_no', label:'Emp #' }, { k:'admin_role', label:'Role' },
+        { k:'staff_role', label:'Staff role' }, { k:'specialty', label:'Specialty' }, { k:'pin_set', label:'PIN' }, { k:'state', label:'State' },
+        { k:'last_seen', label:'Last seen' }, { k:'joined', label:'Joined' },
+      ], r.staff) + '</div>';
+  },
+
+  'setup-config': function(r){
+    function kv(title, obj){
+      return rptTable(title, [{ k:'k', label:'Setting' }, { k:'v', label:'Value' }],
+        Object.keys(obj).map(function(k){ var v = obj[k]; return { k:k, v: (v === true ? 'yes' : v === false ? 'no' : (v == null || v === '' ? '—' : String(v))) }; }));
+    }
+    var carriers = Object.keys(r.carriers).map(function(k){
+      var c = r.carriers[k];
+      return { k:k, v: (c.enabled ? 'enabled' : 'off') +
+        (c.account && c.account !== 'no' ? ' · acct ' + c.account : '') +
+        (c.secret === 'yes' ? ' · secret set' : '') +
+        (c.flat_fee ? ' · flat ' + c.flat_fee : '') };
+    });
+    return '<div style="padding:6px 18px 22px">' +
+      rptGrid(kv('🏢 Company', r.company) + kv('🛒 Storefront', r.storefront)) +
+      rptGrid(kv('🖨 Print', r.print) + kv('📦 Shipping origin', r.shipping_origin)) +
+      rptGrid(
+        rptTable('🚚 Carriers', [{ k:'k', label:'Carrier' }, { k:'v', label:'Status' }], carriers) +
+        kv('💳 Card payment', r.card_payment)
+      ) +
+      rptGrid(
+        kv('🔢 Counts', r.counts) +
+        rptTable('🔐 Roles', [{ k:'label', label:'Role' }, { k:'code', label:'Code' }, { k:'rank', label:'Rank', num:true }], r.roles)
+      ) +
+    '</div>';
+  },
+
+  'inventory-custom': function(r){
+    var labels = { sku:'SKU', barcode:'Barcode', category:'Category', bin:'Bin', supplier:'Supplier', stock:'On hand', threshold:'Reorder at', cost:'Cost', retail:'Retail', margin:'Margin', age:'Age (d)' };
+    var moneyCols = { cost:1, retail:1, margin:1 }, numCols = { stock:1, threshold:1, age:1 };
+    var cols = [{ k:'name', label:'Product' }].concat((r.cols || []).map(function(k){
+      return { k:k, label: labels[k] || k, money: !!moneyCols[k], num: !!numCols[k] };
+    }));
+    return '<div style="padding:0 18px 22px">' +
+      rptTable('🧰 Custom inventory (' + r.rows.length + ' rows)', cols, r.rows.concat([r.totals])) +
+    '</div>';
+  },
+
+  warehouse: function(r){
+    return '<div style="padding:16px 18px 4px"><div class="tiles" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px">' +
+        tile('net qty change', rNum(r.net_delta)) + tile('bins in use', rNum((r.bins || []).length)) + tile('unbinned SKUs', rNum(r.unbinned)) +
+      '</div></div>' +
+      rptGrid(
+        rptTable('🔀 Movements by kind', [{ k:'kind', label:'Kind' }, { k:'n', label:'Moves', num:true }, { k:'units', label:'Units', num:true }], r.by_kind) +
+        rptTable('🧑 By person', [{ k:'person', label:'Person' }, { k:'moves', label:'Moves', num:true }], r.by_person)
+      ) +
+      rptGrid(
+        rptTable('📦 Most moved', [{ k:'product', label:'Product' }, { k:'moves', label:'Moves', num:true }, { k:'net_delta', label:'Net Δ', num:true }], r.top_moved) +
+        rptTable('🗄 Bin occupancy', [{ k:'bin', label:'Bin' }, { k:'skus', label:'SKUs', num:true }, { k:'units', label:'Units', num:true }], r.bins)
+      ) +
+      '<div style="padding:0 18px 22px">' +
+      rptTable('📋 Recent stock counts', [{ k:'count_number', label:'Count #' }, { k:'scope', label:'Scope' }, { k:'status', label:'Status' }, { k:'started', label:'Started' }, { k:'total_items', label:'Items', num:true }, { k:'total_variance', label:'Variance', num:true }], r.recent_counts) +
+    '</div>';
+  },
+
+  'audit-log': function(r){
+    return rptGrid(rptTable('📊 By area', [{ k:'area', label:'Area' }, { k:'n', label:'Events', num:true }], r.by_area) + '<div></div>') +
+      '<div style="padding:0 18px 22px">' +
+      rptTable('📜 Activity (newest first, max 500)', [
+        { k:'at', label:'When' }, { k:'area', label:'Area' }, { k:'action', label:'Action' }, { k:'detail', label:'Detail' }, { k:'by', label:'By' }, { k:'amount', label:'Amount', money:true },
+      ], r.feed) + '</div>';
   },
 };
 

@@ -101,6 +101,37 @@ r = await call('get', '/api/admin/reports/customers');
 A('reports/customers: new + loyalty + newsletter', typeof r.new_customers === 'number' && r.loyalty.earned === 100 && r.newsletter_signups === 1);
 r = await call('get', '/api/admin/reports/drawer-sessions');
 A('reports/drawer-sessions', Array.isArray(r.sessions) && r.sessions.length === 1 && r.sessions[0].opening_float === 200);
+
+// ---- new reports (supplier / customer-detail / order-ledger / users-staff /
+//      setup-config / inventory-custom / warehouse / audit-log) ----
+sdb.exec(`
+INSERT INTO suppliers (id,name,contact_name,phone,is_active) VALUES (5,'Acme Parts','Al','876-1',1);
+UPDATE products SET supplier_id = 5 WHERE img = 'r-1';
+UPDATE purchase_orders SET supplier_id = 5, received_date = datetime('now') WHERE id = 1;
+INSERT INTO users (id,email,name,password_hash,is_staff,admin_role,employee_no,created_at)
+ VALUES (820,'s@x.com','Staffer','h',1,'manager','E-001',datetime('now'));
+INSERT INTO warehouse_activity (kind,product_img,qty_delta,performed_by,created_at)
+ VALUES ('receipt','r-1',5,7,datetime('now'));
+`);
+
+r = await call('get', '/api/admin/reports/supplier');
+A('reports/supplier: Acme with a received PO + a SKU', r.suppliers.some((s) => s.name === 'Acme Parts' && s.pos === 1 && s.po_value === 200 && s.received_value === 200 && s.skus === 1) && r.totals.suppliers === 1);
+r = await call('get', '/api/admin/reports/customer-detail');
+A('reports/customer-detail: Cust One, storefront spend, points', r.customers.some((x) => x.name === 'Cust One' && x.orders === 1 && x.order_spend === 50 && x.points === 100) && typeof r.tiles.new_customers === 'number');
+r = await call('get', '/api/admin/reports/order-ledger');
+A('reports/order-ledger: line + tiles + fulfilment', r.orders.length === 1 && r.orders[0].id === 1 && r.tiles.n === 1 && r.tiles.unpaid === 50 && r.by_fulfilment[0].fulfilment === 'pickup');
+r = await call('get', '/api/admin/reports/users-staff');
+A('reports/users-staff: roster + role count', r.staff.some((s) => s.name === 'Staffer' && s.state === 'active' && s.pin_set === 'no') && r.tiles.total >= 2 && Array.isArray(r.roles));
+r = await call('get', '/api/admin/reports/setup-config');
+A('reports/setup-config: company + carriers + counts, no secrets', r.company && r.carriers.dhl.secret === 'no' && r.card_payment.fygaro_enabled === false && r.counts.suppliers === 1 && typeof r.storefront.public_pricing === 'boolean');
+r = await call('get', '/api/admin/reports/inventory-custom?cols=cost,retail,margin,supplier&category=Gadgets&active=1');
+A('reports/inventory-custom: requested cols + totals', r.cols.join(',') === 'cost,retail,margin,supplier' && r.rows.length === 2 && 'margin' in r.rows[0] && !('bin' in r.rows[0]) && r.totals.name === '2 SKUs' && r.totals.retail === 5 * 20 + 0 * 90);
+r = await call('get', '/api/admin/reports/inventory-custom?cols=stock&category=Gadgets&stock=out');
+A('reports/inventory-custom: stock=out filter', r.rows.length === 1 && r.rows[0].name === 'ZZ Gizmo');
+r = await call('get', '/api/admin/reports/warehouse');
+A('reports/warehouse: movement + bins', r.by_kind.some((k) => k.kind === 'receipt' && k.n === 1) && r.net_delta === 5 && Array.isArray(r.bins) && typeof r.unbinned === 'number');
+r = await call('get', '/api/admin/reports/audit-log');
+A('reports/audit-log: merged feed incl. warehouse + loyalty', Array.isArray(r.feed) && r.feed.some((e) => e.area === 'Warehouse') && r.feed.some((e) => e.area === 'Loyalty') && r.by_area.some((a) => a.area === 'Warehouse'));
 r = await call('get', '/api/admin/reports/x');
 A('reports/x: open session till read', r.kind === 'X' && r.cash.opening_float === 200 && r.cash.cash_sales === 34.5 && r.sales.count === 1);
 r = await call('get', '/api/admin/reports/z');

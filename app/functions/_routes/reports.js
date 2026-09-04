@@ -425,4 +425,282 @@ export default function mount(app) {
       by_category: byCategory, by_location: byLocation, dead_stock: dead,
     });
   });
+
+  // ---- suppliers -----------------------------------------------------
+  app.get('/api/admin/reports/supplier', adminMw, async (c) => {
+    const db = d1(c.env);
+    const { from, to } = range(c);
+    const p = [from, to];
+    const [rows, totals] = await Promise.all([
+      db.many(
+        `SELECT s.id, s.name, s.contact_name, s.phone, s.is_active,
+                (SELECT COUNT(*) FROM purchase_orders po WHERE po.supplier_id = s.id AND date(po.created_at) BETWEEN ? AND ?) AS pos,
+                (SELECT COALESCE(SUM(po.total_cents),0)/100.0 FROM purchase_orders po WHERE po.supplier_id = s.id AND date(po.created_at) BETWEEN ? AND ?) AS po_value,
+                (SELECT COALESCE(SUM(po.total_cents),0)/100.0 FROM purchase_orders po WHERE po.supplier_id = s.id AND po.received_date IS NOT NULL AND date(po.received_date) BETWEEN ? AND ?) AS received_value,
+                (SELECT COUNT(*) FROM products pr WHERE pr.supplier_id = s.id) AS skus,
+                (SELECT COALESCE(SUM(pr.stock_count * COALESCE(pr.cost_cents,0)),0)/100.0 FROM products pr WHERE pr.supplier_id = s.id AND pr.is_active = 1) AS stock_cost,
+                (SELECT MAX(date(po.created_at)) FROM purchase_orders po WHERE po.supplier_id = s.id) AS last_po
+           FROM suppliers s ORDER BY po_value DESC, s.name ASC`,
+        ...p, ...p, ...p),
+      db.one(
+        `SELECT COUNT(*) AS suppliers,
+                SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) AS active
+           FROM suppliers`),
+    ]);
+    const po_value = rows.reduce((a, r) => a + Number(r.po_value || 0), 0);
+    const stock_cost = rows.reduce((a, r) => a + Number(r.stock_cost || 0), 0);
+    return c.json({ from, to, suppliers: rows, totals: { ...totals, po_value, stock_cost } });
+  });
+
+  // ---- customer detail ---------------------------------------------
+  app.get('/api/admin/reports/customer-detail', adminMw, async (c) => {
+    const db = d1(c.env);
+    const { from, to } = range(c);
+    const p = [from, to];
+    const [rows, tiles, byTier] = await Promise.all([
+      db.many(
+        `SELECT u.id, u.name, u.email, u.account_number, COALESCE(u.customer_type, u.price_tier, '-') AS tier,
+                date(u.created_at) AS joined,
+                (SELECT COUNT(*) FROM orders o WHERE o.user_id = u.id) AS orders,
+                (SELECT COALESCE(SUM(o.total_cents),0)/100.0 FROM orders o WHERE o.user_id = u.id) AS order_spend,
+                (SELECT COALESCE(SUM(ps.total_cents),0)/100.0 FROM pos_sales ps WHERE ps.voided = 0 AND ps.customer_name = u.name) AS pos_spend,
+                (SELECT COALESCE(SUM(pt.delta),0) FROM points_transactions pt WHERE pt.user_id = u.id) AS points
+           FROM users u
+          WHERE u.is_staff = 0 AND COALESCE(u.is_admin,0) = 0
+          ORDER BY order_spend + pos_spend DESC
+          LIMIT 100`),
+      db.one(
+        `SELECT (SELECT COUNT(*) FROM users WHERE is_staff = 0 AND COALESCE(is_admin,0) = 0 AND date(created_at) BETWEEN ? AND ?) AS new_customers,
+                (SELECT COUNT(DISTINCT user_id) FROM orders WHERE user_id IS NOT NULL AND date(created_at) BETWEEN ? AND ?) AS active_buyers,
+                (SELECT COUNT(*) FROM newsletter_subscribers WHERE date(subscribed_at) BETWEEN ? AND ?) AS newsletter`,
+        ...p, ...p, ...p),
+      db.many(
+        `SELECT COALESCE(customer_type, price_tier, '-') AS tier, COUNT(*) AS n
+           FROM users WHERE is_staff = 0 AND COALESCE(is_admin,0) = 0 GROUP BY tier ORDER BY n DESC`),
+    ]);
+    return c.json({ from, to, customers: rows, tiles, by_tier: byTier });
+  });
+
+  // ---- order ledger (line list + shipping angle) ------------------
+  app.get('/api/admin/reports/order-ledger', adminMw, async (c) => {
+    const db = d1(c.env);
+    const { from, to } = range(c);
+    const p = [from, to];
+    const [rows, tiles, byFulfilment, byCarrier] = await Promise.all([
+      db.many(
+        `SELECT id, date(created_at) AS day, COALESCE(NULLIF(source,''),'storefront') AS source,
+                COALESCE(customer_name,'-') AS customer, status, payment_method, payment_status,
+                COALESCE(fulfilment,'pickup') AS fulfilment, ship_carrier, tracking_number,
+                ship_fee_cents/100.0 AS ship_fee, total_cents/100.0 AS total
+           FROM orders WHERE date(created_at) BETWEEN ? AND ? ORDER BY created_at DESC LIMIT 500`, ...p),
+      db.one(
+        `SELECT COUNT(*) AS n, COALESCE(SUM(total_cents),0)/100.0 AS revenue,
+                COALESCE(SUM(CASE WHEN payment_status != 'paid' THEN total_cents ELSE 0 END),0)/100.0 AS unpaid,
+                COALESCE(SUM(ship_fee_cents),0)/100.0 AS shipping
+           FROM orders WHERE date(created_at) BETWEEN ? AND ?`, ...p),
+      db.many(
+        `SELECT COALESCE(fulfilment,'pickup') AS fulfilment, COUNT(*) AS n,
+                COALESCE(SUM(ship_fee_cents),0)/100.0 AS ship_fee, COALESCE(SUM(total_cents),0)/100.0 AS total
+           FROM orders WHERE date(created_at) BETWEEN ? AND ? GROUP BY fulfilment ORDER BY n DESC`, ...p),
+      db.many(
+        `SELECT COALESCE(ship_carrier,'(none)') AS carrier, COUNT(*) AS n,
+                SUM(CASE WHEN tracking_number IS NOT NULL THEN 1 ELSE 0 END) AS tracked,
+                COALESCE(SUM(ship_fee_cents),0)/100.0 AS ship_fee
+           FROM orders WHERE date(created_at) BETWEEN ? AND ? AND COALESCE(fulfilment,'pickup') != 'pickup'
+          GROUP BY ship_carrier ORDER BY n DESC`, ...p),
+    ]);
+    return c.json({ from, to, orders: rows, tiles, by_fulfilment: byFulfilment, by_carrier: byCarrier });
+  });
+
+  // ---- users & staff ---------------------------------------------
+  app.get('/api/admin/reports/users-staff', adminMw, async (c) => {
+    const db = d1(c.env);
+    const [rows, byRole, tiles] = await Promise.all([
+      db.many(
+        `SELECT u.id, u.name, u.email, u.employee_no, u.admin_role,
+                CASE WHEN u.pin_hash IS NOT NULL THEN 'yes' ELSE 'no' END AS pin_set,
+                CASE WHEN COALESCE(u.disabled,0) = 1 THEN 'disabled'
+                     WHEN COALESCE(u.is_archived,0) = 1 THEN 'archived'
+                     ELSE 'active' END AS state,
+                date(u.created_at) AS joined,
+                (SELECT MAX(ap.last_seen) FROM admin_presence ap WHERE ap.user_id = u.id) AS last_seen,
+                m.specialty, m.role AS staff_role
+           FROM users u
+           LEFT JOIN mechanics m ON m.user_id = u.id
+          WHERE u.is_staff = 1 OR COALESCE(u.is_admin,0) = 1
+          ORDER BY state ASC, u.name ASC`),
+      db.many(
+        `SELECT COALESCE(admin_role,'-') AS role, COUNT(*) AS n
+           FROM users WHERE is_staff = 1 OR COALESCE(is_admin,0) = 1 GROUP BY admin_role ORDER BY n DESC`),
+      db.one(
+        `SELECT COUNT(*) AS total,
+                SUM(CASE WHEN COALESCE(disabled,0) = 0 AND COALESCE(is_archived,0) = 0 THEN 1 ELSE 0 END) AS active,
+                SUM(CASE WHEN COALESCE(disabled,0) = 1 THEN 1 ELSE 0 END) AS disabled
+           FROM users WHERE is_staff = 1 OR COALESCE(is_admin,0) = 1`),
+    ]);
+    const roleDefs = await db.many('SELECT code, label, rank, can_manage, hidden_tabs FROM roles ORDER BY rank ASC');
+    return c.json({ staff: rows, by_role: byRole, tiles, roles: roleDefs.map((r) => ({ code: r.code, label: r.label, rank: r.rank, can_manage: r.can_manage, hidden_tabs: (() => { try { return JSON.parse(r.hidden_tabs || '[]').length; } catch { return 0; } })() })) });
+  });
+
+  // ---- setup / configuration snapshot --------------------------
+  app.get('/api/admin/reports/setup-config', adminMw, async (c) => {
+    const db = d1(c.env);
+    const s = (await db.one('SELECT * FROM shop_settings ORDER BY id LIMIT 1')) || {};
+    const has = (v) => (v == null || v === '' ? 'no' : 'yes');
+    const [counts, roles] = await Promise.all([
+      db.one(
+        `SELECT (SELECT COUNT(*) FROM users WHERE is_staff = 0 AND COALESCE(is_admin,0) = 0) AS customers,
+                (SELECT COUNT(*) FROM users WHERE is_staff = 1 OR COALESCE(is_admin,0) = 1) AS staff,
+                (SELECT COUNT(*) FROM products WHERE is_active = 1) AS products,
+                (SELECT COUNT(*) FROM suppliers WHERE is_active = 1) AS suppliers,
+                (SELECT COUNT(*) FROM coupons WHERE is_active = 1) AS coupons`),
+      db.many('SELECT code, label, rank FROM roles ORDER BY rank ASC'),
+    ]);
+    return c.json({
+      company: { name: s.company_name || null, address: s.address || null, phone: s.phone || null, email: s.email || null, country: s.country || null },
+      storefront: {
+        public_pricing: !!s.storefront_prices,
+        pos_enforce_login: !!s.pos_enforce_login,
+        pos_enforce_customer: !!s.pos_enforce_customer,
+        pos_default_fulfilment: s.pos_default_fulfilment || '(ask each time)',
+      },
+      print: { logo_on_invoice: !!s.print_logo_on_invoice, default_template: s.default_print_template || null, quote_valid_days: s.quote_valid_days || null },
+      shipping_origin: { name: s.ship_origin_name || null, city: s.ship_origin_city || null, parish: s.ship_origin_parish || null, country: s.ship_origin_country || null },
+      carriers: {
+        dhl: { enabled: !!s.carrier_dhl_enabled, account: has(s.carrier_dhl_account), secret: has(c.env.DHL_API_KEY) },
+        fedex: { enabled: !!s.carrier_fedex_enabled, account: has(s.carrier_fedex_account), secret: has(c.env.FEDEX_CLIENT_ID) },
+        knutsford: { enabled: !!s.carrier_knutsford_enabled },
+        manual: { enabled: s.carrier_manual_enabled == null ? true : !!s.carrier_manual_enabled, flat_fee: Number(s.ship_local_flat_usd) || 0 },
+      },
+      card_payment: { fygaro_enabled: !!s.fygaro_enabled, button_configured: has(s.fygaro_button_id), secret: has(c.env.FYGARO_JWT_SECRET), currency: s.fygaro_currency || 'JMD' },
+      counts,
+      roles,
+    });
+  });
+
+  // ---- custom inventory (configurable columns + filters) --------
+  app.get('/api/admin/reports/inventory-custom', adminMw, async (c) => {
+    const db = d1(c.env);
+    const ALL_COLS = ['sku', 'barcode', 'category', 'bin', 'supplier', 'stock', 'threshold', 'cost', 'retail', 'margin', 'age'];
+    const want = String(c.req.query('cols') || 'category,stock,retail')
+      .split(',').map((x) => x.trim()).filter((x) => ALL_COLS.includes(x));
+    const cols = want.length ? want : ['category', 'stock', 'retail'];
+
+    const where = ['1=1'];
+    const binds = [];
+    const active = String(c.req.query('active') || '1');
+    if (active === '1') where.push('pr.is_active = 1');
+    else if (active === '0') where.push('pr.is_active = 0');
+    const cat = c.req.query('category');
+    if (cat) { where.push('pr.category = ?'); binds.push(cat); }
+    const sup = c.req.query('supplier_id');
+    if (sup) { where.push('pr.supplier_id = ?'); binds.push(parseInt(sup, 10) || 0); }
+    const stock = String(c.req.query('stock') || 'all');
+    if (stock === 'in') where.push('pr.stock_count > 0');
+    else if (stock === 'out') where.push('pr.stock_count <= 0');
+    else if (stock === 'low') where.push('pr.stock_count <= pr.low_threshold');
+
+    const rows = await db.many(
+      `SELECT pr.img, pr.name, pr.sku, pr.barcode, COALESCE(pr.category,'-') AS category,
+              pr.bin_location AS bin, COALESCE(sp.name,'-') AS supplier,
+              pr.stock_count AS stock, pr.low_threshold AS threshold,
+              COALESCE(pr.cost_cents,0)/100.0 AS cost, pr.price_cents/100.0 AS retail,
+              (pr.price_cents - COALESCE(pr.cost_cents,0))/100.0 AS margin,
+              CAST(julianday('now') - julianday(pr.created_at) AS INTEGER) AS age
+         FROM products pr LEFT JOIN suppliers sp ON sp.id = pr.supplier_id
+        WHERE ${where.join(' AND ')}
+        ORDER BY pr.name ASC LIMIT 2000`, ...binds);
+
+    const [cats, sups] = await Promise.all([
+      db.many(`SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND category != '' ORDER BY category`),
+      db.many(`SELECT id, name FROM suppliers WHERE is_active = 1 ORDER BY name`),
+    ]);
+
+    const keep = ['name', ...cols];
+    const trimmed = rows.map((r) => { const o = {}; keep.forEach((k) => { o[k] = r[k]; }); return o; });
+    const totals = {
+      name: `${rows.length} SKUs`,
+      stock: rows.reduce((a, r) => a + Number(r.stock || 0), 0),
+      cost: Math.round(rows.reduce((a, r) => a + Number(r.stock || 0) * Number(r.cost || 0), 0) * 100) / 100,
+      retail: Math.round(rows.reduce((a, r) => a + Number(r.stock || 0) * Number(r.retail || 0), 0) * 100) / 100,
+    };
+    totals.margin = Math.round((totals.retail - totals.cost) * 100) / 100;
+    return c.json({
+      cols, rows: trimmed, totals,
+      all_cols: ALL_COLS,
+      facets: { categories: cats.map((x) => x.category), suppliers: sups },
+    });
+  });
+
+  // ---- warehouse activity + bin occupancy --------------------
+  app.get('/api/admin/reports/warehouse', adminMw, async (c) => {
+    const db = d1(c.env);
+    const { from, to } = range(c);
+    const p = [from, to];
+    const [byKind, topMoved, byPerson, net, bins, unbinned, counts] = await Promise.all([
+      db.many(`SELECT kind, COUNT(*) AS n, COALESCE(SUM(ABS(qty_delta)),0) AS units
+                 FROM warehouse_activity WHERE date(created_at) BETWEEN ? AND ? GROUP BY kind ORDER BY n DESC`, ...p),
+      db.many(`SELECT COALESCE(pr.name, wa.product_img) AS product, COUNT(*) AS moves,
+                      COALESCE(SUM(wa.qty_delta),0) AS net_delta
+                 FROM warehouse_activity wa LEFT JOIN products pr ON pr.img = wa.product_img
+                WHERE date(wa.created_at) BETWEEN ? AND ? GROUP BY product ORDER BY moves DESC LIMIT 25`, ...p),
+      db.many(`SELECT COALESCE(m.name,'-') AS person, COUNT(*) AS moves
+                 FROM warehouse_activity wa LEFT JOIN mechanics m ON m.id = wa.performed_by
+                WHERE date(wa.created_at) BETWEEN ? AND ? GROUP BY m.name ORDER BY moves DESC`, ...p),
+      db.one(`SELECT COALESCE(SUM(qty_delta),0) AS net FROM warehouse_activity WHERE date(created_at) BETWEEN ? AND ?`, ...p),
+      db.many(`SELECT COALESCE(NULLIF(bin_location,''),'(unbinned)') AS bin, COUNT(*) AS skus, COALESCE(SUM(stock_count),0) AS units
+                 FROM products WHERE is_active = 1 GROUP BY bin ORDER BY units DESC LIMIT 50`),
+      db.one(`SELECT COUNT(*) AS n FROM products WHERE is_active = 1 AND (bin_location IS NULL OR bin_location = '')`),
+      db.many(`SELECT count_number, scope, status, date(started_at) AS started, total_items, total_variance
+                 FROM stock_counts ORDER BY started_at DESC LIMIT 15`),
+    ]);
+    return c.json({ from, to, by_kind: byKind, top_moved: topMoved, by_person: byPerson, net_delta: net.net, bins, unbinned: unbinned.n, recent_counts: counts });
+  });
+
+  // ---- audit log (synthesized activity feed) ----------------
+  app.get('/api/admin/reports/audit-log', adminMw, async (c) => {
+    const db = d1(c.env);
+    const { from, to } = range(c);
+    // date range is inclusive of the whole 'to' day
+    const lo = from + ' 00:00:00';
+    const hi = to + ' 23:59:59';
+    const p = [lo, hi];
+    const feed = await db.many(
+      `SELECT * FROM (
+         SELECT wa.created_at AS at, 'Warehouse' AS area, 'Stock ' || wa.kind AS action,
+                COALESCE(pr.name, wa.product_img, '') || ' (' || COALESCE(wa.qty_delta,0) || ')' AS detail,
+                COALESCE(m.name,'-') AS by, NULL AS amount
+           FROM warehouse_activity wa LEFT JOIN products pr ON pr.img = wa.product_img
+           LEFT JOIN mechanics m ON m.id = wa.performed_by
+          WHERE wa.created_at BETWEEN ? AND ?
+         UNION ALL
+         SELECT pt.created_at AS at, 'Loyalty' AS area, 'Points ' || pt.reason AS action,
+                'user #' || pt.user_id || ' ' || (CASE WHEN pt.delta >= 0 THEN '+' ELSE '' END) || pt.delta AS detail,
+                '-' AS by, NULL AS amount
+           FROM points_transactions pt WHERE pt.created_at BETWEEN ? AND ?
+         UNION ALL
+         SELECT gt.created_at AS at, 'Gift card' AS area, 'Gift card ' || gt.reason AS action,
+                gt.reference AS detail, COALESCE(u.name,'-') AS by, gt.delta_cents/100.0 AS amount
+           FROM gift_card_transactions gt LEFT JOIN users u ON u.id = gt.performed_by
+          WHERE gt.created_at BETWEEN ? AND ?
+         UNION ALL
+         SELECT ps.created_at AS at, 'POS' AS area, 'Sale voided' AS action,
+                COALESCE(ps.receipt_number,'#' || ps.id) AS detail, COALESCE(ps.cashier_name,'-') AS by, ps.total_cents/100.0 AS amount
+           FROM pos_sales ps WHERE ps.voided = 1 AND ps.created_at BETWEEN ? AND ?
+         UNION ALL
+         SELECT pr2.created_at AS at, 'POS' AS area, 'Return / refund' AS action,
+                COALESCE(pr2.return_number,'#' || pr2.id) || ' (' || COALESCE(pr2.refund_method,'') || ')' AS detail,
+                COALESCE(u.name,'-') AS by, pr2.refund_cents/100.0 AS amount
+           FROM pos_returns pr2 LEFT JOIN users u ON u.id = pr2.processed_by
+          WHERE pr2.created_at BETWEEN ? AND ?
+         UNION ALL
+         SELECT o.created_at AS at, 'Orders' AS area, 'Order ' || o.status AS action,
+                '#' || o.id || ' ' || COALESCE(o.customer_name,'') AS detail, '-' AS by, o.total_cents/100.0 AS amount
+           FROM orders o WHERE o.status NOT IN ('pending') AND o.created_at BETWEEN ? AND ?
+       ) ORDER BY at DESC LIMIT 500`,
+      ...p, ...p, ...p, ...p, ...p, ...p);
+    const byArea = {};
+    for (const row of feed) byArea[row.area] = (byArea[row.area] || 0) + 1;
+    return c.json({ from, to, feed, by_area: Object.keys(byArea).map((k) => ({ area: k, n: byArea[k] })).sort((a, b) => b.n - a.n) });
+  });
 }
