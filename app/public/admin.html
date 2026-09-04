@@ -2714,7 +2714,10 @@ function posPageSize(){
 function posHighlightSel(){
   var results = document.getElementById('posResults');
   if (!results) return;
-  var rows = results.querySelectorAll('[data-img]');
+  // Row/card containers only -- the per-row checkbox and the "+" button also
+  // carry data-img, so a bare [data-img] query returns several nodes per
+  // product and throws POS_SEL_INDEX (an index into the product list) off.
+  var rows = results.querySelectorAll('.posCard,.posRow');
   rows.forEach(function(row, i){
     if (i === POS_SEL_INDEX) {
       row.style.outline = '3px solid var(--red)';
@@ -4637,17 +4640,19 @@ async function renderPOS(panel){
       drawCart();
     }
   });
-  // ↑/↓ while the cursor is in the scan box scroll the results list itself,
-  // so the operator can read down a long match set without moving focus off
-  // the box they're keying part numbers into.
+  // ↑/↓ while the cursor is in the scan box walk the results list -- the
+  // highlight moves one row per press and scrolls into view with it, so the
+  // operator can read down a long match set without moving focus off the box
+  // they're keying part numbers into. (Enter here still submits a scan.)
   document.getElementById('posScan').addEventListener('keydown', function(e){
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-    var scroll = document.getElementById('posResultsScroll');
-    if (!scroll) return;
+    var results = document.getElementById('posResults');
+    var products = (results && results.__posProducts) || [];
+    if (!products.length) return;
     e.preventDefault();
-    // One row per press -- a card in grid view, a line in list/compact.
-    var step = POS_PREFS.view === 'grid' ? 150 : (POS_PREFS.view === 'compact' ? 36 : 46);
-    scroll.scrollBy({ top: e.key === 'ArrowDown' ? step : -step, behavior: 'smooth' });
+    if (e.key === 'ArrowDown') POS_SEL_INDEX = Math.min(products.length - 1, POS_SEL_INDEX + 1);
+    else POS_SEL_INDEX = Math.max(0, POS_SEL_INDEX - 1);
+    posHighlightSel();
   });
   document.getElementById('posCat').addEventListener('change', drawGrid);
   document.getElementById('posCondition').addEventListener('change', drawGrid);
