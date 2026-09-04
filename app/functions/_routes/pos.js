@@ -262,6 +262,18 @@ export default function mount(app) {
     });
   });
 
+  // Staff who can unlock a POS terminal: anyone with a PIN set. Used by the
+  // lock screen when shop_settings.pos_enforce_login is on. Name + id only --
+  // the PIN itself is checked by POST /api/admin/staff/pin-verify.
+  app.get('/api/admin/pos/operators', adminMw, async (c) => {
+    const rows = await d1(c.env).many(
+      `SELECT id, name FROM users
+        WHERE pin_hash IS NOT NULL AND is_staff = 1 AND (disabled IS NULL OR disabled = 0)
+        ORDER BY name`
+    );
+    return c.json({ operators: rows });
+  });
+
   app.get('/api/admin/pos/walkin-customer', adminMw, async (c) => {
     const row = await d1(c.env).one(
       "SELECT id, name, account_number FROM users WHERE email = 'walkin@mortysautoparts.local' LIMIT 1"

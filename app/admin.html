@@ -2403,6 +2403,45 @@ function mountImageWidget(containerId, hiddenId, opts){
 var POS_REDRAW = null;   // set by renderPOS; lets code outside it refresh the panel
 var POS_DRAWCART = null; // set by renderPOS; lets the persistent keydown listener redraw just the cart
 var POS_SEL_INDEX = -1;  // legacy-keyboard-mode arrow-key selection into the current results list
+
+// Terminal rules from shop_settings (fetched at the top of renderPOS). Off by
+// default so nothing changes until a manager turns them on under Settings.
+var POS_RULES = { enforce_login: false, enforce_customer: false, default_fulfilment: '' };
+// The operator who unlocked this terminal (pos_enforce_login). Held in
+// sessionStorage so a mid-shift reload doesn't force another PIN, but cleared
+// by posResetTicket() so the terminal re-locks after every transaction.
+var POS_OP = null;
+try { POS_OP = JSON.parse(sessionStorage.getItem('mh_pos_op') || 'null'); } catch (_) { POS_OP = null; }
+function posSaveOp(){
+  try { POS_OP ? sessionStorage.setItem('mh_pos_op', JSON.stringify(POS_OP)) : sessionStorage.removeItem('mh_pos_op'); } catch (_) {}
+}
+// Guard shared by checkout / quote / save-as-order when pos_enforce_customer
+// is on: a real customer (not the walk-in account) must be attached first.
+function posRequireCustomer(){
+  if (!POS_RULES.enforce_customer) return true;
+  if (POS.customer && !POS.customer.is_walkin) return true;
+  posToast('Attach a customer before this transaction — terminal rule.', true);
+  var cs = document.getElementById('posCustSearch'); if (cs) cs.focus();
+  return false;
+}
+// Asked once when a customer is attached and no default delivery method is set.
+function posAskFulfilment(){
+  posModal('How does this order leave?',
+    '<div style="display:flex;flex-direction:column;gap:8px">' +
+      [['pickup','🏪 Counter pickup'], ['delivery','🚚 Delivery'], ['shipping','📦 Shipping / courier']].map(function(o){
+        return '<button type="button" class="btn" data-ful="' + o[0] + '" style="padding:13px;font-size:13.5px;text-align:left;font-weight:700">' + o[1] + '</button>';
+      }).join('') +
+    '</div>', 380);
+  var wrap = document.getElementById('mhPosModal');
+  if (wrap) wrap.querySelectorAll('[data-ful]').forEach(function(b){
+    b.addEventListener('click', function(){
+      POS.fulfilment = b.getAttribute('data-ful');
+      if (POS.fulfilment === 'pickup') POS.ship.fee = 0;
+      posSaveState(); posCloseModal();
+      if (POS_REDRAW) POS_REDRAW();
+    });
+  });
+}
 // Checkbox multi-select on the results list -- {img: product} for whatever's
 // currently checked. Scoped to the current page on purpose: it's cleared on
 // every loadGrid() (new search/filter/page), so a checkbox can never point
@@ -2475,6 +2514,8 @@ function posSaveState(){
 function posResetTicket(){
   POS = posBlankTicket();
   posSaveState();
+  // Terminal rule: the next transaction starts from the lock screen.
+  if (POS_RULES.enforce_login) { POS_OP = null; posSaveOp(); }
 }
 
 // pos_holds / pos_quotes / pos_favourites store items_json as Postgres JSONB.
@@ -2837,6 +2878,63 @@ function posAddToCart(p, qty){
 // =============================================================================
 //  MAIN PANEL
 // =============================================================================
+// Lock screen shown when shop_settings.pos_enforce_login is on and no operator
+// has unlocked the terminal yet (or the last transaction re-locked it). Pick a
+// name, key the PIN, and POST /api/admin/staff/pin-verify -- the PIN must
+// belong to the picked person.
+async function posRenderLockScreen(panel){
+  var ops = [];
+  try { ops = (await api('/api/admin/pos/operators')).operators || []; } catch (_) {}
+  panel.innerHTML =
+    '<div style="min-height:60vh;display:flex;align-items:center;justify-content:center;padding:30px">' +
+      '<div style="background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.18);padding:26px 26px 22px;width:100%;max-width:360px;text-align:center">' +
+        '<div style="font-size:40px;line-height:1">🔒</div>' +
+        '<h2 style="margin:8px 0 2px;color:var(--heading);font-size:19px">POS locked</h2>' +
+        '<p style="margin:0 0 16px;color:var(--muted);font-size:12.5px">Choose your name and enter your PIN to start.</p>' +
+        (ops.length
+          ? '<label class="lbl" style="text-align:left">Operator</label>' +
+            '<select id="lockUser" class="fld" style="margin-bottom:10px">' +
+              '<option value="">— select —</option>' +
+              ops.map(function(o){ return '<option value="' + o.id + '">' + esc(o.name) + '</option>'; }).join('') +
+            '</select>' +
+            '<label class="lbl" style="text-align:left">PIN</label>' +
+            '<input id="lockPin" class="fld" type="password" inputmode="numeric" autocomplete="off" autofocus style="letter-spacing:4px;text-align:center;font-size:16px"/>' +
+            '<button type="button" id="lockGo" class="btn ok" style="width:100%;margin-top:14px;padding:11px;font-weight:800">Unlock terminal</button>' +
+            '<div id="lockMsg" style="font-size:12px;margin-top:9px;min-height:15px;color:#b91c1c"></div>'
+          : '<div style="color:#b91c1c;font-size:12.5px">No staff PINs are set yet. A manager can set one under <b>Staff → each person → PIN</b>, or turn this rule off in <b>Settings</b>.</div>') +
+      '</div>' +
+    '</div>';
+  if (!ops.length) return;
+  var sel = document.getElementById('lockUser');
+  var pin = document.getElementById('lockPin');
+  var msg = document.getElementById('lockMsg');
+  var go  = document.getElementById('lockGo');
+  async function unlock(){
+    var uid = parseInt(sel.value, 10);
+    if (!uid) { msg.textContent = 'Pick your name first.'; return; }
+    if (!pin.value.trim()) { msg.textContent = 'Enter your PIN.'; return; }
+    go.disabled = true; msg.style.color = 'var(--muted)'; msg.textContent = 'Checking…';
+    try {
+      var res = await api('/api/admin/staff/pin-verify', { method: 'POST', body: { pin: pin.value.trim(), purpose: 'pos' } });
+      if (!res.user || res.user.id !== uid) {
+        msg.style.color = '#b91c1c';
+        msg.textContent = 'That PIN does not match ' + (sel.options[sel.selectedIndex].text) + '.';
+        go.disabled = false; pin.value = ''; pin.focus();
+        return;
+      }
+      POS_OP = { id: res.user.id, name: res.user.name, rep_id: res.user.rep_id || null };
+      posSaveOp();
+      renderPOS(panel);
+    } catch (e) {
+      msg.style.color = '#b91c1c';
+      msg.textContent = e.message || 'PIN not recognised.';
+      go.disabled = false; pin.value = ''; pin.focus();
+    }
+  }
+  go.addEventListener('click', unlock);
+  pin.addEventListener('keydown', function(e){ if (e.key === 'Enter') { e.preventDefault(); unlock(); } });
+}
+
 async function renderPOS(panel){
   if (!can('pos.access')) {
     panel.innerHTML = '<div style="padding:60px 20px;text-align:center;color:var(--muted)">' +
@@ -2846,6 +2944,19 @@ async function renderPOS(panel){
     return;
   }
   POS = posLoadState();
+
+  // Terminal rules (operator PIN unlock, mandatory customer, default delivery
+  // method). Fetched here so the flags are current every time the panel opens;
+  // absent columns / a failed call just leave every rule off.
+  try {
+    var __st = (await api('/api/admin/settings')).settings || {};
+    POS_RULES.enforce_login    = !!__st.pos_enforce_login;
+    POS_RULES.enforce_customer = !!__st.pos_enforce_customer;
+    POS_RULES.default_fulfilment = __st.pos_default_fulfilment || '';
+  } catch (_) {}
+  if (POS_RULES.enforce_login && !POS_OP) return posRenderLockScreen(panel);
+  // Credit the ticket to the unlocked operator by default.
+  if (POS_OP && !POS.rep) { POS.rep = { id: POS_OP.rep_id || 'self', name: POS_OP.name }; posSaveState(); }
 
   // Staff list for the rep picker. A till that can't say who sold the part
   // can't pay commission on it, so this loads with the panel rather than
@@ -3263,7 +3374,10 @@ async function renderPOS(panel){
       // header is clipped when the cart is collapsed to a strip so the parts
       // search can have the whole width; this one never goes away.
       '<span id="posFootCart" style="white-space:nowrap;flex-shrink:0;font-weight:800" title="Items in the cart">🛒 <span id="posFootCartN">0</span></span>' +
-      '<span id="posFootUser" style="margin-left:auto;white-space:nowrap;opacity:.92;flex-shrink:0" title="Signed in">👤 ' + esc(CURRENT_ADMIN_NAME || '—') + '</span>' +
+      '<span id="posFootUser" style="margin-left:auto;white-space:nowrap;opacity:.92;flex-shrink:0" title="' + (POS_RULES.enforce_login ? 'Operator on this terminal' : 'Signed in') + '">👤 ' + esc((POS_RULES.enforce_login && POS_OP ? POS_OP.name : CURRENT_ADMIN_NAME) || '—') + '</span>' +
+      (POS_RULES.enforce_login
+        ? '<button type="button" id="posFootLock" title="Lock the terminal for the next operator" style="background:rgba(255,255,255,.16);color:#fff;border:0;border-radius:5px;height:20px;padding:0 8px;font-size:11px;font-weight:700;line-height:1;cursor:pointer;flex-shrink:0">🔒 Lock</button>'
+        : '') +
       '<span style="opacity:.3;flex-shrink:0">|</span>' +
       '<span id="posFootCount" style="white-space:nowrap;opacity:.92;flex-shrink:0">—</span>' +
       '<span style="opacity:.3;flex-shrink:0">|</span>' +
@@ -4497,6 +4611,19 @@ async function renderPOS(panel){
     }
     POS.redeemPts = 0;
     posSaveState();
+    // A real customer was just attached: apply the default delivery method if
+    // one is set, otherwise ask (pickup / delivery / shipping).
+    if (m && !m.is_walkin) {
+      if (POS_RULES.default_fulfilment) {
+        if (POS.fulfilment !== POS_RULES.default_fulfilment) {
+          POS.fulfilment = POS_RULES.default_fulfilment;
+          if (POS.fulfilment === 'pickup') POS.ship.fee = 0;
+          posSaveState();
+        }
+      } else if (POS.fulfilment === 'pickup') {
+        setTimeout(posAskFulfilment, 60);
+      }
+    }
   }
   var custSearchInp = document.getElementById('posCustSearch');
   var custResults = document.getElementById('posCustResults');
@@ -4560,6 +4687,13 @@ async function renderPOS(panel){
     refreshBar();
   });
   document.getElementById('posShiftBtn').addEventListener('click', function(){ posShiftModal(shiftSession, refreshBar); });
+  var ftLock = document.getElementById('posFootLock');
+  if (ftLock) ftLock.addEventListener('click', async function(){
+    if (POS.cart.length && !(await posConfirm('Lock the terminal? The current cart stays parked for the next operator.', { ok:'Lock' }))) return;
+    POS_OP = null; posSaveOp();
+    renderPOS(panel);
+  });
+
   var ftTheme = document.getElementById('posFootTheme');
   if (ftTheme) ftTheme.addEventListener('click', function(){
     var tb = document.getElementById('themeToggle');
@@ -4850,12 +4984,13 @@ async function renderPOS(panel){
     if (!POS.cart.length) return posToast('Cart is empty.', true);
     if (POS.cart.some(function(i){ return !(i.price > 0); }))
       return posToast('Enter a price on every line before completing a sale, or save it as a quote instead.', true);
+    if (!posRequireCustomer()) return;
     // Operators without pos.finalise_invoice don't ring the sale -- they save
     // an order and a cashier takes payment / mints the invoice.
     if (!can('pos.finalise_invoice')) return posSaveCartAsOrder(refreshBar);
     openTenderModal(refreshBar);
   });
-  document.getElementById('posSaveQuote').addEventListener('click', function(){ posSaveCartAsQuote(refreshBar); });
+  document.getElementById('posSaveQuote').addEventListener('click', function(){ if (!posRequireCustomer()) return; posSaveCartAsQuote(refreshBar); });
   document.getElementById('posClear').addEventListener('click', async function(){
     if (!POS.cart.length) return;
     if (!(await posConfirm('Empty the cart?', { ok:'Empty', danger:true }))) return;
@@ -5492,6 +5627,7 @@ function posSaveCartAsOrder(after){
   if (!POS.cart.length) return posToast('Cart is empty.', true);
   if (POS.cart.some(function(i){ return !(i.price > 0); }))
     return posToast('Enter a price on every line first.', true);
+  if (!posRequireCustomer()) return;
   var t = posTotals();
   var custName = POS.custName || (POS.customer && POS.customer.name) || 'Cash Customer – Walk-in';
   var sh = POS.ship || {};
@@ -12614,6 +12750,30 @@ async function renderSettings(panel){
       '</div>' +
 
       '<div class="panel" style="margin-bottom:16px">' +
+        '<div style="padding:12px 16px;border-bottom:1px solid var(--line);font-weight:700;font-size:13px">🖥 POS terminal rules</div>' +
+        '<div style="padding:14px 16px;display:grid;gap:14px">' +
+          '<label style="display:flex;gap:9px;align-items:flex-start;font-size:13px;cursor:pointer">' +
+            '<input type="checkbox" id="setPosEnforceLogin" style="margin-top:2px;width:16px;height:16px"' + (s.pos_enforce_login ? ' checked' : '') + '/>' +
+            '<span><b>Require an operator to unlock the terminal</b>' +
+              '<br/><small style="color:var(--muted)">The POS opens locked. The operator picks their name and keys their PIN to start, and the terminal re-locks after every completed transaction. Set staff PINs under <b>Staff → each person</b>.</small></span>' +
+          '</label>' +
+          '<label style="display:flex;gap:9px;align-items:flex-start;font-size:13px;cursor:pointer">' +
+            '<input type="checkbox" id="setPosEnforceCustomer" style="margin-top:2px;width:16px;height:16px"' + (s.pos_enforce_customer ? ' checked' : '') + '/>' +
+            '<span><b>Require a customer on every transaction</b>' +
+              '<br/><small style="color:var(--muted)">Checkout, quote and save-as-order are blocked until a real customer — not “Cash Customer – Walk-in” — is attached.</small></span>' +
+          '</label>' +
+          '<div><label class="lbl">Delivery method when a customer is attached</label>' +
+            '<select id="setPosDefaultFul" class="fld">' +
+              '<option value=""' + (!s.pos_default_fulfilment ? ' selected' : '') + '>Ask the operator every time</option>' +
+              '<option value="pickup"' + (s.pos_default_fulfilment === 'pickup' ? ' selected' : '') + '>Default to counter pickup</option>' +
+              '<option value="delivery"' + (s.pos_default_fulfilment === 'delivery' ? ' selected' : '') + '>Default to delivery</option>' +
+              '<option value="shipping"' + (s.pos_default_fulfilment === 'shipping' ? ' selected' : '') + '>Default to shipping / courier</option>' +
+            '</select>' +
+            '<small style="color:var(--muted);display:block;margin-top:4px">When a customer is attached in the POS: a set default is applied silently; “Ask” pops a pickup / delivery / shipping chooser.</small></div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="panel" style="margin-bottom:16px">' +
         '<div style="padding:12px 16px;border-bottom:1px solid var(--line);font-weight:700;font-size:13px">📝 Notices &amp; messages</div>' +
         '<div style="padding:14px 16px;display:grid;gap:12px">' +
           '<div><label class="lbl">Invoice footer notice</label><textarea id="setInvoiceNotice" class="fld" rows="2">' + esc(s.invoice_notice || '') + '</textarea></div>' +
@@ -13091,6 +13251,9 @@ async function submitSettings(){
       receipt_notice: document.getElementById('setReceiptNotice').value.trim(),
       statement_notice: document.getElementById('setStatementNotice').value.trim(),
       storefront_prices: !!(document.getElementById('setStorefrontPrices') || {}).checked,
+      pos_enforce_login: !!(document.getElementById('setPosEnforceLogin') || {}).checked,
+      pos_enforce_customer: !!(document.getElementById('setPosEnforceCustomer') || {}).checked,
+      pos_default_fulfilment: (document.getElementById('setPosDefaultFul') || {}).value || null,
     };
     await api('/api/admin/settings', { method: 'PATCH', body: body });
     // Reflect immediately in POS_SHOP so a sale rung up right after saving

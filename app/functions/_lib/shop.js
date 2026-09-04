@@ -15,6 +15,9 @@ const FALLBACK = {
   receipt_notice: 'Returns within 14 days with this receipt. Electrical parts non-returnable.',
   statement_notice: 'Please settle any outstanding balance promptly. Contact us with any questions about this statement.',
   storefront_prices: false,
+  pos_enforce_login: 0,
+  pos_enforce_customer: 0,
+  pos_default_fulfilment: null,
 };
 
 export async function getShopSettings(env) {
@@ -23,6 +26,8 @@ export async function getShopSettings(env) {
     if (row) {
       row.print_logo_on_invoice = !!row.print_logo_on_invoice;
       row.storefront_prices = !!row.storefront_prices;
+      row.pos_enforce_login = !!row.pos_enforce_login;
+      row.pos_enforce_customer = !!row.pos_enforce_customer;
       return row;
     }
   } catch { /* table not migrated yet */ }

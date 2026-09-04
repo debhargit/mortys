@@ -54,8 +54,9 @@ export default function mount(app) {
     const b = await c.req.json().catch(() => ({}));
     const fields = ['company_name', 'address', 'country', 'phone', 'email', 'website',
       'print_logo_on_invoice', 'default_print_template', 'quote_valid_days',
-      'invoice_notice', 'receipt_notice', 'statement_notice', 'storefront_prices'];
-    const BITS = ['print_logo_on_invoice', 'storefront_prices'];
+      'invoice_notice', 'receipt_notice', 'statement_notice', 'storefront_prices',
+      'pos_enforce_login', 'pos_enforce_customer', 'pos_default_fulfilment'];
+    const BITS = ['print_logo_on_invoice', 'storefront_prices', 'pos_enforce_login', 'pos_enforce_customer'];
     const sets = []; const vals = [];
     for (const f of fields) if (b[f] !== undefined) { sets.push(`${f} = ?`); vals.push(BITS.includes(f) ? (b[f] ? 1 : 0) : b[f]); }
     if (!sets.length) return c.json({ error: 'Nothing to update' }, 400);
