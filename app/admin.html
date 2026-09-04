@@ -3060,6 +3060,13 @@ async function renderPOS(panel){
       // scrollbar (see .posResultsScroll below), mouse wheel and keyboard
       // scroll all just work on a focusable overflow:auto element.
       '<div style="' + (POS.cartFull ? 'display:none;' : 'display:flex;') + 'flex-direction:column;overflow:hidden;padding:14px;background:var(--card-soft2)">' +
+        // Title bar for this pane, sized and coloured to match the dark "🛒 CART"
+        // header on the cart pane so the two sit level across the split. Negative
+        // margins pull it out to the pane's padding edges; box-sizing + min-height
+        // lock its height to the cart header's (10px padding + a 32px control).
+        '<div style="display:flex;align-items:center;box-sizing:border-box;min-height:52px;padding:10px 12px;margin:-14px -14px 12px;background:#111827;color:#fff;flex-shrink:0">' +
+          '<b style="font-size:13px;letter-spacing:.5px">🔎 PARTS SEARCH WINDOW</b>' +
+        '</div>' +
         '<div style="flex-shrink:0">' +
         '<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;flex-wrap:wrap">' +
           '<input id="posScan" placeholder="⎾⏋ Scan, or qty*code → Enter" title="Type a quantity, *, then the barcode/part no. (e.g. 3*BMP-001) to add several units in one scan" autocomplete="off" style="width:230px;padding:9px 11px;border:2px solid #0891b2;border-radius:6px;font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace"/>' +
@@ -3511,8 +3518,20 @@ async function renderPOS(panel){
 
     results.querySelectorAll('[data-img]').forEach(function(row){
       row.addEventListener('click', function(e){
-        if (e.target && e.target.classList && e.target.classList.contains('posSelCk')) return;
+        if (e.target && e.target.classList && (e.target.classList.contains('posSelCk') || e.target.classList.contains('posAddBtn'))) return;
         var p = r.products.find(function(x){ return x.img === row.getAttribute('data-img'); });
+        if (!p) return;
+        posAddToCart(p, 1);
+        drawCart();
+      });
+    });
+    // Explicit "+" on every result row/card -- same add-to-cart as clicking the
+    // row, but visible so it's obvious the list feeds the cart. stopPropagation
+    // keeps the row's own click handler from firing a second add.
+    results.querySelectorAll('.posAddBtn').forEach(function(btn){
+      btn.addEventListener('click', function(e){
+        e.stopPropagation();
+        var p = r.products.find(function(x){ return x.img === btn.getAttribute('data-img'); });
         if (!p) return;
         posAddToCart(p, 1);
         drawCart();
@@ -3554,6 +3573,7 @@ async function renderPOS(panel){
         var stock = p.stock_count || 0;
         return '<div data-img="' + esc(p.img) + '" class="posCard" style="position:relative;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px;cursor:pointer;display:flex;flex-direction:column;gap:6px">' +
           '<input type="checkbox" class="posSelCk" data-img="' + esc(p.img) + '" title="Select for bulk add"' + (POS_LIST_SEL[p.img] ? ' checked' : '') + ' style="position:absolute;top:6px;left:6px;width:17px;height:17px;z-index:2;cursor:pointer"/>' +
+          '<button type="button" class="posAddBtn" data-img="' + esc(p.img) + '" title="Add to cart" aria-label="Add to cart" style="position:absolute;top:6px;right:6px;z-index:2;width:24px;height:24px;padding:0;border:0;border-radius:6px;background:var(--red);color:#fff;font-size:17px;font-weight:800;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center">+</button>' +
           posThumb(p, Math.round(100 * (POS_FONT_SCALES[POS_PREFS.fontSize]||1))) +
           '<div style="font-size:' + posFS(12) + ';font-weight:700;line-height:1.25">' + esc(p.name) + '</div>' +
           // Part No. at the same size as the product name above it, matching what
@@ -3600,6 +3620,7 @@ async function renderPOS(panel){
         (cols.bin ? '<span style="width:90px;flex-shrink:0">Bin</span>' : '') +
         (cols.qty ? '<span style="width:64px;flex-shrink:0;text-align:center">Qty</span>' : '') +
         (cols.price ? '<span style="width:80px;flex-shrink:0;text-align:right">Price</span>' : '') +
+        '<span style="width:30px;flex-shrink:0"></span>' +
       '</div>' +
       products.map(function(p){
         var stock = p.stock_count || 0;
@@ -3619,6 +3640,7 @@ async function renderPOS(panel){
           (cols.bin ? '<span style="width:90px;flex-shrink:0;font-size:' + posFS(compact?11:12) + ';color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(bin) + '</span>' : '') +
           (cols.qty ? '<span style="width:64px;flex-shrink:0;text-align:center;font-size:' + posFS(compact?11:12) + ';font-weight:700;color:' + posStockColor(p.stock_level) + '">' + stock + '</span>' : '') +
           (cols.price ? '<span style="width:80px;flex-shrink:0;text-align:right">' + posPriceHtml(p, posFS(compact?12:13)) + '</span>' : '') +
+          '<button type="button" class="posAddBtn" data-img="' + esc(p.img) + '" title="Add to cart" aria-label="Add to cart" style="width:26px;height:26px;flex-shrink:0;margin-top:-1px;padding:0;border:0;border-radius:6px;background:var(--red);color:#fff;font-size:17px;font-weight:800;line-height:1;cursor:pointer">+</button>' +
         '</div>';
       }).join('') +
     '</div>' +
@@ -4713,7 +4735,7 @@ async function renderPOS(panel){
   function posSetFullscreen(on){
     if (on) posDefaultRepToSignedInUser();
     document.body.classList.toggle('pos-fullscreen', on);
-    fsBtn.textContent = on ? '⛶ Exit full screen' : '⛶ Full screen';
+    fsBtn.textContent = on ? '⛶ EXIT FULL SCREEN' : '⛶ Full screen';
     // The header and sidebar have just appeared or vanished, so the shell has
     // moved and its height is now wrong -- re-measure after the reflow.
     requestAnimationFrame(posSizeShell);
@@ -4765,7 +4787,7 @@ async function renderPOS(panel){
   // rather than a full-width cart wedged under the still-visible header.
   if (POS.cartFull && !posInFullscreen()) {
     document.body.classList.add('pos-fullscreen');
-    fsBtn.textContent = '⛶ Exit full screen';
+    fsBtn.textContent = '⛶ EXIT FULL SCREEN';
     requestAnimationFrame(posSizeShell);
   }
   // The browser's own Escape-to-exit (or F11) on real fullscreen shouldn't
