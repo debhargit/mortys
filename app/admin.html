@@ -1780,6 +1780,11 @@ async function renderProducts(panel){
             cats.map(function(c){ return '<option value="' + c[0] + '">' + c[1] + '</option>'; }).join('') +
           '</select></div>' +
           '<div><label class="lbl">Condition</label><select id="npCondition" class="fld"><option value="USED" selected>USED</option><option value="NEW">NEW</option></select></div>' +
+          '<div style="grid-column:1/-1"><label class="lbl">Item type</label><select id="npItemType" class="fld">' +
+            '<option value="inventory">Inventory — a stocked part</option>' +
+            '<option value="tracked">Tracked — a counted non-warehouse item (e.g. tokens)</option>' +
+            '<option value="service">Service / fee — no stock concept (e.g. delivery, rent)</option>' +
+          '</select></div>' +
           '<div><label class="lbl">SKU</label><input id="npSku" placeholder="internal code" class="fld"/></div>' +
           '<div><label class="lbl">Barcode</label><input id="npBarcode" placeholder="UPC / EAN" class="fld"/></div>' +
           '<div><label class="lbl">Cost / buy price (USD)</label><input id="npCost" type="number" step="0.01" min="0" placeholder="0.00" class="fld"/></div>' +
@@ -1838,6 +1843,23 @@ async function renderProducts(panel){
       cost.addEventListener('input', recalc);
       mk.addEventListener('input', recalc);
     }
+    // Item type shapes which fields apply, same as the edit modal: a service /
+    // fee has no stock placement or low-stock threshold; a tracked item keeps
+    // the threshold but isn't warehouse-placed.
+    (function(){
+      var typeSel = document.getElementById('npItemType');
+      if (!typeSel) return;
+      var wrap = function(id){ var el = document.getElementById(id); return el ? el.parentElement : null; };
+      var lowW = wrap('npLow'), binW = wrap('npBin'), locW = wrap('npLocation');
+      var sync = function(){
+        var t = typeSel.value;
+        if (lowW) lowW.style.display = (t === 'service') ? 'none' : '';
+        if (binW) binW.style.display = (t === 'inventory') ? '' : 'none';
+        if (locW) locW.style.display = (t === 'inventory') ? '' : 'none';
+      };
+      typeSel.addEventListener('change', sync);
+      sync();
+    })();
     var jin = document.getElementById('npCopy'), jout = document.getElementById('npCopyResults');
     if (!jin || !jout) return;
     var jd = null, jseq = 0, jrows = [], jsel = -1;
@@ -1872,6 +1894,7 @@ async function renderProducts(panel){
       setV('npName', p.name); setV('npMakeModel', p.make_model);
       var catSel = document.getElementById('npCategory'); if (catSel && p.category) catSel.value = p.category;
       var condSel = document.getElementById('npCondition'); if (condSel && p.condition) condSel.value = p.condition;
+      var itSel = document.getElementById('npItemType'); if (itSel) { itSel.value = p.item_type || 'inventory'; itSel.dispatchEvent(new Event('change')); }
       setV('npCost', p.cost_usd); setV('npMarkup', p.markup_pct); setV('npPrice', p.price_usd);
       setV('npList', p.list_price_usd); setV('npLow', p.low_threshold);
       setV('npStockUom', p.stock_uom || 'each'); setV('npPurchUom', p.purchase_uom);
@@ -14917,6 +14940,7 @@ async function submitNewProduct(){
     fd.append('make_model', document.getElementById('npMakeModel').value.trim());
     fd.append('category', document.getElementById('npCategory').value);
     fd.append('condition', document.getElementById('npCondition').value);
+    fd.append('item_type', document.getElementById('npItemType').value || 'inventory');
     fd.append('price_usd', document.getElementById('npPrice').value || '0');
     fd.append('stock_count', document.getElementById('npStock').value || '0');
     fd.append('bin_location', document.getElementById('npBin').value.trim());
