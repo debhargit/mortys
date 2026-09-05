@@ -11,6 +11,8 @@
 //   GET /api/admin/bin/:bin
 import { d1 } from '../_lib/db.js';
 import { adminMw, managerMw } from '../_lib/guards.js';
+import { readUploadBody, putUpload } from '../_lib/uploads.js';
+import { fundLedger, recomputeBalanceCents } from '../_lib/petty_cash.js';
 
 const c2u = (c) => (c == null ? 0 : c / 100);
 const u2c = (u) => (u == null || u === '' ? null : Math.round(Number(u) * 100));
@@ -445,7 +447,7 @@ export default function mount(app) {
     // any other payout) never made it into the count -- subtract it from what
     // we expect to find, or every payout would read as an unexplained shortage.
     const po = await db.one(
-      "SELECT COALESCE(SUM(amount_cents),0) / 100.0 AS s FROM cash_payouts WHERE source_type = 'drawer' AND drawer_session_id = ?",
+      "SELECT COALESCE(SUM(amount_cents),0) / 100.0 AS s FROM cash_payouts WHERE source_type = 'drawer' AND voided = 0 AND drawer_session_id = ?",
       id);
     const expected = r2(c2u(sess.opening_float_cents) + (cs.s || 0) - (po.s || 0));
     const closing = Number(b.closing_amount || 0);
@@ -457,86 +459,304 @@ export default function mount(app) {
   });
 
   // ============ CASH PAYOUTS + PETTY CASH ============
+  // ---- expense categories ----
+  app.get('/api/admin/petty-cash-categories', adminMw, async (c) => {
+    const all = c.req.query('all') === '1';
+    const rows = await d1(c.env).many(
+      `SELECT id, name, is_active, sort_order FROM petty_cash_categories
+        ${all ? '' : 'WHERE is_active = 1'} ORDER BY sort_order, name`);
+    return c.json({ categories: rows });
+  });
+  app.post('/api/admin/petty-cash-categories', managerMw, async (c) => {
+    const db = d1(c.env);
+    const b = await c.req.json().catch(() => ({}));
+    const name = String(b.name || '').trim().slice(0, 80);
+    if (!name) return c.json({ error: 'A name is required' }, 400);
+    try {
+      const r = await db.run('INSERT INTO petty_cash_categories (name, sort_order) VALUES (?, ?)',
+        name, b.sort_order != null ? parseInt(b.sort_order, 10) : 99);
+      return c.json({ ok: true, id: r.meta.last_row_id });
+    } catch (e) {
+      if (String(e.message || '').includes('UNIQUE')) return c.json({ error: 'That category already exists' }, 400);
+      throw e;
+    }
+  });
+  app.patch('/api/admin/petty-cash-categories/:id', managerMw, async (c) => {
+    const b = await c.req.json().catch(() => ({}));
+    const sets = []; const vals = [];
+    if (b.name !== undefined) { sets.push('name = ?'); vals.push(String(b.name).trim().slice(0, 80)); }
+    if (b.is_active !== undefined) { sets.push('is_active = ?'); vals.push(b.is_active ? 1 : 0); }
+    if (b.sort_order !== undefined) { sets.push('sort_order = ?'); vals.push(parseInt(b.sort_order, 10) || 0); }
+    if (!sets.length) return c.json({ error: 'Nothing to update' }, 400);
+    vals.push(c.req.param('id'));
+    await d1(c.env).run(`UPDATE petty_cash_categories SET ${sets.join(', ')} WHERE id = ?`, ...vals);
+    return c.json({ ok: true });
+  });
+
+  // ---- payouts ----
   app.get('/api/admin/cash-payouts', adminMw, async (c) => {
     const db = d1(c.env);
-    const drawerId = c.req.query('drawer_session_id');
-    const fundId = c.req.query('fund_id');
+    const q = c.req.query();
     const where = []; const binds = [];
-    if (drawerId) { where.push('cp.drawer_session_id = ?'); binds.push(drawerId); }
-    if (fundId) { where.push('cp.fund_id = ?'); binds.push(fundId); }
+    if (q.drawer_session_id) { where.push('cp.drawer_session_id = ?'); binds.push(q.drawer_session_id); }
+    if (q.fund_id) { where.push('cp.fund_id = ?'); binds.push(q.fund_id); }
+    if (q.advance_status) { where.push('cp.advance_status = ?'); binds.push(q.advance_status); }
+    if (q.is_advance === '1') where.push('cp.is_advance = 1');
+    if (q.include_voided !== '1') where.push('cp.voided = 0');
     const rows = await db.many(
       `SELECT cp.id, cp.amount_cents / 100.0 AS amount_usd, cp.reason, cp.paid_to, cp.notes,
-              cp.source_type, cp.drawer_session_id, cp.fund_id, cp.created_at,
-              u.name AS authorized_by_name
-         FROM cash_payouts cp LEFT JOIN users u ON u.id = cp.authorized_by
+              cp.source_type, cp.drawer_session_id, cp.fund_id, cp.created_at, cp.voided,
+              cp.category_id, cp.receipt_ref, cp.receipt_url, cp.is_advance, cp.advance_to, cp.advance_status,
+              cat.name AS category, u.name AS authorized_by_name
+         FROM cash_payouts cp
+         LEFT JOIN users u ON u.id = cp.authorized_by
+         LEFT JOIN petty_cash_categories cat ON cat.id = cp.category_id
          ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
         ORDER BY cp.created_at DESC LIMIT 500`, ...binds);
     return c.json({ payouts: rows });
   });
+
   app.post('/api/admin/cash-payouts', managerMw, async (c) => {
     const db = d1(c.env);
     const me = c.get('user');
-    const b = await c.req.json().catch(() => ({}));
+    let file, body;
+    try { ({ file, body } = await readUploadBody(c, ['receipt'])); }
+    catch (e) { return c.json({ error: e.message }, e.status || 400); }
+    const b = body || {};
     const amount = Number(b.amount_usd || 0);
     if (!(amount > 0)) return c.json({ error: 'A positive amount is required' }, 400);
     if (!String(b.reason || '').trim()) return c.json({ error: 'A reason is required' }, 400);
     const sourceType = b.source_type === 'fund' ? 'fund' : 'drawer';
     const amountCents = u2c(amount);
+    const truthy = (v) => v === true || v === 'true' || v === '1' || v === 1;
+    const isAdvance = sourceType === 'fund' && truthy(b.is_advance);
+
+    let categoryId = null;
+    if (!isAdvance) {
+      categoryId = b.category_id ? parseInt(b.category_id, 10) : null;
+      if (sourceType === 'fund' && !categoryId)
+        return c.json({ error: 'Pick an expense category, or mark it a staff advance.' }, 400);
+      if (categoryId && !(await db.one('SELECT id FROM petty_cash_categories WHERE id = ? AND is_active = 1', categoryId)))
+        return c.json({ error: 'Unknown category' }, 400);
+    }
+
     const stmts = [];
+    let threshold = 0;
     if (sourceType === 'drawer') {
       const sess = await db.one('SELECT id FROM cash_drawer_sessions WHERE id = ? AND closed_at IS NULL', b.drawer_session_id);
       if (!sess) return c.json({ error: 'That cash drawer session is not open' }, 400);
     } else {
-      const fund = await db.one('SELECT id, balance_cents FROM petty_cash_funds WHERE id = ? AND is_active = 1', b.fund_id);
+      const fund = await db.one('SELECT id, balance_cents, receipt_threshold_cents FROM petty_cash_funds WHERE id = ? AND is_active = 1', b.fund_id);
       if (!fund) return c.json({ error: 'Petty cash fund not found' }, 404);
       if (fund.balance_cents < amountCents) return c.json({ error: 'That would take the fund below zero (balance is ' + (fund.balance_cents / 100).toFixed(2) + ')' }, 400);
+      threshold = fund.receipt_threshold_cents || 0;
       stmts.push({ sql: 'UPDATE petty_cash_funds SET balance_cents = balance_cents - ? WHERE id = ?', binds: [amountCents, fund.id] });
     }
+
+    const receiptRef = b.receipt_ref ? String(b.receipt_ref).trim().slice(0, 120) : null;
+    let receiptUrl = null;
+    if (file) {
+      try {
+        const up = await putUpload(c.env, { prefix: 'petty-cash', bytes: new Uint8Array(await file.arrayBuffer()), contentType: file.type, filename: file.name });
+        receiptUrl = up.url;
+      } catch (_) { /* uploads bucket not enabled -> keep the reference only */ }
+    }
+
     stmts.push({
-      sql: `INSERT INTO cash_payouts (amount_cents, reason, paid_to, notes, source_type, drawer_session_id, fund_id, authorized_by)
-            VALUES (?,?,?,?,?,?,?,?)`,
+      sql: `INSERT INTO cash_payouts
+        (amount_cents, reason, paid_to, notes, source_type, drawer_session_id, fund_id, authorized_by,
+         category_id, receipt_ref, receipt_url, is_advance, advance_to, advance_status)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       binds: [amountCents, String(b.reason).trim().slice(0, 200), b.paid_to ? String(b.paid_to).trim().slice(0, 200) : null,
         b.notes ? String(b.notes).trim().slice(0, 500) : null, sourceType,
         sourceType === 'drawer' ? parseInt(b.drawer_session_id, 10) : null,
-        sourceType === 'fund' ? parseInt(b.fund_id, 10) : null, me.id],
+        sourceType === 'fund' ? parseInt(b.fund_id, 10) : null, me.id,
+        categoryId, receiptRef, receiptUrl, isAdvance ? 1 : 0,
+        isAdvance ? (b.advance_to ? String(b.advance_to).trim().slice(0, 120) : null) : null,
+        isAdvance ? 'open' : null],
     });
+    await db.batch(stmts);
+    const warning = (threshold > 0 && amountCents >= threshold && !receiptRef && !receiptUrl)
+      ? 'A receipt is recommended for this amount.' : null;
+    return c.json({ ok: true, warning });
+  });
+
+  app.post('/api/admin/cash-payouts/:id/void', managerMw, async (c) => {
+    const db = d1(c.env);
+    const me = c.get('user');
+    const p = await db.one('SELECT * FROM cash_payouts WHERE id = ?', c.req.param('id'));
+    if (!p) return c.json({ error: 'Not found' }, 404);
+    if (p.voided) return c.json({ error: 'Already voided' }, 400);
+    const stmts = [{ sql: `UPDATE cash_payouts SET voided = 1, voided_by = ?, voided_at = CURRENT_TIMESTAMP WHERE id = ?`, binds: [me.id, p.id] }];
+    if (p.source_type === 'fund' && p.fund_id) {
+      stmts.push({ sql: 'UPDATE petty_cash_funds SET balance_cents = balance_cents + ? WHERE id = ?', binds: [p.amount_cents, p.fund_id] });
+      stmts.push({
+        sql: `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, ref, related_payout_id, created_by)
+              VALUES (?, 'void_reversal', ?, ?, ?, ?)`,
+        binds: [p.fund_id, p.amount_cents, 'void of payout #' + p.id, p.id, me.id],
+      });
+    }
     await db.batch(stmts);
     return c.json({ ok: true });
   });
 
+  app.post('/api/admin/cash-payouts/:id/settle-advance', managerMw, async (c) => {
+    const db = d1(c.env);
+    const me = c.get('user');
+    let file, body;
+    try { ({ file, body } = await readUploadBody(c, ['receipt'])); }
+    catch (e) { return c.json({ error: e.message }, e.status || 400); }
+    const b = body || {};
+    const p = await db.one('SELECT * FROM cash_payouts WHERE id = ?', c.req.param('id'));
+    if (!p || !p.is_advance) return c.json({ error: 'Not a staff advance' }, 404);
+    if (p.advance_status !== 'open') return c.json({ error: 'This advance is already ' + p.advance_status }, 400);
+    const how = b.how === 'expense' ? 'expense' : 'repay';
+    const stmts = [];
+    if (how === 'repay') {
+      stmts.push({ sql: `UPDATE cash_payouts SET advance_status = 'repaid', advance_settled_at = CURRENT_TIMESTAMP WHERE id = ?`, binds: [p.id] });
+      if (p.fund_id) {
+        stmts.push({ sql: 'UPDATE petty_cash_funds SET balance_cents = balance_cents + ? WHERE id = ?', binds: [p.amount_cents, p.fund_id] });
+        stmts.push({
+          sql: `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, ref, related_payout_id, created_by)
+                VALUES (?, 'advance_repay', ?, ?, ?, ?)`,
+          binds: [p.fund_id, p.amount_cents, 'advance #' + p.id + ' repaid', p.id, me.id],
+        });
+      }
+    } else {
+      const catId = b.category_id ? parseInt(b.category_id, 10) : null;
+      if (!catId) return c.json({ error: 'Pick a category to expense the advance to' }, 400);
+      let receiptUrl = null;
+      if (file) {
+        try { const up = await putUpload(c.env, { prefix: 'petty-cash', bytes: new Uint8Array(await file.arrayBuffer()), contentType: file.type, filename: file.name }); receiptUrl = up.url; }
+        catch (_) { /* uploads off */ }
+      }
+      stmts.push({
+        sql: `UPDATE cash_payouts SET advance_status = 'expensed', advance_settled_at = CURRENT_TIMESTAMP,
+              category_id = ?, receipt_ref = COALESCE(?, receipt_ref), receipt_url = COALESCE(?, receipt_url) WHERE id = ?`,
+        binds: [catId, b.receipt_ref ? String(b.receipt_ref).trim().slice(0, 120) : null, receiptUrl, p.id],
+      });
+    }
+    await db.batch(stmts);
+    return c.json({ ok: true });
+  });
+
+  // ---- funds ----
   app.get('/api/admin/petty-cash-funds', adminMw, async (c) => {
     const rows = await d1(c.env).many(
-      `SELECT f.id, f.name, f.balance_cents / 100.0 AS balance_usd, f.custodian_id, f.is_active, f.created_at,
+      `SELECT f.id, f.name, f.balance_cents / 100.0 AS balance_usd, f.float_cents / 100.0 AS float_usd,
+              f.receipt_threshold_cents / 100.0 AS receipt_threshold_usd, f.location, f.notes,
+              f.custodian_id, f.is_active, f.created_at, f.last_reconciled_at,
+              (f.float_cents > 0 AND f.balance_cents < f.float_cents) AS needs_topup,
               u.name AS custodian_name
          FROM petty_cash_funds f LEFT JOIN users u ON u.id = f.custodian_id
         ORDER BY f.is_active DESC, f.name`);
     return c.json({ funds: rows });
   });
+
   app.post('/api/admin/petty-cash-funds', managerMw, async (c) => {
     const db = d1(c.env);
+    const me = c.get('user');
     const b = await c.req.json().catch(() => ({}));
     if (!String(b.name || '').trim()) return c.json({ error: 'A name is required' }, 400);
+    const opening = u2c(b.opening_balance_usd || 0) || 0;
     const r = await db.run(
-      'INSERT INTO petty_cash_funds (name, balance_cents, custodian_id) VALUES (?,?,?)',
-      String(b.name).trim().slice(0, 120), u2c(b.opening_balance_usd || 0) || 0, b.custodian_id ? parseInt(b.custodian_id, 10) : null);
-    return c.json({ ok: true, id: r.meta.last_row_id });
+      'INSERT INTO petty_cash_funds (name, balance_cents, float_cents, receipt_threshold_cents, location, custodian_id) VALUES (?,?,?,?,?,?)',
+      String(b.name).trim().slice(0, 120), opening, u2c(b.float_usd || 0) || 0, u2c(b.receipt_threshold_usd || 0) || 0,
+      b.location ? String(b.location).trim().slice(0, 120) : null,
+      b.custodian_id ? parseInt(b.custodian_id, 10) : null);
+    const id = r.meta.last_row_id;
+    if (opening !== 0) {
+      await db.run(
+        `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, source, notes, created_by)
+         VALUES (?, 'opening', ?, 'bank', 'Opening balance', ?)`, id, opening, me.id);
+    }
+    return c.json({ ok: true, id });
   });
+
+  app.patch('/api/admin/petty-cash-funds/:id', managerMw, async (c) => {
+    const db = d1(c.env);
+    const id = c.req.param('id');
+    const b = await c.req.json().catch(() => ({}));
+    const fund = await db.one('SELECT id, balance_cents FROM petty_cash_funds WHERE id = ?', id);
+    if (!fund) return c.json({ error: 'Not found' }, 404);
+    const sets = []; const vals = [];
+    if (b.name !== undefined) { sets.push('name = ?'); vals.push(String(b.name).trim().slice(0, 120)); }
+    if (b.custodian_id !== undefined) { sets.push('custodian_id = ?'); vals.push(b.custodian_id ? parseInt(b.custodian_id, 10) : null); }
+    if (b.float_usd !== undefined) { sets.push('float_cents = ?'); vals.push(u2c(b.float_usd) || 0); }
+    if (b.receipt_threshold_usd !== undefined) { sets.push('receipt_threshold_cents = ?'); vals.push(u2c(b.receipt_threshold_usd) || 0); }
+    if (b.location !== undefined) { sets.push('location = ?'); vals.push(b.location ? String(b.location).trim().slice(0, 120) : null); }
+    if (b.notes !== undefined) { sets.push('notes = ?'); vals.push(b.notes ? String(b.notes).trim().slice(0, 500) : null); }
+    if (b.is_active !== undefined) {
+      const active = b.is_active ? 1 : 0;
+      if (!active && fund.balance_cents !== 0 && !b.force)
+        return c.json({ error: 'Fund balance is ' + (fund.balance_cents / 100).toFixed(2) + ' — reconcile it to zero, or pass force to write it off.' }, 400);
+      if (!active && fund.balance_cents !== 0 && b.force) {
+        await db.run(`INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, notes, created_by)
+                      VALUES (?, 'reconcile_adjust', ?, 'Written off on close', ?)`, id, -fund.balance_cents, c.get('user').id);
+        sets.push('balance_cents = 0');
+      }
+      sets.push('is_active = ?', "closed_at = " + (active ? 'NULL' : 'CURRENT_TIMESTAMP'));
+      vals.push(active);
+    }
+    if (!sets.length) return c.json({ error: 'Nothing to update' }, 400);
+    vals.push(id);
+    await db.run(`UPDATE petty_cash_funds SET ${sets.join(', ')} WHERE id = ?`, ...vals);
+    return c.json({ ok: true });
+  });
+
+  app.get('/api/admin/petty-cash-funds/:id', adminMw, async (c) => {
+    const db = d1(c.env);
+    const id = c.req.param('id');
+    const fund = await db.one(
+      `SELECT f.*, f.balance_cents / 100.0 AS balance_usd, f.float_cents / 100.0 AS float_usd,
+              f.receipt_threshold_cents / 100.0 AS receipt_threshold_usd, u.name AS custodian_name
+         FROM petty_cash_funds f LEFT JOIN users u ON u.id = f.custodian_id WHERE f.id = ?`, id);
+    if (!fund) return c.json({ error: 'Not found' }, 404);
+    const q = c.req.query();
+    const [ledger, advances, counts] = await Promise.all([
+      fundLedger(db, id, q.from && q.to ? { from: q.from, to: q.to } : {}),
+      db.many(
+        `SELECT cp.id, cp.amount_cents / 100.0 AS amount_usd, cp.advance_to, cp.reason, cp.created_at,
+                cp.advance_status, u.name AS authorized_by_name
+           FROM cash_payouts cp LEFT JOIN users u ON u.id = cp.authorized_by
+          WHERE cp.fund_id = ? AND cp.is_advance = 1 AND cp.advance_status = 'open' ORDER BY cp.created_at`, id),
+      db.many(
+        `SELECT id, counted_cents / 100.0 AS counted_usd, expected_cents / 100.0 AS expected_usd,
+                variance_cents / 100.0 AS variance_usd, notes, created_at
+           FROM petty_cash_counts WHERE fund_id = ? ORDER BY created_at DESC LIMIT 30`, id),
+    ]);
+    fund.needs_topup = fund.float_cents > 0 && fund.balance_cents < fund.float_cents;
+    return c.json({ fund, ledger, open_advances: advances, counts, computed_balance_usd: (await recomputeBalanceCents(db, id)) / 100 });
+  });
+
   app.post('/api/admin/petty-cash-funds/:id/replenish', managerMw, async (c) => {
     const db = d1(c.env);
     const me = c.get('user');
     const id = c.req.param('id');
     const b = await c.req.json().catch(() => ({}));
-    const amount = Number(b.amount_usd || 0);
-    if (!(amount > 0)) return c.json({ error: 'A positive amount is required' }, 400);
-    const fund = await db.one('SELECT id FROM petty_cash_funds WHERE id = ? AND is_active = 1', id);
+    const fund = await db.one('SELECT id, balance_cents, float_cents FROM petty_cash_funds WHERE id = ? AND is_active = 1', id);
     if (!fund) return c.json({ error: 'Petty cash fund not found' }, 404);
-    const amountCents = u2c(amount);
-    const stmts = [{ sql: 'UPDATE petty_cash_funds SET balance_cents = balance_cents + ? WHERE id = ?', binds: [amountCents, id] }];
-    // Sourced from the till: the transfer out of the drawer is itself a
-    // drawer payout, so it still shows up in that session's reconciliation.
-    if (b.source === 'drawer') {
+    let amountCents;
+    if (b.to_float) {
+      amountCents = (fund.float_cents || 0) - fund.balance_cents;
+      if (amountCents <= 0) return c.json({ error: 'The fund is already at (or above) its float.' }, 400);
+    } else {
+      amountCents = u2c(Number(b.amount_usd || 0));
+      if (!(amountCents > 0)) return c.json({ error: 'A positive amount is required' }, 400);
+    }
+    const source = b.source === 'drawer' ? 'drawer' : 'bank';
+    const stmts = [
+      { sql: 'UPDATE petty_cash_funds SET balance_cents = balance_cents + ? WHERE id = ?', binds: [amountCents, id] },
+      {
+        sql: `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, source, drawer_session_id, notes, created_by)
+              VALUES (?, 'replenishment', ?, ?, ?, ?, ?)`,
+        binds: [id, amountCents, source, null, b.notes ? String(b.notes).slice(0, 300) : null, me.id],
+      },
+    ];
+    if (source === 'drawer') {
       const sess = await db.one('SELECT id FROM cash_drawer_sessions WHERE id = ? AND closed_at IS NULL', b.drawer_session_id);
       if (!sess) return c.json({ error: 'That cash drawer session is not open' }, 400);
+      stmts[1].binds[3] = sess.id;
       stmts.push({
         sql: `INSERT INTO cash_payouts (amount_cents, reason, source_type, drawer_session_id, fund_id, authorized_by)
               VALUES (?, 'Petty cash replenishment', 'drawer', ?, ?, ?)`,
@@ -544,7 +764,115 @@ export default function mount(app) {
       });
     }
     await db.batch(stmts);
+    return c.json({ ok: true, amount_usd: amountCents / 100 });
+  });
+
+  app.post('/api/admin/petty-cash-funds/:id/reconcile', managerMw, async (c) => {
+    const db = d1(c.env);
+    const me = c.get('user');
+    const id = c.req.param('id');
+    const b = await c.req.json().catch(() => ({}));
+    const fund = await db.one('SELECT id, balance_cents FROM petty_cash_funds WHERE id = ? AND is_active = 1', id);
+    if (!fund) return c.json({ error: 'Petty cash fund not found' }, 404);
+    const countedCents = u2c(Number(b.counted_usd));
+    if (countedCents == null || countedCents < 0) return c.json({ error: 'Enter the counted amount' }, 400);
+    const varianceCents = countedCents - fund.balance_cents;
+    const stmts = [
+      {
+        sql: `INSERT INTO petty_cash_counts (fund_id, counted_cents, expected_cents, variance_cents, notes, counted_by)
+              VALUES (?,?,?,?,?,?)`,
+        binds: [id, countedCents, fund.balance_cents, varianceCents, b.notes ? String(b.notes).slice(0, 300) : null, me.id],
+      },
+      { sql: `UPDATE petty_cash_funds SET balance_cents = ?, last_reconciled_at = CURRENT_TIMESTAMP WHERE id = ?`, binds: [countedCents, id] },
+    ];
+    if (varianceCents !== 0) {
+      stmts.push({
+        sql: `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, notes, created_by)
+              VALUES (?, 'reconcile_adjust', ?, ?, ?)`,
+        binds: [id, varianceCents, 'Count ' + (varianceCents < 0 ? 'short' : 'over') + ' by ' + Math.abs(varianceCents / 100).toFixed(2), me.id],
+      });
+    }
+    await db.batch(stmts);
+    return c.json({ ok: true, expected_usd: fund.balance_cents / 100, counted_usd: countedCents / 100, variance_usd: varianceCents / 100 });
+  });
+
+  app.post('/api/admin/petty-cash-funds/:id/transfer', managerMw, async (c) => {
+    const db = d1(c.env);
+    const me = c.get('user');
+    const id = parseInt(c.req.param('id'), 10);
+    const b = await c.req.json().catch(() => ({}));
+    const toId = parseInt(b.to_fund_id, 10);
+    const amountCents = u2c(Number(b.amount_usd || 0));
+    if (!(amountCents > 0)) return c.json({ error: 'A positive amount is required' }, 400);
+    if (!toId || toId === id) return c.json({ error: 'Pick a different destination fund' }, 400);
+    const [src, dst] = await Promise.all([
+      db.one('SELECT id, balance_cents FROM petty_cash_funds WHERE id = ? AND is_active = 1', id),
+      db.one('SELECT id FROM petty_cash_funds WHERE id = ? AND is_active = 1', toId),
+    ]);
+    if (!src || !dst) return c.json({ error: 'Fund not found' }, 404);
+    if (src.balance_cents < amountCents) return c.json({ error: 'The source fund only has ' + (src.balance_cents / 100).toFixed(2) }, 400);
+    const note = b.notes ? String(b.notes).slice(0, 300) : null;
+    await db.batch([
+      { sql: 'UPDATE petty_cash_funds SET balance_cents = balance_cents - ? WHERE id = ?', binds: [amountCents, id] },
+      { sql: 'UPDATE petty_cash_funds SET balance_cents = balance_cents + ? WHERE id = ?', binds: [amountCents, toId] },
+      { sql: `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, source, related_fund_id, notes, created_by)
+              VALUES (?, 'transfer_out', ?, 'fund', ?, ?, ?)`, binds: [id, -amountCents, toId, note, me.id] },
+      { sql: `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, source, related_fund_id, notes, created_by)
+              VALUES (?, 'transfer_in', ?, 'fund', ?, ?, ?)`, binds: [toId, amountCents, id, note, me.id] },
+    ]);
     return c.json({ ok: true });
+  });
+
+  // ---- petty cash report (for accounting) ----
+  app.get('/api/admin/petty-cash-report', adminMw, async (c) => {
+    const db = d1(c.env);
+    const from = c.req.query('from') || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const to = c.req.query('to') || new Date().toISOString().slice(0, 10);
+    const fundId = c.req.query('fund_id');
+    const fw = fundId ? ' AND cp.fund_id = ?' : '';
+    const fb = fundId ? [fundId] : [];
+    const [byCat, byFund, repl, variance, openAdv, lines] = await Promise.all([
+      db.many(
+        `SELECT COALESCE(cat.name, 'Uncategorised') AS category, COUNT(*) AS n,
+                COALESCE(SUM(cp.amount_cents),0) / 100.0 AS spend_usd
+           FROM cash_payouts cp LEFT JOIN petty_cash_categories cat ON cat.id = cp.category_id
+          WHERE cp.source_type = 'fund' AND cp.voided = 0 AND (cp.is_advance = 0 OR cp.advance_status = 'expensed')
+            AND date(cp.created_at) BETWEEN ? AND ?${fw}
+          GROUP BY category ORDER BY spend_usd DESC`, from, to, ...fb),
+      db.many(
+        `SELECT f.name AS fund, COUNT(*) AS n, COALESCE(SUM(cp.amount_cents),0) / 100.0 AS spend_usd
+           FROM cash_payouts cp JOIN petty_cash_funds f ON f.id = cp.fund_id
+          WHERE cp.source_type = 'fund' AND cp.voided = 0 AND date(cp.created_at) BETWEEN ? AND ?${fw}
+          GROUP BY f.name ORDER BY spend_usd DESC`, from, to, ...fb),
+      db.one(
+        `SELECT COALESCE(SUM(delta_cents),0) / 100.0 AS s FROM petty_cash_movements
+          WHERE kind = 'replenishment' AND date(created_at) BETWEEN ? AND ?${fundId ? ' AND fund_id = ?' : ''}`, from, to, ...fb),
+      db.one(
+        `SELECT COALESCE(SUM(delta_cents),0) / 100.0 AS s FROM petty_cash_movements
+          WHERE kind = 'reconcile_adjust' AND date(created_at) BETWEEN ? AND ?${fundId ? ' AND fund_id = ?' : ''}`, from, to, ...fb),
+      db.many(
+        `SELECT COALESCE(cp.advance_to, 'unnamed') AS advance_to, COUNT(*) AS count,
+                COALESCE(SUM(cp.amount_cents),0) / 100.0 AS amount_usd
+           FROM cash_payouts cp
+          WHERE cp.is_advance = 1 AND cp.advance_status = 'open'${fw}
+          GROUP BY advance_to ORDER BY amount_usd DESC`, ...fb),
+      db.many(
+        `SELECT cp.created_at, f.name AS fund, COALESCE(cat.name, cp.is_advance) AS category,
+                cp.paid_to, cp.reason, cp.receipt_ref, cp.amount_cents / 100.0 AS amount_usd,
+                cp.is_advance, cp.advance_status, cp.voided, u.name AS authorized_by
+           FROM cash_payouts cp
+           JOIN petty_cash_funds f ON f.id = cp.fund_id
+           LEFT JOIN petty_cash_categories cat ON cat.id = cp.category_id
+           LEFT JOIN users u ON u.id = cp.authorized_by
+          WHERE cp.source_type = 'fund' AND date(cp.created_at) BETWEEN ? AND ?${fw}
+          ORDER BY cp.created_at DESC LIMIT 1000`, from, to, ...fb),
+    ]);
+    const totalSpend = byCat.reduce((s, x) => s + x.spend_usd, 0);
+    return c.json({
+      from, to,
+      totals: { spend_usd: Math.round(totalSpend * 100) / 100, replenishments_usd: repl.s || 0, reconcile_variance_usd: variance.s || 0 },
+      by_category: byCat, by_fund: byFund, open_advances: openAdv, lines,
+    });
   });
 
   // ============ CASH REPORT ============

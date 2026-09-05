@@ -9610,35 +9610,61 @@ async function renderCashReport(panel){
 // against a fund never touches any drawer's reconciliation -- only a
 // drawer-sourced payout (recorded here or from Cash Report) does that.
 var PC_VIEW_FUND = null;
+var PC_TAB = null;               // null = funds list | 'advances' | 'categories' | 'report'
+var PC_STAFF = null, PC_CATS = null;
+async function pcStaff(){ if (!PC_STAFF) { try { PC_STAFF = (await api('/api/admin/users?origin=staff')).users || []; } catch (_) { PC_STAFF = []; } } return PC_STAFF; }
+async function pcCats(){ if (!PC_CATS) { try { PC_CATS = (await api('/api/admin/petty-cash-categories')).categories || []; } catch (_) { PC_CATS = []; } } return PC_CATS; }
+function pcCatOptions(sel){ return '<option value="">— category —</option>' + (PC_CATS || []).map(function(c){ return '<option value="' + c.id + '"' + (String(c.id) === String(sel || '') ? ' selected' : '') + '>' + esc(c.name) + '</option>'; }).join(''); }
+function pcNav(active){
+  var mk = function(k, label){ return '<button type="button" class="pcNav" data-k="' + k + '" style="padding:6px 12px;border:1px solid var(--line);border-radius:6px;cursor:pointer;font-weight:700;font-size:12px;background:' + (active === k ? 'var(--sky)' : 'var(--card)') + ';color:' + (active === k ? '#fff' : 'var(--ink)') + '">' + label + '</button>'; };
+  return '<div style="padding:10px 16px;border-bottom:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap">' +
+    mk('funds', '💰 Funds') + mk('advances', '🧾 Outstanding advances') + mk('categories', '🏷 Categories') + mk('report', '📊 Report') + '</div>';
+}
+function pcWireNav(panel){
+  panel.querySelectorAll('.pcNav').forEach(function(b){ b.addEventListener('click', function(){
+    var k = b.getAttribute('data-k'); PC_VIEW_FUND = null; PC_TAB = (k === 'funds' ? null : k); renderPettyCash(panel);
+  }); });
+}
 async function renderPettyCash(panel){
   if (PC_VIEW_FUND) return renderPettyCashFundDetail(panel, PC_VIEW_FUND);
+  if (PC_TAB === 'advances') return renderPcAdvances(panel);
+  if (PC_TAB === 'categories') return renderPcCategories(panel);
+  if (PC_TAB === 'report') return renderPcReport(panel);
   panel.innerHTML = '<div class="empty">Loading…</div>';
-  var r;
-  try { r = await api('/api/admin/petty-cash-funds'); }
+  var r, staff;
+  try { r = await api('/api/admin/petty-cash-funds'); staff = await pcStaff(); }
   catch (e) { panel.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return; }
-  panel.innerHTML =
+  var staffOpts = '<option value="">— none —</option>' + staff.map(function(u){ return '<option value="' + u.id + '">' + esc(u.name || u.email) + '</option>'; }).join('');
+  panel.innerHTML = pcNav('funds') +
     '<details style="border-bottom:1px solid var(--line);background:var(--card-soft)">' +
       '<summary style="padding:12px 16px;cursor:pointer;font-weight:700;color:var(--heading)">+ New petty cash fund</summary>' +
-      '<form id="newFund" style="padding:14px 18px;display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:640px" onsubmit="event.preventDefault();submitPettyCashFund();">' +
+      '<form id="newFund" style="padding:14px 18px;display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:680px" onsubmit="event.preventDefault();submitPettyCashFund();">' +
         '<div><label class="lbl">Name *</label><input id="pcfName" required class="fld" placeholder="e.g. Front Desk Petty Cash"/></div>' +
+        '<div><label class="lbl">Custodian</label><select id="pcfCustodian" class="fld">' + staffOpts + '</select></div>' +
         '<div><label class="lbl">Opening balance</label><input id="pcfOpening" type="number" min="0" step="0.01" value="0" class="fld"/></div>' +
+        '<div><label class="lbl">Imprest float (top-up target)</label><input id="pcfFloat" type="number" min="0" step="0.01" value="0" class="fld"/></div>' +
+        '<div><label class="lbl">Receipt required over</label><input id="pcfThreshold" type="number" min="0" step="0.01" value="0" class="fld"/></div>' +
+        '<div><label class="lbl">Location</label><input id="pcfLocation" class="fld"/></div>' +
         '<div id="pcfMsg" style="grid-column:1/-1;display:none;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
         '<button type="submit" style="grid-column:1/-1;background:var(--red);color:#fff;border:0;padding:11px 22px;border-radius:7px;font-weight:700;cursor:pointer">Create fund</button>' +
       '</form>' +
     '</details>' +
     (r.funds.length
-      ? '<table><thead><tr><th>Name</th><th>Balance</th><th>Custodian</th><th>Status</th><th></th></tr></thead><tbody>' +
+      ? '<table><thead><tr><th>Name</th><th>Balance / float</th><th>Custodian</th><th>Last count</th><th>Status</th><th></th></tr></thead><tbody>' +
         r.funds.map(function(f){
+          var pct = f.float_usd > 0 ? Math.max(0, Math.min(100, Math.round(f.balance_usd / f.float_usd * 100))) : 0;
           return '<tr' + (!f.is_active ? ' style="opacity:.55"' : '') + '>' +
-            '<td><b>' + esc(f.name) + '</b></td>' +
-            '<td><b>' + fmtMoney(f.balance_usd) + '</b></td>' +
+            '<td><b>' + esc(f.name) + '</b>' + (f.location ? '<br/><small style="color:var(--muted)">' + esc(f.location) + '</small>' : '') + '</td>' +
+            '<td><b>' + fmtMoney(f.balance_usd) + '</b>' + (f.float_usd > 0 ? ' <small style="color:var(--muted)">/ ' + fmtMoney(f.float_usd) + '</small>' +
+              (f.needs_topup ? ' <span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:800;padding:1px 6px;border-radius:8px">needs top-up</span>' : '') : '') + '</td>' +
             '<td>' + esc(f.custodian_name || '—') + '</td>' +
-            '<td>' + badge(f.is_active ? 'active' : 'inactive', f.is_active ? 'ok' : 'bad') + '</td>' +
+            '<td>' + (f.last_reconciled_at ? fmtDate(f.last_reconciled_at) : '<small style="color:var(--muted)">never</small>') + '</td>' +
+            '<td>' + badge(f.is_active ? 'active' : 'closed', f.is_active ? 'ok' : 'bad') + '</td>' +
             '<td class="actions"><button class="btn" data-open="' + f.id + '">Open</button></td>' +
           '</tr>';
         }).join('') + '</tbody></table>'
-      : '<div class="empty">No petty cash funds yet — create one above, or just record payouts straight from the register on the Cash Report tab.</div>');
-
+      : '<div class="empty">No petty cash funds yet — create one above.</div>');
+  pcWireNav(panel);
   panel.querySelectorAll('[data-open]').forEach(function(b){
     b.addEventListener('click', function(){ PC_VIEW_FUND = parseInt(b.getAttribute('data-open'), 10); renderPettyCash(panel); });
   });
@@ -9649,63 +9675,290 @@ async function submitPettyCashFund(){
   try {
     await api('/api/admin/petty-cash-funds', { method: 'POST', body: {
       name: document.getElementById('pcfName').value.trim(),
+      custodian_id: document.getElementById('pcfCustodian').value || null,
       opening_balance_usd: document.getElementById('pcfOpening').value || 0,
+      float_usd: document.getElementById('pcfFloat').value || 0,
+      receipt_threshold_usd: document.getElementById('pcfThreshold').value || 0,
+      location: document.getElementById('pcfLocation').value.trim() || null,
     }});
     show('pettycash');
   } catch (e) { msg.style.background = '#fee2e2'; msg.style.color = '#b91c1c'; msg.textContent = e.message; }
 }
+
+async function renderPcAdvances(panel){
+  panel.innerHTML = pcNav('advances') + '<div class="empty">Loading…</div>';
+  var r;
+  try { r = await api('/api/admin/cash-payouts?is_advance=1&advance_status=open'); await pcCats(); }
+  catch (e) { panel.innerHTML = pcNav('advances') + '<div class="empty">' + esc(e.message) + '</div>'; return; }
+  var body = pcNav('advances') + '<div style="padding:14px 16px">' +
+    (r.payouts.length
+      ? '<table><thead><tr><th>Date</th><th>Person</th><th>Reason</th><th>Fund</th><th align="right">Amount</th><th></th></tr></thead><tbody>' +
+        r.payouts.map(function(p){
+          return '<tr><td>' + fmtDate(p.created_at) + '</td><td><b>' + esc(p.advance_to || '—') + '</b></td>' +
+            '<td>' + esc(p.reason || '—') + '</td><td>' + (p.fund_id || '—') + '</td>' +
+            '<td align="right"><b>' + fmtMoney(p.amount_usd) + '</b></td>' +
+            '<td class="actions"><button class="btn pcAdvRepay" data-id="' + p.id + '">Repaid</button> ' +
+              '<button class="btn pcAdvExp" data-id="' + p.id + '">Expense…</button></td></tr>';
+        }).join('') + '</tbody></table>'
+      : '<div class="empty">No outstanding advances 🎉</div>') + '</div>';
+  panel.innerHTML = body;
+  pcWireNav(panel);
+  panel.querySelectorAll('.pcAdvRepay').forEach(function(b){ b.addEventListener('click', async function(){
+    try { await api('/api/admin/cash-payouts/' + b.getAttribute('data-id') + '/settle-advance', { method: 'POST', body: { how: 'repay' } }); renderPcAdvances(panel); }
+    catch (e) { alert(e.message); }
+  }); });
+  panel.querySelectorAll('.pcAdvExp').forEach(function(b){ b.addEventListener('click', function(){
+    posModal('Expense the advance', '<label class="lbl">Category</label><select id="pcExpCat" class="fld">' + pcCatOptions() + '</select>' +
+      '<label class="lbl" style="margin-top:8px">Receipt reference</label><input id="pcExpRef" class="fld"/>' +
+      '<div id="pcExpMsg" style="font-size:12.5px;margin-top:8px"></div>' +
+      '<div style="margin-top:12px"><button type="button" class="btn ok" id="pcExpGo">Save</button></div>', 460);
+    document.getElementById('pcExpGo').addEventListener('click', async function(){
+      var m = document.getElementById('pcExpMsg');
+      if (!document.getElementById('pcExpCat').value) { m.textContent = 'Pick a category'; m.style.color = 'var(--red)'; return; }
+      try {
+        await api('/api/admin/cash-payouts/' + b.getAttribute('data-id') + '/settle-advance', { method: 'POST', body: {
+          how: 'expense', category_id: document.getElementById('pcExpCat').value, receipt_ref: document.getElementById('pcExpRef').value.trim() || null } });
+        posCloseModal(); renderPcAdvances(panel);
+      } catch (e) { m.textContent = e.message; m.style.color = 'var(--red)'; }
+    });
+  }); });
+}
+
+async function renderPcCategories(panel){
+  panel.innerHTML = pcNav('categories') + '<div class="empty">Loading…</div>';
+  var r;
+  try { r = await api('/api/admin/petty-cash-categories?all=1'); }
+  catch (e) { panel.innerHTML = pcNav('categories') + '<div class="empty">' + esc(e.message) + '</div>'; return; }
+  panel.innerHTML = pcNav('categories') + '<div style="padding:14px 16px;max-width:520px">' +
+    '<form id="pcNewCat" style="display:flex;gap:8px;margin-bottom:12px" onsubmit="event.preventDefault();pcAddCat();">' +
+      '<input id="pcCatName" class="fld" placeholder="new category name" style="flex:1"/><button class="btn ok" type="submit">Add</button></form>' +
+    '<table><tbody>' + r.categories.map(function(c){
+      return '<tr' + (c.is_active ? '' : ' style="opacity:.5"') + '><td style="width:60%"><b>' + esc(c.name) + '</b></td>' +
+        '<td class="actions"><button class="btn pcCatToggle" data-id="' + c.id + '" data-a="' + (c.is_active ? 0 : 1) + '">' + (c.is_active ? 'Deactivate' : 'Reactivate') + '</button></td></tr>';
+    }).join('') + '</tbody></table></div>';
+  pcWireNav(panel);
+  panel.querySelectorAll('.pcCatToggle').forEach(function(b){ b.addEventListener('click', async function(){
+    try { await api('/api/admin/petty-cash-categories/' + b.getAttribute('data-id'), { method: 'PATCH', body: { is_active: b.getAttribute('data-a') === '1' } }); PC_CATS = null; renderPcCategories(panel); }
+    catch (e) { alert(e.message); }
+  }); });
+}
+async function pcAddCat(){
+  try { await api('/api/admin/petty-cash-categories', { method: 'POST', body: { name: document.getElementById('pcCatName').value.trim() } }); PC_CATS = null; renderPcCategories(document.getElementById('panel')); }
+  catch (e) { alert(e.message); }
+}
+
+var PC_RPT_FROM = '', PC_RPT_TO = '', PC_RPT_FUND = '';
+async function renderPcReport(panel){
+  panel.innerHTML = pcNav('report') + '<div class="empty">Loading…</div>';
+  if (!PC_RPT_FROM) { var d = new Date(); PC_RPT_TO = d.toISOString().slice(0, 10); d.setDate(d.getDate() - 30); PC_RPT_FROM = d.toISOString().slice(0, 10); }
+  var r, funds;
+  try {
+    funds = (await api('/api/admin/petty-cash-funds')).funds || [];
+    r = await api('/api/admin/petty-cash-report?from=' + PC_RPT_FROM + '&to=' + PC_RPT_TO + (PC_RPT_FUND ? '&fund_id=' + PC_RPT_FUND : ''));
+  } catch (e) { panel.innerHTML = pcNav('report') + '<div class="empty">' + esc(e.message) + '</div>'; return; }
+  panel.innerHTML = pcNav('report') + '<div style="padding:14px 16px">' +
+    '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">' +
+      '<div><label class="lbl">From</label><input type="date" id="pcRf" value="' + PC_RPT_FROM + '" class="fld"/></div>' +
+      '<div><label class="lbl">To</label><input type="date" id="pcRt" value="' + PC_RPT_TO + '" class="fld"/></div>' +
+      '<div><label class="lbl">Fund</label><select id="pcRfund" class="fld"><option value="">All</option>' +
+        funds.map(function(f){ return '<option value="' + f.id + '"' + (String(f.id) === PC_RPT_FUND ? ' selected' : '') + '>' + esc(f.name) + '</option>'; }).join('') + '</select></div>' +
+      '<button class="btn" id="pcRgo">Run</button><button class="btn" id="pcRcsv">Download CSV</button>' +
+    '</div>' +
+    '<div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:14px">' +
+      '<div><div class="lbl">Total spend</div><b style="font-size:18px">' + fmtMoney(r.totals.spend_usd) + '</b></div>' +
+      '<div><div class="lbl">Replenishments in</div><b style="font-size:18px">' + fmtMoney(r.totals.replenishments_usd) + '</b></div>' +
+      '<div><div class="lbl">Reconcile variance</div><b style="font-size:18px">' + fmtMoney(r.totals.reconcile_variance_usd) + '</b></div>' +
+    '</div>' +
+    '<h4 style="margin:0 0 6px">By category</h4>' +
+    '<table><thead><tr><th>Category</th><th align="right">Count</th><th align="right">Spend</th></tr></thead><tbody>' +
+      (r.by_category || []).map(function(x){ return '<tr><td>' + esc(x.category) + '</td><td align="right">' + x.n + '</td><td align="right">' + fmtMoney(x.spend_usd) + '</td></tr>'; }).join('') + '</tbody></table>' +
+    '<h4 style="margin:14px 0 6px">By fund</h4>' +
+    '<table><thead><tr><th>Fund</th><th align="right">Count</th><th align="right">Spend</th></tr></thead><tbody>' +
+      (r.by_fund || []).map(function(x){ return '<tr><td>' + esc(x.fund) + '</td><td align="right">' + x.n + '</td><td align="right">' + fmtMoney(x.spend_usd) + '</td></tr>'; }).join('') + '</tbody></table>' +
+    (r.open_advances && r.open_advances.length ? '<h4 style="margin:14px 0 6px">Outstanding advances</h4><table><tbody>' +
+      r.open_advances.map(function(x){ return '<tr><td>' + esc(x.advance_to) + '</td><td align="right">' + x.count + '</td><td align="right">' + fmtMoney(x.amount_usd) + '</td></tr>'; }).join('') + '</tbody></table>' : '') +
+  '</div>';
+  pcWireNav(panel);
+  document.getElementById('pcRgo').addEventListener('click', function(){
+    PC_RPT_FROM = document.getElementById('pcRf').value; PC_RPT_TO = document.getElementById('pcRt').value; PC_RPT_FUND = document.getElementById('pcRfund').value; renderPcReport(panel);
+  });
+  document.getElementById('pcRcsv').addEventListener('click', function(){
+    var head = ['created_at', 'fund', 'category', 'paid_to', 'reason', 'receipt_ref', 'amount_usd', 'is_advance', 'advance_status', 'voided', 'authorized_by'];
+    var rows = (r.lines || []).map(function(l){ return head.map(function(k){ var v = l[k]; return '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"'; }).join(','); });
+    var blob = new Blob([head.join(',') + '\n' + rows.join('\n')], { type: 'text/csv' });
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'petty-cash-' + PC_RPT_FROM + '_' + PC_RPT_TO + '.csv'; a.click();
+  });
+}
+var PC_LEDGER_FROM = '', PC_LEDGER_TO = '';
 async function renderPettyCashFundDetail(panel, fundId){
   panel.innerHTML = '<div class="empty">Loading…</div>';
-  var funds, payouts;
+  var d, allFunds, cats;
   try {
-    funds = (await api('/api/admin/petty-cash-funds')).funds;
-    payouts = (await api('/api/admin/cash-payouts?fund_id=' + fundId)).payouts;
+    var qs = (PC_LEDGER_FROM && PC_LEDGER_TO) ? ('?from=' + PC_LEDGER_FROM + '&to=' + PC_LEDGER_TO) : '';
+    d = await api('/api/admin/petty-cash-funds/' + fundId + qs);
+    allFunds = (await api('/api/admin/petty-cash-funds')).funds || [];
+    cats = await pcCats();
   } catch (e) { panel.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return; }
-  var f = funds.find(function(x){ return x.id === fundId; });
+  var f = d.fund;
   if (!f) { panel.innerHTML = '<div class="empty">Fund not found.</div>'; return; }
+  var ledger = d.ledger || [], advances = d.open_advances || [], counts = d.counts || [];
+  var xferOpts = allFunds.filter(function(x){ return x.id !== fundId && x.is_active; })
+    .map(function(x){ return '<option value="' + x.id + '">' + esc(x.name) + '</option>'; }).join('');
 
   panel.innerHTML =
-    '<div style="padding:11px 14px;border-bottom:1px solid var(--line)"><button class="btn" id="pcBack">‹ All funds</button></div>' +
+    '<div style="padding:11px 14px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center">' +
+      '<button class="btn" id="pcBack">‹ All funds</button>' +
+      '<button class="btn" id="pcEdit">✎ Edit fund</button></div>' +
     '<div style="padding:14px 16px;display:flex;gap:24px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--line)">' +
-      '<div><div class="lbl">Fund</div><b style="font-size:16px">' + esc(f.name) + '</b></div>' +
-      '<div><div class="lbl">Balance</div><b style="font-size:15px">' + fmtMoney(f.balance_usd) + '</b></div>' +
+      '<div><div class="lbl">Fund</div><b style="font-size:16px">' + esc(f.name) + '</b>' + (f.location ? ' <small style="color:var(--muted)">' + esc(f.location) + '</small>' : '') + '</div>' +
+      '<div><div class="lbl">Balance</div><b style="font-size:15px">' + fmtMoney(f.balance_usd) + '</b>' +
+        (f.needs_topup ? ' <span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:800;padding:1px 6px;border-radius:8px">needs top-up</span>' : '') + '</div>' +
+      '<div><div class="lbl">Imprest float</div>' + (f.float_usd > 0 ? fmtMoney(f.float_usd) : '—') + '</div>' +
+      '<div><div class="lbl">Receipt required over</div>' + (f.receipt_threshold_usd > 0 ? fmtMoney(f.receipt_threshold_usd) : '—') + '</div>' +
       '<div><div class="lbl">Custodian</div>' + esc(f.custodian_name || '—') + '</div>' +
-      '<div><div class="lbl">Status</div>' + badge(f.is_active ? 'active' : 'inactive', f.is_active ? 'ok' : 'bad') + '</div>' +
+      '<div><div class="lbl">Status</div>' + badge(f.is_active ? 'active' : 'closed', f.is_active ? 'ok' : 'bad') + '</div>' +
     '</div>' +
-    '<div style="padding:14px 16px;border-bottom:1px solid var(--line);display:flex;gap:20px;flex-wrap:wrap">' +
-      '<form id="pcReplenishForm" style="display:flex;gap:8px;align-items:flex-end" onsubmit="event.preventDefault();submitReplenish(' + fundId + ');">' +
-        '<div><label class="lbl">Replenish amount</label><input id="pcReplenishAmt" type="number" min="0.01" step="0.01" required class="fld" style="width:100px"/></div>' +
-        '<div><label class="lbl">Source</label><select id="pcReplenishSource" class="fld"><option value="bank">Bank / owner (no drawer)</option><option value="drawer">The open register drawer</option></select></div>' +
-        '<button type="submit" class="btn ok">Replenish</button>' +
+
+    '<div style="padding:14px 16px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px">' +
+      // Payout
+      '<form id="pcPayoutForm" onsubmit="event.preventDefault();submitFundPayout(' + fundId + ');">' +
+        '<div style="font-weight:700;margin-bottom:6px">Payout</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end">' +
+          '<div><label class="lbl">Amount</label><input id="pcPayoutAmt" type="number" min="0.01" step="0.01" required class="fld" style="width:90px"/></div>' +
+          '<div><label class="lbl">Reason</label><input id="pcPayoutReason" required class="fld" style="width:140px"/></div>' +
+          '<div id="pcCatWrap"><label class="lbl">Category</label><select id="pcPayoutCat" class="fld" style="width:140px">' + pcCatOptions() + '</select></div>' +
+          '<div id="pcWhoWrap" style="display:none"><label class="lbl">Advance to</label><input id="pcPayoutWho" class="fld" style="width:120px"/></div>' +
+          '<div><label class="lbl">Paid to</label><input id="pcPayoutTo" class="fld" style="width:110px"/></div>' +
+          '<div><label class="lbl">Receipt ref</label><input id="pcPayoutRef" class="fld" style="width:100px"/></div>' +
+          '<label style="font-size:12px;display:flex;gap:4px;align-items:center"><input type="checkbox" id="pcIsAdvance"/> staff advance</label>' +
+          '<button type="submit" class="btn">Record</button>' +
+        '</div>' +
       '</form>' +
-      '<form id="pcPayoutForm" style="display:flex;gap:8px;align-items:flex-end" onsubmit="event.preventDefault();submitFundPayout(' + fundId + ');">' +
-        '<div><label class="lbl">Payout amount</label><input id="pcPayoutAmt" type="number" min="0.01" step="0.01" required class="fld" style="width:100px"/></div>' +
-        '<div><label class="lbl">Reason</label><input id="pcPayoutReason" required class="fld" style="width:160px"/></div>' +
-        '<div><label class="lbl">Paid to</label><input id="pcPayoutTo" class="fld" style="width:130px"/></div>' +
-        '<button type="submit" class="btn">Record payout</button>' +
+      // Replenish
+      '<form id="pcReplenishForm" onsubmit="event.preventDefault();submitReplenish(' + fundId + ');">' +
+        '<div style="font-weight:700;margin-bottom:6px">Replenish</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end">' +
+          '<label style="font-size:12px;display:flex;gap:4px;align-items:center"><input type="checkbox" id="pcToFloat"' + (f.float_usd > 0 ? '' : ' disabled') + '/> to float' + (f.float_usd > 0 ? ' (' + fmtMoney(Math.max(0, f.float_usd - f.balance_usd)) + ')' : '') + '</label>' +
+          '<div><label class="lbl">Amount</label><input id="pcReplenishAmt" type="number" min="0.01" step="0.01" class="fld" style="width:90px"/></div>' +
+          '<div><label class="lbl">Source</label><select id="pcReplenishSource" class="fld"><option value="bank">Bank / owner</option><option value="drawer">Open drawer</option></select></div>' +
+          '<button type="submit" class="btn ok">Replenish</button>' +
+        '</div>' +
       '</form>' +
-      '<span id="pcMsg" style="align-self:center;font-size:12.5px"></span>' +
+      // Reconcile
+      '<form id="pcReconcileForm" onsubmit="event.preventDefault();submitReconcile(' + fundId + ',' + f.balance_usd + ');">' +
+        '<div style="font-weight:700;margin-bottom:6px">Reconcile (count)</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end">' +
+          '<div><label class="lbl">Counted cash</label><input id="pcCountAmt" type="number" min="0" step="0.01" required class="fld" style="width:100px"/></div>' +
+          '<div><label class="lbl">Notes</label><input id="pcCountNotes" class="fld" style="width:120px"/></div>' +
+          '<span id="pcVarPreview" style="font-size:12px;color:var(--muted)">expected ' + fmtMoney(f.balance_usd) + '</span>' +
+          '<button type="submit" class="btn">Save count</button>' +
+        '</div>' +
+      '</form>' +
+      // Transfer
+      (xferOpts ? '<form id="pcTransferForm" onsubmit="event.preventDefault();submitTransfer(' + fundId + ');">' +
+        '<div style="font-weight:700;margin-bottom:6px">Transfer to another fund</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end">' +
+          '<div><label class="lbl">To fund</label><select id="pcXferTo" class="fld">' + xferOpts + '</select></div>' +
+          '<div><label class="lbl">Amount</label><input id="pcXferAmt" type="number" min="0.01" step="0.01" required class="fld" style="width:90px"/></div>' +
+          '<button type="submit" class="btn">Transfer</button>' +
+        '</div>' +
+      '</form>' : '') +
+      '<span id="pcMsg" style="font-size:12.5px;align-self:center"></span>' +
     '</div>' +
+
+    (advances.length ? '<div style="padding:10px 16px;border-bottom:1px solid var(--line);font-size:12.5px;color:#92400e;background:#fffbeb">' +
+      '<b>Open advances:</b> ' + advances.map(function(a){ return esc(a.advance_to) + ' ' + fmtMoney(a.amount_usd); }).join(' · ') +
+      ' — settle on the ' + '<a href="#" id="pcGoAdv">Outstanding advances</a> tab.</div>' : '') +
+
     '<div style="padding:14px 16px">' +
-      '<h4 style="margin:0 0 8px">Ledger</h4>' +
-      (payouts.length
-        ? '<table><thead><tr><th>Date</th><th>Reason</th><th>Paid to</th><th>Authorized by</th><th align="right">Amount</th></tr></thead><tbody>' +
-          payouts.map(function(p){
-            return '<tr><td>' + fmtDate(p.created_at) + '</td>' +
-              '<td>' + esc(p.reason) + '</td><td>' + esc(p.paid_to || '—') + '</td><td>' + esc(p.authorized_by_name || '—') + '</td>' +
-              '<td align="right">' + fmtMoney(p.amount_usd) + '</td></tr>';
+      '<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:8px">' +
+        '<h4 style="margin:0;flex:1">Ledger</h4>' +
+        '<div><label class="lbl">From</label><input type="date" id="pcLf" value="' + PC_LEDGER_FROM + '" class="fld"/></div>' +
+        '<div><label class="lbl">To</label><input type="date" id="pcLt" value="' + PC_LEDGER_TO + '" class="fld"/></div>' +
+        '<button class="btn" id="pcLgo">Filter</button>' + (PC_LEDGER_FROM ? '<button class="btn" id="pcLclear">Clear</button>' : '') +
+      '</div>' +
+      (ledger.length
+        ? '<table><thead><tr><th>Date</th><th>Description</th><th>Receipt</th><th align="right">In</th><th align="right">Out</th><th align="right">Balance</th><th></th></tr></thead><tbody>' +
+          ledger.map(function(e){
+            var strike = e.voided ? 'text-decoration:line-through;opacity:.55' : '';
+            var desc = esc(e.label) + (e.reason ? ' — ' + esc(e.reason) : '') + (e.paid_to ? ' <small style="color:var(--muted)">→ ' + esc(e.paid_to) + '</small>' : '');
+            var rcpt = e.receipt_url ? '<a href="' + esc(e.receipt_url) + '" target="_blank">📎</a>' : (e.receipt_ref ? esc(e.receipt_ref) : (e.ref ? esc(e.ref) : ''));
+            var voidBtn = (e.payout_id && !e.voided) ? '<button class="btn pcVoid" data-id="' + e.payout_id + '">Void</button>' : '';
+            return '<tr style="' + strike + '"><td>' + fmtDate(e.at) + '</td><td>' + desc + '</td><td>' + rcpt + '</td>' +
+              '<td align="right">' + (e.delta_usd > 0 ? fmtMoney(e.delta_usd) : '') + '</td>' +
+              '<td align="right">' + (e.delta_usd < 0 ? fmtMoney(-e.delta_usd) : '') + '</td>' +
+              '<td align="right">' + (e.voided ? '' : fmtMoney(e.balance_usd)) + '</td>' +
+              '<td class="actions">' + voidBtn + '</td></tr>';
           }).join('') + '</tbody></table>'
-        : '<div class="empty">No activity yet.</div>') +
+        : '<div class="empty">No activity in range.</div>') +
+      (counts.length ? '<h4 style="margin:16px 0 6px">Count history</h4><table><thead><tr><th>Date</th><th align="right">Counted</th><th align="right">Expected</th><th align="right">Variance</th><th>Notes</th></tr></thead><tbody>' +
+        counts.map(function(c){ return '<tr><td>' + fmtDate(c.created_at) + '</td><td align="right">' + fmtMoney(c.counted_usd) + '</td>' +
+          '<td align="right">' + fmtMoney(c.expected_usd) + '</td><td align="right">' + fmtMoney(c.variance_usd) + '</td>' +
+          '<td>' + esc(c.notes || '') + '</td></tr>'; }).join('') + '</tbody></table>' : '') +
     '</div>';
 
-  document.getElementById('pcBack').addEventListener('click', function(){ PC_VIEW_FUND = null; renderPettyCash(panel); });
+  document.getElementById('pcBack').addEventListener('click', function(){ PC_VIEW_FUND = null; PC_LEDGER_FROM = ''; PC_LEDGER_TO = ''; renderPettyCash(panel); });
+  document.getElementById('pcEdit').addEventListener('click', function(){ pcEditFund(panel, f); });
+  var gadv = document.getElementById('pcGoAdv'); if (gadv) gadv.addEventListener('click', function(ev){ ev.preventDefault(); PC_VIEW_FUND = null; PC_TAB = 'advances'; renderPettyCash(panel); });
+  document.getElementById('pcLgo').addEventListener('click', function(){ PC_LEDGER_FROM = document.getElementById('pcLf').value; PC_LEDGER_TO = document.getElementById('pcLt').value; renderPettyCashFundDetail(panel, fundId); });
+  var lc = document.getElementById('pcLclear'); if (lc) lc.addEventListener('click', function(){ PC_LEDGER_FROM = ''; PC_LEDGER_TO = ''; renderPettyCashFundDetail(panel, fundId); });
+  var toFloat = document.getElementById('pcToFloat'), amt = document.getElementById('pcReplenishAmt');
+  if (toFloat) toFloat.addEventListener('change', function(){ amt.disabled = toFloat.checked; if (toFloat.checked) amt.value = ''; });
+  var isAdv = document.getElementById('pcIsAdvance');
+  isAdv.addEventListener('change', function(){
+    document.getElementById('pcCatWrap').style.display = isAdv.checked ? 'none' : '';
+    document.getElementById('pcWhoWrap').style.display = isAdv.checked ? '' : 'none';
+  });
+  var cnt = document.getElementById('pcCountAmt');
+  cnt.addEventListener('input', function(){
+    var v = parseFloat(cnt.value); var pv = document.getElementById('pcVarPreview');
+    if (isNaN(v)) { pv.textContent = 'expected ' + fmtMoney(f.balance_usd); pv.style.color = 'var(--muted)'; return; }
+    var diff = Math.round((v - f.balance_usd) * 100) / 100;
+    pv.textContent = 'variance ' + (diff >= 0 ? '+' : '') + fmtMoney(diff);
+    pv.style.color = diff === 0 ? 'var(--muted)' : 'var(--red)';
+  });
+  panel.querySelectorAll('.pcVoid').forEach(function(b){ b.addEventListener('click', async function(){
+    if (!confirm('Void this payout? A fund payout is credited back to the balance.')) return;
+    try { await api('/api/admin/cash-payouts/' + b.getAttribute('data-id') + '/void', { method: 'POST', body: {} }); renderPettyCashFundDetail(panel, fundId); }
+    catch (e) { alert(e.message); }
+  }); });
+}
+function pcEditFund(panel, f){
+  posModal('Edit fund — ' + esc(f.name),
+    '<label class="lbl">Name</label><input id="pcEfName" class="fld" value="' + esc(f.name) + '"/>' +
+    '<label class="lbl" style="margin-top:6px">Imprest float</label><input id="pcEfFloat" type="number" min="0" step="0.01" class="fld" value="' + (f.float_usd || 0) + '"/>' +
+    '<label class="lbl" style="margin-top:6px">Receipt required over</label><input id="pcEfThr" type="number" min="0" step="0.01" class="fld" value="' + (f.receipt_threshold_usd || 0) + '"/>' +
+    '<label class="lbl" style="margin-top:6px">Location</label><input id="pcEfLoc" class="fld" value="' + esc(f.location || '') + '"/>' +
+    '<label class="lbl" style="margin-top:6px">Notes</label><input id="pcEfNotes" class="fld" value="' + esc(f.notes || '') + '"/>' +
+    (f.is_active ? '<label style="display:flex;gap:6px;margin-top:10px;font-size:13px"><input type="checkbox" id="pcEfClose"/> Close this fund' +
+      (f.balance_usd !== 0 ? ' <span style="color:var(--red)">(balance ' + fmtMoney(f.balance_usd) + ' will be zeroed with an adjustment)</span>' : '') + '</label>' : '') +
+    '<div id="pcEfMsg" style="font-size:12.5px;margin-top:8px"></div>' +
+    '<div style="margin-top:12px"><button type="button" class="btn ok" id="pcEfGo">Save</button></div>', 480);
+  document.getElementById('pcEfGo').addEventListener('click', async function(){
+    var m = document.getElementById('pcEfMsg'); m.textContent = 'Saving…'; m.style.color = 'var(--muted)';
+    var body = {
+      name: document.getElementById('pcEfName').value.trim(),
+      float_usd: document.getElementById('pcEfFloat').value || 0,
+      receipt_threshold_usd: document.getElementById('pcEfThr').value || 0,
+      location: document.getElementById('pcEfLoc').value.trim() || null,
+      notes: document.getElementById('pcEfNotes').value.trim() || null,
+    };
+    var cl = document.getElementById('pcEfClose');
+    if (cl && cl.checked) { body.is_active = false; body.force = true; }
+    try { await api('/api/admin/petty-cash-funds/' + f.id, { method: 'PATCH', body: body }); posCloseModal();
+      if (cl && cl.checked) { PC_VIEW_FUND = null; renderPettyCash(panel); } else renderPettyCashFundDetail(panel, f.id);
+    } catch (e) { m.textContent = e.message; m.style.color = 'var(--red)'; }
+  });
 }
 async function submitReplenish(fundId){
   var msg = document.getElementById('pcMsg');
   msg.style.color = 'var(--muted)'; msg.textContent = 'Saving…';
   try {
     var source = document.getElementById('pcReplenishSource').value;
-    var body = { amount_usd: document.getElementById('pcReplenishAmt').value, source: source };
+    var toFloat = document.getElementById('pcToFloat').checked;
+    var body = { source: source };
+    if (toFloat) body.to_float = true;
+    else body.amount_usd = document.getElementById('pcReplenishAmt').value;
     if (source === 'drawer') {
       var open = null;
       try { open = (await api('/api/admin/cash-drawer/open')).session; } catch (_) {}
@@ -9713,22 +9966,49 @@ async function submitReplenish(fundId){
       body.drawer_session_id = open.id;
     }
     await api('/api/admin/petty-cash-funds/' + fundId + '/replenish', { method: 'POST', body: body });
-    PC_VIEW_FUND = fundId;
-    show('pettycash');
+    renderPettyCashFundDetail(document.getElementById('panel'), fundId);
   } catch (e) { msg.style.color = 'var(--red)'; msg.textContent = e.message; }
 }
 async function submitFundPayout(fundId){
   var msg = document.getElementById('pcMsg');
   msg.style.color = 'var(--muted)'; msg.textContent = 'Saving…';
+  var isAdv = document.getElementById('pcIsAdvance').checked;
   try {
-    await api('/api/admin/cash-payouts', { method: 'POST', body: {
+    var body = {
       amount_usd: document.getElementById('pcPayoutAmt').value,
-      reason: document.getElementById('pcPayoutReason').value.trim(),
+      reason: document.getElementById('pcPayoutReason') ? document.getElementById('pcPayoutReason').value.trim() : (document.getElementById('pcPayoutTo').value.trim() || 'Payout'),
       paid_to: document.getElementById('pcPayoutTo').value.trim() || null,
+      receipt_ref: document.getElementById('pcPayoutRef').value.trim() || null,
       source_type: 'fund', fund_id: fundId,
+    };
+    if (isAdv) { body.is_advance = true; body.advance_to = document.getElementById('pcPayoutWho').value.trim(); }
+    else { body.category_id = document.getElementById('pcPayoutCat').value || null; }
+    var r = await api('/api/admin/cash-payouts', { method: 'POST', body: body });
+    if (r && r.warning) { msg.style.color = '#92400e'; msg.textContent = r.warning; }
+    var p = document.getElementById('panel');
+    setTimeout(function(){ renderPettyCashFundDetail(p, fundId); }, r && r.warning ? 1400 : 0);
+  } catch (e) { msg.style.color = 'var(--red)'; msg.textContent = e.message; }
+}
+async function submitReconcile(fundId, expectedUsd){
+  var msg = document.getElementById('pcMsg');
+  msg.style.color = 'var(--muted)'; msg.textContent = 'Saving…';
+  try {
+    await api('/api/admin/petty-cash-funds/' + fundId + '/reconcile', { method: 'POST', body: {
+      counted_usd: document.getElementById('pcCountAmt').value,
+      notes: document.getElementById('pcCountNotes').value.trim() || null,
     }});
-    PC_VIEW_FUND = fundId;
-    show('pettycash');
+    renderPettyCashFundDetail(document.getElementById('panel'), fundId);
+  } catch (e) { msg.style.color = 'var(--red)'; msg.textContent = e.message; }
+}
+async function submitTransfer(fundId){
+  var msg = document.getElementById('pcMsg');
+  msg.style.color = 'var(--muted)'; msg.textContent = 'Saving…';
+  try {
+    await api('/api/admin/petty-cash-funds/' + fundId + '/transfer', { method: 'POST', body: {
+      to_fund_id: document.getElementById('pcXferTo').value,
+      amount_usd: document.getElementById('pcXferAmt').value,
+    }});
+    renderPettyCashFundDetail(document.getElementById('panel'), fundId);
   } catch (e) { msg.style.color = 'var(--red)'; msg.textContent = e.message; }
 }
 

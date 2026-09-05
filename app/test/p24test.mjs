@@ -35,7 +35,7 @@ let st = 200;
 async function call(v, url, body) {
   const m = match(v, url); if (!m) throw new Error('no route ' + v + ' ' + url); st = 200;
   const c = { env: ENV, get: () => USER,
-    req: { param: (n) => m.params[n], query: (n) => (n == null ? m.query : m.query[n]), json: async () => body || {} },
+    req: { param: (n) => m.params[n], query: (n) => (n == null ? m.query : m.query[n]), json: async () => body || {}, header: () => null },
     json: (o, s) => { if (s) st = s; return { _json: o }; } };
   const r = await m.r.h(c); return r && r._json !== undefined ? r._json : r;
 }
@@ -84,7 +84,7 @@ let fund = r.funds.find((f) => f.id === fundId);
 A('fund: list shows the opening balance', fund && fund.balance_usd === 50);
 
 r = await call('post', '/api/admin/cash-payouts', {
-  amount_usd: 15, reason: 'Cleaning supplies', source_type: 'fund', fund_id: fundId,
+  amount_usd: 15, reason: 'Cleaning supplies', source_type: 'fund', fund_id: fundId, category_id: 1,
 });
 A('payout: a fund payout succeeds', st === 200 && r.ok === true);
 fund = (await call('get', '/api/admin/petty-cash-funds')).funds.find((f) => f.id === fundId);
