@@ -92,9 +92,10 @@ const LIST_COLS = `
   img, name, make_model, category, condition,
   price_cents, price_cents / 100.0 AS price_usd,
   stock_count, low_threshold, sku, NULL AS barcode, bin_location, location,
-  CASE WHEN stock_count <= 0 THEN 'out'
+  CASE WHEN item_type = 'service' THEN 'in'
+       WHEN stock_count <= 0 THEN 'out'
        WHEN stock_count <= low_threshold THEN 'low' ELSE 'in' END AS stock_level,
-  serial_required, warranty_days,
+  serial_required, warranty_days, item_type,
   core_charge_cents / 100.0 AS core_charge_usd, env_fee_cents / 100.0 AS env_fee_usd,
   matrix_id, ${ACTIVE_SALE_PRICE_SQL} AS active_sale_cents,
   max_discount_pct, is_redeemable,

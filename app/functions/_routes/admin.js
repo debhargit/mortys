@@ -153,7 +153,7 @@ export default function mount(app) {
               m.name AS matrix_name, m.axis1_label AS matrix_axis1_label, m.axis2_label AS matrix_axis2_label,
               p.sale_price_cents / 100.0 AS sale_price_usd, p.sale_starts_at, p.sale_ends_at,
               ${ACTIVE_SALE_PRICE_SQL} AS active_sale_cents,
-              p.max_discount_pct, p.is_redeemable,
+              p.max_discount_pct, p.is_redeemable, p.item_type,
               p.restricted_instore_only, p.restricted_manager_approval, p.restricted_id_required, p.restricted_tax_id_required
          FROM products p LEFT JOIN suppliers s ON s.id = p.supplier_id
                           LEFT JOIN product_matrices m ON m.id = p.matrix_id
@@ -175,7 +175,7 @@ export default function mount(app) {
       `SELECT img, name, make_model, category, condition, price_cents / 100.0 AS price_usd,
               stock_count, low_threshold
          FROM products
-        WHERE is_active = 1 AND stock_count <= low_threshold
+        WHERE is_active = 1 AND item_type != 'service' AND stock_count <= low_threshold
         ORDER BY stock_count ASC, name ASC LIMIT 100`
     );
     return c.json({ products: rows, count: rows.length });
@@ -274,7 +274,7 @@ export default function mount(app) {
       n('SELECT COUNT(*) AS n FROM notify_subscriptions WHERE notified_at IS NULL'),
       n('SELECT COUNT(*) AS n FROM reviews WHERE approved = 0'),
       n("SELECT COUNT(*) AS n FROM orders WHERE status = 'pending'"),
-      n('SELECT COUNT(*) AS n FROM products WHERE stock_count <= low_threshold'),
+      n("SELECT COUNT(*) AS n FROM products WHERE item_type != 'service' AND stock_count <= low_threshold"),
     ]);
     return c.json({ new_inquiries, pending_appointments, pending_notifications, pending_reviews, pending_orders, low_stock_count });
   });
@@ -322,8 +322,8 @@ export default function mount(app) {
           FROM users u) t WHERE bal > 0.01`),
       db.one(`SELECT
           (SELECT COUNT(*) FROM orders WHERE status IN ('pending','confirmed'))                                    AS orders_pending,
-          (SELECT COUNT(*) FROM products WHERE is_active = 1 AND stock_count > 0 AND stock_count <= low_threshold)  AS low_stock,
-          (SELECT COUNT(*) FROM products WHERE is_active = 1 AND stock_count <= 0)                                  AS out_of_stock,
+          (SELECT COUNT(*) FROM products WHERE is_active = 1 AND item_type != 'service' AND stock_count > 0 AND stock_count <= low_threshold)  AS low_stock,
+          (SELECT COUNT(*) FROM products WHERE is_active = 1 AND item_type != 'service' AND stock_count <= 0)                                  AS out_of_stock,
           (SELECT COUNT(*) FROM parts_requisitions WHERE status IN ('pending','partial','backordered'))             AS parts_pulls_open,
           (SELECT COUNT(*) FROM pos_quotes WHERE status = 'open')                                                   AS quotes_open,
           (SELECT COUNT(*) FROM pos_holds)                                                                          AS holds`),

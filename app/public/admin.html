@@ -1986,6 +1986,8 @@ async function renderProducts(panel){
         return '<tr class="prodRow" data-i="' + i + '" data-img="' + esc(p.img) + '" style="cursor:pointer">' +
           '<td><b>' + esc(p.name) + '</b>' +
             (p.matrix_id ? ' <button type="button" class="btn" data-matrix="' + p.matrix_id + '" style="padding:1px 7px;font-size:10.5px;border-radius:10px;background:#ede9fe;color:#6d28d9;border:0;cursor:pointer;vertical-align:middle">🧬 matrix</button>' : '') +
+            (p.item_type === 'service' ? ' <span style="padding:1px 7px;font-size:10.5px;border-radius:10px;background:#fef3c7;color:#92400e;vertical-align:middle">🧾 service</span>'
+              : p.item_type === 'tracked' ? ' <span style="padding:1px 7px;font-size:10.5px;border-radius:10px;background:#e0f2fe;color:#075985;vertical-align:middle">🎫 tracked</span>' : '') +
             '<div style="margin-top:2px"><b class="skuCell" style="color:#0369a1">' + esc(p.sku || 'no SKU') + '</b>' +
               ' <span style="color:var(--muted)">' + esc(p.img) + '</span></div>' +
             (p.make_model ? '<small style="color:var(--muted)">' + esc(p.make_model) + '</small>' : '') + '</td>' +
@@ -2109,6 +2111,11 @@ async function renderProducts(panel){
         '<div style="flex:1;min-width:0">' +
           sect('Identity',
             '<div style="grid-column:1/-1"><label class="lbl">Part name</label><input id="peName" class="fld" value="' + esc(p.name || '') + '"/></div>' +
+            selFld('Item type', 'peItemType', p.item_type || 'inventory', [
+              ['inventory', 'Inventory — a stocked part'],
+              ['tracked', 'Tracked — a counted non-warehouse item (e.g. tokens)'],
+              ['service', 'Service / fee — no stock concept (e.g. delivery, rent)'],
+            ]) +
             fld('SKU', 'peSku', p.sku) +
             fld('Barcode', 'peBarcode', p.barcode) +
             '<div style="grid-column:1/-1"><label class="lbl">Part number (photo key)</label><input class="fld" value="' + esc(p.img) + '" disabled style="opacity:.6"/></div>') +
@@ -2139,19 +2146,19 @@ async function renderProducts(panel){
               ['amount', 'Flat amount per unit'], ['none', 'No commission — skip this item'],
             ]) +
             '<div><label class="lbl" id="peCommValLbl">Value</label><input id="peCommValue" class="fld" type="number" step="0.01" min="0" placeholder="—" value="' + esc(p.commission_value == null ? '' : p.commission_value) + '"/></div>') +
-          sect('Stock',
+          '<div id="peStockSect">' + sect('Stock',
             fld('Stock count', 'peStock', p.stock_count, 'type="number" min="0"') +
-            fld('Low-stock threshold', 'peLow', p.low_threshold, 'type="number" min="0"') +
+            '<div id="peLowWrap"><label class="lbl">Low-stock threshold</label><input id="peLow" class="fld" type="number" min="0" value="' + esc(p.low_threshold == null ? '' : p.low_threshold) + '"/></div>' +
             selFld('Stock unit', 'peStockUom', p.stock_uom || 'each', [['','—']].concat(UOM_OPTS)) +
             selFld('Purchase unit', 'pePurchUom', p.purchase_uom, [['','—']].concat(UOM_OPTS)) +
             fld('Units per purchase', 'peUnitsPerPurch', p.units_per_purchase, 'type="number" step="0.001" min="0" placeholder="e.g. 12 per box"') +
-            selFld('Costing method', 'peCosting', p.costing_method, COSTING_OPTS)) +
+            selFld('Costing method', 'peCosting', p.costing_method, COSTING_OPTS)) + '</div>' +
           sect('Supplier',
             '<div style="grid-column:1/-1"><label class="lbl">Supplier</label><select id="peSupplier" class="fld">' + supplierOptions(p.supplier_id) + '</select></div>' +
             fld('Supplier part #', 'peSupPartNo', p.supplier_part_no, 'placeholder="vendor catalogue no."')) +
-          sect('Location',
+          '<div id="peLocationSect">' + sect('Location',
             selFld('Location', 'peLocation', p.location, locs) +
-            fld('Bin / Rack', 'peBin', p.bin_location, 'placeholder="e.g. A-12"')) +
+            fld('Bin / Rack', 'peBin', p.bin_location, 'placeholder="e.g. A-12"')) + '</div>' +
           sect('Warranty & serial',
             fld('Warranty (days)', 'peWarranty', p.warranty_days, 'type="number" min="0" placeholder="e.g. 90"') +
             '<div><label class="lbl">Serial number</label><label style="display:inline-flex;align-items:center;gap:7px;font-size:13px;padding-top:6px"><input type="checkbox" id="peSerial"' + (p.serial_required ? ' checked' : '') + '/> required at sale</label></div>') +
@@ -2288,6 +2295,23 @@ async function renderProducts(panel){
       jin.addEventListener('focus', function(){ if (jrows.length) { place(); jout.style.display = 'block'; } });
     })();
 
+    // Item type shapes which fields even make sense: a service/fee has no
+    // stock concept at all (no bin/location, no low-stock threshold); a
+    // tracked item (e.g. tokens) still wants a low-stock threshold but isn't
+    // warehouse-placed.
+    (function(){
+      var typeSel = document.getElementById('peItemType');
+      var locSect = document.getElementById('peLocationSect'), lowWrap = document.getElementById('peLowWrap');
+      if (!typeSel) return;
+      var sync = function(){
+        var t = typeSel.value;
+        locSect.style.display = (t === 'inventory') ? '' : 'none';
+        lowWrap.style.display = (t === 'service') ? 'none' : '';
+      };
+      typeSel.addEventListener('change', sync);
+      sync();
+    })();
+
     // Retail auto-fills from cost × (1 + markup%) until the user types a price
     // by hand — the usual parts-counter default.
     (function(){
@@ -2405,6 +2429,7 @@ async function renderProducts(panel){
       body.restricted_id_required = document.getElementById('peResId').checked;
       body.restricted_tax_id_required = document.getElementById('peResTaxId').checked;
       body.is_redeemable = document.getElementById('peRedeemable').checked;
+      body.item_type = document.getElementById('peItemType').value;
       msg.textContent = 'Saving…'; msg.style.color = 'var(--muted)';
       try {
         await api('/api/admin/products/' + encodeURIComponent(p.img), { method: 'PATCH', body: body });

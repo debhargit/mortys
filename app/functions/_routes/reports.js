@@ -261,8 +261,8 @@ export default function mount(app) {
                       COALESCE(SUM(stock_count * price_cents),0)/100.0 AS retail_value
                  FROM products WHERE is_active = 1 GROUP BY category ORDER BY retail_value DESC`),
       db.many(`SELECT img, name, category, stock_count, low_threshold, price_cents/100.0 AS price_usd
-                 FROM products WHERE is_active = 1 AND stock_count <= low_threshold ORDER BY stock_count ASC LIMIT 100`),
-      db.one(`SELECT COUNT(*) AS n FROM products WHERE is_active = 1 AND stock_count <= 0`),
+                 FROM products WHERE is_active = 1 AND item_type != 'service' AND stock_count <= low_threshold ORDER BY stock_count ASC LIMIT 100`),
+      db.one(`SELECT COUNT(*) AS n FROM products WHERE is_active = 1 AND item_type != 'service' AND stock_count <= 0`),
     ]);
     return c.json({
       valuation: { ...valuation, margin_value: valuation.retail_value - valuation.cost_value },

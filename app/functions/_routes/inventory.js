@@ -135,6 +135,10 @@ export default function mount(app) {
     if (b.restricted_manager_approval !== undefined) put('restricted_manager_approval = ?', toBit(b.restricted_manager_approval));
     if (b.restricted_id_required !== undefined) put('restricted_id_required = ?', toBit(b.restricted_id_required));
     if (b.restricted_tax_id_required !== undefined) put('restricted_tax_id_required = ?', toBit(b.restricted_tax_id_required));
+    if (b.item_type !== undefined) {
+      const t = String(b.item_type || '').trim();
+      put('item_type = ?', ['inventory', 'tracked', 'service'].includes(t) ? t : 'inventory');
+    }
 
     // Matrix-item bookkeeping: a plain save from the product editor always
     // resubmits every field, not just the deltas, so "touched" alone can't
@@ -192,12 +196,13 @@ export default function mount(app) {
     if (exists) return c.json({ error: 'A product with that image key already exists' }, 409);
     const nn = (v) => (v === '' || v == null || !Number.isFinite(Number(v)) ? null : Number(v));
     const trimOrNull = (v) => (v && String(v).trim() ? String(v).trim() : null);
+    const itemType = ['inventory', 'tracked', 'service'].includes(String(b.item_type || '').trim()) ? b.item_type : 'inventory';
     await db.run(
       `INSERT INTO products
          (img, name, make_model, category, condition, price_cents, cost_cents, list_price_cents,
           stock_count, low_threshold, location, bin_location, sku, barcode, supplier_id, supplier_part_no,
-          markup_pct, costing_method, warranty_days, serial_required, stock_uom, purchase_uom, units_per_purchase)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          markup_pct, costing_method, warranty_days, serial_required, stock_uom, purchase_uom, units_per_purchase, item_type)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       img, b.name, b.make_model || '', b.category, condition,
       b.price_usd ? usdToCents(b.price_usd) : null,
       b.cost_usd ? usdToCents(b.cost_usd) : null,
@@ -210,7 +215,7 @@ export default function mount(app) {
       nn(b.markup_pct), trimOrNull(b.costing_method),
       b.warranty_days === '' || b.warranty_days == null ? null : parseInt(b.warranty_days, 10),
       toBit(b.serial_required || 0),
-      trimOrNull(b.stock_uom), trimOrNull(b.purchase_uom), nn(b.units_per_purchase),
+      trimOrNull(b.stock_uom), trimOrNull(b.purchase_uom), nn(b.units_per_purchase), itemType,
     );
     return c.json({ ok: true, img });
   });
@@ -354,7 +359,7 @@ export default function mount(app) {
         where.push('(p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ? OR p.make_model LIKE ? OR p.category LIKE ?)');
       }
     }
-    if (lowOnly) where.push('p.stock_count <= COALESCE(p.low_threshold, 4)');
+    if (lowOnly) where.push("p.stock_count <= COALESCE(p.low_threshold, 4) AND p.item_type != 'service'");
     const rows = await d1(c.env).many(
       `SELECT p.img, p.name, p.make_model, p.category, p.condition,
               p.price_cents / 100.0 AS price_usd, p.cost_cents / 100.0 AS cost_usd,

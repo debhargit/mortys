@@ -62,7 +62,7 @@ export default function mount(app) {
     const rules = new Map();
     if (imgs.length) {
       const rows = await db.many(
-        `SELECT img, serial_required, max_discount_pct, is_redeemable,
+        `SELECT img, serial_required, max_discount_pct, is_redeemable, item_type,
                 restricted_id_required, restricted_tax_id_required, restricted_manager_approval
            FROM products WHERE img IN (${imgs.map(() => '?').join(',')})`, ...imgs);
       for (const r of rows) rules.set(r.img, r);
@@ -303,7 +303,10 @@ export default function mount(app) {
           binds: [genRedemptionCode(), it.product_img, saleId, saleItemId, cts(it.unit_price_usd), me.id],
         });
       }
-      if (it.product_img) {
+      // A service item (a fee/charge) has no stock concept at all -- never
+      // decrement it. 'tracked' (e.g. tokens) still counts down like a normal
+      // stocked part.
+      if (it.product_img && (!rule || rule.item_type !== 'service')) {
         stmts.push({ sql: `UPDATE products SET stock_count = MAX(0, stock_count - ?) WHERE img = ?`, binds: [Number(it.qty), it.product_img] });
       }
     }
@@ -515,11 +518,20 @@ export default function mount(app) {
     );
     const retById = {};
     for (const r of returned) retById[r.sale_item_id] = r.qty;
+    const imgs = [...new Set(items.filter((it) => it.product_img).map((it) => it.product_img))];
+    const itemTypes = new Map();
+    if (imgs.length) {
+      const rows = await db.many(`SELECT img, item_type FROM products WHERE img IN (${imgs.map(() => '?').join(',')})`, ...imgs);
+      for (const r of rows) itemTypes.set(r.img, r.item_type);
+    }
 
     const stmts = [];
     for (const it of items) {
       const restock = it.qty - (retById[it.id] || 0);
-      if (it.product_img && restock > 0) {
+      // A service item was never decremented at sale time (see the sale
+      // handler above) -- restocking it on void would fabricate stock for
+      // something that has no stock concept at all.
+      if (it.product_img && restock > 0 && itemTypes.get(it.product_img) !== 'service') {
         stmts.push({ sql: 'UPDATE products SET stock_count = stock_count + ? WHERE img = ?', binds: [restock, it.product_img] });
       }
     }
@@ -548,8 +560,10 @@ export default function mount(app) {
 
     const saleItems = await db.many(
       `SELECT psi.*, psi.unit_price_cents / 100.0 AS unit_price_usd,
-              psi.core_charge_cents / 100.0 AS core_charge_usd, psi.env_fee_cents / 100.0 AS env_fee_usd
-         FROM pos_sale_items psi WHERE psi.sale_id = ?`, id
+              psi.core_charge_cents / 100.0 AS core_charge_usd, psi.env_fee_cents / 100.0 AS env_fee_usd,
+              p.item_type
+         FROM pos_sale_items psi LEFT JOIN products p ON p.img = psi.product_img
+        WHERE psi.sale_id = ?`, id
     );
     const itemById = {};
     for (const it of saleItems) itemById[it.id] = it;
@@ -633,7 +647,7 @@ export default function mount(app) {
               VALUES (?,?,?,?,?,?,?,?,?)`,
         binds: [returnId, lw.item.id, lw.item.product_img || null, lw.item.description, lw.qty, cts(lw.refundLine), lw.item.unit_price_cents, lw.proratePct, lw.warrantyClaim ? 1 : 0],
       });
-      if (lw.item.product_img) {
+      if (lw.item.product_img && lw.item.item_type !== 'service') {
         stmts.push({ sql: 'UPDATE products SET stock_count = stock_count + ? WHERE img = ?', binds: [lw.qty, lw.item.product_img] });
       }
     }
