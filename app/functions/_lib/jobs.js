@@ -103,7 +103,7 @@ export async function lowStockDigest(env) {
     `SELECT img, name, make_model, category, stock_count, low_threshold,
             price_cents / 100.0 AS price_usd
        FROM products
-      WHERE is_active = 1 AND item_type != 'service' AND stock_count <= low_threshold
+      WHERE is_active = 1 AND item_type != 'service' AND is_kit = 0 AND stock_count <= low_threshold
       ORDER BY (stock_count <= 0) DESC, stock_count ASC, name ASC LIMIT 200`);
   if (!low.length) return { low: 0, emailed: false };
 

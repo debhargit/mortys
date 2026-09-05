@@ -18,6 +18,7 @@ import { readUploadBody } from '../_lib/uploads.js';
 import { safeJson } from '../_lib/util.js';
 import { getShopSettings } from '../_lib/shop.js';
 import { bestUnitPriceCents, loadBreaksByImg, ACTIVE_SALE_PRICE_SQL, effectiveBaseCents } from '../_lib/price_breaks.js';
+import { loadKitComponentsByImg, kitRollupCents, kitBuildableQty } from '../_lib/kits.js';
 import { centsToUsd } from '../_lib/money.js';
 
 // Attach each row's price_breaks (ascending by min_qty, in USD) and its
@@ -98,7 +99,7 @@ const LIST_COLS = `
   serial_required, warranty_days, item_type,
   core_charge_cents / 100.0 AS core_charge_usd, env_fee_cents / 100.0 AS env_fee_usd,
   matrix_id, ${ACTIVE_SALE_PRICE_SQL} AS active_sale_cents,
-  max_discount_pct, is_redeemable,
+  max_discount_pct, is_redeemable, is_kit, kit_price_mode,
   restricted_instore_only, restricted_manager_approval, restricted_id_required, restricted_tax_id_required`;
 
 const COUNT_CAP = 5000;
@@ -139,6 +140,29 @@ export default function mount(app) {
       const counted = (cnt && cnt.n) || 0;
       const capped = !isCompact && counted > COUNT_CAP;
       const total = Math.max(capped ? COUNT_CAP : counted, offset + rows.length);
+
+      // Kit rows carry no stock of their own -- swap in the derived buildable
+      // quantity, and (for a roll-up kit) the summed component price -- so the
+      // storefront grid and the POS parts search both see a real number.
+      // Bounded second query, only for the handful of kits actually on the page.
+      const kitImgs = rows.filter((r) => r.is_kit).map((r) => r.img);
+      if (kitImgs.length) {
+        const compMap = await loadKitComponentsByImg(db, kitImgs);
+        for (const r of rows) {
+          if (!r.is_kit) continue;
+          const comps = compMap.get(r.img) || [];
+          const buildable = kitBuildableQty(comps);
+          r.stock_count = Number.isFinite(buildable) ? buildable : 9999;
+          r.stock_level = r.stock_count <= 0 ? 'out'
+            : (r.low_threshold != null && r.stock_count <= r.low_threshold) ? 'low' : 'in';
+          if (r.kit_price_mode === 'rollup') {
+            const roll = kitRollupCents(comps);
+            r.price_cents = roll;
+            r.price_usd = roll / 100;
+            r.active_sale_cents = null;   // roll-up already reflects component sale prices
+          }
+        }
+      }
 
       // The storefront (index.html / shop.html) asks with ?compact=1 and reads
       // a positional-array format: { cats, rows:[[img,name,make_model,catIdx,

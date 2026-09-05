@@ -12,9 +12,18 @@ import {
   nextReceiptNumber, nextInvoiceNumber, nextReturnNumber, nextId, genGiftCardCode, genRedemptionCode,
 } from '../_lib/pos.js';
 import { loadCoupon, computeCouponDiscount } from '../_lib/coupons.js';
+import { loadKitComponentsByImg, explodeKitLine } from '../_lib/kits.js';
 
 const r2 = (n) => Math.round(n * 100) / 100;
 const cts = (usd) => Math.round((Number(usd) || 0) * 100);
+
+// Parse a pos_sale_items.kit_components_json snapshot ([{product_img,
+// qty_each, item_type}]) -- null/blank/malformed all mean "not a kit line".
+function restockKitComponents(json) {
+  if (!json) return null;
+  try { const a = JSON.parse(json); return Array.isArray(a) && a.length ? a : null; }
+  catch { return null; }
+}
 
 const PAYMENT_METHODS = ['cash', 'card', 'cheque', 'bank', 'loyalty', 'gift_card', 'account'];
 const REFUND_METHODS = ['cash', 'card', 'cheque', 'bank', 'store_credit'];
@@ -28,7 +37,7 @@ const REFUND_METHODS = ['cash', 'card', 'cheque', 'bank', 'store_credit'];
 // same shape `c.json(body, status)` would have sent.
 export async function createPosSale(env, b, me) {
   const db = d1(env);
-  const items = Array.isArray(b.items) ? b.items : [];
+  let items = Array.isArray(b.items) ? b.items : [];
   if (!items.length) return { status: 400, body: { error: 'At least one item required' } };
 
   // ----- normalise payments -----
@@ -65,12 +74,31 @@ export async function createPosSale(env, b, me) {
   if (imgs.length) {
     const rows = await db.many(
       `SELECT img, serial_required, max_discount_pct, is_redeemable, item_type, category,
+              is_kit, kit_price_mode, kit_line_mode,
               restricted_id_required, restricted_tax_id_required, restricted_manager_approval
          FROM products WHERE img IN (${imgs.map(() => '?').join(',')})`, ...imgs);
     for (const r of rows) rules.set(r.img, r);
   }
   const missingSerial = items.find((it) => { const r = rules.get(it.product_img); return r && r.serial_required && !String(it.serial_number || '').trim(); });
   if (missingSerial) return { status: 400, body: { error: `"${missingSerial.description}" requires a serial number to sell.` } };
+
+  // Kit lines: load the recipe for every kit img in the cart. A 'single'-mode
+  // kit stays one line (it decrements its components at the stock step and
+  // snapshots them for void/return); an 'exploded'-mode kit is expanded into
+  // ordinary component lines just below, so from `lineCalc` onward nothing is
+  // kit-aware. Either way a restricted component makes the whole kit
+  // restricted (checked here, before the expansion).
+  const kitImgs = [...new Set(items
+    .filter((it) => { const r = rules.get(it.product_img); return r && r.is_kit; })
+    .map((it) => it.product_img))];
+  const kitComps = kitImgs.length ? await loadKitComponentsByImg(db, kitImgs) : new Map();
+  const singleKitLine = (it) => { const r = rules.get(it.product_img); return !!(r && r.is_kit && (r.kit_line_mode || 'single') === 'single'); };
+  const gateHit = (it, flag) => {
+    const r = rules.get(it.product_img);
+    if (r && r[flag]) return true;
+    if (r && r.is_kit) return (kitComps.get(it.product_img) || []).some((cpt) => cpt[flag]);
+    return false;
+  };
 
   for (const it of items) {
     const r = rules.get(it.product_img);
@@ -82,15 +110,35 @@ export async function createPosSale(env, b, me) {
     }
   }
 
-  const needsId = items.some((it) => { const r = rules.get(it.product_img); return r && r.restricted_id_required; });
+  const needsId = items.some((it) => gateHit(it, 'restricted_id_required'));
   if (needsId && !String(b.verify_id_number || '').trim())
     return { status: 400, body: { error: 'One or more items require an ID to be recorded before this sale can complete.' } };
-  const needsTaxId = items.some((it) => { const r = rules.get(it.product_img); return r && r.restricted_tax_id_required; });
+  const needsTaxId = items.some((it) => gateHit(it, 'restricted_tax_id_required'));
   if (needsTaxId && !String(b.verify_tax_id || '').trim())
     return { status: 400, body: { error: 'One or more items require a Tax ID to be recorded before this sale can complete.' } };
-  const needsApproval = items.some((it) => { const r = rules.get(it.product_img); return r && r.restricted_manager_approval; });
+  const needsApproval = items.some((it) => gateHit(it, 'restricted_manager_approval'));
   if (needsApproval && !String(b.restricted_approved_by || '').trim())
     return { status: 400, body: { error: 'One or more items require manager approval before this sale can complete.' } };
+
+  // Expand 'exploded'-mode kit lines into their component lines now, so every
+  // step from here (line totals, coupon, tax, receipt items, stock) sees only
+  // ordinary lines. 'single'-mode kits pass through untouched.
+  if (kitImgs.length) {
+    const expanded = [];
+    for (const it of items) {
+      const r = rules.get(it.product_img);
+      const comps = r && r.is_kit ? (kitComps.get(it.product_img) || []) : null;
+      if (r && r.is_kit && (r.kit_line_mode || 'single') === 'exploded' && comps.length) {
+        for (const ln of explodeKitLine(it, comps, r.kit_price_mode || 'fixed')) {
+          expanded.push({ product_img: ln.product_img, description: ln.description, qty: ln.qty,
+            unit_price_usd: ln.unit_price_usd, discount_usd: 0, item_type: ln.item_type });
+        }
+      } else {
+        expanded.push(it);
+      }
+    }
+    items = expanded;
+  }
 
   // ----- 1. line totals -----
   // core_charge_usd / env_fee_usd travel per unit (what the product record
@@ -307,26 +355,37 @@ export async function createPosSale(env, b, me) {
     const it = items[i];
     const lc = lineCalc[i];
     const saleItemId = saleItemBaseId + i;
+    const rule = rules.get(it.product_img);
     let warrantyUntil = null;
     if (it.warranty_days) warrantyUntil = new Date(Date.now() + Number(it.warranty_days) * 86400000).toISOString().slice(0, 10);
+
+    // 'single'-mode kit line: snapshot which components (and how many each)
+    // this line consumed, so a later void/return restocks exactly these even
+    // if the kit's recipe changes afterwards.
+    let kitJson = null;
+    if (singleKitLine(it)) {
+      kitJson = JSON.stringify((kitComps.get(it.product_img) || []).map((cpt) => ({
+        product_img: cpt.component_img, qty_each: Number(cpt.qty_each) || 1, item_type: cpt.item_type,
+      })));
+    }
+
     stmts.push({
       sql: `INSERT INTO pos_sale_items
         (id, sale_id, product_img, description, qty, unit_price_cents, core_charge_cents, env_fee_cents,
-         discount_cents, discount_note, serial_number, warranty_until, total_cents)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         discount_cents, discount_note, serial_number, warranty_until, total_cents, kit_components_json)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       binds: [
         saleItemId, saleId, it.product_img || null, it.description, Number(it.qty), cts(it.unit_price_usd),
         // Stored as the line's total, not per-unit -- see the gross-total
         // comment above; the return endpoint divides this back by qty.
         cts((Number(it.core_charge_usd) || 0) * Number(it.qty)), cts((Number(it.env_fee_usd) || 0) * Number(it.qty)),
         cts(lc.disc), lc.disc > 0 && it.discount_note ? String(it.discount_note).slice(0, 300) : null,
-        it.serial_number || null, warrantyUntil, cts(lc.net),
+        it.serial_number || null, warrantyUntil, cts(lc.net), kitJson,
       ],
     });
     // Redeemable items (e.g. lottery scratch cards) mint one instrument per
     // sold unit -- posAddToCart forces qty 1 per line for these, same as
     // serial_required, so this is exactly one instrument per such line.
-    const rule = rules.get(it.product_img);
     if (rule && rule.is_redeemable) {
       stmts.push({
         sql: `INSERT INTO redemption_instruments (code, product_img, sale_id, sale_item_id, face_value_cents, sold_by)
@@ -334,10 +393,18 @@ export async function createPosSale(env, b, me) {
         binds: [genRedemptionCode(), it.product_img, saleId, saleItemId, cts(it.unit_price_usd), me.id],
       });
     }
-    // A service item (a fee/charge) has no stock concept at all -- never
-    // decrement it. 'tracked' (e.g. tokens) still counts down like a normal
-    // stocked part.
-    if (it.product_img && (!rule || rule.item_type !== 'service')) {
+    // Stock. A 'single'-mode kit draws down its components (skip 'service'
+    // ones); everything else decrements itself unless it's a service line.
+    // 'tracked' (e.g. tokens) counts down like a normal stocked part.
+    if (it.product_img && kitJson) {
+      for (const cpt of (kitComps.get(it.product_img) || [])) {
+        if (cpt.item_type === 'service') continue;
+        stmts.push({
+          sql: `UPDATE products SET stock_count = MAX(0, stock_count - ?) WHERE img = ?`,
+          binds: [(Number(cpt.qty_each) || 1) * Number(it.qty), cpt.component_img],
+        });
+      }
+    } else if (it.product_img && it.item_type !== 'service' && (!rule || rule.item_type !== 'service')) {
       stmts.push({ sql: `UPDATE products SET stock_count = MAX(0, stock_count - ?) WHERE img = ?`, binds: [Number(it.qty), it.product_img] });
     }
   }
@@ -602,10 +669,21 @@ export default function mount(app) {
     const stmts = [];
     for (const it of items) {
       const restock = it.qty - (retById[it.id] || 0);
-      // A service item was never decremented at sale time (see the sale
-      // handler above) -- restocking it on void would fabricate stock for
-      // something that has no stock concept at all.
-      if (it.product_img && restock > 0 && itemTypes.get(it.product_img) !== 'service') {
+      if (!(it.product_img && restock > 0)) continue;
+      // A 'single'-mode kit line decremented its components at sale time and
+      // carries a snapshot of them -- restock those, not the kit shell.
+      const kitSnap = restockKitComponents(it.kit_components_json);
+      if (kitSnap) {
+        for (const cpt of kitSnap) {
+          if (cpt.item_type === 'service') continue;
+          stmts.push({ sql: 'UPDATE products SET stock_count = stock_count + ? WHERE img = ?',
+            binds: [(Number(cpt.qty_each) || 1) * restock, cpt.product_img] });
+        }
+        continue;
+      }
+      // A service item was never decremented at sale time -- restocking it on
+      // void would fabricate stock for something that has no stock concept.
+      if (itemTypes.get(it.product_img) !== 'service') {
         stmts.push({ sql: 'UPDATE products SET stock_count = stock_count + ? WHERE img = ?', binds: [restock, it.product_img] });
       }
     }
@@ -721,7 +799,16 @@ export default function mount(app) {
               VALUES (?,?,?,?,?,?,?,?,?)`,
         binds: [returnId, lw.item.id, lw.item.product_img || null, lw.item.description, lw.qty, cts(lw.refundLine), lw.item.unit_price_cents, lw.proratePct, lw.warrantyClaim ? 1 : 0],
       });
-      if (lw.item.product_img && lw.item.item_type !== 'service') {
+      // A 'single'-mode kit line restocks its snapshotted components, scaled
+      // by how many kits are being returned; anything else restocks itself.
+      const kitSnap = restockKitComponents(lw.item.kit_components_json);
+      if (lw.item.product_img && kitSnap) {
+        for (const cpt of kitSnap) {
+          if (cpt.item_type === 'service') continue;
+          stmts.push({ sql: 'UPDATE products SET stock_count = stock_count + ? WHERE img = ?',
+            binds: [(Number(cpt.qty_each) || 1) * lw.qty, cpt.product_img] });
+        }
+      } else if (lw.item.product_img && lw.item.item_type !== 'service') {
         stmts.push({ sql: 'UPDATE products SET stock_count = stock_count + ? WHERE img = ?', binds: [lw.qty, lw.item.product_img] });
       }
     }

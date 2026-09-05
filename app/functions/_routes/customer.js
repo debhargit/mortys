@@ -22,6 +22,7 @@ import { verifyQuote } from '../_lib/carriers/index.js';
 import { bookShipment } from './shipping.js';
 import { fygaroEnabled, buildCheckoutUrl } from '../_lib/fygaro.js';
 import { bestUnitPriceCents, loadBreaksByImg, loadActiveSaleCentsByImg, effectiveBaseCents } from '../_lib/price_breaks.js';
+import { loadKitComponentsByImg, kitRollupCents } from '../_lib/kits.js';
 import { loadCoupon, computeCouponDiscount } from '../_lib/coupons.js';
 
 const SITE_BASE = 'https://mortsautoparts.com';
@@ -55,7 +56,34 @@ async function repriceForQty(db, items) {
     const effCents = bestUnitPriceCents(effBase, breaks, it.qty);
     if (effCents != null && effCents < baseCents) it.price_usd = r2(effCents / 100);
   }
+  // A roll-up kit is priced from its components, not products.price_cents.
+  const rollupImgs = items.filter((it) => it.is_kit && it.kit_price_mode === 'rollup').map((it) => it.product_img);
+  if (rollupImgs.length) {
+    const compMap = await loadKitComponentsByImg(db, rollupImgs);
+    for (const it of items) {
+      if (it.is_kit && it.kit_price_mode === 'rollup') {
+        it.price_usd = r2(kitRollupCents(compMap.get(it.product_img) || []) / 100);
+      }
+    }
+  }
   return items;
+}
+
+// A kit inherits its components' online-block: a kit whose recipe contains a
+// restricted or redeemable part can't be sold online either. Returns the
+// sub-list of `items` that may not check out online.
+async function blockedForOnline(db, items) {
+  const blocked = items.filter(onlineCheckoutBlocked);
+  const done = new Set(blocked.map((it) => it.product_img));
+  const kitImgs = items.filter((it) => it.is_kit && !done.has(it.product_img)).map((it) => it.product_img);
+  if (kitImgs.length) {
+    const compMap = await loadKitComponentsByImg(db, kitImgs);
+    for (const it of items) {
+      if (!it.is_kit || done.has(it.product_img)) continue;
+      if ((compMap.get(it.product_img) || []).some(onlineCheckoutBlocked)) blocked.push(it);
+    }
+  }
+  return blocked;
 }
 
 // Anything that needs a human at the counter -- an explicit in-store-only
@@ -293,13 +321,14 @@ export default function mount(app) {
 
     const items = await db.many(
       `SELECT c.product_img, c.qty, p.price_cents / 100.0 AS price_usd, p.name, p.make_model, p.category,
+              p.is_kit, p.kit_price_mode,
               p.restricted_instore_only, p.restricted_manager_approval, p.restricted_id_required, p.restricted_tax_id_required, p.is_redeemable
          FROM cart_items c JOIN products p ON p.img = c.product_img WHERE c.user_id = ?`, uid);
     if (!items.length) return c.json({ error: 'Cart is empty' }, 400);
     if (items.some((it) => it.price_usd == null)) {
       return c.json({ error: 'Some items in your cart are not priced — remove them or submit a quote request for the whole cart.', code: 'unpriced_items' }, 400);
     }
-    const instoreOnly = items.filter(onlineCheckoutBlocked);
+    const instoreOnly = await blockedForOnline(db, items);
     if (instoreOnly.length) {
       return c.json({
         error: `${instoreOnly.map((it) => it.name).join(', ')} can only be purchased in-store — remove ${instoreOnly.length === 1 ? 'it' : 'them'} from your cart to check out online.`,
@@ -420,7 +449,7 @@ export default function mount(app) {
     if (!reqItems.length) return c.json({ error: 'Cart is empty' }, 400);
     const imgs = [...new Set(reqItems.map((it) => String(it.img)))].slice(0, 200);
     const rows = await db.many(
-      `SELECT img, price_cents / 100.0 AS price_usd, name, make_model, category,
+      `SELECT img, price_cents / 100.0 AS price_usd, name, make_model, category, is_kit, kit_price_mode,
               restricted_instore_only, restricted_manager_approval, restricted_id_required, restricted_tax_id_required, is_redeemable
          FROM products WHERE img IN (${imgs.map(() => '?').join(',')})`, ...imgs);
     const byImg = new Map(rows.map((r) => [r.img, r]));
@@ -428,6 +457,7 @@ export default function mount(app) {
       const p = byImg.get(String(it.img));
       if (!p) return null;
       return { product_img: p.img, qty: Math.max(1, parseInt(it.qty, 10) || 1), price_usd: p.price_usd, name: p.name, make_model: p.make_model, category: p.category,
+        is_kit: p.is_kit, kit_price_mode: p.kit_price_mode,
         restricted_instore_only: p.restricted_instore_only, restricted_manager_approval: p.restricted_manager_approval,
         restricted_id_required: p.restricted_id_required, restricted_tax_id_required: p.restricted_tax_id_required, is_redeemable: p.is_redeemable };
     }).filter(Boolean);
@@ -435,7 +465,7 @@ export default function mount(app) {
     if (items.some((it) => it.price_usd == null)) {
       return c.json({ error: 'Some items in your cart are not priced — submit a quote request for the whole cart.', code: 'unpriced_items' }, 400);
     }
-    const instoreOnly = items.filter(onlineCheckoutBlocked);
+    const instoreOnly = await blockedForOnline(db, items);
     if (instoreOnly.length) {
       return c.json({
         error: `${instoreOnly.map((it) => it.name).join(', ')} can only be purchased in-store — remove ${instoreOnly.length === 1 ? 'it' : 'them'} from your cart to check out online.`,

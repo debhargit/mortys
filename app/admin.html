@@ -2015,6 +2015,7 @@ async function renderProducts(panel){
             (p.matrix_id ? ' <button type="button" class="btn" data-matrix="' + p.matrix_id + '" style="padding:1px 7px;font-size:10.5px;border-radius:10px;background:#ede9fe;color:#6d28d9;border:0;cursor:pointer;vertical-align:middle">🧬 matrix</button>' : '') +
             (p.item_type === 'service' ? ' <span style="padding:1px 7px;font-size:10.5px;border-radius:10px;background:#fef3c7;color:#92400e;vertical-align:middle">🧾 service</span>'
               : p.item_type === 'tracked' ? ' <span style="padding:1px 7px;font-size:10.5px;border-radius:10px;background:#e0f2fe;color:#075985;vertical-align:middle">🎫 tracked</span>' : '') +
+            (p.is_kit ? ' <span style="padding:1px 7px;font-size:10.5px;border-radius:10px;background:#dcfce7;color:#166534;vertical-align:middle">🧩 kit</span>' : '') +
             '<div style="margin-top:2px"><b class="skuCell" style="color:#0369a1">' + esc(p.sku || 'no SKU') + '</b>' +
               ' <span style="color:var(--muted)">' + esc(p.img) + '</span></div>' +
             (p.make_model ? '<small style="color:var(--muted)">' + esc(p.make_model) + '</small>' : '') + '</td>' +
@@ -2216,6 +2217,24 @@ async function renderProducts(panel){
             '</div>') +
           sect('Redeemable item',
             '<div style="grid-column:1/-1"><label style="display:inline-flex;align-items:center;gap:7px;font-size:13px"><input type="checkbox" id="peRedeemable"' + (p.is_redeemable ? ' checked' : '') + '/> This is a redeemable item <small style="color:var(--muted)">(e.g. a scratch card — each unit sold mints a code under 🎟 Redeemables)</small></label></div>') +
+          '<div style="margin-bottom:12px">' +
+            '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:800;margin-bottom:6px">Kit / bundle <span style="font-weight:400;text-transform:none;letter-spacing:0">— one sellable part built from other parts</span></div>' +
+            '<label style="display:flex;align-items:center;gap:7px;font-size:13px;margin-bottom:8px"><input type="checkbox" id="peIsKit"' + (p.is_kit ? ' checked' : '') + '/> This part is a kit <small style="color:var(--muted)">— selling it draws its components\' stock down; its own stock count is ignored</small></label>' +
+            '<div id="peKitBody"' + (p.is_kit ? '' : ' style="display:none"') + '>' +
+              '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">' +
+                selFld('Pricing', 'peKitPriceMode', p.kit_price_mode || 'fixed', [['fixed', 'Fixed — the sell price above'], ['rollup', 'Roll-up — sum of components']]) +
+                selFld('Receipt / cart line', 'peKitLineMode', p.kit_line_mode || 'single', [['single', 'One line for the kit'], ['exploded', 'One line per component']]) +
+              '</div>' +
+              '<div id="peKitRows"></div>' +
+              '<div style="position:relative;margin-top:2px">' +
+                '<input id="peKitSearch" placeholder="🔎 add a component part…" autocomplete="off" class="fld"/>' +
+                '<div id="peKitResults" style="display:none;position:fixed;z-index:130;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 14px 36px rgba(0,0,0,.30);max-height:min(46vh,340px);overflow-y:auto"></div>' +
+              '</div>' +
+              '<div style="margin-top:8px;font-size:12.5px;color:var(--muted)">Roll-up total: <b id="peKitRollup">—</b></div>' +
+              '<button type="button" class="btn ok" id="peKitSave" style="margin-top:6px">💾 Save kit</button>' +
+              '<span id="peKitMsg" style="font-size:12.5px;margin-left:8px"></span>' +
+            '</div>' +
+          '</div>' +
           sect('Status',
             '<div style="grid-column:1/-1"><label style="display:inline-flex;align-items:center;gap:7px;font-size:13px"><input type="checkbox" id="peActive"' + (p.is_active === false ? '' : ' checked') + '/> Listed / active</label></div>') +
           '<div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:6px">' +
@@ -2409,6 +2428,113 @@ async function renderProducts(panel){
           await api('/api/admin/products/' + encodeURIComponent(p.img) + '/price-breaks', { method: 'PUT', body: { breaks: payload } });
           pbMsg.textContent = '✓ Saved'; pbMsg.style.color = '#166534';
         } catch (e) { pbMsg.textContent = e.message; pbMsg.style.color = 'var(--red)'; }
+      });
+    })();
+
+    // Kit / bundle: the component list is a child collection with its own
+    // save (PUT .../kit-components), like bulk pricing above; the is_kit flag
+    // and the two modes ride along in that same PUT so they can't drift from
+    // the recipe. peSave deliberately does NOT touch any kit field.
+    (function(){
+      var chk = document.getElementById('peIsKit');
+      if (!chk) return;
+      var body = document.getElementById('peKitBody');
+      var rowsBox = document.getElementById('peKitRows');
+      var rollupEl = document.getElementById('peKitRollup');
+      var stockSect = document.getElementById('peStockSect'), locSect = document.getElementById('peLocationSect');
+      var priceModeSel = document.getElementById('peKitPriceMode');
+      var comps = (p.kit_components || []).map(function(k){
+        return { component_img: k.component_img, qty_each: k.qty_each, name: k.name || k.component_img,
+                 unit_usd: (k.effective_price_usd != null ? k.effective_price_usd : k.price_usd) || 0 };
+      });
+      var grey = function(el, on){ if (!el) return; el.style.opacity = on ? '.45' : ''; el.style.pointerEvents = on ? 'none' : ''; };
+      var syncKit = function(){ var on = chk.checked; body.style.display = on ? '' : 'none'; grey(stockSect, on); grey(locSect, on); };
+      var paintRollup = function(){
+        var t = comps.reduce(function(s, c){ return s + (Number(c.unit_usd) || 0) * (Number(c.qty_each) || 1); }, 0);
+        rollupEl.textContent = 'J$' + t.toFixed(2) + (priceModeSel && priceModeSel.value === 'rollup' ? ' — used as this kit’s price' : '');
+      };
+      var paint = function(){
+        rowsBox.innerHTML = comps.length ? comps.map(function(c, i){
+          return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px" data-kcrow="' + i + '">' +
+            '<span style="flex:1;min-width:0;font-size:12.5px">' + esc(c.name) + ' <code style="color:var(--muted)">' + esc(c.component_img) + '</code></span>' +
+            '<span style="font-size:12.5px;color:var(--muted)">×</span>' +
+            '<input type="number" min="1" step="1" class="fld kcQty" value="' + esc(c.qty_each == null ? 1 : c.qty_each) + '" style="width:70px"/>' +
+            '<button type="button" class="btn kcRemove" style="padding:3px 9px;background:#fee2e2;color:#b91c1c">✕</button>' +
+          '</div>';
+        }).join('') : '<div style="font-size:12.5px;color:var(--muted);margin-bottom:6px">No components yet — search below to add parts.</div>';
+        rowsBox.querySelectorAll('.kcRemove').forEach(function(btn){
+          btn.addEventListener('click', function(){
+            comps.splice(parseInt(btn.closest('[data-kcrow]').getAttribute('data-kcrow'), 10), 1); paint(); paintRollup();
+          });
+        });
+        rowsBox.querySelectorAll('[data-kcrow]').forEach(function(row){
+          row.querySelector('.kcQty').addEventListener('input', function(){
+            comps[parseInt(row.getAttribute('data-kcrow'), 10)].qty_each = parseInt(row.querySelector('.kcQty').value, 10) || 1;
+            paintRollup();
+          });
+        });
+      };
+      chk.addEventListener('change', syncKit);
+      if (priceModeSel) priceModeSel.addEventListener('change', paintRollup);
+      syncKit(); paint(); paintRollup();
+
+      (function(){
+        var jin = document.getElementById('peKitSearch'), jout = document.getElementById('peKitResults');
+        var jd = null, jseq = 0, jrows = [];
+        var place = function(){ var r = jin.getBoundingClientRect(); jout.style.left = Math.round(r.left) + 'px'; jout.style.top = Math.round(r.bottom + 4) + 'px'; jout.style.width = Math.round(r.width) + 'px'; };
+        var render = function(){
+          if (!jrows.length) { jout.style.display = 'none'; jout.innerHTML = ''; return; }
+          jout.innerHTML = jrows.map(function(x, i){
+            return '<button type="button" data-i="' + i + '" style="display:flex;gap:9px;width:100%;text-align:left;border:0;border-bottom:1px solid var(--hover);background:var(--card);color:var(--ink);padding:8px 10px;cursor:pointer;font-family:inherit;font-size:12px">' +
+              '<code style="flex-shrink:0;font-weight:700;max-width:150px;word-break:break-all">' + esc(x.img) + '</code>' +
+              '<span style="flex:1;min-width:0;font-weight:600">' + esc(x.name || '') + '</span>' +
+              '<small style="flex-shrink:0;color:var(--muted)">J$' + (Number(x.price_usd) || 0).toFixed(2) + '</small>' +
+            '</button>';
+          }).join('');
+          place(); jout.style.display = 'block';
+          jout.querySelectorAll('button').forEach(function(b){
+            b.addEventListener('mousedown', function(e){ e.preventDefault(); add(jrows[parseInt(b.dataset.i, 10)]); });
+          });
+        };
+        var add = function(x){
+          if (!x) return;
+          if (x.img === p.img) { posToast('A kit can’t contain itself.'); return; }
+          if (x.is_kit) { posToast('A kit can’t contain another kit.'); return; }
+          if (comps.some(function(c){ return c.component_img === x.img; })) { posToast('Already a component.'); return; }
+          comps.push({ component_img: x.img, qty_each: 1, name: x.name || x.img, unit_usd: Number(x.price_usd) || 0 });
+          jin.value = ''; jrows = []; render(); paint(); paintRollup();
+        };
+        var run = function(){
+          var q = jin.value.trim(); clearTimeout(jd);
+          if (q.length < 2) { jrows = []; render(); return; }
+          jd = setTimeout(async function(){
+            var seq = ++jseq;
+            try {
+              var r = await api('/api/products?limit=12&offset=0&q=' + encodeURIComponent(q));
+              if (seq !== jseq) return;
+              jrows = (r.products || []).filter(function(x){ return !x.is_kit && x.img !== p.img; }).slice(0, 10);
+              render();
+            } catch (e) { if (seq === jseq) { jrows = []; render(); } }
+          }, 220);
+        };
+        jin.addEventListener('input', run);
+        jin.addEventListener('blur', function(){ setTimeout(function(){ jout.style.display = 'none'; }, 150); });
+      })();
+
+      document.getElementById('peKitSave').addEventListener('click', async function(){
+        var m = document.getElementById('peKitMsg');
+        rowsBox.querySelectorAll('[data-kcrow]').forEach(function(row, i){ comps[i].qty_each = parseInt(row.querySelector('.kcQty').value, 10) || 1; });
+        var payload = {
+          is_kit: chk.checked,
+          kit_price_mode: document.getElementById('peKitPriceMode').value,
+          kit_line_mode: document.getElementById('peKitLineMode').value,
+          components: comps.map(function(c){ return { component_img: c.component_img, qty_each: c.qty_each }; }),
+        };
+        m.textContent = 'Saving…'; m.style.color = 'var(--muted)';
+        try {
+          await api('/api/admin/products/' + encodeURIComponent(p.img) + '/kit-components', { method: 'PUT', body: payload });
+          m.textContent = '✓ Saved'; m.style.color = '#166534';
+        } catch (e) { m.textContent = e.message; m.style.color = 'var(--red)'; }
       });
     })();
 

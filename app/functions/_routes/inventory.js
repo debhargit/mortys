@@ -139,6 +139,25 @@ export default function mount(app) {
       const t = String(b.item_type || '').trim();
       put('item_type = ?', ['inventory', 'tracked', 'service'].includes(t) ? t : 'inventory');
     }
+    // Kit flags. Turning is_kit ON is guarded (a matrix / redeemable product
+    // can't also be a kit); the recipe itself is set via the dedicated
+    // PUT .../kit-components below, which carries the fuller validation.
+    if (b.is_kit !== undefined) {
+      if (toBit(b.is_kit) === 1) {
+        const cur = await db.one('SELECT matrix_id, is_redeemable FROM products WHERE img = ?', c.req.param('img'));
+        if (cur && cur.matrix_id) return c.json({ error: 'A matrix / variant product cannot also be a kit.' }, 400);
+        if (cur && cur.is_redeemable) return c.json({ error: 'A redeemable product cannot also be a kit.' }, 400);
+      }
+      put('is_kit = ?', toBit(b.is_kit));
+    }
+    if (b.kit_price_mode !== undefined) {
+      const m = String(b.kit_price_mode || '').trim();
+      put('kit_price_mode = ?', ['fixed', 'rollup'].includes(m) ? m : 'fixed');
+    }
+    if (b.kit_line_mode !== undefined) {
+      const m = String(b.kit_line_mode || '').trim();
+      put('kit_line_mode = ?', ['single', 'exploded'].includes(m) ? m : 'single');
+    }
 
     // Matrix-item bookkeeping: a plain save from the product editor always
     // resubmits every field, not just the deltas, so "touched" alone can't
@@ -257,6 +276,73 @@ export default function mount(app) {
   });
 
   // =====================================================================
+  //  KIT COMPONENTS — replace the whole recipe for one kit product, and
+  //  (optionally) set the kit flags in the same batch so is_kit and its
+  //  rows can never drift apart. Same replace-the-whole-set shape as
+  //  price-breaks above.
+  // =====================================================================
+  app.put('/api/admin/products/:img/kit-components', adminMw, async (c) => {
+    const db = d1(c.env);
+    const img = c.req.param('img');
+    const kit = await db.one('SELECT img, matrix_id, is_redeemable, kit_line_mode FROM products WHERE img = ?', img);
+    if (!kit) return c.json({ error: 'Not found' }, 404);
+    if (kit.matrix_id) return c.json({ error: 'A matrix / variant product cannot also be a kit.' }, 400);
+    if (kit.is_redeemable) return c.json({ error: 'A redeemable product cannot also be a kit.' }, 400);
+
+    const b = await c.req.json().catch(() => ({}));
+    const raw = Array.isArray(b.components) ? b.components : [];
+    const lineMode = ['single', 'exploded'].includes(String(b.kit_line_mode || '').trim())
+      ? String(b.kit_line_mode).trim() : (kit.kit_line_mode || 'single');
+
+    const seen = new Set();
+    const rows = [];
+    for (const r of raw) {
+      const componentImg = String(r.component_img || '').trim();
+      if (!componentImg) return c.json({ error: 'Each component needs a part.' }, 400);
+      if (componentImg === img) return c.json({ error: 'A kit cannot contain itself.' }, 400);
+      if (seen.has(componentImg)) return c.json({ error: 'Duplicate component ' + componentImg }, 400);
+      const qtyEach = parseInt(r.qty_each, 10);
+      if (!Number.isInteger(qtyEach) || qtyEach < 1) return c.json({ error: 'Each component needs a quantity of 1 or more.' }, 400);
+      seen.add(componentImg);
+      rows.push({ componentImg, qtyEach, sortOrder: rows.length });
+    }
+    if (rows.length) {
+      const comps = await db.many(
+        `SELECT img, is_kit, serial_required FROM products WHERE img IN (${rows.map(() => '?').join(',')})`,
+        ...rows.map((r) => r.componentImg));
+      const byImg = new Map(comps.map((p) => [p.img, p]));
+      for (const r of rows) {
+        const p = byImg.get(r.componentImg);
+        if (!p) return c.json({ error: 'Component not found: ' + r.componentImg }, 400);
+        if (p.is_kit) return c.json({ error: 'A kit cannot contain another kit (' + r.componentImg + ').' }, 400);
+        if (p.serial_required)
+          return c.json({ error: '"' + r.componentImg + '" needs a serial number at sale, which a kit line cannot capture. Drop the component, or sell it on its own line.' }, 400);
+      }
+    }
+
+    const stmts = [{ sql: 'DELETE FROM kit_components WHERE kit_img = ?', binds: [img] }];
+    for (const r of rows) {
+      stmts.push({
+        sql: 'INSERT INTO kit_components (kit_img, component_img, qty_each, sort_order) VALUES (?,?,?,?)',
+        binds: [img, r.componentImg, r.qtyEach, r.sortOrder],
+      });
+    }
+    if (b.is_kit !== undefined || b.kit_price_mode !== undefined || b.kit_line_mode !== undefined) {
+      const sets = []; const vals = [];
+      if (b.is_kit !== undefined) { sets.push('is_kit = ?'); vals.push(toBit(b.is_kit)); }
+      if (b.kit_price_mode !== undefined) {
+        sets.push('kit_price_mode = ?');
+        vals.push(['fixed', 'rollup'].includes(String(b.kit_price_mode)) ? String(b.kit_price_mode) : 'fixed');
+      }
+      if (b.kit_line_mode !== undefined) { sets.push('kit_line_mode = ?'); vals.push(lineMode); }
+      vals.push(img);
+      stmts.push({ sql: `UPDATE products SET ${sets.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE img = ?`, binds: vals });
+    }
+    await db.batch(stmts);
+    return c.json({ ok: true, count: rows.length });
+  });
+
+  // =====================================================================
   //  SUPPLIERS / VENDORS
   // =====================================================================
   const SUPPLIER_COLS = `id, code, name, contact_name, phone, email, address, website,
@@ -359,7 +445,7 @@ export default function mount(app) {
         where.push('(p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ? OR p.make_model LIKE ? OR p.category LIKE ?)');
       }
     }
-    if (lowOnly) where.push("p.stock_count <= COALESCE(p.low_threshold, 4) AND p.item_type != 'service'");
+    if (lowOnly) where.push("p.stock_count <= COALESCE(p.low_threshold, 4) AND p.item_type != 'service' AND p.is_kit = 0");
     const rows = await d1(c.env).many(
       `SELECT p.img, p.name, p.make_model, p.category, p.condition,
               p.price_cents / 100.0 AS price_usd, p.cost_cents / 100.0 AS cost_usd,
