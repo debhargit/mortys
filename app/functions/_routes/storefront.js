@@ -77,7 +77,9 @@ const LIST_COLS = `
   price_cents / 100.0 AS price_usd,
   stock_count, low_threshold, sku, NULL AS barcode, bin_location, location,
   CASE WHEN stock_count <= 0 THEN 'out'
-       WHEN stock_count <= low_threshold THEN 'low' ELSE 'in' END AS stock_level`;
+       WHEN stock_count <= low_threshold THEN 'low' ELSE 'in' END AS stock_level,
+  serial_required, warranty_days,
+  core_charge_cents / 100.0 AS core_charge_usd, env_fee_cents / 100.0 AS env_fee_usd`;
 
 const COUNT_CAP = 5000;
 

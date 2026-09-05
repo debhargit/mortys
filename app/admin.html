@@ -2134,6 +2134,9 @@ async function renderProducts(panel){
           sect('Warranty & serial',
             fld('Warranty (days)', 'peWarranty', p.warranty_days, 'type="number" min="0" placeholder="e.g. 90"') +
             '<div><label class="lbl">Serial number</label><label style="display:inline-flex;align-items:center;gap:7px;font-size:13px;padding-top:6px"><input type="checkbox" id="peSerial"' + (p.serial_required ? ' checked' : '') + '/> required at sale</label></div>') +
+          sect('Core charge & fees',
+            fld('Core charge (USD, per unit)', 'peCoreCharge', p.core_charge_usd, 'type="number" step="0.01" min="0" placeholder="0.00"') +
+            fld('Environmental fee (USD, per unit)', 'peEnvFee', p.env_fee_usd, 'type="number" step="0.01" min="0" placeholder="0.00"')) +
           sect('Status',
             '<div style="grid-column:1/-1"><label style="display:inline-flex;align-items:center;gap:7px;font-size:13px"><input type="checkbox" id="peActive"' + (p.is_active === false ? '' : ' checked') + '/> Listed / active</label></div>') +
           '<div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:6px">' +
@@ -2304,6 +2307,8 @@ async function renderProducts(panel){
       body.commission_type = document.getElementById('peCommType').value || null;
       var rawCommVal = (document.getElementById('peCommValue').value || '').trim();
       body.commission_value = rawCommVal !== '' ? Number(rawCommVal) : null;
+      body.core_charge_usd = (document.getElementById('peCoreCharge').value || '').trim();
+      body.env_fee_usd = (document.getElementById('peEnvFee').value || '').trim();
       msg.textContent = 'Saving…'; msg.style.color = 'var(--muted)';
       try {
         await api('/api/admin/products/' + encodeURIComponent(p.img), { method: 'PATCH', body: body });
@@ -2873,6 +2878,10 @@ function posCartPayload(){
       unit_price_usd: Number(i.price) || 0,
       discount_usd: posLineDisc(i),
       discount_note: i.discNote || null,
+      serial_number: i.serialNumber || null,
+      warranty_days: i.warrantyDays || null,
+      core_charge_usd: Number(i.coreChargeUsd) || 0,
+      env_fee_usd: Number(i.envFeeUsd) || 0,
     };
   });
 }
@@ -2886,15 +2895,31 @@ function posRepIdForPayload(){
 }
 
 function posAddToCart(p, qty){
-  var ex = POS.cart.find(function(c){ return c.img === p.img; });
+  var serialRequired = !!p.serial_required;
+  var extra = {
+    location: p.location, bin_location: p.bin_location, stock_count: p.stock_count,
+    disc: 0, discPct: 0, discMode: 'amt', discNote: '',
+    serialRequired: serialRequired, serialNumber: '',
+    warrantyDays: p.warranty_days || null,
+    coreChargeUsd: Number(p.core_charge_usd) || 0, envFeeUsd: Number(p.env_fee_usd) || 0,
+  };
+  if (serialRequired) {
+    // Each serialized unit needs its own serial number, so it can't share a
+    // line (and a shared qty) with another unit the way an ordinary part
+    // does -- every "add" of a serialized item is its own cart line.
+    var n = Math.max(1, qty || 1);
+    for (var i = 0; i < n; i++) {
+      POS.cart.push(Object.assign({ img: p.img, name: p.name, make_model: p.make_model, sku: p.sku || null,
+        price: Number(p.price_usd) || 0, qty: 1 }, extra));
+    }
+    posSaveState();
+    return;
+  }
+  var ex = POS.cart.find(function(c){ return c.img === p.img && !c.serialRequired; });
   if (ex) { ex.qty += (qty || 1); }
   else {
-    POS.cart.push({
-      img: p.img, name: p.name, make_model: p.make_model, sku: p.sku || null,
-      price: Number(p.price_usd) || 0, qty: qty || 1,
-      location: p.location, bin_location: p.bin_location,
-      stock_count: p.stock_count, disc: 0, discPct: 0, discMode: 'amt', discNote: '',
-    });
+    POS.cart.push(Object.assign({ img: p.img, name: p.name, make_model: p.make_model, sku: p.sku || null,
+      price: Number(p.price_usd) || 0, qty: qty || 1 }, extra));
   }
   posSaveState();
 }
@@ -3873,6 +3898,10 @@ async function renderPOS(panel){
           esc(i.sku || i.img) + '</code>' +
         '<span style="width:300px;flex-shrink:0;font-weight:700;word-break:break-word;line-height:1.2">' +
           esc(i.name) + loc +
+          (i.serialRequired
+            ? '<input class="posSerialNum" data-sidx="' + idx + '" value="' + esc(i.serialNumber || '') + '" placeholder="serial # — required to sell" ' +
+              'style="width:100%;margin-top:3px;padding:3px 6px;border:1px solid ' + (i.serialNumber ? '#86efac' : '#fca5a5') + ';border-radius:4px;font-size:' + posFS(10.5) + ';font-weight:700;font-family:inherit"/>'
+            : '') +
           (d > 0
             ? '<input class="posDiscNote" data-nidx="' + idx + '" value="' + esc(i.discNote || '') + '" placeholder="reason for discount (prints on the invoice)" ' +
               'style="width:100%;margin-top:3px;padding:3px 6px;border:1px solid #fde68a;border-radius:4px;font-size:' + posFS(10.5) + ';font-weight:700;font-family:inherit"/>'
@@ -3963,6 +3992,9 @@ async function renderPOS(panel){
             'style="width:52px;padding:4px;border:1px solid ' + (d > 0 ? '#fca5a5' : 'var(--line)') + ';border-radius:4px;font-size:12px;text-align:right"/>' +
           '<b style="margin-left:auto;font-size:12.5px">' + (i.price > 0 ? fmtMoney(net) : '—') + '</b>' +
         '</div>' +
+        (i.serialRequired
+          ? '<input class="posSerialNum" data-sidx="' + idx + '" value="' + esc(i.serialNumber || '') + '" placeholder="serial # — required to sell" style="width:100%;margin-top:4px;padding:3px 6px;border:1px solid ' + (i.serialNumber ? '#86efac' : '#fca5a5') + ';border-radius:4px;font-size:11px"/>'
+          : '') +
         (d > 0
           ? '<input class="posDiscNote" data-nidx="' + idx + '" value="' + esc(i.discNote || '') + '" placeholder="reason for discount (prints on invoice)" style="width:100%;margin-top:4px;padding:3px 6px;border:1px solid #fde68a;background:var(--card)beb;border-radius:4px;font-size:11px"/>'
           : '') +
@@ -4100,6 +4132,12 @@ async function renderPOS(panel){
       inp.addEventListener('change', function(){
         POS.cart[parseInt(inp.getAttribute('data-nidx'), 10)].discNote = inp.value;
         posSaveState();
+      });
+    });
+    items.querySelectorAll('.posSerialNum').forEach(function(inp){
+      inp.addEventListener('change', function(){
+        POS.cart[parseInt(inp.getAttribute('data-sidx'), 10)].serialNumber = inp.value.trim();
+        drawCart();
       });
     });
     items.querySelectorAll('[data-rm]').forEach(function(btn){
@@ -6543,6 +6581,8 @@ function openTenderModal(after){
     if (POS.fulfilment !== 'pickup' && !(POS.ship.line1 || '').trim()) {
       return alert('A delivery or shipping sale needs a street address.');
     }
+    var missingSerial = POS.cart.find(function(i){ return i.serialRequired && !(i.serialNumber || '').trim(); });
+    if (missingSerial) return alert('"' + missingSerial.name + '" requires a serial number to sell — enter it on the cart line.');
     if (summ.moneyIn + 0.001 < summ.dueNow) {
       return alert('Tendered (' + fmtMoney(summ.moneyIn) + ') is less than the amount due now (' + fmtMoney(summ.dueNow) + ').');
     }
@@ -7786,13 +7826,33 @@ function posReturnModal(d, after){
   var s = d.sale;
   var returnable = d.items.filter(function(it){ return (it.qty - (it.returned_qty || 0)) > 0; });
 
+  // A warranty claim past the normal return window is prorated by how much
+  // of the warranty period is left (days remaining / total warranty days),
+  // rather than refused outright or refunded in full regardless of age.
+  function warrantyPct(it){
+    if (!it.warranty_until) return null;
+    var totalDays = Math.round((new Date(it.warranty_until) - new Date(s.created_at)) / 86400000);
+    var daysLeft = Math.round((new Date(it.warranty_until) - new Date()) / 86400000);
+    if (daysLeft <= 0) return 0;
+    return totalDays > 0 ? Math.max(0, Math.min(100, Math.round((daysLeft / totalDays) * 100))) : 100;
+  }
+
   posModal('Return items — ' + esc(s.receipt_number || ''),
     '<table style="width:100%;font-size:12.5px"><thead><tr>' +
       '<th align="left">Part</th><th>Sold</th><th>Returned</th><th>Return qty</th><th align="right">Unit</th>' +
     '</tr></thead><tbody>' +
       returnable.map(function(it){
         var remaining = it.qty - (it.returned_qty || 0);
-        return '<tr><td>' + esc(it.description) + '</td>' +
+        var pct = warrantyPct(it);
+        var warrantyHtml = '';
+        if (pct === 0) {
+          warrantyHtml = '<br/><small style="color:#b91c1c">Warranty expired ' + esc(it.warranty_until) + '</small>';
+        } else if (pct != null) {
+          warrantyHtml = '<br/><label style="font-size:10.5px;color:#0e7490;display:inline-flex;align-items:center;gap:4px;margin-top:3px;cursor:pointer">' +
+            '<input type="checkbox" class="rtWarranty" data-wid="' + it.id + '" data-pct="' + pct + '"/> Warranty claim — prorate to ' + pct + '% (covered to ' + esc(it.warranty_until) + ')' +
+          '</label>';
+        }
+        return '<tr><td>' + esc(it.description) + (it.serial_number ? '<br/><code style="font-size:10.5px;color:var(--muted)">S/N ' + esc(it.serial_number) + '</code>' : '') + warrantyHtml + '</td>' +
           '<td style="text-align:center">' + it.qty + '</td>' +
           '<td style="text-align:center">' + (it.returned_qty || 0) + '</td>' +
           '<td style="text-align:center"><input type="number" min="0" max="' + remaining + '" value="0" class="fld-mini" data-retqty="' + it.id + '" style="width:56px"/></td>' +
@@ -7816,16 +7876,21 @@ function posReturnModal(d, after){
     640
   );
 
+  function lineProratePct(sid){
+    var ck = document.querySelector('.rtWarranty[data-wid="' + sid + '"]');
+    return (ck && ck.checked) ? Number(ck.getAttribute('data-pct')) : 100;
+  }
   function estimate(){
     var subtotal = Number(s.subtotal_usd) || 0;
     var proportion0 = 0, refundSubtotal = 0;
     document.querySelectorAll('#mhPosModal [data-retqty]').forEach(function(inp){
       var qty = parseInt(inp.value, 10) || 0;
       if (qty <= 0) return;
-      var it = returnable.find(function(x){ return String(x.id) === inp.getAttribute('data-retqty'); });
+      var sid = inp.getAttribute('data-retqty');
+      var it = returnable.find(function(x){ return String(x.id) === sid; });
       if (!it) return;
       var perUnit = Number(it.unit_price_usd) + (Number(it.core_charge_usd || 0) + Number(it.env_fee_usd || 0)) / it.qty;
-      refundSubtotal += perUnit * qty;
+      refundSubtotal += perUnit * qty * (lineProratePct(sid) / 100);
     });
     proportion0 = subtotal > 0 ? Math.min(1, refundSubtotal / subtotal) : 0;
     var refundTotal = refundSubtotal - (Number(s.discount_usd) * proportion0) + (Number(s.tax_usd) * proportion0);
@@ -7834,6 +7899,7 @@ function posReturnModal(d, after){
       : 'Enter a quantity above to estimate the refund.';
   }
   document.querySelectorAll('#mhPosModal [data-retqty]').forEach(function(inp){ inp.addEventListener('input', estimate); });
+  document.querySelectorAll('#mhPosModal .rtWarranty').forEach(function(ck){ ck.addEventListener('change', estimate); });
 
   document.getElementById('rtGo').addEventListener('click', async function(){
     var go = this;
@@ -7842,11 +7908,15 @@ function posReturnModal(d, after){
       var qty = parseInt(inp.value, 10) || 0;
       if (qty <= 0) return;
       var sid = parseInt(inp.getAttribute('data-retqty'), 10);
-      items.push({ sale_item_id: sid, qty: qty });
+      var ck = document.querySelector('.rtWarranty[data-wid="' + sid + '"]');
+      var pct = ck ? Number(ck.getAttribute('data-pct')) : 100;
+      var claim = !!(ck && ck.checked);
+      items.push({ sale_item_id: sid, qty: qty, prorate_pct: claim ? pct : 100, warranty_claim: claim });
       var src = (d.items || []).find(function(x){ return x.id === sid; }) || {};
+      var srcPerUnit = Number(src.unit_price_usd) + (Number(src.core_charge_usd || 0) + Number(src.env_fee_usd || 0)) / (Number(src.qty) || 1);
       enteredLines.push({ description: src.description, product_img: src.product_img, sku: src.sku,
         qty: qty, unit_price_usd: src.unit_price_usd,
-        refund_usd: Math.round((Number(src.unit_price_usd) || 0) * qty * 100) / 100 });
+        refund_usd: Math.round(srcPerUnit * qty * (claim ? pct / 100 : 1) * 100) / 100 });
     });
     var msg = document.getElementById('rtMsg');
     if (!items.length) { msg.style.display = 'block'; msg.style.background = '#fee2e2'; msg.style.color = '#b91c1c'; msg.textContent = 'Enter a return quantity for at least one item.'; return; }
@@ -11698,6 +11768,8 @@ var REPORT_DEFS = [
   { key:'inventory',   label:'🏗 Inventory Position',    group:'Operations',dated:false, blurb:'Valuation, category mix and low-stock list.' },
   { key:'inventory-custom', label:'🧰 Custom Inventory',  group:'Operations',dated:false, blurb:'Pick your own columns and filters.' },
   { key:'warehouse',   label:'🏬 Warehouse Activity',    group:'Operations',blurb:'Stock movements, bin occupancy, recent counts.' },
+  { key:'serial-lookup', label:'🔎 Serial Lookup',       group:'Operations',dated:false, blurb:'Find a sale by serial number; check warranty status.' },
+  { key:'core-charges', label:'♻️ Core Charges',         group:'Operations',blurb:'Cores charged this range vs. still outstanding.' },
   { key:'labour',      label:'⏱ Labour Hours',           group:'Operations',blurb:'Clocked hours by mechanic and day.' },
   { key:'customers',   label:'👥 Customers & Loyalty',   group:'Operations',blurb:'New signups, top spenders, loyalty movement.' },
   { key:'customer-detail', label:'👤 Customer Detail',   group:'Operations',blurb:'Per-customer orders, POS spend, points, tier.' },
@@ -11813,6 +11885,21 @@ async function renderReports(panel){
     });
   }
 
+  var SERIAL_Q = '';
+  function rptSerialPicker(show){
+    var el = document.getElementById('serialPicker');
+    if (!show){ if (el) el.remove(); return; }
+    var body = document.getElementById('rptBody');
+    if (!body) return;
+    if (!el){ el = document.createElement('div'); el.id = 'serialPicker'; el.style.cssText = 'padding:12px 18px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:end'; body.parentNode.insertBefore(el, body); }
+    el.innerHTML =
+      '<div><label class="lbl">Serial number (or part of one)</label><input id="serialQ" class="fld" style="width:260px" value="' + esc(SERIAL_Q) + '" placeholder="e.g. AB1234"/></div>' +
+      '<button type="button" class="btn ok" id="serialGo">Search</button>';
+    var go = function(){ SERIAL_Q = document.getElementById('serialQ').value.trim(); run(); };
+    document.getElementById('serialGo').addEventListener('click', go);
+    document.getElementById('serialQ').addEventListener('keydown', function(e){ if (e.key === 'Enter') go(); });
+  }
+
   var INV_ALL_COLS = ['sku', 'barcode', 'category', 'bin', 'supplier', 'stock', 'threshold', 'cost', 'retail', 'margin', 'age'];
   function rptInvQS(){
     var p = ['cols=' + encodeURIComponent(INV_CUSTOM.cols.join(','))];
@@ -11901,7 +11988,9 @@ async function renderReports(panel){
     // only decides which sessions the picker offers.
     if (RPT_CURRENT === 'z') qs = RPT_SESSION_ID ? '?session_id=' + RPT_SESSION_ID : '';
     if (RPT_CURRENT === 'inventory-custom') qs = '?' + rptInvQS();
+    if (RPT_CURRENT === 'serial-lookup') qs = '?q=' + encodeURIComponent(SERIAL_Q);
     rptInvPicker(RPT_CURRENT === 'inventory-custom');
+    rptSerialPicker(RPT_CURRENT === 'serial-lookup');
     box.innerHTML = '<div class="empty">Loading…</div>';
     RPT_TABLES = [];
     var r;
@@ -12504,6 +12593,37 @@ var RPT_RENDERERS = {
       rptTable('📜 Activity (newest first, max 500)', [
         { k:'at', label:'When' }, { k:'area', label:'Area' }, { k:'action', label:'Action' }, { k:'detail', label:'Detail' }, { k:'by', label:'By' }, { k:'amount', label:'Amount', money:true },
       ], r.feed) + '</div>';
+  },
+
+  'serial-lookup': function(r){
+    var rows = (r.results || []).map(function(x){
+      return Object.assign({}, x, {
+        against: x.invoice_number || x.receipt_number || '#' + x.sale_id,
+        status: x.voided ? 'sale voided' : x.returned ? 'returned' : x.warranty_status,
+      });
+    });
+    return '<div style="padding:0 18px 22px">' +
+      rptTable('🔎 Matches', [
+        { k:'serial_number', label:'Serial #' }, { k:'description', label:'Item' }, { k:'against', label:'Sale' },
+        { k:'created_at', label:'Sold' }, { k:'customer_name', label:'Customer' }, { k:'customer_phone', label:'Phone' },
+        { k:'warranty_until', label:'Warranty to' }, { k:'status', label:'Status' },
+      ], rows, 'Type a serial number above and press Search.') +
+    '</div>';
+  },
+
+  'core-charges': function(r){
+    return '<div style="padding:16px 18px 4px"><div class="tiles" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">' +
+        tile('core-charged lines', rNum(r.totals.lines)) + tile('core charged', rMoney(r.totals.core_charged)) +
+        tile('lines outstanding', rNum(r.totals.outstanding_lines)) + tile('core outstanding', rMoney(r.totals.core_outstanding)) +
+      '</div></div>' +
+      '<div style="padding:0 18px 22px">' +
+      rptTable('♻️ Core-charged lines', [
+        { k:'receipt_number', label:'Receipt' }, { k:'created_at', label:'Sold' }, { k:'description', label:'Item' },
+        { k:'customer_name', label:'Customer' }, { k:'customer_phone', label:'Phone' },
+        { k:'qty', label:'Qty', num:true }, { k:'returned_qty', label:'Returned', num:true },
+        { k:'core_charge_usd', label:'Core charged', money:true }, { k:'core_outstanding_usd', label:'Still owed', money:true },
+      ], r.lines, 'No core-charged sales in this range.') +
+    '</div>';
   },
 };
 

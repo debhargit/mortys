@@ -53,10 +53,26 @@ export default function mount(app) {
     if (b.no_tax === true && !userCan(me, 'pos.no_tax'))
       return c.json({ error: 'Your account is not allowed to switch GCT off.' }, 403);
 
+    // ----- serial numbers -----
+    // Trust the product record, not the client, for which images actually
+    // require one -- the "required at sale" checkbox is meaningless if a
+    // stale/edited cart line can just omit serial_required.
+    const imgs = [...new Set(items.filter((it) => it.product_img).map((it) => it.product_img))];
+    if (imgs.length) {
+      const flagged = await db.many(
+        `SELECT img FROM products WHERE serial_required = 1 AND img IN (${imgs.map(() => '?').join(',')})`, ...imgs);
+      const need = new Set(flagged.map((r) => r.img));
+      const missing = items.find((it) => need.has(it.product_img) && !String(it.serial_number || '').trim());
+      if (missing) return c.json({ error: `"${missing.description}" requires a serial number to sell.` }, 400);
+    }
+
     // ----- 1. line totals -----
+    // core_charge_usd / env_fee_usd travel per unit (what the product record
+    // carries); scale by qty so a line of 3 units with a $5 core each
+    // collects $15, not $5 -- and so the return endpoint's per-unit refund
+    // (which divides the stored line total back down by qty) comes out right.
     const lineCalc = items.map((it) => {
-      const gross = r2(Number(it.unit_price_usd) * Number(it.qty)
-        + Number(it.core_charge_usd || 0) + Number(it.env_fee_usd || 0));
+      const gross = r2((Number(it.unit_price_usd) + Number(it.core_charge_usd || 0) + Number(it.env_fee_usd || 0)) * Number(it.qty));
       const disc = Math.min(gross, Math.max(0, Number(it.discount_usd || 0)));
       return { gross, disc, net: r2(gross - disc) };
     });
@@ -235,7 +251,9 @@ export default function mount(app) {
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
         binds: [
           saleId, it.product_img || null, it.description, Number(it.qty), cts(it.unit_price_usd),
-          cts(it.core_charge_usd || 0), cts(it.env_fee_usd || 0),
+          // Stored as the line's total, not per-unit -- see the gross-total
+          // comment above; the return endpoint divides this back by qty.
+          cts((Number(it.core_charge_usd) || 0) * Number(it.qty)), cts((Number(it.env_fee_usd) || 0) * Number(it.qty)),
           cts(lc.disc), lc.disc > 0 && it.discount_note ? String(it.discount_note).slice(0, 300) : null,
           it.serial_number || null, warrantyUntil, cts(lc.net),
         ],
@@ -509,9 +527,14 @@ export default function mount(app) {
       const remaining = item.qty - (retById[sid] || 0);
       if (qty > remaining) return c.json({ error: 'Only ' + remaining + ' unit(s) of "' + item.description + '" remain returnable' }, 400);
       const perUnit = Number(item.unit_price_usd) + (Number(item.core_charge_usd || 0) + Number(item.env_fee_usd || 0)) / item.qty;
-      const refundLine = r2(perUnit * qty);
+      // A warranty claim past the normal return window can be prorated by how
+      // much of the warranty period is left, rather than refused outright or
+      // refunded in full regardless of age. 0-100; omitted/absent = 100 (full).
+      const proratePct = reqIt.prorate_pct != null && reqIt.prorate_pct !== ''
+        ? Math.max(0, Math.min(100, Number(reqIt.prorate_pct))) : 100;
+      const refundLine = r2(perUnit * qty * (proratePct / 100));
       refundSubtotal += refundLine;
-      lineWork.push({ item, qty, refundLine });
+      lineWork.push({ item, qty, refundLine, proratePct, warrantyClaim: !!reqIt.warranty_claim });
     }
     refundSubtotal = r2(refundSubtotal);
 
@@ -561,9 +584,9 @@ export default function mount(app) {
 
     for (const lw of lineWork) {
       stmts.push({
-        sql: `INSERT INTO pos_return_items (return_id, sale_item_id, product_img, description, qty, refund_cents, unit_price_cents)
-              VALUES (?,?,?,?,?,?,?)`,
-        binds: [returnId, lw.item.id, lw.item.product_img || null, lw.item.description, lw.qty, cts(lw.refundLine), lw.item.unit_price_cents],
+        sql: `INSERT INTO pos_return_items (return_id, sale_item_id, product_img, description, qty, refund_cents, unit_price_cents, prorate_pct, warranty_claim)
+              VALUES (?,?,?,?,?,?,?,?,?)`,
+        binds: [returnId, lw.item.id, lw.item.product_img || null, lw.item.description, lw.qty, cts(lw.refundLine), lw.item.unit_price_cents, lw.proratePct, lw.warrantyClaim ? 1 : 0],
       });
       if (lw.item.product_img) {
         stmts.push({ sql: 'UPDATE products SET stock_count = stock_count + ? WHERE img = ?', binds: [lw.qty, lw.item.product_img] });

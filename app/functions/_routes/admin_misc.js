@@ -306,7 +306,9 @@ export default function mount(app) {
     const product = await d1(c.env).one(
       `SELECT img, name, make_model, category, condition, price_cents / 100.0 AS price_usd, stock_count, low_threshold,
               sku, barcode, bin_location, location,
-              CASE WHEN stock_count <= 0 THEN 'out' WHEN stock_count <= low_threshold THEN 'low' ELSE 'in' END AS stock_level
+              CASE WHEN stock_count <= 0 THEN 'out' WHEN stock_count <= low_threshold THEN 'low' ELSE 'in' END AS stock_level,
+              serial_required, warranty_days,
+              core_charge_cents / 100.0 AS core_charge_usd, env_fee_cents / 100.0 AS env_fee_usd
          FROM products WHERE is_active = 1 AND (lower(sku) = lower(?) OR lower(barcode) = lower(?) OR img = ?) LIMIT 1`,
       code, code, code);
     if (!product) return c.json({ error: 'No product matches that code' }, 404);

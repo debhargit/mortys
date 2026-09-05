@@ -108,6 +108,8 @@ export default function mount(app) {
     if (b.units_per_purchase !== undefined) put('units_per_purchase = ?', numOrNull(b.units_per_purchase));
     if (b.warranty_days !== undefined) put('warranty_days = ?', intOrNull(b.warranty_days));
     if (b.serial_required !== undefined) put('serial_required = ?', toBit(b.serial_required));
+    if (b.core_charge_usd !== undefined) put('core_charge_cents = ?', usdToCents(b.core_charge_usd) || 0);
+    if (b.env_fee_usd !== undefined) put('env_fee_cents = ?', usdToCents(b.env_fee_usd) || 0);
     if (b.low_threshold != null) put('low_threshold = ?', Math.max(0, parseInt(b.low_threshold, 10) || 0));
     if (b.is_active != null) put('is_active = ?', toBit(b.is_active));
     if (b.name != null) put('name = ?', String(b.name));

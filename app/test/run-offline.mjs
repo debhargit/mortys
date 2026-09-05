@@ -16,7 +16,7 @@ const OFFLINE = [
   'verify-functions.mjs',
   'p4test.mjs',
   'p6test.mjs', 'p7test.mjs', 'p8test.mjs',
-  'p11test.mjs', 'p12test.mjs', 'p13test.mjs', 'p14test.mjs', 'p15test.mjs',
+  'p11test.mjs', 'p12test.mjs', 'p13test.mjs', 'p14test.mjs', 'p15test.mjs', 'p16test.mjs',
   'presence-test.mjs', 'quote-test.mjs',
 ];
 const present = new Set(readdirSync(DIR));

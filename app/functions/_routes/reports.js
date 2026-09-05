@@ -760,4 +760,55 @@ export default function mount(app) {
     }));
     return c.json({ from, to, totals, by_rep: byRep, detail, reps: repOptions });
   });
+
+  // ---- serial number lookup ---------------------------------------
+  // Not date-ranged -- this is a query tool (warranty claims, recalls,
+  // "who has this unit"), not a period report. Empty query = empty result,
+  // not the whole table.
+  app.get('/api/admin/reports/serial-lookup', adminMw, async (c) => {
+    const term = String(c.req.query('q') || '').trim();
+    if (!term) return c.json({ results: [] });
+    const db = d1(c.env);
+    const rows = await db.many(
+      `SELECT psi.id, psi.serial_number, psi.description, psi.product_img, psi.warranty_until, psi.qty,
+              ps.id AS sale_id, ps.receipt_number, ps.invoice_number, ps.created_at, ps.customer_name, ps.customer_phone, ps.voided,
+              COALESCE((SELECT SUM(pri.qty) FROM pos_return_items pri WHERE pri.sale_item_id = psi.id), 0) AS returned_qty
+         FROM pos_sale_items psi JOIN pos_sales ps ON ps.id = psi.sale_id
+        WHERE psi.serial_number LIKE ? ORDER BY ps.created_at DESC LIMIT 100`,
+      '%' + term + '%');
+    const today = new Date().toISOString().slice(0, 10);
+    for (const r of rows) {
+      r.warranty_status = !r.warranty_until ? 'no warranty' : r.warranty_until >= today ? 'in warranty' : 'expired';
+      r.returned = r.returned_qty >= r.qty;
+    }
+    return c.json({ results: rows });
+  });
+
+  // ---- core charges: charged vs. still outstanding -----------------
+  // "Outstanding" = a core-charged line whose unit(s) haven't come back yet
+  // -- the customer still owes the shop the physical core.
+  app.get('/api/admin/reports/core-charges', adminMw, async (c) => {
+    const db = d1(c.env);
+    const { from, to } = range(c);
+    const p = [from, to];
+    const rows = await db.many(
+      `SELECT psi.id, psi.description, psi.product_img, psi.qty, psi.core_charge_cents/100.0 AS core_charge_usd,
+              ps.id AS sale_id, ps.receipt_number, ps.created_at, ps.customer_name, ps.customer_phone,
+              COALESCE((SELECT SUM(pri.qty) FROM pos_return_items pri WHERE pri.sale_item_id = psi.id), 0) AS returned_qty
+         FROM pos_sale_items psi JOIN pos_sales ps ON ps.id = psi.sale_id
+        WHERE psi.core_charge_cents > 0 AND ps.voided = 0 AND date(ps.created_at) BETWEEN ? AND ?
+        ORDER BY ps.created_at DESC LIMIT 300`, ...p);
+    let charged = 0, outstanding = 0, outstandingLines = 0;
+    for (const r of rows) {
+      charged += r.core_charge_usd;
+      const frac = Math.max(0, (r.qty - r.returned_qty) / r.qty);
+      if (frac > 0) { outstanding += r.core_charge_usd * frac; outstandingLines++; }
+      r.core_outstanding_usd = Math.round(r.core_charge_usd * frac * 100) / 100;
+    }
+    return c.json({
+      from, to,
+      totals: { lines: rows.length, core_charged: Math.round(charged * 100) / 100, outstanding_lines: outstandingLines, core_outstanding: Math.round(outstanding * 100) / 100 },
+      lines: rows,
+    });
+  });
 }
