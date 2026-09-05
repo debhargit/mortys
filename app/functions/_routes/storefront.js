@@ -79,7 +79,8 @@ const LIST_COLS = `
   CASE WHEN stock_count <= 0 THEN 'out'
        WHEN stock_count <= low_threshold THEN 'low' ELSE 'in' END AS stock_level,
   serial_required, warranty_days,
-  core_charge_cents / 100.0 AS core_charge_usd, env_fee_cents / 100.0 AS env_fee_usd`;
+  core_charge_cents / 100.0 AS core_charge_usd, env_fee_cents / 100.0 AS env_fee_usd,
+  matrix_id`;
 
 const COUNT_CAP = 5000;
 

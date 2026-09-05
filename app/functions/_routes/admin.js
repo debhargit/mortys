@@ -146,13 +146,17 @@ export default function mount(app) {
               p.stock_uom, p.purchase_uom, p.units_per_purchase, p.supplier_part_no,
               p.location, p.bin_location, p.supplier_id, s.name AS supplier_name,
               p.commission_type, p.commission_value,
-              p.core_charge_cents / 100.0 AS core_charge_usd, p.env_fee_cents / 100.0 AS env_fee_usd
+              p.core_charge_cents / 100.0 AS core_charge_usd, p.env_fee_cents / 100.0 AS env_fee_usd,
+              p.matrix_id, p.matrix_axis1_value, p.matrix_axis2_value, p.matrix_overrides,
+              m.name AS matrix_name, m.axis1_label AS matrix_axis1_label, m.axis2_label AS matrix_axis2_label
          FROM products p LEFT JOIN suppliers s ON s.id = p.supplier_id
+                          LEFT JOIN product_matrices m ON m.id = p.matrix_id
         WHERE p.img = ?`,
       c.req.param('img')
     );
     if (!row) return c.json({ error: 'Not found' }, 404);
     boolify(row, ['is_active', 'serial_required']);
+    row.matrix_overrides = safeJson(row.matrix_overrides, []);
     return c.json({ product: row });
   });
 

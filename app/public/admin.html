@@ -1755,6 +1755,7 @@ async function renderProducts(panel){
     '<div style="padding:8px 16px;background:var(--card-soft);border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
       '<label class="btn" style="background:#fef3c7;color:#92400e;cursor:pointer;margin:0">📥 Import inventory<input type="file" id="invImportInput" accept=".csv,.tsv,.txt,.xlsx,.xlsm" style="display:none"/></label>' +
       '<a class="btn" href="/api/admin/inventory/import/template.csv" download style="text-decoration:none;background:var(--card-soft2)">📄 Template</a>' +
+      '<button type="button" class="btn" id="matrixCreateBtn" style="background:#ede9fe;color:#6d28d9">🧬 Create matrix</button>' +
       '<small style="color:var(--muted);margin-left:auto">CSV, TSV or Excel (.xlsx). Column names are matched automatically — you get a preview before anything changes.</small>' +
     '</div>' +
     '<details style="border-bottom:1px solid var(--line);background:var(--card-soft)">' +
@@ -1921,6 +1922,8 @@ async function renderProducts(panel){
       if (file) startInventoryImport(file, function(){ load(false); });
     });
   }
+  var matrixCreateBtn = document.getElementById('matrixCreateBtn');
+  if (matrixCreateBtn) matrixCreateBtn.addEventListener('click', function(){ matrixCreateModal(function(){ load(false); }); });
 
   var seq = 0;
   var debounce = null;
@@ -1980,6 +1983,7 @@ async function renderProducts(panel){
         // highlight (see the keydown handler below).
         return '<tr class="prodRow" data-i="' + i + '" data-img="' + esc(p.img) + '" style="cursor:pointer">' +
           '<td><b>' + esc(p.name) + '</b>' +
+            (p.matrix_id ? ' <button type="button" class="btn" data-matrix="' + p.matrix_id + '" style="padding:1px 7px;font-size:10.5px;border-radius:10px;background:#ede9fe;color:#6d28d9;border:0;cursor:pointer;vertical-align:middle">🧬 matrix</button>' : '') +
             '<div style="margin-top:2px"><b class="skuCell" style="color:#0369a1">' + esc(p.sku || 'no SKU') + '</b>' +
               ' <span style="color:var(--muted)">' + esc(p.img) + '</span></div>' +
             (p.make_model ? '<small style="color:var(--muted)">' + esc(p.make_model) + '</small>' : '') + '</td>' +
@@ -2012,6 +2016,9 @@ async function renderProducts(panel){
     };
     scope.querySelectorAll('[data-editimg]').forEach(function(btn){
       btn.addEventListener('click', function(e){ e.stopPropagation(); openEdit(btn.getAttribute('data-editimg')); });
+    });
+    scope.querySelectorAll('[data-matrix]').forEach(function(btn){
+      btn.addEventListener('click', function(e){ e.stopPropagation(); matrixManagerModal(parseInt(btn.getAttribute('data-matrix'), 10), function(){ load(false); }); });
     });
     scope.querySelectorAll('.prodRow').forEach(function(tr){
       tr.addEventListener('click', function(){ openEdit(tr.getAttribute('data-img')); });
@@ -2103,6 +2110,18 @@ async function renderProducts(panel){
             fld('SKU', 'peSku', p.sku) +
             fld('Barcode', 'peBarcode', p.barcode) +
             '<div style="grid-column:1/-1"><label class="lbl">Part number (photo key)</label><input class="fld" value="' + esc(p.img) + '" disabled style="opacity:.6"/></div>') +
+          (p.matrix_id ? (
+            '<div style="grid-column:1/-1;margin:-4px 0 12px;padding:9px 12px;background:#ede9fe;color:#6d28d9;border-radius:7px;font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">' +
+              '<span>🧬 Part of matrix <b>' + esc(p.matrix_name || '') + '</b> — ' + esc(p.matrix_axis1_label || '') + ': ' + esc(p.matrix_axis1_value || '') +
+                (p.matrix_axis2_value ? ' / ' + esc(p.matrix_axis2_label || '') + ': ' + esc(p.matrix_axis2_value) : '') +
+                (p.matrix_overrides && p.matrix_overrides.length ? ' <span style="opacity:.75">(' + p.matrix_overrides.length + ' field' + (p.matrix_overrides.length === 1 ? '' : 's') + ' customised on this part)</span>' : '') +
+              '</span>' +
+              '<span style="display:flex;gap:6px;flex-shrink:0">' +
+                '<button type="button" class="btn" id="peMatrixManage" style="padding:5px 10px;font-size:11.5px">Manage matrix →</button>' +
+                (p.matrix_overrides && p.matrix_overrides.length ? '<button type="button" class="btn" id="peMatrixReset" style="padding:5px 10px;font-size:11.5px">↺ Reset to default</button>' : '') +
+              '</span>' +
+            '</div>'
+          ) : '') +
           sect('Fitment',
             '<div style="grid-column:1/-1"><label class="lbl">Vehicle / fitment</label><input id="peMakeModel" class="fld" value="' + esc(p.make_model || '') + '"/></div>' +
             selFld('Category', 'peCategory', p.category, cats) +
@@ -2324,6 +2343,307 @@ async function renderProducts(panel){
         posCloseModal(); posToast('Deleted'); if (after) after();
       } catch (e) { posToast(e.message, true); }
     });
+    var peMatrixManage = document.getElementById('peMatrixManage');
+    if (peMatrixManage) peMatrixManage.addEventListener('click', function(){
+      posCloseModal(); matrixManagerModal(p.matrix_id, function(){ load(false); });
+    });
+    var peMatrixReset = document.getElementById('peMatrixReset');
+    if (peMatrixReset) peMatrixReset.addEventListener('click', async function(){
+      if (!(await posConfirm('Reset "' + (p.name || p.img) + '" to the matrix\'s current shared values? Any customisation on this part is lost.', { ok:'Reset' }))) return;
+      try {
+        await api('/api/admin/product-matrix/' + p.matrix_id + '/reset/' + encodeURIComponent(p.img), { method: 'POST' });
+        posCloseModal(); posToast('Reset to matrix default'); if (after) after();
+      } catch (e) { posToast(e.message, true); }
+    });
+  }
+
+  // ===========================================================================
+  //  MATRIX ITEMS — one photo + shared fields + axis values -> N child parts.
+  //  Both modals below live in renderProducts()'s closure so they share cats/
+  //  locs/UOM_OPTS/COSTING_OPTS/supplierOptions/load()/productEditModal with
+  //  everything else on this screen.
+  // ===========================================================================
+  function matrixCreateModal(onDone){
+    var axis2On = false;
+    posModal('🧬 Create a matrix item',
+      '<div style="margin-bottom:12px" id="mxImageWidget"></div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
+        '<div style="grid-column:1/-1"><label class="lbl">Base name *</label><input id="mxName" required placeholder="e.g. Brake Pad Set" class="fld"/></div>' +
+        '<div><label class="lbl">Category *</label><select id="mxCategory" required class="fld">' +
+          cats.map(function(c){ return '<option value="' + c[0] + '">' + c[1] + '</option>'; }).join('') +
+        '</select></div>' +
+        '<div><label class="lbl">Condition</label><select id="mxCondition" class="fld"><option value="NEW" selected>NEW</option><option value="USED">USED</option></select></div>' +
+        '<div><label class="lbl">Vehicle / fitment</label><input id="mxMakeModel" placeholder="e.g. 2020 Honda Accord" class="fld"/></div>' +
+        '<div><label class="lbl">Base SKU <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional — derived from the name)</span></label><input id="mxBaseSku" class="fld"/></div>' +
+        '<div><label class="lbl">Cost / buy price (USD)</label><input id="mxCost" type="number" step="0.01" min="0" placeholder="0.00" class="fld"/></div>' +
+        '<div><label class="lbl">Markup %</label><input id="mxMarkup" type="number" step="0.1" min="0" placeholder="e.g. 35" class="fld"/></div>' +
+        '<div><label class="lbl">Sell price / retail (USD)</label><input id="mxPrice" type="number" step="0.01" min="0" placeholder="auto from cost × markup" class="fld"/></div>' +
+        '<div><label class="lbl">List / MSRP (USD)</label><input id="mxList" type="number" step="0.01" min="0" placeholder="reference" class="fld"/></div>' +
+        '<div><label class="lbl">Stock count <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(per variant)</span></label><input id="mxStock" type="number" min="0" value="1" class="fld"/></div>' +
+        '<div><label class="lbl">Low-stock threshold</label><input id="mxLow" type="number" min="0" placeholder="0" class="fld"/></div>' +
+        '<div><label class="lbl">Stock unit</label><select id="mxStockUom" class="fld">' + uomOptions('each') + '</select></div>' +
+        '<div><label class="lbl">Purchase unit</label><select id="mxPurchUom" class="fld">' + uomOptions('') + '</select></div>' +
+        '<div><label class="lbl">Units per purchase</label><input id="mxUnitsPerPurch" type="number" step="0.001" min="0" placeholder="e.g. 12 per box" class="fld"/></div>' +
+        '<div><label class="lbl">Costing method</label><select id="mxCosting" class="fld">' +
+          COSTING_OPTS.map(function(o){ return '<option value="' + o[0] + '">' + o[1] + '</option>'; }).join('') +
+        '</select></div>' +
+        '<div><label class="lbl">Supplier</label><select id="mxSupplier" class="fld">' + supplierOptions('') + '</select></div>' +
+        '<div><label class="lbl">Supplier part #</label><input id="mxSupPartNo" placeholder="vendor catalogue no." class="fld"/></div>' +
+        '<div><label class="lbl">Warranty (days)</label><input id="mxWarranty" type="number" min="0" placeholder="e.g. 90" class="fld"/></div>' +
+        '<div><label class="lbl">Core charge (USD, per unit)</label><input id="mxCoreCharge" type="number" step="0.01" min="0" placeholder="0.00" class="fld"/></div>' +
+        '<div><label class="lbl">Environmental fee (USD, per unit)</label><input id="mxEnvFee" type="number" step="0.01" min="0" placeholder="0.00" class="fld"/></div>' +
+        '<div><label class="lbl">📍 Location</label><select id="mxLocation" class="fld">' +
+          locs.map(function(l){ return '<option value="' + l + '">' + l + '</option>'; }).join('') +
+        '</select></div>' +
+        '<div style="grid-column:1/-1"><label style="display:inline-flex;align-items:center;gap:7px;font-size:13px"><input type="checkbox" id="mxSerial"/> Serial number required at sale</label></div>' +
+      '</div>' +
+      '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">' +
+        '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:800;margin-bottom:6px">Axis 1 — required</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 2fr;gap:10px">' +
+          '<input id="mxAxis1Label" placeholder="Label, e.g. Position" class="fld"/>' +
+          '<input id="mxAxis1Values" placeholder="Values, comma-separated — e.g. Front, Rear" class="fld"/>' +
+        '</div>' +
+        '<button type="button" class="btn" id="mxAxis2Toggle" style="margin-top:8px">+ Add a second axis</button>' +
+        '<div id="mxAxis2Box" style="display:none;margin-top:8px;grid-template-columns:1fr 2fr;gap:10px">' +
+          '<input id="mxAxis2Label" placeholder="Label, e.g. Side" class="fld"/>' +
+          '<input id="mxAxis2Values" placeholder="Values, comma-separated — e.g. Left, Right" class="fld"/>' +
+        '</div>' +
+      '</div>' +
+      '<div id="mxPreview" style="margin-top:12px;font-size:12.5px;color:var(--muted)"></div>' +
+      '<div id="mxMsg" style="display:none;margin-top:10px;padding:9px 12px;border-radius:6px;font-size:13px"></div>' +
+      '<div style="display:flex;justify-content:flex-end;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">' +
+        '<button type="button" class="btn ok" id="mxGo">Create matrix</button>' +
+      '</div>', 760
+    );
+    mountImageWidget('mxImageWidget', 'mxPhotoHidden', { noUrl: true });
+
+    (function(){
+      var cost = document.getElementById('mxCost'), mk = document.getElementById('mxMarkup'), price = document.getElementById('mxPrice');
+      var touched = false;
+      price.addEventListener('input', function(){ touched = (price.value.trim() !== ''); });
+      var recalc = function(){
+        if (touched) return;
+        var c2 = parseFloat(cost.value), m = parseFloat(mk.value);
+        if (isFinite(c2) && isFinite(m)) price.value = (Math.round(c2 * (1 + m / 100) * 100) / 100).toFixed(2);
+      };
+      cost.addEventListener('input', recalc);
+      mk.addEventListener('input', recalc);
+    })();
+
+    var axis2Box = document.getElementById('mxAxis2Box');
+    document.getElementById('mxAxis2Toggle').addEventListener('click', function(){
+      axis2On = !axis2On;
+      axis2Box.style.display = axis2On ? 'grid' : 'none';
+      this.textContent = axis2On ? '− Remove second axis' : '+ Add a second axis';
+      if (!axis2On) { document.getElementById('mxAxis2Label').value = ''; document.getElementById('mxAxis2Values').value = ''; }
+      updatePreview();
+    });
+
+    function parseAxis(s){
+      var seen = {}, out = [];
+      (s || '').split(/[,\n]/).forEach(function(v){ v = v.trim(); if (!v || seen[v.toLowerCase()]) return; seen[v.toLowerCase()] = 1; out.push(v); });
+      return out;
+    }
+    function updatePreview(){
+      var name = document.getElementById('mxName').value.trim() || '(name)';
+      var a1 = parseAxis(document.getElementById('mxAxis1Values').value);
+      var a2 = axis2On ? parseAxis(document.getElementById('mxAxis2Values').value) : [];
+      var combos = [];
+      a1.forEach(function(x){ if (a2.length) a2.forEach(function(y){ combos.push(name + ' — ' + x + ' / ' + y); }); else combos.push(name + ' — ' + x); });
+      var box = document.getElementById('mxPreview');
+      box.innerHTML = combos.length
+        ? 'Will create <b>' + combos.length + '</b> part' + (combos.length === 1 ? '' : 's') + ': ' + combos.slice(0, 8).map(esc).join(', ') + (combos.length > 8 ? ', …' : '')
+        : '';
+    }
+    ['mxName', 'mxAxis1Values', 'mxAxis2Values'].forEach(function(id){ document.getElementById(id).addEventListener('input', updatePreview); });
+
+    var msg = document.getElementById('mxMsg');
+    document.getElementById('mxGo').addEventListener('click', async function(){
+      var btn = this;
+      var widget = document.getElementById('mxImageWidget').__widget;
+      var file = widget ? widget.getFile() : null;
+      var name = document.getElementById('mxName').value.trim();
+      var category = document.getElementById('mxCategory').value;
+      var axis1Values = document.getElementById('mxAxis1Values').value.trim();
+      var showMsg = function(text, bad){
+        msg.style.display = 'block';
+        msg.style.background = bad ? '#fee2e2' : '#dbeafe';
+        msg.style.color = bad ? '#991b1b' : '#1e40af';
+        msg.textContent = text;
+      };
+      if (!name || !category) return showMsg('Base name and category are required.', true);
+      if (!file) return showMsg('A photo is required — every variant gets its own copy of it.', true);
+      if (!axis1Values) return showMsg('Axis 1 values are required.', true);
+
+      var fd = new FormData();
+      fd.append('photo', file);
+      fd.append('name', name);
+      fd.append('category', category);
+      fd.append('condition', document.getElementById('mxCondition').value);
+      fd.append('make_model', document.getElementById('mxMakeModel').value.trim());
+      fd.append('base_sku', document.getElementById('mxBaseSku').value.trim());
+      var addIf = function(id, key){ var v = (document.getElementById(id).value || '').trim(); if (v !== '') fd.append(key, v); };
+      addIf('mxCost', 'cost_usd'); addIf('mxMarkup', 'markup_pct'); addIf('mxPrice', 'price_usd'); addIf('mxList', 'list_price_usd');
+      fd.append('stock_count', document.getElementById('mxStock').value || '1');
+      fd.append('low_threshold', document.getElementById('mxLow').value || '0');
+      fd.append('stock_uom', document.getElementById('mxStockUom').value);
+      fd.append('purchase_uom', document.getElementById('mxPurchUom').value);
+      addIf('mxUnitsPerPurch', 'units_per_purchase');
+      fd.append('costing_method', document.getElementById('mxCosting').value);
+      fd.append('supplier_id', document.getElementById('mxSupplier').value || '');
+      fd.append('supplier_part_no', document.getElementById('mxSupPartNo').value.trim());
+      addIf('mxWarranty', 'warranty_days');
+      fd.append('serial_required', document.getElementById('mxSerial').checked ? '1' : '0');
+      addIf('mxCoreCharge', 'core_charge_usd'); addIf('mxEnvFee', 'env_fee_usd');
+      fd.append('location', document.getElementById('mxLocation').value);
+      fd.append('axis1_label', document.getElementById('mxAxis1Label').value.trim() || 'Variant');
+      fd.append('axis1_values', axis1Values);
+      if (axis2On) {
+        fd.append('axis2_label', document.getElementById('mxAxis2Label').value.trim());
+        fd.append('axis2_values', document.getElementById('mxAxis2Values').value.trim());
+      }
+
+      showMsg('Creating…');
+      btn.disabled = true;
+      try {
+        var res = await fetch('/api/admin/product-matrix', { method: 'POST', body: fd, credentials: 'same-origin' });
+        var data = null; try { data = await res.json(); } catch (e) {}
+        if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+        posCloseModal();
+        posToast('Matrix created — ' + data.children.length + ' parts added');
+        if (onDone) onDone();
+        matrixManagerModal(data.matrix_id, onDone);
+      } catch (e) { showMsg(e.message, true); }
+      finally { btn.disabled = false; }
+    });
+  }
+
+  async function matrixManagerModal(matrixId, onDone){
+    var data;
+    try { data = await api('/api/admin/product-matrix/' + matrixId); }
+    catch (e) { posToast(e.message, true); return; }
+    var m = data.matrix, children = data.children;
+    var ovCount = {};
+    data.overrides_summary.forEach(function(x){ ovCount[x.field] = x.overridden_count; });
+    var hint = function(key){ return ovCount[key] ? ' <span style="font-weight:600;color:#b45309">· overridden on ' + ovCount[key] + '/' + children.length + '</span>' : ''; };
+    var mfld = function(label, id, val, attrs, key){
+      return '<div><label class="lbl">' + esc(label) + (key ? hint(key) : '') + '</label><input id="' + id + '" class="fld" value="' + esc(val == null ? '' : val) + '" ' + (attrs || '') + '/></div>';
+    };
+    var mSel = function(label, id, val, opts, key){
+      return '<div><label class="lbl">' + esc(label) + (key ? hint(key) : '') + '</label><select id="' + id + '" class="fld">' +
+        opts.map(function(o){ var v = Array.isArray(o) ? o[0] : o, t = Array.isArray(o) ? o[1] : o;
+          return '<option value="' + esc(v) + '"' + (String(v) === String(val || '') ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') +
+      '</select></div>';
+    };
+
+    posModal('🧬 ' + esc(m.name),
+      '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:800;margin-bottom:8px">Shared fields — saving pushes to every part below that hasn\'t customised that field</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
+        mSel('Category', 'mmCategory', m.category, cats, 'category') +
+        mSel('Condition', 'mmCondition', m.condition, [['USED', 'USED'], ['NEW', 'NEW']], 'condition') +
+        '<div style="grid-column:1/-1"><label class="lbl">Vehicle / fitment' + hint('make_model') + '</label><input id="mmMakeModel" class="fld" value="' + esc(m.make_model || '') + '"/></div>' +
+        mfld('Cost / buy price (USD)', 'mmCost', m.cost_usd, 'type="number" step="0.01" min="0"', 'cost_usd') +
+        mfld('Markup %', 'mmMarkup', m.markup_pct, 'type="number" step="0.1" min="0"', 'markup_pct') +
+        mfld('Sell price / retail (USD)', 'mmPrice', m.price_usd, 'type="number" step="0.01" min="0"', 'price_usd') +
+        mfld('List / MSRP (USD)', 'mmList', m.list_price_usd, 'type="number" step="0.01" min="0"', 'list_price_usd') +
+        mSel('Supplier', 'mmSupplier', m.supplier_id, [['', '— none —']].concat(partSuppliers.map(function(s){ return [s.id, s.name]; })), 'supplier_id') +
+        mfld('Supplier part #', 'mmSupPartNo', m.supplier_part_no, '', 'supplier_part_no') +
+        mSel('Costing method', 'mmCosting', m.costing_method, COSTING_OPTS, 'costing_method') +
+        mSel('Stock unit', 'mmStockUom', m.stock_uom || 'each', [['', '—']].concat(UOM_OPTS), 'stock_uom') +
+        mSel('Purchase unit', 'mmPurchUom', m.purchase_uom, [['', '—']].concat(UOM_OPTS), 'purchase_uom') +
+        mfld('Units per purchase', 'mmUnitsPerPurch', m.units_per_purchase, 'type="number" step="0.001" min="0"', 'units_per_purchase') +
+        mfld('Warranty (days)', 'mmWarranty', m.warranty_days, 'type="number" min="0"', 'warranty_days') +
+        mfld('Core charge (USD/unit)', 'mmCoreCharge', m.core_charge_usd, 'type="number" step="0.01" min="0"', 'core_charge_usd') +
+        mfld('Environmental fee (USD/unit)', 'mmEnvFee', m.env_fee_usd, 'type="number" step="0.01" min="0"', 'env_fee_usd') +
+        '<div><label class="lbl">Serial required' + hint('serial_required') + '</label><label style="display:inline-flex;align-items:center;gap:7px;font-size:13px;padding-top:6px"><input type="checkbox" id="mmSerial"' + (m.serial_required ? ' checked' : '') + '/> required at sale</label></div>' +
+      '</div>' +
+      '<div id="mmMsg" style="display:none;margin-top:10px;padding:9px 12px;border-radius:6px;font-size:12.5px"></div>' +
+      '<div style="display:flex;justify-content:flex-end;margin-top:10px"><button type="button" class="btn ok" id="mmSave">💾 Save & push to children</button></div>' +
+
+      '<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">' +
+        '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:800;margin-bottom:8px">' + children.length + ' part' + (children.length === 1 ? '' : 's') + '</div>' +
+        '<table style="width:100%;font-size:12px"><thead><tr><th align="left">Part</th><th>Stock</th><th>Price</th><th></th><th></th></tr></thead><tbody>' +
+        children.map(function(ch){
+          var axisLabel = m.axis1_label + ': ' + ch.matrix_axis1_value + (ch.matrix_axis2_value ? ' / ' + m.axis2_label + ': ' + ch.matrix_axis2_value : '');
+          return '<tr style="opacity:' + (ch.is_active ? '1' : '.5') + '">' +
+            '<td><b>' + esc(ch.name) + '</b><br/><small style="color:var(--muted)">' + esc(axisLabel) + ' · ' + esc(ch.sku || 'no SKU') + '</small>' +
+              (ch.matrix_overrides.length ? '<br/><small style="color:#b45309">🔧 ' + ch.matrix_overrides.length + ' customised field' + (ch.matrix_overrides.length === 1 ? '' : 's') + '</small>' : '') +
+              (!ch.is_active ? '<br/><small style="color:var(--red)">removed</small>' : '') + '</td>' +
+            '<td style="text-align:center">' + ch.stock_count + '</td>' +
+            '<td style="text-align:right">' + (ch.price_usd != null ? '$' + Number(ch.price_usd).toFixed(2) : '—') + '</td>' +
+            '<td><button type="button" class="btn" data-mmedit="' + esc(ch.img) + '" style="padding:4px 9px;font-size:11.5px">✎ Edit</button></td>' +
+            '<td>' + (ch.matrix_overrides.length ? '<button type="button" class="btn" data-mmreset="' + esc(ch.img) + '" style="padding:4px 9px;font-size:11.5px">↺</button> ' : '') +
+              (ch.is_active ? '<button type="button" class="btn" data-mmremove="' + esc(ch.img) + '" style="padding:4px 9px;font-size:11.5px;background:#fee2e2;color:#b91c1c">🗑</button>' : '') + '</td>' +
+          '</tr>';
+        }).join('') +
+        '</tbody></table>' +
+        '<div style="display:flex;gap:8px;align-items:flex-end;margin-top:12px;flex-wrap:wrap">' +
+          '<div><label class="lbl">' + esc(m.axis1_label) + '</label><input id="mmNewAxis1" class="fld" style="width:140px"/></div>' +
+          (m.axis2_label ? '<div><label class="lbl">' + esc(m.axis2_label) + '</label><input id="mmNewAxis2" class="fld" style="width:140px"/></div>' : '') +
+          '<button type="button" class="btn" id="mmAddVariant">➕ Add variant</button>' +
+        '</div>' +
+      '</div>', 820
+    );
+
+    var mmMsg = document.getElementById('mmMsg');
+    var showMmMsg = function(text, bad){ mmMsg.style.display = 'block'; mmMsg.style.background = bad ? '#fee2e2' : '#dcfce7'; mmMsg.style.color = bad ? '#991b1b' : '#166534'; mmMsg.textContent = text; };
+
+    document.getElementById('mmSave').addEventListener('click', async function(){
+      var body = {
+        category: document.getElementById('mmCategory').value,
+        condition: document.getElementById('mmCondition').value,
+        make_model: document.getElementById('mmMakeModel').value.trim(),
+        supplier_id: document.getElementById('mmSupplier').value || '',
+        supplier_part_no: document.getElementById('mmSupPartNo').value.trim(),
+        costing_method: document.getElementById('mmCosting').value,
+        stock_uom: document.getElementById('mmStockUom').value,
+        purchase_uom: document.getElementById('mmPurchUom').value,
+        serial_required: document.getElementById('mmSerial').checked,
+      };
+      var rawIf = function(id){ return (document.getElementById(id).value || '').trim(); };
+      var cost = rawIf('mmCost'); if (cost !== '') body.cost_usd = Number(cost);
+      var price = rawIf('mmPrice'); if (price !== '') body.price_usd = Number(price);
+      var list = rawIf('mmList'); if (list !== '') body.list_price_usd = Number(list);
+      var markup = rawIf('mmMarkup'); body.markup_pct = markup;
+      var upp = rawIf('mmUnitsPerPurch'); body.units_per_purchase = upp;
+      var warranty = rawIf('mmWarranty'); body.warranty_days = warranty;
+      body.core_charge_usd = rawIf('mmCoreCharge');
+      body.env_fee_usd = rawIf('mmEnvFee');
+      showMmMsg('Saving & pushing…');
+      try {
+        var r = await api('/api/admin/product-matrix/' + matrixId, { method: 'PATCH', body: body });
+        showMmMsg('Saved — pushed to ' + r.updated_children + ' part' + (r.updated_children === 1 ? '' : 's') + '.');
+        if (onDone) onDone();
+        posCloseModal(); matrixManagerModal(matrixId, onDone);
+      } catch (e) { showMmMsg(e.message, true); }
+    });
+
+    document.querySelectorAll('[data-mmedit]').forEach(function(btn){
+      btn.addEventListener('click', function(){ posCloseModal(); productEditModal({ img: btn.getAttribute('data-mmedit') }, function(){ if (onDone) onDone(); matrixManagerModal(matrixId, onDone); }); });
+    });
+    document.querySelectorAll('[data-mmreset]').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        try { await api('/api/admin/product-matrix/' + matrixId + '/reset/' + encodeURIComponent(btn.getAttribute('data-mmreset')), { method: 'POST' }); if (onDone) onDone(); posCloseModal(); matrixManagerModal(matrixId, onDone); }
+        catch (e) { showMmMsg(e.message, true); }
+      });
+    });
+    document.querySelectorAll('[data-mmremove]').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        if (!(await posConfirm('Remove this variant from the matrix?', { ok: 'Remove', danger: true }))) return;
+        try { await api('/api/admin/product-matrix/' + matrixId + '/children/' + encodeURIComponent(btn.getAttribute('data-mmremove')), { method: 'DELETE' }); if (onDone) onDone(); posCloseModal(); matrixManagerModal(matrixId, onDone); }
+        catch (e) { showMmMsg(e.message, true); }
+      });
+    });
+    document.getElementById('mmAddVariant').addEventListener('click', async function(){
+      var a1 = document.getElementById('mmNewAxis1').value.trim();
+      var a2El = document.getElementById('mmNewAxis2');
+      if (!a1) return showMmMsg(m.axis1_label + ' value is required.', true);
+      try {
+        await api('/api/admin/product-matrix/' + matrixId + '/children', { method: 'POST', body: { axis1_value: a1, axis2_value: a2El ? a2El.value.trim() : undefined } });
+        if (onDone) onDone();
+        posCloseModal(); matrixManagerModal(matrixId, onDone);
+      } catch (e) { showMmMsg(e.message, true); }
+    });
   }
 
   document.getElementById('prodSearch').addEventListener('input', function(e){
@@ -2362,15 +2682,15 @@ function mountImageWidget(containerId, hiddenId, opts){
       '<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">' +
         '<button type="button" class="iwTab" data-mode="cam" id="' + uid + '_camTab" style="padding:7px 14px;border:1px solid var(--line);background:var(--navy);color:#fff;border-radius:6px;font-weight:700;cursor:pointer;font-size:12.5px">📸 Camera</button>' +
         '<button type="button" class="iwTab" data-mode="file" id="' + uid + '_fileTab" style="padding:7px 14px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:6px;font-weight:700;cursor:pointer;font-size:12.5px">📁 File</button>' +
-        '<button type="button" class="iwTab" data-mode="url" id="' + uid + '_urlTab" style="padding:7px 14px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:6px;font-weight:700;cursor:pointer;font-size:12.5px">🔗 URL</button>' +
+        (opts.noUrl ? '' : '<button type="button" class="iwTab" data-mode="url" id="' + uid + '_urlTab" style="padding:7px 14px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:6px;font-weight:700;cursor:pointer;font-size:12.5px">🔗 URL</button>') +
       '</div>' +
       '<div id="' + uid + '_camPane"><input type="file" name="photo" accept="image/*" capture="environment" id="' + uid + '_camIn" style="width:100%;font-size:13px"/></div>' +
       '<div id="' + uid + '_filePane" style="display:none"><input type="file" name="photo" accept="image/*" id="' + uid + '_fileIn" style="width:100%;font-size:13px"/></div>' +
-      '<div id="' + uid + '_urlPane" style="display:none"><input type="url" name="photo_url" placeholder="https://..." id="' + uid + '_urlIn" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:6px;font-size:13px;font-family:inherit"/></div>' +
+      (opts.noUrl ? '' : '<div id="' + uid + '_urlPane" style="display:none"><input type="url" name="photo_url" placeholder="https://..." id="' + uid + '_urlIn" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:6px;font-size:13px;font-family:inherit"/></div>') +
       '<div id="' + uid + '_preview" style="margin-top:10px;text-align:center;display:none">' +
         '<img id="' + uid + '_previewImg" style="max-width:240px;max-height:200px;border-radius:8px;border:1px solid var(--line)"/>' +
       '</div>' +
-      '<small style="display:block;margin-top:6px;color:var(--muted);font-size:11px">📱 Mobile: 📸 Camera tab opens rear camera. URL mode for hosted images.</small>' +
+      '<small style="display:block;margin-top:6px;color:var(--muted);font-size:11px">📱 Mobile: 📸 Camera tab opens rear camera.' + (opts.noUrl ? '' : ' URL mode for hosted images.') + '</small>' +
     '</div>';
   function switchTo(mode){
     ['cam','file','url'].forEach(function(m){
@@ -2397,12 +2717,14 @@ function mountImageWidget(containerId, hiddenId, opts){
     });
   });
   var urlIn = document.getElementById(uid + '_urlIn');
-  urlIn.addEventListener('change', function(){
-    if (urlIn.value) {
-      document.getElementById(uid + '_previewImg').src = urlIn.value;
-      document.getElementById(uid + '_preview').style.display = 'block';
-    }
-  });
+  if (urlIn) {
+    urlIn.addEventListener('change', function(){
+      if (urlIn.value) {
+        document.getElementById(uid + '_previewImg').src = urlIn.value;
+        document.getElementById(uid + '_preview').style.display = 'block';
+      }
+    });
+  }
   c.__widget = { uid: uid, getMode: function(){ return c.querySelector('.iwTab[style*="navy"]') ? c.querySelector('.iwTab[style*="navy"]').getAttribute('data-mode') : 'cam'; },
     getFile: function(){
       var mode = c.__widget.getMode();
@@ -2410,7 +2732,7 @@ function mountImageWidget(containerId, hiddenId, opts){
       if (mode === 'file') return document.getElementById(uid + '_fileIn').files[0];
       return null;
     },
-    getUrl: function(){ return document.getElementById(uid + '_urlIn').value || ''; }
+    getUrl: function(){ var el = document.getElementById(uid + '_urlIn'); return el ? (el.value || '') : ''; }
   };
 }
 

@@ -19,9 +19,10 @@
 // the receive paths do every read, compute in JS, then one db.batch().
 import { d1 } from '../_lib/db.js';
 import { adminMw, managerMw, userCan } from '../_lib/guards.js';
-import { boolify } from '../_lib/util.js';
+import { boolify, safeJson } from '../_lib/util.js';
 import { usdToCents } from '../_lib/money.js';
 import { readUploadBody, putUpload } from '../_lib/uploads.js';
+import { PUSHABLE_FIELDS, toColumnValue, valuesEqual } from '../_lib/product_matrix.js';
 import {
   parseInventoryFile, TEMPLATE_CSV, FIELD_SYNONYMS,
 } from '../_lib/inventory_import.js';
@@ -125,6 +126,27 @@ export default function mount(app) {
       put('commission_type = ?', ['percent', 'amount', 'none'].includes(t) ? t : null);
     }
     if (b.commission_value !== undefined) put('commission_value = ?', numOrNull(b.commission_value));
+
+    // Matrix-item bookkeeping: a plain save from the product editor always
+    // resubmits every field, not just the deltas, so "touched" alone can't
+    // mean "overridden" -- compare the incoming value to the matrix's
+    // *current* shared value instead. A field only diverges (and stops
+    // inheriting future "push to children" edits) when it now actually
+    // differs; retyping the shared value re-aligns it automatically.
+    const touchedShared = PUSHABLE_FIELDS.filter((f) => b[f.key] !== undefined);
+    if (touchedShared.length) {
+      const row = await db.one('SELECT matrix_id, matrix_overrides FROM products WHERE img = ?', c.req.param('img'));
+      const parent = row && row.matrix_id ? await db.one('SELECT * FROM product_matrices WHERE id = ?', row.matrix_id) : null;
+      if (parent) {
+        const ov = new Set(safeJson(row.matrix_overrides, []));
+        for (const f of touchedShared) {
+          const childVal = toColumnValue(f.kind, f.col, b[f.key]);
+          if (valuesEqual(f.kind, childVal, parent[f.col])) ov.delete(f.key); else ov.add(f.key);
+        }
+        put('matrix_overrides = ?', JSON.stringify([...ov]));
+      }
+    }
+
     if (!sets.length) return c.json({ error: 'Nothing to update' }, 400);
     sets.push('updated_at = CURRENT_TIMESTAMP');
     vals.push(c.req.param('img'));

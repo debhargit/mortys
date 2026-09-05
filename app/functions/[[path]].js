@@ -13,6 +13,7 @@ import mountAdmin from './_routes/admin.js';           // Phase 3 (admin reads)
 import mountPos from './_routes/pos.js';               // Phase 4 (POS reads + hold/quote)
 import mountPosTxn from './_routes/pos_txn.js';         // Phase 5 (sale / void / return)
 import mountInventory from './_routes/inventory.js';    // Phase 6 (inventory + purchasing + CSV import)
+import mountProductMatrix from './_routes/product_matrix.js'; // matrix items (variant SKUs)
 import mountMedia from './_routes/media.js';            // Phase 7 (R2 uploads + send_email)
 import mountCrm from './_routes/crm.js';                // Phase 8 (customer reminders CRUD)
 import mountCron from './_routes/cron.js';              // Phase 8 (scheduled-job endpoints)
@@ -34,6 +35,7 @@ mountAdmin(app);
 mountPos(app);
 mountPosTxn(app);
 mountInventory(app);
+mountProductMatrix(app);
 mountMedia(app);
 mountCrm(app);
 mountCron(app);
