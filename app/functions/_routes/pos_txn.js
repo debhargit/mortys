@@ -83,6 +83,51 @@ export async function createPosSale(env, b, me) {
   const missingSerial = items.find((it) => { const r = rules.get(it.product_img); return r && r.serial_required && !String(it.serial_number || '').trim(); });
   if (missingSerial) return { status: 400, body: { error: `"${missingSerial.description}" requires a serial number to sell.` } };
 
+  // ----- serial register (0056) -----
+  // A serial_required line's serial must be an in-stock entry in the part's
+  // register, unless the acting user may free-type (pos.serial_freetype). A
+  // free-typed serial gets its own 'sold' register row so the register stays
+  // complete. `it._serialAction` = { mark: <register id> } | { insert: true }.
+  const canFreeSerial = userCan(me, 'pos.serial_freetype');
+  {
+    const seen = new Set();
+    for (const it of items) {
+      const r = rules.get(it.product_img);
+      if (!r || !r.serial_required) continue;
+      const sn = String(it.serial_number || '').trim();
+      const key = it.product_img + '|' + sn.toLowerCase();
+      if (seen.has(key)) return { status: 400, body: { error: `Serial "${sn}" is on this ticket more than once.` } };
+      seen.add(key);
+      const reg = await db.one(
+        `SELECT id FROM product_serials WHERE product_img = ? AND lower(serial) = lower(?) AND status = 'in_stock'`,
+        it.product_img, sn);
+      if (!reg && !canFreeSerial)
+        return { status: 400, body: { error: `Serial "${sn}" for "${it.description}" isn't in the register. Pick a loaded serial (a manager can sell an off-register one).` } };
+      it._serialAction = reg ? { mark: reg.id } : { insert: true, serial: sn };
+    }
+  }
+
+  // ----- redeemable instruments (0047 + 0056) -----
+  // If real instrument codes are pre-loaded, assign the next unused one;
+  // otherwise mint RD-xxxx, gated by pos.redeemable_mint.
+  const canMint = userCan(me, 'pos.redeemable_mint');
+  {
+    const taken = {};
+    for (const it of items) {
+      const r = rules.get(it.product_img);
+      if (!r || !r.is_redeemable) continue;
+      const used = taken[it.product_img] || (taken[it.product_img] = []);
+      const row = await db.one(
+        `SELECT code FROM redemption_instruments WHERE product_img = ? AND status = 'in_stock'
+           ${used.length ? `AND code NOT IN (${used.map(() => '?').join(',')})` : ''}
+         ORDER BY id LIMIT 1`,
+        ...[it.product_img, ...used]);
+      if (row) { used.push(row.code); it._instrument = { code: row.code, preloaded: true }; }
+      else if (canMint) it._instrument = { code: genRedemptionCode(), preloaded: false };
+      else return { status: 400, body: { error: `No "${it.description}" instruments are loaded — a manager must load them first.` } };
+    }
+  }
+
   // Kit lines: load the recipe for every kit img in the cart. A 'single'-mode
   // kit stays one line (it decrements its components at the stock step and
   // snapshots them for void/return); an 'exploded'-mode kit is expanded into
@@ -391,8 +436,8 @@ export async function createPosSale(env, b, me) {
     stmts.push({
       sql: `INSERT INTO pos_sale_items
         (id, sale_id, product_img, description, qty, unit_price_cents, core_charge_cents, env_fee_cents,
-         discount_cents, discount_note, serial_number, warranty_until, total_cents, kit_components_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         discount_cents, discount_note, serial_number, warranty_until, total_cents, kit_components_json, core_returned)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       binds: [
         saleItemId, saleId, it.product_img || null, it.description, Number(it.qty), cts(it.unit_price_usd),
         // Stored as the line's total, not per-unit -- see the gross-total
@@ -400,17 +445,39 @@ export async function createPosSale(env, b, me) {
         cts((Number(it.core_charge_usd) || 0) * Number(it.qty)), cts((Number(it.env_fee_usd) || 0) * Number(it.qty)),
         cts(lc.disc), lc.disc > 0 && it.discount_note ? String(it.discount_note).slice(0, 300) : null,
         it.serial_number || null, warrantyUntil, cts(lc.net), kitJson,
+        it.core_returned ? 1 : 0,
       ],
     });
-    // Redeemable items (e.g. lottery scratch cards) mint one instrument per
-    // sold unit -- posAddToCart forces qty 1 per line for these, same as
-    // serial_required, so this is exactly one instrument per such line.
-    if (rule && rule.is_redeemable) {
+    // Serial register (0056): mark the picked serial sold, or drop in a new
+    // 'sold' row for an off-register (free-typed) one.
+    if (it._serialAction && it._serialAction.mark) {
       stmts.push({
-        sql: `INSERT INTO redemption_instruments (code, product_img, sale_id, sale_item_id, face_value_cents, sold_by)
-              VALUES (?,?,?,?,?,?)`,
-        binds: [genRedemptionCode(), it.product_img, saleId, saleItemId, cts(it.unit_price_usd), me.id],
+        sql: `UPDATE product_serials SET status = 'sold', sale_id = ?, sale_item_id = ?, sold_at = CURRENT_TIMESTAMP, sold_by = ?, warranty_until = ? WHERE id = ?`,
+        binds: [saleId, saleItemId, me.id, warrantyUntil, it._serialAction.mark],
       });
+    } else if (it._serialAction && it._serialAction.insert) {
+      // received_at = NULL marks it as off-register (free-typed at the
+      // counter, not loaded in) -- void/return use that to tell it apart.
+      stmts.push({
+        sql: `INSERT INTO product_serials (product_img, serial, status, sale_id, sale_item_id, sold_at, sold_by, warranty_until, received_at)
+              VALUES (?,?,'sold',?,?,CURRENT_TIMESTAMP,?,?,NULL)`,
+        binds: [it.product_img, it._serialAction.serial, saleId, saleItemId, me.id, warrantyUntil],
+      });
+    }
+    // Redeemable items: assign a pre-loaded instrument, or mint one.
+    if (rule && rule.is_redeemable && it._instrument) {
+      if (it._instrument.preloaded) {
+        stmts.push({
+          sql: `UPDATE redemption_instruments SET status = 'sold', sale_id = ?, sale_item_id = ?, face_value_cents = ?, sold_by = ? WHERE code = ?`,
+          binds: [saleId, saleItemId, cts(it.unit_price_usd), me.id, it._instrument.code],
+        });
+      } else {
+        stmts.push({
+          sql: `INSERT INTO redemption_instruments (code, product_img, sale_id, sale_item_id, face_value_cents, sold_by)
+                VALUES (?,?,?,?,?,?)`,
+          binds: [it._instrument.code, it.product_img, saleId, saleItemId, cts(it.unit_price_usd), me.id],
+        });
+      }
     }
     // Stock. A 'single'-mode kit draws down its components (skip 'service'
     // ones); everything else decrements itself unless it's a service line.
@@ -706,6 +773,13 @@ export default function mount(app) {
         stmts.push({ sql: 'UPDATE products SET stock_count = stock_count + ? WHERE img = ?', binds: [restock, it.product_img] });
       }
     }
+    // Serials + redemption instruments sold on this sale go back to stock; a
+    // minted (not pre-loaded) instrument is voided instead -- it never was
+    // stock. Off-register free-typed serial rows are voided too.
+    stmts.push({ sql: `UPDATE product_serials SET status = 'in_stock', sale_id = NULL, sale_item_id = NULL, sold_at = NULL, sold_by = NULL, warranty_until = NULL WHERE sale_id = ? AND status = 'sold' AND received_at IS NOT NULL`, binds: [id] });
+    stmts.push({ sql: `UPDATE product_serials SET status = 'void' WHERE sale_id = ? AND status = 'sold' AND received_at IS NULL`, binds: [id] });
+    stmts.push({ sql: `UPDATE redemption_instruments SET status = 'in_stock', sale_id = NULL, sale_item_id = NULL, sold_by = NULL WHERE sale_id = ? AND status = 'sold' AND received_at IS NOT NULL`, binds: [id] });
+    stmts.push({ sql: `UPDATE redemption_instruments SET status = 'void' WHERE sale_id = ? AND status = 'sold' AND received_at IS NULL`, binds: [id] });
     stmts.push({ sql: `UPDATE pos_sales SET voided = 1, voided_at = CURRENT_TIMESTAMP, voided_by = ? WHERE id = ?`, binds: [c.get('user').id, id] });
     try { await db.batch(stmts); } catch (e) { return c.json({ error: e.message }, 500); }
     return c.json({ ok: true });
@@ -818,6 +892,8 @@ export default function mount(app) {
               VALUES (?,?,?,?,?,?,?,?,?)`,
         binds: [returnId, lw.item.id, lw.item.product_img || null, lw.item.description, lw.qty, cts(lw.refundLine), lw.item.unit_price_cents, lw.proratePct, lw.warrantyClaim ? 1 : 0],
       });
+      // A serialised line's units come back -- mark those serial rows returned.
+      stmts.push({ sql: `UPDATE product_serials SET status = 'returned', returned_at = CURRENT_TIMESTAMP WHERE sale_item_id = ? AND status = 'sold'`, binds: [lw.item.id] });
       // A 'single'-mode kit line restocks its snapshotted components, scaled
       // by how many kits are being returned; anything else restocks itself.
       const kitSnap = restockKitComponents(lw.item.kit_components_json);
@@ -847,5 +923,49 @@ export default function mount(app) {
       store_credit_code: storeCreditCode,
       loyalty_points_clawed_back: pointsClawedBack, loyalty_points_recredited: pointsRecredited,
     });
+  });
+
+  // =====================================================================
+  //  POST /api/admin/pos/sales/:id/core-return
+  //  The customer brings the old core back later: refund the deposit for
+  //  that line. The part itself stays sold -- no stock change.
+  // =====================================================================
+  app.post('/api/admin/pos/sales/:id/core-return', adminMw, async (c) => {
+    if (!userCan(c.get('user'), 'pos.refund')) return c.json({ error: 'Not allowed to process a refund.' }, 403);
+    const db = d1(c.env);
+    const me = c.get('user');
+    const id = c.req.param('id');
+    const b = await c.req.json().catch(() => ({}));
+    if (!REFUND_METHODS.includes(b.refund_method))
+      return c.json({ error: 'refund_method must be cash, card, cheque, bank, or store_credit' }, 400);
+    const sale = await db.one('SELECT id, voided FROM pos_sales WHERE id = ?', id);
+    if (!sale) return c.json({ error: 'Sale not found' }, 404);
+    if (sale.voided) return c.json({ error: 'That sale is voided' }, 400);
+    const line = await db.one(
+      'SELECT id, description, qty, core_charge_cents, core_returned FROM pos_sale_items WHERE id = ? AND sale_id = ?',
+      b.sale_item_id, id);
+    if (!line) return c.json({ error: 'sale_item_id is not on this sale' }, 400);
+    if (!(line.core_charge_cents > 0)) return c.json({ error: `"${line.description}" has no core charge` }, 400);
+    if (line.core_returned) return c.json({ error: 'The core for this line was already handed in at the sale' }, 400);
+    const qty = parseInt(b.qty, 10);
+    if (!(qty > 0)) return c.json({ error: 'qty must be a positive number' }, 400);
+    const [priorCore, priorPartReturn] = await Promise.all([
+      db.one('SELECT COALESCE(SUM(qty),0) AS q FROM core_returns WHERE sale_item_id = ?', line.id),
+      db.one('SELECT COALESCE(SUM(qty),0) AS q FROM pos_return_items WHERE sale_item_id = ?', line.id),
+    ]);
+    const remaining = line.qty - (priorCore.q || 0) - (priorPartReturn.q || 0);
+    if (qty > remaining) return c.json({ error: `Only ${remaining} core(s) remain claimable on this line` }, 400);
+    const perCoreCents = Math.round(line.core_charge_cents / line.qty);
+    const refundCents = perCoreCents * qty;
+    const year = new Date().getFullYear();
+    const seq = await db.one("SELECT COUNT(*) AS n FROM core_returns WHERE return_number LIKE ?", `CR-${year}-%`);
+    const returnNumber = `CR-${year}-${String(((seq && seq.n) || 0) + 1).padStart(4, '0')}`;
+    try {
+      await db.run(
+        `INSERT INTO core_returns (return_number, sale_id, sale_item_id, qty, refund_cents, refund_method, processed_by, notes)
+         VALUES (?,?,?,?,?,?,?,?)`,
+        returnNumber, id, line.id, qty, refundCents, b.refund_method, me.id, b.notes ? String(b.notes).slice(0, 300) : null);
+    } catch (e) { return c.json({ error: e.message }, 500); }
+    return c.json({ ok: true, return_number: returnNumber, refund_usd: refundCents / 100, qty });
   });
 }

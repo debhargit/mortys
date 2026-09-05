@@ -15,6 +15,7 @@ import { sendEmail } from '../_lib/mailer.js';
 import { readUploadBody } from '../_lib/uploads.js';
 import { loadBreaksForImg, ACTIVE_SALE_PRICE_SQL } from '../_lib/price_breaks.js';
 import { loadAltNumbersForImg, loadSubstitutesForImg } from '../_lib/alt_numbers.js';
+import { loadSerialStockByImg, loadRedeemableStockByImg } from '../_lib/serials.js';
 import { centsToUsd } from '../_lib/money.js';
 
 const u2c = (u) => (u == null || u === '' ? null : Math.round(Number(u) * 100));
@@ -327,6 +328,14 @@ export default function mount(app) {
     product.qty_discounts = allBreaks.filter((b) => b.discount_pct != null).map((b) => ({ min_qty: b.min_qty, discount_pct: b.discount_pct }));
     product.alt_numbers = await loadAltNumbersForImg(d1(c.env), product.img);
     product.substitutes = await loadSubstitutesForImg(d1(c.env), product.img);
+    if (product.serial_required) {
+      const sm = await loadSerialStockByImg(d1(c.env), [product.img]);
+      product.serials_available = (sm.get(product.img) || { available: [] }).available;
+    }
+    if (product.is_redeemable) {
+      const rm = await loadRedeemableStockByImg(d1(c.env), [product.img]);
+      product.redeemables_available = rm.get(product.img) || 0;
+    }
     product.sale_price_usd = product.active_sale_cents != null ? centsToUsd(product.active_sale_cents) : null;
     delete product.active_sale_cents;
     return c.json({ product });

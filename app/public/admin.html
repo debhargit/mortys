@@ -699,7 +699,8 @@ var renderers = {
   reports:       renderReports,
   coupons:       renderCoupons,
   giftcards:     renderGiftCards,
-  redemptions:   renderRedemptions
+  redemptions:   renderRedemptions,
+  warranty:      renderWarranty
 };
 // POS Terminal, not Dashboard, is the default landing tab -- this is a
 // counter-sales app first; staff signing in should land straight on the
@@ -773,6 +774,7 @@ var SIDEBAR_GROUPS = [
     { tab:'coupons', label:'🏷 Coupons' },
     { tab:'giftcards', label:'🎁 Gift Cards' },
     { tab:'redemptions', label:'🎟 Redeemables' },
+    { tab:'warranty', label:'🛡 Warranty' },
   ]},
   { title: '👥 Customers', items: [
     { tab:'customers', label:'👥 Customers (CRM)' },
@@ -2190,6 +2192,22 @@ async function renderProducts(panel){
           sect('Warranty & serial',
             fld('Warranty (days)', 'peWarranty', p.warranty_days, 'type="number" min="0" placeholder="e.g. 90"') +
             '<div><label class="lbl">Serial number</label><label style="display:inline-flex;align-items:center;gap:7px;font-size:13px;padding-top:6px"><input type="checkbox" id="peSerial"' + (p.serial_required ? ' checked' : '') + '/> required at sale</label></div>') +
+          '<div id="peSerialReg" style="margin-bottom:12px' + (p.serial_required ? '' : ';display:none') + '">' +
+            '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:800;margin-bottom:6px">Serial register <span style="font-weight:400;text-transform:none;letter-spacing:0">— serials on hand; a sale assigns one and tracks it</span></div>' +
+            '<div id="peSerialSummary" style="font-size:12.5px;color:var(--muted);margin-bottom:6px">…</div>' +
+            '<textarea id="peSerialLoad" placeholder="paste serials, one per line" style="width:100%;min-height:52px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:6px"></textarea>' +
+            '<button type="button" class="btn ok" id="peSerialSave" style="margin-top:4px">＋ Load serials</button>' +
+            '<span id="peSerialMsg" style="font-size:12.5px;margin-left:8px"></span>' +
+            '<div id="peSerialList" style="margin-top:6px"></div>' +
+          '</div>' +
+          (p.is_redeemable ?
+          '<div style="margin-bottom:12px">' +
+            '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:800;margin-bottom:6px">Redeemable instruments <span style="font-weight:400;text-transform:none;letter-spacing:0">— pre-load real card / voucher numbers; a sale assigns the next one</span></div>' +
+            '<div id="peInstSummary" style="font-size:12.5px;color:var(--muted);margin-bottom:6px">…</div>' +
+            '<textarea id="peInstLoad" placeholder="paste instrument codes, one per line" style="width:100%;min-height:52px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:6px"></textarea>' +
+            '<button type="button" class="btn ok" id="peInstSave" style="margin-top:4px">＋ Load instruments</button>' +
+            '<span id="peInstMsg" style="font-size:12.5px;margin-left:8px"></span>' +
+          '</div>' : '') +
           sect('Core charge & fees',
             fld('Core charge (USD, per unit)', 'peCoreCharge', p.core_charge_usd, 'type="number" step="0.01" min="0" placeholder="0.00"') +
             fld('Environmental fee (USD, per unit)', 'peEnvFee', p.env_fee_usd, 'type="number" step="0.01" min="0" placeholder="0.00"')) +
@@ -2657,6 +2675,78 @@ async function renderProducts(panel){
           m.textContent = '✓ Saved'; m.style.color = '#166534';
         } catch (e) { m.textContent = e.message; m.style.color = 'var(--red)'; }
       });
+    })();
+
+    // Serial register (0056): load serials, see the in-stock / sold counts,
+    // void a bad one. The block is shown/hidden with the serial-required box.
+    (function(){
+      var box = document.getElementById('peSerialReg');
+      if (!box) return;
+      var chk = document.getElementById('peSerial');
+      if (chk) chk.addEventListener('change', function(){ box.style.display = chk.checked ? '' : 'none'; });
+      var summary = document.getElementById('peSerialSummary'), listEl = document.getElementById('peSerialList');
+      var refresh = async function(){
+        try {
+          var r = await api('/api/admin/products/' + encodeURIComponent(p.img) + '/serials');
+          var c2 = r.counts || {};
+          summary.textContent = (c2.in_stock || 0) + ' in stock · ' + (c2.sold || 0) + ' sold · ' + (c2.returned || 0) + ' returned' +
+            ((c2.void || 0) ? ' · ' + c2.void + ' void' : '') + '  (stock count: ' + (p.stock_count != null ? p.stock_count : '—') + ')';
+          listEl.innerHTML = (r.serials || []).slice(0, 40).map(function(s){
+            return '<div style="display:flex;gap:8px;align-items:center;font-size:12px;padding:2px 0">' +
+              '<code style="flex:0 0 150px;font-weight:700">' + esc(s.serial) + '</code>' +
+              '<span style="flex:0 0 80px;color:' + (s.status === 'in_stock' ? '#166534' : s.status === 'sold' ? '#1d4ed8' : 'var(--muted)') + '">' + esc(s.status) + '</span>' +
+              '<span style="flex:1;min-width:0;color:var(--muted)">' + esc(s.receipt_number || '') + (s.warranty_until ? ' · warr ' + esc(s.warranty_until) : '') + '</span>' +
+              (s.status === 'in_stock' ? '<button type="button" class="btn peSerVoid" data-id="' + s.id + '" style="padding:2px 8px;background:#fee2e2;color:#b91c1c">void</button>' : '') +
+            '</div>';
+          }).join('') || '<div style="font-size:12px;color:var(--muted)">No serials loaded.</div>';
+          listEl.querySelectorAll('.peSerVoid').forEach(function(b){
+            b.addEventListener('click', async function(){
+              try { await api('/api/admin/products/' + encodeURIComponent(p.img) + '/serials/' + b.getAttribute('data-id'), { method: 'PATCH', body: { status: 'void' } }); refresh(); }
+              catch (e) { alert(e.message); }
+            });
+          });
+        } catch (e) { summary.textContent = e.message; }
+      };
+      document.getElementById('peSerialSave').addEventListener('click', async function(){
+        var m = document.getElementById('peSerialMsg');
+        var val = document.getElementById('peSerialLoad').value;
+        if (!val.trim()) { m.textContent = 'paste some serials first'; m.style.color = 'var(--red)'; return; }
+        m.textContent = 'Loading…'; m.style.color = 'var(--muted)';
+        try {
+          var r = await api('/api/admin/products/' + encodeURIComponent(p.img) + '/serials', { method: 'POST', body: { serials: val } });
+          document.getElementById('peSerialLoad').value = '';
+          m.textContent = '✓ ' + r.in_stock + ' in stock'; m.style.color = '#166534';
+          refresh();
+        } catch (e) { m.textContent = e.message; m.style.color = 'var(--red)'; }
+      });
+      refresh();
+    })();
+
+    // Redeemable instrument loader (only rendered for is_redeemable products).
+    (function(){
+      var btn = document.getElementById('peInstSave');
+      if (!btn) return;
+      var summary = document.getElementById('peInstSummary');
+      var refresh = async function(){
+        try {
+          var r = await api('/api/admin/redemptions?status=in_stock');
+          var mine = (r.redemptions || []).filter(function(x){ return x.product_img === p.img; });
+          summary.textContent = mine.length + ' instrument(s) loaded and unsold';
+        } catch (e) { summary.textContent = ''; }
+      };
+      btn.addEventListener('click', async function(){
+        var m = document.getElementById('peInstMsg');
+        var val = document.getElementById('peInstLoad').value;
+        if (!val.trim()) { m.textContent = 'paste some codes first'; m.style.color = 'var(--red)'; return; }
+        m.textContent = 'Loading…'; m.style.color = 'var(--muted)';
+        try {
+          var r = await api('/api/admin/redemptions/load', { method: 'POST', body: { product_img: p.img, codes: val } });
+          document.getElementById('peInstLoad').value = '';
+          m.textContent = '✓ ' + r.in_stock + ' in stock'; m.style.color = '#166534';
+          refresh();
+        } catch (e) { m.textContent = e.message; m.style.color = 'var(--red)'; }
+      });
+      refresh();
     })();
 
     var msg = document.getElementById('peMsg');
@@ -3586,7 +3676,8 @@ function posCartPayload(){
       discount_note: i.discNote || null,
       serial_number: i.serialNumber || null,
       warranty_days: i.warrantyDays || null,
-      core_charge_usd: Number(i.coreChargeUsd) || 0,
+      core_charge_usd: i.coreReturned ? 0 : (Number(i.coreChargeUsd) || 0),
+      core_returned: !!i.coreReturned,
       env_fee_usd: Number(i.envFeeUsd) || 0,
     };
   });
@@ -3628,6 +3719,32 @@ function posTierPrice(p){
   return (v == null || v === '') ? null : Number(v);
 }
 
+// Serial capture on a cart line: a picker of in-stock serials when the
+// register is loaded, a free input otherwise. Free-type of an off-register
+// serial is only *offered* when the operator has pos.serial_freetype; the
+// server enforces it either way.
+function posSerialField(i, idx, fs){
+  if (!i.serialRequired) return '';
+  fs = fs || 11;
+  var avail = i.serialsAvailable || [];
+  var freetype = (typeof can === 'function') && can('pos.serial_freetype');
+  var st = 'width:100%;margin-top:3px;padding:3px 6px;border:1px solid ' + (i.serialNumber ? '#86efac' : '#fca5a5') + ';border-radius:4px;font-size:' + fs + ';font-weight:700;font-family:inherit';
+  if (avail.length && !i._serialTyping){
+    var opts = '<option value="">— pick a serial —</option>' +
+      avail.map(function(s){ return '<option' + (s === i.serialNumber ? ' selected' : '') + '>' + esc(s) + '</option>'; }).join('') +
+      (freetype ? '<option value="__type__">＋ type another…</option>' : '');
+    return '<select class="posSerialSel" data-sidx="' + idx + '" style="' + st + '">' + opts + '</select>' +
+      (i.serialNumber && avail.indexOf(i.serialNumber) < 0
+        ? '<input class="posSerialNum" data-sidx="' + idx + '" value="' + esc(i.serialNumber) + '" placeholder="serial #" style="' + st + '"/>' : '');
+  }
+  return '<input class="posSerialNum" data-sidx="' + idx + '" value="' + esc(i.serialNumber || '') + '" placeholder="serial # — ' + (freetype ? 'none in register' : 'a manager must load serials') + '" style="' + st + '"/>';
+}
+function posCoreField(i, idx){
+  if (!(Number(i.coreChargeUsd) > 0)) return '';
+  return '<label style="display:inline-flex;align-items:center;gap:5px;margin-top:3px;font-size:11px;color:#b45309;font-weight:700">' +
+    '<input type="checkbox" class="posCoreRet" data-cidx="' + idx + '"' + (i.coreReturned ? ' checked' : '') + '/> core returned — waive $' + Number(i.coreChargeUsd).toFixed(2) + '</label>';
+}
+
 // Re-derive every non-manually-priced cart line's base + unit price against
 // whatever customer (tier) is attached now -- called when a customer is
 // attached / changed / cleared so "add a trade account, the cart drops to
@@ -3661,8 +3778,10 @@ function posAddToCart(p, qty){
     location: p.location, bin_location: p.bin_location, stock_count: p.stock_count,
     disc: 0, discPct: 0, discMode: 'amt', discNote: '',
     serialRequired: serialRequired, serialNumber: '', isRedeemable: isRedeemable,
+    serialsAvailable: Array.isArray(p.serials_available) ? p.serials_available.slice() : null,
+    redeemablesAvailable: Number(p.redeemables_available) || 0,
     warrantyDays: p.warranty_days || null,
-    coreChargeUsd: Number(p.core_charge_usd) || 0, envFeeUsd: Number(p.env_fee_usd) || 0,
+    coreChargeUsd: Number(p.core_charge_usd) || 0, coreReturned: false, envFeeUsd: Number(p.env_fee_usd) || 0,
     basePrice: basePrice, saleBase: saleBase, priceBreaks: priceBreaks, priceManual: false,
     regularPrice: regularPrice, saleActive: saleBase < regularPrice,
     tierPrices: p.tier_prices || null, tierApplied: tierPrice != null && tierPrice < saleBase,
@@ -4708,12 +4827,10 @@ async function renderPOS(panel){
           esc(i.sku || i.img) + '</code>' +
         '<span style="width:300px;flex-shrink:0;font-weight:700;word-break:break-word;line-height:1.2">' +
           esc(i.name) + loc +
-          (i.serialRequired
-            ? '<input class="posSerialNum" data-sidx="' + idx + '" value="' + esc(i.serialNumber || '') + '" placeholder="serial # — required to sell" ' +
-              'style="width:100%;margin-top:3px;padding:3px 6px;border:1px solid ' + (i.serialNumber ? '#86efac' : '#fca5a5') + ';border-radius:4px;font-size:' + posFS(10.5) + ';font-weight:700;font-family:inherit"/>'
-            : '') +
+          posSerialField(i, idx, posFS(10.5)) +
+          posCoreField(i, idx) +
           (i.isRedeemable
-            ? '<small style="display:block;margin-top:2px;color:#7c3aed;font-weight:700">🎟 redeemable — a code is generated on sale</small>'
+            ? '<small style="display:block;margin-top:2px;color:#7c3aed;font-weight:700">🎟 redeemable — a code is ' + ((i.redeemablesAvailable || 0) > 0 ? 'assigned' : 'generated') + ' on sale</small>'
             : '') +
           (d > 0
             ? '<input class="posDiscNote" data-nidx="' + idx + '" value="' + esc(i.discNote || '') + '" placeholder="reason for discount (prints on the invoice)" ' +
@@ -4817,11 +4934,10 @@ async function renderPOS(panel){
           ? '<small style="display:block;margin-top:2px;color:#166534;font-weight:700">🏷 sale price</small>' : '') +
         (!i.priceManual && i.tierApplied
           ? '<small style="display:block;margin-top:2px;color:#6d28d9;font-weight:700">🏷 tier price</small>' : '') +
-        (i.serialRequired
-          ? '<input class="posSerialNum" data-sidx="' + idx + '" value="' + esc(i.serialNumber || '') + '" placeholder="serial # — required to sell" style="width:100%;margin-top:4px;padding:3px 6px;border:1px solid ' + (i.serialNumber ? '#86efac' : '#fca5a5') + ';border-radius:4px;font-size:11px"/>'
-          : '') +
+        posSerialField(i, idx, 11) +
+        posCoreField(i, idx) +
         (i.isRedeemable
-          ? '<small style="display:block;margin-top:2px;color:#7c3aed;font-weight:700">🎟 redeemable — a code is generated on sale</small>'
+          ? '<small style="display:block;margin-top:2px;color:#7c3aed;font-weight:700">🎟 redeemable — a code is ' + ((i.redeemablesAvailable || 0) > 0 ? 'assigned' : 'generated') + ' on sale</small>'
           : '') +
         (d > 0
           ? '<input class="posDiscNote" data-nidx="' + idx + '" value="' + esc(i.discNote || '') + '" placeholder="reason for discount (prints on invoice)" style="width:100%;margin-top:4px;padding:3px 6px;border:1px solid #fde68a;background:var(--card)beb;border-radius:4px;font-size:11px"/>'
@@ -4987,6 +5103,21 @@ async function renderPOS(panel){
     items.querySelectorAll('.posSerialNum').forEach(function(inp){
       inp.addEventListener('change', function(){
         POS.cart[parseInt(inp.getAttribute('data-sidx'), 10)].serialNumber = inp.value.trim();
+        drawCart();
+      });
+    });
+    items.querySelectorAll('.posSerialSel').forEach(function(sel){
+      sel.addEventListener('change', function(){
+        var line = POS.cart[parseInt(sel.getAttribute('data-sidx'), 10)];
+        line.serialNumber = (sel.value === '__type__') ? '' : sel.value;
+        line._serialTyping = (sel.value === '__type__');
+        drawCart();
+        if (line._serialTyping){ var ni = items.querySelector('.posSerialNum[data-sidx="' + sel.getAttribute('data-sidx') + '"]'); if (ni) ni.focus(); }
+      });
+    });
+    items.querySelectorAll('.posCoreRet').forEach(function(cb){
+      cb.addEventListener('change', function(){
+        POS.cart[parseInt(cb.getAttribute('data-cidx'), 10)].coreReturned = cb.checked;
         drawCart();
       });
     });
@@ -8777,6 +8908,21 @@ function posReturnModal(d, after){
         '</tr>';
       }).join('') +
     '</tbody></table>' +
+    (function(){
+      var cores = (d.items || []).filter(function(it){ return Number(it.core_charge_usd) > 0 && !it.core_returned; });
+      if (!cores.length) return '';
+      return '<div style="margin-top:14px;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--card-soft)">' +
+        '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:800;margin-bottom:6px">♻ Core returned separately — refund just the deposit</div>' +
+        cores.map(function(it){
+          return '<div style="display:flex;gap:8px;align-items:center;font-size:12px;padding:2px 0">' +
+            '<span style="flex:1;min-width:0">' + esc(it.description) + ' <span style="color:var(--muted)">— $' + Number(it.core_charge_usd).toFixed(2) + '/core</span></span>' +
+            '<input type="number" min="0" max="' + it.qty + '" value="0" class="fld-mini crQty" data-crid="' + it.id + '" style="width:56px"/>' +
+            '<button type="button" class="btn crGo" data-crid="' + it.id + '" style="padding:3px 9px">Refund core</button>' +
+          '</div>';
+        }).join('') +
+        '<div id="crMsg" style="font-size:12px;margin-top:4px"></div>' +
+      '</div>';
+    })() +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px">' +
       '<div><label class="lbl">Refund method</label><select id="rtMethod" class="fld">' +
         '<option value="cash">Cash</option><option value="card">Card</option><option value="cheque">Cheque</option>' +
@@ -8817,6 +8963,24 @@ function posReturnModal(d, after){
   }
   document.querySelectorAll('#mhPosModal [data-retqty]').forEach(function(inp){ inp.addEventListener('input', estimate); });
   document.querySelectorAll('#mhPosModal .rtWarranty').forEach(function(ck){ ck.addEventListener('change', estimate); });
+  document.querySelectorAll('#mhPosModal .crGo').forEach(function(btn){
+    btn.addEventListener('click', async function(){
+      var sid = parseInt(btn.getAttribute('data-crid'), 10);
+      var qi = document.querySelector('#mhPosModal .crQty[data-crid="' + sid + '"]');
+      var qty = parseInt(qi && qi.value, 10) || 0;
+      var msg = document.getElementById('crMsg');
+      if (qty <= 0) { msg.textContent = 'Enter how many cores came back.'; msg.style.color = 'var(--red)'; return; }
+      var method = document.getElementById('rtMethod').value;
+      msg.textContent = 'Processing…'; msg.style.color = 'var(--muted)';
+      try {
+        var r = await api('/api/admin/pos/sales/' + s.id + '/core-return', { method: 'POST',
+          body: { sale_item_id: sid, qty: qty, refund_method: method, notes: (document.getElementById('rtNotes').value || '') } });
+        msg.textContent = '✓ ' + r.return_number + ' — refunded $' + Number(r.refund_usd).toFixed(2);
+        msg.style.color = '#166534';
+        if (qi) qi.value = '0';
+      } catch (e) { msg.textContent = e.message; msg.style.color = 'var(--red)'; }
+    });
+  });
 
   document.getElementById('rtGo').addEventListener('click', async function(){
     var go = this;
@@ -14193,7 +14357,7 @@ async function renderRedemptions(panel){
     '<div style="padding:10px 16px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center">' +
       '<label class="lbl" style="margin:0">Status</label>' +
       '<select id="rdStatus" class="fld" style="width:160px">' +
-        ['', 'sold', 'redeemed', 'void'].map(function(s){ return '<option value="' + s + '"' + (RD_STATUS_FILTER === s ? ' selected' : '') + '>' + (s || 'All') + '</option>'; }).join('') +
+        ['', 'in_stock', 'sold', 'redeemed', 'void'].map(function(s){ return '<option value="' + s + '"' + (RD_STATUS_FILTER === s ? ' selected' : '') + '>' + (s || 'All') + '</option>'; }).join('') +
       '</select>' +
     '</div>' +
     (r.redemptions.length
@@ -14268,6 +14432,116 @@ async function submitRedeem(code){
   } catch (e) {
     msg.style.background = '#fee2e2'; msg.style.color = '#b91c1c'; msg.textContent = e.message;
   }
+}
+
+// ============= WARRANTY REGISTER + CLAIMS =============
+var WR_FILTER = 'active';
+var WR_CLAIM_STATUS = '';
+async function renderWarranty(panel){
+  panel.innerHTML = '<div class="empty">Loading…</div>';
+  var reg, cl;
+  try {
+    reg = await api('/api/admin/warranty/register?filter=' + WR_FILTER);
+    cl = await api('/api/admin/warranty/claims' + (WR_CLAIM_STATUS ? '?status=' + WR_CLAIM_STATUS : ''));
+  } catch (e) { panel.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return; }
+  var chip = function(k, label){
+    return '<button type="button" class="wrChip" data-f="' + k + '" style="padding:5px 12px;border-radius:999px;border:1px solid var(--line);cursor:pointer;font-weight:700;font-size:12px;background:' + (WR_FILTER === k ? 'var(--sky)' : 'var(--card)') + ';color:' + (WR_FILTER === k ? '#fff' : 'var(--ink)') + '">' + label + '</button>';
+  };
+  var stCol = { active: '#166534', expiring: '#b45309', expired: '#b91c1c' };
+  panel.innerHTML =
+    '<div style="padding:12px 16px;border-bottom:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+      chip('active', 'Active') + chip('expiring', 'Expiring ≤30d') + chip('expired', 'Expired') + chip('claimed', 'Has claim') +
+      '<button type="button" id="wrNewClaim" class="btn" style="margin-left:auto">＋ Open a claim</button>' +
+    '</div>' +
+    '<div style="padding:12px 16px">' +
+      '<h3 style="margin:0 0 8px;font-size:13px;color:var(--heading)">Register — ' + reg.register.length + ' unit(s)</h3>' +
+      (reg.register.length
+        ? '<table><thead><tr><th>Serial</th><th>Part</th><th>Receipt</th><th>Customer</th><th>Warranty to</th><th>State</th></tr></thead><tbody>' +
+          reg.register.map(function(x){
+            return '<tr' + (x.has_open_claim ? ' style="background:#fef3c7"' : '') + '>' +
+              '<td><code>' + esc(x.serial || '—') + '</code></td>' +
+              '<td>' + esc(x.product_name || x.product_img) + '</td>' +
+              '<td>' + esc(x.receipt_number || '—') + '</td>' +
+              '<td>' + esc(x.customer_name || '—') + '</td>' +
+              '<td>' + esc(x.warranty_until || '—') + '</td>' +
+              '<td><b style="color:' + (stCol[x.warranty_state] || 'var(--muted)') + '">' + x.warranty_state + (x.has_open_claim ? ' · claim' : '') + '</b></td>' +
+            '</tr>';
+          }).join('') + '</tbody></table>'
+        : '<div class="empty">Nothing in this view.</div>') +
+      '<h3 style="margin:18px 0 8px;font-size:13px;color:var(--heading)">Claims</h3>' +
+      '<select id="wrClaimStatus" class="fld" style="width:160px;margin-bottom:8px">' +
+        ['', 'open', 'repair', 'replace', 'refund', 'denied', 'closed'].map(function(s){ return '<option value="' + s + '"' + (WR_CLAIM_STATUS === s ? ' selected' : '') + '>' + (s || 'All') + '</option>'; }).join('') +
+      '</select>' +
+      (cl.claims.length
+        ? '<table><thead><tr><th>#</th><th>Part</th><th>Serial</th><th>Customer</th><th>Fault</th><th>Status</th><th>Opened</th><th></th></tr></thead><tbody>' +
+          cl.claims.map(function(x){
+            return '<tr><td>' + x.id + '</td>' +
+              '<td>' + esc(x.product_name || x.product_img || '—') + '</td>' +
+              '<td><code>' + esc(x.serial || '—') + '</code></td>' +
+              '<td>' + esc(x.customer_name || '—') + (x.customer_phone ? '<br/><small style="color:var(--muted)">' + esc(x.customer_phone) + '</small>' : '') + '</td>' +
+              '<td style="max-width:220px">' + esc(x.fault || '—') + '</td>' +
+              '<td>' + badge(x.status, x.status === 'denied' ? 'bad' : x.status === 'closed' ? '' : 'ok') + '</td>' +
+              '<td>' + fmtDate(x.opened_at) + '</td>' +
+              '<td class="actions"><button class="btn wrResolve" data-id="' + x.id + '">Resolve</button></td>' +
+            '</tr>';
+          }).join('') + '</tbody></table>'
+        : '<div class="empty">No claims.</div>') +
+    '</div>';
+  panel.querySelectorAll('.wrChip').forEach(function(b){ b.addEventListener('click', function(){ WR_FILTER = b.getAttribute('data-f'); renderWarranty(panel); }); });
+  document.getElementById('wrClaimStatus').addEventListener('change', function(){ WR_CLAIM_STATUS = this.value; renderWarranty(panel); });
+  document.getElementById('wrNewClaim').addEventListener('click', function(){ warrantyClaimModal(null, function(){ renderWarranty(panel); }); });
+  panel.querySelectorAll('.wrResolve').forEach(function(b){
+    b.addEventListener('click', function(){ warrantyClaimModal(cl.claims.find(function(x){ return x.id === parseInt(b.getAttribute('data-id'), 10); }), function(){ renderWarranty(panel); }); });
+  });
+}
+function warrantyClaimModal(claim, after){
+  var isNew = !claim;
+  posModal(isNew ? 'Open a warranty claim' : 'Claim #' + claim.id,
+    (isNew
+      ? '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
+          '<div style="grid-column:1/-1"><label class="lbl">Serial number (or leave blank)</label><input id="wcSerial" class="fld"/></div>' +
+          '<div><label class="lbl">Receipt / sale line id</label><input id="wcSaleItem" class="fld" placeholder="sale_item_id (optional)"/></div>' +
+          '<div><label class="lbl">Customer name</label><input id="wcName" class="fld"/></div>' +
+          '<div><label class="lbl">Customer phone</label><input id="wcPhone" class="fld"/></div>' +
+          '<div style="grid-column:1/-1"><label class="lbl">Fault reported</label><input id="wcFault" class="fld"/></div>' +
+        '</div>'
+      : '<div style="font-size:13px;line-height:1.7">' +
+          '<div><b>Part:</b> ' + esc(claim.product_name || claim.product_img || '—') + '</div>' +
+          '<div><b>Serial:</b> <code>' + esc(claim.serial || '—') + '</code></div>' +
+          '<div><b>Customer:</b> ' + esc(claim.customer_name || '—') + '</div>' +
+          '<div><b>Fault:</b> ' + esc(claim.fault || '—') + '</div>' +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">' +
+          '<div><label class="lbl">Resolution</label><select id="wcStatus" class="fld">' +
+            ['open', 'repair', 'replace', 'refund', 'denied', 'closed'].map(function(s){ return '<option' + (s === claim.status ? ' selected' : '') + '>' + s + '</option>'; }).join('') +
+          '</select></div>' +
+          '<div><label class="lbl">Replacement sale id</label><input id="wcReplSale" class="fld" value="' + (claim.replacement_sale_id || '') + '" placeholder="optional"/></div>' +
+          '<div style="grid-column:1/-1"><label class="lbl">Resolution note</label><input id="wcNote" class="fld" value="' + esc(claim.resolution_note || '') + '"/></div>' +
+        '</div>') +
+    '<div id="wcMsg" style="font-size:12.5px;margin-top:10px"></div>' +
+    '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)"><button type="button" class="btn ok" id="wcGo">' + (isNew ? 'Open claim' : 'Save') + '</button></div>',
+    560);
+  document.getElementById('wcGo').addEventListener('click', async function(){
+    var m = document.getElementById('wcMsg'); m.textContent = 'Saving…'; m.style.color = 'var(--muted)';
+    try {
+      if (isNew) {
+        await api('/api/admin/warranty/claims', { method: 'POST', body: {
+          serial: (document.getElementById('wcSerial').value || '').trim() || null,
+          sale_item_id: (document.getElementById('wcSaleItem').value || '').trim() || null,
+          customer_name: (document.getElementById('wcName').value || '').trim() || null,
+          customer_phone: (document.getElementById('wcPhone').value || '').trim() || null,
+          fault: (document.getElementById('wcFault').value || '').trim() || null,
+        } });
+      } else {
+        await api('/api/admin/warranty/claims/' + claim.id, { method: 'PATCH', body: {
+          status: document.getElementById('wcStatus').value,
+          resolution_note: (document.getElementById('wcNote').value || '').trim() || null,
+          replacement_sale_id: (document.getElementById('wcReplSale').value || '').trim() || null,
+        } });
+      }
+      posCloseModal(); if (after) after();
+    } catch (e) { m.textContent = e.message; m.style.color = 'var(--red)'; }
+  });
 }
 
 // ============= STUB RPT_RENDERERS (so navigation doesn't break) =============

@@ -20,6 +20,7 @@ import { getShopSettings } from '../_lib/shop.js';
 import { bestUnitPriceCents, loadBreaksByImg, ACTIVE_SALE_PRICE_SQL, effectiveBaseCents, loadTierPricesByImg, tierCentsFor } from '../_lib/price_breaks.js';
 import { loadKitComponentsByImg, kitRollupCents, kitBuildableQty } from '../_lib/kits.js';
 import { loadAltNumbersByImg, loadSubstitutesByImg, loadSubstitutesForImg } from '../_lib/alt_numbers.js';
+import { loadSerialStockByImg, loadRedeemableStockByImg } from '../_lib/serials.js';
 import { centsToUsd } from '../_lib/money.js';
 
 // Attach each row's price_breaks (ascending by min_qty, in USD) and its
@@ -230,6 +231,17 @@ export default function mount(app) {
           for (const r of list) {
             const s = subMap.get(r.img);
             if (s && (s.forward.length || s.reverse.length)) r.substitutes = s;
+          }
+          // In-stock serials / redemption instruments for the counter picker.
+          const serialImgs = list.filter((r) => r.serial_required).map((r) => r.img);
+          const redeemImgs = list.filter((r) => r.is_redeemable).map((r) => r.img);
+          if (serialImgs.length) {
+            const sm = await loadSerialStockByImg(db, serialImgs);
+            for (const r of list) { const e = sm.get(r.img); if (e) r.serials_available = e.available; }
+          }
+          if (redeemImgs.length) {
+            const rm = await loadRedeemableStockByImg(db, redeemImgs);
+            for (const r of list) { const n = rm.get(r.img); if (n) r.redeemables_available = n; }
           }
         }
       } else {

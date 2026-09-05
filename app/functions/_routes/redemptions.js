@@ -15,9 +15,37 @@ const RI_USD = `id, code, product_img, sale_id, sale_item_id, status,
   sold_by, redeemed_by, redeemed_at, notes, created_at`;
 
 export default function mount(app) {
+  // Bulk-load real printed instrument codes for a redeemable product as
+  // 'in_stock' -- a sale then assigns the next one instead of minting RD-xxxx.
+  app.post('/api/admin/redemptions/load', managerMw, async (c) => {
+    const db = d1(c.env);
+    const b = await c.req.json().catch(() => ({}));
+    const img = String(b.product_img || '').trim();
+    const p = img ? await db.one('SELECT img, price_cents, is_redeemable FROM products WHERE img = ?', img) : null;
+    if (!p) return c.json({ error: 'Product not found' }, 404);
+    if (!p.is_redeemable) return c.json({ error: 'That product is not a redeemable item' }, 400);
+    const note = b.note ? String(b.note).slice(0, 200) : null;
+    const raw = Array.isArray(b.codes) ? b.codes : String(b.codes || '').split(/[\r\n,]+/);
+    const seen = new Set();
+    const codes = [];
+    for (const x of raw) {
+      const v = String(x || '').trim().toUpperCase().slice(0, 60);
+      if (!v || seen.has(v)) continue;
+      seen.add(v); codes.push(v);
+    }
+    if (!codes.length) return c.json({ error: 'No codes given' }, 400);
+    await db.batch(codes.map((code) => ({
+      sql: `INSERT OR IGNORE INTO redemption_instruments (code, product_img, status, face_value_cents, received_at, received_note)
+            VALUES (?,?,'in_stock',?,CURRENT_TIMESTAMP,?)`,
+      binds: [code, img, p.price_cents || 0, note],
+    })));
+    const n = await db.one(`SELECT COUNT(*) AS n FROM redemption_instruments WHERE product_img = ? AND status = 'in_stock'`, img);
+    return c.json({ ok: true, in_stock: n ? n.n : 0 });
+  });
+
   app.get('/api/admin/redemptions', adminMw, async (c) => {
     const status = c.req.query('status');
-    const where = status && ['sold', 'redeemed', 'void'].includes(status) ? 'WHERE ri.status = ?' : '';
+    const where = status && ['in_stock', 'sold', 'redeemed', 'void'].includes(status) ? 'WHERE ri.status = ?' : '';
     const rows = await d1(c.env).many(
       `SELECT ri.id, ri.code, ri.product_img, ri.sale_id, ri.sale_item_id, ri.status,
               ri.face_value_cents / 100.0 AS face_value_usd, ri.payout_cents / 100.0 AS payout_usd,

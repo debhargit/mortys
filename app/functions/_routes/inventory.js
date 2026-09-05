@@ -376,6 +376,77 @@ export default function mount(app) {
   });
 
   // =====================================================================
+  //  SERIAL REGISTER — serials on hand for a part (migration 0056).
+  //  Loading serials does NOT touch stock_count; the two are shown side by
+  //  side so a mismatch is visible.
+  // =====================================================================
+  app.get('/api/admin/products/:img/serials', adminMw, async (c) => {
+    const status = c.req.query('status');
+    const ok = ['in_stock', 'sold', 'returned', 'void', 'claimed'];
+    const where = status && ok.includes(status) ? ' AND s.status = ?' : '';
+    const rows = await d1(c.env).many(
+      `SELECT s.id, s.serial, s.status, s.sale_id, s.sold_at, s.warranty_until, s.returned_at,
+              s.received_at, s.received_note, s.notes,
+              ps.receipt_number, ps.customer_name
+         FROM product_serials s LEFT JOIN pos_sales ps ON ps.id = s.sale_id
+        WHERE s.product_img = ?${where}
+        ORDER BY s.status = 'in_stock' DESC, s.id DESC LIMIT 500`,
+      ...(where ? [c.req.param('img'), status] : [c.req.param('img')]));
+    const counts = await d1(c.env).many(
+      `SELECT status, COUNT(*) AS n FROM product_serials WHERE product_img = ? GROUP BY status`, c.req.param('img'));
+    return c.json({ serials: rows, counts: Object.fromEntries(counts.map((r) => [r.status, r.n])) });
+  });
+
+  app.post('/api/admin/products/:img/serials', adminMw, async (c) => {
+    const db = d1(c.env);
+    if (!userCan(c.get('user'), 'inventory.adjust_stock'))
+      return c.json({ error: 'Your account is not allowed to adjust stock counts.' }, 403);
+    const img = c.req.param('img');
+    if (!(await db.one('SELECT img FROM products WHERE img = ?', img))) return c.json({ error: 'Not found' }, 404);
+    const b = await c.req.json().catch(() => ({}));
+    const note = b.note ? String(b.note).trim().slice(0, 200) : null;
+    const raw = Array.isArray(b.serials) ? b.serials
+      : String(b.serials || '').split(/[\r\n,]+/);
+    const seen = new Set();
+    const list = [];
+    for (const s of raw) {
+      const v = String(s || '').trim().slice(0, 120);
+      if (!v || seen.has(v.toLowerCase())) continue;
+      seen.add(v.toLowerCase());
+      list.push(v);
+    }
+    if (!list.length) return c.json({ error: 'No serials given' }, 400);
+    const stmts = list.map((serial) => ({
+      sql: `INSERT OR IGNORE INTO product_serials (product_img, serial, status, received_note) VALUES (?,?,'in_stock',?)`,
+      binds: [img, serial, note],
+    }));
+    await db.batch(stmts);
+    const n = await db.one(`SELECT COUNT(*) AS n FROM product_serials WHERE product_img = ? AND status = 'in_stock'`, img);
+    return c.json({ ok: true, in_stock: n ? n.n : 0 });
+  });
+
+  app.patch('/api/admin/products/:img/serials/:id', adminMw, async (c) => {
+    const db = d1(c.env);
+    if (!userCan(c.get('user'), 'inventory.adjust_stock'))
+      return c.json({ error: 'Your account is not allowed to adjust stock counts.' }, 403);
+    const b = await c.req.json().catch(() => ({}));
+    const row = await db.one('SELECT id, status FROM product_serials WHERE id = ? AND product_img = ?', c.req.param('id'), c.req.param('img'));
+    if (!row) return c.json({ error: 'Not found' }, 404);
+    const sets = []; const vals = [];
+    if (b.status !== undefined) {
+      const t = String(b.status);
+      if (!['in_stock', 'void'].includes(t)) return c.json({ error: 'Can only set a serial to in_stock or void here' }, 400);
+      if (row.status === 'sold' || row.status === 'claimed') return c.json({ error: `A ${row.status} serial can't be changed here` }, 400);
+      sets.push('status = ?'); vals.push(t);
+    }
+    if (b.notes !== undefined) { sets.push('notes = ?'); vals.push(b.notes ? String(b.notes).slice(0, 300) : null); }
+    if (!sets.length) return c.json({ error: 'Nothing to update' }, 400);
+    vals.push(row.id);
+    await db.run(`UPDATE product_serials SET ${sets.join(', ')} WHERE id = ?`, ...vals);
+    return c.json({ ok: true });
+  });
+
+  // =====================================================================
   //  KIT COMPONENTS — replace the whole recipe for one kit product, and
   //  (optionally) set the kit flags in the same batch so is_kit and its
   //  rows can never drift apart. Same replace-the-whole-set shape as
@@ -735,6 +806,15 @@ export default function mount(app) {
         binds: ['receive', p.img, p.stock_count, p.stock_count + qty, qty,
           r.bin_location != null ? String(r.bin_location) : null, null, 'no_po', supplierId, activityNote],
       });
+      // Optional per-line serial / redemption-instrument load (0056).
+      for (const s of (Array.isArray(r.serials) ? r.serials : [])) {
+        const v = String(s || '').trim().slice(0, 120);
+        if (v) stmts.push({ sql: `INSERT OR IGNORE INTO product_serials (product_img, serial, status, received_note) VALUES (?,?,'in_stock',?)`, binds: [p.img, v, activityNote] });
+      }
+      for (const s of (Array.isArray(r.instruments) ? r.instruments : [])) {
+        const v = String(s || '').trim().toUpperCase().slice(0, 60);
+        if (v) stmts.push({ sql: `INSERT OR IGNORE INTO redemption_instruments (code, product_img, status, received_at, received_note) VALUES (?,?,'in_stock',CURRENT_TIMESTAMP,?)`, binds: [v, p.img, activityNote] });
+      }
       results.push({ ok: true, product_img: p.img, name: p.name, qty });
     }
     if (stmts.length) await db.batch(stmts);

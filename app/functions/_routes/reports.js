@@ -769,19 +769,35 @@ export default function mount(app) {
     const term = String(c.req.query('q') || '').trim();
     if (!term) return c.json({ results: [] });
     const db = d1(c.env);
+    const like = '%' + term + '%';
+    // Sold-line history (free-typed serials + any serial ever put on a sale).
     const rows = await db.many(
       `SELECT psi.id, psi.serial_number, psi.description, psi.product_img, psi.warranty_until, psi.qty,
               ps.id AS sale_id, ps.receipt_number, ps.invoice_number, ps.created_at, ps.customer_name, ps.customer_phone, ps.voided,
               COALESCE((SELECT SUM(pri.qty) FROM pos_return_items pri WHERE pri.sale_item_id = psi.id), 0) AS returned_qty
          FROM pos_sale_items psi JOIN pos_sales ps ON ps.id = psi.sale_id
-        WHERE psi.serial_number LIKE ? ORDER BY ps.created_at DESC LIMIT 100`,
-      '%' + term + '%');
+        WHERE psi.serial_number LIKE ? ORDER BY ps.created_at DESC LIMIT 100`, like);
+    // Register rows (0056) -- includes in-stock and returned units the sale
+    // history alone can't show.
+    const reg = await db.many(
+      `SELECT s.id, s.serial AS serial_number, p.name AS description, s.product_img, s.status AS register_status,
+              s.warranty_until, s.sale_id, s.sold_at, s.returned_at, s.received_at,
+              ps.receipt_number, ps.customer_name, ps.customer_phone
+         FROM product_serials s
+         JOIN products p ON p.img = s.product_img
+         LEFT JOIN pos_sales ps ON ps.id = s.sale_id
+        WHERE s.serial LIKE ? ORDER BY s.id DESC LIMIT 100`, like);
     const today = new Date().toISOString().slice(0, 10);
     for (const r of rows) {
       r.warranty_status = !r.warranty_until ? 'no warranty' : r.warranty_until >= today ? 'in warranty' : 'expired';
       r.returned = r.returned_qty >= r.qty;
+      r.source = 'sale_line';
     }
-    return c.json({ results: rows });
+    for (const r of reg) {
+      r.warranty_status = !r.warranty_until ? 'no warranty' : r.warranty_until >= today ? 'in warranty' : 'expired';
+      r.source = 'register';
+    }
+    return c.json({ results: rows, register: reg });
   });
 
   // ---- core charges: charged vs. still outstanding -----------------
@@ -793,21 +809,32 @@ export default function mount(app) {
     const p = [from, to];
     const rows = await db.many(
       `SELECT psi.id, psi.description, psi.product_img, psi.qty, psi.core_charge_cents/100.0 AS core_charge_usd,
+              psi.core_returned,
               ps.id AS sale_id, ps.receipt_number, ps.created_at, ps.customer_name, ps.customer_phone,
-              COALESCE((SELECT SUM(pri.qty) FROM pos_return_items pri WHERE pri.sale_item_id = psi.id), 0) AS returned_qty
+              COALESCE((SELECT SUM(pri.qty) FROM pos_return_items pri WHERE pri.sale_item_id = psi.id), 0) AS part_returned_qty,
+              COALESCE((SELECT SUM(cr.qty) FROM core_returns cr WHERE cr.sale_item_id = psi.id), 0) AS core_returned_qty
          FROM pos_sale_items psi JOIN pos_sales ps ON ps.id = psi.sale_id
         WHERE psi.core_charge_cents > 0 AND ps.voided = 0 AND date(ps.created_at) BETWEEN ? AND ?
         ORDER BY ps.created_at DESC LIMIT 300`, ...p);
-    let charged = 0, outstanding = 0, outstandingLines = 0;
+    let charged = 0, outstanding = 0, outstandingLines = 0, waivedAtSale = 0, refundedLater = 0;
     for (const r of rows) {
+      // core_returned = 1 -> the deposit was never charged on this line.
+      if (r.core_returned) { r.core_outstanding_usd = 0; r.waived_at_sale = true; waivedAtSale += r.core_charge_usd; continue; }
       charged += r.core_charge_usd;
-      const frac = Math.max(0, (r.qty - r.returned_qty) / r.qty);
+      const done = Math.min(r.qty, (r.part_returned_qty || 0) + (r.core_returned_qty || 0));
+      refundedLater += r.core_charge_usd * (Math.min(r.qty, r.core_returned_qty || 0) / r.qty);
+      const frac = Math.max(0, (r.qty - done) / r.qty);
       if (frac > 0) { outstanding += r.core_charge_usd * frac; outstandingLines++; }
       r.core_outstanding_usd = Math.round(r.core_charge_usd * frac * 100) / 100;
     }
+    const rnd = (n) => Math.round(n * 100) / 100;
     return c.json({
       from, to,
-      totals: { lines: rows.length, core_charged: Math.round(charged * 100) / 100, outstanding_lines: outstandingLines, core_outstanding: Math.round(outstanding * 100) / 100 },
+      totals: {
+        lines: rows.length, core_charged: rnd(charged),
+        waived_at_sale: rnd(waivedAtSale), refunded_later: rnd(refundedLater),
+        outstanding_lines: outstandingLines, core_outstanding: rnd(outstanding),
+      },
       lines: rows,
     });
   });
