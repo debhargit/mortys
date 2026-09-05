@@ -20,6 +20,7 @@ import { getShopSettings } from '../_lib/shop.js';
 import { loadBreaksForImg, ACTIVE_SALE_PRICE_SQL, effectiveBaseCents, loadTierPricesByImg } from '../_lib/price_breaks.js';
 import { loadKitComponentsForImg, kitRollupCents } from '../_lib/kits.js';
 import { loadAltNumbersForImg, loadSubstitutesForImg } from '../_lib/alt_numbers.js';
+import { loadImagesForImg, primaryUrl } from '../_lib/product_images.js';
 import { centsToUsd } from '../_lib/money.js';
 
 // 14-day zero-filled series from rows [{ day:'YYYY-MM-DD', <key> }]
@@ -133,7 +134,8 @@ export default function mount(app) {
   app.get('/api/admin/products', adminMw, async (c) => {
     const rows = await d1(c.env).many(
       `SELECT img, name, make_model, category, condition, price_cents / 100.0 AS price_usd,
-              stock_count, low_threshold, is_active, created_at
+              stock_count, low_threshold, is_active, created_at,
+              COALESCE(primary_image_override, img) AS thumb_url
          FROM products ORDER BY created_at DESC, name ASC`
     );
     for (const r of rows) boolify(r, ['is_active']);
@@ -146,6 +148,7 @@ export default function mount(app) {
               p.price_cents / 100.0 AS price_usd, p.cost_cents / 100.0 AS cost_usd,
               p.list_price_cents / 100.0 AS list_price_usd, p.markup_pct, p.costing_method,
               p.stock_count, p.low_threshold, p.is_active, p.sku, p.barcode,
+              p.primary_image_override,
               p.warranty_days, p.serial_required,
               p.stock_uom, p.purchase_uom, p.units_per_purchase, p.supplier_part_no,
               p.location, p.bin_location, p.supplier_id, s.name AS supplier_name,
@@ -178,6 +181,8 @@ export default function mount(app) {
       fleet: tp.fleet != null ? centsToUsd(tp.fleet) : null,
       dealer: tp.dealer != null ? centsToUsd(tp.dealer) : null,
     };
+    row.images = await loadImagesForImg(d1(c.env), row.img);
+    row.primary_image_url = primaryUrl(row);
     row.alt_numbers = await loadAltNumbersForImg(d1(c.env), row.img);
     row.substitute_links = await loadSubstitutesForImg(d1(c.env), row.img);
     const kitComps = await loadKitComponentsForImg(d1(c.env), row.img);

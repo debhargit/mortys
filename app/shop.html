@@ -2277,7 +2277,7 @@ document.addEventListener('DOMContentLoaded', function(){
         var btnClass = 'add' + (inCart ? ' in' : '') + (st.level === 'out' ? ' notify' : '');
         return '<tr>' +
           '<td style="color:var(--muted);font-size:11px;text-align:center">' + rowNum + '</td>' +
-          '<td><img class="c-img" src="' + photoOf(p.i) + '" alt="' + esc(p.n) + '" loading="lazy" onerror="this.style.opacity=.2"/></td>' +
+          '<td><img class="c-img" src="' + photoOf(p.thumb || p.i) + '" alt="' + esc(p.n) + '" loading="lazy" onerror="this.style.opacity=.2"/></td>' +
           '<td><div class="c-name">' + esc(p.n) + '</div><div style="font-size:10.5px;color:var(--muted);font-family:ui-monospace,Menlo,Consolas,monospace">' + esc(p.i) + '</div></td>' +
           '<td style="font-size:12px;color:var(--muted);max-width:160px">' + esc(p.m) + '</td>' +
           '<td><span style="font-size:11px;color:var(--muted)">' + catLabel(p.c) + '</span></td>' +
@@ -2319,7 +2319,7 @@ document.addEventListener('DOMContentLoaded', function(){
             stockBadgeHTML(st) +
             '<label class="cmp-check' + isCmp + '" title="Compare"><input type="checkbox" data-cmp="' + esc(p.i) + '" ' + cmpChk + '/>Compare</label>' +
             '<button type="button" class="wish-btn' + isWish + '" data-wish="' + esc(p.i) + '" aria-label="Save to wishlist"></button>' +
-            '<img src="' + photoOf(p.i) + '" alt="' + p.n + '" loading="lazy" onerror="this.style.opacity=0.25"/>' +
+            '<img src="' + photoOf(p.thumb || p.i) + '" alt="' + p.n + '" loading="lazy" onerror="this.style.opacity=0.25"/>' +
           '</div>' +
           '<div class="body">' +
             '<div class="make">' + p.m + '</div>' +
@@ -2762,11 +2762,12 @@ document.addEventListener('DOMContentLoaded', function(){
     var heartIcon = isWish ? '❤' : '♡';
     // Track recently viewed
     if (typeof trackView === 'function') try { trackView(img); } catch(_){}
-    // Build photo column
+    // Build photo column (a single photo up front; the lazy fetch below adds
+    // a thumbnail strip when the part has a gallery).
     var photo = document.getElementById('pdPhoto');
     photo.innerHTML =
       '<span class="b ' + (p.b==='USED'?'used':'') + '">' + p.b + '</span>' +
-      '<img src="' + photoOf(img) + '" alt="' + esc(p.n) + '" onerror="this.style.opacity=0.25"/>';
+      '<img id="pdMainImg" src="' + photoOf(p.thumb || img) + '" alt="' + esc(p.n) + '" onerror="this.style.opacity=0.25"/>';
     // Build info column
     var info = document.getElementById('pdInfo');
     var stockTxt = st.level === 'out' ? '<span style="color:#b91c1c;font-weight:700">Out of Stock</span>'
@@ -2851,6 +2852,31 @@ document.addEventListener('DOMContentLoaded', function(){
       fetch('/api/products/' + encodeURIComponent(img), { credentials:'same-origin' })
         .then(function(r){ return r.ok ? r.json() : null; })
         .then(function(d){
+          // Photo gallery: swap the single #pdPhoto image for a main image +
+          // thumbnail strip when the part has more than one photo.
+          var imgs = d && d.product && d.product.images;
+          var pdPhoto = document.getElementById('pdPhoto');
+          var mainImg = document.getElementById('pdMainImg');
+          if (imgs && imgs.length > 1 && pdPhoto && mainImg) {
+            mainImg.src = photoOf(imgs[0].url);
+            var strip = pdPhoto.querySelector('.pd-thumbs');
+            if (strip) strip.remove();
+            strip = document.createElement('div');
+            strip.className = 'pd-thumbs';
+            strip.style.cssText = 'display:flex;gap:6px;margin-top:8px;flex-wrap:wrap';
+            strip.innerHTML = imgs.map(function(g, i){
+              return '<img data-gi="' + i + '" src="' + photoOf(g.url) + '" alt="' + esc(g.caption || '') + '" ' +
+                'style="width:52px;height:52px;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid ' + (i === 0 ? '#1e40af' : 'transparent') + '" onerror="this.style.opacity=.3"/>';
+            }).join('');
+            pdPhoto.appendChild(strip);
+            strip.querySelectorAll('img').forEach(function(t){
+              t.addEventListener('click', function(){
+                mainImg.src = t.src;
+                strip.querySelectorAll('img').forEach(function(x){ x.style.borderColor = 'transparent'; });
+                t.style.borderColor = '#1e40af';
+              });
+            });
+          }
           var subs = d && d.product && d.product.substitutes;
           if (!subs || !subs.length || !box) return;
           var groups = {};
@@ -3411,7 +3437,7 @@ document.addEventListener('DOMContentLoaded', function(){
             var btn = usd
               ? '<button class="add ' + (inCart?'in':'') + '" data-img="' + esc(p.i) + '">' + (inCart ? '✓ Added' : '+ Add') + '</button>'
               : '<button class="add quote ' + (inCart?'in':'') + '" data-img="' + esc(p.i) + '">' + (inCart ? '✓ Added' : '+ Get Quote') + '</button>';
-            return '<article class="part"><div class="img"><span class="badge ' + (p.b==='USED'?'used':'') + '">' + p.b + '</span><img src="' + photoOf(p.i) + '" alt="' + p.n + '" loading="lazy" onerror="this.style.opacity=0.25"/></div><div class="body"><div class="make">' + p.m + '</div><h5>' + p.n + '</h5><p class="desc">' + descFor(p, st) + '</p><div class="foot">' + priceBlock + btn + '</div></div></article>';
+            return '<article class="part"><div class="img"><span class="badge ' + (p.b==='USED'?'used':'') + '">' + p.b + '</span><img src="' + photoOf(p.thumb || p.i) + '" alt="' + p.n + '" loading="lazy" onerror="this.style.opacity=0.25"/></div><div class="body"><div class="make">' + p.m + '</div><h5>' + p.n + '</h5><p class="desc">' + descFor(p, st) + '</p><div class="foot">' + priceBlock + btn + '</div></div></article>';
           }).join('');
           document.getElementById('partsCount').textContent = matched.length + ' items';
           g.querySelectorAll('.add').forEach(function(b){ b.addEventListener('click', function(){ addToCart(b.dataset.img); }); });
@@ -3611,7 +3637,7 @@ document.addEventListener('DOMContentLoaded', function(){
             var btn = usd
               ? '<button class="add ' + (inCart?'in':'') + '" data-img="' + esc(p.i) + '">' + (inCart ? '✓ Added' : '+ Add') + '</button>'
               : '<button class="add quote ' + (inCart?'in':'') + '" data-img="' + esc(p.i) + '">' + (inCart ? '✓ Added' : '+ Get Quote') + '</button>';
-            return '<article class="part"><div class="img"><span class="badge ' + (p.b==='USED'?'used':'') + '">' + p.b + '</span><img src="' + photoOf(p.i) + '" alt="' + p.n + '" loading="lazy" onerror="this.style.opacity=0.25"/></div><div class="body"><div class="make">' + p.m + '</div><h5>' + p.n + '</h5><p class="desc">' + descFor(p, st) + '</p><div class="foot">' + priceBlock + btn + '</div></div></article>';
+            return '<article class="part"><div class="img"><span class="badge ' + (p.b==='USED'?'used':'') + '">' + p.b + '</span><img src="' + photoOf(p.thumb || p.i) + '" alt="' + p.n + '" loading="lazy" onerror="this.style.opacity=0.25"/></div><div class="body"><div class="make">' + p.m + '</div><h5>' + p.n + '</h5><p class="desc">' + descFor(p, st) + '</p><div class="foot">' + priceBlock + btn + '</div></div></article>';
           }).join('');
           document.getElementById('partsCount').textContent = matched.length + ' items';
           g.querySelectorAll('.add').forEach(function(b){ b.addEventListener('click', function(){ addToCart(b.dataset.img); }); });
@@ -3813,7 +3839,7 @@ document.addEventListener('DOMContentLoaded', function(){
       var st = stockOf(p.i);
       var priceBlock = '<span class="price">' + fmt(usd) + (usd ? '<span class="alt">' + altFmt(usd) + '</span>' : '') + '</span>';
       return '<article class="part' + (st.level==='out'?' outstock':'') + '">' +
-        '<div class="img"><span class="badge ' + (p.b==='USED'?'used':'') + '">' + p.b + '</span>' + stockBadgeHTML(st) + '<img src="' + photoOf(p.i) + '" alt="' + p.n + '" loading="lazy" onerror="this.style.opacity=0.25"/></div>' +
+        '<div class="img"><span class="badge ' + (p.b==='USED'?'used':'') + '">' + p.b + '</span>' + stockBadgeHTML(st) + '<img src="' + photoOf(p.thumb || p.i) + '" alt="' + p.n + '" loading="lazy" onerror="this.style.opacity=0.25"/></div>' +
         '<div class="body"><div class="make">' + p.m + '</div><h5>' + p.n + '</h5>' + urgencyHTML(p, st) + '<p class="desc">' + descFor(p, st) + '</p><div class="foot">' + priceBlock + buttonHTML(p, usd, inCart, st) + '</div></div>' +
       '</article>';
     }).join('');
@@ -4264,6 +4290,7 @@ document.addEventListener('DOMContentLoaded', function(){
         var cat  = String((isArr ? (cats[r[3]] || '') : r.category) || '').toLowerCase();
         var cond = isArr ? (r[4] === 1 ? 'USED' : 'NEW') : (r.condition === 'USED' ? 'USED' : 'NEW');
         var altStr = isArr ? (r[8] || '') : '';
+        var thumb = isArr ? (r[9] || '') : (r.thumb_url || '');
         if (isArr) {
           if (r[5] != null && !isNaN(r[5])) prices[img] = Number(r[5]) / 100;
         } else {
@@ -4277,6 +4304,7 @@ document.addEventListener('DOMContentLoaded', function(){
           c: VALID_CATS[cat] ? cat : 'accessories',
           b: cond,
           i: img,
+          thumb: thumb || img,   // effective primary photo (may be an overridden gallery image)
           bin: '',   // bin location is warehouse-internal — not shown or searchable on the storefront
           // Precomputed lowercase haystack. Building this once at load is what
           // makes search fast -- the old filter concatenated and lowercased

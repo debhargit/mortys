@@ -21,7 +21,7 @@ import { d1 } from '../_lib/db.js';
 import { adminMw, managerMw, userCan } from '../_lib/guards.js';
 import { boolify, safeJson } from '../_lib/util.js';
 import { usdToCents } from '../_lib/money.js';
-import { readUploadBody, putUpload } from '../_lib/uploads.js';
+import { readUploadBody, putUpload, deleteUpload } from '../_lib/uploads.js';
 import { PUSHABLE_FIELDS, toColumnValue, valuesEqual } from '../_lib/product_matrix.js';
 import {
   parseInventoryFile, TEMPLATE_CSV, FIELD_SYNONYMS,
@@ -443,6 +443,103 @@ export default function mount(app) {
     if (!sets.length) return c.json({ error: 'Nothing to update' }, 400);
     vals.push(row.id);
     await db.run(`UPDATE product_serials SET ${sets.join(', ')} WHERE id = ?`, ...vals);
+    return c.json({ ok: true });
+  });
+
+  // =====================================================================
+  //  PRODUCT IMAGES (migration 0057) — extra photos + a settable primary.
+  //  products.img stays the identity; these are the gallery shots.
+  // =====================================================================
+  app.get('/api/admin/products/:img/images', adminMw, async (c) => {
+    const db = d1(c.env);
+    const img = c.req.param('img');
+    const p = await db.one('SELECT img, primary_image_override FROM products WHERE img = ?', img);
+    if (!p) return c.json({ error: 'Not found' }, 404);
+    const rows = await db.many('SELECT id, url, caption, sort_order, created_at FROM product_images WHERE product_img = ? ORDER BY sort_order, id', img);
+    return c.json({ images: rows, primary_image_override: p.primary_image_override || null, img: p.img });
+  });
+
+  app.post('/api/admin/products/:img/images', adminMw, async (c) => {
+    const db = d1(c.env);
+    const img = c.req.param('img');
+    if (!(await db.one('SELECT img FROM products WHERE img = ?', img))) return c.json({ error: 'Not found' }, 404);
+    // multipart with one or more photo* file parts, and/or a JSON/newline urls list
+    const ct = c.req.header('content-type') || '';
+    const added = [];
+    const start = (await db.one('SELECT COALESCE(MAX(sort_order), -1) AS m FROM product_images WHERE product_img = ?', img)).m + 1;
+    let order = start;
+    const insert = async (url, caption) => {
+      const r = await db.run('INSERT INTO product_images (product_img, url, caption, sort_order) VALUES (?,?,?,?)',
+        img, url, caption || null, order++);
+      added.push({ id: r.meta ? r.meta.last_row_id : undefined, url, caption: caption || null, sort_order: order - 1 });
+    };
+    if (ct.includes('multipart/form-data') || ct.includes('application/x-www-form-urlencoded')) {
+      const body = await c.req.parseBody({ all: true });
+      const files = [];
+      for (const [k, v] of Object.entries(body)) {
+        if (!/^photo/i.test(k)) continue;
+        for (const f of (Array.isArray(v) ? v : [v])) if (f && typeof f !== 'string') files.push(f);
+      }
+      for (const f of files) {
+        if (f.size > 12 * 1024 * 1024) return c.json({ error: 'One image is over the 12 MB limit.' }, 413);
+        let upload;
+        try {
+          upload = await putUpload(c.env, { prefix: 'products', bytes: new Uint8Array(await f.arrayBuffer()), contentType: f.type, filename: f.name });
+        } catch (e) { return c.json({ error: e.message }, e.status || 400); }
+        await insert(upload.url, null);
+      }
+      for (const raw of String(body.urls || '').split(/[\r\n,]+/)) {
+        const u = raw.trim(); if (u) await insert(u, null);
+      }
+    } else {
+      const b = await c.req.json().catch(() => ({}));
+      const urls = Array.isArray(b.urls) ? b.urls : String(b.urls || '').split(/[\r\n,]+/);
+      for (const raw of urls) { const u = String(raw || '').trim(); if (u) await insert(u, null); }
+    }
+    if (!added.length) return c.json({ error: 'No images given' }, 400);
+    return c.json({ ok: true, images: added });
+  });
+
+  app.patch('/api/admin/products/:img/images/:id', adminMw, async (c) => {
+    const db = d1(c.env);
+    const b = await c.req.json().catch(() => ({}));
+    const row = await db.one('SELECT id FROM product_images WHERE id = ? AND product_img = ?', c.req.param('id'), c.req.param('img'));
+    if (!row) return c.json({ error: 'Not found' }, 404);
+    const sets = []; const vals = [];
+    if (b.caption !== undefined) { sets.push('caption = ?'); vals.push(b.caption ? String(b.caption).slice(0, 200) : null); }
+    if (b.sort_order !== undefined) { sets.push('sort_order = ?'); vals.push(parseInt(b.sort_order, 10) || 0); }
+    if (!sets.length) return c.json({ error: 'Nothing to update' }, 400);
+    vals.push(row.id);
+    await db.run(`UPDATE product_images SET ${sets.join(', ')} WHERE id = ?`, ...vals);
+    return c.json({ ok: true });
+  });
+
+  app.post('/api/admin/products/:img/images/:id/make-primary', adminMw, async (c) => {
+    const db = d1(c.env);
+    const img = c.req.param('img');
+    const id = c.req.param('id');
+    if (!(await db.one('SELECT img FROM products WHERE img = ?', img))) return c.json({ error: 'Not found' }, 404);
+    if (id === 'original') {
+      await db.run('UPDATE products SET primary_image_override = NULL WHERE img = ?', img);
+      return c.json({ ok: true, primary_image_override: null });
+    }
+    const row = await db.one('SELECT url FROM product_images WHERE id = ? AND product_img = ?', id, img);
+    if (!row) return c.json({ error: 'Image not found' }, 404);
+    await db.run('UPDATE products SET primary_image_override = ? WHERE img = ?', row.url, img);
+    return c.json({ ok: true, primary_image_override: row.url });
+  });
+
+  app.delete('/api/admin/products/:img/images/:id', adminMw, async (c) => {
+    const db = d1(c.env);
+    const img = c.req.param('img');
+    const row = await db.one('SELECT id, url FROM product_images WHERE id = ? AND product_img = ?', c.req.param('id'), img);
+    if (!row) return c.json({ error: 'Not found' }, 404);
+    await db.run('DELETE FROM product_images WHERE id = ?', row.id);
+    // If it was the chosen primary, fall back to the original photo.
+    await db.run('UPDATE products SET primary_image_override = NULL WHERE img = ? AND primary_image_override = ?', img, row.url);
+    if (/^\/uploads\//.test(row.url)) {
+      try { await deleteUpload(c.env, row.url.replace(/^\/uploads\//, '')); } catch (_) { /* best effort */ }
+    }
     return c.json({ ok: true });
   });
 

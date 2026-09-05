@@ -1771,6 +1771,8 @@ async function renderProducts(panel){
       '<div style="padding:16px 18px">' +
         '<form id="newProdForm" onsubmit="event.preventDefault();submitNewProduct();" enctype="multipart/form-data" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:880px">' +
           '<div style="grid-column:1/-1" id="npImageWidget"></div>' +
+          '<div style="grid-column:1/-1"><label class="lbl">More photos <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional — first photo above is the main one)</span></label>' +
+            '<input type="file" id="npMorePhotos" accept="image/*" multiple style="width:100%;font-size:13px"/></div>' +
           '<div style="grid-column:1/-1;position:relative">' +
             '<label class="lbl">Copy from an existing part <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional — prefills the fields below)</span></label>' +
             '<input id="npCopy" placeholder="🔎 search a part to copy its details…" autocomplete="off" class="fld"/>' +
@@ -2137,7 +2139,12 @@ async function renderProducts(panel){
         '<span id="pePos" style="font-size:11.5px;color:var(--muted);font-weight:700;flex-shrink:0"></span>' +
       '</div>' +
       '<div style="display:flex;gap:16px;align-items:flex-start">' +
-        '<img src="/' + encodeURI(p.img) + '" onerror="this.style.display=\'none\'" style="width:120px;height:120px;object-fit:cover;border-radius:8px;border:1px solid var(--line);flex-shrink:0"/>' +
+        '<div style="flex-shrink:0;width:120px">' +
+          '<img id="peHeroImg" src="' + esc(p.primary_image_url ? encodeURI(p.primary_image_url) : ('/' + encodeURI(p.img))) + '" onerror="this.style.display=\'none\'" style="width:120px;height:120px;object-fit:cover;border-radius:8px;border:1px solid var(--line)"/>' +
+          '<div id="peImgGrid" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px"></div>' +
+          '<label class="btn" style="display:block;text-align:center;margin-top:6px;font-size:11px;cursor:pointer">＋ Add photos<input type="file" id="peImgAdd" accept="image/*" multiple style="display:none"/></label>' +
+          '<span id="peImgMsg" style="font-size:11px;display:block;text-align:center"></span>' +
+        '</div>' +
         '<div style="flex:1;min-width:0">' +
           sect('Identity',
             '<div style="grid-column:1/-1"><label class="lbl">Part name</label><input id="peName" class="fld" value="' + esc(p.name || '') + '"/></div>' +
@@ -2745,6 +2752,59 @@ async function renderProducts(panel){
           m.textContent = '✓ ' + r.in_stock + ' in stock'; m.style.color = '#166534';
           refresh();
         } catch (e) { m.textContent = e.message; m.style.color = 'var(--red)'; }
+      });
+      refresh();
+    })();
+
+    // Photo gallery (0057): thumb grid with set-as-main / delete, plus a
+    // multi-file add. products.img stays the identity; these are extras.
+    (function(){
+      var grid = document.getElementById('peImgGrid');
+      if (!grid) return;
+      var hero = document.getElementById('peHeroImg');
+      var msgEl = document.getElementById('peImgMsg');
+      var refresh = async function(){
+        try {
+          var r = await api('/api/admin/products/' + encodeURIComponent(p.img) + '/images');
+          var ov = r.primary_image_override;
+          hero.src = ov ? encodeURI(ov) : ('/' + encodeURI(p.img));
+          hero.style.display = '';
+          var tiles = [{ url: '/' + encodeURI(p.img), id: 'original', isMain: !ov, orig: true }].concat(
+            (r.images || []).map(function(im){ return { url: encodeURI(im.url), id: im.id, isMain: ov && ov === im.url }; }));
+          grid.innerHTML = tiles.map(function(t){
+            return '<div style="position:relative;width:36px;height:36px" title="' + (t.orig ? 'original photo' : '') + '">' +
+              '<img src="' + t.url + '" style="width:36px;height:36px;object-fit:cover;border-radius:4px;border:2px solid ' + (t.isMain ? 'var(--sky)' : 'var(--line)') + '" onerror="this.style.opacity=.3"/>' +
+              (t.isMain ? '<span style="position:absolute;bottom:-2px;left:0;right:0;text-align:center;font-size:8px;font-weight:800;color:var(--sky)">main</span>'
+                        : '<button type="button" class="peImgMain" data-id="' + t.id + '" title="set as main" style="position:absolute;top:-6px;left:-6px;width:16px;height:16px;border-radius:50%;border:0;background:var(--sky);color:#fff;font-size:10px;line-height:1;cursor:pointer">★</button>') +
+              (t.orig ? '' : '<button type="button" class="peImgDel" data-id="' + t.id + '" title="delete" style="position:absolute;top:-6px;right:-6px;width:16px;height:16px;border-radius:50%;border:0;background:#b91c1c;color:#fff;font-size:10px;line-height:1;cursor:pointer">✕</button>') +
+            '</div>';
+          }).join('');
+          grid.querySelectorAll('.peImgMain').forEach(function(b){
+            b.addEventListener('click', async function(){
+              try { await api('/api/admin/products/' + encodeURIComponent(p.img) + '/images/' + b.getAttribute('data-id') + '/make-primary', { method: 'POST', body: {} }); refresh(); }
+              catch (e) { msgEl.textContent = e.message; msgEl.style.color = 'var(--red)'; }
+            });
+          });
+          grid.querySelectorAll('.peImgDel').forEach(function(b){
+            b.addEventListener('click', async function(){
+              try { await api('/api/admin/products/' + encodeURIComponent(p.img) + '/images/' + b.getAttribute('data-id'), { method: 'DELETE' }); refresh(); }
+              catch (e) { msgEl.textContent = e.message; msgEl.style.color = 'var(--red)'; }
+            });
+          });
+        } catch (e) { msgEl.textContent = e.message; msgEl.style.color = 'var(--red)'; }
+      };
+      document.getElementById('peImgAdd').addEventListener('change', async function(){
+        var files = this.files; if (!files || !files.length) return;
+        var fd = new FormData();
+        for (var i = 0; i < files.length; i++) fd.append('photo' + i, files[i]);
+        msgEl.textContent = 'Uploading…'; msgEl.style.color = 'var(--muted)';
+        try {
+          var res = await fetch('/api/admin/products/' + encodeURIComponent(p.img) + '/images', { method: 'POST', body: fd, credentials: 'same-origin' });
+          var d = await res.json().catch(function(){ return {}; });
+          if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status));
+          msgEl.textContent = '✓ added ' + (d.images || []).length; msgEl.style.color = '#166534';
+          this.value = ''; refresh();
+        } catch (e) { msgEl.textContent = e.message; msgEl.style.color = 'var(--red)'; }
       });
       refresh();
     })();
@@ -4431,8 +4491,9 @@ async function renderPOS(panel){
   // img field actually looks like one.
   function posThumb(p, sizePx){
     var s = sizePx || 100;
-    if (/\.(jpe?g|png|webp|gif|svg)$/i.test(p.img || '') || String(p.img || '').indexOf('/uploads/') === 0){
-      return '<img src="' + encodeURI(p.img) + '" style="width:100%;height:' + s + 'px;object-fit:cover;border-radius:6px;background:var(--card-soft2)" onerror="this.style.opacity=0.3"/>';
+    var src = p.thumb_url || p.img || '';
+    if (/\.(jpe?g|png|webp|gif|svg)$/i.test(src) || src.indexOf('/uploads/') === 0){
+      return '<img src="' + encodeURI(src) + '" style="width:100%;height:' + s + 'px;object-fit:cover;border-radius:6px;background:var(--card-soft2)" onerror="this.style.opacity=0.3"/>';
     }
     return '<div style="height:' + s + 'px;border-radius:6px;background:var(--card-soft2);display:flex;align-items:center;justify-content:center;padding:4px;text-align:center">' +
       '<code style="font-size:' + posFS(11) + ';color:#374151;font-weight:700;word-break:break-all">' + esc(p.img) + '</code></div>';
@@ -15584,6 +15645,14 @@ async function submitNewProduct(){
     var res = await fetch('/api/admin/products', { method:'POST', body: fd, credentials:'same-origin' });
     var data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Save failed');
+    // Extra photos, if any, go into the new part's gallery.
+    var more = document.getElementById('npMorePhotos');
+    var newImg = data.product && (data.product.img || data.product.product_img) || data.img || data.product_img;
+    if (more && more.files && more.files.length && newImg) {
+      var gfd = new FormData();
+      for (var gi = 0; gi < more.files.length; gi++) gfd.append('photo' + gi, more.files[gi]);
+      try { await fetch('/api/admin/products/' + encodeURIComponent(newImg) + '/images', { method:'POST', body: gfd, credentials:'same-origin' }); } catch (_) {}
+    }
     msg.style.background = '#dcfce7';
     msg.style.color = '#166534';
     msg.textContent = 'Added';

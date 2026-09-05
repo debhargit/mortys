@@ -21,6 +21,7 @@ import { bestUnitPriceCents, loadBreaksByImg, ACTIVE_SALE_PRICE_SQL, effectiveBa
 import { loadKitComponentsByImg, kitRollupCents, kitBuildableQty } from '../_lib/kits.js';
 import { loadAltNumbersByImg, loadSubstitutesByImg, loadSubstitutesForImg } from '../_lib/alt_numbers.js';
 import { loadSerialStockByImg, loadRedeemableStockByImg } from '../_lib/serials.js';
+import { loadImagesForImg, galleryFor, primaryUrl } from '../_lib/product_images.js';
 import { centsToUsd } from '../_lib/money.js';
 
 // Attach each row's price_breaks (ascending by min_qty, in USD) and its
@@ -130,6 +131,7 @@ const LIST_COLS = `
   core_charge_cents / 100.0 AS core_charge_usd, env_fee_cents / 100.0 AS env_fee_usd,
   matrix_id, ${ACTIVE_SALE_PRICE_SQL} AS active_sale_cents,
   max_discount_pct, is_redeemable, is_kit, kit_price_mode,
+  COALESCE(primary_image_override, img) AS thumb_url,
   restricted_instore_only, restricted_manager_approval, restricted_id_required, restricted_tax_id_required`;
 
 const COUNT_CAP = 5000;
@@ -197,11 +199,13 @@ export default function mount(app) {
 
       // The storefront (index.html / shop.html) asks with ?compact=1 and reads
       // a positional-array format: { cats, rows:[[img,name,make_model,catIdx,
-      // condIdx,price_cents,stock_count,bin, alt?], ...] }. price_cents is null
-      // when this caller may not see prices, which is what flips a cart into a
-      // quote request client-side. `alt` (element 8) is a space-joined string
-      // of the part's alternate numbers, present only when it has any, so the
-      // client-side search box can match them too.
+      // condIdx,price_cents,stock_count,bin, alt?, thumb?], ...] }. price_cents
+      // is null when this caller may not see prices, which is what flips a
+      // cart into a quote request client-side. `alt` (element 8) is a
+      // space-joined string of the part's alternate numbers; `thumb` (element
+      // 9) is the effective primary-image url when it differs from `img`. Each
+      // is only emitted when it has a value -- and thumb forces alt to a
+      // placeholder so the positions stay fixed.
       if (q.compact) {
         const altByImg = await loadAltNumbersByImg(db, rows.map((r) => r.img));
         const catIndex = {};
@@ -212,8 +216,9 @@ export default function mount(app) {
           const priceCents = showPrices && r.price_usd != null ? Math.round(r.price_usd * 100) : null;
           const condIdx = String(r.condition || '').toUpperCase() === 'USED' ? 1 : 0;
           const alt = (altByImg.get(r.img) || []).map((a) => a.number).join(' ');
+          const thumb = r.thumb_url && r.thumb_url !== r.img ? r.thumb_url : '';
           const row = [r.img, r.name, r.make_model || '', catIndex[cat], condIdx, priceCents, r.stock_count, r.bin_location || ''];
-          if (alt) row.push(alt);
+          if (thumb) { row.push(alt, thumb); } else if (alt) { row.push(alt); }
           return row;
         });
         return c.json({ cats, rows: packed, total, limit, offset, prices_visible: showPrices });
@@ -289,6 +294,11 @@ export default function mount(app) {
         .map((s) => ({ img: s.img, name: s.name, sku: s.sku, price_usd: s.price_usd, stock_level: s.stock_level, relationship: s.relationship }));
       if (subs.length) row.substitutes = subs;
     }
+    // Photo gallery -- always (photos aren't price-gated). Effective primary
+    // first, then the original if it was overridden, then the extras.
+    const extras = await loadImagesForImg(d1(c.env), row.img);
+    row.images = galleryFor(row, extras).map((g) => ({ url: g.url, caption: g.caption, is_primary: g.is_primary }));
+    row.primary_image_url = primaryUrl(row);
     return c.json({ product: row });
   });
 

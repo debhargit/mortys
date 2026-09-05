@@ -309,7 +309,7 @@ export default function mount(app) {
     if (!code) return c.json({ error: 'code required' }, 400);
     const product = await d1(c.env).one(
       `SELECT img, name, make_model, category, condition, price_cents / 100.0 AS price_usd, stock_count, low_threshold,
-              sku, barcode, bin_location, location,
+              sku, barcode, bin_location, location, COALESCE(primary_image_override, img) AS thumb_url,
               CASE WHEN item_type = 'service' THEN 'in'
                    WHEN stock_count <= 0 THEN 'out' WHEN stock_count <= low_threshold THEN 'low' ELSE 'in' END AS stock_level,
               serial_required, warranty_days, item_type,
