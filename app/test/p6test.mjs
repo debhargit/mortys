@@ -113,6 +113,14 @@ await call('patch', '/api/admin/products/ZZT-45022', { body: { price_usd: 42.5, 
 let p = q1('SELECT price_cents,stock_count,supplier_id FROM products WHERE img=?', 'ZZT-45022');
 A('product patch: usd->cents, stock, supplier', p.price_cents === 4250 && p.stock_count === 6 && p.supplier_id === supId);
 
+// ===== per-product commission override =====
+await call('patch', '/api/admin/products/ZZT-45022', { body: { commission_type: 'percent', commission_value: 3 } });
+p = q1('SELECT commission_type,commission_value FROM products WHERE img=?', 'ZZT-45022');
+A('product patch: commission override set', p.commission_type === 'percent' && p.commission_value === 3);
+await call('patch', '/api/admin/products/ZZT-45022', { body: { commission_type: 'bogus', commission_value: '' } });
+p = q1('SELECT commission_type,commission_value FROM products WHERE img=?', 'ZZT-45022');
+A('product patch: unknown commission_type falls back to null (rep default), blank value -> null', p.commission_type === null && p.commission_value === null);
+
 // ===== products-ext =====
 await call('patch', '/api/admin/products-ext/ZZT-15400', { body: { core_charge_usd: 10, env_fee_usd: 1.5, warranty_days: 90, serial_required: true, markup_pct: 35 } });
 p = q1('SELECT core_charge_cents,env_fee_cents,warranty_days,serial_required,markup_pct FROM products WHERE img=?', 'ZZT-15400');

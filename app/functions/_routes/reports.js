@@ -703,4 +703,61 @@ export default function mount(app) {
     for (const row of feed) byArea[row.area] = (byArea[row.area] || 0) + 1;
     return c.json({ from, to, feed, by_area: Object.keys(byArea).map((k) => ({ area: k, n: byArea[k] })).sort((a, b) => b.n - a.n) });
   });
+
+  // ---- sales rep commission ------------------------------------
+  // Computed at report time, never stored per-sale: a line's commission comes
+  // from the product's own override (percent / flat amount / none-at-all) if
+  // it has one, else the crediting rep's default percent. Changing a rate
+  // recalculates every past sale the same way the margin report already
+  // recalculates off products.cost_cents.
+  app.get('/api/admin/reports/commission', adminMw, async (c) => {
+    const db = d1(c.env);
+    const { from, to } = range(c);
+    const p = [from, to];
+    const CASE = `CASE
+        WHEN pr.commission_type = 'none' THEN 0
+        WHEN pr.commission_type = 'amount' THEN COALESCE(pr.commission_value,0) * i.qty
+        WHEN pr.commission_type = 'percent' THEN (i.total_cents/100.0) * (COALESCE(pr.commission_value,0)/100.0)
+        ELSE (i.total_cents/100.0) * (COALESCE(m.commission_pct,0)/100.0)
+      END`;
+    const JOIN = `FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+                  LEFT JOIN mechanics m ON m.id = ps.sales_rep_id
+                  LEFT JOIN products pr ON pr.img = i.product_img`;
+    const [byRep, totals, detail, allTime, paid, reps] = await Promise.all([
+      db.many(`SELECT ps.sales_rep_id AS mechanic_id, COALESCE(m.name, ps.sales_rep_name, '(no rep)') AS rep,
+                      COUNT(*) AS lines, COALESCE(SUM(i.total_cents),0)/100.0 AS revenue,
+                      COALESCE(SUM(${CASE}),0) AS commission,
+                      SUM(CASE WHEN (${CASE}) = 0 THEN 1 ELSE 0 END) AS skipped_lines
+                 ${JOIN}
+                WHERE ps.voided = 0 AND ps.sales_rep_id IS NOT NULL AND date(ps.created_at) BETWEEN ? AND ?
+                GROUP BY ps.sales_rep_id ORDER BY commission DESC`, ...p),
+      db.one(`SELECT COUNT(*) AS lines, COALESCE(SUM(i.total_cents),0)/100.0 AS revenue, COALESCE(SUM(${CASE}),0) AS commission
+                 ${JOIN}
+                WHERE ps.voided = 0 AND ps.sales_rep_id IS NOT NULL AND date(ps.created_at) BETWEEN ? AND ?`, ...p),
+      db.many(`SELECT ps.receipt_number, ps.created_at, COALESCE(m.name, ps.sales_rep_name, '(no rep)') AS rep,
+                      i.description, i.qty, i.total_cents/100.0 AS line_total,
+                      COALESCE(pr.commission_type, 'rep default') AS commission_type,
+                      (${CASE}) AS commission
+                 ${JOIN}
+                WHERE ps.voided = 0 AND ps.sales_rep_id IS NOT NULL AND date(ps.created_at) BETWEEN ? AND ?
+                ORDER BY ps.created_at DESC LIMIT 300`, ...p),
+      db.many(`SELECT ps.sales_rep_id AS mechanic_id, COALESCE(SUM(${CASE}),0) AS earned
+                 ${JOIN}
+                WHERE ps.voided = 0 AND ps.sales_rep_id IS NOT NULL GROUP BY ps.sales_rep_id`),
+      db.many(`SELECT mechanic_id, COALESCE(SUM(amount_cents),0)/100.0 AS paid FROM commission_payouts GROUP BY mechanic_id`),
+      db.many(`SELECT id, name FROM mechanics WHERE is_active = 1 ORDER BY name`),
+    ]);
+    const earnedByMech = {}; for (const r of allTime) earnedByMech[r.mechanic_id] = r.earned;
+    const paidByMech = {}; for (const r of paid) paidByMech[r.mechanic_id] = r.paid;
+    for (const r of byRep) {
+      r.earned_all_time = earnedByMech[r.mechanic_id] || 0;
+      r.paid_all_time = paidByMech[r.mechanic_id] || 0;
+      r.owed = Math.round((r.earned_all_time - r.paid_all_time) * 100) / 100;
+    }
+    const repOptions = reps.map((m) => ({
+      id: m.id, name: m.name,
+      owed: Math.round(((earnedByMech[m.id] || 0) - (paidByMech[m.id] || 0)) * 100) / 100,
+    }));
+    return c.json({ from, to, totals, by_rep: byRep, detail, reps: repOptions });
+  });
 }

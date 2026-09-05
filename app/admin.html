@@ -2112,6 +2112,12 @@ async function renderProducts(panel){
             fld('Markup %', 'peMarkup', p.markup_pct, 'type="number" step="0.1" min="0" placeholder="e.g. 35"') +
             fld('Sell price / retail (USD)', 'pePrice', p.price_usd, 'type="number" step="0.01" min="0" placeholder="auto from cost × markup"') +
             fld('List / MSRP (USD)', 'peList', p.list_price_usd, 'type="number" step="0.01" min="0" placeholder="reference"')) +
+          sect('Commission',
+            selFld('Basis', 'peCommType', p.commission_type || '', [
+              ['', "Use rep's default rate"], ['percent', 'Percent of sale (overrides default)'],
+              ['amount', 'Flat amount per unit'], ['none', 'No commission — skip this item'],
+            ]) +
+            '<div><label class="lbl" id="peCommValLbl">Value</label><input id="peCommValue" class="fld" type="number" step="0.01" min="0" placeholder="—" value="' + esc(p.commission_value == null ? '' : p.commission_value) + '"/></div>') +
           sect('Stock',
             fld('Stock count', 'peStock', p.stock_count, 'type="number" min="0"') +
             fld('Low-stock threshold', 'peLow', p.low_threshold, 'type="number" min="0"') +
@@ -2250,6 +2256,21 @@ async function renderProducts(panel){
       mk.addEventListener('input', recalc);
     })();
 
+    // Commission value only means something for percent/amount — grey it out
+    // otherwise so it's clear the number field isn't doing anything.
+    (function(){
+      var typeSel = document.getElementById('peCommType'), val = document.getElementById('peCommValue'), lbl = document.getElementById('peCommValLbl');
+      if (!typeSel || !val) return;
+      var sync = function(){
+        var t = typeSel.value;
+        val.disabled = (t !== 'percent' && t !== 'amount');
+        lbl.textContent = t === 'percent' ? 'Percent (e.g. 3 for 3%)' : t === 'amount' ? 'Flat amount per unit (J$)' : 'Value';
+        if (val.disabled) val.value = '';
+      };
+      typeSel.addEventListener('change', sync);
+      sync();
+    })();
+
     var msg = document.getElementById('peMsg');
     document.getElementById('peSave').addEventListener('click', async function(){
       var raw = (document.getElementById('pePrice').value || '').trim();
@@ -2280,6 +2301,9 @@ async function renderProducts(panel){
       if (rawCost !== '') body.cost_usd = Number(rawCost);
       var rawList = (document.getElementById('peList').value || '').trim();
       if (rawList !== '') body.list_price_usd = Number(rawList);
+      body.commission_type = document.getElementById('peCommType').value || null;
+      var rawCommVal = (document.getElementById('peCommValue').value || '').trim();
+      body.commission_value = rawCommVal !== '' ? Number(rawCommVal) : null;
       msg.textContent = 'Saving…'; msg.style.color = 'var(--muted)';
       try {
         await api('/api/admin/products/' + encodeURIComponent(p.img), { method: 'PATCH', body: body });
@@ -10660,17 +10684,19 @@ async function renderMechanics(panel){
         '<div><label class="lbl">Email</label><input id="mkEmail" type="email" class="fld"/></div>' +
         '<div><label class="lbl">Specialty</label><input id="mkSpecialty" class="fld"/></div>' +
         '<div><label class="lbl">Hourly rate (USD)</label><input id="mkRate" type="number" min="0" step="0.01" value="25.00" class="fld"/></div>' +
+        '<div><label class="lbl">Commission % (sales rep default)</label><input id="mkCommission" type="number" min="0" step="0.1" placeholder="0 = none" class="fld"/></div>' +
         '<div id="mkMsg" style="grid-column:1/-1;display:none;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
         '<button type="submit" style="grid-column:1/-1;background:var(--red);color:#fff;border:0;padding:11px 22px;border-radius:7px;font-weight:700;cursor:pointer">Save</button>' +
       '</form>' +
     '</details>' +
     (r.mechanics.length
-      ? '<table><thead><tr><th>Name</th><th>Role</th><th>Contact</th><th>Specialty</th><th>Rate</th><th>Status</th><th></th></tr></thead><tbody>' +
+      ? '<table><thead><tr><th>Name</th><th>Role</th><th>Contact</th><th>Specialty</th><th>Rate</th><th>Commission %</th><th>Status</th><th></th></tr></thead><tbody>' +
         r.mechanics.map(function(m){
           return '<tr' + (!m.is_active ? ' style="opacity:.55"' : '') + '>' +
             '<td><b>' + esc(m.name) + '</b></td><td>' + esc(m.role) + '</td>' +
             '<td>' + esc(m.phone || '') + (m.email ? '<br/><small>' + esc(m.email) + '</small>' : '') + '</td>' +
             '<td>' + esc(m.specialty || '—') + '</td><td>' + fmtMoney(m.hourly_rate_usd) + '/hr</td>' +
+            '<td><input type="number" min="0" step="0.1" class="fld" data-comm="' + m.id + '" value="' + (m.commission_pct != null ? m.commission_pct : '') + '" placeholder="0" style="width:70px;padding:4px 6px"/></td>' +
             '<td>' + badge(m.is_active ? 'active' : 'inactive', m.is_active ? 'ok' : 'bad') + '</td>' +
             '<td class="actions"><button class="btn" data-toggle="' + m.id + '" data-active="' + m.is_active + '">' + (m.is_active ? 'Deactivate' : 'Reactivate') + '</button></td>' +
           '</tr>';
@@ -10685,6 +10711,16 @@ async function renderMechanics(panel){
       catch (e) { alert(e.message); }
     });
   });
+  // Commission rate edits in place on blur/Enter — no separate save button
+  // for one number on an otherwise read-only row.
+  panel.querySelectorAll('[data-comm]').forEach(function(inp){
+    var save = async function(){
+      try { await api('/api/admin/mechanics/' + inp.getAttribute('data-comm'), { method:'PATCH', body: { commission_pct: inp.value === '' ? null : inp.value } }); posToast('Saved'); }
+      catch (e) { alert(e.message); }
+    };
+    inp.addEventListener('change', save);
+    inp.addEventListener('keydown', function(e){ if (e.key === 'Enter') inp.blur(); });
+  });
 }
 async function submitMechanic(){
   var msg = document.getElementById('mkMsg');
@@ -10697,6 +10733,7 @@ async function submitMechanic(){
       email: document.getElementById('mkEmail').value.trim() || null,
       specialty: document.getElementById('mkSpecialty').value.trim() || null,
       hourly_rate_usd: document.getElementById('mkRate').value || 25,
+      commission_pct: document.getElementById('mkCommission').value || null,
     }});
     show('mechanics');
   } catch (e) { msg.style.background='#fee2e2'; msg.style.color='#b91c1c'; msg.textContent=e.message; }
@@ -11652,6 +11689,7 @@ var REPORT_DEFS = [
   { key:'order-ledger',label:'📋 Order Ledger',          group:'Sales',     blurb:'Every order as a line, with fulfilment + carrier.' },
   { key:'pos-orders',  label:'💵 POS Orders / Cashier',  group:'Sales',     blurb:'Order-first checkout aging and speed to invoice.' },
   { key:'sales-reps',  label:'🧑‍💼 Sales by Rep',        group:'Sales',     blurb:'Tickets, revenue and margin per rep.' },
+  { key:'commission',  label:'💸 Sales Commission',      group:'Sales',     blurb:'Per-item commission earned by rep, and payouts.' },
   { key:'margin',      label:'📈 Gross Margin',          group:'Sales',     blurb:'Revenue vs. cost by product and category.' },
   { key:'valuation',   label:'💰 Stock Valuation',       group:'Operations',blurb:'Stock at cost / retail, by category and location.' },
   { key:'supplier',    label:'🏭 Suppliers',             group:'Operations',blurb:'POs, receipts, SKUs and stock value per supplier.' },
@@ -11897,6 +11935,25 @@ async function renderReports(panel){
 
     var selEl = document.getElementById('rptSession');
     if (selEl) selEl.onchange = function(){ RPT_SESSION_ID = selEl.value || null; run(); };
+
+    var payGo = document.getElementById('commPayGo');
+    if (payGo) payGo.addEventListener('click', async function(){
+      var repId = document.getElementById('commPayRep').value;
+      var amt = document.getElementById('commPayAmt').value;
+      var msgEl = document.getElementById('commPayMsg');
+      if (!repId) { msgEl.style.color = '#b91c1c'; msgEl.textContent = 'Choose a rep.'; return; }
+      if (!(Number(amt) > 0)) { msgEl.style.color = '#b91c1c'; msgEl.textContent = 'Enter an amount.'; return; }
+      msgEl.style.color = 'var(--muted)'; msgEl.textContent = 'Saving…';
+      try {
+        await api('/api/admin/mechanics/' + repId + '/commission-payouts', { method:'POST', body: {
+          amount_usd: amt,
+          notes: document.getElementById('commPayNotes').value.trim() || null,
+          period_from: document.getElementById('rptFrom').value, period_to: document.getElementById('rptTo').value,
+        }});
+        msgEl.style.color = '#166534'; msgEl.textContent = '✓ Recorded';
+        setTimeout(run, 700);
+      } catch (e) { msgEl.style.color = '#b91c1c'; msgEl.textContent = e.message; }
+    });
   }
 
   function rptPrint(){
@@ -12174,6 +12231,43 @@ var RPT_RENDERERS = {
         ], reps.map(function(x){ return Object.assign({}, x, { margin_pct: x.margin_pct == null ? '—' : x.margin_pct + '%' }); }),
         'No sales in this range.') +
         '<p style="font-size:11.5px;color:var(--muted);margin:8px 2px">Margin uses the cost on each product record — mostly the import placeholder until costs are set.</p>' +
+      '</div>';
+  },
+
+  commission: function(r){
+    var byRep = r.by_rep || [];
+    return '<div style="padding:16px 18px 4px"><div class="tiles" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px">' +
+        tile('commissionable lines', rNum(r.totals.lines)) + tile('revenue (range)', rMoney(r.totals.revenue)) +
+        tile('commission earned (range)', rMoney(r.totals.commission)) +
+      '</div></div>' +
+      '<div style="padding:0 18px 22px">' +
+        rptTable('🧑‍💼 By rep', [
+          { k:'rep', label:'Rep' }, { k:'lines', label:'Lines', num:true }, { k:'skipped_lines', label:'No commission', num:true },
+          { k:'revenue', label:'Revenue (range)', money:true }, { k:'commission', label:'Earned (range)', money:true },
+          { k:'earned_all_time', label:'Earned (all-time)', money:true }, { k:'paid_all_time', label:'Paid (all-time)', money:true },
+          { k:'owed', label:'Owed now', money:true },
+        ], byRep, 'No commissionable sales in this range.') +
+      '</div>' +
+      '<div style="padding:0 18px 22px">' +
+        '<div class="panel">' +
+          '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">💵 Record a commission payout</div>' +
+          '<div style="padding:12px 14px;display:flex;gap:8px;align-items:end;flex-wrap:wrap">' +
+            '<div><label class="lbl">Rep</label><select id="commPayRep" class="fld" style="width:220px"><option value="">— choose —</option>' +
+              (r.reps || []).map(function(m){ return '<option value="' + m.id + '">' + esc(m.name) + ' (owed ' + fmtMoney(m.owed) + ')</option>'; }).join('') +
+            '</select></div>' +
+            '<div><label class="lbl">Amount</label><input id="commPayAmt" type="number" min="0.01" step="0.01" class="fld" style="width:120px"/></div>' +
+            '<div><label class="lbl">Notes</label><input id="commPayNotes" class="fld" style="width:200px" placeholder="optional"/></div>' +
+            '<button type="button" class="btn ok" id="commPayGo">Record payout</button>' +
+            '<span id="commPayMsg" style="font-size:12px"></span>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div style="padding:0 18px 22px">' +
+        rptTable('📋 Line detail (range, newest 300)', [
+          { k:'receipt_number', label:'Receipt' }, { k:'rep', label:'Rep' }, { k:'description', label:'Item' },
+          { k:'qty', label:'Qty', num:true }, { k:'line_total', label:'Line total', money:true },
+          { k:'commission_type', label:'Basis' }, { k:'commission', label:'Commission', money:true },
+        ], r.detail, 'No commissionable lines in this range.') +
       '</div>';
   },
 

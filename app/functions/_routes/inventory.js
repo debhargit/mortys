@@ -118,6 +118,11 @@ export default function mount(app) {
     if (b.condition != null) put('condition = ?', String(b.condition));
     if (b.location != null) put('location = ?', String(b.location));
     if (b.bin_location != null) put('bin_location = ?', String(b.bin_location));
+    if (b.commission_type !== undefined) {
+      const t = String(b.commission_type || '').trim();
+      put('commission_type = ?', ['percent', 'amount', 'none'].includes(t) ? t : null);
+    }
+    if (b.commission_value !== undefined) put('commission_value = ?', numOrNull(b.commission_value));
     if (!sets.length) return c.json({ error: 'Nothing to update' }, 400);
     sets.push('updated_at = CURRENT_TIMESTAMP');
     vals.push(c.req.param('img'));

@@ -251,4 +251,34 @@ A('import/services: 2 inserted, 1 skipped, cents', r.inserted === 2 && r.skipped
 r = await call('post', '/api/admin/import/services', { form: {} });
 A('import/services: no file -> 400', st === 400);
 
+// ---- reports/commission ------------------------------------------------
+// Mech Seven gets a 10% default; r-1 has no override (uses that default),
+// r-2 is knocked down to a 2% override; sale #1 (r-1 x1 @ $20, r-2 x1 @ $10,
+// seeded near the top of this file) gets credited to him.
+sdb.exec(`
+UPDATE mechanics SET commission_pct = 10 WHERE id = 7;
+UPDATE products SET commission_type = 'percent', commission_value = 2 WHERE img = 'r-2';
+UPDATE pos_sales SET sales_rep_id = 7, sales_rep_name = 'Mech Seven' WHERE id = 1;
+`);
+r = await call('get', '/api/admin/reports/commission');
+A('reports/commission: totals (rep default 10% + line override 2%)',
+  r.totals.lines === 2 && r.totals.revenue === 30 && Math.abs(r.totals.commission - 2.2) < 0.001);
+A('reports/commission: by_rep for Mech Seven', r.by_rep.length === 1 && r.by_rep[0].rep === 'Mech Seven' &&
+  Math.abs(r.by_rep[0].commission - 2.2) < 0.001 && r.by_rep[0].skipped_lines === 0 && r.by_rep[0].owed === 2.2);
+A('reports/commission: line detail shows each basis', r.detail.some((d) => d.description === 'ZZ Widget' && d.commission_type === 'rep default' && Math.abs(d.commission - 2) < 0.001) &&
+  r.detail.some((d) => d.description === 'ZZ Gizmo' && d.commission_type === 'percent' && Math.abs(d.commission - 0.2) < 0.001));
+const mechSevenId = 7;
+r = await call('get', '/api/admin/reports/commission');
+A('reports/commission: rep appears in the payout picker with the owed amount', r.reps.some((x) => x.id === mechSevenId && x.owed === 2.2));
+
+// "none" skips a line entirely, even under a rep with a default rate.
+sdb.exec(`UPDATE products SET commission_type = 'none' WHERE img = 'r-1';`);
+r = await call('get', '/api/admin/reports/commission');
+A('reports/commission: commission_type=none zeroes that line', Math.abs(r.by_rep[0].commission - 0.2) < 0.001 && r.by_rep[0].skipped_lines === 1);
+
+// Record a payout and confirm "owed" drops by exactly that amount.
+sdb.exec("INSERT INTO commission_payouts (mechanic_id, amount_cents, notes) VALUES (7, 15, 'partial payout')");
+r = await call('get', '/api/admin/reports/commission');
+A('reports/commission: a recorded payout reduces owed (all-time)', Math.abs(r.by_rep[0].paid_all_time - 0.15) < 0.001 && Math.abs(r.by_rep[0].owed - 0.05) < 0.001);
+
 console.log('\ndone');

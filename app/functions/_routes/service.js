@@ -1,5 +1,6 @@
 // Phase 13 — service centre. Ports server.js:
 //   GET/POST/PATCH/DELETE /api/admin/mechanics[/:id]
+//   GET/POST /api/admin/mechanics/:id/commission-payouts
 //   GET/POST/PATCH/DELETE /api/admin/services[/:id]
 //   GET/POST/PATCH/DELETE /api/admin/work-orders[/:id]
 //   POST/DELETE /api/admin/work-orders/:id/labor[/:id]
@@ -52,7 +53,7 @@ export default function mount(app) {
     else if (c.req.query('role') === 'mechanic') cl.push("role IN ('mechanic','both')");
     const mechanics = await d1(c.env).many(
       `SELECT id, user_id, name, phone, email, specialty, certifications,
-              hourly_rate_cents / 100.0 AS hourly_rate_usd, hire_date, is_active, notes, role, created_at
+              hourly_rate_cents / 100.0 AS hourly_rate_usd, commission_pct, hire_date, is_active, notes, role, created_at
          FROM mechanics ${cl.length ? 'WHERE ' + cl.join(' AND ') : ''} ORDER BY is_active DESC, name ASC`);
     return c.json({ mechanics: mechanics.map((r) => boolify(r, ['is_active'])) });
   });
@@ -61,10 +62,12 @@ export default function mount(app) {
     if (!b.name) return c.json({ error: 'name required' }, 400);
     const role = ['mechanic', 'advisor', 'both'].includes(b.role) ? b.role : 'mechanic';
     const r = await d1(c.env).run(
-      `INSERT INTO mechanics (user_id, name, phone, email, specialty, certifications, hourly_rate_cents, hire_date, is_active, notes, role)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO mechanics (user_id, name, phone, email, specialty, certifications, hourly_rate_cents, commission_pct, hire_date, is_active, notes, role)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
       b.user_id || null, b.name, b.phone || null, b.email || null, b.specialty || null, b.certifications || null,
-      b.hourly_rate_usd != null ? u2c(b.hourly_rate_usd) : 2500, b.hire_date || null, b.is_active === false ? 0 : 1, b.notes || null, role);
+      b.hourly_rate_usd != null ? u2c(b.hourly_rate_usd) : 2500,
+      b.commission_pct === '' || b.commission_pct == null ? null : Number(b.commission_pct),
+      b.hire_date || null, b.is_active === false ? 0 : 1, b.notes || null, role);
     return c.json({ ok: true, id: r.meta.last_row_id });
   });
   app.patch('/api/admin/mechanics/:id', managerMw, async (c) => {
@@ -73,6 +76,7 @@ export default function mount(app) {
     const sets = []; const vals = [];
     for (const [f, isB] of Object.entries(MAP)) if (b[f] !== undefined) { sets.push(`${f} = ?`); vals.push(isB ? bit(b[f]) : b[f]); }
     if (b.hourly_rate_usd !== undefined) { sets.push('hourly_rate_cents = ?'); vals.push(u2c(b.hourly_rate_usd)); }
+    if (b.commission_pct !== undefined) { sets.push('commission_pct = ?'); vals.push(b.commission_pct === '' || b.commission_pct == null ? null : Number(b.commission_pct)); }
     if (!sets.length) return c.json({ error: 'Nothing to update' }, 400);
     vals.push(c.req.param('id'));
     await d1(c.env).run(`UPDATE mechanics SET ${sets.join(', ')} WHERE id = ?`, ...vals);
@@ -80,6 +84,28 @@ export default function mount(app) {
   });
   app.delete('/api/admin/mechanics/:id', managerMw, async (c) => {
     await d1(c.env).run('UPDATE mechanics SET is_active = 0 WHERE id = ?', c.req.param('id'));
+    return c.json({ ok: true });
+  });
+
+  // ---- commission payouts ------------------------------------------
+  // A record that a rep was actually paid some/all of what the commission
+  // report says they've earned. Not tied to a specific sale -- reps are
+  // usually paid on their own schedule, not per ticket.
+  app.get('/api/admin/mechanics/:id/commission-payouts', adminMw, async (c) => {
+    const payouts = await d1(c.env).many(
+      `SELECT cp.*, cp.amount_cents / 100.0 AS amount_usd, u.name AS paid_by_name
+         FROM commission_payouts cp LEFT JOIN users u ON u.id = cp.paid_by
+        WHERE cp.mechanic_id = ? ORDER BY cp.created_at DESC`, c.req.param('id'));
+    return c.json({ payouts });
+  });
+  app.post('/api/admin/mechanics/:id/commission-payouts', managerMw, async (c) => {
+    const b = await c.req.json().catch(() => ({}));
+    const amt = Number(b.amount_usd);
+    if (!(amt > 0)) return c.json({ error: 'amount_usd must be positive' }, 400);
+    await d1(c.env).run(
+      `INSERT INTO commission_payouts (mechanic_id, amount_cents, period_from, period_to, notes, paid_by)
+         VALUES (?,?,?,?,?,?)`,
+      c.req.param('id'), u2c(amt), b.period_from || null, b.period_to || null, b.notes || null, c.get('user').id);
     return c.json({ ok: true });
   });
 
