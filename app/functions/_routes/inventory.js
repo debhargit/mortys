@@ -212,6 +212,37 @@ export default function mount(app) {
   });
 
   // =====================================================================
+  //  QUANTITY-BREAK (BULK) PRICING — replace the whole set for one product
+  // =====================================================================
+  app.put('/api/admin/products/:img/price-breaks', adminMw, async (c) => {
+    const db = d1(c.env);
+    if (!userCan(c.get('user'), 'inventory.edit_price'))
+      return c.json({ error: 'Your account is not allowed to edit product pricing.' }, 403);
+    const img = c.req.param('img');
+    const exists = await db.one('SELECT img FROM products WHERE img = ?', img);
+    if (!exists) return c.json({ error: 'Not found' }, 404);
+    const b = await c.req.json().catch(() => ({}));
+    const raw = Array.isArray(b.breaks) ? b.breaks : [];
+    const seen = new Set();
+    const rows = [];
+    for (const r of raw) {
+      const minQty = parseInt(r.min_qty, 10);
+      if (!Number.isInteger(minQty) || minQty < 2) return c.json({ error: 'Each tier needs a quantity of 2 or more' }, 400);
+      if (seen.has(minQty)) return c.json({ error: 'Duplicate quantity ' + minQty }, 400);
+      const priceCents = usdToCents(r.price_usd);
+      if (priceCents == null || priceCents < 0) return c.json({ error: 'Each tier needs a price' }, 400);
+      seen.add(minQty);
+      rows.push({ minQty, priceCents });
+    }
+    const stmts = [{ sql: 'DELETE FROM product_price_breaks WHERE product_img = ?', binds: [img] }];
+    for (const r of rows) {
+      stmts.push({ sql: 'INSERT INTO product_price_breaks (product_img, min_qty, price_cents) VALUES (?,?,?)', binds: [img, r.minQty, r.priceCents] });
+    }
+    await db.batch(stmts);
+    return c.json({ ok: true, count: rows.length });
+  });
+
+  // =====================================================================
   //  SUPPLIERS / VENDORS
   // =====================================================================
   const SUPPLIER_COLS = `id, code, name, contact_name, phone, email, address, website,

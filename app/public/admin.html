@@ -2156,6 +2156,13 @@ async function renderProducts(panel){
           sect('Core charge & fees',
             fld('Core charge (USD, per unit)', 'peCoreCharge', p.core_charge_usd, 'type="number" step="0.01" min="0" placeholder="0.00"') +
             fld('Environmental fee (USD, per unit)', 'peEnvFee', p.env_fee_usd, 'type="number" step="0.01" min="0" placeholder="0.00"')) +
+          '<div style="margin-bottom:12px">' +
+            '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:800;margin-bottom:6px">Bulk pricing <span style="font-weight:400;text-transform:none;letter-spacing:0">— lower unit price once a line reaches a quantity</span></div>' +
+            '<div id="peBreakRows"></div>' +
+            '<button type="button" class="btn" id="peBreakAdd" style="margin-top:4px">+ Add tier</button> ' +
+            '<button type="button" class="btn ok" id="peBreakSave" style="margin-top:4px">💾 Save pricing tiers</button>' +
+            '<span id="peBreakMsg" style="font-size:12.5px;margin-left:8px"></span>' +
+          '</div>' +
           sect('Status',
             '<div style="grid-column:1/-1"><label style="display:inline-flex;align-items:center;gap:7px;font-size:13px"><input type="checkbox" id="peActive"' + (p.is_active === false ? '' : ' checked') + '/> Listed / active</label></div>') +
           '<div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:6px">' +
@@ -2291,6 +2298,48 @@ async function renderProducts(panel){
       };
       typeSel.addEventListener('change', sync);
       sync();
+    })();
+
+    // Bulk pricing: a small repeatable [qty, price] row list, saved on its
+    // own via PUT .../price-breaks rather than folded into peSave -- it's a
+    // child collection (replace-the-whole-set), not a plain column update.
+    (function(){
+      var rowsBox = document.getElementById('peBreakRows');
+      var breaks = (p.price_breaks || []).map(function(b){ return { min_qty: b.min_qty, price_usd: b.price_usd }; });
+      var paintBreaks = function(){
+        rowsBox.innerHTML = breaks.length ? breaks.map(function(b, i){
+          return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px" data-pbrow="' + i + '">' +
+            '<span style="font-size:12.5px;color:var(--muted)">Qty ≥</span>' +
+            '<input type="number" min="2" step="1" class="fld pbQty" value="' + esc(b.min_qty == null ? '' : b.min_qty) + '" style="width:80px"/>' +
+            '<span style="font-size:12.5px;color:var(--muted)">@ $</span>' +
+            '<input type="number" min="0" step="0.01" class="fld pbPrice" value="' + esc(b.price_usd == null ? '' : b.price_usd) + '" style="width:100px"/>' +
+            '<span style="font-size:12.5px;color:var(--muted)">each</span>' +
+            '<button type="button" class="btn pbRemove" style="padding:3px 9px;background:#fee2e2;color:#b91c1c">✕</button>' +
+          '</div>';
+        }).join('') : '<div style="font-size:12.5px;color:var(--muted);margin-bottom:6px">No bulk tiers — every quantity pays the sell price above.</div>';
+        rowsBox.querySelectorAll('.pbRemove').forEach(function(btn){
+          btn.addEventListener('click', function(){
+            var i = parseInt(btn.closest('[data-pbrow]').getAttribute('data-pbrow'), 10);
+            breaks.splice(i, 1); paintBreaks();
+          });
+        });
+      };
+      paintBreaks();
+      document.getElementById('peBreakAdd').addEventListener('click', function(){ breaks.push({ min_qty: '', price_usd: '' }); paintBreaks(); });
+      document.getElementById('peBreakSave').addEventListener('click', async function(){
+        var pbMsg = document.getElementById('peBreakMsg');
+        rowsBox.querySelectorAll('[data-pbrow]').forEach(function(row, i){
+          breaks[i].min_qty = row.querySelector('.pbQty').value;
+          breaks[i].price_usd = row.querySelector('.pbPrice').value;
+        });
+        var payload = breaks.filter(function(b){ return b.min_qty !== '' || b.price_usd !== ''; })
+          .map(function(b){ return { min_qty: parseInt(b.min_qty, 10), price_usd: Number(b.price_usd) }; });
+        pbMsg.textContent = 'Saving…'; pbMsg.style.color = 'var(--muted)';
+        try {
+          await api('/api/admin/products/' + encodeURIComponent(p.img) + '/price-breaks', { method: 'PUT', body: { breaks: payload } });
+          pbMsg.textContent = '✓ Saved'; pbMsg.style.color = '#166534';
+        } catch (e) { pbMsg.textContent = e.message; pbMsg.style.color = 'var(--red)'; }
+      });
     })();
 
     var msg = document.getElementById('peMsg');
@@ -3216,32 +3265,52 @@ function posRepIdForPayload(){
   return (POS.rep && typeof POS.rep.id === 'number') ? POS.rep.id : null;
 }
 
+// The lowest of the base price and every quantity-break the given qty
+// qualifies for -- mirrors _lib/price_breaks.js's bestUnitPriceCents (kept in
+// USD here since the whole POS cart already works in dollars client-side).
+function posBestUnitPrice(basePrice, breaks, qty){
+  var best = Number(basePrice) || 0;
+  (breaks || []).forEach(function(b){
+    var bp = Number(b.price_usd);
+    if (qty >= b.min_qty && isFinite(bp) && bp < best) best = bp;
+  });
+  return best;
+}
+
 function posAddToCart(p, qty){
   var serialRequired = !!p.serial_required;
+  var basePrice = Number(p.price_usd) || 0;
+  var priceBreaks = p.price_breaks || [];
   var extra = {
     location: p.location, bin_location: p.bin_location, stock_count: p.stock_count,
     disc: 0, discPct: 0, discMode: 'amt', discNote: '',
     serialRequired: serialRequired, serialNumber: '',
     warrantyDays: p.warranty_days || null,
     coreChargeUsd: Number(p.core_charge_usd) || 0, envFeeUsd: Number(p.env_fee_usd) || 0,
+    basePrice: basePrice, priceBreaks: priceBreaks, priceManual: false,
   };
   if (serialRequired) {
     // Each serialized unit needs its own serial number, so it can't share a
     // line (and a shared qty) with another unit the way an ordinary part
-    // does -- every "add" of a serialized item is its own cart line.
+    // does -- every "add" of a serialized item is its own cart line, always
+    // qty 1, so quantity-break pricing (which needs qty >= 2 on one line)
+    // never applies here.
     var n = Math.max(1, qty || 1);
     for (var i = 0; i < n; i++) {
       POS.cart.push(Object.assign({ img: p.img, name: p.name, make_model: p.make_model, sku: p.sku || null,
-        price: Number(p.price_usd) || 0, qty: 1 }, extra));
+        price: basePrice, qty: 1 }, extra));
     }
     posSaveState();
     return;
   }
   var ex = POS.cart.find(function(c){ return c.img === p.img && !c.serialRequired; });
-  if (ex) { ex.qty += (qty || 1); }
-  else {
+  if (ex) {
+    ex.qty += (qty || 1);
+    if (!ex.priceManual) ex.price = posBestUnitPrice(ex.basePrice, ex.priceBreaks, ex.qty);
+  } else {
+    var q = qty || 1;
     POS.cart.push(Object.assign({ img: p.img, name: p.name, make_model: p.make_model, sku: p.sku || null,
-      price: Number(p.price_usd) || 0, qty: qty || 1 }, extra));
+      price: posBestUnitPrice(basePrice, priceBreaks, q), qty: q }, extra));
   }
   posSaveState();
 }
@@ -4239,6 +4308,8 @@ async function renderPOS(panel){
         '<span style="width:90px;flex-shrink:0;text-align:right">' +
           '<input type="number" min="0" step="0.01" value="' + (i.price > 0 ? i.price : '') + '" placeholder="price" data-pidx="' + idx + '" class="posPrice" ' +
             'style="width:86px;padding:4px;border:1px solid ' + (i.price > 0 ? 'var(--line)' : '#818cf8') + ';border-radius:5px;font-size:' + posFS(12) + ';font-weight:700;text-align:right;font-family:inherit"/>' +
+          (!i.priceManual && i.priceBreaks && i.priceBreaks.length && Number(i.price) < Number(i.basePrice)
+            ? '<small style="display:block;color:#0e7490;font-weight:700;font-size:' + posFS(9.5) + '">🏷 bulk qty ' + i.qty + '</small>' : '') +
         '</span>' +
         '<span style="width:128px;flex-shrink:0;display:flex;gap:3px;align-items:center;justify-content:flex-end">' +
           '<select class="posDiscMode" data-dmidx="' + idx + '" title="Enter the discount as a dollar amount or a percent of this line" ' +
@@ -4314,6 +4385,8 @@ async function renderPOS(panel){
             'style="width:52px;padding:4px;border:1px solid ' + (d > 0 ? '#fca5a5' : 'var(--line)') + ';border-radius:4px;font-size:12px;text-align:right"/>' +
           '<b style="margin-left:auto;font-size:12.5px">' + (i.price > 0 ? fmtMoney(net) : '—') + '</b>' +
         '</div>' +
+        (!i.priceManual && i.priceBreaks && i.priceBreaks.length && Number(i.price) < Number(i.basePrice)
+          ? '<small style="display:block;margin-top:2px;color:#0e7490;font-weight:700">🏷 bulk price for qty ' + i.qty + '</small>' : '') +
         (i.serialRequired
           ? '<input class="posSerialNum" data-sidx="' + idx + '" value="' + esc(i.serialNumber || '') + '" placeholder="serial # — required to sell" style="width:100%;margin-top:4px;padding:3px 6px;border:1px solid ' + (i.serialNumber ? '#86efac' : '#fca5a5') + ';border-radius:4px;font-size:11px"/>'
           : '') +
@@ -4392,13 +4465,20 @@ async function renderPOS(panel){
 
     items.querySelectorAll('.posQty').forEach(function(inp){
       inp.addEventListener('change', function(){
-        POS.cart[parseInt(inp.getAttribute('data-idx'), 10)].qty = Math.max(1, parseInt(inp.value, 10) || 1);
+        var line = POS.cart[parseInt(inp.getAttribute('data-idx'), 10)];
+        line.qty = Math.max(1, parseInt(inp.value, 10) || 1);
+        // A manually-typed price (pos.price_override) is a deliberate call by
+        // the cashier and must survive a quantity change; otherwise re-price
+        // against this product's bulk tiers for the new quantity.
+        if (!line.priceManual) line.price = posBestUnitPrice(line.basePrice, line.priceBreaks, line.qty);
         drawCart();
       });
     });
     items.querySelectorAll('.posPrice').forEach(function(inp){
       inp.addEventListener('change', function(){
-        POS.cart[parseInt(inp.getAttribute('data-pidx'), 10)].price = Math.max(0, Number(inp.value) || 0);
+        var line = POS.cart[parseInt(inp.getAttribute('data-pidx'), 10)];
+        line.price = Math.max(0, Number(inp.value) || 0);
+        line.priceManual = true;
         drawCart();
       });
     });

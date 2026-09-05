@@ -13,6 +13,8 @@ import { adminMw, managerMw, currentUser } from '../_lib/guards.js';
 import { getShopSettings, shopSettingsToShop } from '../_lib/shop.js';
 import { sendEmail } from '../_lib/mailer.js';
 import { readUploadBody } from '../_lib/uploads.js';
+import { loadBreaksForImg } from '../_lib/price_breaks.js';
+import { centsToUsd } from '../_lib/money.js';
 
 const u2c = (u) => (u == null || u === '' ? null : Math.round(Number(u) * 100));
 const r2 = (n) => Math.round(n * 100) / 100;
@@ -312,6 +314,7 @@ export default function mount(app) {
          FROM products WHERE is_active = 1 AND (lower(sku) = lower(?) OR lower(barcode) = lower(?) OR img = ?) LIMIT 1`,
       code, code, code);
     if (!product) return c.json({ error: 'No product matches that code' }, 404);
+    product.price_breaks = (await loadBreaksForImg(d1(c.env), product.img)).map((b) => ({ min_qty: b.min_qty, price_usd: centsToUsd(b.price_cents) }));
     return c.json({ product });
   });
   app.get('/api/admin/lookup', adminMw, async (c) => {

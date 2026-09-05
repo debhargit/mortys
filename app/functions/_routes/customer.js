@@ -21,6 +21,7 @@ import { getShopSettings } from '../_lib/shop.js';
 import { verifyQuote } from '../_lib/carriers/index.js';
 import { bookShipment } from './shipping.js';
 import { fygaroEnabled, buildCheckoutUrl } from '../_lib/fygaro.js';
+import { bestUnitPriceCents, loadBreaksByImg } from '../_lib/price_breaks.js';
 
 const SITE_BASE = 'https://mortsautoparts.com';
 
@@ -32,6 +33,24 @@ const digits7 = (s) => String(s || '').replace(/[^\d]/g, '').slice(-7);
 async function pointsBalance(db, userId) {
   const r = await db.one('SELECT COALESCE(SUM(delta),0) AS b FROM points_transactions WHERE user_id = ?', userId);
   return (r && r.b) || 0;
+}
+
+// Reprice a fetched line list against each product's quantity breaks --
+// checkout always starts from products.price_cents (never a client-supplied
+// price), so this only ever brings the charged price *down* to whatever the
+// line's own quantity qualifies for. Mutates price_usd in place; skips lines
+// with no price (already flagged unpriced elsewhere) or no breaks at all.
+async function repriceForQty(db, items) {
+  const breaksByImg = await loadBreaksByImg(db, items.map((it) => it.product_img));
+  for (const it of items) {
+    if (it.price_usd == null) continue;
+    const breaks = breaksByImg.get(it.product_img) || [];
+    if (!breaks.length) continue;
+    const baseCents = cents(it.price_usd);
+    const effCents = bestUnitPriceCents(baseCents, breaks, it.qty);
+    if (effCents != null && effCents < baseCents) it.price_usd = r2(effCents / 100);
+  }
+  return items;
 }
 async function nextAccountNumber(db) {
   const rows = await db.many("SELECT account_number AS a FROM users WHERE account_number LIKE 'C-%'");
@@ -240,7 +259,8 @@ export default function mount(app) {
     const r = await loadCoupon(db, (await c.req.json().catch(() => ({}))).code);
     if (!r.ok) return c.json({ error: r.error }, 400);
     const items = await db.many(
-      'SELECT c.qty, p.price_cents / 100.0 AS price_usd FROM cart_items c JOIN products p ON p.img = c.product_img WHERE c.user_id = ?', uid);
+      'SELECT c.product_img, c.qty, p.price_cents / 100.0 AS price_usd FROM cart_items c JOIN products p ON p.img = c.product_img WHERE c.user_id = ?', uid);
+    await repriceForQty(db, items);
     const subtotal = r2(items.reduce((s, it) => s + Number(it.price_usd || 0) * it.qty, 0));
     const { discount, reason } = computeCouponDiscount(r.coupon, subtotal);
     if (discount === 0 && reason) return c.json({ error: reason }, 400);
@@ -278,6 +298,7 @@ export default function mount(app) {
     if (items.some((it) => it.price_usd == null)) {
       return c.json({ error: 'Some items in your cart are not priced — remove them or submit a quote request for the whole cart.', code: 'unpriced_items' }, 400);
     }
+    await repriceForQty(db, items);
     const subtotal = r2(items.reduce((s, it) => s + Number(it.price_usd || 0) * it.qty, 0));
     let total = subtotal;
 
@@ -403,6 +424,7 @@ export default function mount(app) {
     if (items.some((it) => it.price_usd == null)) {
       return c.json({ error: 'Some items in your cart are not priced — submit a quote request for the whole cart.', code: 'unpriced_items' }, 400);
     }
+    await repriceForQty(db, items);
 
     const subtotal = r2(items.reduce((s, it) => s + Number(it.price_usd || 0) * it.qty, 0));
     let total = subtotal;

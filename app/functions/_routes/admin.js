@@ -17,6 +17,8 @@ import { adminMw, roleCanManage } from '../_lib/guards.js';
 import { safeJson, boolify } from '../_lib/util.js';
 import { CAPABILITIES } from '../_lib/capabilities.js';
 import { getShopSettings } from '../_lib/shop.js';
+import { loadBreaksForImg } from '../_lib/price_breaks.js';
+import { centsToUsd } from '../_lib/money.js';
 
 // 14-day zero-filled series from rows [{ day:'YYYY-MM-DD', <key> }]
 function fill14(rows, key) {
@@ -157,6 +159,7 @@ export default function mount(app) {
     if (!row) return c.json({ error: 'Not found' }, 404);
     boolify(row, ['is_active', 'serial_required']);
     row.matrix_overrides = safeJson(row.matrix_overrides, []);
+    row.price_breaks = (await loadBreaksForImg(d1(c.env), row.img)).map((b) => ({ min_qty: b.min_qty, price_usd: centsToUsd(b.price_cents) }));
     return c.json({ product: row });
   });
 

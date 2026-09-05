@@ -17,6 +17,17 @@ import { sendEmail } from '../_lib/mailer.js';
 import { readUploadBody } from '../_lib/uploads.js';
 import { safeJson } from '../_lib/util.js';
 import { getShopSettings } from '../_lib/shop.js';
+import { bestUnitPriceCents, loadBreaksByImg } from '../_lib/price_breaks.js';
+import { centsToUsd } from '../_lib/money.js';
+
+// Attach each row's price_breaks (ascending by min_qty, in USD) from a
+// pre-fetched img -> breaks Map -- shared by the list and single-product
+// endpoints below so both expose bulk pricing the same way.
+function withBreaks(row, breaksByImg) {
+  const b = breaksByImg.get(row.img) || [];
+  row.price_breaks = b.map((x) => ({ min_qty: x.min_qty, price_usd: centsToUsd(x.price_cents) }));
+  return row;
+}
 
 // Who may see prices on the storefront endpoints:
 //   * any admin / staff account — ALWAYS (the POS grid uses these endpoints)
@@ -139,7 +150,11 @@ export default function mount(app) {
         return c.json({ cats, rows: packed, total, limit, offset, prices_visible: showPrices });
       }
 
-      const list = showPrices ? rows : rows.map((r) => ({ ...r, price_usd: null }));
+      let list = showPrices ? rows : rows.map((r) => ({ ...r, price_usd: null }));
+      if (showPrices) {
+        const breaksByImg = await loadBreaksByImg(db, list.map((r) => r.img));
+        list = list.map((r) => withBreaks(r, breaksByImg));
+      }
       return c.json({ products: list, total, limit, offset, prices_visible: showPrices, approximate: capped, count_mode: capped ? 'capped' : 'exact' });
     } catch (e) {
       return c.json({ error: 'Server error' }, 500);
@@ -162,9 +177,12 @@ export default function mount(app) {
       c.req.param('img')
     );
     if (!row) return c.json({ error: 'Not found' }, 404);
-    if (!(await canSeePrices(c))) {
+    const showPrices = await canSeePrices(c);
+    if (!showPrices) {
       row.price_usd = null; row.price_cents = null;
       row.cost_usd = null; row.cost_cents = null;
+    } else {
+      withBreaks(row, await loadBreaksByImg(d1(c.env), [row.img]));
     }
     return c.json({ product: row });
   });
@@ -180,15 +198,30 @@ export default function mount(app) {
 
   // ---- cart (D1 cart_items has no product_id; key on product_img) ----------
   app.get('/api/cart', authMw, async (c) => {
-    const rows = await d1(c.env).many(
-      `SELECT c.product_img AS img, c.qty, p.name, p.make_model, p.price_cents / 100.0 AS price_usd, p.condition
+    const db = d1(c.env);
+    const rows = await db.many(
+      `SELECT c.product_img AS img, c.qty, p.name, p.make_model, p.price_cents, p.price_cents / 100.0 AS price_usd, p.condition
          FROM cart_items c JOIN products p ON p.img = c.product_img
         WHERE c.user_id = ? ORDER BY c.updated_at DESC`,
       c.get('user').id
     );
     const showPrices = await canSeePrices(c);
-    if (!showPrices) rows.forEach((r) => { r.price_usd = null; });
-    const total = showPrices ? rows.reduce((s, r) => s + Number(r.price_usd || 0) * r.qty, 0) : null;
+    let total = null;
+    if (showPrices) {
+      const breaksByImg = await loadBreaksByImg(db, rows.map((r) => r.img));
+      total = 0;
+      rows.forEach((r) => {
+        const breaks = breaksByImg.get(r.img) || [];
+        const effCents = bestUnitPriceCents(r.price_cents, breaks, r.qty);
+        r.effective_price_usd = centsToUsd(effCents);
+        r.price_breaks = breaks.map((x) => ({ min_qty: x.min_qty, price_usd: centsToUsd(x.price_cents) }));
+        total += Number(r.effective_price_usd || 0) * r.qty;
+        delete r.price_cents;
+      });
+      total = Math.round(total * 100) / 100;
+    } else {
+      rows.forEach((r) => { r.price_usd = null; delete r.price_cents; });
+    }
     return c.json({ cart: rows, total_usd: total, prices_visible: showPrices });
   });
 
