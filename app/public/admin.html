@@ -682,6 +682,7 @@ var renderers = {
   timeclock:     renderTimeClock,
   partsreq:      renderPartsReq,
   cashreport:    renderCashReport,
+  pettycash:     renderPettyCash,
   lowstock:      renderLowStock,
   warehouse:     renderWarehouse,
   deliveries:    renderDeliveries,
@@ -765,6 +766,7 @@ var SIDEBAR_GROUPS = [
     { tab:'quotes', label:'📝 Quotes' },
     { tab:'orders', label:'🛒 Orders' },
     { tab:'cashreport', label:'📈 Cash Report' },
+    { tab:'pettycash', label:'💰 Petty Cash' },
     { tab:'reviews', label:'⭐ Reviews' },
     { tab:'coupons', label:'🏷 Coupons' },
     { tab:'giftcards', label:'🎁 Gift Cards' },
@@ -8800,6 +8802,17 @@ async function renderCashReport(panel){
         '</div>' +
         '<button class="btn" id="crCloseBtn" style="margin-top:10px;background:var(--red)">Close till</button>' +
         '<div id="crCloseResult" style="margin-top:10px"></div>' +
+        '<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--line)">' +
+          '<div style="font-weight:700;font-size:12.5px;margin-bottom:6px">💵 Payouts from this session</div>' +
+          '<div id="crPayouts"><div class="empty">Loading…</div></div>' +
+          '<div style="display:flex;gap:8px;align-items:flex-end;margin-top:8px;flex-wrap:wrap">' +
+            '<div><label class="lbl">Amount</label><input id="crPayoutAmt" type="number" step="0.01" min="0" class="fld" style="width:100px"/></div>' +
+            '<div><label class="lbl">Reason</label><input id="crPayoutReason" class="fld" style="width:200px" placeholder="e.g. courier, supplies"/></div>' +
+            '<div><label class="lbl">Paid to</label><input id="crPayoutTo" class="fld" style="width:140px"/></div>' +
+            '<button class="btn" id="crPayoutGo">Record payout</button>' +
+          '</div>' +
+          '<div id="crPayoutMsg" style="margin-top:6px;font-size:12.5px"></div>' +
+        '</div>' +
       '</div>'
     : '<div style="padding:14px 16px">' +
         '<div style="margin-bottom:8px;font-size:13px;color:var(--muted)">No cash drawer session is currently open.</div>' +
@@ -8881,6 +8894,42 @@ async function renderCashReport(panel){
 
   document.getElementById('crGo').addEventListener('click', loadReport);
 
+  async function loadPayouts(){
+    var box = document.getElementById('crPayouts');
+    if (!box || !session) return;
+    var d;
+    try { d = await api('/api/admin/cash-payouts?drawer_session_id=' + session.id); }
+    catch (e) { box.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return; }
+    var total = d.payouts.reduce(function(s, p){ return s + Number(p.amount_usd || 0); }, 0);
+    box.innerHTML = d.payouts.length
+      ? '<table style="font-size:12.5px"><thead><tr><th>When</th><th>Reason</th><th>Paid to</th><th align="right">Amount</th></tr></thead><tbody>' +
+          d.payouts.map(function(p){
+            return '<tr><td>' + fmtDate(p.created_at) + '</td><td>' + esc(p.reason) + '</td><td>' + esc(p.paid_to || '—') + '</td>' +
+              '<td align="right">' + fmtMoney(p.amount_usd) + '</td></tr>';
+          }).join('') +
+        '</tbody></table><div style="margin-top:4px;font-size:12.5px;color:var(--muted)">Total: <b>' + fmtMoney(total) + '</b></div>'
+      : '<div class="empty">No payouts recorded from this session yet.</div>';
+  }
+  loadPayouts();
+  var payoutGo = document.getElementById('crPayoutGo');
+  if (payoutGo) payoutGo.addEventListener('click', async function(){
+    var msg = document.getElementById('crPayoutMsg');
+    var amt = document.getElementById('crPayoutAmt').value;
+    var reason = document.getElementById('crPayoutReason').value.trim();
+    if (!amt || Number(amt) <= 0) { msg.style.color = 'var(--red)'; msg.textContent = 'Enter a positive amount.'; return; }
+    if (!reason) { msg.style.color = 'var(--red)'; msg.textContent = 'A reason is required.'; return; }
+    msg.style.color = 'var(--muted)'; msg.textContent = 'Saving…';
+    try {
+      await api('/api/admin/cash-payouts', { method: 'POST', body: {
+        amount_usd: amt, reason: reason, paid_to: document.getElementById('crPayoutTo').value.trim() || null,
+        source_type: 'drawer', drawer_session_id: session.id,
+      }});
+      document.getElementById('crPayoutAmt').value = ''; document.getElementById('crPayoutReason').value = ''; document.getElementById('crPayoutTo').value = '';
+      msg.style.color = '#166534'; msg.textContent = 'Recorded.';
+      loadPayouts();
+    } catch (e) { msg.style.color = 'var(--red)'; msg.textContent = e.message; }
+  });
+
   var openBtn = document.getElementById('crOpenBtn');
   if (openBtn) openBtn.addEventListener('click', async function(){
     var res = document.getElementById('crOpenResult');
@@ -8924,6 +8973,134 @@ async function renderCashReport(panel){
   });
 
   loadReport();
+}
+
+// ============= PETTY CASH =============
+// Fund management + payout browsing across everything (not just the current
+// till session, which the Cash Report tab already covers inline). A payout
+// against a fund never touches any drawer's reconciliation -- only a
+// drawer-sourced payout (recorded here or from Cash Report) does that.
+var PC_VIEW_FUND = null;
+async function renderPettyCash(panel){
+  if (PC_VIEW_FUND) return renderPettyCashFundDetail(panel, PC_VIEW_FUND);
+  panel.innerHTML = '<div class="empty">Loading…</div>';
+  var r;
+  try { r = await api('/api/admin/petty-cash-funds'); }
+  catch (e) { panel.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return; }
+  panel.innerHTML =
+    '<details style="border-bottom:1px solid var(--line);background:var(--card-soft)">' +
+      '<summary style="padding:12px 16px;cursor:pointer;font-weight:700;color:var(--heading)">+ New petty cash fund</summary>' +
+      '<form id="newFund" style="padding:14px 18px;display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:640px" onsubmit="event.preventDefault();submitPettyCashFund();">' +
+        '<div><label class="lbl">Name *</label><input id="pcfName" required class="fld" placeholder="e.g. Front Desk Petty Cash"/></div>' +
+        '<div><label class="lbl">Opening balance</label><input id="pcfOpening" type="number" min="0" step="0.01" value="0" class="fld"/></div>' +
+        '<div id="pcfMsg" style="grid-column:1/-1;display:none;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
+        '<button type="submit" style="grid-column:1/-1;background:var(--red);color:#fff;border:0;padding:11px 22px;border-radius:7px;font-weight:700;cursor:pointer">Create fund</button>' +
+      '</form>' +
+    '</details>' +
+    (r.funds.length
+      ? '<table><thead><tr><th>Name</th><th>Balance</th><th>Custodian</th><th>Status</th><th></th></tr></thead><tbody>' +
+        r.funds.map(function(f){
+          return '<tr' + (!f.is_active ? ' style="opacity:.55"' : '') + '>' +
+            '<td><b>' + esc(f.name) + '</b></td>' +
+            '<td><b>' + fmtMoney(f.balance_usd) + '</b></td>' +
+            '<td>' + esc(f.custodian_name || '—') + '</td>' +
+            '<td>' + badge(f.is_active ? 'active' : 'inactive', f.is_active ? 'ok' : 'bad') + '</td>' +
+            '<td class="actions"><button class="btn" data-open="' + f.id + '">Open</button></td>' +
+          '</tr>';
+        }).join('') + '</tbody></table>'
+      : '<div class="empty">No petty cash funds yet — create one above, or just record payouts straight from the register on the Cash Report tab.</div>');
+
+  panel.querySelectorAll('[data-open]').forEach(function(b){
+    b.addEventListener('click', function(){ PC_VIEW_FUND = parseInt(b.getAttribute('data-open'), 10); renderPettyCash(panel); });
+  });
+}
+async function submitPettyCashFund(){
+  var msg = document.getElementById('pcfMsg');
+  msg.style.display = 'block'; msg.style.background = '#dbeafe'; msg.style.color = '#1e40af'; msg.textContent = 'Saving…';
+  try {
+    await api('/api/admin/petty-cash-funds', { method: 'POST', body: {
+      name: document.getElementById('pcfName').value.trim(),
+      opening_balance_usd: document.getElementById('pcfOpening').value || 0,
+    }});
+    show('pettycash');
+  } catch (e) { msg.style.background = '#fee2e2'; msg.style.color = '#b91c1c'; msg.textContent = e.message; }
+}
+async function renderPettyCashFundDetail(panel, fundId){
+  panel.innerHTML = '<div class="empty">Loading…</div>';
+  var funds, payouts;
+  try {
+    funds = (await api('/api/admin/petty-cash-funds')).funds;
+    payouts = (await api('/api/admin/cash-payouts?fund_id=' + fundId)).payouts;
+  } catch (e) { panel.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return; }
+  var f = funds.find(function(x){ return x.id === fundId; });
+  if (!f) { panel.innerHTML = '<div class="empty">Fund not found.</div>'; return; }
+
+  panel.innerHTML =
+    '<div style="padding:11px 14px;border-bottom:1px solid var(--line)"><button class="btn" id="pcBack">‹ All funds</button></div>' +
+    '<div style="padding:14px 16px;display:flex;gap:24px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--line)">' +
+      '<div><div class="lbl">Fund</div><b style="font-size:16px">' + esc(f.name) + '</b></div>' +
+      '<div><div class="lbl">Balance</div><b style="font-size:15px">' + fmtMoney(f.balance_usd) + '</b></div>' +
+      '<div><div class="lbl">Custodian</div>' + esc(f.custodian_name || '—') + '</div>' +
+      '<div><div class="lbl">Status</div>' + badge(f.is_active ? 'active' : 'inactive', f.is_active ? 'ok' : 'bad') + '</div>' +
+    '</div>' +
+    '<div style="padding:14px 16px;border-bottom:1px solid var(--line);display:flex;gap:20px;flex-wrap:wrap">' +
+      '<form id="pcReplenishForm" style="display:flex;gap:8px;align-items:flex-end" onsubmit="event.preventDefault();submitReplenish(' + fundId + ');">' +
+        '<div><label class="lbl">Replenish amount</label><input id="pcReplenishAmt" type="number" min="0.01" step="0.01" required class="fld" style="width:100px"/></div>' +
+        '<div><label class="lbl">Source</label><select id="pcReplenishSource" class="fld"><option value="bank">Bank / owner (no drawer)</option><option value="drawer">The open register drawer</option></select></div>' +
+        '<button type="submit" class="btn ok">Replenish</button>' +
+      '</form>' +
+      '<form id="pcPayoutForm" style="display:flex;gap:8px;align-items:flex-end" onsubmit="event.preventDefault();submitFundPayout(' + fundId + ');">' +
+        '<div><label class="lbl">Payout amount</label><input id="pcPayoutAmt" type="number" min="0.01" step="0.01" required class="fld" style="width:100px"/></div>' +
+        '<div><label class="lbl">Reason</label><input id="pcPayoutReason" required class="fld" style="width:160px"/></div>' +
+        '<div><label class="lbl">Paid to</label><input id="pcPayoutTo" class="fld" style="width:130px"/></div>' +
+        '<button type="submit" class="btn">Record payout</button>' +
+      '</form>' +
+      '<span id="pcMsg" style="align-self:center;font-size:12.5px"></span>' +
+    '</div>' +
+    '<div style="padding:14px 16px">' +
+      '<h4 style="margin:0 0 8px">Ledger</h4>' +
+      (payouts.length
+        ? '<table><thead><tr><th>Date</th><th>Reason</th><th>Paid to</th><th>Authorized by</th><th align="right">Amount</th></tr></thead><tbody>' +
+          payouts.map(function(p){
+            return '<tr><td>' + fmtDate(p.created_at) + '</td>' +
+              '<td>' + esc(p.reason) + '</td><td>' + esc(p.paid_to || '—') + '</td><td>' + esc(p.authorized_by_name || '—') + '</td>' +
+              '<td align="right">' + fmtMoney(p.amount_usd) + '</td></tr>';
+          }).join('') + '</tbody></table>'
+        : '<div class="empty">No activity yet.</div>') +
+    '</div>';
+
+  document.getElementById('pcBack').addEventListener('click', function(){ PC_VIEW_FUND = null; renderPettyCash(panel); });
+}
+async function submitReplenish(fundId){
+  var msg = document.getElementById('pcMsg');
+  msg.style.color = 'var(--muted)'; msg.textContent = 'Saving…';
+  try {
+    var source = document.getElementById('pcReplenishSource').value;
+    var body = { amount_usd: document.getElementById('pcReplenishAmt').value, source: source };
+    if (source === 'drawer') {
+      var open = null;
+      try { open = (await api('/api/admin/cash-drawer/open')).session; } catch (_) {}
+      if (!open) { msg.style.color = 'var(--red)'; msg.textContent = 'No cash drawer session is currently open.'; return; }
+      body.drawer_session_id = open.id;
+    }
+    await api('/api/admin/petty-cash-funds/' + fundId + '/replenish', { method: 'POST', body: body });
+    PC_VIEW_FUND = fundId;
+    show('pettycash');
+  } catch (e) { msg.style.color = 'var(--red)'; msg.textContent = e.message; }
+}
+async function submitFundPayout(fundId){
+  var msg = document.getElementById('pcMsg');
+  msg.style.color = 'var(--muted)'; msg.textContent = 'Saving…';
+  try {
+    await api('/api/admin/cash-payouts', { method: 'POST', body: {
+      amount_usd: document.getElementById('pcPayoutAmt').value,
+      reason: document.getElementById('pcPayoutReason').value.trim(),
+      paid_to: document.getElementById('pcPayoutTo').value.trim() || null,
+      source_type: 'fund', fund_id: fundId,
+    }});
+    PC_VIEW_FUND = fundId;
+    show('pettycash');
+  } catch (e) { msg.style.color = 'var(--red)'; msg.textContent = e.message; }
 }
 
 // ============= LOW STOCK =============

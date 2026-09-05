@@ -441,13 +441,110 @@ export default function mount(app) {
     const cs = await db.one(
       "SELECT COALESCE(SUM(total_cents),0) / 100.0 AS s FROM pos_sales WHERE payment_method = 'cash' AND voided = 0 AND created_at >= ?",
       sess.opened_at);
-    const expected = r2(c2u(sess.opening_float_cents) + (cs.s || 0));
+    // Cash paid straight out of this drawer (petty cash, a fund replenishment,
+    // any other payout) never made it into the count -- subtract it from what
+    // we expect to find, or every payout would read as an unexplained shortage.
+    const po = await db.one(
+      "SELECT COALESCE(SUM(amount_cents),0) / 100.0 AS s FROM cash_payouts WHERE source_type = 'drawer' AND drawer_session_id = ?",
+      id);
+    const expected = r2(c2u(sess.opening_float_cents) + (cs.s || 0) - (po.s || 0));
     const closing = Number(b.closing_amount || 0);
     const variance = r2(closing - expected);
     await db.run(
       `UPDATE cash_drawer_sessions SET closed_by = ?, closing_amount_cents = ?, expected_cash_cents = ?, variance_cents = ?, notes = ?, closed_at = CURRENT_TIMESTAMP WHERE id = ?`,
       b.closed_by || null, u2c(closing), u2c(expected), u2c(variance), b.notes || sess.notes, id);
-    return c.json({ ok: true, expected_cash: expected, closing_amount: closing, variance });
+    return c.json({ ok: true, expected_cash: expected, closing_amount: closing, variance, payouts: po.s || 0 });
+  });
+
+  // ============ CASH PAYOUTS + PETTY CASH ============
+  app.get('/api/admin/cash-payouts', adminMw, async (c) => {
+    const db = d1(c.env);
+    const drawerId = c.req.query('drawer_session_id');
+    const fundId = c.req.query('fund_id');
+    const where = []; const binds = [];
+    if (drawerId) { where.push('cp.drawer_session_id = ?'); binds.push(drawerId); }
+    if (fundId) { where.push('cp.fund_id = ?'); binds.push(fundId); }
+    const rows = await db.many(
+      `SELECT cp.id, cp.amount_cents / 100.0 AS amount_usd, cp.reason, cp.paid_to, cp.notes,
+              cp.source_type, cp.drawer_session_id, cp.fund_id, cp.created_at,
+              u.name AS authorized_by_name
+         FROM cash_payouts cp LEFT JOIN users u ON u.id = cp.authorized_by
+         ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+        ORDER BY cp.created_at DESC LIMIT 500`, ...binds);
+    return c.json({ payouts: rows });
+  });
+  app.post('/api/admin/cash-payouts', managerMw, async (c) => {
+    const db = d1(c.env);
+    const me = c.get('user');
+    const b = await c.req.json().catch(() => ({}));
+    const amount = Number(b.amount_usd || 0);
+    if (!(amount > 0)) return c.json({ error: 'A positive amount is required' }, 400);
+    if (!String(b.reason || '').trim()) return c.json({ error: 'A reason is required' }, 400);
+    const sourceType = b.source_type === 'fund' ? 'fund' : 'drawer';
+    const amountCents = u2c(amount);
+    const stmts = [];
+    if (sourceType === 'drawer') {
+      const sess = await db.one('SELECT id FROM cash_drawer_sessions WHERE id = ? AND closed_at IS NULL', b.drawer_session_id);
+      if (!sess) return c.json({ error: 'That cash drawer session is not open' }, 400);
+    } else {
+      const fund = await db.one('SELECT id, balance_cents FROM petty_cash_funds WHERE id = ? AND is_active = 1', b.fund_id);
+      if (!fund) return c.json({ error: 'Petty cash fund not found' }, 404);
+      if (fund.balance_cents < amountCents) return c.json({ error: 'That would take the fund below zero (balance is ' + (fund.balance_cents / 100).toFixed(2) + ')' }, 400);
+      stmts.push({ sql: 'UPDATE petty_cash_funds SET balance_cents = balance_cents - ? WHERE id = ?', binds: [amountCents, fund.id] });
+    }
+    stmts.push({
+      sql: `INSERT INTO cash_payouts (amount_cents, reason, paid_to, notes, source_type, drawer_session_id, fund_id, authorized_by)
+            VALUES (?,?,?,?,?,?,?,?)`,
+      binds: [amountCents, String(b.reason).trim().slice(0, 200), b.paid_to ? String(b.paid_to).trim().slice(0, 200) : null,
+        b.notes ? String(b.notes).trim().slice(0, 500) : null, sourceType,
+        sourceType === 'drawer' ? parseInt(b.drawer_session_id, 10) : null,
+        sourceType === 'fund' ? parseInt(b.fund_id, 10) : null, me.id],
+    });
+    await db.batch(stmts);
+    return c.json({ ok: true });
+  });
+
+  app.get('/api/admin/petty-cash-funds', adminMw, async (c) => {
+    const rows = await d1(c.env).many(
+      `SELECT f.id, f.name, f.balance_cents / 100.0 AS balance_usd, f.custodian_id, f.is_active, f.created_at,
+              u.name AS custodian_name
+         FROM petty_cash_funds f LEFT JOIN users u ON u.id = f.custodian_id
+        ORDER BY f.is_active DESC, f.name`);
+    return c.json({ funds: rows });
+  });
+  app.post('/api/admin/petty-cash-funds', managerMw, async (c) => {
+    const db = d1(c.env);
+    const b = await c.req.json().catch(() => ({}));
+    if (!String(b.name || '').trim()) return c.json({ error: 'A name is required' }, 400);
+    const r = await db.run(
+      'INSERT INTO petty_cash_funds (name, balance_cents, custodian_id) VALUES (?,?,?)',
+      String(b.name).trim().slice(0, 120), u2c(b.opening_balance_usd || 0) || 0, b.custodian_id ? parseInt(b.custodian_id, 10) : null);
+    return c.json({ ok: true, id: r.meta.last_row_id });
+  });
+  app.post('/api/admin/petty-cash-funds/:id/replenish', managerMw, async (c) => {
+    const db = d1(c.env);
+    const me = c.get('user');
+    const id = c.req.param('id');
+    const b = await c.req.json().catch(() => ({}));
+    const amount = Number(b.amount_usd || 0);
+    if (!(amount > 0)) return c.json({ error: 'A positive amount is required' }, 400);
+    const fund = await db.one('SELECT id FROM petty_cash_funds WHERE id = ? AND is_active = 1', id);
+    if (!fund) return c.json({ error: 'Petty cash fund not found' }, 404);
+    const amountCents = u2c(amount);
+    const stmts = [{ sql: 'UPDATE petty_cash_funds SET balance_cents = balance_cents + ? WHERE id = ?', binds: [amountCents, id] }];
+    // Sourced from the till: the transfer out of the drawer is itself a
+    // drawer payout, so it still shows up in that session's reconciliation.
+    if (b.source === 'drawer') {
+      const sess = await db.one('SELECT id FROM cash_drawer_sessions WHERE id = ? AND closed_at IS NULL', b.drawer_session_id);
+      if (!sess) return c.json({ error: 'That cash drawer session is not open' }, 400);
+      stmts.push({
+        sql: `INSERT INTO cash_payouts (amount_cents, reason, source_type, drawer_session_id, fund_id, authorized_by)
+              VALUES (?, 'Petty cash replenishment', 'drawer', ?, ?, ?)`,
+        binds: [amountCents, sess.id, id, me.id],
+      });
+    }
+    await db.batch(stmts);
+    return c.json({ ok: true });
   });
 
   // ============ CASH REPORT ============
