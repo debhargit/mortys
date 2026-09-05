@@ -14,6 +14,7 @@ import { getShopSettings, shopSettingsToShop } from '../_lib/shop.js';
 import { sendEmail } from '../_lib/mailer.js';
 import { readUploadBody } from '../_lib/uploads.js';
 import { loadBreaksForImg, ACTIVE_SALE_PRICE_SQL } from '../_lib/price_breaks.js';
+import { loadAltNumbersForImg } from '../_lib/alt_numbers.js';
 import { centsToUsd } from '../_lib/money.js';
 
 const u2c = (u) => (u == null || u === '' ? null : Math.round(Number(u) * 100));
@@ -315,10 +316,16 @@ export default function mount(app) {
               ${ACTIVE_SALE_PRICE_SQL} AS active_sale_cents,
               max_discount_pct, is_redeemable,
               restricted_instore_only, restricted_manager_approval, restricted_id_required, restricted_tax_id_required
-         FROM products WHERE is_active = 1 AND (lower(sku) = lower(?) OR lower(barcode) = lower(?) OR img = ?) LIMIT 1`,
-      code, code, code);
+         FROM products WHERE is_active = 1 AND (
+             lower(sku) = lower(?) OR lower(barcode) = lower(?) OR img = ?
+             OR img IN (SELECT product_img FROM product_alt_numbers WHERE lower(number) = lower(?))
+         ) LIMIT 1`,
+      code, code, code, code);
     if (!product) return c.json({ error: 'No product matches that code' }, 404);
-    product.price_breaks = (await loadBreaksForImg(d1(c.env), product.img)).map((b) => ({ min_qty: b.min_qty, price_usd: centsToUsd(b.price_cents) }));
+    const allBreaks = await loadBreaksForImg(d1(c.env), product.img);
+    product.price_breaks = allBreaks.filter((b) => b.price_cents != null).map((b) => ({ min_qty: b.min_qty, price_usd: centsToUsd(b.price_cents) }));
+    product.qty_discounts = allBreaks.filter((b) => b.discount_pct != null).map((b) => ({ min_qty: b.min_qty, discount_pct: b.discount_pct }));
+    product.alt_numbers = await loadAltNumbersForImg(d1(c.env), product.img);
     product.sale_price_usd = product.active_sale_cents != null ? centsToUsd(product.active_sale_cents) : null;
     delete product.active_sale_cents;
     return c.json({ product });
@@ -328,7 +335,9 @@ export default function mount(app) {
     if (!q) return c.json({ error: 'q required' }, 400);
     const products = await d1(c.env).many(
       `SELECT img, name, sku, barcode, category, condition, price_cents / 100.0 AS price_usd, cost_cents / 100.0 AS cost_usd, stock_count, bin_location
-         FROM products WHERE sku = ? OR barcode = ? OR name LIKE '%' || ? || '%' LIMIT 30`, q, q, q);
+         FROM products WHERE sku = ? OR barcode = ? OR name LIKE '%' || ? || '%'
+             OR img IN (SELECT product_img FROM product_alt_numbers WHERE lower(number) LIKE '%' || lower(?) || '%')
+         LIMIT 30`, q, q, q, q);
     return c.json({ products });
   });
 

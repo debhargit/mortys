@@ -335,6 +335,39 @@ export default function mount(app) {
   });
 
   // =====================================================================
+  //  ALTERNATE / INTERCHANGE PART NUMBERS — replace the whole set. The
+  //  counter can scan or search any of these to pull the part up; they also
+  //  feed the storefront search. Same replace-the-whole-set shape as above.
+  // =====================================================================
+  app.put('/api/admin/products/:img/alt-numbers', adminMw, async (c) => {
+    const db = d1(c.env);
+    const img = c.req.param('img');
+    if (!(await db.one('SELECT img FROM products WHERE img = ?', img))) return c.json({ error: 'Not found' }, 404);
+    const b = await c.req.json().catch(() => ({}));
+    const raw = Array.isArray(b.numbers) ? b.numbers : [];
+    const seen = new Set();
+    const rows = [];
+    for (const r of raw) {
+      const number = String(r.number || '').trim().slice(0, 80);
+      if (!number) continue;
+      const key = number.toLowerCase();
+      if (seen.has(key)) return c.json({ error: 'Duplicate number ' + number }, 400);
+      seen.add(key);
+      rows.push({
+        number,
+        kind: r.kind ? String(r.kind).trim().slice(0, 40) || null : null,
+        note: r.note ? String(r.note).trim().slice(0, 200) || null : null,
+      });
+    }
+    const stmts = [{ sql: 'DELETE FROM product_alt_numbers WHERE product_img = ?', binds: [img] }];
+    for (const r of rows) {
+      stmts.push({ sql: 'INSERT INTO product_alt_numbers (product_img, number, kind, note) VALUES (?,?,?,?)', binds: [img, r.number, r.kind, r.note] });
+    }
+    await db.batch(stmts);
+    return c.json({ ok: true, count: rows.length });
+  });
+
+  // =====================================================================
   //  KIT COMPONENTS — replace the whole recipe for one kit product, and
   //  (optionally) set the kit flags in the same batch so is_kit and its
   //  rows can never drift apart. Same replace-the-whole-set shape as

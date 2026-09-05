@@ -2194,6 +2194,13 @@ async function renderProducts(panel){
             fld('Core charge (USD, per unit)', 'peCoreCharge', p.core_charge_usd, 'type="number" step="0.01" min="0" placeholder="0.00"') +
             fld('Environmental fee (USD, per unit)', 'peEnvFee', p.env_fee_usd, 'type="number" step="0.01" min="0" placeholder="0.00"')) +
           '<div style="margin-bottom:12px">' +
+            '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:800;margin-bottom:6px">Alternate part numbers <span style="font-weight:400;text-transform:none;letter-spacing:0">— OEM / interchange / superseded numbers; scan or search any of them to pull this part up</span></div>' +
+            '<div id="peAltRows"></div>' +
+            '<button type="button" class="btn" id="peAltAdd" style="margin-top:4px">+ Add number</button> ' +
+            '<button type="button" class="btn ok" id="peAltSave" style="margin-top:4px">💾 Save alternate numbers</button>' +
+            '<span id="peAltMsg" style="font-size:12.5px;margin-left:8px"></span>' +
+          '</div>' +
+          '<div style="margin-bottom:12px">' +
             '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:800;margin-bottom:6px">Quantity discounts <span style="font-weight:400;text-transform:none;letter-spacing:0">— % off retail once a line reaches a quantity</span></div>' +
             '<div id="peBreakRows"></div>' +
             (p.price_breaks && p.price_breaks.length ? '<div style="font-size:11.5px;color:var(--muted);margin-bottom:4px">+ ' + p.price_breaks.length + ' fixed-price tier' + (p.price_breaks.length === 1 ? '' : 's') + ' set via import/API (not editable here)</div>' : '') +
@@ -2398,6 +2405,46 @@ async function renderProducts(panel){
       };
       typeSel.addEventListener('change', sync);
       sync();
+    })();
+
+    // Alternate part numbers: a repeatable [number, kind, note] row list,
+    // saved on its own via PUT .../alt-numbers (replace-the-whole-set).
+    (function(){
+      var rowsBox = document.getElementById('peAltRows');
+      if (!rowsBox) return;
+      var nums = (p.alt_numbers || []).map(function(a){ return { number: a.number, kind: a.kind || '', note: a.note || '' }; });
+      var paint = function(){
+        rowsBox.innerHTML = nums.length ? nums.map(function(a, i){
+          return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px" data-anrow="' + i + '">' +
+            '<input class="fld anNum" placeholder="part number" value="' + esc(a.number || '') + '" style="width:150px"/>' +
+            '<input class="fld anKind" placeholder="OEM / interchange…" value="' + esc(a.kind || '') + '" style="width:130px"/>' +
+            '<input class="fld anNote" placeholder="note (optional)" value="' + esc(a.note || '') + '" style="flex:1;min-width:80px"/>' +
+            '<button type="button" class="btn anRemove" style="padding:3px 9px;background:#fee2e2;color:#b91c1c">✕</button>' +
+          '</div>';
+        }).join('') : '<div style="font-size:12.5px;color:var(--muted);margin-bottom:6px">No alternate numbers.</div>';
+        rowsBox.querySelectorAll('.anRemove').forEach(function(btn){
+          btn.addEventListener('click', function(){
+            nums.splice(parseInt(btn.closest('[data-anrow]').getAttribute('data-anrow'), 10), 1); paint();
+          });
+        });
+      };
+      paint();
+      document.getElementById('peAltAdd').addEventListener('click', function(){ nums.push({ number: '', kind: '', note: '' }); paint(); });
+      document.getElementById('peAltSave').addEventListener('click', async function(){
+        var m = document.getElementById('peAltMsg');
+        rowsBox.querySelectorAll('[data-anrow]').forEach(function(row, i){
+          nums[i].number = row.querySelector('.anNum').value;
+          nums[i].kind = row.querySelector('.anKind').value;
+          nums[i].note = row.querySelector('.anNote').value;
+        });
+        var payload = nums.map(function(a){ return { number: (a.number || '').trim(), kind: (a.kind || '').trim(), note: (a.note || '').trim() }; })
+          .filter(function(a){ return a.number; });
+        m.textContent = 'Saving…'; m.style.color = 'var(--muted)';
+        try {
+          await api('/api/admin/products/' + encodeURIComponent(p.img) + '/alt-numbers', { method: 'PUT', body: { numbers: payload } });
+          m.textContent = '✓ Saved'; m.style.color = '#166534';
+        } catch (e) { m.textContent = e.message; m.style.color = 'var(--red)'; }
+      });
     })();
 
     // Quantity discounts: a repeatable [qty, % off] row list, saved on its own

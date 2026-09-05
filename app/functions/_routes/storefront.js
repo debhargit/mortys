@@ -19,6 +19,7 @@ import { safeJson } from '../_lib/util.js';
 import { getShopSettings } from '../_lib/shop.js';
 import { bestUnitPriceCents, loadBreaksByImg, ACTIVE_SALE_PRICE_SQL, effectiveBaseCents, loadTierPricesByImg, tierCentsFor } from '../_lib/price_breaks.js';
 import { loadKitComponentsByImg, kitRollupCents, kitBuildableQty } from '../_lib/kits.js';
+import { loadAltNumbersByImg } from '../_lib/alt_numbers.js';
 import { centsToUsd } from '../_lib/money.js';
 
 // Attach each row's price_breaks (ascending by min_qty, in USD) and its
@@ -95,9 +96,13 @@ function productWhere(q) {
   if (q.q) {
     const terms = String(q.q).split(',').map((t) => t.trim().toLowerCase()).filter(Boolean).slice(0, 4);
     for (const t of terms) {
-      where.push("(lower(name) LIKE ? OR lower(make_model) LIKE ? OR lower(coalesce(sku,'')) LIKE ?)");
+      // The alt-number match is a non-correlated IN (no reference to the outer
+      // products row) so SQLite evaluates it once against the small,
+      // lower(number)-indexed product_alt_numbers table -- see migration 0054.
+      where.push("(lower(name) LIKE ? OR lower(make_model) LIKE ? OR lower(coalesce(sku,'')) LIKE ?"
+        + " OR img IN (SELECT product_img FROM product_alt_numbers WHERE lower(number) LIKE ?))");
       const s = '%' + t + '%';
-      binds.push(s, s, s);
+      binds.push(s, s, s, s);
     }
   }
   return { where: where.join(' AND '), binds };
@@ -191,10 +196,13 @@ export default function mount(app) {
 
       // The storefront (index.html / shop.html) asks with ?compact=1 and reads
       // a positional-array format: { cats, rows:[[img,name,make_model,catIdx,
-      // condIdx,price_cents,stock_count,bin], ...] }. price_cents is null when
-      // this caller may not see prices, which is what flips a cart into a
-      // quote request client-side.
+      // condIdx,price_cents,stock_count,bin, alt?], ...] }. price_cents is null
+      // when this caller may not see prices, which is what flips a cart into a
+      // quote request client-side. `alt` (element 8) is a space-joined string
+      // of the part's alternate numbers, present only when it has any, so the
+      // client-side search box can match them too.
       if (q.compact) {
+        const altByImg = await loadAltNumbersByImg(db, rows.map((r) => r.img));
         const catIndex = {};
         const cats = [];
         const packed = rows.map((r) => {
@@ -202,7 +210,10 @@ export default function mount(app) {
           if (!(cat in catIndex)) { catIndex[cat] = cats.length; cats.push(cat); }
           const priceCents = showPrices && r.price_usd != null ? Math.round(r.price_usd * 100) : null;
           const condIdx = String(r.condition || '').toUpperCase() === 'USED' ? 1 : 0;
-          return [r.img, r.name, r.make_model || '', catIndex[cat], condIdx, priceCents, r.stock_count, r.bin_location || ''];
+          const alt = (altByImg.get(r.img) || []).map((a) => a.number).join(' ');
+          const row = [r.img, r.name, r.make_model || '', catIndex[cat], condIdx, priceCents, r.stock_count, r.bin_location || ''];
+          if (alt) row.push(alt);
+          return row;
         });
         return c.json({ cats, rows: packed, total, limit, offset, prices_visible: showPrices });
       }
