@@ -22,6 +22,7 @@ import { verifyQuote } from '../_lib/carriers/index.js';
 import { bookShipment } from './shipping.js';
 import { fygaroEnabled, buildCheckoutUrl } from '../_lib/fygaro.js';
 import { bestUnitPriceCents, loadBreaksByImg, loadActiveSaleCentsByImg, effectiveBaseCents } from '../_lib/price_breaks.js';
+import { loadCoupon, computeCouponDiscount } from '../_lib/coupons.js';
 
 const SITE_BASE = 'https://mortsautoparts.com';
 
@@ -56,6 +57,18 @@ async function repriceForQty(db, items) {
   }
   return items;
 }
+
+// Anything that needs a human at the counter -- an explicit in-store-only
+// flag, or a safeguard (manager approval / ID / Tax ID) that an unattended
+// web checkout has no way to actually satisfy -- blocks online checkout
+// entirely, same as instore_only always has. A redeemable item (e.g. a
+// lottery scratch card) is blocked too: minting its redemption code only
+// happens inside the POS sale path, so selling one online today would just
+// charge the customer with no code ever created.
+function onlineCheckoutBlocked(it) {
+  return !!(it.restricted_instore_only || it.restricted_manager_approval ||
+    it.restricted_id_required || it.restricted_tax_id_required || it.is_redeemable);
+}
 async function nextAccountNumber(db) {
   const rows = await db.many("SELECT account_number AS a FROM users WHERE account_number LIKE 'C-%'");
   let max = 0;
@@ -67,38 +80,8 @@ async function nextId(db, table) {
   return r.n;
 }
 
-async function loadCoupon(db, rawCode) {
-  const code = String(rawCode || '').trim().toUpperCase();
-  if (!code) return { ok: false, error: 'Coupon code required' };
-  const c = await db.one(
-    `SELECT code, kind, amount, min_subtotal, max_redemptions, redeemed_count, expires_at, is_active, description
-       FROM coupons WHERE code = ?`, code);
-  if (!c) return { ok: false, error: 'Invalid coupon code' };
-  if (!c.is_active) return { ok: false, error: 'This coupon is no longer active' };
-  if (c.expires_at && new Date(c.expires_at) < new Date()) return { ok: false, error: 'This coupon has expired' };
-  if (c.max_redemptions != null && c.redeemed_count >= c.max_redemptions)
-    return { ok: false, error: 'This coupon has reached its redemption limit' };
-  // A coupon with no scope rows applies to the whole cart (unchanged
-  // behaviour); one with rows only discounts matching category/product lines.
-  const scopes = await db.many('SELECT category, product_img FROM coupon_scopes WHERE coupon_code = ?', code);
-  return { ok: true, coupon: c, scopes };
-}
-// `items` need product_img/category/qty/price_usd (repriceForQty should run
-// first so this sees the same per-unit price checkout will actually charge).
-function computeCouponDiscount(coupon, items, scopes) {
-  const cartSubtotal = r2(items.reduce((s, it) => s + Number(it.price_usd || 0) * it.qty, 0));
-  if (cartSubtotal < Number(coupon.min_subtotal || 0))
-    return { discount: 0, reason: `Minimum subtotal $${Number(coupon.min_subtotal).toFixed(2)} not met` };
-  let base = cartSubtotal;
-  if (scopes && scopes.length) {
-    const cats = new Set(scopes.filter((s) => s.category).map((s) => s.category));
-    const imgs = new Set(scopes.filter((s) => s.product_img).map((s) => s.product_img));
-    base = r2(items.reduce((s, it) => (imgs.has(it.product_img) || cats.has(it.category)) ? s + Number(it.price_usd || 0) * it.qty : s, 0));
-    if (base <= 0) return { discount: 0, reason: "This coupon doesn't apply to anything in your cart" };
-  }
-  const raw = coupon.kind === 'percent' ? r2(base * (Number(coupon.amount) / 100)) : Number(coupon.amount);
-  return { discount: Math.min(raw, base), reason: null };
-}
+// loadCoupon/computeCouponDiscount now live in _lib/coupons.js, shared with
+// the POS tender (pos_txn.js) so a code behaves identically at the counter.
 
 // ---- shipping -------------------------------------------------------
 const PARISHES = [
@@ -309,13 +292,14 @@ export default function mount(app) {
     if (shipErr) return c.json({ error: shipErr, code: 'ship_incomplete' }, 400);
 
     const items = await db.many(
-      `SELECT c.product_img, c.qty, p.price_cents / 100.0 AS price_usd, p.name, p.make_model, p.category, p.restricted_instore_only
+      `SELECT c.product_img, c.qty, p.price_cents / 100.0 AS price_usd, p.name, p.make_model, p.category,
+              p.restricted_instore_only, p.restricted_manager_approval, p.restricted_id_required, p.restricted_tax_id_required, p.is_redeemable
          FROM cart_items c JOIN products p ON p.img = c.product_img WHERE c.user_id = ?`, uid);
     if (!items.length) return c.json({ error: 'Cart is empty' }, 400);
     if (items.some((it) => it.price_usd == null)) {
       return c.json({ error: 'Some items in your cart are not priced — remove them or submit a quote request for the whole cart.', code: 'unpriced_items' }, 400);
     }
-    const instoreOnly = items.filter((it) => it.restricted_instore_only);
+    const instoreOnly = items.filter(onlineCheckoutBlocked);
     if (instoreOnly.length) {
       return c.json({
         error: `${instoreOnly.map((it) => it.name).join(', ')} can only be purchased in-store — remove ${instoreOnly.length === 1 ? 'it' : 'them'} from your cart to check out online.`,
@@ -436,19 +420,22 @@ export default function mount(app) {
     if (!reqItems.length) return c.json({ error: 'Cart is empty' }, 400);
     const imgs = [...new Set(reqItems.map((it) => String(it.img)))].slice(0, 200);
     const rows = await db.many(
-      `SELECT img, price_cents / 100.0 AS price_usd, name, make_model, category, restricted_instore_only
+      `SELECT img, price_cents / 100.0 AS price_usd, name, make_model, category,
+              restricted_instore_only, restricted_manager_approval, restricted_id_required, restricted_tax_id_required, is_redeemable
          FROM products WHERE img IN (${imgs.map(() => '?').join(',')})`, ...imgs);
     const byImg = new Map(rows.map((r) => [r.img, r]));
     const items = reqItems.map((it) => {
       const p = byImg.get(String(it.img));
       if (!p) return null;
-      return { product_img: p.img, qty: Math.max(1, parseInt(it.qty, 10) || 1), price_usd: p.price_usd, name: p.name, make_model: p.make_model, category: p.category, restricted_instore_only: p.restricted_instore_only };
+      return { product_img: p.img, qty: Math.max(1, parseInt(it.qty, 10) || 1), price_usd: p.price_usd, name: p.name, make_model: p.make_model, category: p.category,
+        restricted_instore_only: p.restricted_instore_only, restricted_manager_approval: p.restricted_manager_approval,
+        restricted_id_required: p.restricted_id_required, restricted_tax_id_required: p.restricted_tax_id_required, is_redeemable: p.is_redeemable };
     }).filter(Boolean);
     if (!items.length) return c.json({ error: 'None of those items are still available' }, 400);
     if (items.some((it) => it.price_usd == null)) {
       return c.json({ error: 'Some items in your cart are not priced — submit a quote request for the whole cart.', code: 'unpriced_items' }, 400);
     }
-    const instoreOnly = items.filter((it) => it.restricted_instore_only);
+    const instoreOnly = items.filter(onlineCheckoutBlocked);
     if (instoreOnly.length) {
       return c.json({
         error: `${instoreOnly.map((it) => it.name).join(', ')} can only be purchased in-store — remove ${instoreOnly.length === 1 ? 'it' : 'them'} from your cart to check out online.`,

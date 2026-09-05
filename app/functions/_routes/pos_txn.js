@@ -11,6 +11,7 @@ import {
   TAX_RATE, POINTS_USD_RATE, POS_SALE_USD,
   nextReceiptNumber, nextInvoiceNumber, nextReturnNumber, nextId, genGiftCardCode, genRedemptionCode,
 } from '../_lib/pos.js';
+import { loadCoupon, computeCouponDiscount } from '../_lib/coupons.js';
 
 const r2 = (n) => Math.round(n * 100) / 100;
 const cts = (usd) => Math.round((Number(usd) || 0) * 100);
@@ -63,7 +64,7 @@ export async function createPosSale(env, b, me) {
   const rules = new Map();
   if (imgs.length) {
     const rows = await db.many(
-      `SELECT img, serial_required, max_discount_pct, is_redeemable, item_type,
+      `SELECT img, serial_required, max_discount_pct, is_redeemable, item_type, category,
               restricted_id_required, restricted_tax_id_required, restricted_manager_approval
          FROM products WHERE img IN (${imgs.map(() => '?').join(',')})`, ...imgs);
     for (const r of rows) rules.set(r.img, r);
@@ -104,6 +105,26 @@ export async function createPosSale(env, b, me) {
   const subtotal = r2(lineCalc.reduce((s, l) => s + l.net, 0));
   const manualDiscount = Math.max(0, Number(b.discount_usd || 0));
 
+  // ----- 1b. coupon -- same lookup/discount math the storefront uses, so a
+  // code behaves identically whether it's typed online or read at the
+  // counter. Not gated by pos.ticket_discount and not counted against the
+  // customer's discount_limit_pct below -- it's a valid promo code, not a
+  // manual override, same treatment loyalty already gets.
+  let couponCode = null, couponDiscount = 0;
+  if (b.coupon_code) {
+    const cr = await loadCoupon(db, b.coupon_code);
+    if (!cr.ok) return { status: 400, body: { error: cr.error } };
+    const couponItems = items.map((it, i) => {
+      const r = rules.get(it.product_img);
+      const qty = Number(it.qty) || 1;
+      return { product_img: it.product_img, category: r ? r.category : null, qty, price_usd: lineCalc[i].net / qty };
+    });
+    const cd = computeCouponDiscount(cr.coupon, couponItems, cr.scopes);
+    if (cd.discount <= 0) return { status: 400, body: { error: cd.reason || "This coupon doesn't apply to this sale." } };
+    couponCode = cr.coupon.code;
+    couponDiscount = cd.discount;
+  }
+
   // ----- 2. loyalty redemption -----
   const walkinRow = await db.one("SELECT id FROM users WHERE email = 'walkin@mortysautoparts.local' LIMIT 1");
   const walkinId = walkinRow ? walkinRow.id : -1;
@@ -130,7 +151,7 @@ export async function createPosSale(env, b, me) {
     }
   }
   const taxExempt = !!(limits && limits.tax_exempt) || b.no_tax === true;
-  const totalDiscount = r2(manualDiscount + loyaltyDiscount);
+  const totalDiscount = r2(manualDiscount + loyaltyDiscount + couponDiscount);
 
   // ----- fulfilment + shipping -----
   const fulfilment = ['pickup', 'delivery', 'shipping'].includes(b.fulfilment) ? b.fulfilment : 'pickup';
@@ -227,8 +248,8 @@ export async function createPosSale(env, b, me) {
        sales_rep_id, sales_rep_name, fulfilment, ship_method, ship_fee_cents, ship_name, ship_phone,
        ship_line1, ship_line2, ship_city, ship_parish, ship_instructions, tracking_number,
        payment_status, amount_paid_cents, balance_due_cents, due_date, po_number, quote_id,
-       verify_id_type, verify_id_number, verify_tax_id, restricted_approved_by)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       verify_id_type, verify_id_number, verify_tax_id, restricted_approved_by, coupon_code, coupon_discount_cents)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     binds: [
       saleId, receipt, invoiceNumber, b.cashier_id || me.id, b.customer_id || null,
       b.customer_name || null, b.customer_phone || null, b.vehicle_info || null,
@@ -248,8 +269,17 @@ export async function createPosSale(env, b, me) {
       b.verify_id_number ? String(b.verify_id_number).slice(0, 80) : null,
       b.verify_tax_id ? String(b.verify_tax_id).slice(0, 40) : null,
       b.restricted_approved_by ? String(b.restricted_approved_by).slice(0, 200) : null,
+      couponCode, cts(couponDiscount),
     ],
   });
+
+  if (couponCode) {
+    stmts.push({ sql: 'UPDATE coupons SET redeemed_count = redeemed_count + 1 WHERE code = ?', binds: [couponCode] });
+    stmts.push({
+      sql: 'INSERT OR IGNORE INTO coupon_redemptions (coupon_code, user_id, sale_id, discount_usd) VALUES (?,?,?,?)',
+      binds: [couponCode, b.customer_id || null, saleId, couponDiscount],
+    });
+  }
 
   for (const p of filled) {
     const amtC = cts(p.amount_usd);
@@ -341,6 +371,7 @@ export async function createPosSale(env, b, me) {
     body: {
       ok: true, id: saleId, receipt_number: receipt, invoice_number: invoiceNumber,
       subtotal_usd: subtotal, discount_usd: totalDiscount, loyalty_discount_usd: loyaltyDiscount,
+      coupon_code: couponCode, coupon_discount_usd: couponDiscount,
       tax_usd: tax, tax_exempt: taxExempt, ship_fee_usd: shipFee, fulfilment,
       total_usd: total, money_in: moneyIn, change_due: changeDue,
       amount_paid_usd: amountPaid, balance_due_usd: balanceDue, payment_status: paymentStatus, due_date: dueDate,
@@ -358,6 +389,35 @@ export default function mount(app) {
     const b = await c.req.json().catch(() => ({}));
     const r = await createPosSale(c.env, b, c.get('user'));
     return c.json(r.body, r.status);
+  });
+
+  // Preview-only: what a coupon code would be worth against the current cart,
+  // so the cart screen can show it before the cashier commits to the sale.
+  // Mirrors createPosSale's own coupon step exactly (same lookup, same
+  // per-line net-of-discount price) -- the sale itself always recomputes
+  // this fresh rather than trusting whatever was last previewed.
+  app.post('/api/admin/pos/coupon-preview', adminMw, async (c) => {
+    const db = d1(c.env);
+    const b = await c.req.json().catch(() => ({}));
+    const items = Array.isArray(b.items) ? b.items : [];
+    if (!items.length) return c.json({ error: 'Cart is empty' }, 400);
+    const cr = await loadCoupon(db, b.code);
+    if (!cr.ok) return c.json({ error: cr.error }, 400);
+    const imgs = [...new Set(items.filter((it) => it.product_img).map((it) => it.product_img))];
+    const catByImg = new Map();
+    if (imgs.length) {
+      const rows = await db.many(`SELECT img, category FROM products WHERE img IN (${imgs.map(() => '?').join(',')})`, ...imgs);
+      for (const r of rows) catByImg.set(r.img, r.category);
+    }
+    const couponItems = items.map((it) => {
+      const qty = Number(it.qty) || 1;
+      const gross = (Number(it.unit_price_usd) + Number(it.core_charge_usd || 0) + Number(it.env_fee_usd || 0)) * qty;
+      const net = Math.max(0, gross - Math.max(0, Number(it.discount_usd || 0)));
+      return { product_img: it.product_img, category: catByImg.get(it.product_img) || null, qty, price_usd: net / qty };
+    });
+    const cd = computeCouponDiscount(cr.coupon, couponItems, cr.scopes);
+    if (cd.discount <= 0) return c.json({ error: cd.reason || "This coupon doesn't apply to this sale." }, 400);
+    return c.json({ code: cr.coupon.code, discount_usd: cd.discount });
   });
 
   // =====================================================================

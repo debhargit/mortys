@@ -2934,6 +2934,7 @@ function posBlankTicket(){
     custName: '', custPhone: '', vehicle: '',
     rep: null,               // { id, name }
     orderDiscRaw: 0, orderDiscMode: 'dollar',
+    couponCode: '', couponDiscount: 0,   // couponDiscount is last previewed/applied value; the sale itself always recomputes it fresh
     redeemPts: 0,
     fulfilment: 'pickup',
     ship: { method:'', fee:0, name:'', phone:'', line1:'', line2:'', city:'', parish:'', country:'Jamaica', instructions:'' },
@@ -3286,14 +3287,18 @@ function posTotals(){
   var maxPts = POS.customer ? (POS.customer.points_balance || 0) : 0;
   var redeemPts = Math.min(maxPts, Math.max(0, parseInt(POS.redeemPts || 0, 10) || 0));
   var loyaltyDisc = Math.min(subtotal - orderDisc, Math.round(redeemPts * POS_POINTS_USD_RATE * 100) / 100);
-  var goods = Math.max(0, subtotal - orderDisc - loyaltyDisc);
+  // Whatever was last previewed/applied via "Apply" -- the sale itself always
+  // recomputes this fresh server-side, so a stale preview (cart changed since)
+  // can only ever make the on-screen total optimistic, never actually wrong.
+  var couponDisc = POS.couponCode ? Math.max(0, Math.min(subtotal - orderDisc - loyaltyDisc, Number(POS.couponDiscount) || 0)) : 0;
+  var goods = Math.max(0, subtotal - orderDisc - loyaltyDisc - couponDisc);
   var shipping = POS.fulfilment === 'pickup' ? 0 : Math.max(0, Number(POS.ship.fee) || 0);
   var taxable = Math.round((goods + shipping) * 100) / 100;
   var tax = (POS.noTax || (POS.customer && POS.customer.tax_exempt)) ? 0 : Math.round(taxable * POS_TAX_RATE * 100) / 100;
   return {
     subtotal: subtotal, lineDisc: lineDisc, orderDisc: orderDisc,
-    redeemPts: redeemPts, loyaltyDisc: loyaltyDisc,
-    totalDisc: Math.round((orderDisc + loyaltyDisc) * 100) / 100,
+    redeemPts: redeemPts, loyaltyDisc: loyaltyDisc, couponDisc: couponDisc,
+    totalDisc: Math.round((orderDisc + loyaltyDisc + couponDisc) * 100) / 100,
     shipping: shipping, taxable: taxable, tax: tax,
     total: Math.round((taxable + tax) * 100) / 100,
   };
@@ -4501,6 +4506,7 @@ async function renderPOS(panel){
         '</span>' +
         (t.lineDisc > 0 ? '<span style="color:#fca5a5">Line −' + fmtMoney(t.lineDisc) + '</span>' : '') +
         (t.orderDisc > 0 ? '<span style="color:#fca5a5">Tkt −' + fmtMoney(t.orderDisc) + '</span>' : '') +
+        (t.couponDisc > 0 ? '<span style="color:#fca5a5">🏷 ' + esc(POS.couponCode) + ' −' + fmtMoney(t.couponDisc) + '</span>' : '') +
         (t.shipping > 0 ? '<span style="color:#7dd3fc">Ship ' + fmtMoney(t.shipping) + '</span>' : '') +
         '<label style="display:flex;align-items:center;gap:4px;margin:0;' + ((POS.customer && POS.customer.tax_exempt) ? 'cursor:default' : 'cursor:pointer') + '" title="' + ((POS.customer && POS.customer.tax_exempt) ? 'Customer is tax exempt' : 'Charge GCT on this ticket') + '">' +
           '<input type="checkbox" id="posTaxToggle" ' + ((POS.customer && POS.customer.tax_exempt) ? 'checked disabled' : (POS.noTax ? '' : 'checked')) + ' style="margin:0"/>' +
@@ -4525,9 +4531,18 @@ async function renderPOS(panel){
           '<option value="pct"' + (POS.orderDiscMode === 'pct' ? ' selected' : '') + '>%</option>' +
         '</select>' +
       '</div>' +
+      '<div style="display:flex;align-items:center;gap:5px;margin-bottom:2px">' +
+        '<span style="color:var(--muted);flex:1">Coupon code</span>' +
+        (POS.couponCode
+          ? '<code style="font-weight:700">' + esc(POS.couponCode) + '</code><button type="button" id="posCouponClear" style="border:0;background:none;color:#b91c1c;cursor:pointer;font-size:13px;padding:0 2px" title="Remove coupon">✕</button>'
+          : '<input id="posCouponInput" placeholder="CODE" autocomplete="off" style="width:80px;padding:3px 5px;border:1px solid var(--line);border-radius:4px;font-size:12px;text-transform:uppercase"/>' +
+            '<button type="button" id="posCouponApply" class="btn" style="padding:3px 8px;font-size:11px">Apply</button>') +
+      '</div>' +
+      '<div id="posCouponMsg" style="font-size:11px;margin-bottom:6px;min-height:14px"></div>' +
       '<div style="display:flex;justify-content:space-between;font-size:13.5px;font-weight:700"><span>Subtotal</span><b>' + fmtMoney(t.subtotal) + '</b></div>' +
       (t.lineDisc > 0 ? '<div style="display:flex;justify-content:space-between;color:#b91c1c"><span>Line discounts</span><b>−' + fmtMoney(t.lineDisc) + '</b></div>' : '') +
       (t.orderDisc > 0 ? '<div style="display:flex;justify-content:space-between;color:#b91c1c"><span>Ticket discount</span><b>−' + fmtMoney(t.orderDisc) + '</b></div>' : '') +
+      (t.couponDisc > 0 ? '<div style="display:flex;justify-content:space-between;color:#b91c1c"><span>Coupon (' + esc(POS.couponCode) + ')</span><b>−' + fmtMoney(t.couponDisc) + '</b></div>' : '') +
       (t.shipping > 0 ? '<div style="display:flex;justify-content:space-between;color:#0e7490"><span>Shipping</span><b>' + fmtMoney(t.shipping) + '</b></div>' : '') +
       // GCT line doubles as its toggle. Checked = charge tax. A customer-level
       // exemption wins and locks the box; otherwise the operator can switch it
@@ -4640,6 +4655,21 @@ async function renderPOS(panel){
     if (om) om.addEventListener('change', function(){ POS.orderDiscMode = this.value; drawCart(); });
     var tt = document.getElementById('posTaxToggle');
     if (tt) tt.addEventListener('change', function(){ POS.noTax = !this.checked; drawCart(); });
+    var cpApply = document.getElementById('posCouponApply');
+    if (cpApply) cpApply.addEventListener('click', async function(){
+      var inp = document.getElementById('posCouponInput');
+      var msg = document.getElementById('posCouponMsg');
+      var code = (inp.value || '').trim();
+      if (!code) return;
+      msg.style.color = 'var(--muted)'; msg.textContent = 'Checking…';
+      try {
+        var r = await api('/api/admin/pos/coupon-preview', { method: 'POST', body: { code: code, items: posCartPayload() } });
+        POS.couponCode = r.code; POS.couponDiscount = r.discount_usd;
+        drawCart();
+      } catch (e) { msg.style.color = 'var(--red)'; msg.textContent = e.message; }
+    });
+    var cpClear = document.getElementById('posCouponClear');
+    if (cpClear) cpClear.addEventListener('click', function(){ POS.couponCode = ''; POS.couponDiscount = 0; drawCart(); });
 
     drawCartFooter(unpriced);
     posApplyPerms();
@@ -7153,6 +7183,7 @@ function openTenderModal(after){
       verify_id_type: POS.verification.id_type || null,
       verify_id_number: POS.verification.id_number || null,
       verify_tax_id: POS.verification.tax_id || null,
+      coupon_code: POS.couponCode || null,
     };
 
     TENDER.posting = true;
