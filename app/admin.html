@@ -6297,15 +6297,16 @@ function openTenderModal(after){
   }
 
   function renderPaymentRow(p, idx, autoFillHint){
-    var methods = { cash:'💵 Cash', card:'💳 Card', cheque:'📝 Cheque', bank:'🏦 Bank', account:'📗 Account' };
+    var methods = { cash:'💵 Cash', card:'💳 Card', cheque:'📝 Cheque', bank:'🏦 Bank', gift_card:'🎁 Gift card', account:'📗 Account' };
     if (!can('pos.charge_to_account')) delete methods.account;   // server also rejects it
     var isCash = p.method === 'cash';
     var isAccount = p.method === 'account';
+    var isGiftCard = p.method === 'gift_card';
     var hint = autoFillHint != null ? autoFillHint.toFixed(2) + ' (auto)' : '0.00';
     // Charging to an account needs a real customer record to charge against.
     var accountBlocked = isAccount && !POS.customer;
     return '<div style="border:1px solid ' + (accountBlocked ? '#fca5a5' : 'var(--line)') + ';border-radius:8px;padding:10px;margin-bottom:6px;background:var(--card-soft)">' +
-      '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-bottom:8px">' +
+      '<div style="display:grid;grid-template-columns:repeat(' + Object.keys(methods).length + ',1fr);gap:4px;margin-bottom:8px">' +
         Object.keys(methods).map(function(m){
           var on = p.method === m;
           return '<button type="button" class="tPayMethodBtn" data-pidx="' + idx + '" data-method="' + m + '" style="padding:6px 3px;border:2px solid ' + (on ? 'var(--navy)' : 'var(--line)') + ';border-radius:6px;background:' + (on ? 'var(--navy)' : 'var(--card)') + ';color:' + (on ? '#fff' : 'var(--heading)') + ';font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">' + methods[m] + '</button>';
@@ -6327,12 +6328,26 @@ function openTenderModal(after){
           : isAccount
             ? '<div><label style="font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;display:block;margin-bottom:3px">Due date</label>' +
                 '<input class="tPayRef" data-pidx="' + idx + '" type="date" value="' + esc(p.reference || '') + '" style="width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:5px;font-family:inherit;font-size:13px"/></div>'
-            : '<div>' +
-                '<label style="font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;display:block;margin-bottom:3px">Reference</label>' +
-                '<input class="tPayRef" data-pidx="' + idx + '" type="text" value="' + esc(p.reference || '') + '" placeholder="' + (p.method === 'card' ? '****1234' : p.method === 'cheque' ? 'CHQ #5012' : 'Txn ref') + '" style="width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:5px;font-family:inherit;font-size:13px"/>' +
-              '</div>'
+            : isGiftCard
+              ? '<div><label style="font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;display:block;margin-bottom:3px">Gift card code</label>' +
+                  '<div style="display:flex;gap:4px">' +
+                    '<input class="tPayRef" data-pidx="' + idx + '" type="text" value="' + esc(p.reference || '') + '" placeholder="e.g. GC-AB12CD" style="flex:1;min-width:0;padding:7px 9px;border:1px solid var(--line);border-radius:5px;font-family:inherit;font-size:13px;text-transform:uppercase"/>' +
+                    '<button type="button" class="tGcCheck" data-pidx="' + idx + '" style="padding:0 10px;border:1px solid var(--line);border-radius:5px;background:var(--card);color:var(--heading);font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit">Check</button>' +
+                  '</div></div>'
+              : '<div>' +
+                  '<label style="font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;display:block;margin-bottom:3px">Reference</label>' +
+                  '<input class="tPayRef" data-pidx="' + idx + '" type="text" value="' + esc(p.reference || '') + '" placeholder="' + (p.method === 'card' ? '****1234' : p.method === 'cheque' ? 'CHQ #5012' : 'Txn ref') + '" style="width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:5px;font-family:inherit;font-size:13px"/>' +
+                '</div>'
         ) +
       '</div>' +
+      (isGiftCard
+        ? '<div style="margin-top:6px;font-size:11.5px;' + (p._gcActive === false ? 'color:#b91c1c' : 'color:var(--muted)') + '">' +
+            (p._gcBalance == null ? 'Enter the code and press Check to look up the balance.'
+              : p._gcActive === false ? 'Card is inactive.'
+              : p._gcBalance > 0 ? 'Balance ' + fmtMoney(p._gcBalance) + ' — Amount above was set to what this ticket can take from it.'
+              : 'Balance ' + fmtMoney(p._gcBalance) + ' — nothing left on this card.') +
+          '</div>'
+        : '') +
       (isCash
         ? '<div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap">' +
             [500,1000,2000,5000].map(function(q){
@@ -6396,7 +6411,9 @@ function openTenderModal(after){
     // Tenders
     document.querySelectorAll('.tPayMethodBtn').forEach(function(b){
       b.addEventListener('click', function(){
-        TENDER.payments[parseInt(this.getAttribute('data-pidx'), 10)].method = this.getAttribute('data-method');
+        var row = TENDER.payments[parseInt(this.getAttribute('data-pidx'), 10)];
+        row.method = this.getAttribute('data-method');
+        delete row._gcBalance; delete row._gcActive;   // stale lookup from a different method/code
         paint();
       });
     });
@@ -6414,7 +6431,35 @@ function openTenderModal(after){
     });
     document.querySelectorAll('.tPayRef').forEach(function(inp){
       inp.addEventListener('input', function(){
-        TENDER.payments[parseInt(this.getAttribute('data-pidx'), 10)].reference = this.value;
+        var row = TENDER.payments[parseInt(this.getAttribute('data-pidx'), 10)];
+        row.reference = this.value;
+        delete row._gcBalance; delete row._gcActive;   // code changed -- last balance no longer applies
+      });
+    });
+    document.querySelectorAll('.tGcCheck').forEach(function(b){
+      b.addEventListener('click', async function(){
+        var i = parseInt(this.getAttribute('data-pidx'), 10);
+        var row = TENDER.payments[i];
+        var code = String(row.reference || '').trim().toUpperCase();
+        if (!code) return alert('Enter the gift card code first.');
+        this.disabled = true; this.textContent = '…';
+        try {
+          var gc = (await api('/api/admin/gift-cards/' + encodeURIComponent(code))).gift_card;
+          row._gcBalance = gc.balance_usd;
+          row._gcActive = !!gc.is_active;
+          if (gc.is_active && gc.balance_usd > 0) {
+            // Same "how much is left to pay" math as the EXACT button, capped
+            // at whatever the card actually has on it.
+            var t = posTotals();
+            var summ = paymentSummary(t.total);
+            var want = summ.blankIdx === i ? Math.max(0, summ.remaining) : Number(row.amount_usd || 0) || Math.max(0, summ.remaining);
+            row.amount_usd = Math.round(Math.min(gc.balance_usd, want) * 100) / 100;
+          }
+        } catch (e) {
+          delete row._gcBalance; delete row._gcActive;
+          alert('Could not look up that gift card: ' + e.message);
+        }
+        paint();
       });
     });
     document.querySelectorAll('.tQuickAmt').forEach(function(btn){
@@ -6477,6 +6522,8 @@ function openTenderModal(after){
     if (summ.moneyIn + 0.001 < summ.dueNow) {
       return alert('Tendered (' + fmtMoney(summ.moneyIn) + ') is less than the amount due now (' + fmtMoney(summ.dueNow) + ').');
     }
+    var missingGcCode = TENDER.payments.some(function(p){ return p.method === 'gift_card' && !(p.reference || '').trim(); });
+    if (missingGcCode) return alert('Enter (and Check) a gift card code for the gift card tender before completing the sale.');
     var missingRef = TENDER.payments.some(function(p){
       return (p.method === 'card' || p.method === 'cheque' || p.method === 'bank') && !(p.reference || '').trim();
     });
