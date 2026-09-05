@@ -270,7 +270,7 @@ export default function mount(app) {
       b.push('%' + term + '%', '%' + term + '%', '%' + term + '%');
     }
     const rows = await d1(c.env).many(
-      `SELECT u.id, u.name, u.email, u.phone, u.price_tier, u.discount_pct, u.account_number,
+      `SELECT u.id, u.name, u.email, u.phone, u.price_tier, u.discount_pct, u.account_number, u.tax_id,
               u.credit_limit_cents / 100.0 AS credit_limit_usd, u.payment_terms_days, u.discount_limit_pct, u.tax_exempt,
               COALESCE((SELECT SUM(delta) FROM points_transactions pt WHERE pt.user_id = u.id), 0) AS points_balance,
               (COALESCE((SELECT SUM(sp.amount_cents) FROM sale_payments sp JOIN pos_sales s ON s.id = sp.sale_id

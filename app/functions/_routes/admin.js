@@ -17,7 +17,7 @@ import { adminMw, roleCanManage } from '../_lib/guards.js';
 import { safeJson, boolify } from '../_lib/util.js';
 import { CAPABILITIES } from '../_lib/capabilities.js';
 import { getShopSettings } from '../_lib/shop.js';
-import { loadBreaksForImg } from '../_lib/price_breaks.js';
+import { loadBreaksForImg, ACTIVE_SALE_PRICE_SQL } from '../_lib/price_breaks.js';
 import { centsToUsd } from '../_lib/money.js';
 
 // 14-day zero-filled series from rows [{ day:'YYYY-MM-DD', <key> }]
@@ -150,16 +150,23 @@ export default function mount(app) {
               p.commission_type, p.commission_value,
               p.core_charge_cents / 100.0 AS core_charge_usd, p.env_fee_cents / 100.0 AS env_fee_usd,
               p.matrix_id, p.matrix_axis1_value, p.matrix_axis2_value, p.matrix_overrides,
-              m.name AS matrix_name, m.axis1_label AS matrix_axis1_label, m.axis2_label AS matrix_axis2_label
+              m.name AS matrix_name, m.axis1_label AS matrix_axis1_label, m.axis2_label AS matrix_axis2_label,
+              p.sale_price_cents / 100.0 AS sale_price_usd, p.sale_starts_at, p.sale_ends_at,
+              ${ACTIVE_SALE_PRICE_SQL} AS active_sale_cents,
+              p.max_discount_pct, p.is_redeemable,
+              p.restricted_instore_only, p.restricted_manager_approval, p.restricted_id_required, p.restricted_tax_id_required
          FROM products p LEFT JOIN suppliers s ON s.id = p.supplier_id
                           LEFT JOIN product_matrices m ON m.id = p.matrix_id
         WHERE p.img = ?`,
       c.req.param('img')
     );
     if (!row) return c.json({ error: 'Not found' }, 404);
-    boolify(row, ['is_active', 'serial_required']);
+    boolify(row, ['is_active', 'serial_required', 'is_redeemable',
+      'restricted_instore_only', 'restricted_manager_approval', 'restricted_id_required', 'restricted_tax_id_required']);
     row.matrix_overrides = safeJson(row.matrix_overrides, []);
     row.price_breaks = (await loadBreaksForImg(d1(c.env), row.img)).map((b) => ({ min_qty: b.min_qty, price_usd: centsToUsd(b.price_cents) }));
+    row.sale_active = row.active_sale_cents != null;
+    delete row.active_sale_cents;
     return c.json({ product: row });
   });
 

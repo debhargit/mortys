@@ -9,7 +9,7 @@ import { d1 } from '../_lib/db.js';
 import { adminMw, userCan } from '../_lib/guards.js';
 import {
   TAX_RATE, POINTS_USD_RATE, POS_SALE_USD,
-  nextReceiptNumber, nextInvoiceNumber, nextReturnNumber, nextId, genGiftCardCode,
+  nextReceiptNumber, nextInvoiceNumber, nextReturnNumber, nextId, genGiftCardCode, genRedemptionCode,
 } from '../_lib/pos.js';
 
 const r2 = (n) => Math.round(n * 100) / 100;
@@ -53,18 +53,42 @@ export default function mount(app) {
     if (b.no_tax === true && !userCan(me, 'pos.no_tax'))
       return c.json({ error: 'Your account is not allowed to switch GCT off.' }, 403);
 
-    // ----- serial numbers -----
+    // ----- per-product server-side rules -----
     // Trust the product record, not the client, for which images actually
-    // require one -- the "required at sale" checkbox is meaningless if a
-    // stale/edited cart line can just omit serial_required.
+    // carry these -- a checkbox client-side is meaningless if a stale/edited
+    // cart line can just omit it. One query covers serial-required, the
+    // per-item discount cap, and the restricted-item flags.
     const imgs = [...new Set(items.filter((it) => it.product_img).map((it) => it.product_img))];
+    const rules = new Map();
     if (imgs.length) {
-      const flagged = await db.many(
-        `SELECT img FROM products WHERE serial_required = 1 AND img IN (${imgs.map(() => '?').join(',')})`, ...imgs);
-      const need = new Set(flagged.map((r) => r.img));
-      const missing = items.find((it) => need.has(it.product_img) && !String(it.serial_number || '').trim());
-      if (missing) return c.json({ error: `"${missing.description}" requires a serial number to sell.` }, 400);
+      const rows = await db.many(
+        `SELECT img, serial_required, max_discount_pct, is_redeemable,
+                restricted_id_required, restricted_tax_id_required, restricted_manager_approval
+           FROM products WHERE img IN (${imgs.map(() => '?').join(',')})`, ...imgs);
+      for (const r of rows) rules.set(r.img, r);
     }
+    const missingSerial = items.find((it) => { const r = rules.get(it.product_img); return r && r.serial_required && !String(it.serial_number || '').trim(); });
+    if (missingSerial) return c.json({ error: `"${missingSerial.description}" requires a serial number to sell.` }, 400);
+
+    for (const it of items) {
+      const r = rules.get(it.product_img);
+      const disc = Math.max(0, Number(it.discount_usd || 0));
+      if (!r || r.max_discount_pct == null || disc <= 0) continue;
+      const gross = (Number(it.unit_price_usd) + Number(it.core_charge_usd || 0) + Number(it.env_fee_usd || 0)) * Number(it.qty);
+      if (gross > 0 && (disc / gross) * 100 > Number(r.max_discount_pct) + 0.01) {
+        return c.json({ error: `"${it.description}" can only be discounted up to ${Number(r.max_discount_pct)}%` }, 400);
+      }
+    }
+
+    const needsId = items.some((it) => { const r = rules.get(it.product_img); return r && r.restricted_id_required; });
+    if (needsId && !String(b.verify_id_number || '').trim())
+      return c.json({ error: 'One or more items require an ID to be recorded before this sale can complete.' }, 400);
+    const needsTaxId = items.some((it) => { const r = rules.get(it.product_img); return r && r.restricted_tax_id_required; });
+    if (needsTaxId && !String(b.verify_tax_id || '').trim())
+      return c.json({ error: 'One or more items require a Tax ID to be recorded before this sale can complete.' }, 400);
+    const needsApproval = items.some((it) => { const r = rules.get(it.product_img); return r && r.restricted_manager_approval; });
+    if (needsApproval && !String(b.restricted_approved_by || '').trim())
+      return c.json({ error: 'One or more items require manager approval before this sale can complete.' }, 400);
 
     // ----- 1. line totals -----
     // core_charge_usd / env_fee_usd travel per unit (what the product record
@@ -201,8 +225,9 @@ export default function mount(app) {
          payment_method, reference, notes, loyalty_points_redeemed, loyalty_discount_cents, loyalty_points_earned,
          sales_rep_id, sales_rep_name, fulfilment, ship_method, ship_fee_cents, ship_name, ship_phone,
          ship_line1, ship_line2, ship_city, ship_parish, ship_instructions, tracking_number,
-         payment_status, amount_paid_cents, balance_due_cents, due_date, po_number, quote_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         payment_status, amount_paid_cents, balance_due_cents, due_date, po_number, quote_id,
+         verify_id_type, verify_id_number, verify_tax_id, restricted_approved_by)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       binds: [
         saleId, receipt, invoiceNumber, b.cashier_id || me.id, b.customer_id || null,
         b.customer_name || null, b.customer_phone || null, b.vehicle_info || null,
@@ -218,6 +243,10 @@ export default function mount(app) {
         paymentStatus, cts(amountPaid), cts(balanceDue), dueDate,
         b.po_number ? String(b.po_number).slice(0, 60) : null,
         Number.isInteger(b.quote_id) ? b.quote_id : null,
+        b.verify_id_type ? String(b.verify_id_type).slice(0, 40) : null,
+        b.verify_id_number ? String(b.verify_id_number).slice(0, 80) : null,
+        b.verify_tax_id ? String(b.verify_tax_id).slice(0, 40) : null,
+        b.restricted_approved_by ? String(b.restricted_approved_by).slice(0, 200) : null,
       ],
     });
 
@@ -239,18 +268,23 @@ export default function mount(app) {
       }
     }
 
+    // Pre-assigned like saleId -- a redemption instrument (below) needs to
+    // reference its sale_item_id, and D1 batches can't feed one statement's
+    // last_insert_rowid() into a later one.
+    const saleItemBaseId = await nextId(c.env, 'pos_sale_items');
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
       const lc = lineCalc[i];
+      const saleItemId = saleItemBaseId + i;
       let warrantyUntil = null;
       if (it.warranty_days) warrantyUntil = new Date(Date.now() + Number(it.warranty_days) * 86400000).toISOString().slice(0, 10);
       stmts.push({
         sql: `INSERT INTO pos_sale_items
-          (sale_id, product_img, description, qty, unit_price_cents, core_charge_cents, env_fee_cents,
+          (id, sale_id, product_img, description, qty, unit_price_cents, core_charge_cents, env_fee_cents,
            discount_cents, discount_note, serial_number, warranty_until, total_cents)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         binds: [
-          saleId, it.product_img || null, it.description, Number(it.qty), cts(it.unit_price_usd),
+          saleItemId, saleId, it.product_img || null, it.description, Number(it.qty), cts(it.unit_price_usd),
           // Stored as the line's total, not per-unit -- see the gross-total
           // comment above; the return endpoint divides this back by qty.
           cts((Number(it.core_charge_usd) || 0) * Number(it.qty)), cts((Number(it.env_fee_usd) || 0) * Number(it.qty)),
@@ -258,6 +292,17 @@ export default function mount(app) {
           it.serial_number || null, warrantyUntil, cts(lc.net),
         ],
       });
+      // Redeemable items (e.g. lottery scratch cards) mint one instrument per
+      // sold unit -- posAddToCart forces qty 1 per line for these, same as
+      // serial_required, so this is exactly one instrument per such line.
+      const rule = rules.get(it.product_img);
+      if (rule && rule.is_redeemable) {
+        stmts.push({
+          sql: `INSERT INTO redemption_instruments (code, product_img, sale_id, sale_item_id, face_value_cents, sold_by)
+                VALUES (?,?,?,?,?,?)`,
+          binds: [genRedemptionCode(), it.product_img, saleId, saleItemId, cts(it.unit_price_usd), me.id],
+        });
+      }
       if (it.product_img) {
         stmts.push({ sql: `UPDATE products SET stock_count = MAX(0, stock_count - ?) WHERE img = ?`, binds: [Number(it.qty), it.product_img] });
       }

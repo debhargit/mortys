@@ -87,7 +87,7 @@ export default function mount(app) {
     const db = d1(c.env);
     const me = c.get('user');
     const b = await c.req.json().catch(() => ({}));
-    if ((b.price_usd != null || b.cost_usd != null || b.list_price_usd != null) && !userCan(me, 'inventory.edit_price'))
+    if ((b.price_usd != null || b.cost_usd != null || b.list_price_usd != null || b.sale_price_usd !== undefined) && !userCan(me, 'inventory.edit_price'))
       return c.json({ error: 'Your account is not allowed to edit product pricing.' }, 403);
     if (b.stock_count != null && !userCan(me, 'inventory.adjust_stock'))
       return c.json({ error: 'Your account is not allowed to adjust stock counts.' }, 403);
@@ -126,6 +126,15 @@ export default function mount(app) {
       put('commission_type = ?', ['percent', 'amount', 'none'].includes(t) ? t : null);
     }
     if (b.commission_value !== undefined) put('commission_value = ?', numOrNull(b.commission_value));
+    if (b.sale_price_usd !== undefined) put('sale_price_cents = ?', b.sale_price_usd === '' ? null : usdToCents(b.sale_price_usd));
+    if (b.sale_starts_at !== undefined) put('sale_starts_at = ?', b.sale_starts_at || null);
+    if (b.sale_ends_at !== undefined) put('sale_ends_at = ?', b.sale_ends_at || null);
+    if (b.max_discount_pct !== undefined) put('max_discount_pct = ?', numOrNull(b.max_discount_pct));
+    if (b.is_redeemable !== undefined) put('is_redeemable = ?', toBit(b.is_redeemable));
+    if (b.restricted_instore_only !== undefined) put('restricted_instore_only = ?', toBit(b.restricted_instore_only));
+    if (b.restricted_manager_approval !== undefined) put('restricted_manager_approval = ?', toBit(b.restricted_manager_approval));
+    if (b.restricted_id_required !== undefined) put('restricted_id_required = ?', toBit(b.restricted_id_required));
+    if (b.restricted_tax_id_required !== undefined) put('restricted_tax_id_required = ?', toBit(b.restricted_tax_id_required));
 
     // Matrix-item bookkeeping: a plain save from the product editor always
     // resubmits every field, not just the deltas, so "touched" alone can't

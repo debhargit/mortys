@@ -17,15 +17,20 @@ import { sendEmail } from '../_lib/mailer.js';
 import { readUploadBody } from '../_lib/uploads.js';
 import { safeJson } from '../_lib/util.js';
 import { getShopSettings } from '../_lib/shop.js';
-import { bestUnitPriceCents, loadBreaksByImg } from '../_lib/price_breaks.js';
+import { bestUnitPriceCents, loadBreaksByImg, ACTIVE_SALE_PRICE_SQL, effectiveBaseCents } from '../_lib/price_breaks.js';
 import { centsToUsd } from '../_lib/money.js';
 
-// Attach each row's price_breaks (ascending by min_qty, in USD) from a
-// pre-fetched img -> breaks Map -- shared by the list and single-product
-// endpoints below so both expose bulk pricing the same way.
-function withBreaks(row, breaksByImg) {
+// Attach each row's price_breaks (ascending by min_qty, in USD) and its
+// active sale price (null when there's no sale or it's outside its window)
+// from a pre-fetched img -> breaks Map -- shared by the list and
+// single-product endpoints below so both expose pricing the same way.
+// price_cents/active_sale_cents ride along on the row purely to compute this
+// and are stripped before the row goes out.
+function withPricing(row, breaksByImg) {
   const b = breaksByImg.get(row.img) || [];
   row.price_breaks = b.map((x) => ({ min_qty: x.min_qty, price_usd: centsToUsd(x.price_cents) }));
+  row.sale_price_usd = row.active_sale_cents != null ? centsToUsd(row.active_sale_cents) : null;
+  delete row.price_cents; delete row.active_sale_cents;
   return row;
 }
 
@@ -85,13 +90,15 @@ const SORTS = {
 
 const LIST_COLS = `
   img, name, make_model, category, condition,
-  price_cents / 100.0 AS price_usd,
+  price_cents, price_cents / 100.0 AS price_usd,
   stock_count, low_threshold, sku, NULL AS barcode, bin_location, location,
   CASE WHEN stock_count <= 0 THEN 'out'
        WHEN stock_count <= low_threshold THEN 'low' ELSE 'in' END AS stock_level,
   serial_required, warranty_days,
   core_charge_cents / 100.0 AS core_charge_usd, env_fee_cents / 100.0 AS env_fee_usd,
-  matrix_id`;
+  matrix_id, ${ACTIVE_SALE_PRICE_SQL} AS active_sale_cents,
+  max_discount_pct, is_redeemable,
+  restricted_instore_only, restricted_manager_approval, restricted_id_required, restricted_tax_id_required`;
 
 const COUNT_CAP = 5000;
 
@@ -153,7 +160,9 @@ export default function mount(app) {
       let list = showPrices ? rows : rows.map((r) => ({ ...r, price_usd: null }));
       if (showPrices) {
         const breaksByImg = await loadBreaksByImg(db, list.map((r) => r.img));
-        list = list.map((r) => withBreaks(r, breaksByImg));
+        list = list.map((r) => withPricing(r, breaksByImg));
+      } else {
+        list = list.map((r) => { delete r.price_cents; delete r.active_sale_cents; return r; });
       }
       return c.json({ products: list, total, limit, offset, prices_visible: showPrices, approximate: capped, count_mode: capped ? 'capped' : 'exact' });
     } catch (e) {
@@ -173,16 +182,19 @@ export default function mount(app) {
 
   app.get('/api/products/:img', async (c) => {
     const row = await d1(c.env).one(
-      'SELECT *, price_cents / 100.0 AS price_usd, cost_cents / 100.0 AS cost_usd FROM products WHERE img = ? AND is_active = 1',
+      `SELECT *, price_cents / 100.0 AS price_usd, cost_cents / 100.0 AS cost_usd,
+              ${ACTIVE_SALE_PRICE_SQL} AS active_sale_cents
+         FROM products WHERE img = ? AND is_active = 1`,
       c.req.param('img')
     );
     if (!row) return c.json({ error: 'Not found' }, 404);
     const showPrices = await canSeePrices(c);
     if (!showPrices) {
       row.price_usd = null; row.price_cents = null;
+      row.active_sale_cents = null; row.sale_price_usd = null;
       row.cost_usd = null; row.cost_cents = null;
     } else {
-      withBreaks(row, await loadBreaksByImg(d1(c.env), [row.img]));
+      withPricing(row, await loadBreaksByImg(d1(c.env), [row.img]));
     }
     return c.json({ product: row });
   });
@@ -200,7 +212,8 @@ export default function mount(app) {
   app.get('/api/cart', authMw, async (c) => {
     const db = d1(c.env);
     const rows = await db.many(
-      `SELECT c.product_img AS img, c.qty, p.name, p.make_model, p.price_cents, p.price_cents / 100.0 AS price_usd, p.condition
+      `SELECT c.product_img AS img, c.qty, p.name, p.make_model, p.price_cents, p.price_cents / 100.0 AS price_usd, p.condition,
+              ${ACTIVE_SALE_PRICE_SQL} AS active_sale_cents
          FROM cart_items c JOIN products p ON p.img = c.product_img
         WHERE c.user_id = ? ORDER BY c.updated_at DESC`,
       c.get('user').id
@@ -212,9 +225,12 @@ export default function mount(app) {
       total = 0;
       rows.forEach((r) => {
         const breaks = breaksByImg.get(r.img) || [];
-        const effCents = bestUnitPriceCents(r.price_cents, breaks, r.qty);
+        r.sale_price_usd = r.active_sale_cents != null ? centsToUsd(r.active_sale_cents) : null;
+        const baseCents = effectiveBaseCents(r.price_cents, r.active_sale_cents);
+        const effCents = bestUnitPriceCents(baseCents, breaks, r.qty);
         r.effective_price_usd = centsToUsd(effCents);
         r.price_breaks = breaks.map((x) => ({ min_qty: x.min_qty, price_usd: centsToUsd(x.price_cents) }));
+        delete r.active_sale_cents;
         total += Number(r.effective_price_usd || 0) * r.qty;
         delete r.price_cents;
       });

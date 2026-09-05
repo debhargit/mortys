@@ -696,7 +696,8 @@ var renderers = {
   dashboard:     renderDashboard,
   reports:       renderReports,
   coupons:       renderCoupons,
-  giftcards:     renderGiftCards
+  giftcards:     renderGiftCards,
+  redemptions:   renderRedemptions
 };
 // POS Terminal, not Dashboard, is the default landing tab -- this is a
 // counter-sales app first; staff signing in should land straight on the
@@ -767,6 +768,7 @@ var SIDEBAR_GROUPS = [
     { tab:'reviews', label:'⭐ Reviews' },
     { tab:'coupons', label:'🏷 Coupons' },
     { tab:'giftcards', label:'🎁 Gift Cards' },
+    { tab:'redemptions', label:'🎟 Redeemables' },
   ]},
   { title: '👥 Customers', items: [
     { tab:'customers', label:'👥 Customers (CRM)' },
@@ -2163,6 +2165,23 @@ async function renderProducts(panel){
             '<button type="button" class="btn ok" id="peBreakSave" style="margin-top:4px">💾 Save pricing tiers</button>' +
             '<span id="peBreakMsg" style="font-size:12.5px;margin-left:8px"></span>' +
           '</div>' +
+          sect('Sale price',
+            fld('Sale price (USD)', 'peSalePrice', p.sale_price_usd, 'type="number" step="0.01" min="0" placeholder="none"') +
+            (p.sale_active ? '<div style="align-self:center;font-size:12px;font-weight:700;color:#166534">🏷 Sale is live</div>' : '<div></div>') +
+            fld('Starts', 'peSaleStarts', p.sale_starts_at, 'type="date" placeholder="immediately"') +
+            fld('Ends (auto-expires)', 'peSaleEnds', p.sale_ends_at, 'type="date" placeholder="never"')) +
+          sect('Discount limit',
+            fld('Max discount %', 'peMaxDiscount', p.max_discount_pct, 'type="number" step="0.1" min="0" max="100" placeholder="no item-specific limit"') +
+            '<div style="align-self:center;font-size:11.5px;color:var(--muted)">0 = never discountable. Blank = only the customer\'s own limit applies.</div>') +
+          sect('Restrictions',
+            '<div style="grid-column:1/-1;display:flex;flex-direction:column;gap:6px">' +
+              '<label style="display:flex;align-items:center;gap:7px;font-size:13px"><input type="checkbox" id="peResInstore"' + (p.restricted_instore_only ? ' checked' : '') + '/> In-store only <small style="color:var(--muted)">— blocked from online checkout</small></label>' +
+              '<label style="display:flex;align-items:center;gap:7px;font-size:13px"><input type="checkbox" id="peResApproval"' + (p.restricted_manager_approval ? ' checked' : '') + '/> Requires manager approval to sell</label>' +
+              '<label style="display:flex;align-items:center;gap:7px;font-size:13px"><input type="checkbox" id="peResId"' + (p.restricted_id_required ? ' checked' : '') + '/> Requires an ID to be recorded at sale</label>' +
+              '<label style="display:flex;align-items:center;gap:7px;font-size:13px"><input type="checkbox" id="peResTaxId"' + (p.restricted_tax_id_required ? ' checked' : '') + '/> Requires a Tax ID to be recorded at sale</label>' +
+            '</div>') +
+          sect('Redeemable item',
+            '<div style="grid-column:1/-1"><label style="display:inline-flex;align-items:center;gap:7px;font-size:13px"><input type="checkbox" id="peRedeemable"' + (p.is_redeemable ? ' checked' : '') + '/> This is a redeemable item <small style="color:var(--muted)">(e.g. a scratch card — each unit sold mints a code under 🎟 Redeemables)</small></label></div>') +
           sect('Status',
             '<div style="grid-column:1/-1"><label style="display:inline-flex;align-items:center;gap:7px;font-size:13px"><input type="checkbox" id="peActive"' + (p.is_active === false ? '' : ' checked') + '/> Listed / active</label></div>') +
           '<div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:6px">' +
@@ -2377,6 +2396,15 @@ async function renderProducts(panel){
       body.commission_value = rawCommVal !== '' ? Number(rawCommVal) : null;
       body.core_charge_usd = (document.getElementById('peCoreCharge').value || '').trim();
       body.env_fee_usd = (document.getElementById('peEnvFee').value || '').trim();
+      body.sale_price_usd = (document.getElementById('peSalePrice').value || '').trim();
+      body.sale_starts_at = document.getElementById('peSaleStarts').value || '';
+      body.sale_ends_at = document.getElementById('peSaleEnds').value || '';
+      body.max_discount_pct = (document.getElementById('peMaxDiscount').value || '').trim();
+      body.restricted_instore_only = document.getElementById('peResInstore').checked;
+      body.restricted_manager_approval = document.getElementById('peResApproval').checked;
+      body.restricted_id_required = document.getElementById('peResId').checked;
+      body.restricted_tax_id_required = document.getElementById('peResTaxId').checked;
+      body.is_redeemable = document.getElementById('peRedeemable').checked;
       msg.textContent = 'Saving…'; msg.style.color = 'var(--muted)';
       try {
         await api('/api/admin/products/' + encodeURIComponent(p.img), { method: 'PATCH', body: body });
@@ -2891,6 +2919,8 @@ function posBlankTicket(){
     noTax: false,          // operator switched GCT off for this ticket — overrides the default rate,
                            // distinct from a customer-level tax exemption
     tag: '',               // free-text label from the 👁 preview menu ("Tag cart")
+    restrictedApprovedBy: null,   // manager's name once a restricted-item approval has been granted this ticket
+    verification: { id_type: '', id_number: '', tax_id: '' },  // captured for restricted items requiring one
   };
 }
 function posLoadState(){
@@ -2903,6 +2933,7 @@ function posLoadState(){
       // missing keys the rest of this panel dereferences.
       Object.keys(blank).forEach(function(k){ if (s[k] === undefined) s[k] = blank[k]; });
       s.ship = Object.assign({}, blank.ship, s.ship || {});
+      s.verification = Object.assign({}, blank.verification, s.verification || {});
       return s;
     }
   } catch (_) {}
@@ -3279,22 +3310,33 @@ function posBestUnitPrice(basePrice, breaks, qty){
 
 function posAddToCart(p, qty){
   var serialRequired = !!p.serial_required;
-  var basePrice = Number(p.price_usd) || 0;
+  var isRedeemable = !!p.is_redeemable;
+  // The lower of the regular price and an active sale price -- mirrors
+  // _lib/price_breaks.js's effectiveBaseCents; quantity breaks then apply on
+  // top of *this*, via posBestUnitPrice, exactly like the server does.
+  var regularPrice = Number(p.price_usd) || 0;
+  var basePrice = (p.sale_price_usd != null && Number(p.sale_price_usd) < regularPrice) ? Number(p.sale_price_usd) : regularPrice;
   var priceBreaks = p.price_breaks || [];
   var extra = {
     location: p.location, bin_location: p.bin_location, stock_count: p.stock_count,
     disc: 0, discPct: 0, discMode: 'amt', discNote: '',
-    serialRequired: serialRequired, serialNumber: '',
+    serialRequired: serialRequired, serialNumber: '', isRedeemable: isRedeemable,
     warrantyDays: p.warranty_days || null,
     coreChargeUsd: Number(p.core_charge_usd) || 0, envFeeUsd: Number(p.env_fee_usd) || 0,
     basePrice: basePrice, priceBreaks: priceBreaks, priceManual: false,
+    regularPrice: regularPrice, saleActive: basePrice < regularPrice,
+    maxDiscountPct: p.max_discount_pct != null && p.max_discount_pct !== '' ? Number(p.max_discount_pct) : null,
+    restrictedManagerApproval: !!p.restricted_manager_approval,
+    restrictedIdRequired: !!p.restricted_id_required,
+    restrictedTaxIdRequired: !!p.restricted_tax_id_required,
   };
-  if (serialRequired) {
-    // Each serialized unit needs its own serial number, so it can't share a
-    // line (and a shared qty) with another unit the way an ordinary part
-    // does -- every "add" of a serialized item is its own cart line, always
-    // qty 1, so quantity-break pricing (which needs qty >= 2 on one line)
-    // never applies here.
+  if (serialRequired || isRedeemable) {
+    // Each serialized unit needs its own serial number (typed by the
+    // cashier), and each redeemable unit mints its own code (server-side,
+    // after the sale) -- either way it can't share a line (and a shared qty)
+    // with another unit the way an ordinary part does. Every "add" is its
+    // own cart line, always qty 1, so quantity-break pricing (which needs
+    // qty >= 2 on one line) never applies here.
     var n = Math.max(1, qty || 1);
     for (var i = 0; i < n; i++) {
       POS.cart.push(Object.assign({ img: p.img, name: p.name, make_model: p.make_model, sku: p.sku || null,
@@ -3303,7 +3345,7 @@ function posAddToCart(p, qty){
     posSaveState();
     return;
   }
-  var ex = POS.cart.find(function(c){ return c.img === p.img && !c.serialRequired; });
+  var ex = POS.cart.find(function(c){ return c.img === p.img && !c.serialRequired && !c.isRedeemable; });
   if (ex) {
     ex.qty += (qty || 1);
     if (!ex.priceManual) ex.price = posBestUnitPrice(ex.basePrice, ex.priceBreaks, ex.qty);
@@ -4293,6 +4335,9 @@ async function renderPOS(panel){
             ? '<input class="posSerialNum" data-sidx="' + idx + '" value="' + esc(i.serialNumber || '') + '" placeholder="serial # — required to sell" ' +
               'style="width:100%;margin-top:3px;padding:3px 6px;border:1px solid ' + (i.serialNumber ? '#86efac' : '#fca5a5') + ';border-radius:4px;font-size:' + posFS(10.5) + ';font-weight:700;font-family:inherit"/>'
             : '') +
+          (i.isRedeemable
+            ? '<small style="display:block;margin-top:2px;color:#7c3aed;font-weight:700">🎟 redeemable — a code is generated on sale</small>'
+            : '') +
           (d > 0
             ? '<input class="posDiscNote" data-nidx="' + idx + '" value="' + esc(i.discNote || '') + '" placeholder="reason for discount (prints on the invoice)" ' +
               'style="width:100%;margin-top:3px;padding:3px 6px;border:1px solid #fde68a;border-radius:4px;font-size:' + posFS(10.5) + ';font-weight:700;font-family:inherit"/>'
@@ -4310,6 +4355,8 @@ async function renderPOS(panel){
             'style="width:86px;padding:4px;border:1px solid ' + (i.price > 0 ? 'var(--line)' : '#818cf8') + ';border-radius:5px;font-size:' + posFS(12) + ';font-weight:700;text-align:right;font-family:inherit"/>' +
           (!i.priceManual && i.priceBreaks && i.priceBreaks.length && Number(i.price) < Number(i.basePrice)
             ? '<small style="display:block;color:#0e7490;font-weight:700;font-size:' + posFS(9.5) + '">🏷 bulk qty ' + i.qty + '</small>' : '') +
+          (!i.priceManual && i.saleActive
+            ? '<small style="display:block;color:#166534;font-weight:700;font-size:' + posFS(9.5) + '">🏷 sale price</small>' : '') +
         '</span>' +
         '<span style="width:128px;flex-shrink:0;display:flex;gap:3px;align-items:center;justify-content:flex-end">' +
           '<select class="posDiscMode" data-dmidx="' + idx + '" title="Enter the discount as a dollar amount or a percent of this line" ' +
@@ -4387,8 +4434,13 @@ async function renderPOS(panel){
         '</div>' +
         (!i.priceManual && i.priceBreaks && i.priceBreaks.length && Number(i.price) < Number(i.basePrice)
           ? '<small style="display:block;margin-top:2px;color:#0e7490;font-weight:700">🏷 bulk price for qty ' + i.qty + '</small>' : '') +
+        (!i.priceManual && i.saleActive
+          ? '<small style="display:block;margin-top:2px;color:#166534;font-weight:700">🏷 sale price</small>' : '') +
         (i.serialRequired
           ? '<input class="posSerialNum" data-sidx="' + idx + '" value="' + esc(i.serialNumber || '') + '" placeholder="serial # — required to sell" style="width:100%;margin-top:4px;padding:3px 6px;border:1px solid ' + (i.serialNumber ? '#86efac' : '#fca5a5') + ';border-radius:4px;font-size:11px"/>'
+          : '') +
+        (i.isRedeemable
+          ? '<small style="display:block;margin-top:2px;color:#7c3aed;font-weight:700">🎟 redeemable — a code is generated on sale</small>'
           : '') +
         (d > 0
           ? '<input class="posDiscNote" data-nidx="' + idx + '" value="' + esc(i.discNote || '') + '" placeholder="reason for discount (prints on invoice)" style="width:100%;margin-top:4px;padding:3px 6px;border:1px solid #fde68a;background:var(--card)beb;border-radius:4px;font-size:11px"/>'
@@ -4504,13 +4556,18 @@ async function renderPOS(panel){
         var want = isPct ? Math.round(gross * raw / 100 * 100) / 100 : raw;
         var was = posLineDisc(line);
 
-        // The customer's discount_limit_pct is the ceiling a cashier may give
-        // on their own. Past it, a manager PIN authorises this one line --
-        // which is the whole point of the override: the cashier keeps the till
-        // and the manager does not have to sign in and out to approve a
-        // discount. Owners and managers are never asked; they already hold the
-        // authority the prompt would be checking for.
-        var cap = POS.customer && POS.customer.discount_limit_pct;
+        // The customer's discount_limit_pct and this specific product's own
+        // max_discount_pct are both ceilings a cashier may give on their own
+        // -- whichever is stricter wins. Past it, a manager PIN authorises
+        // this one line -- which is the whole point of the override: the
+        // cashier keeps the till and the manager does not have to sign in
+        // and out to approve a discount. Owners and managers are never
+        // asked; they already hold the authority the prompt would be
+        // checking for.
+        var custCap = POS.customer && POS.customer.discount_limit_pct;
+        var itemCap = line.maxDiscountPct;
+        var cap = itemCap != null && (custCap == null || itemCap < custCap) ? itemCap : custCap;
+        var capIsItem = cap === itemCap && itemCap != null;
         var capValue = (cap != null && gross > 0) ? (gross * Number(cap) / 100) : null;
 
         if (capValue != null && want > capValue + 0.001 && want > was &&
@@ -4518,7 +4575,7 @@ async function renderPOS(panel){
           var appr = await posPinPrompt({
             purpose: 'override',
             title: 'Manager approval needed',
-            detail: 'Discount above this customer’s ' + cap + '% limit (' + fmtMoney(capValue) + ' on this line).',
+            detail: (capIsItem ? 'This part\'s own discount limit is ' : 'Discount above this customer’s ') + cap + '% limit (' + fmtMoney(capValue) + ' on this line).',
           });
           if (!appr) { drawCart(); return; }  // declined -- redraw restores the old value
           line.discApprovedBy = appr.name;
@@ -6985,6 +7042,29 @@ function openTenderModal(after){
     }
     var missingSerial = POS.cart.find(function(i){ return i.serialRequired && !(i.serialNumber || '').trim(); });
     if (missingSerial) return alert('"' + missingSerial.name + '" requires a serial number to sell — enter it on the cart line.');
+
+    var needApproval = POS.cart.some(function(i){ return i.restrictedManagerApproval; });
+    if (needApproval && !POS.restrictedApprovedBy && !['owner', 'manager'].includes(CURRENT_ADMIN_ROLE)) {
+      var appr = await posPinPrompt({
+        purpose: 'override', title: 'Manager approval needed',
+        detail: 'One or more items in this cart require manager approval to sell.',
+      });
+      if (!appr) return;
+      POS.restrictedApprovedBy = appr.name;
+      posSaveState();
+    }
+    var needId = POS.cart.some(function(i){ return i.restrictedIdRequired; }) && !(POS.verification.id_number || '').trim();
+    var needTaxId = POS.cart.some(function(i){ return i.restrictedTaxIdRequired; }) && !(POS.verification.tax_id || '').trim();
+    if (needId || needTaxId) {
+      var v = await posVerificationPrompt({
+        needId: needId, needTaxId: needTaxId,
+        taxIdPrefill: (POS.customer && POS.customer.tax_id) || '',
+      });
+      if (!v) return;
+      if (needId) { POS.verification.id_type = v.id_type; POS.verification.id_number = v.id_number; }
+      if (needTaxId) POS.verification.tax_id = v.tax_id;
+      posSaveState();
+    }
     if (summ.moneyIn + 0.001 < summ.dueNow) {
       return alert('Tendered (' + fmtMoney(summ.moneyIn) + ') is less than the amount due now (' + fmtMoney(summ.dueNow) + ').');
     }
@@ -7040,6 +7120,10 @@ function openTenderModal(after){
       quote_id: POS.quoteId || null,
       hold_id: POS.holdId || null,
       no_tax: !!POS.noTax,   // operator switched GCT off on this ticket; server re-checks
+      restricted_approved_by: POS.restrictedApprovedBy || null,
+      verify_id_type: POS.verification.id_type || null,
+      verify_id_number: POS.verification.id_number || null,
+      verify_tax_id: POS.verification.tax_id || null,
     };
 
     TENDER.posting = true;
@@ -9779,6 +9863,48 @@ function posPinPrompt(opts){
     }
     document.addEventListener('keydown', onKey);
     paint();
+  });
+}
+
+// Captures whatever a restricted item demands before the sale can complete —
+// an ID (type + number) and/or a Tax ID — same self-contained overlay style
+// as posPinPrompt. Resolves { id_type, id_number, tax_id } or null on cancel.
+function posVerificationPrompt(opts){
+  var o = opts || {};
+  return new Promise(function(resolve){
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(2,6,23,.72);z-index:9999;display:flex;align-items:center;justify-content:center';
+    wrap.innerHTML =
+      '<div style="background:var(--card);border-radius:14px;padding:22px;width:360px;box-shadow:0 24px 60px rgba(0,0,0,.45)">' +
+        '<div style="font-weight:800;font-size:16px;color:var(--heading);margin-bottom:2px">Verification required</div>' +
+        '<div style="font-size:12.5px;color:var(--muted);margin-bottom:14px">' + esc(o.detail || 'One or more items require this to be recorded before the sale can complete.') + '</div>' +
+        (o.needId ?
+          '<label class="lbl">ID type</label><select id="vfIdType" class="fld" style="margin-bottom:8px;width:100%">' +
+            ['drivers_license', 'passport', 'national_id', 'other'].map(function(t){ return '<option value="' + t + '">' + t.replace(/_/g, ' ') + '</option>'; }).join('') +
+          '</select>' +
+          '<label class="lbl">ID number</label><input id="vfIdNumber" class="fld" style="margin-bottom:10px;width:100%"/>'
+          : '') +
+        (o.needTaxId ?
+          '<label class="lbl">Tax ID</label><input id="vfTaxId" class="fld" value="' + esc(o.taxIdPrefill || '') + '" style="margin-bottom:10px;width:100%"/>'
+          : '') +
+        '<div id="vfErr" style="display:none;color:var(--red);font-size:12px;margin-bottom:8px"></div>' +
+        '<div style="display:flex;gap:8px">' +
+          '<button id="vfOk" class="btn ok" style="flex:1">Confirm</button>' +
+          '<button id="vfCancel" class="btn" style="flex:1">Cancel</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(wrap);
+    wrap.querySelector('#vfCancel').addEventListener('click', function(){ wrap.remove(); resolve(null); });
+    wrap.querySelector('#vfOk').addEventListener('click', function(){
+      var idType = o.needId ? document.getElementById('vfIdType').value : '';
+      var idNumber = o.needId ? document.getElementById('vfIdNumber').value.trim() : '';
+      var taxId = o.needTaxId ? document.getElementById('vfTaxId').value.trim() : '';
+      var err = document.getElementById('vfErr');
+      if (o.needId && !idNumber) { err.textContent = 'ID number is required.'; err.style.display = 'block'; return; }
+      if (o.needTaxId && !taxId) { err.textContent = 'Tax ID is required.'; err.style.display = 'block'; return; }
+      wrap.remove();
+      resolve({ id_type: idType, id_number: idNumber, tax_id: taxId });
+    });
   });
 }
 
@@ -13049,16 +13175,28 @@ async function renderCoupons(panel){
         '<div><label class="lbl">Max redemptions</label><input id="cpnMax" type="number" min="1" class="fld" placeholder="unlimited"/></div>' +
         '<div><label class="lbl">Expires</label><input id="cpnExpires" type="date" class="fld"/></div>' +
         '<div style="grid-column:1/-1"><label class="lbl">Description</label><input id="cpnDesc" class="fld"/></div>' +
+        '<div><label class="lbl">Limit to category <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional)</span></label>' +
+          '<select id="cpnCategory" class="fld"><option value="">— whole cart —</option>' +
+            POS_CATEGORIES.map(function(c){ return '<option value="' + c[0] + '">' + c[1] + '</option>'; }).join('') +
+          '</select></div>' +
+        '<div><label class="lbl">Limit to part numbers <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional, comma-separated photo keys)</span></label>' +
+          '<input id="cpnProducts" class="fld" placeholder="e.g. brake-pad.jpg, wiper.jpg"/></div>' +
+        '<div style="grid-column:1/-1;font-size:11.5px;color:var(--muted)">Leave both blank for a whole-cart coupon. Set either (or both) to restrict the discount to matching lines only.</div>' +
         '<div id="cpnMsg" style="grid-column:1/-1;display:none;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
         '<button type="submit" style="grid-column:1/-1;background:var(--red);color:#fff;border:0;padding:11px 22px;border-radius:7px;font-weight:700;cursor:pointer">Save coupon</button>' +
       '</form>' +
     '</details>' +
     (r.coupons.length
-      ? '<table><thead><tr><th>Code</th><th>Discount</th><th>Min order</th><th>Redeemed</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>' +
+      ? '<table><thead><tr><th>Code</th><th>Discount</th><th>Scope</th><th>Min order</th><th>Redeemed</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>' +
         r.coupons.map(function(c){
+          var cats = (c.scopes || []).filter(function(s){ return s.category; }).map(function(s){ return s.category; });
+          var imgs = (c.scopes || []).filter(function(s){ return s.product_img; });
+          var scopeText = !c.scopes || !c.scopes.length ? 'Whole cart'
+            : (cats.length ? cats.join(', ') : '') + (cats.length && imgs.length ? ' + ' : '') + (imgs.length ? imgs.length + ' part' + (imgs.length === 1 ? '' : 's') : '');
           return '<tr' + (!c.is_active ? ' style="opacity:.55"' : '') + '>' +
             '<td><code style="font-weight:700">' + esc(c.code) + '</code>' + (c.description ? '<br/><small style="color:var(--muted)">' + esc(c.description) + '</small>' : '') + '</td>' +
             '<td>' + (c.kind === 'percent' ? c.amount + '%' : fmtMoney(c.amount)) + ' off</td>' +
+            '<td>' + esc(scopeText) + '</td>' +
             '<td>' + (c.min_subtotal > 0 ? fmtMoney(c.min_subtotal) : '—') + '</td>' +
             '<td>' + c.redeemed_count + (c.max_redemptions ? ' / ' + c.max_redemptions : '') + '</td>' +
             '<td>' + (c.expires_at ? new Date(c.expires_at).toLocaleDateString() : '—') + '</td>' +
@@ -13081,6 +13219,11 @@ async function submitCoupon(){
   var msg = document.getElementById('cpnMsg');
   msg.style.display='block'; msg.style.background='#dbeafe'; msg.style.color='#1e40af'; msg.textContent='Saving…';
   try {
+    var scopes = [];
+    var cat = document.getElementById('cpnCategory').value;
+    if (cat) scopes.push({ category: cat });
+    document.getElementById('cpnProducts').value.split(',').map(function(s){ return s.trim(); }).filter(Boolean)
+      .forEach(function(img){ scopes.push({ product_img: img }); });
     await api('/api/admin/coupons', { method:'POST', body: {
       code: document.getElementById('cpnCode').value.trim().toUpperCase(),
       kind: document.getElementById('cpnKind').value,
@@ -13089,6 +13232,7 @@ async function submitCoupon(){
       max_redemptions: document.getElementById('cpnMax').value || null,
       expires_at: document.getElementById('cpnExpires').value || null,
       description: document.getElementById('cpnDesc').value.trim() || null,
+      scopes: scopes,
     }});
     show('coupons');
   } catch (e) { msg.style.background='#fee2e2'; msg.style.color='#b91c1c'; msg.textContent=e.message; }
@@ -13204,6 +13348,100 @@ async function submitGiftCardReload(code){
       amount_usd: document.getElementById('gcReloadAmount').value,
     }});
     show('giftcards');
+  } catch (e) {
+    msg.style.background = '#fee2e2'; msg.style.color = '#b91c1c'; msg.textContent = e.message;
+  }
+}
+
+// ============= REDEEMABLE ITEMS =============
+// No "+ New" form here — an instrument is minted by selling an is_redeemable
+// product through the regular POS sale flow (see posAddToCart / pos_txn.js);
+// this screen just manages what's already been sold.
+var RD_VIEW_CODE = null;
+var RD_STATUS_FILTER = '';
+async function renderRedemptions(panel){
+  if (RD_VIEW_CODE) return renderRedemptionDetail(panel, RD_VIEW_CODE);
+  panel.innerHTML = '<div class="empty">Loading…</div>';
+  var r;
+  try { r = await api('/api/admin/redemptions' + (RD_STATUS_FILTER ? '?status=' + RD_STATUS_FILTER : '')); }
+  catch (e) { panel.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return; }
+  var statusBadge = function(s){ return badge(s, s === 'redeemed' ? 'bad' : s === 'void' ? 'bad' : 'ok'); };
+  panel.innerHTML =
+    '<div style="padding:10px 16px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center">' +
+      '<label class="lbl" style="margin:0">Status</label>' +
+      '<select id="rdStatus" class="fld" style="width:160px">' +
+        ['', 'sold', 'redeemed', 'void'].map(function(s){ return '<option value="' + s + '"' + (RD_STATUS_FILTER === s ? ' selected' : '') + '>' + (s || 'All') + '</option>'; }).join('') +
+      '</select>' +
+    '</div>' +
+    (r.redemptions.length
+      ? '<table><thead><tr><th>Code</th><th>Product</th><th>Face value</th><th>Payout</th><th>Status</th><th>Sold by</th><th>Sold</th><th></th></tr></thead><tbody>' +
+        r.redemptions.map(function(x){
+          return '<tr' + (x.status === 'void' ? ' style="opacity:.55"' : '') + '>' +
+            '<td><code style="font-weight:700">' + esc(x.code) + '</code></td>' +
+            '<td>' + esc(x.product_name || x.product_img) + '</td>' +
+            '<td>' + fmtMoney(x.face_value_usd) + '</td>' +
+            '<td>' + (x.payout_usd != null ? fmtMoney(x.payout_usd) : '—') + '</td>' +
+            '<td>' + statusBadge(x.status) + '</td>' +
+            '<td>' + esc(x.sold_by_name || '—') + '</td>' +
+            '<td>' + fmtDate(x.created_at) + '</td>' +
+            '<td class="actions"><button class="btn" data-open="' + esc(x.code) + '">Open</button></td>' +
+          '</tr>';
+        }).join('') + '</tbody></table>'
+      : '<div class="empty">No redeemable items sold yet.</div>');
+
+  document.getElementById('rdStatus').addEventListener('change', function(){ RD_STATUS_FILTER = this.value; renderRedemptions(panel); });
+  panel.querySelectorAll('[data-open]').forEach(function(b){
+    b.addEventListener('click', function(){ RD_VIEW_CODE = b.getAttribute('data-open'); renderRedemptions(panel); });
+  });
+}
+async function renderRedemptionDetail(panel, code){
+  panel.innerHTML = '<div class="empty">Loading…</div>';
+  var d;
+  try { d = await api('/api/admin/redemptions/' + encodeURIComponent(code)); }
+  catch (e) { panel.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return; }
+  var x = d.redemption;
+  panel.innerHTML =
+    '<div style="padding:11px 14px;border-bottom:1px solid var(--line)"><button class="btn" id="rdBack">‹ All redeemables</button></div>' +
+    '<div style="padding:14px 16px;display:flex;gap:24px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--line)">' +
+      '<div><div class="lbl">Code</div><b style="font-size:16px"><code>' + esc(x.code) + '</code></b></div>' +
+      '<div><div class="lbl">Product</div>' + esc((d.product && d.product.name) || x.product_img) + '</div>' +
+      '<div><div class="lbl">Face value</div><b>' + fmtMoney(x.face_value_usd) + '</b></div>' +
+      (x.payout_usd != null ? '<div><div class="lbl">Payout</div><b>' + fmtMoney(x.payout_usd) + '</b></div>' : '') +
+      '<div><div class="lbl">Status</div>' + badge(x.status, x.status === 'sold' ? 'ok' : 'bad') + '</div>' +
+      (d.sale ? '<div><div class="lbl">Sold on</div>' + esc(d.sale.receipt_number || ('#' + d.sale.id)) + ' · ' + fmtDate(d.sale.created_at) + '</div>' : '') +
+      (x.notes ? '<div><div class="lbl">Notes</div>' + esc(x.notes) + '</div>' : '') +
+    '</div>' +
+    (x.status === 'sold'
+      ? '<div style="padding:14px 16px;display:flex;gap:20px;flex-wrap:wrap">' +
+          '<form id="rdRedeemForm" style="display:flex;gap:10px;align-items:flex-end" onsubmit="event.preventDefault();submitRedeem(\'' + esc(x.code).replace(/'/g, "\\'") + '\');">' +
+            '<div><label class="lbl">Payout (USD, optional)</label><input id="rdPayout" type="number" min="0" step="0.01" class="fld" placeholder="e.g. winning amount"/></div>' +
+            '<div><label class="lbl">Notes</label><input id="rdNotes" class="fld" placeholder="optional"/></div>' +
+            '<button type="submit" class="btn ok">Redeem</button>' +
+          '</form>' +
+          '<button class="btn" id="rdVoid" style="background:#fee2e2;color:#b91c1c;align-self:flex-end">Void (misprinted / damaged)</button>' +
+          '<span id="rdMsg" style="display:none;padding:8px 10px;border-radius:6px;font-size:13px;align-self:flex-end"></span>' +
+        '</div>'
+      : '');
+
+  document.getElementById('rdBack').addEventListener('click', function(){ RD_VIEW_CODE = null; renderRedemptions(panel); });
+  var voidBtn = document.getElementById('rdVoid');
+  if (voidBtn) voidBtn.addEventListener('click', async function(){
+    if (!(await posConfirm('Void this instrument? It can no longer be redeemed.', { ok: 'Void', danger: true }))) return;
+    try { await api('/api/admin/redemptions/' + encodeURIComponent(x.code) + '/void', { method: 'POST', body: {} }); renderRedemptionDetail(panel, x.code); }
+    catch (e) { alert(e.message); }
+  });
+}
+async function submitRedeem(code){
+  var msg = document.getElementById('rdMsg');
+  msg.style.display = 'inline-block'; msg.style.background = '#dbeafe'; msg.style.color = '#1e40af'; msg.textContent = 'Saving…';
+  try {
+    var payout = (document.getElementById('rdPayout').value || '').trim();
+    await api('/api/admin/redemptions/' + encodeURIComponent(code) + '/redeem', { method: 'POST', body: {
+      payout_usd: payout !== '' ? payout : null,
+      notes: document.getElementById('rdNotes').value.trim() || null,
+    }});
+    RD_VIEW_CODE = code;
+    show('redemptions');
   } catch (e) {
     msg.style.background = '#fee2e2'; msg.style.color = '#b91c1c'; msg.textContent = e.message;
   }

@@ -21,7 +21,7 @@ import { getShopSettings } from '../_lib/shop.js';
 import { verifyQuote } from '../_lib/carriers/index.js';
 import { bookShipment } from './shipping.js';
 import { fygaroEnabled, buildCheckoutUrl } from '../_lib/fygaro.js';
-import { bestUnitPriceCents, loadBreaksByImg } from '../_lib/price_breaks.js';
+import { bestUnitPriceCents, loadBreaksByImg, loadActiveSaleCentsByImg, effectiveBaseCents } from '../_lib/price_breaks.js';
 
 const SITE_BASE = 'https://mortsautoparts.com';
 
@@ -35,19 +35,23 @@ async function pointsBalance(db, userId) {
   return (r && r.b) || 0;
 }
 
-// Reprice a fetched line list against each product's quantity breaks --
-// checkout always starts from products.price_cents (never a client-supplied
-// price), so this only ever brings the charged price *down* to whatever the
-// line's own quantity qualifies for. Mutates price_usd in place; skips lines
-// with no price (already flagged unpriced elsewhere) or no breaks at all.
+// Reprice a fetched line list against each product's active sale price and
+// quantity breaks -- checkout always starts from products.price_cents (never
+// a client-supplied price), so this only ever brings the charged price
+// *down* to whichever of {regular, sale, bulk} the line qualifies for right
+// now. Mutates price_usd in place; skips lines with no price (already
+// flagged unpriced elsewhere).
 async function repriceForQty(db, items) {
-  const breaksByImg = await loadBreaksByImg(db, items.map((it) => it.product_img));
+  const imgs = items.map((it) => it.product_img);
+  const [breaksByImg, saleByImg] = await Promise.all([
+    loadBreaksByImg(db, imgs), loadActiveSaleCentsByImg(db, imgs),
+  ]);
   for (const it of items) {
     if (it.price_usd == null) continue;
-    const breaks = breaksByImg.get(it.product_img) || [];
-    if (!breaks.length) continue;
     const baseCents = cents(it.price_usd);
-    const effCents = bestUnitPriceCents(baseCents, breaks, it.qty);
+    const effBase = effectiveBaseCents(baseCents, saleByImg.get(it.product_img));
+    const breaks = breaksByImg.get(it.product_img) || [];
+    const effCents = bestUnitPriceCents(effBase, breaks, it.qty);
     if (effCents != null && effCents < baseCents) it.price_usd = r2(effCents / 100);
   }
   return items;
@@ -74,15 +78,26 @@ async function loadCoupon(db, rawCode) {
   if (c.expires_at && new Date(c.expires_at) < new Date()) return { ok: false, error: 'This coupon has expired' };
   if (c.max_redemptions != null && c.redeemed_count >= c.max_redemptions)
     return { ok: false, error: 'This coupon has reached its redemption limit' };
-  return { ok: true, coupon: c };
+  // A coupon with no scope rows applies to the whole cart (unchanged
+  // behaviour); one with rows only discounts matching category/product lines.
+  const scopes = await db.many('SELECT category, product_img FROM coupon_scopes WHERE coupon_code = ?', code);
+  return { ok: true, coupon: c, scopes };
 }
-function computeCouponDiscount(coupon, subtotal) {
-  if (subtotal < Number(coupon.min_subtotal || 0))
+// `items` need product_img/category/qty/price_usd (repriceForQty should run
+// first so this sees the same per-unit price checkout will actually charge).
+function computeCouponDiscount(coupon, items, scopes) {
+  const cartSubtotal = r2(items.reduce((s, it) => s + Number(it.price_usd || 0) * it.qty, 0));
+  if (cartSubtotal < Number(coupon.min_subtotal || 0))
     return { discount: 0, reason: `Minimum subtotal $${Number(coupon.min_subtotal).toFixed(2)} not met` };
-  const raw = coupon.kind === 'percent'
-    ? r2(subtotal * (Number(coupon.amount) / 100))
-    : Number(coupon.amount);
-  return { discount: Math.min(raw, subtotal), reason: null };
+  let base = cartSubtotal;
+  if (scopes && scopes.length) {
+    const cats = new Set(scopes.filter((s) => s.category).map((s) => s.category));
+    const imgs = new Set(scopes.filter((s) => s.product_img).map((s) => s.product_img));
+    base = r2(items.reduce((s, it) => (imgs.has(it.product_img) || cats.has(it.category)) ? s + Number(it.price_usd || 0) * it.qty : s, 0));
+    if (base <= 0) return { discount: 0, reason: "This coupon doesn't apply to anything in your cart" };
+  }
+  const raw = coupon.kind === 'percent' ? r2(base * (Number(coupon.amount) / 100)) : Number(coupon.amount);
+  return { discount: Math.min(raw, base), reason: null };
 }
 
 // ---- shipping -------------------------------------------------------
@@ -259,10 +274,10 @@ export default function mount(app) {
     const r = await loadCoupon(db, (await c.req.json().catch(() => ({}))).code);
     if (!r.ok) return c.json({ error: r.error }, 400);
     const items = await db.many(
-      'SELECT c.product_img, c.qty, p.price_cents / 100.0 AS price_usd FROM cart_items c JOIN products p ON p.img = c.product_img WHERE c.user_id = ?', uid);
+      'SELECT c.product_img, c.qty, p.price_cents / 100.0 AS price_usd, p.category FROM cart_items c JOIN products p ON p.img = c.product_img WHERE c.user_id = ?', uid);
     await repriceForQty(db, items);
     const subtotal = r2(items.reduce((s, it) => s + Number(it.price_usd || 0) * it.qty, 0));
-    const { discount, reason } = computeCouponDiscount(r.coupon, subtotal);
+    const { discount, reason } = computeCouponDiscount(r.coupon, items, r.scopes);
     if (discount === 0 && reason) return c.json({ error: reason }, 400);
     return c.json({ code: r.coupon.code, kind: r.coupon.kind, amount: r.coupon.amount, description: r.coupon.description, subtotal, discount_usd: discount });
   });
@@ -292,11 +307,18 @@ export default function mount(app) {
     if (shipErr) return c.json({ error: shipErr, code: 'ship_incomplete' }, 400);
 
     const items = await db.many(
-      `SELECT c.product_img, c.qty, p.price_cents / 100.0 AS price_usd, p.name, p.make_model
+      `SELECT c.product_img, c.qty, p.price_cents / 100.0 AS price_usd, p.name, p.make_model, p.category, p.restricted_instore_only
          FROM cart_items c JOIN products p ON p.img = c.product_img WHERE c.user_id = ?`, uid);
     if (!items.length) return c.json({ error: 'Cart is empty' }, 400);
     if (items.some((it) => it.price_usd == null)) {
       return c.json({ error: 'Some items in your cart are not priced — remove them or submit a quote request for the whole cart.', code: 'unpriced_items' }, 400);
+    }
+    const instoreOnly = items.filter((it) => it.restricted_instore_only);
+    if (instoreOnly.length) {
+      return c.json({
+        error: `${instoreOnly.map((it) => it.name).join(', ')} can only be purchased in-store — remove ${instoreOnly.length === 1 ? 'it' : 'them'} from your cart to check out online.`,
+        code: 'restricted_instore_only',
+      }, 400);
     }
     await repriceForQty(db, items);
     const subtotal = r2(items.reduce((s, it) => s + Number(it.price_usd || 0) * it.qty, 0));
@@ -306,7 +328,7 @@ export default function mount(app) {
     if (b.coupon_code) {
       const cr = await loadCoupon(db, b.coupon_code);
       if (cr.ok) {
-        const cd = computeCouponDiscount(cr.coupon, total);
+        const cd = computeCouponDiscount(cr.coupon, items, cr.scopes);
         if (cd.discount > 0) { couponCode = cr.coupon.code; couponDiscount = cd.discount; total = r2(total - couponDiscount); }
       }
     }
@@ -412,17 +434,24 @@ export default function mount(app) {
     if (!reqItems.length) return c.json({ error: 'Cart is empty' }, 400);
     const imgs = [...new Set(reqItems.map((it) => String(it.img)))].slice(0, 200);
     const rows = await db.many(
-      `SELECT img, price_cents / 100.0 AS price_usd, name, make_model
+      `SELECT img, price_cents / 100.0 AS price_usd, name, make_model, category, restricted_instore_only
          FROM products WHERE img IN (${imgs.map(() => '?').join(',')})`, ...imgs);
     const byImg = new Map(rows.map((r) => [r.img, r]));
     const items = reqItems.map((it) => {
       const p = byImg.get(String(it.img));
       if (!p) return null;
-      return { product_img: p.img, qty: Math.max(1, parseInt(it.qty, 10) || 1), price_usd: p.price_usd, name: p.name, make_model: p.make_model };
+      return { product_img: p.img, qty: Math.max(1, parseInt(it.qty, 10) || 1), price_usd: p.price_usd, name: p.name, make_model: p.make_model, category: p.category, restricted_instore_only: p.restricted_instore_only };
     }).filter(Boolean);
     if (!items.length) return c.json({ error: 'None of those items are still available' }, 400);
     if (items.some((it) => it.price_usd == null)) {
       return c.json({ error: 'Some items in your cart are not priced — submit a quote request for the whole cart.', code: 'unpriced_items' }, 400);
+    }
+    const instoreOnly = items.filter((it) => it.restricted_instore_only);
+    if (instoreOnly.length) {
+      return c.json({
+        error: `${instoreOnly.map((it) => it.name).join(', ')} can only be purchased in-store — remove ${instoreOnly.length === 1 ? 'it' : 'them'} from your cart to check out online.`,
+        code: 'restricted_instore_only',
+      }, 400);
     }
     await repriceForQty(db, items);
 
@@ -432,7 +461,7 @@ export default function mount(app) {
     if (b.coupon_code) {
       const cr = await loadCoupon(db, b.coupon_code);
       if (cr.ok) {
-        const cd = computeCouponDiscount(cr.coupon, total);
+        const cd = computeCouponDiscount(cr.coupon, items, cr.scopes);
         if (cd.discount > 0) { couponCode = cr.coupon.code; couponDiscount = cd.discount; total = r2(total - couponDiscount); }
       }
     }

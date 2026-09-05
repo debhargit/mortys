@@ -13,7 +13,7 @@ import { adminMw, managerMw, currentUser } from '../_lib/guards.js';
 import { getShopSettings, shopSettingsToShop } from '../_lib/shop.js';
 import { sendEmail } from '../_lib/mailer.js';
 import { readUploadBody } from '../_lib/uploads.js';
-import { loadBreaksForImg } from '../_lib/price_breaks.js';
+import { loadBreaksForImg, ACTIVE_SALE_PRICE_SQL } from '../_lib/price_breaks.js';
 import { centsToUsd } from '../_lib/money.js';
 
 const u2c = (u) => (u == null || u === '' ? null : Math.round(Number(u) * 100));
@@ -310,11 +310,16 @@ export default function mount(app) {
               sku, barcode, bin_location, location,
               CASE WHEN stock_count <= 0 THEN 'out' WHEN stock_count <= low_threshold THEN 'low' ELSE 'in' END AS stock_level,
               serial_required, warranty_days,
-              core_charge_cents / 100.0 AS core_charge_usd, env_fee_cents / 100.0 AS env_fee_usd
+              core_charge_cents / 100.0 AS core_charge_usd, env_fee_cents / 100.0 AS env_fee_usd,
+              ${ACTIVE_SALE_PRICE_SQL} AS active_sale_cents,
+              max_discount_pct, is_redeemable,
+              restricted_instore_only, restricted_manager_approval, restricted_id_required, restricted_tax_id_required
          FROM products WHERE is_active = 1 AND (lower(sku) = lower(?) OR lower(barcode) = lower(?) OR img = ?) LIMIT 1`,
       code, code, code);
     if (!product) return c.json({ error: 'No product matches that code' }, 404);
     product.price_breaks = (await loadBreaksForImg(d1(c.env), product.img)).map((b) => ({ min_qty: b.min_qty, price_usd: centsToUsd(b.price_cents) }));
+    product.sale_price_usd = product.active_sale_cents != null ? centsToUsd(product.active_sale_cents) : null;
+    delete product.active_sale_cents;
     return c.json({ product });
   });
   app.get('/api/admin/lookup', adminMw, async (c) => {
