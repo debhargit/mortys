@@ -4,7 +4,7 @@
 
 const SCHEDULE = {
   '*/15 * * * *': ['back-in-stock'],
-  '0 13 * * *': ['reminders-digest', 'low-stock-digest', 'back-in-stock'],
+  '0 13 * * *': ['reminders-digest', 'low-stock-digest', 'back-in-stock', 'recurring-charges'],
 };
 
 async function hit(env, job) {
