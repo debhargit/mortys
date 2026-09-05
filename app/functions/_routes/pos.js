@@ -131,21 +131,78 @@ export default function mount(app) {
   });
 
   // ---- sales list + detail -------------------------------------
+  // Recall (POS F8) uses this both for the date-range Invoices tab and, when
+  // `q` is given, to jump straight to a specific receipt/invoice number --
+  // that search runs across every date, not just the picked range, since the
+  // whole point is not having to know when the sale happened.
   app.get('/api/admin/pos/sales', adminMw, async (c) => {
     const q = c.req.query();
-    const today = new Date().toISOString().slice(0, 10);
-    const from = q.from || today;
-    const to = q.to || from;
     const includeVoided = q.include_voided === '1' || q.include_voided === 'true';
-    const sales = await d1(c.env).many(
-      `SELECT s.*, ${POS_SALE_USD}, COALESCE(u.name, u.email) AS cashier_name
-         FROM pos_sales s LEFT JOIN users u ON u.id = s.cashier_id
-        WHERE date(s.created_at) BETWEEN date(?) AND date(?) ${includeVoided ? '' : 'AND s.voided = 0'}
-        ORDER BY s.created_at DESC LIMIT 200`,
-      from, to
-    );
+    const term = String(q.q || '').trim();
+    const db = d1(c.env);
+    let sales;
+    if (term) {
+      const like = '%' + term + '%';
+      sales = await db.many(
+        `SELECT s.*, ${POS_SALE_USD}, COALESCE(u.name, u.email) AS cashier_name
+           FROM pos_sales s LEFT JOIN users u ON u.id = s.cashier_id
+          WHERE (s.receipt_number LIKE ? OR s.invoice_number LIKE ?) ${includeVoided ? '' : 'AND s.voided = 0'}
+          ORDER BY s.created_at DESC LIMIT 200`,
+        like, like
+      );
+    } else {
+      const today = new Date().toISOString().slice(0, 10);
+      const from = q.from || today;
+      const to = q.to || from;
+      sales = await db.many(
+        `SELECT s.*, ${POS_SALE_USD}, COALESCE(u.name, u.email) AS cashier_name
+           FROM pos_sales s LEFT JOIN users u ON u.id = s.cashier_id
+          WHERE date(s.created_at) BETWEEN date(?) AND date(?) ${includeVoided ? '' : 'AND s.voided = 0'}
+          ORDER BY s.created_at DESC LIMIT 200`,
+        from, to
+      );
+    }
     for (const s of sales) boolify(s, ['voided', 'tax_exempt']);
     return c.json({ sales });
+  });
+
+  // ---- returns / credit notes list ------------------------------
+  // Same shape as the sales list above: a date range by default, or `q`
+  // searching the return number and the parent sale's receipt/invoice number
+  // across all time.
+  app.get('/api/admin/pos/returns', adminMw, async (c) => {
+    const q = c.req.query();
+    const term = String(q.q || '').trim();
+    const db = d1(c.env);
+    const cols = `r.*, r.refund_cents / 100.0 AS refund_total_usd,
+              r.refund_subtotal_cents / 100.0 AS refund_subtotal_usd,
+              r.refund_discount_cents / 100.0 AS refund_discount_usd,
+              r.refund_tax_cents / 100.0 AS refund_tax_usd,
+              s.receipt_number, s.invoice_number, s.customer_name, s.voided AS sale_voided,
+              COALESCE(u.name, u.email) AS processed_by_name`;
+    let returns;
+    if (term) {
+      const like = '%' + term + '%';
+      returns = await db.many(
+        `SELECT ${cols} FROM pos_returns r
+           JOIN pos_sales s ON s.id = r.sale_id LEFT JOIN users u ON u.id = r.processed_by
+          WHERE r.return_number LIKE ? OR s.receipt_number LIKE ? OR s.invoice_number LIKE ?
+          ORDER BY r.created_at DESC LIMIT 200`,
+        like, like, like
+      );
+    } else {
+      const today = new Date().toISOString().slice(0, 10);
+      const from = q.from || today;
+      const to = q.to || from;
+      returns = await db.many(
+        `SELECT ${cols} FROM pos_returns r
+           JOIN pos_sales s ON s.id = r.sale_id LEFT JOIN users u ON u.id = r.processed_by
+          WHERE date(r.created_at) BETWEEN date(?) AND date(?)
+          ORDER BY r.created_at DESC LIMIT 200`,
+        from, to
+      );
+    }
+    return c.json({ returns });
   });
 
   app.get('/api/admin/pos/sales/:id', adminMw, async (c) => {

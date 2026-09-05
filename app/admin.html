@@ -5362,7 +5362,8 @@ async function posHoldCart(after){
 async function posRecallModal(after){
   var mode = 'held';
   var today = new Date().toISOString().slice(0, 10);
-  var invFrom = today, invTo = today;
+  var invFrom = today, invTo = today, invQ = '';
+  var retFrom = today, retTo = today, retQ = '';
 
   function tabBtn(key, glyph, label){
     var on = mode === key;
@@ -5416,11 +5417,14 @@ async function posRecallModal(after){
   }
 
   async function invoicesBody(){
+    var qs = invQ.trim() ? 'q=' + encodeURIComponent(invQ.trim()) : 'from=' + invFrom + '&to=' + invTo;
     var r;
-    try { r = await api('/api/admin/pos/sales?from=' + invFrom + '&to=' + invTo); }
+    try { r = await api('/api/admin/pos/sales?' + qs); }
     catch (e) { return '<div class="empty">Could not load invoices: ' + esc(e.message) + '</div>'; }
     var rows = r.sales || [];
-    return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;font-size:12.5px">' +
+    return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:12.5px">' +
+        '<input type="search" id="prInvQ" value="' + esc(invQ) + '" placeholder="🔎 Receipt or invoice #" class="fld" style="width:200px"/>' +
+        '<span style="color:var(--muted)">or</span>' +
         '<label class="lbl" style="margin:0">From</label><input type="date" id="prInvFrom" value="' + invFrom + '" class="fld" style="width:140px"/>' +
         '<label class="lbl" style="margin:0">To</label><input type="date" id="prInvTo" value="' + invTo + '" class="fld" style="width:140px"/>' +
         '<button type="button" class="btn" id="prInvGo">Apply</button>' +
@@ -5431,6 +5435,7 @@ async function posRecallModal(after){
               return '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--card-soft2)' + (s.voided ? ';opacity:.55' : '') + '">' +
                 '<div style="flex:1">' +
                   '<b style="color:var(--heading);font-size:13.5px">' + esc(s.receipt_number || '') + '</b>' +
+                  (s.invoice_number ? ' <code style="font-size:11px;color:var(--muted)">' + esc(s.invoice_number) + '</code>' : '') +
                   (s.voided ? ' ' + badge('voided', 'bad') : '') +
                   '<br/><small style="color:var(--muted)">' + esc(s.customer_name || 'Walk-in') + ' · ' + fmtMoney(s.total_usd) + ' · ' + fmtDate(s.created_at) + '</small>' +
                 '</div>' +
@@ -5438,16 +5443,51 @@ async function posRecallModal(after){
               '</div>';
             }).join('') +
           '</div>'
-        : '<div class="empty">No invoices in that range.</div>');
+        : '<div class="empty">' + (invQ.trim() ? 'No invoice matches "' + esc(invQ.trim()) + '".' : 'No invoices in that range.') + '</div>');
+  }
+
+  async function returnsBody(){
+    var qs = retQ.trim() ? 'q=' + encodeURIComponent(retQ.trim()) : 'from=' + retFrom + '&to=' + retTo;
+    var r;
+    try { r = await api('/api/admin/pos/returns?' + qs); }
+    catch (e) { return '<div class="empty">Could not load credit notes: ' + esc(e.message) + '</div>'; }
+    var rows = r.returns || [];
+    return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:12.5px">' +
+        '<input type="search" id="prRetQ" value="' + esc(retQ) + '" placeholder="🔎 Return, receipt or invoice #" class="fld" style="width:220px"/>' +
+        '<span style="color:var(--muted)">or</span>' +
+        '<label class="lbl" style="margin:0">From</label><input type="date" id="prRetFrom" value="' + retFrom + '" class="fld" style="width:140px"/>' +
+        '<label class="lbl" style="margin:0">To</label><input type="date" id="prRetTo" value="' + retTo + '" class="fld" style="width:140px"/>' +
+        '<button type="button" class="btn" id="prRetGo">Apply</button>' +
+      '</div>' +
+      (rows.length
+        ? '<div style="border:1px solid var(--line);border-radius:8px;overflow:hidden;max-height:360px;overflow-y:auto">' +
+            rows.map(function(r2){
+              return '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--card-soft2)">' +
+                '<div style="flex:1">' +
+                  '<b style="color:var(--heading);font-size:13.5px">' + esc(r2.return_number || '') + '</b> ' +
+                  '<span style="color:var(--muted);font-size:11.5px">against ' + esc(r2.invoice_number || r2.receipt_number || '—') + '</span>' +
+                  (r2.sale_voided ? ' ' + badge('sale voided', 'bad') : '') +
+                  '<br/><small style="color:var(--muted)">' + esc(r2.customer_name || 'Walk-in') + ' · ' +
+                    fmtMoney(r2.refund_total_usd) + ' refunded · ' + esc(posMethodLabel(r2.refund_method)) +
+                    (r2.store_credit_code ? ' <code>' + esc(r2.store_credit_code) + '</code>' : '') +
+                    ' · ' + fmtDate(r2.created_at) + (r2.processed_by_name ? ' · ' + esc(r2.processed_by_name) : '') + '</small>' +
+                '</div>' +
+                '<button type="button" class="btn ghost" data-view-return="' + r2.sale_id + '">View</button>' +
+              '</div>';
+            }).join('') +
+          '</div>'
+        : '<div class="empty">' + (retQ.trim() ? 'No credit note matches "' + esc(retQ.trim()) + '".' : 'No returns / credit notes in that range.') + '</div>');
   }
 
   async function paint(){
-    var body = mode === 'held' ? await heldBody() : mode === 'quotes' ? await quotesBody() : await invoicesBody();
+    var body = mode === 'held' ? await heldBody() : mode === 'quotes' ? await quotesBody()
+      : mode === 'returns' ? await returnsBody() : await invoicesBody();
     posModal('📂 Recall',
       '<div style="display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:14px">' +
         tabBtn('held', '⏸', 'Held tickets') + tabBtn('quotes', '📝', 'Quotes') + tabBtn('invoices', '🧾', 'Invoices') +
+        tabBtn('returns', '↩️', 'Credit Notes') +
       '</div>' + body,
-      600
+      640
     );
     document.querySelectorAll('.posRecallTab').forEach(function(b){
       b.addEventListener('click', function(){ mode = b.getAttribute('data-mode'); paint(); });
@@ -5535,17 +5575,36 @@ async function posRecallModal(after){
       b.addEventListener('click', function(){ showQuoteDetail(b.getAttribute('data-view-quote')); });
     });
 
-    // ---- Invoices: date range + view (a completed sale opens the existing
-    // sale-detail view -- reprint/return/void live there already, no reason
-    // to duplicate them here)
+    // ---- Invoices: search by number (any date) or a date range + view (a
+    // completed sale opens the existing sale-detail view -- reprint/return/
+    // void live there already, no reason to duplicate them here)
     var invGo = document.getElementById('prInvGo');
     if (invGo) invGo.addEventListener('click', function(){
+      invQ = document.getElementById('prInvQ').value || '';
       invFrom = document.getElementById('prInvFrom').value || today;
       invTo = document.getElementById('prInvTo').value || today;
       paint();
     });
+    var invQEl = document.getElementById('prInvQ');
+    if (invQEl) invQEl.addEventListener('keydown', function(e){ if (e.key === 'Enter') invGo.click(); });
     document.querySelectorAll('[data-view-invoice]').forEach(function(b){
       b.addEventListener('click', function(){ posSaleDetail(b.getAttribute('data-view-invoice'), after); });
+    });
+
+    // ---- Credit notes / returns: same search-or-range pattern. "View" opens
+    // the parent sale, where the return already has its own 🧾 Credit note
+    // reprint button -- no reason to duplicate that document builder here.
+    var retGo = document.getElementById('prRetGo');
+    if (retGo) retGo.addEventListener('click', function(){
+      retQ = document.getElementById('prRetQ').value || '';
+      retFrom = document.getElementById('prRetFrom').value || today;
+      retTo = document.getElementById('prRetTo').value || today;
+      paint();
+    });
+    var retQEl = document.getElementById('prRetQ');
+    if (retQEl) retQEl.addEventListener('keydown', function(e){ if (e.key === 'Enter') retGo.click(); });
+    document.querySelectorAll('[data-view-return]').forEach(function(b){
+      b.addEventListener('click', function(){ posSaleDetail(b.getAttribute('data-view-return'), after); });
     });
   }
 
