@@ -17,7 +17,7 @@ import { sendEmail } from '../_lib/mailer.js';
 import { readUploadBody } from '../_lib/uploads.js';
 import { safeJson } from '../_lib/util.js';
 import { getShopSettings } from '../_lib/shop.js';
-import { bestUnitPriceCents, loadBreaksByImg, ACTIVE_SALE_PRICE_SQL, effectiveBaseCents } from '../_lib/price_breaks.js';
+import { bestUnitPriceCents, loadBreaksByImg, ACTIVE_SALE_PRICE_SQL, effectiveBaseCents, loadTierPricesByImg, tierCentsFor } from '../_lib/price_breaks.js';
 import { loadKitComponentsByImg, kitRollupCents, kitBuildableQty } from '../_lib/kits.js';
 import { centsToUsd } from '../_lib/money.js';
 
@@ -27,10 +27,28 @@ import { centsToUsd } from '../_lib/money.js';
 // single-product endpoints below so both expose pricing the same way.
 // price_cents/active_sale_cents ride along on the row purely to compute this
 // and are stripped before the row goes out.
-function withPricing(row, breaksByImg) {
+// `pctx` = { show, tier, staff } from pricingCtx(). `tierByImg` is a
+// loadTierPricesByImg() Map. The headline price_usd stays retail (same as
+// today -- sale prices aren't folded into it either); tier / percent / sale
+// ride alongside as their own fields and the client (or the cart / checkout
+// resolver) composes them.
+function withPricing(row, breaksByImg, tierByImg, pctx) {
   const b = breaksByImg.get(row.img) || [];
-  row.price_breaks = b.map((x) => ({ min_qty: x.min_qty, price_usd: centsToUsd(x.price_cents) }));
+  row.price_breaks = b.filter((x) => x.price_cents != null).map((x) => ({ min_qty: x.min_qty, price_usd: centsToUsd(x.price_cents) }));
+  row.qty_discounts = b.filter((x) => x.discount_pct != null).map((x) => ({ min_qty: x.min_qty, discount_pct: x.discount_pct }));
   row.sale_price_usd = row.active_sale_cents != null ? centsToUsd(row.active_sale_cents) : null;
+  const tp = (tierByImg && tierByImg.get(row.img)) || null;
+  const myTierCents = tierCentsFor(tp, pctx && pctx.tier);
+  row.tier_price_usd = myTierCents != null ? centsToUsd(myTierCents) : null;
+  // The POS grid (staff viewer) needs every tier's price + the % rows so its
+  // client can resolve per whichever customer is attached at the till.
+  if (pctx && pctx.staff) {
+    row.tier_prices = {
+      trade: tp && tp.trade != null ? centsToUsd(tp.trade) : null,
+      fleet: tp && tp.fleet != null ? centsToUsd(tp.fleet) : null,
+      dealer: tp && tp.dealer != null ? centsToUsd(tp.dealer) : null,
+    };
+  }
   delete row.price_cents; delete row.active_sale_cents;
   return row;
 }
@@ -41,15 +59,21 @@ function withPricing(row, breaksByImg) {
 //   * everyone, when the global shop_settings.storefront_prices switch is on
 // Otherwise prices are stripped and the front-end shows "Call for price" and
 // routes checkout to a quote request. See migrations 0027 / 0028.
+// One pass over the viewer: may they see prices, what tier do they buy at,
+// are they staff (the POS grid). Replaces canSeePrices at the pricing sites
+// so currentUser is fetched once, not three times.
+async function pricingCtx(c) {
+  let u = null;
+  try { u = await currentUser(c.req.raw, c.env); } catch { /* guest */ }
+  const staff = !!(u && (u.is_admin || u.is_staff));
+  let show = staff || !!(u && u.show_prices);
+  if (!show) {
+    try { const s = await getShopSettings(c.env); show = !!(s && s.storefront_prices); } catch { show = false; }
+  }
+  return { show, staff, tier: (u && u.price_tier) || 'retail' };
+}
 async function canSeePrices(c) {
-  try {
-    const u = await currentUser(c.req.raw, c.env);
-    if (u && (u.is_admin || u.is_staff || u.show_prices)) return true;
-  } catch { /* guest */ }
-  try {
-    const s = await getShopSettings(c.env);
-    return !!(s && s.storefront_prices);
-  } catch { return false; }
+  return (await pricingCtx(c)).show;
 }
 
 // server.js buildProductWhere(), for SQLite.
@@ -109,7 +133,8 @@ export default function mount(app) {
     try {
       const db = d1(c.env);
       const q = c.req.query();
-      const showPrices = await canSeePrices(c);
+      const pctx = await pricingCtx(c);
+      const showPrices = pctx.show;
       // With prices hidden, a price filter or price sort would leak the very
       // numbers we're withholding (binary-search the catalogue by price_max).
       // Drop them for un-approved callers.
@@ -184,8 +209,9 @@ export default function mount(app) {
 
       let list = showPrices ? rows : rows.map((r) => ({ ...r, price_usd: null }));
       if (showPrices) {
-        const breaksByImg = await loadBreaksByImg(db, list.map((r) => r.img));
-        list = list.map((r) => withPricing(r, breaksByImg));
+        const imgList = list.map((r) => r.img);
+        const [breaksByImg, tierByImg] = await Promise.all([loadBreaksByImg(db, imgList), loadTierPricesByImg(db, imgList)]);
+        list = list.map((r) => withPricing(r, breaksByImg, tierByImg, pctx));
       } else {
         list = list.map((r) => { delete r.price_cents; delete r.active_sale_cents; return r; });
       }
@@ -213,13 +239,16 @@ export default function mount(app) {
       c.req.param('img')
     );
     if (!row) return c.json({ error: 'Not found' }, 404);
-    const showPrices = await canSeePrices(c);
-    if (!showPrices) {
+    const pctx = await pricingCtx(c);
+    if (!pctx.show) {
       row.price_usd = null; row.price_cents = null;
       row.active_sale_cents = null; row.sale_price_usd = null;
       row.cost_usd = null; row.cost_cents = null;
     } else {
-      withPricing(row, await loadBreaksByImg(d1(c.env), [row.img]));
+      const [breaksByImg, tierByImg] = await Promise.all([
+        loadBreaksByImg(d1(c.env), [row.img]), loadTierPricesByImg(d1(c.env), [row.img]),
+      ]);
+      withPricing(row, breaksByImg, tierByImg, pctx);
     }
     return c.json({ product: row });
   });
@@ -243,18 +272,24 @@ export default function mount(app) {
         WHERE c.user_id = ? ORDER BY c.updated_at DESC`,
       c.get('user').id
     );
-    const showPrices = await canSeePrices(c);
+    const pctx = await pricingCtx(c);
+    const showPrices = pctx.show;
     let total = null;
     if (showPrices) {
-      const breaksByImg = await loadBreaksByImg(db, rows.map((r) => r.img));
+      const [breaksByImg, tierByImg] = await Promise.all([
+        loadBreaksByImg(db, rows.map((r) => r.img)), loadTierPricesByImg(db, rows.map((r) => r.img)),
+      ]);
       total = 0;
       rows.forEach((r) => {
         const breaks = breaksByImg.get(r.img) || [];
+        const tierCents = tierCentsFor(tierByImg.get(r.img), pctx.tier);
         r.sale_price_usd = r.active_sale_cents != null ? centsToUsd(r.active_sale_cents) : null;
-        const baseCents = effectiveBaseCents(r.price_cents, r.active_sale_cents);
-        const effCents = bestUnitPriceCents(baseCents, breaks, r.qty);
+        r.tier_price_usd = tierCents != null ? centsToUsd(tierCents) : null;
+        const baseCents = effectiveBaseCents(r.price_cents, r.active_sale_cents, tierCents);
+        const effCents = bestUnitPriceCents(baseCents, breaks, r.qty, r.price_cents);
         r.effective_price_usd = centsToUsd(effCents);
-        r.price_breaks = breaks.map((x) => ({ min_qty: x.min_qty, price_usd: centsToUsd(x.price_cents) }));
+        r.price_breaks = breaks.filter((x) => x.price_cents != null).map((x) => ({ min_qty: x.min_qty, price_usd: centsToUsd(x.price_cents) }));
+        r.qty_discounts = breaks.filter((x) => x.discount_pct != null).map((x) => ({ min_qty: x.min_qty, discount_pct: x.discount_pct }));
         delete r.active_sale_cents;
         total += Number(r.effective_price_usd || 0) * r.qty;
         delete r.price_cents;

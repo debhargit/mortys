@@ -21,7 +21,7 @@ import { getShopSettings } from '../_lib/shop.js';
 import { verifyQuote } from '../_lib/carriers/index.js';
 import { bookShipment } from './shipping.js';
 import { fygaroEnabled, buildCheckoutUrl } from '../_lib/fygaro.js';
-import { bestUnitPriceCents, loadBreaksByImg, loadActiveSaleCentsByImg, effectiveBaseCents } from '../_lib/price_breaks.js';
+import { bestUnitPriceCents, loadBreaksByImg, loadActiveSaleCentsByImg, effectiveBaseCents, loadTierPricesByImg, tierCentsFor } from '../_lib/price_breaks.js';
 import { loadKitComponentsByImg, kitRollupCents } from '../_lib/kits.js';
 import { loadCoupon, computeCouponDiscount } from '../_lib/coupons.js';
 
@@ -43,18 +43,26 @@ async function pointsBalance(db, userId) {
 // *down* to whichever of {regular, sale, bulk} the line qualifies for right
 // now. Mutates price_usd in place; skips lines with no price (already
 // flagged unpriced elsewhere).
-async function repriceForQty(db, items) {
+async function userTier(db, uid) {
+  if (!uid) return 'retail';
+  const r = await db.one('SELECT price_tier FROM users WHERE id = ?', uid);
+  return (r && r.price_tier) || 'retail';
+}
+
+async function repriceForQty(db, items, tier) {
   const imgs = items.map((it) => it.product_img);
-  const [breaksByImg, saleByImg] = await Promise.all([
+  const [breaksByImg, saleByImg, tierByImg] = await Promise.all([
     loadBreaksByImg(db, imgs), loadActiveSaleCentsByImg(db, imgs),
+    tier && tier !== 'retail' ? loadTierPricesByImg(db, imgs) : Promise.resolve(new Map()),
   ]);
   for (const it of items) {
     if (it.price_usd == null) continue;
-    const baseCents = cents(it.price_usd);
-    const effBase = effectiveBaseCents(baseCents, saleByImg.get(it.product_img));
+    const retailCents = cents(it.price_usd);   // checkout always starts from products.price_cents
+    const tierCents = tierCentsFor(tierByImg.get(it.product_img), tier);
+    const effBase = effectiveBaseCents(retailCents, saleByImg.get(it.product_img), tierCents);
     const breaks = breaksByImg.get(it.product_img) || [];
-    const effCents = bestUnitPriceCents(effBase, breaks, it.qty);
-    if (effCents != null && effCents < baseCents) it.price_usd = r2(effCents / 100);
+    const effCents = bestUnitPriceCents(effBase, breaks, it.qty, retailCents);
+    if (effCents != null && effCents < retailCents) it.price_usd = r2(effCents / 100);
   }
   // A roll-up kit is priced from its components, not products.price_cents.
   const rollupImgs = items.filter((it) => it.is_kit && it.kit_price_mode === 'rollup').map((it) => it.product_img);
@@ -288,7 +296,7 @@ export default function mount(app) {
     if (!r.ok) return c.json({ error: r.error }, 400);
     const items = await db.many(
       'SELECT c.product_img, c.qty, p.price_cents / 100.0 AS price_usd, p.category FROM cart_items c JOIN products p ON p.img = c.product_img WHERE c.user_id = ?', uid);
-    await repriceForQty(db, items);
+    await repriceForQty(db, items, await userTier(db, uid));
     const subtotal = r2(items.reduce((s, it) => s + Number(it.price_usd || 0) * it.qty, 0));
     const { discount, reason } = computeCouponDiscount(r.coupon, items, r.scopes);
     if (discount === 0 && reason) return c.json({ error: reason }, 400);
@@ -335,7 +343,7 @@ export default function mount(app) {
         code: 'restricted_instore_only',
       }, 400);
     }
-    await repriceForQty(db, items);
+    await repriceForQty(db, items, await userTier(db, uid));
     const subtotal = r2(items.reduce((s, it) => s + Number(it.price_usd || 0) * it.qty, 0));
     let total = subtotal;
 
@@ -472,7 +480,7 @@ export default function mount(app) {
         code: 'restricted_instore_only',
       }, 400);
     }
-    await repriceForQty(db, items);
+    await repriceForQty(db, items, 'retail');   // guest checkout is always retail
 
     const subtotal = r2(items.reduce((s, it) => s + Number(it.price_usd || 0) * it.qty, 0));
     let total = subtotal;

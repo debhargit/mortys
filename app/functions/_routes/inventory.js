@@ -276,6 +276,65 @@ export default function mount(app) {
   });
 
   // =====================================================================
+  //  PERCENTAGE QUANTITY DISCOUNTS — replace the whole set for one product.
+  //  Same shape as price-breaks above; the % comes off the retail price and
+  //  "cheapest wins" (see _lib/price_breaks.js).
+  // =====================================================================
+  app.put('/api/admin/products/:img/qty-discounts', adminMw, async (c) => {
+    const db = d1(c.env);
+    if (!userCan(c.get('user'), 'inventory.edit_price'))
+      return c.json({ error: 'Your account is not allowed to edit product pricing.' }, 403);
+    const img = c.req.param('img');
+    if (!(await db.one('SELECT img FROM products WHERE img = ?', img))) return c.json({ error: 'Not found' }, 404);
+    const b = await c.req.json().catch(() => ({}));
+    const raw = Array.isArray(b.discounts) ? b.discounts : [];
+    const seen = new Set();
+    const rows = [];
+    for (const r of raw) {
+      const minQty = parseInt(r.min_qty, 10);
+      if (!Number.isInteger(minQty) || minQty < 2) return c.json({ error: 'Each tier needs a quantity of 2 or more' }, 400);
+      if (seen.has(minQty)) return c.json({ error: 'Duplicate quantity ' + minQty }, 400);
+      const pct = Number(r.discount_pct);
+      if (!Number.isFinite(pct) || pct <= 0 || pct > 100) return c.json({ error: 'Each tier needs a discount between 0 and 100%' }, 400);
+      seen.add(minQty);
+      rows.push({ minQty, pct });
+    }
+    const stmts = [{ sql: 'DELETE FROM product_qty_discounts WHERE product_img = ?', binds: [img] }];
+    for (const r of rows) {
+      stmts.push({ sql: 'INSERT INTO product_qty_discounts (product_img, min_qty, discount_pct) VALUES (?,?,?)', binds: [img, r.minQty, r.pct] });
+    }
+    await db.batch(stmts);
+    return c.json({ ok: true, count: rows.length });
+  });
+
+  // =====================================================================
+  //  TIER PRICE BOOK — the per-item set price for trade / fleet / dealer.
+  //  Body: { prices: { trade?, fleet?, dealer? } } in USD; a blank / null /
+  //  omitted value clears that tier's override (it falls back to retail).
+  // =====================================================================
+  app.put('/api/admin/products/:img/tier-prices', adminMw, async (c) => {
+    const db = d1(c.env);
+    if (!userCan(c.get('user'), 'inventory.edit_price'))
+      return c.json({ error: 'Your account is not allowed to edit product pricing.' }, 403);
+    const img = c.req.param('img');
+    if (!(await db.one('SELECT img FROM products WHERE img = ?', img))) return c.json({ error: 'Not found' }, 404);
+    const b = await c.req.json().catch(() => ({}));
+    const prices = b.prices && typeof b.prices === 'object' ? b.prices : {};
+    const stmts = [{ sql: 'DELETE FROM product_tier_prices WHERE product_img = ?', binds: [img] }];
+    let count = 0;
+    for (const tier of ['trade', 'fleet', 'dealer']) {
+      const raw = prices[tier];
+      if (raw === undefined || raw === null || String(raw).trim() === '') continue;
+      const cents = usdToCents(raw);
+      if (cents == null || cents < 0) return c.json({ error: `"${tier}" price is not a valid amount` }, 400);
+      stmts.push({ sql: 'INSERT INTO product_tier_prices (product_img, tier, price_cents) VALUES (?,?,?)', binds: [img, tier, cents] });
+      count++;
+    }
+    await db.batch(stmts);
+    return c.json({ ok: true, count });
+  });
+
+  // =====================================================================
   //  KIT COMPONENTS — replace the whole recipe for one kit product, and
   //  (optionally) set the kit flags in the same batch so is_kit and its
   //  rows can never drift apart. Same replace-the-whole-set shape as

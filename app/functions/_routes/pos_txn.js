@@ -13,6 +13,7 @@ import {
 } from '../_lib/pos.js';
 import { loadCoupon, computeCouponDiscount } from '../_lib/coupons.js';
 import { loadKitComponentsByImg, explodeKitLine } from '../_lib/kits.js';
+import { loadTierPricesByImg, tierCentsFor } from '../_lib/price_breaks.js';
 
 const r2 = (n) => Math.round(n * 100) / 100;
 const cts = (usd) => Math.round((Number(usd) || 0) * 100);
@@ -138,6 +139,24 @@ export async function createPosSale(env, b, me) {
       }
     }
     items = expanded;
+  }
+
+  // ----- tier price floor -----
+  // A real customer on a non-retail price tier can never be charged above
+  // their per-item tier price, whatever the client sent. Only ever lowers a
+  // line -- matches the storefront's repriceForQty. (Percentage quantity
+  // discounts are resolved client-side, same as the absolute bulk breaks.)
+  if (b.customer_id) {
+    const cust = await db.one('SELECT price_tier FROM users WHERE id = ?', b.customer_id);
+    const tier = cust && cust.price_tier;
+    if (tier && tier !== 'retail') {
+      const tImgs = [...new Set(items.filter((it) => it.product_img).map((it) => it.product_img))];
+      const tierByImg = tImgs.length ? await loadTierPricesByImg(db, tImgs) : new Map();
+      for (const it of items) {
+        const tc = tierCentsFor(tierByImg.get(it.product_img), tier);
+        if (tc != null && Number(it.unit_price_usd) > tc / 100) it.unit_price_usd = tc / 100;
+      }
+    }
   }
 
   // ----- 1. line totals -----

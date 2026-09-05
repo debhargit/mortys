@@ -17,7 +17,7 @@ import { adminMw, roleCanManage } from '../_lib/guards.js';
 import { safeJson, boolify } from '../_lib/util.js';
 import { CAPABILITIES } from '../_lib/capabilities.js';
 import { getShopSettings } from '../_lib/shop.js';
-import { loadBreaksForImg, ACTIVE_SALE_PRICE_SQL, effectiveBaseCents } from '../_lib/price_breaks.js';
+import { loadBreaksForImg, ACTIVE_SALE_PRICE_SQL, effectiveBaseCents, loadTierPricesByImg } from '../_lib/price_breaks.js';
 import { loadKitComponentsForImg, kitRollupCents } from '../_lib/kits.js';
 import { centsToUsd } from '../_lib/money.js';
 
@@ -166,7 +166,17 @@ export default function mount(app) {
     boolify(row, ['is_active', 'serial_required', 'is_redeemable', 'is_kit',
       'restricted_instore_only', 'restricted_manager_approval', 'restricted_id_required', 'restricted_tax_id_required']);
     row.matrix_overrides = safeJson(row.matrix_overrides, []);
-    row.price_breaks = (await loadBreaksForImg(d1(c.env), row.img)).map((b) => ({ min_qty: b.min_qty, price_usd: centsToUsd(b.price_cents) }));
+    const allBreaks = await loadBreaksForImg(d1(c.env), row.img);
+    row.price_breaks = allBreaks.filter((b) => b.price_cents != null)
+      .map((b) => ({ min_qty: b.min_qty, price_usd: centsToUsd(b.price_cents) }));
+    row.qty_discounts = allBreaks.filter((b) => b.discount_pct != null)
+      .map((b) => ({ min_qty: b.min_qty, discount_pct: b.discount_pct }));
+    const tp = (await loadTierPricesByImg(d1(c.env), [row.img])).get(row.img) || {};
+    row.tier_prices = {
+      trade: tp.trade != null ? centsToUsd(tp.trade) : null,
+      fleet: tp.fleet != null ? centsToUsd(tp.fleet) : null,
+      dealer: tp.dealer != null ? centsToUsd(tp.dealer) : null,
+    };
     const kitComps = await loadKitComponentsForImg(d1(c.env), row.img);
     row.kit_components = kitComps.map((k) => ({
       component_img: k.component_img, qty_each: k.qty_each, name: k.name,
