@@ -19,7 +19,7 @@ import { CAPABILITIES } from '../_lib/capabilities.js';
 import { getShopSettings } from '../_lib/shop.js';
 import { loadBreaksForImg, ACTIVE_SALE_PRICE_SQL, effectiveBaseCents, loadTierPricesByImg } from '../_lib/price_breaks.js';
 import { loadKitComponentsForImg, kitRollupCents } from '../_lib/kits.js';
-import { loadAltNumbersForImg } from '../_lib/alt_numbers.js';
+import { loadAltNumbersForImg, loadSubstitutesForImg } from '../_lib/alt_numbers.js';
 import { centsToUsd } from '../_lib/money.js';
 
 // 14-day zero-filled series from rows [{ day:'YYYY-MM-DD', <key> }]
@@ -179,6 +179,7 @@ export default function mount(app) {
       dealer: tp.dealer != null ? centsToUsd(tp.dealer) : null,
     };
     row.alt_numbers = await loadAltNumbersForImg(d1(c.env), row.img);
+    row.substitute_links = await loadSubstitutesForImg(d1(c.env), row.img);
     const kitComps = await loadKitComponentsForImg(d1(c.env), row.img);
     row.kit_components = kitComps.map((k) => ({
       component_img: k.component_img, qty_each: k.qty_each, name: k.name,

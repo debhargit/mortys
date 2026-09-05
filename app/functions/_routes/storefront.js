@@ -19,7 +19,7 @@ import { safeJson } from '../_lib/util.js';
 import { getShopSettings } from '../_lib/shop.js';
 import { bestUnitPriceCents, loadBreaksByImg, ACTIVE_SALE_PRICE_SQL, effectiveBaseCents, loadTierPricesByImg, tierCentsFor } from '../_lib/price_breaks.js';
 import { loadKitComponentsByImg, kitRollupCents, kitBuildableQty } from '../_lib/kits.js';
-import { loadAltNumbersByImg } from '../_lib/alt_numbers.js';
+import { loadAltNumbersByImg, loadSubstitutesByImg, loadSubstitutesForImg } from '../_lib/alt_numbers.js';
 import { centsToUsd } from '../_lib/money.js';
 
 // Attach each row's price_breaks (ascending by min_qty, in USD) and its
@@ -223,6 +223,15 @@ export default function mount(app) {
         const imgList = list.map((r) => r.img);
         const [breaksByImg, tierByImg] = await Promise.all([loadBreaksByImg(db, imgList), loadTierPricesByImg(db, imgList)]);
         list = list.map((r) => withPricing(r, breaksByImg, tierByImg, pctx));
+        // The POS grid (staff) shows an "alternatives" expander per row; give
+        // it the linked substitutes without a second round-trip.
+        if (pctx.staff && !isCompact) {
+          const subMap = await loadSubstitutesByImg(db, imgList);
+          for (const r of list) {
+            const s = subMap.get(r.img);
+            if (s && (s.forward.length || s.reverse.length)) r.substitutes = s;
+          }
+        }
       } else {
         list = list.map((r) => { delete r.price_cents; delete r.active_sale_cents; return r; });
       }
@@ -260,6 +269,13 @@ export default function mount(app) {
         loadBreaksByImg(d1(c.env), [row.img]), loadTierPricesByImg(d1(c.env), [row.img]),
       ]);
       withPricing(row, breaksByImg, tierByImg, pctx);
+      // Substitute parts a shopper might want instead -- forward links only
+      // (a shopper doesn't need "this supersedes an older part"), and only
+      // ones that are actually orderable: active + in stock.
+      const subs = (await loadSubstitutesForImg(d1(c.env), row.img)).forward
+        .filter((s) => s.is_active && s.stock_level !== 'out')
+        .map((s) => ({ img: s.img, name: s.name, sku: s.sku, price_usd: s.price_usd, stock_level: s.stock_level, relationship: s.relationship }));
+      if (subs.length) row.substitutes = subs;
     }
     return c.json({ product: row });
   });

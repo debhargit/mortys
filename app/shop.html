@@ -2841,6 +2841,40 @@ document.addEventListener('DOMContentLoaded', function(){
         render(currentFilter); // refresh card hearts
       });
     });
+    // Substitute / superseding parts — a lazy fetch (only when a shopper
+    // actually opens a product); the strip is additive so a failed fetch just
+    // means no strip.
+    (function(){
+      var box = document.querySelector('.pd-box');
+      var old = box && box.querySelector('.pd-subs');
+      if (old) old.remove();
+      fetch('/api/products/' + encodeURIComponent(img), { credentials:'same-origin' })
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(d){
+          var subs = d && d.product && d.product.substitutes;
+          if (!subs || !subs.length || !box) return;
+          var groups = {};
+          subs.forEach(function(s){ (groups[s.relationship || 'substitute'] = groups[s.relationship || 'substitute'] || []).push(s); });
+          var sec = document.createElement('div');
+          sec.className = 'pd-subs';
+          sec.style.gridColumn = '1 / -1';
+          sec.innerHTML = Object.keys(groups).map(function(label){
+            return '<h4>' + esc(label.charAt(0).toUpperCase() + label.slice(1)) + '</h4>' +
+              '<div class="strip">' + groups[label].map(function(s){
+                var sp = (s.price_usd != null) ? s.price_usd : (prices[s.img] || 0);
+                return '<a data-pdrel="' + esc(s.img) + '">' +
+                  '<img src="' + photoOf(s.img) + '" alt="" loading="lazy" onerror="this.style.opacity=0.25"/>' +
+                  '<div class="pad"><b>' + esc(s.name || s.img) + '</b><span>' + fmt(sp) + '</span></div>' +
+                '</a>';
+              }).join('') + '</div>';
+          }).join('');
+          box.appendChild(sec);
+          sec.querySelectorAll('[data-pdrel]').forEach(function(a){
+            a.addEventListener('click', function(){ openProductDetail(a.dataset.pdrel); });
+          });
+        })
+        .catch(function(){});
+    })();
     // Update URL hash for sharing / deep-linking
     try { history.replaceState(null, '', '#part=' + encodeURIComponent(img)); } catch(_){}
     document.getElementById('pdModal').classList.add('show');
@@ -4216,29 +4250,40 @@ document.addEventListener('DOMContentLoaded', function(){
     }
 
     function absorb(data){
-      var rows = (data && (data.products || data.rows)) || [];
-      var mapped = rows.map(function(r){
-        // /api/products row: { img, name, make_model, category, condition,
-        // price_usd, stock_count, bin_location, ... }
-        var img = r.img;
-        var pu = parseFloat(r.price_usd);
-        if (!isNaN(pu)) prices[img] = pu;
-        liveStock[img] = r.stock_count;
-        var cat = String(r.category || '').toLowerCase();
-        var name = r.name || img;
-        var make = r.make_model || '';
+      var raw = (data && (data.products || data.rows)) || [];
+      var cats = (data && data.cats) || [];
+      var mapped = raw.map(function(r){
+        // /api/products?compact=1 returns positional-array rows:
+        //   [img, name, make_model, catIdx, condIdx, priceCents, stock, bin, alt?]
+        // A non-compact caller returns objects ({img, name, price_usd, ...}).
+        // Handle both so the loader can't silently absorb nothing again.
+        var isArr = Array.isArray(r);
+        var img  = isArr ? r[0] : r.img;
+        var name = (isArr ? r[1] : r.name) || img;
+        var make = (isArr ? r[2] : r.make_model) || '';
+        var cat  = String((isArr ? (cats[r[3]] || '') : r.category) || '').toLowerCase();
+        var cond = isArr ? (r[4] === 1 ? 'USED' : 'NEW') : (r.condition === 'USED' ? 'USED' : 'NEW');
+        var altStr = isArr ? (r[8] || '') : '';
+        if (isArr) {
+          if (r[5] != null && !isNaN(r[5])) prices[img] = Number(r[5]) / 100;
+        } else {
+          var pu = parseFloat(r.price_usd);
+          if (!isNaN(pu)) prices[img] = pu;
+        }
+        liveStock[img] = isArr ? r[6] : r.stock_count;
         return {
           n: name,
           m: make,
           c: VALID_CATS[cat] ? cat : 'accessories',
-          b: r.condition === 'USED' ? 'USED' : 'NEW',
+          b: cond,
           i: img,
           bin: '',   // bin location is warehouse-internal — not shown or searchable on the storefront
           // Precomputed lowercase haystack. Building this once at load is what
           // makes search fast -- the old filter concatenated and lowercased
-          // three fields for all 23k parts on every keystroke. Part number is
-          // included because that is what customers actually search by.
-          s: (name + ' ' + make + ' ' + cat + ' ' + img).toLowerCase()
+          // several fields for all ~17k parts on every keystroke. Part number
+          // and any alternate/interchange numbers are included because that is
+          // what customers actually search by.
+          s: (name + ' ' + make + ' ' + cat + ' ' + img + (altStr ? ' ' + altStr : '')).toLowerCase()
         };
       });
       // `parts` starts empty now, so this only matters if a retry ever

@@ -353,15 +353,23 @@ export default function mount(app) {
       const key = number.toLowerCase();
       if (seen.has(key)) return c.json({ error: 'Duplicate number ' + number }, 400);
       seen.add(key);
+      let sub = r.substitute_img ? String(r.substitute_img).trim() : null;
+      if (sub) {
+        if (sub === img) return c.json({ error: 'A part cannot be its own substitute.' }, 400);
+        if (!(await db.one('SELECT img FROM products WHERE img = ?', sub))) return c.json({ error: 'Substitute part not found: ' + sub }, 400);
+      } else {
+        sub = null;
+      }
       rows.push({
         number,
         kind: r.kind ? String(r.kind).trim().slice(0, 40) || null : null,
         note: r.note ? String(r.note).trim().slice(0, 200) || null : null,
+        substitute_img: sub,
       });
     }
     const stmts = [{ sql: 'DELETE FROM product_alt_numbers WHERE product_img = ?', binds: [img] }];
     for (const r of rows) {
-      stmts.push({ sql: 'INSERT INTO product_alt_numbers (product_img, number, kind, note) VALUES (?,?,?,?)', binds: [img, r.number, r.kind, r.note] });
+      stmts.push({ sql: 'INSERT INTO product_alt_numbers (product_img, number, kind, note, substitute_img) VALUES (?,?,?,?,?)', binds: [img, r.number, r.kind, r.note, r.substitute_img] });
     }
     await db.batch(stmts);
     return c.json({ ok: true, count: rows.length });

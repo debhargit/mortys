@@ -14,7 +14,7 @@ import { getShopSettings, shopSettingsToShop } from '../_lib/shop.js';
 import { sendEmail } from '../_lib/mailer.js';
 import { readUploadBody } from '../_lib/uploads.js';
 import { loadBreaksForImg, ACTIVE_SALE_PRICE_SQL } from '../_lib/price_breaks.js';
-import { loadAltNumbersForImg } from '../_lib/alt_numbers.js';
+import { loadAltNumbersForImg, loadSubstitutesForImg } from '../_lib/alt_numbers.js';
 import { centsToUsd } from '../_lib/money.js';
 
 const u2c = (u) => (u == null || u === '' ? null : Math.round(Number(u) * 100));
@@ -326,6 +326,7 @@ export default function mount(app) {
     product.price_breaks = allBreaks.filter((b) => b.price_cents != null).map((b) => ({ min_qty: b.min_qty, price_usd: centsToUsd(b.price_cents) }));
     product.qty_discounts = allBreaks.filter((b) => b.discount_pct != null).map((b) => ({ min_qty: b.min_qty, discount_pct: b.discount_pct }));
     product.alt_numbers = await loadAltNumbersForImg(d1(c.env), product.img);
+    product.substitutes = await loadSubstitutesForImg(d1(c.env), product.img);
     product.sale_price_usd = product.active_sale_cents != null ? centsToUsd(product.active_sale_cents) : null;
     delete product.active_sale_cents;
     return c.json({ product });

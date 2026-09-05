@@ -2407,38 +2407,84 @@ async function renderProducts(panel){
       sync();
     })();
 
-    // Alternate part numbers: a repeatable [number, kind, note] row list,
-    // saved on its own via PUT .../alt-numbers (replace-the-whole-set).
+    // Alternate part numbers: a repeatable row list, saved on its own via
+    // PUT .../alt-numbers (replace-the-whole-set). Each row is a lookup alias
+    // for this part; it can also link to another product as a substitute /
+    // supersession (kind + substitute_img).
     (function(){
       var rowsBox = document.getElementById('peAltRows');
       if (!rowsBox) return;
-      var nums = (p.alt_numbers || []).map(function(a){ return { number: a.number, kind: a.kind || '', note: a.note || '' }; });
+      var KINDS = ['interchange', 'substitute', 'supersedes', 'superseded by', 'OEM'];
+      var nums = (p.alt_numbers || []).map(function(a){
+        return { number: a.number, kind: a.kind || '', note: a.note || '',
+          substitute_img: a.substitute_img || null, _sub: a.substitute || null };
+      });
+      var kindOpts = function(cur){
+        var list = KINDS.slice();
+        if (cur && list.indexOf(cur) < 0) list.push(cur);
+        return '<option value=""' + (cur ? '' : ' selected') + '>— type —</option>' +
+          list.map(function(k){ return '<option' + (k === cur ? ' selected' : '') + '>' + esc(k) + '</option>'; }).join('');
+      };
       var paint = function(){
         rowsBox.innerHTML = nums.length ? nums.map(function(a, i){
-          return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px" data-anrow="' + i + '">' +
-            '<input class="fld anNum" placeholder="part number" value="' + esc(a.number || '') + '" style="width:150px"/>' +
-            '<input class="fld anKind" placeholder="OEM / interchange…" value="' + esc(a.kind || '') + '" style="width:130px"/>' +
-            '<input class="fld anNote" placeholder="note (optional)" value="' + esc(a.note || '') + '" style="flex:1;min-width:80px"/>' +
-            '<button type="button" class="btn anRemove" style="padding:3px 9px;background:#fee2e2;color:#b91c1c">✕</button>' +
+          var chip = a.substitute_img
+            ? '<span style="display:inline-flex;align-items:center;gap:6px;background:#ede9fe;color:#5b21b6;border-radius:6px;padding:3px 8px;font-size:12px">↔ ' +
+                esc((a._sub && a._sub.name) || a.substitute_img) +
+                (a._sub && a._sub.price_usd != null ? ' · $' + Number(a._sub.price_usd).toFixed(2) : '') +
+                (a._sub ? ' · ' + (a._sub.stock_count || 0) + ' in stock' : '') +
+                ' <button type="button" class="anUnlink" title="Unlink" style="border:0;background:none;color:#5b21b6;cursor:pointer;font-weight:800">✕</button></span>'
+            : '<input class="fld anSub" placeholder="link a substitute part no. (optional)" style="width:260px"/>';
+          return '<div style="border:1px solid var(--line);border-radius:7px;padding:8px;margin-bottom:6px" data-anrow="' + i + '">' +
+            '<div style="display:flex;gap:8px;align-items:center">' +
+              '<input class="fld anNum" placeholder="part number" value="' + esc(a.number || '') + '" style="width:150px"/>' +
+              '<select class="fld anKind" style="width:150px">' + kindOpts(a.kind || '') + '</select>' +
+              '<input class="fld anNote" placeholder="note (optional)" value="' + esc(a.note || '') + '" style="flex:1;min-width:80px"/>' +
+              '<button type="button" class="btn anRemove" style="padding:3px 9px;background:#fee2e2;color:#b91c1c">✕</button>' +
+            '</div>' +
+            '<div style="margin-top:6px;font-size:12px;color:var(--muted)">Substitute → ' + chip + ' <span class="anSubMsg" style="margin-left:6px"></span></div>' +
           '</div>';
         }).join('') : '<div style="font-size:12.5px;color:var(--muted);margin-bottom:6px">No alternate numbers.</div>';
         rowsBox.querySelectorAll('.anRemove').forEach(function(btn){
-          btn.addEventListener('click', function(){
-            nums.splice(parseInt(btn.closest('[data-anrow]').getAttribute('data-anrow'), 10), 1); paint();
+          btn.addEventListener('click', function(){ nums.splice(rowIdx(btn), 1); paint(); });
+        });
+        rowsBox.querySelectorAll('.anUnlink').forEach(function(btn){
+          btn.addEventListener('click', function(){ var a = nums[rowIdx(btn)]; a.substitute_img = null; a._sub = null; sync(); paint(); });
+        });
+        rowsBox.querySelectorAll('.anSub').forEach(function(inp){
+          inp.addEventListener('change', async function(){
+            var a = nums[rowIdx(inp)]; var code = (inp.value || '').trim();
+            var msg = inp.closest('[data-anrow]').querySelector('.anSubMsg');
+            if (!code) return;
+            try {
+              var res = await api('/api/admin/pos/scan?code=' + encodeURIComponent(code));
+              if (!res.product || res.product.img === p.img) throw new Error('nope');
+              a.substitute_img = res.product.img;
+              a._sub = { name: res.product.name, price_usd: res.product.price_usd, stock_count: res.product.stock_count };
+              sync(); paint();
+            } catch (e) { msg.textContent = 'not found'; msg.style.color = 'var(--red)'; }
           });
         });
       };
+      var rowIdx = function(el){ return parseInt(el.closest('[data-anrow]').getAttribute('data-anrow'), 10); };
+      // Pull the free-text fields off the DOM into `nums` (so a repaint keeps them).
+      var sync = function(){
+        rowsBox.querySelectorAll('[data-anrow]').forEach(function(row, i){
+          if (!nums[i]) return;
+          var n = row.querySelector('.anNum'), k = row.querySelector('.anKind'), nt = row.querySelector('.anNote');
+          if (n) nums[i].number = n.value;
+          if (k) nums[i].kind = k.value;
+          if (nt) nums[i].note = nt.value;
+        });
+      };
       paint();
-      document.getElementById('peAltAdd').addEventListener('click', function(){ nums.push({ number: '', kind: '', note: '' }); paint(); });
+      document.getElementById('peAltAdd').addEventListener('click', function(){ sync(); nums.push({ number: '', kind: '', note: '', substitute_img: null, _sub: null }); paint(); });
       document.getElementById('peAltSave').addEventListener('click', async function(){
         var m = document.getElementById('peAltMsg');
-        rowsBox.querySelectorAll('[data-anrow]').forEach(function(row, i){
-          nums[i].number = row.querySelector('.anNum').value;
-          nums[i].kind = row.querySelector('.anKind').value;
-          nums[i].note = row.querySelector('.anNote').value;
-        });
-        var payload = nums.map(function(a){ return { number: (a.number || '').trim(), kind: (a.kind || '').trim(), note: (a.note || '').trim() }; })
-          .filter(function(a){ return a.number; });
+        sync();
+        var payload = nums.map(function(a){ return {
+          number: (a.number || '').trim(), kind: (a.kind || '').trim(),
+          note: (a.note || '').trim(), substitute_img: a.substitute_img || null,
+        }; }).filter(function(a){ return a.number; });
         m.textContent = 'Saving…'; m.style.color = 'var(--muted)';
         try {
           await api('/api/admin/products/' + encodeURIComponent(p.img) + '/alt-numbers', { method: 'PUT', body: { numbers: payload } });
@@ -4426,9 +4472,9 @@ async function renderPOS(panel){
     if (jp && ji) jp.addEventListener('click', function(){ var n = parseInt(ji.value, 10); if (n > 0) loadGrid(n); });
     if (ji) ji.addEventListener('keydown', function(e){ if (e.key === 'Enter') { e.preventDefault(); var n = parseInt(ji.value, 10); if (n > 0) loadGrid(n); } });
 
-    results.querySelectorAll('[data-img]').forEach(function(row){
+    results.querySelectorAll('.posRow[data-img], .posCard[data-img]').forEach(function(row){
       row.addEventListener('click', function(e){
-        if (e.target && e.target.classList && (e.target.classList.contains('posSelCk') || e.target.classList.contains('posAddBtn'))) return;
+        if (e.target && e.target.closest && e.target.closest('.posSelCk, .posAddBtn, .posAltBtn, .posSubAdd, .posSubPanel')) return;
         var p = r.products.find(function(x){ return x.img === row.getAttribute('data-img'); });
         if (!p) return;
         posAddToCart(p, 1);
@@ -4445,6 +4491,26 @@ async function renderPOS(panel){
         if (!p) return;
         posAddToCart(p, 1);
         drawCart();
+      });
+    });
+    // "↔" toggles the substitutes panel that was rendered (hidden) after the row.
+    results.querySelectorAll('.posAltBtn').forEach(function(btn){
+      btn.addEventListener('click', function(e){
+        e.stopPropagation();
+        var panel = results.querySelector('.posSubPanel[data-forimg="' + (btn.getAttribute('data-img') || '').replace(/"/g, '\\"') + '"]');
+        if (panel) panel.hidden = !panel.hidden;
+      });
+    });
+    // "+" on a substitute line: pull the full product (pricing / breaks / tier)
+    // via the scan endpoint, then add it like any other part.
+    results.querySelectorAll('.posSubAdd').forEach(function(btn){
+      btn.addEventListener('click', async function(e){
+        e.stopPropagation();
+        var code = btn.getAttribute('data-img');
+        try {
+          var res = await api('/api/admin/pos/scan?code=' + encodeURIComponent(code));
+          if (res && res.product) { posAddToCart(res.product, 1); drawCart(); }
+        } catch (err) { /* ignore */ }
       });
     });
     results.querySelectorAll('.posSelCk').forEach(function(ck){
@@ -4539,6 +4605,21 @@ async function renderPOS(panel){
       products.map(function(p){
         var stock = p.stock_count || 0;
         var bin = p.bin_location || p.location || '—';
+        var subs = p.substitutes ? (p.substitutes.forward || []).concat(p.substitutes.reverse || []) : [];
+        var subPanel = subs.length
+          ? '<div class="posSubPanel" data-forimg="' + esc(p.img) + '" hidden style="padding:4px 10px 8px 40px;background:var(--card-soft);border-bottom:1px solid var(--hover)">' +
+              subs.map(function(s){
+                return '<div style="display:flex;gap:8px;align-items:center;padding:3px 0;font-size:' + posFS(11.5) + (s.stock_level === 'out' ? ';opacity:.5' : '') + '">' +
+                  '<span style="width:130px;flex-shrink:0;color:var(--muted)">↔ ' + esc(s.relationship || 'substitute') + '</span>' +
+                  '<code style="flex-shrink:0;font-weight:700;color:#374151">' + esc(s.sku || s.img) + '</code>' +
+                  '<span style="flex:1;min-width:0;font-weight:600">' + esc(s.name || s.img) + '</span>' +
+                  '<span style="width:70px;text-align:right;font-weight:700">' + (s.price_usd != null ? '$' + Number(s.price_usd).toFixed(2) : '—') + '</span>' +
+                  '<span style="width:44px;text-align:center;font-weight:700;color:' + posStockColor(s.stock_level) + '">' + (s.stock_count || 0) + '</span>' +
+                  '<button type="button" class="posSubAdd" data-img="' + esc(s.img) + '" title="Add this instead" style="width:24px;height:24px;flex-shrink:0;padding:0;border:0;border-radius:6px;background:var(--red);color:#fff;font-size:16px;font-weight:800;line-height:1;cursor:pointer">+</button>' +
+                '</div>';
+              }).join('') +
+            '</div>'
+          : '';
         return '<div data-img="' + esc(p.img) + '" style="display:flex;gap:8px;align-items:flex-start;padding:' + pad + ';border-bottom:1px solid var(--hover);cursor:pointer" class="posRow">' +
           '<input type="checkbox" class="posSelCk" data-img="' + esc(p.img) + '" title="Select for bulk add"' + (POS_LIST_SEL[p.img] ? ' checked' : '') + ' style="width:15px;height:15px;flex-shrink:0;margin-top:2px;cursor:pointer"/>' +
           (thumbSize ? '<span style="width:' + thumbSize + 'px;flex-shrink:0">' + posThumb(p, thumbSize) + '</span>' : '') +
@@ -4555,8 +4636,9 @@ async function renderPOS(panel){
           (cols.bin ? '<span style="width:90px;flex-shrink:0;font-size:' + posFS(compact?11:12) + ';color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(bin) + '</span>' : '') +
           (cols.qty ? '<span style="width:64px;flex-shrink:0;text-align:center;font-size:' + posFS(compact?11:12) + ';font-weight:700;color:' + posStockColor(p.stock_level) + '">' + stock + '</span>' : '') +
           (cols.price ? '<span style="width:80px;flex-shrink:0;text-align:right">' + posPriceHtml(p, posFS(compact?12:13)) + '</span>' : '') +
+          (subs.length ? '<button type="button" class="posAltBtn" data-img="' + esc(p.img) + '" title="Show substitutes / alternatives" style="width:26px;height:26px;flex-shrink:0;margin-top:-1px;padding:0;border:1px solid var(--line);border-radius:6px;background:var(--card);color:#5b21b6;font-size:12px;font-weight:800;line-height:1;cursor:pointer">↔' + subs.length + '</button>' : '') +
           '<button type="button" class="posAddBtn" data-img="' + esc(p.img) + '" title="Add to cart" aria-label="Add to cart" style="width:26px;height:26px;flex-shrink:0;margin-top:-1px;padding:0;border:0;border-radius:6px;background:var(--red);color:#fff;font-size:17px;font-weight:800;line-height:1;cursor:pointer">+</button>' +
-        '</div>';
+        '</div>' + subPanel;
       }).join('') +
     '</div>' +
     '<style>.posRow:hover{background:var(--card-soft)}</style>';
@@ -5613,6 +5695,29 @@ async function renderPOS(panel){
       posAddToCart(res.product, qty);
       drawCart();
       status.innerHTML = '<span style="color:#15803d;font-weight:700">✔ Added ' + (qty > 1 ? qty + '× ' : '') + esc(res.product.name) + '</span>';
+      // Out of stock, but a linked substitute is in stock -> offer to swap.
+      var fwd = (res.product.substitutes && res.product.substitutes.forward) || [];
+      var inStockSub = res.product.stock_level === 'out' && fwd.filter(function(s){ return s.stock_level !== 'out'; })[0];
+      if (inStockSub) {
+        window.__posLastScanImg = res.product.img;
+        status.innerHTML += ' <span style="color:#b45309;font-weight:700">— ⚠ out of stock. ↔ ' + esc(inStockSub.name) +
+          (inStockSub.price_usd != null ? ' ($' + Number(inStockSub.price_usd).toFixed(2) + ')' : '') +
+          ', ' + (inStockSub.stock_count || 0) + ' in stock</span> ' +
+          '<button type="button" id="posSubSwap" data-img="' + esc(inStockSub.img) + '" style="border:0;background:var(--red);color:#fff;border-radius:5px;padding:2px 8px;font-weight:800;cursor:pointer">use instead</button>';
+        var sw = document.getElementById('posSubSwap');
+        if (sw) sw.addEventListener('click', async function(){
+          try {
+            var sr = await api('/api/admin/pos/scan?code=' + encodeURIComponent(sw.getAttribute('data-img')));
+            if (sr && sr.product) {
+              // drop the out-of-stock line we just added, then add the substitute
+              var oi = POS.cart.map(function(c){ return c.img; }).lastIndexOf(window.__posLastScanImg);
+              if (oi >= 0) POS.cart.splice(oi, 1);
+              posAddToCart(sr.product, qty); drawCart();
+              status.innerHTML = '<span style="color:#15803d;font-weight:700">✔ Swapped to ' + esc(sr.product.name) + '</span>';
+            }
+          } catch (e2) { /* ignore */ }
+        });
+      }
     } catch (err) {
       // Not a known code — fall back to putting it in the search box so the
       // operator can see what is close rather than getting a dead end.
