@@ -4199,10 +4199,14 @@ document.addEventListener('DOMContentLoaded', function(){
   // never reshuffles what the shopper is already looking at.
   (function loadCatalogue(){
     var VALID_CATS = {engine:1,body:1,suspension:1,electrical:1,brakes:1,wheels:1,fluids:1,accessories:1};
-    // /api/products hard-caps `limit` at 200, so page in 200s until a short
-    // page comes back. The server sorts priced parts first, so page 1 is the
-    // sellable stock and later pages only ever append.
-    var PAGE = 200;
+    // /api/products?compact=1 is capped at 5000 (see storefront.js), not the
+    // 200 a plain /api/products call gets -- pull in 5000s so a ~17k-part
+    // catalogue takes ~4 requests, not ~90. Each request also re-runs a full
+    // COUNT(*) that this loader never reads (see absorb()), so an accidental
+    // drop to small pages here silently multiplies that scan by however many
+    // more chunks it takes -- this bit us once already (Sep 2026, blew the
+    // D1 free-tier daily row-read cap from a handful of storefront visits).
+    var PAGE = 5000;
     var first = true;
     var loaded = 0;
 
