@@ -683,6 +683,7 @@ var renderers = {
   partsreq:      renderPartsReq,
   cashreport:    renderCashReport,
   pettycash:     renderPettyCash,
+  recurring:     renderRecurring,
   lowstock:      renderLowStock,
   warehouse:     renderWarehouse,
   deliveries:    renderDeliveries,
@@ -767,6 +768,7 @@ var SIDEBAR_GROUPS = [
     { tab:'orders', label:'🛒 Orders' },
     { tab:'cashreport', label:'📈 Cash Report' },
     { tab:'pettycash', label:'💰 Petty Cash' },
+    { tab:'recurring', label:'🔁 Recurring Charges' },
     { tab:'reviews', label:'⭐ Reviews' },
     { tab:'coupons', label:'🏷 Coupons' },
     { tab:'giftcards', label:'🎁 Gift Cards' },
@@ -9101,6 +9103,223 @@ async function submitFundPayout(fundId){
     PC_VIEW_FUND = fundId;
     show('pettycash');
   } catch (e) { msg.style.color = 'var(--red)'; msg.textContent = e.message; }
+}
+
+// ============= RECURRING CHARGES =============
+// A plan bills automatically on a schedule via the 'recurring-charges'
+// scheduled job (_lib/recurring.js, registered in _lib/jobs.js) -- this
+// screen is just the admin CRUD + a manual "run now" for testing/urgent
+// billing. Mirrors the coupons/gift-cards/redemptions list+detail pattern.
+var RC_VIEW_PLAN = null;
+var RC_ITEMS = [];   // the create form's repeatable line-item rows
+var RC_CUSTOMER = null;   // { id, name } picked via the search box below
+async function renderRecurring(panel){
+  if (RC_VIEW_PLAN) return renderRecurringDetail(panel, RC_VIEW_PLAN);
+  panel.innerHTML = '<div class="empty">Loading…</div>';
+  var r;
+  try { r = await api('/api/admin/recurring-plans'); }
+  catch (e) { panel.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return; }
+
+  RC_ITEMS = [{ description: '', qty: 1, unit_price_usd: '' }];
+  RC_CUSTOMER = null;
+  var freqLabel = { weekly:'Weekly', monthly:'Monthly', quarterly:'Quarterly', yearly:'Yearly' };
+  var targetLabel = { order:'Order (invoiced by email)', pos_account_sale:'POS sale, charged to account' };
+
+  panel.innerHTML =
+    '<details style="border-bottom:1px solid var(--line);background:var(--card-soft)">' +
+      '<summary style="padding:12px 16px;cursor:pointer;font-weight:700;color:var(--heading)">+ New recurring plan</summary>' +
+      '<div style="padding:14px 18px;max-width:760px">' +
+        '<div style="position:relative;margin-bottom:10px">' +
+          '<label class="lbl">Customer *</label>' +
+          '<input id="rcCustSearch" placeholder="🔎 search name, phone, or account #…" autocomplete="off" class="fld"/>' +
+          '<div id="rcCustResults" style="display:none;position:absolute;z-index:60;left:0;right:0;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 14px 36px rgba(0,0,0,.30);max-height:280px;overflow-y:auto"></div>' +
+          '<div id="rcCustPicked" style="margin-top:4px;font-size:12.5px;color:var(--muted)"></div>' +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
+          '<div><label class="lbl">Bills as</label><select id="rcTarget" class="fld">' +
+            '<option value="order">Order (invoiced by email)</option><option value="pos_account_sale">POS sale, charged to account</option>' +
+          '</select></div>' +
+          '<div><label class="lbl">Frequency</label><select id="rcFrequency" class="fld">' +
+            '<option value="monthly">Monthly</option><option value="weekly">Weekly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option>' +
+          '</select></div>' +
+          '<div style="grid-column:1/-1"><label class="lbl">Description</label><input id="rcDescription" class="fld" placeholder="e.g. Monthly rent"/></div>' +
+          '<div><label class="lbl">First charge date</label><input id="rcNextRun" type="date" value="' + new Date().toISOString().slice(0,10) + '" class="fld"/></div>' +
+          '<div><label class="lbl">Ends on <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional)</span></label><input id="rcEndDate" type="date" class="fld"/></div>' +
+          '<div><label class="lbl"># of charges <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional — blank = until cancelled)</span></label><input id="rcOccurrences" type="number" min="1" class="fld"/></div>' +
+        '</div>' +
+        '<div style="margin-top:12px">' +
+          '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:800;margin-bottom:6px">Line items</div>' +
+          '<div id="rcItemRows"></div>' +
+          '<button type="button" class="btn" id="rcItemAdd" style="margin-top:4px">+ Add line</button>' +
+        '</div>' +
+        '<div id="rcMsg" style="display:none;margin-top:10px;padding:9px 12px;border-radius:6px;font-size:13px"></div>' +
+        '<button type="button" class="btn ok" id="rcCreateGo" style="margin-top:12px">Create plan</button>' +
+      '</div>' +
+    '</details>' +
+    (r.plans.length
+      ? '<table><thead><tr><th>Customer</th><th>Description</th><th>Amount</th><th>Bills as</th><th>Frequency</th><th>Next run</th><th>Status</th><th></th></tr></thead><tbody>' +
+        r.plans.map(function(p){
+          return '<tr' + (!p.is_active ? ' style="opacity:.55"' : '') + '>' +
+            '<td>' + esc(p.customer_name || ('#' + p.customer_id)) + '</td>' +
+            '<td>' + esc(p.description) + '</td>' +
+            '<td>' + fmtMoney(p.amount_usd) + '</td>' +
+            '<td>' + esc(targetLabel[p.target] || p.target) + '</td>' +
+            '<td>' + esc(freqLabel[p.frequency] || p.frequency) + '</td>' +
+            '<td>' + esc(p.next_run_date) + (p.occurrences_left != null ? '<br/><small style="color:var(--muted)">' + p.occurrences_left + ' left</small>' : '') + '</td>' +
+            '<td>' + badge(p.is_active ? 'active' : 'paused', p.is_active ? 'ok' : 'bad') + '</td>' +
+            '<td class="actions"><button class="btn" data-open="' + p.id + '">Open</button></td>' +
+          '</tr>';
+        }).join('') + '</tbody></table>'
+      : '<div class="empty">No recurring plans yet — create one above.</div>');
+
+  function paintItemRows(){
+    var box = document.getElementById('rcItemRows');
+    box.innerHTML = RC_ITEMS.map(function(it, i){
+      return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px" data-rcrow="' + i + '">' +
+        '<input placeholder="Description" class="fld rcDesc" value="' + esc(it.description) + '" style="flex:1"/>' +
+        '<input type="number" min="1" placeholder="Qty" class="fld rcQty" value="' + esc(it.qty) + '" style="width:70px"/>' +
+        '<span style="font-size:12.5px;color:var(--muted)">@ $</span>' +
+        '<input type="number" min="0" step="0.01" placeholder="Price" class="fld rcPrice" value="' + esc(it.unit_price_usd) + '" style="width:100px"/>' +
+        '<button type="button" class="btn rcRowDel" style="padding:3px 9px;background:#fee2e2;color:#b91c1c">✕</button>' +
+      '</div>';
+    }).join('');
+    box.querySelectorAll('.rcRowDel').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var i = parseInt(btn.closest('[data-rcrow]').getAttribute('data-rcrow'), 10);
+        if (RC_ITEMS.length > 1) { RC_ITEMS.splice(i, 1); paintItemRows(); }
+      });
+    });
+  }
+  paintItemRows();
+  document.getElementById('rcItemAdd').addEventListener('click', function(){ RC_ITEMS.push({ description:'', qty:1, unit_price_usd:'' }); paintItemRows(); });
+
+  // Customer search -- same debounced-search-box pattern as the product
+  // form's "Copy from an existing part" widget, hitting the existing
+  // customer-lookup endpoint (there's no single shared customer-picker
+  // widget in admin.html to reuse -- POS's own is wired inline into the
+  // POS panel).
+  (function(){
+    var jin = document.getElementById('rcCustSearch'), jout = document.getElementById('rcCustResults');
+    var jd = null, jseq = 0, jrows = [];
+    var render = function(){
+      if (!jrows.length) { jout.style.display = 'none'; jout.innerHTML = ''; return; }
+      jout.innerHTML = jrows.map(function(x, i){
+        return '<button type="button" data-i="' + i + '" style="display:block;width:100%;text-align:left;border:0;border-bottom:1px solid var(--hover);background:var(--card);color:var(--ink);padding:8px 10px;cursor:pointer;font-family:inherit;font-size:12.5px">' +
+          '<b>' + esc(x.name || '') + '</b> <span style="color:var(--muted)">' + esc(x.email || x.phone || '') + '</span></button>';
+      }).join('');
+      jout.style.display = 'block';
+      jout.querySelectorAll('button').forEach(function(b){
+        b.addEventListener('mousedown', function(e){
+          e.preventDefault();
+          var x = jrows[parseInt(b.getAttribute('data-i'), 10)];
+          RC_CUSTOMER = { id: x.id, name: x.name };
+          document.getElementById('rcCustPicked').textContent = 'Selected: ' + x.name;
+          jin.value = ''; jrows = []; render();
+        });
+      });
+    };
+    jin.addEventListener('input', function(){
+      var q = jin.value.trim();
+      clearTimeout(jd);
+      if (q.length < 2) { jrows = []; render(); return; }
+      jd = setTimeout(async function(){
+        var seq = ++jseq;
+        try {
+          var res = await api('/api/admin/pos/customer-lookup?q=' + encodeURIComponent(q) + '&phone=' + encodeURIComponent(q));
+          if (seq !== jseq) return;
+          jrows = res.matches || []; render();
+        } catch (e) { if (seq === jseq) { jrows = []; render(); } }
+      }, 220);
+    });
+    jin.addEventListener('blur', function(){ setTimeout(function(){ jout.style.display = 'none'; }, 120); });
+  })();
+
+  document.getElementById('rcCreateGo').addEventListener('click', async function(){
+    var msg = document.getElementById('rcMsg');
+    var showMsg = function(text, bad){ msg.style.display = 'block'; msg.style.background = bad ? '#fee2e2' : '#dbeafe'; msg.style.color = bad ? '#991b1b' : '#1e40af'; msg.textContent = text; };
+    if (!RC_CUSTOMER) return showMsg('Pick a customer first.', true);
+    var description = document.getElementById('rcDescription').value.trim();
+    if (!description) return showMsg('A description is required.', true);
+    document.querySelectorAll('#rcItemRows [data-rcrow]').forEach(function(row, i){
+      RC_ITEMS[i].description = row.querySelector('.rcDesc').value.trim();
+      RC_ITEMS[i].qty = row.querySelector('.rcQty').value;
+      RC_ITEMS[i].unit_price_usd = row.querySelector('.rcPrice').value;
+    });
+    var items = RC_ITEMS.filter(function(it){ return it.description && it.unit_price_usd !== ''; })
+      .map(function(it){ return { description: it.description, qty: parseInt(it.qty, 10) || 1, unit_price_usd: Number(it.unit_price_usd) }; });
+    if (!items.length) return showMsg('At least one line item (description + price) is required.', true);
+    showMsg('Saving…');
+    try {
+      await api('/api/admin/recurring-plans', { method: 'POST', body: {
+        customer_id: RC_CUSTOMER.id, target: document.getElementById('rcTarget').value,
+        description: description, frequency: document.getElementById('rcFrequency').value,
+        next_run_date: document.getElementById('rcNextRun').value || null,
+        end_date: document.getElementById('rcEndDate').value || null,
+        occurrences_left: document.getElementById('rcOccurrences').value || null,
+        items: items,
+      }});
+      show('recurring');
+    } catch (e) { showMsg(e.message, true); }
+  });
+
+  panel.querySelectorAll('[data-open]').forEach(function(b){
+    b.addEventListener('click', function(){ RC_VIEW_PLAN = parseInt(b.getAttribute('data-open'), 10); renderRecurring(panel); });
+  });
+}
+async function renderRecurringDetail(panel, planId){
+  panel.innerHTML = '<div class="empty">Loading…</div>';
+  var d;
+  try { d = await api('/api/admin/recurring-plans/' + planId); }
+  catch (e) { panel.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return; }
+  var p = d.plan;
+  panel.innerHTML =
+    '<div style="padding:11px 14px;border-bottom:1px solid var(--line)"><button class="btn" id="rcBack">‹ All plans</button></div>' +
+    '<div style="padding:14px 16px;display:flex;gap:24px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--line)">' +
+      '<div><div class="lbl">Customer</div><b>' + esc(p.customer_name || ('#' + p.customer_id)) + '</b></div>' +
+      '<div><div class="lbl">Description</div>' + esc(p.description) + '</div>' +
+      '<div><div class="lbl">Bills as</div>' + (p.target === 'order' ? 'Order (email invoice)' : 'POS sale, charged to account') + '</div>' +
+      '<div><div class="lbl">Frequency</div>' + esc(p.frequency) + '</div>' +
+      '<div><div class="lbl">Next run</div>' + esc(p.next_run_date) + (p.occurrences_left != null ? ' (' + p.occurrences_left + ' left)' : '') + '</div>' +
+      '<div><div class="lbl">Status</div>' + badge(p.is_active ? 'active' : 'paused', p.is_active ? 'ok' : 'bad') + '</div>' +
+      '<div style="margin-left:auto;display:flex;gap:6px">' +
+        '<button class="btn" id="rcRunNow">▶ Run now</button>' +
+        '<button class="btn ' + (p.is_active ? '' : 'ok') + '" id="rcToggle">' + (p.is_active ? 'Pause' : 'Resume') + '</button>' +
+      '</div>' +
+    '</div>' +
+    '<div style="padding:14px 16px;border-bottom:1px solid var(--line)">' +
+      '<h4 style="margin:0 0 8px">Line items</h4>' +
+      '<table><thead><tr><th>Description</th><th>Qty</th><th align="right">Price</th></tr></thead><tbody>' +
+        p.items.map(function(it){ return '<tr><td>' + esc(it.description) + '</td><td>' + it.qty + '</td><td align="right">' + fmtMoney(it.unit_price_usd) + '</td></tr>'; }).join('') +
+      '</tbody></table>' +
+      '<div id="rcDetailMsg" style="margin-top:8px;font-size:12.5px"></div>' +
+    '</div>' +
+    '<div style="padding:14px 16px">' +
+      '<h4 style="margin:0 0 8px">Run history</h4>' +
+      (d.runs.length
+        ? '<table><thead><tr><th>Date</th><th>Status</th><th>Order/Sale</th><th>Error</th></tr></thead><tbody>' +
+          d.runs.map(function(x){
+            return '<tr><td>' + esc(x.run_date) + '</td><td>' + badge(x.status, x.status === 'ok' ? 'ok' : 'bad') + '</td>' +
+              '<td>' + (x.order_id ? 'Order #' + x.order_id : x.sale_id ? 'Sale #' + x.sale_id : '—') + '</td>' +
+              '<td style="color:#b91c1c">' + esc(x.error || '') + '</td></tr>';
+          }).join('') + '</tbody></table>'
+        : '<div class="empty">No runs yet.</div>') +
+    '</div>';
+
+  document.getElementById('rcBack').addEventListener('click', function(){ RC_VIEW_PLAN = null; renderRecurring(panel); });
+  document.getElementById('rcToggle').addEventListener('click', async function(){
+    try { await api('/api/admin/recurring-plans/' + planId, { method: 'PATCH', body: { is_active: !p.is_active } }); renderRecurringDetail(panel, planId); }
+    catch (e) { alert(e.message); }
+  });
+  document.getElementById('rcRunNow').addEventListener('click', async function(){
+    var msg = document.getElementById('rcDetailMsg');
+    msg.style.color = 'var(--muted)'; msg.textContent = 'Running…';
+    try {
+      var r = await api('/api/admin/recurring-plans/' + planId + '/run-now', { method: 'POST' });
+      msg.style.color = r.status === 'ok' ? '#166534' : 'var(--red)';
+      msg.textContent = r.status === 'ok' ? 'Ran successfully.' : ('Failed: ' + r.error);
+      renderRecurringDetail(panel, planId);
+    } catch (e) { msg.style.color = 'var(--red)'; msg.textContent = e.message; }
+  });
 }
 
 // ============= LOW STOCK =============

@@ -18,324 +18,327 @@ const cts = (usd) => Math.round((Number(usd) || 0) * 100);
 const PAYMENT_METHODS = ['cash', 'card', 'cheque', 'bank', 'loyalty', 'gift_card', 'account'];
 const REFUND_METHODS = ['cash', 'card', 'cheque', 'bank', 'store_credit'];
 
-export default function mount(app) {
-  // =====================================================================
-  //  POST /api/admin/pos/sale
-  // =====================================================================
-  app.post('/api/admin/pos/sale', adminMw, async (c) => {
-    const db = d1(c.env);
-    const me = c.get('user');
-    const b = await c.req.json().catch(() => ({}));
-    const items = Array.isArray(b.items) ? b.items : [];
-    if (!items.length) return c.json({ error: 'At least one item required' }, 400);
+// The actual sale logic, extracted out of the HTTP route so a non-HTTP
+// caller (the recurring-charges job, _lib/recurring.js) can create a real
+// POS sale -- discount caps, restricted-item checks, tax, receipt
+// numbering, stock decrement, everything -- without going through a fake
+// request. `env`/`b`/`me` are exactly what the route used to read off
+// `c.env`/the parsed body/`c.get('user')`; returns `{ status, body }` the
+// same shape `c.json(body, status)` would have sent.
+export async function createPosSale(env, b, me) {
+  const db = d1(env);
+  const items = Array.isArray(b.items) ? b.items : [];
+  if (!items.length) return { status: 400, body: { error: 'At least one item required' } };
 
-    // ----- normalise payments -----
-    let payments = Array.isArray(b.payments) ? b.payments.slice() : null;
-    if (!payments || !payments.length) {
-      if (!b.payment_method) return c.json({ error: 'payment_method or payments[] required' }, 400);
-      payments = [{ method: b.payment_method, amount_usd: null,
-        amount_tendered: b.amount_tendered != null ? Number(b.amount_tendered) : null,
-        reference: b.reference || null, notes: null }];
+  // ----- normalise payments -----
+  let payments = Array.isArray(b.payments) ? b.payments.slice() : null;
+  if (!payments || !payments.length) {
+    if (!b.payment_method) return { status: 400, body: { error: 'payment_method or payments[] required' } };
+    payments = [{ method: b.payment_method, amount_usd: null,
+      amount_tendered: b.amount_tendered != null ? Number(b.amount_tendered) : null,
+      reference: b.reference || null, notes: null }];
+  }
+  for (const p of payments) {
+    if (!p.method) return { status: 400, body: { error: 'Each payment row needs a method' } };
+    if (!PAYMENT_METHODS.includes(p.method)) return { status: 400, body: { error: 'Unknown payment method: ' + p.method } };
+  }
+
+  // ----- permission gates -----
+  const lineDisc = items.reduce((s, it) => s + Math.max(0, Number(it.discount_usd || 0)), 0);
+  if (lineDisc > 0 && !userCan(me, 'pos.line_discount'))
+    return { status: 403, body: { error: 'Your account is not allowed to give a per-line discount.' } };
+  if (Number(b.discount_usd || 0) > 0 && !userCan(me, 'pos.ticket_discount'))
+    return { status: 403, body: { error: 'Your account is not allowed to give a whole-ticket discount.' } };
+  if (payments.some((p) => p.method === 'account') && !userCan(me, 'pos.charge_to_account'))
+    return { status: 403, body: { error: 'Your account is not allowed to take a charge / account sale.' } };
+  if (b.no_tax === true && !userCan(me, 'pos.no_tax'))
+    return { status: 403, body: { error: 'Your account is not allowed to switch GCT off.' } };
+
+  // ----- per-product server-side rules -----
+  // Trust the product record, not the client, for which images actually
+  // carry these -- a checkbox client-side is meaningless if a stale/edited
+  // cart line can just omit it. One query covers serial-required, the
+  // per-item discount cap, and the restricted-item flags.
+  const imgs = [...new Set(items.filter((it) => it.product_img).map((it) => it.product_img))];
+  const rules = new Map();
+  if (imgs.length) {
+    const rows = await db.many(
+      `SELECT img, serial_required, max_discount_pct, is_redeemable, item_type,
+              restricted_id_required, restricted_tax_id_required, restricted_manager_approval
+         FROM products WHERE img IN (${imgs.map(() => '?').join(',')})`, ...imgs);
+    for (const r of rows) rules.set(r.img, r);
+  }
+  const missingSerial = items.find((it) => { const r = rules.get(it.product_img); return r && r.serial_required && !String(it.serial_number || '').trim(); });
+  if (missingSerial) return { status: 400, body: { error: `"${missingSerial.description}" requires a serial number to sell.` } };
+
+  for (const it of items) {
+    const r = rules.get(it.product_img);
+    const disc = Math.max(0, Number(it.discount_usd || 0));
+    if (!r || r.max_discount_pct == null || disc <= 0) continue;
+    const gross = (Number(it.unit_price_usd) + Number(it.core_charge_usd || 0) + Number(it.env_fee_usd || 0)) * Number(it.qty);
+    if (gross > 0 && (disc / gross) * 100 > Number(r.max_discount_pct) + 0.01) {
+      return { status: 400, body: { error: `"${it.description}" can only be discounted up to ${Number(r.max_discount_pct)}%` } };
     }
-    for (const p of payments) {
-      if (!p.method) return c.json({ error: 'Each payment row needs a method' }, 400);
-      if (!PAYMENT_METHODS.includes(p.method)) return c.json({ error: 'Unknown payment method: ' + p.method }, 400);
-    }
+  }
 
-    // ----- permission gates -----
-    const lineDisc = items.reduce((s, it) => s + Math.max(0, Number(it.discount_usd || 0)), 0);
-    if (lineDisc > 0 && !userCan(me, 'pos.line_discount'))
-      return c.json({ error: 'Your account is not allowed to give a per-line discount.' }, 403);
-    if (Number(b.discount_usd || 0) > 0 && !userCan(me, 'pos.ticket_discount'))
-      return c.json({ error: 'Your account is not allowed to give a whole-ticket discount.' }, 403);
-    if (payments.some((p) => p.method === 'account') && !userCan(me, 'pos.charge_to_account'))
-      return c.json({ error: 'Your account is not allowed to take a charge / account sale.' }, 403);
-    if (b.no_tax === true && !userCan(me, 'pos.no_tax'))
-      return c.json({ error: 'Your account is not allowed to switch GCT off.' }, 403);
+  const needsId = items.some((it) => { const r = rules.get(it.product_img); return r && r.restricted_id_required; });
+  if (needsId && !String(b.verify_id_number || '').trim())
+    return { status: 400, body: { error: 'One or more items require an ID to be recorded before this sale can complete.' } };
+  const needsTaxId = items.some((it) => { const r = rules.get(it.product_img); return r && r.restricted_tax_id_required; });
+  if (needsTaxId && !String(b.verify_tax_id || '').trim())
+    return { status: 400, body: { error: 'One or more items require a Tax ID to be recorded before this sale can complete.' } };
+  const needsApproval = items.some((it) => { const r = rules.get(it.product_img); return r && r.restricted_manager_approval; });
+  if (needsApproval && !String(b.restricted_approved_by || '').trim())
+    return { status: 400, body: { error: 'One or more items require manager approval before this sale can complete.' } };
 
-    // ----- per-product server-side rules -----
-    // Trust the product record, not the client, for which images actually
-    // carry these -- a checkbox client-side is meaningless if a stale/edited
-    // cart line can just omit it. One query covers serial-required, the
-    // per-item discount cap, and the restricted-item flags.
-    const imgs = [...new Set(items.filter((it) => it.product_img).map((it) => it.product_img))];
-    const rules = new Map();
-    if (imgs.length) {
-      const rows = await db.many(
-        `SELECT img, serial_required, max_discount_pct, is_redeemable, item_type,
-                restricted_id_required, restricted_tax_id_required, restricted_manager_approval
-           FROM products WHERE img IN (${imgs.map(() => '?').join(',')})`, ...imgs);
-      for (const r of rows) rules.set(r.img, r);
-    }
-    const missingSerial = items.find((it) => { const r = rules.get(it.product_img); return r && r.serial_required && !String(it.serial_number || '').trim(); });
-    if (missingSerial) return c.json({ error: `"${missingSerial.description}" requires a serial number to sell.` }, 400);
+  // ----- 1. line totals -----
+  // core_charge_usd / env_fee_usd travel per unit (what the product record
+  // carries); scale by qty so a line of 3 units with a $5 core each
+  // collects $15, not $5 -- and so the return endpoint's per-unit refund
+  // (which divides the stored line total back down by qty) comes out right.
+  const lineCalc = items.map((it) => {
+    const gross = r2((Number(it.unit_price_usd) + Number(it.core_charge_usd || 0) + Number(it.env_fee_usd || 0)) * Number(it.qty));
+    const disc = Math.min(gross, Math.max(0, Number(it.discount_usd || 0)));
+    return { gross, disc, net: r2(gross - disc) };
+  });
+  const subtotal = r2(lineCalc.reduce((s, l) => s + l.net, 0));
+  const manualDiscount = Math.max(0, Number(b.discount_usd || 0));
 
-    for (const it of items) {
-      const r = rules.get(it.product_img);
-      const disc = Math.max(0, Number(it.discount_usd || 0));
-      if (!r || r.max_discount_pct == null || disc <= 0) continue;
-      const gross = (Number(it.unit_price_usd) + Number(it.core_charge_usd || 0) + Number(it.env_fee_usd || 0)) * Number(it.qty);
-      if (gross > 0 && (disc / gross) * 100 > Number(r.max_discount_pct) + 0.01) {
-        return c.json({ error: `"${it.description}" can only be discounted up to ${Number(r.max_discount_pct)}%` }, 400);
+  // ----- 2. loyalty redemption -----
+  const walkinRow = await db.one("SELECT id FROM users WHERE email = 'walkin@mortysautoparts.local' LIMIT 1");
+  const walkinId = walkinRow ? walkinRow.id : -1;
+  const isWalkin = b.customer_id && Number(b.customer_id) === walkinId;
+  const redeemPts = isWalkin ? 0 : Math.max(0, parseInt(b.loyalty_points_redeemed || 0, 10) || 0);
+  let loyaltyDiscount = 0;
+  if (redeemPts > 0) {
+    if (!b.customer_id) return { status: 400, body: { error: 'customer_id required to redeem loyalty points' } };
+    const bal = await db.one('SELECT COALESCE(SUM(delta), 0) AS balance FROM points_transactions WHERE user_id = ?', b.customer_id);
+    const balance = (bal && bal.balance) || 0;
+    if (redeemPts > balance) return { status: 400, body: { error: 'Customer only has ' + balance + ' points (tried to redeem ' + redeemPts + ')' } };
+    loyaltyDiscount = r2(redeemPts * POINTS_USD_RATE);
+  }
+
+  // ----- 2b. customer terms -----
+  let limits = null;
+  if (b.customer_id && !isWalkin) {
+    limits = await db.one('SELECT credit_limit_cents, discount_limit_pct, payment_terms_days, tax_exempt FROM users WHERE id = ?', b.customer_id);
+    if (limits && limits.discount_limit_pct != null && subtotal > 0) {
+      const pct = (manualDiscount / subtotal) * 100;
+      if (pct > Number(limits.discount_limit_pct) + 0.01) {
+        return { status: 400, body: { error: `Discount of ${pct.toFixed(1)}% exceeds this customer's limit of ${Number(limits.discount_limit_pct)}%` } };
       }
     }
+  }
+  const taxExempt = !!(limits && limits.tax_exempt) || b.no_tax === true;
+  const totalDiscount = r2(manualDiscount + loyaltyDiscount);
 
-    const needsId = items.some((it) => { const r = rules.get(it.product_img); return r && r.restricted_id_required; });
-    if (needsId && !String(b.verify_id_number || '').trim())
-      return c.json({ error: 'One or more items require an ID to be recorded before this sale can complete.' }, 400);
-    const needsTaxId = items.some((it) => { const r = rules.get(it.product_img); return r && r.restricted_tax_id_required; });
-    if (needsTaxId && !String(b.verify_tax_id || '').trim())
-      return c.json({ error: 'One or more items require a Tax ID to be recorded before this sale can complete.' }, 400);
-    const needsApproval = items.some((it) => { const r = rules.get(it.product_img); return r && r.restricted_manager_approval; });
-    if (needsApproval && !String(b.restricted_approved_by || '').trim())
-      return c.json({ error: 'One or more items require manager approval before this sale can complete.' }, 400);
+  // ----- fulfilment + shipping -----
+  const fulfilment = ['pickup', 'delivery', 'shipping'].includes(b.fulfilment) ? b.fulfilment : 'pickup';
+  const shipFee = fulfilment === 'pickup' ? 0 : Math.max(0, r2(Number(b.ship_fee_usd) || 0));
 
-    // ----- 1. line totals -----
-    // core_charge_usd / env_fee_usd travel per unit (what the product record
-    // carries); scale by qty so a line of 3 units with a $5 core each
-    // collects $15, not $5 -- and so the return endpoint's per-unit refund
-    // (which divides the stored line total back down by qty) comes out right.
-    const lineCalc = items.map((it) => {
-      const gross = r2((Number(it.unit_price_usd) + Number(it.core_charge_usd || 0) + Number(it.env_fee_usd || 0)) * Number(it.qty));
-      const disc = Math.min(gross, Math.max(0, Number(it.discount_usd || 0)));
-      return { gross, disc, net: r2(gross - disc) };
-    });
-    const subtotal = r2(lineCalc.reduce((s, l) => s + l.net, 0));
-    const manualDiscount = Math.max(0, Number(b.discount_usd || 0));
+  const goods = Math.max(0, r2(subtotal - totalDiscount));
+  const taxable = r2(goods + shipFee);
+  const tax = taxExempt ? 0 : r2(taxable * TAX_RATE);
+  const total = r2(taxable + tax);
 
-    // ----- 2. loyalty redemption -----
-    const walkinRow = await db.one("SELECT id FROM users WHERE email = 'walkin@mortysautoparts.local' LIMIT 1");
-    const walkinId = walkinRow ? walkinRow.id : -1;
-    const isWalkin = b.customer_id && Number(b.customer_id) === walkinId;
-    const redeemPts = isWalkin ? 0 : Math.max(0, parseInt(b.loyalty_points_redeemed || 0, 10) || 0);
-    let loyaltyDiscount = 0;
-    if (redeemPts > 0) {
-      if (!b.customer_id) return c.json({ error: 'customer_id required to redeem loyalty points' }, 400);
-      const bal = await db.one('SELECT COALESCE(SUM(delta), 0) AS balance FROM points_transactions WHERE user_id = ?', b.customer_id);
-      const balance = (bal && bal.balance) || 0;
-      if (redeemPts > balance) return c.json({ error: 'Customer only has ' + balance + ' points (tried to redeem ' + redeemPts + ')' }, 400);
-      loyaltyDiscount = r2(redeemPts * POINTS_USD_RATE);
-    }
+  // ----- 3. distribute payment amounts -----
+  let allocated = 0;
+  const filled = payments.map((p) => {
+    const amt = p.amount_usd != null && p.amount_usd !== '' ? Number(p.amount_usd) : null;
+    if (amt != null) allocated += amt;
+    return { ...p, amount_usd: amt };
+  });
+  const remaining = r2(total - allocated);
+  const blank = filled.findIndex((p) => p.amount_usd == null);
+  if (blank >= 0) filled[blank].amount_usd = Math.max(0, remaining);
+  else if (Math.abs(remaining) > 0.01)
+    return { status: 400, body: { error: 'Sum of payment amounts ($' + allocated.toFixed(2) + ') does not match total ($' + total.toFixed(2) + ')' } };
 
-    // ----- 2b. customer terms -----
-    let limits = null;
-    if (b.customer_id && !isWalkin) {
-      limits = await db.one('SELECT credit_limit_cents, discount_limit_pct, payment_terms_days, tax_exempt FROM users WHERE id = ?', b.customer_id);
-      if (limits && limits.discount_limit_pct != null && subtotal > 0) {
-        const pct = (manualDiscount / subtotal) * 100;
-        if (pct > Number(limits.discount_limit_pct) + 0.01) {
-          return c.json({ error: `Discount of ${pct.toFixed(1)}% exceeds this customer's limit of ${Number(limits.discount_limit_pct)}%` }, 400);
-        }
+  let moneyIn = 0;
+  for (const p of filled) {
+    moneyIn += (p.method === 'cash' && p.amount_tendered != null) ? Number(p.amount_tendered) : Number(p.amount_usd);
+  }
+  if (moneyIn + 0.001 < total)
+    return { status: 400, body: { error: 'Tendered ($' + moneyIn.toFixed(2) + ') is less than total ($' + total.toFixed(2) + ')' } };
+  const changeDue = r2(moneyIn - total);
+
+  // ----- 3b. gift card validation -----
+  const gcByCode = {};
+  for (const p of filled) {
+    if (p.method !== 'gift_card') continue;
+    if (!p.reference) return { status: 400, body: { error: 'Gift card payments need the card code in "reference"' } };
+    const code = String(p.reference).toUpperCase();
+    const gc = await db.one('SELECT id, balance_cents, is_active FROM gift_cards WHERE code = ?', code);
+    if (!gc || !gc.is_active) return { status: 400, body: { error: 'Gift card ' + p.reference + ' not found or inactive' } };
+    if (gc.balance_cents < cts(p.amount_usd) - 1)
+      return { status: 400, body: { error: 'Gift card ' + p.reference + ' has insufficient balance ($' + (gc.balance_cents / 100).toFixed(2) + ')' } };
+    gcByCode[code] = gc;
+  }
+
+  // ----- 3c. credit-limit check -----
+  const accountAmount = filled.filter((p) => p.method === 'account').reduce((s, p) => s + Number(p.amount_usd), 0);
+  if (accountAmount > 0.001) {
+    if (!b.customer_id || isWalkin) return { status: 400, body: { error: 'A real customer account is required to charge a sale to account' } };
+    if (!limits || limits.payment_terms_days == null) return { status: 400, body: { error: 'This customer has no payment terms set up -- cannot sell on account' } };
+    if (limits.credit_limit_cents != null) {
+      const balRow = await db.one(
+        `SELECT (COALESCE((SELECT SUM(sp.amount_cents) FROM sale_payments sp JOIN pos_sales s ON s.id = sp.sale_id
+                            WHERE sp.method = 'account' AND s.customer_id = ? AND s.voided = 0), 0)
+                 - COALESCE((SELECT SUM(amount_cents) FROM account_payments WHERE customer_id = ?), 0)) AS bal_cents`,
+        b.customer_id, b.customer_id
+      );
+      const currentBalance = (balRow ? balRow.bal_cents : 0) / 100;
+      const projected = currentBalance + accountAmount;
+      if (projected > Number(limits.credit_limit_cents) / 100 + 0.01) {
+        return { status: 400, body: { error: `This sale would put the account at $${projected.toFixed(2)}, over its $${(limits.credit_limit_cents / 100).toFixed(2)} credit limit` } };
       }
     }
-    const taxExempt = !!(limits && limits.tax_exempt) || b.no_tax === true;
-    const totalDiscount = r2(manualDiscount + loyaltyDiscount);
+  }
 
-    // ----- fulfilment + shipping -----
-    const fulfilment = ['pickup', 'delivery', 'shipping'].includes(b.fulfilment) ? b.fulfilment : 'pickup';
-    const shipFee = fulfilment === 'pickup' ? 0 : Math.max(0, r2(Number(b.ship_fee_usd) || 0));
+  // ----- 3d. payment status -----
+  const balanceDue = r2(Math.min(accountAmount, total));
+  const amountPaid = r2(total - balanceDue);
+  const paymentStatus = balanceDue <= 0.001 ? 'paid' : balanceDue + 0.001 >= total ? 'unpaid' : 'partial';
+  let dueDate = null;
+  if (balanceDue > 0.001) {
+    if (b.due_date && !isNaN(Date.parse(b.due_date))) dueDate = new Date(b.due_date).toISOString().slice(0, 10);
+    else if (limits && limits.payment_terms_days != null) dueDate = new Date(Date.now() + Number(limits.payment_terms_days) * 86400000).toISOString().slice(0, 10);
+  }
 
-    const goods = Math.max(0, r2(subtotal - totalDiscount));
-    const taxable = r2(goods + shipFee);
-    const tax = taxExempt ? 0 : r2(taxable * TAX_RATE);
-    const total = r2(taxable + tax);
+  // ----- 4. build the write batch -----
+  const headerMethod = filled.length === 1 ? filled[0].method : 'split';
+  const headerRef = filled.length === 1 ? (filled[0].reference || null)
+    : filled.map((p) => p.method + (p.reference ? ':' + p.reference : '')).join(' + ');
+  const headerTendered = filled.length === 1 && filled[0].method === 'cash' ? filled[0].amount_tendered : null;
+  const earnedPoints = (b.customer_id && !isWalkin) ? Math.floor(total) : 0;
 
-    // ----- 3. distribute payment amounts -----
-    let allocated = 0;
-    const filled = payments.map((p) => {
-      const amt = p.amount_usd != null && p.amount_usd !== '' ? Number(p.amount_usd) : null;
-      if (amt != null) allocated += amt;
-      return { ...p, amount_usd: amt };
-    });
-    const remaining = r2(total - allocated);
-    const blank = filled.findIndex((p) => p.amount_usd == null);
-    if (blank >= 0) filled[blank].amount_usd = Math.max(0, remaining);
-    else if (Math.abs(remaining) > 0.01)
-      return c.json({ error: 'Sum of payment amounts ($' + allocated.toFixed(2) + ') does not match total ($' + total.toFixed(2) + ')' }, 400);
+  const receipt = await nextReceiptNumber(env);
+  const invoiceNumber = await nextInvoiceNumber(env);
+  const saleId = await nextId(env, 'pos_sales');
+  const repId = Number.isInteger(b.sales_rep_id) ? b.sales_rep_id : null;
+  const ship = (v) => (fulfilment === 'pickup' ? null : v || null);
 
-    let moneyIn = 0;
-    for (const p of filled) {
-      moneyIn += (p.method === 'cash' && p.amount_tendered != null) ? Number(p.amount_tendered) : Number(p.amount_usd);
-    }
-    if (moneyIn + 0.001 < total)
-      return c.json({ error: 'Tendered ($' + moneyIn.toFixed(2) + ') is less than total ($' + total.toFixed(2) + ')' }, 400);
-    const changeDue = r2(moneyIn - total);
+  const stmts = [];
+  stmts.push({
+    sql: `INSERT INTO pos_sales
+      (id, receipt_number, invoice_number, cashier_id, customer_id, customer_name, customer_phone, vehicle_info,
+       subtotal_cents, tax_cents, tax_exempt, discount_cents, total_cents, amount_tendered_cents, change_due_cents,
+       payment_method, reference, notes, loyalty_points_redeemed, loyalty_discount_cents, loyalty_points_earned,
+       sales_rep_id, sales_rep_name, fulfilment, ship_method, ship_fee_cents, ship_name, ship_phone,
+       ship_line1, ship_line2, ship_city, ship_parish, ship_instructions, tracking_number,
+       payment_status, amount_paid_cents, balance_due_cents, due_date, po_number, quote_id,
+       verify_id_type, verify_id_number, verify_tax_id, restricted_approved_by)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    binds: [
+      saleId, receipt, invoiceNumber, b.cashier_id || me.id, b.customer_id || null,
+      b.customer_name || null, b.customer_phone || null, b.vehicle_info || null,
+      cts(subtotal), cts(tax), taxExempt ? 1 : 0, cts(totalDiscount), cts(total),
+      headerTendered != null ? cts(headerTendered) : null, cts(changeDue),
+      headerMethod, headerRef, b.notes || null,
+      redeemPts, cts(loyaltyDiscount), earnedPoints,
+      repId, b.sales_rep_name ? String(b.sales_rep_name).slice(0, 200) : null,
+      fulfilment, ship(b.ship_method && String(b.ship_method).slice(0, 120)), cts(shipFee),
+      ship(b.ship_name), ship(b.ship_phone), ship(b.ship_line1), ship(b.ship_line2),
+      ship(b.ship_city), ship(b.ship_parish), ship(b.ship_instructions),
+      ship(b.tracking_number && String(b.tracking_number).slice(0, 80)),
+      paymentStatus, cts(amountPaid), cts(balanceDue), dueDate,
+      b.po_number ? String(b.po_number).slice(0, 60) : null,
+      Number.isInteger(b.quote_id) ? b.quote_id : null,
+      b.verify_id_type ? String(b.verify_id_type).slice(0, 40) : null,
+      b.verify_id_number ? String(b.verify_id_number).slice(0, 80) : null,
+      b.verify_tax_id ? String(b.verify_tax_id).slice(0, 40) : null,
+      b.restricted_approved_by ? String(b.restricted_approved_by).slice(0, 200) : null,
+    ],
+  });
 
-    // ----- 3b. gift card validation -----
-    const gcByCode = {};
-    for (const p of filled) {
-      if (p.method !== 'gift_card') continue;
-      if (!p.reference) return c.json({ error: 'Gift card payments need the card code in "reference"' }, 400);
-      const code = String(p.reference).toUpperCase();
-      const gc = await db.one('SELECT id, balance_cents, is_active FROM gift_cards WHERE code = ?', code);
-      if (!gc || !gc.is_active) return c.json({ error: 'Gift card ' + p.reference + ' not found or inactive' }, 400);
-      if (gc.balance_cents < cts(p.amount_usd) - 1)
-        return c.json({ error: 'Gift card ' + p.reference + ' has insufficient balance ($' + (gc.balance_cents / 100).toFixed(2) + ')' }, 400);
-      gcByCode[code] = gc;
-    }
-
-    // ----- 3c. credit-limit check -----
-    const accountAmount = filled.filter((p) => p.method === 'account').reduce((s, p) => s + Number(p.amount_usd), 0);
-    if (accountAmount > 0.001) {
-      if (!b.customer_id || isWalkin) return c.json({ error: 'A real customer account is required to charge a sale to account' }, 400);
-      if (!limits || limits.payment_terms_days == null) return c.json({ error: 'This customer has no payment terms set up -- cannot sell on account' }, 400);
-      if (limits.credit_limit_cents != null) {
-        const balRow = await db.one(
-          `SELECT (COALESCE((SELECT SUM(sp.amount_cents) FROM sale_payments sp JOIN pos_sales s ON s.id = sp.sale_id
-                              WHERE sp.method = 'account' AND s.customer_id = ? AND s.voided = 0), 0)
-                   - COALESCE((SELECT SUM(amount_cents) FROM account_payments WHERE customer_id = ?), 0)) AS bal_cents`,
-          b.customer_id, b.customer_id
-        );
-        const currentBalance = (balRow ? balRow.bal_cents : 0) / 100;
-        const projected = currentBalance + accountAmount;
-        if (projected > Number(limits.credit_limit_cents) / 100 + 0.01) {
-          return c.json({ error: `This sale would put the account at $${projected.toFixed(2)}, over its $${(limits.credit_limit_cents / 100).toFixed(2)} credit limit` }, 400);
-        }
-      }
-    }
-
-    // ----- 3d. payment status -----
-    const balanceDue = r2(Math.min(accountAmount, total));
-    const amountPaid = r2(total - balanceDue);
-    const paymentStatus = balanceDue <= 0.001 ? 'paid' : balanceDue + 0.001 >= total ? 'unpaid' : 'partial';
-    let dueDate = null;
-    if (balanceDue > 0.001) {
-      if (b.due_date && !isNaN(Date.parse(b.due_date))) dueDate = new Date(b.due_date).toISOString().slice(0, 10);
-      else if (limits && limits.payment_terms_days != null) dueDate = new Date(Date.now() + Number(limits.payment_terms_days) * 86400000).toISOString().slice(0, 10);
-    }
-
-    // ----- 4. build the write batch -----
-    const headerMethod = filled.length === 1 ? filled[0].method : 'split';
-    const headerRef = filled.length === 1 ? (filled[0].reference || null)
-      : filled.map((p) => p.method + (p.reference ? ':' + p.reference : '')).join(' + ');
-    const headerTendered = filled.length === 1 && filled[0].method === 'cash' ? filled[0].amount_tendered : null;
-    const earnedPoints = (b.customer_id && !isWalkin) ? Math.floor(total) : 0;
-
-    const receipt = await nextReceiptNumber(c.env);
-    const invoiceNumber = await nextInvoiceNumber(c.env);
-    const saleId = await nextId(c.env, 'pos_sales');
-    const repId = Number.isInteger(b.sales_rep_id) ? b.sales_rep_id : null;
-    const ship = (v) => (fulfilment === 'pickup' ? null : v || null);
-
-    const stmts = [];
+  for (const p of filled) {
+    const amtC = cts(p.amount_usd);
     stmts.push({
-      sql: `INSERT INTO pos_sales
-        (id, receipt_number, invoice_number, cashier_id, customer_id, customer_name, customer_phone, vehicle_info,
-         subtotal_cents, tax_cents, tax_exempt, discount_cents, total_cents, amount_tendered_cents, change_due_cents,
-         payment_method, reference, notes, loyalty_points_redeemed, loyalty_discount_cents, loyalty_points_earned,
-         sales_rep_id, sales_rep_name, fulfilment, ship_method, ship_fee_cents, ship_name, ship_phone,
-         ship_line1, ship_line2, ship_city, ship_parish, ship_instructions, tracking_number,
-         payment_status, amount_paid_cents, balance_due_cents, due_date, po_number, quote_id,
-         verify_id_type, verify_id_number, verify_tax_id, restricted_approved_by)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      sql: `INSERT INTO sale_payments (sale_id, method, amount_cents, amount_tendered_cents, reference)
+            VALUES (?,?,?,?,?)`,
+      binds: [saleId, p.method, amtC, p.amount_tendered != null ? cts(p.amount_tendered) : null, p.reference || null],
+    });
+    if (p.method === 'gift_card') {
+      const code = String(p.reference).toUpperCase();
+      stmts.push({ sql: `UPDATE gift_cards SET balance_cents = balance_cents - ?, last_used_at = CURRENT_TIMESTAMP WHERE code = ?`, binds: [amtC, code] });
+      stmts.push({
+        sql: `INSERT INTO gift_card_transactions (gift_card_id, delta_cents, reason, reference, performed_by)
+              VALUES ((SELECT id FROM gift_cards WHERE code = ?), ?, 'redemption', ?, ?)`,
+        binds: [code, -amtC, receipt, me.id],
+      });
+    }
+  }
+
+  // Pre-assigned like saleId -- a redemption instrument (below) needs to
+  // reference its sale_item_id, and D1 batches can't feed one statement's
+  // last_insert_rowid() into a later one.
+  const saleItemBaseId = await nextId(env, 'pos_sale_items');
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    const lc = lineCalc[i];
+    const saleItemId = saleItemBaseId + i;
+    let warrantyUntil = null;
+    if (it.warranty_days) warrantyUntil = new Date(Date.now() + Number(it.warranty_days) * 86400000).toISOString().slice(0, 10);
+    stmts.push({
+      sql: `INSERT INTO pos_sale_items
+        (id, sale_id, product_img, description, qty, unit_price_cents, core_charge_cents, env_fee_cents,
+         discount_cents, discount_note, serial_number, warranty_until, total_cents)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       binds: [
-        saleId, receipt, invoiceNumber, b.cashier_id || me.id, b.customer_id || null,
-        b.customer_name || null, b.customer_phone || null, b.vehicle_info || null,
-        cts(subtotal), cts(tax), taxExempt ? 1 : 0, cts(totalDiscount), cts(total),
-        headerTendered != null ? cts(headerTendered) : null, cts(changeDue),
-        headerMethod, headerRef, b.notes || null,
-        redeemPts, cts(loyaltyDiscount), earnedPoints,
-        repId, b.sales_rep_name ? String(b.sales_rep_name).slice(0, 200) : null,
-        fulfilment, ship(b.ship_method && String(b.ship_method).slice(0, 120)), cts(shipFee),
-        ship(b.ship_name), ship(b.ship_phone), ship(b.ship_line1), ship(b.ship_line2),
-        ship(b.ship_city), ship(b.ship_parish), ship(b.ship_instructions),
-        ship(b.tracking_number && String(b.tracking_number).slice(0, 80)),
-        paymentStatus, cts(amountPaid), cts(balanceDue), dueDate,
-        b.po_number ? String(b.po_number).slice(0, 60) : null,
-        Number.isInteger(b.quote_id) ? b.quote_id : null,
-        b.verify_id_type ? String(b.verify_id_type).slice(0, 40) : null,
-        b.verify_id_number ? String(b.verify_id_number).slice(0, 80) : null,
-        b.verify_tax_id ? String(b.verify_tax_id).slice(0, 40) : null,
-        b.restricted_approved_by ? String(b.restricted_approved_by).slice(0, 200) : null,
+        saleItemId, saleId, it.product_img || null, it.description, Number(it.qty), cts(it.unit_price_usd),
+        // Stored as the line's total, not per-unit -- see the gross-total
+        // comment above; the return endpoint divides this back by qty.
+        cts((Number(it.core_charge_usd) || 0) * Number(it.qty)), cts((Number(it.env_fee_usd) || 0) * Number(it.qty)),
+        cts(lc.disc), lc.disc > 0 && it.discount_note ? String(it.discount_note).slice(0, 300) : null,
+        it.serial_number || null, warrantyUntil, cts(lc.net),
       ],
     });
-
-    for (const p of filled) {
-      const amtC = cts(p.amount_usd);
+    // Redeemable items (e.g. lottery scratch cards) mint one instrument per
+    // sold unit -- posAddToCart forces qty 1 per line for these, same as
+    // serial_required, so this is exactly one instrument per such line.
+    const rule = rules.get(it.product_img);
+    if (rule && rule.is_redeemable) {
       stmts.push({
-        sql: `INSERT INTO sale_payments (sale_id, method, amount_cents, amount_tendered_cents, reference)
-              VALUES (?,?,?,?,?)`,
-        binds: [saleId, p.method, amtC, p.amount_tendered != null ? cts(p.amount_tendered) : null, p.reference || null],
+        sql: `INSERT INTO redemption_instruments (code, product_img, sale_id, sale_item_id, face_value_cents, sold_by)
+              VALUES (?,?,?,?,?,?)`,
+        binds: [genRedemptionCode(), it.product_img, saleId, saleItemId, cts(it.unit_price_usd), me.id],
       });
-      if (p.method === 'gift_card') {
-        const code = String(p.reference).toUpperCase();
-        stmts.push({ sql: `UPDATE gift_cards SET balance_cents = balance_cents - ?, last_used_at = CURRENT_TIMESTAMP WHERE code = ?`, binds: [amtC, code] });
-        stmts.push({
-          sql: `INSERT INTO gift_card_transactions (gift_card_id, delta_cents, reason, reference, performed_by)
-                VALUES ((SELECT id FROM gift_cards WHERE code = ?), ?, 'redemption', ?, ?)`,
-          binds: [code, -amtC, receipt, me.id],
-        });
-      }
     }
+    // A service item (a fee/charge) has no stock concept at all -- never
+    // decrement it. 'tracked' (e.g. tokens) still counts down like a normal
+    // stocked part.
+    if (it.product_img && (!rule || rule.item_type !== 'service')) {
+      stmts.push({ sql: `UPDATE products SET stock_count = MAX(0, stock_count - ?) WHERE img = ?`, binds: [Number(it.qty), it.product_img] });
+    }
+  }
 
-    // Pre-assigned like saleId -- a redemption instrument (below) needs to
-    // reference its sale_item_id, and D1 batches can't feed one statement's
-    // last_insert_rowid() into a later one.
-    const saleItemBaseId = await nextId(c.env, 'pos_sale_items');
-    for (let i = 0; i < items.length; i++) {
-      const it = items[i];
-      const lc = lineCalc[i];
-      const saleItemId = saleItemBaseId + i;
-      let warrantyUntil = null;
-      if (it.warranty_days) warrantyUntil = new Date(Date.now() + Number(it.warranty_days) * 86400000).toISOString().slice(0, 10);
-      stmts.push({
-        sql: `INSERT INTO pos_sale_items
-          (id, sale_id, product_img, description, qty, unit_price_cents, core_charge_cents, env_fee_cents,
-           discount_cents, discount_note, serial_number, warranty_until, total_cents)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        binds: [
-          saleItemId, saleId, it.product_img || null, it.description, Number(it.qty), cts(it.unit_price_usd),
-          // Stored as the line's total, not per-unit -- see the gross-total
-          // comment above; the return endpoint divides this back by qty.
-          cts((Number(it.core_charge_usd) || 0) * Number(it.qty)), cts((Number(it.env_fee_usd) || 0) * Number(it.qty)),
-          cts(lc.disc), lc.disc > 0 && it.discount_note ? String(it.discount_note).slice(0, 300) : null,
-          it.serial_number || null, warrantyUntil, cts(lc.net),
-        ],
-      });
-      // Redeemable items (e.g. lottery scratch cards) mint one instrument per
-      // sold unit -- posAddToCart forces qty 1 per line for these, same as
-      // serial_required, so this is exactly one instrument per such line.
-      const rule = rules.get(it.product_img);
-      if (rule && rule.is_redeemable) {
-        stmts.push({
-          sql: `INSERT INTO redemption_instruments (code, product_img, sale_id, sale_item_id, face_value_cents, sold_by)
-                VALUES (?,?,?,?,?,?)`,
-          binds: [genRedemptionCode(), it.product_img, saleId, saleItemId, cts(it.unit_price_usd), me.id],
-        });
-      }
-      // A service item (a fee/charge) has no stock concept at all -- never
-      // decrement it. 'tracked' (e.g. tokens) still counts down like a normal
-      // stocked part.
-      if (it.product_img && (!rule || rule.item_type !== 'service')) {
-        stmts.push({ sql: `UPDATE products SET stock_count = MAX(0, stock_count - ?) WHERE img = ?`, binds: [Number(it.qty), it.product_img] });
-      }
-    }
+  if (b.customer_id && redeemPts > 0) {
+    stmts.push({ sql: `INSERT INTO points_transactions (user_id, delta, reason, reference_id) VALUES (?,?,'redemption',?)`, binds: [b.customer_id, -redeemPts, saleId] });
+  }
+  if (b.customer_id && earnedPoints > 0) {
+    stmts.push({ sql: `INSERT INTO points_transactions (user_id, delta, reason, reference_id) VALUES (?,?,'purchase',?)`, binds: [b.customer_id, earnedPoints, saleId] });
+  }
+  if (Number.isInteger(b.quote_id)) {
+    stmts.push({ sql: `UPDATE pos_quotes SET status = 'converted', converted_sale_id = ? WHERE id = ? AND converted_sale_id IS NULL`, binds: [saleId, b.quote_id] });
+  }
+  if (Number.isInteger(b.hold_id)) {
+    stmts.push({ sql: `DELETE FROM pos_holds WHERE id = ?`, binds: [b.hold_id] });
+  }
 
-    if (b.customer_id && redeemPts > 0) {
-      stmts.push({ sql: `INSERT INTO points_transactions (user_id, delta, reason, reference_id) VALUES (?,?,'redemption',?)`, binds: [b.customer_id, -redeemPts, saleId] });
-    }
-    if (b.customer_id && earnedPoints > 0) {
-      stmts.push({ sql: `INSERT INTO points_transactions (user_id, delta, reason, reference_id) VALUES (?,?,'purchase',?)`, binds: [b.customer_id, earnedPoints, saleId] });
-    }
-    if (Number.isInteger(b.quote_id)) {
-      stmts.push({ sql: `UPDATE pos_quotes SET status = 'converted', converted_sale_id = ? WHERE id = ? AND converted_sale_id IS NULL`, binds: [saleId, b.quote_id] });
-    }
-    if (Number.isInteger(b.hold_id)) {
-      stmts.push({ sql: `DELETE FROM pos_holds WHERE id = ?`, binds: [b.hold_id] });
-    }
+  try {
+    await db.batch(stmts);
+  } catch (e) {
+    return { status: 500, body: { error: e.message } };
+  }
 
-    try {
-      await db.batch(stmts);
-    } catch (e) {
-      return c.json({ error: e.message }, 500);
-    }
-
-    let newBalance = null;
-    if (b.customer_id) {
-      const bal = await db.one('SELECT COALESCE(SUM(delta), 0) AS balance FROM points_transactions WHERE user_id = ?', b.customer_id);
-      newBalance = (bal && bal.balance) || 0;
-    }
-    return c.json({
+  let newBalance = null;
+  if (b.customer_id) {
+    const bal = await db.one('SELECT COALESCE(SUM(delta), 0) AS balance FROM points_transactions WHERE user_id = ?', b.customer_id);
+    newBalance = (bal && bal.balance) || 0;
+  }
+  return {
+    status: 200,
+    body: {
       ok: true, id: saleId, receipt_number: receipt, invoice_number: invoiceNumber,
       subtotal_usd: subtotal, discount_usd: totalDiscount, loyalty_discount_usd: loyaltyDiscount,
       tax_usd: tax, tax_exempt: taxExempt, ship_fee_usd: shipFee, fulfilment,
@@ -343,7 +346,18 @@ export default function mount(app) {
       amount_paid_usd: amountPaid, balance_due_usd: balanceDue, payment_status: paymentStatus, due_date: dueDate,
       payments: filled,
       loyalty: b.customer_id ? { points_redeemed: redeemPts, points_earned: earnedPoints, balance: newBalance } : null,
-    });
+    },
+  };
+}
+
+export default function mount(app) {
+  // =====================================================================
+  //  POST /api/admin/pos/sale
+  // =====================================================================
+  app.post('/api/admin/pos/sale', adminMw, async (c) => {
+    const b = await c.req.json().catch(() => ({}));
+    const r = await createPosSale(c.env, b, c.get('user'));
+    return c.json(r.body, r.status);
   });
 
   // =====================================================================

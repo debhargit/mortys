@@ -8,6 +8,7 @@
 // is a no-op. Every run is logged to job_runs.
 import { d1 } from './db.js';
 import { sendEmail, templates } from './mailer.js';
+import { generateRecurringCharges } from './recurring.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -134,6 +135,7 @@ export const JOBS = {
   'back-in-stock': notifyBackInStock,
   'reminders-digest': remindersDigest,
   'low-stock-digest': lowStockDigest,
+  'recurring-charges': generateRecurringCharges,
 };
 
 // Run one job by name, logging the outcome to job_runs. Throws for an unknown

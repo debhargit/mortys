@@ -17,7 +17,7 @@ const OFFLINE = [
   'p4test.mjs',
   'p6test.mjs', 'p7test.mjs', 'p8test.mjs',
   'p11test.mjs', 'p12test.mjs', 'p13test.mjs', 'p14test.mjs', 'p15test.mjs', 'p16test.mjs', 'p17test.mjs', 'p18test.mjs',
-  'p19test.mjs', 'p20test.mjs', 'p21test.mjs', 'p22test.mjs', 'p23test.mjs', 'p24test.mjs',
+  'p19test.mjs', 'p20test.mjs', 'p21test.mjs', 'p22test.mjs', 'p23test.mjs', 'p24test.mjs', 'p25test.mjs',
   'presence-test.mjs', 'quote-test.mjs',
 ];
 const present = new Set(readdirSync(DIR));

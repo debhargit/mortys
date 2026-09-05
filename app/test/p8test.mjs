@@ -145,9 +145,9 @@ A('low-stock-digest: throttled on same-day re-run', r.result.emailed === false);
 
 // ===== _all + listing + job_runs =====
 r = await call('post', '/api/cron/_all', { headers: KEY });
-A('cron _all runs every job', r.ok && r.ran['back-in-stock'] && r.ran['reminders-digest'] && r.ran['low-stock-digest']);
+A('cron _all runs every job', r.ok && r.ran['back-in-stock'] && r.ran['reminders-digest'] && r.ran['low-stock-digest'] && r.ran['recurring-charges']);
 r = await call('get', '/api/cron', { headers: KEY });
-A('GET /api/cron lists jobs + last runs', r.jobs.length === 3 && r.last_runs.length === 3 && r.last_runs.every((x) => x.ok === 1));
+A('GET /api/cron lists jobs + last runs', r.jobs.length === 4 && r.last_runs.length === 4 && r.last_runs.every((x) => x.ok === 1));
 A('job_runs logged every invocation', q1('SELECT COUNT(*) n FROM job_runs').n >= 8);
 
 // ===== CRON_FORCE bypasses throttle =====

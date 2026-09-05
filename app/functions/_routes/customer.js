@@ -157,8 +157,10 @@ function shipError(ship) {
   return null;
 }
 // Build an `INSERT INTO orders` statement from a column->value map, so the
-// authed and guest checkout paths can share one insert with different columns.
-function orderInsertStmt(orderId, cols) {
+// authed and guest checkout paths can share one insert with different
+// columns -- also reused by _lib/recurring.js to generate an order the same
+// way checkout does, outside of any request.
+export function orderInsertStmt(orderId, cols) {
   const keys = Object.keys(cols);
   return {
     sql: `INSERT INTO orders (id, ${keys.join(', ')}) VALUES (?, ${keys.map(() => '?').join(', ')})`,
