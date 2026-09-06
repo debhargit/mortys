@@ -2029,3 +2029,99 @@ CREATE TABLE IF NOT EXISTS backup_log (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_backup_log_at ON backup_log (created_at DESC);
+
+-- =============================================================================
+--  PETTY CASH  (ported from the D1 backend: functions/_routes/ops.js +
+--  functions/_lib/petty_cash.js, D1 migrations 0049 + 0058.)
+--
+--  server.js never had any of this -- the admin "Petty Cash" tab and the Cash
+--  Report tab's payout form both 404'd against the Postgres backend. Money is
+--  stored in integer cents here, exactly as the D1 tables do, so the ledger /
+--  balance cross-check arithmetic ports across verbatim; every endpoint divides
+--  by 100 to honour the *_usd float contract the admin UI speaks.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS petty_cash_categories (
+  id         SERIAL PRIMARY KEY,
+  name       TEXT NOT NULL UNIQUE,
+  is_active  BOOLEAN NOT NULL DEFAULT true,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+INSERT INTO petty_cash_categories (name, sort_order) VALUES
+ ('Fuel', 1), ('Office supplies', 2), ('Cleaning', 3), ('Refreshments / staff welfare', 4),
+ ('Postage / courier', 5), ('Repairs & maintenance', 6), ('Transport / taxi', 7),
+ ('Bank charges', 8), ('Sundry / misc', 9)
+ON CONFLICT (name) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS petty_cash_funds (
+  id                      SERIAL PRIMARY KEY,
+  name                    TEXT NOT NULL,
+  balance_cents           BIGINT NOT NULL DEFAULT 0,
+  custodian_id            INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  is_active               BOOLEAN NOT NULL DEFAULT true,
+  float_cents             BIGINT NOT NULL DEFAULT 0,
+  receipt_threshold_cents BIGINT NOT NULL DEFAULT 0,
+  location                TEXT,
+  notes                   TEXT,
+  closed_at               TIMESTAMPTZ,
+  last_reconciled_at      TIMESTAMPTZ,
+  created_at              TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- "cash physically disbursed" -- straight from an open till (source_type
+-- 'drawer', netted off that session's expected cash at close) or from a
+-- standing fund (source_type 'fund', which the fund balance absorbs directly).
+CREATE TABLE IF NOT EXISTS cash_payouts (
+  id                 SERIAL PRIMARY KEY,
+  amount_cents       BIGINT NOT NULL,
+  reason             TEXT NOT NULL,
+  paid_to            TEXT,
+  notes              TEXT,
+  source_type        TEXT NOT NULL CHECK (source_type IN ('drawer', 'fund')),
+  drawer_session_id  INTEGER REFERENCES cash_drawer_sessions(id),
+  fund_id            INTEGER REFERENCES petty_cash_funds(id),
+  authorized_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  category_id        INTEGER REFERENCES petty_cash_categories(id),
+  receipt_ref        TEXT,
+  receipt_url        TEXT,
+  is_advance         BOOLEAN NOT NULL DEFAULT false,
+  advance_to         TEXT,
+  advance_status     TEXT,              -- NULL | open | repaid | expensed
+  advance_settled_at TIMESTAMPTZ,
+  voided             BOOLEAN NOT NULL DEFAULT false,
+  voided_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  voided_at          TIMESTAMPTZ,
+  created_at         TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_cash_payouts_drawer ON cash_payouts (drawer_session_id);
+CREATE INDEX IF NOT EXISTS idx_cash_payouts_fund   ON cash_payouts (fund_id);
+
+-- Every non-disbursement fund movement, signed: + adds to the fund.
+CREATE TABLE IF NOT EXISTS petty_cash_movements (
+  id                SERIAL PRIMARY KEY,
+  fund_id           INTEGER NOT NULL REFERENCES petty_cash_funds(id) ON DELETE CASCADE,
+  kind              TEXT NOT NULL CHECK (kind IN
+    ('opening','replenishment','reconcile_adjust','transfer_in','transfer_out','void_reversal','advance_repay')),
+  delta_cents       BIGINT NOT NULL,
+  source            TEXT,              -- 'bank' | 'drawer' | 'fund' | NULL
+  drawer_session_id INTEGER REFERENCES cash_drawer_sessions(id),
+  ref               TEXT,
+  notes             TEXT,
+  related_payout_id INTEGER REFERENCES cash_payouts(id),
+  related_fund_id   INTEGER REFERENCES petty_cash_funds(id),
+  created_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at        TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pc_movements_fund ON petty_cash_movements (fund_id, created_at);
+
+CREATE TABLE IF NOT EXISTS petty_cash_counts (
+  id             SERIAL PRIMARY KEY,
+  fund_id        INTEGER NOT NULL REFERENCES petty_cash_funds(id) ON DELETE CASCADE,
+  counted_cents  BIGINT NOT NULL,
+  expected_cents BIGINT NOT NULL,
+  variance_cents BIGINT NOT NULL,
+  notes          TEXT,
+  counted_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pc_counts_fund ON petty_cash_counts (fund_id, created_at);

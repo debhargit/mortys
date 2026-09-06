@@ -7430,16 +7430,567 @@ app.post('/api/admin/cash-drawer/:id/close', requireAdmin, requireCap('pos.open_
   const { rows: sess } = await query('SELECT * FROM cash_drawer_sessions WHERE id = $1', [req.params.id]);
   if (!sess.length || sess[0].closed_at) return res.status(400).json({ error: 'Session not open' });
   // Expected cash = opening_float + sum(cash sales since opened_at)
+  //   − cash paid out of this session (petty-cash payouts, replenishments).
+  // Without the payout term a payout reads as an unexplained shortage at close.
   const { rows: cs } = await query(
     `SELECT COALESCE(SUM(total_usd),0)::float AS s FROM pos_sales WHERE payment_method = 'cash' AND voided = false AND created_at >= $1`,
     [sess[0].opened_at]
   );
-  const expected = Number(sess[0].opening_float) + cs[0].s;
+  const { rows: po } = await query(
+    `SELECT COALESCE(SUM(amount_cents),0)::float / 100 AS s FROM cash_payouts
+      WHERE drawer_session_id = $1 AND source_type = 'drawer' AND voided = false`,
+    [req.params.id]
+  );
+  const expected = Math.round((Number(sess[0].opening_float) + cs[0].s - po[0].s) * 100) / 100;
   const closing = Number(b.closing_amount || 0);
   const variance = Math.round((closing - expected) * 100) / 100;
   await query(`UPDATE cash_drawer_sessions SET closed_by = $1, closing_amount = $2, expected_cash = $3, variance = $4, notes = $5, closed_at = NOW() WHERE id = $6`,
     [b.closed_by || null, closing, expected, variance, b.notes || sess[0].notes, req.params.id]);
-  res.json({ ok: true, expected_cash: expected, closing_amount: closing, variance });
+  res.json({ ok: true, expected_cash: expected, closing_amount: closing, variance, payouts: po[0].s || 0 });
+});
+
+// =============================================================================
+//  CASH PAYOUTS + PETTY CASH
+//
+//  Ported from the D1 backend (functions/_routes/ops.js + functions/_lib/
+//  petty_cash.js). Money is held in integer cents in the petty-cash tables,
+//  exactly as D1 does, so the ledger / balance cross-check arithmetic matches;
+//  every response divides by 100 for the *_usd float contract the admin UI
+//  speaks. requireAdmin gates reads, requireManager gates writes (mirrors the
+//  D1 adminMw / managerMw split). No receipt-file upload here: the admin UI
+//  only ever sends a text receipt_ref, so receipt_url stays null.
+// =============================================================================
+const pcU2c = (u) => (u == null || u === '' ? null : Math.round(Number(u) * 100));
+const pcC2u = (c) => (c == null ? 0 : Number(c) / 100);
+
+// Run fn inside a single transaction; commit on success, roll back on throw.
+async function pcTx(fn) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const r = await fn(client);
+    await client.query('COMMIT');
+    return r;
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+const PC_MOVEMENT_LABEL = {
+  opening: 'Opening balance',
+  replenishment: 'Replenishment',
+  reconcile_adjust: 'Reconciliation adjustment',
+  transfer_in: 'Transfer in',
+  transfer_out: 'Transfer out',
+  void_reversal: 'Payout voided',
+  advance_repay: 'Advance repaid',
+};
+
+// A merged, oldest-first ledger with a running balance. `payouts` are the
+// disbursements for this fund (cash out, negative). Voided payouts stay
+// visible but don't move the running total.
+async function pcFundLedger(fundId, { from, to } = {}) {
+  const ranged = !!(from && to);
+  const params = ranged ? [fundId, from, to] : [fundId];
+  const mRange = ranged ? ' AND m.created_at::date BETWEEN $2 AND $3' : '';
+  const pRange = ranged ? ' AND cp.created_at::date BETWEEN $2 AND $3' : '';
+
+  const { rows: movements } = await query(
+    `SELECT m.id, m.kind, m.delta_cents, m.source, m.ref, m.notes, m.created_at,
+            m.related_payout_id, u.name AS by_name
+       FROM petty_cash_movements m LEFT JOIN users u ON u.id = m.created_by
+      WHERE m.fund_id = $1${mRange} ORDER BY m.created_at, m.id`, params);
+
+  const { rows: payouts } = await query(
+    `SELECT cp.id, cp.amount_cents, cp.reason, cp.paid_to, cp.notes, cp.created_at,
+            cp.receipt_ref, cp.receipt_url, cp.is_advance, cp.advance_to, cp.advance_status,
+            cp.voided, cat.name AS category, u.name AS by_name
+       FROM cash_payouts cp
+       LEFT JOIN petty_cash_categories cat ON cat.id = cp.category_id
+       LEFT JOIN users u ON u.id = cp.authorized_by
+      WHERE cp.fund_id = $1${pRange} ORDER BY cp.created_at, cp.id`, params);
+
+  const entries = [];
+  for (const m of movements) {
+    entries.push({
+      at: m.created_at, kind: m.kind, label: PC_MOVEMENT_LABEL[m.kind] || m.kind,
+      delta_usd: pcC2u(m.delta_cents), source: m.source || null, ref: m.ref || null,
+      notes: m.notes || null, by_name: m.by_name || null, voided: false,
+    });
+  }
+  for (const p of payouts) {
+    entries.push({
+      at: p.created_at,
+      kind: p.is_advance ? 'advance' : 'payout',
+      label: p.is_advance
+        ? ('Staff advance' + (p.advance_to ? ' — ' + p.advance_to : '')
+           + (p.advance_status && p.advance_status !== 'open' ? ' (' + p.advance_status + ')' : ''))
+        : (p.category ? p.category : 'Payout'),
+      delta_usd: -pcC2u(p.amount_cents),
+      reason: p.reason || null, paid_to: p.paid_to || null, category: p.category || null,
+      receipt_ref: p.receipt_ref || null, receipt_url: p.receipt_url || null,
+      notes: p.notes || null, by_name: p.by_name || null,
+      payout_id: p.id, voided: !!p.voided, advance_status: p.advance_status || null,
+    });
+  }
+  entries.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+
+  let bal = 0;
+  for (const e of entries) {
+    if (!e.voided) bal += e.delta_usd;
+    e.balance_usd = Math.round(bal * 100) / 100;
+  }
+  return entries;
+}
+
+// opening + Σ movement deltas − Σ non-voided payouts. A cross-check against the
+// denormalised petty_cash_funds.balance_cents; never the mid-request value.
+//
+// 'void_reversal' movements are excluded on purpose: voiding a payout already
+// drops it out of the non-voided payout sum below (which restores its amount),
+// so counting the matching void_reversal movement as well would double it and
+// leave this cross-check permanently disagreeing with the real balance after
+// any void. (The D1 _lib/petty_cash.js has this same double-count bug; the
+// void_reversal row still exists for the human-readable ledger, which nets it
+// against the struck-through payout correctly.)
+async function pcRecomputeBalanceCents(fundId) {
+  const { rows: mv } = await query(
+    `SELECT COALESCE(SUM(delta_cents),0) AS s FROM petty_cash_movements
+      WHERE fund_id = $1 AND kind <> 'void_reversal'`, [fundId]);
+  const { rows: po } = await query(
+    'SELECT COALESCE(SUM(amount_cents),0) AS s FROM cash_payouts WHERE fund_id = $1 AND voided = false', [fundId]);
+  return Number(mv[0].s || 0) - Number(po[0].s || 0);
+}
+
+// ---- expense categories ----
+app.get('/api/admin/petty-cash-categories', requireAdmin, async (req, res) => {
+  const all = req.query.all === '1';
+  const { rows } = await query(
+    `SELECT id, name, is_active, sort_order FROM petty_cash_categories
+      ${all ? '' : 'WHERE is_active = true'} ORDER BY sort_order, name`);
+  res.json({ categories: rows });
+});
+
+app.post('/api/admin/petty-cash-categories', requireManager, async (req, res) => {
+  const b = req.body || {};
+  const name = String(b.name || '').trim().slice(0, 80);
+  if (!name) return res.status(400).json({ error: 'A name is required' });
+  try {
+    const { rows } = await query(
+      'INSERT INTO petty_cash_categories (name, sort_order) VALUES ($1, $2) RETURNING id',
+      [name, b.sort_order != null ? parseInt(b.sort_order, 10) : 99]);
+    res.json({ ok: true, id: rows[0].id });
+  } catch (e) {
+    if (e.code === '23505') return res.status(400).json({ error: 'That category already exists' });
+    throw e;
+  }
+});
+
+app.patch('/api/admin/petty-cash-categories/:id', requireManager, async (req, res) => {
+  const b = req.body || {};
+  const sets = []; const vals = [];
+  const put = (frag, val) => { vals.push(val); sets.push(frag.replace('?', '$' + vals.length)); };
+  if (b.name !== undefined) put('name = ?', String(b.name).trim().slice(0, 80));
+  if (b.is_active !== undefined) put('is_active = ?', !!b.is_active);
+  if (b.sort_order !== undefined) put('sort_order = ?', parseInt(b.sort_order, 10) || 0);
+  if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
+  vals.push(req.params.id);
+  await query(`UPDATE petty_cash_categories SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
+  res.json({ ok: true });
+});
+
+// ---- payouts ----
+app.get('/api/admin/cash-payouts', requireAdmin, async (req, res) => {
+  const q = req.query;
+  const where = []; const binds = [];
+  const add = (frag, val) => { binds.push(val); where.push(frag.replace('?', '$' + binds.length)); };
+  if (q.drawer_session_id) add('cp.drawer_session_id = ?', parseInt(q.drawer_session_id, 10));
+  if (q.fund_id) add('cp.fund_id = ?', parseInt(q.fund_id, 10));
+  if (q.advance_status) add('cp.advance_status = ?', q.advance_status);
+  if (q.is_advance === '1') where.push('cp.is_advance = true');
+  if (q.include_voided !== '1') where.push('cp.voided = false');
+  const { rows } = await query(
+    `SELECT cp.id, (cp.amount_cents / 100.0)::float AS amount_usd, cp.reason, cp.paid_to, cp.notes,
+            cp.source_type, cp.drawer_session_id, cp.fund_id, cp.created_at, cp.voided,
+            cp.category_id, cp.receipt_ref, cp.receipt_url, cp.is_advance, cp.advance_to, cp.advance_status,
+            cat.name AS category, u.name AS authorized_by_name
+       FROM cash_payouts cp
+       LEFT JOIN users u ON u.id = cp.authorized_by
+       LEFT JOIN petty_cash_categories cat ON cat.id = cp.category_id
+       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+      ORDER BY cp.created_at DESC LIMIT 500`, binds);
+  res.json({ payouts: rows });
+});
+
+app.post('/api/admin/cash-payouts', requireManager, async (req, res) => {
+  const me = req.session.userId;
+  const b = req.body || {};
+  const amount = Number(b.amount_usd || 0);
+  if (!(amount > 0)) return res.status(400).json({ error: 'A positive amount is required' });
+  if (!String(b.reason || '').trim()) return res.status(400).json({ error: 'A reason is required' });
+  const sourceType = b.source_type === 'fund' ? 'fund' : 'drawer';
+  const amountCents = pcU2c(amount);
+  const truthy = (v) => v === true || v === 'true' || v === '1' || v === 1;
+  const isAdvance = sourceType === 'fund' && truthy(b.is_advance);
+
+  let categoryId = null;
+  if (!isAdvance) {
+    categoryId = b.category_id ? parseInt(b.category_id, 10) : null;
+    if (sourceType === 'fund' && !categoryId)
+      return res.status(400).json({ error: 'Pick an expense category, or mark it a staff advance.' });
+    if (categoryId) {
+      const { rows } = await query('SELECT id FROM petty_cash_categories WHERE id = $1 AND is_active = true', [categoryId]);
+      if (!rows.length) return res.status(400).json({ error: 'Unknown category' });
+    }
+  }
+
+  let threshold = 0;
+  let fundId = null;
+  const drawerSessionId = sourceType === 'drawer' ? parseInt(b.drawer_session_id, 10) : null;
+  if (sourceType === 'drawer') {
+    const { rows } = await query('SELECT id FROM cash_drawer_sessions WHERE id = $1 AND closed_at IS NULL', [drawerSessionId]);
+    if (!rows.length) return res.status(400).json({ error: 'That cash drawer session is not open' });
+  } else {
+    fundId = parseInt(b.fund_id, 10);
+    const { rows } = await query('SELECT id, balance_cents, receipt_threshold_cents FROM petty_cash_funds WHERE id = $1 AND is_active = true', [fundId]);
+    if (!rows.length) return res.status(404).json({ error: 'Petty cash fund not found' });
+    const fund = rows[0];
+    if (Number(fund.balance_cents) < amountCents)
+      return res.status(400).json({ error: 'That would take the fund below zero (balance is ' + (Number(fund.balance_cents) / 100).toFixed(2) + ')' });
+    threshold = Number(fund.receipt_threshold_cents) || 0;
+  }
+
+  const receiptRef = b.receipt_ref ? String(b.receipt_ref).trim().slice(0, 120) : null;
+
+  await pcTx(async (cx) => {
+    if (sourceType === 'fund')
+      await cx.query('UPDATE petty_cash_funds SET balance_cents = balance_cents - $1 WHERE id = $2', [amountCents, fundId]);
+    await cx.query(
+      `INSERT INTO cash_payouts
+         (amount_cents, reason, paid_to, notes, source_type, drawer_session_id, fund_id, authorized_by,
+          category_id, receipt_ref, receipt_url, is_advance, advance_to, advance_status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      [amountCents, String(b.reason).trim().slice(0, 200), b.paid_to ? String(b.paid_to).trim().slice(0, 200) : null,
+        b.notes ? String(b.notes).trim().slice(0, 500) : null, sourceType,
+        drawerSessionId, fundId, me,
+        categoryId, receiptRef, null, isAdvance,
+        isAdvance ? (b.advance_to ? String(b.advance_to).trim().slice(0, 120) : null) : null,
+        isAdvance ? 'open' : null]);
+  });
+
+  const warning = (threshold > 0 && amountCents >= threshold && !receiptRef)
+    ? 'A receipt is recommended for this amount.' : null;
+  res.json({ ok: true, warning });
+});
+
+app.post('/api/admin/cash-payouts/:id/void', requireManager, async (req, res) => {
+  const me = req.session.userId;
+  const { rows } = await query('SELECT * FROM cash_payouts WHERE id = $1', [req.params.id]);
+  const p = rows[0];
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  if (p.voided) return res.status(400).json({ error: 'Already voided' });
+  await pcTx(async (cx) => {
+    await cx.query('UPDATE cash_payouts SET voided = true, voided_by = $1, voided_at = NOW() WHERE id = $2', [me, p.id]);
+    if (p.source_type === 'fund' && p.fund_id) {
+      await cx.query('UPDATE petty_cash_funds SET balance_cents = balance_cents + $1 WHERE id = $2', [Number(p.amount_cents), p.fund_id]);
+      await cx.query(
+        `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, ref, related_payout_id, created_by)
+         VALUES ($1, 'void_reversal', $2, $3, $4, $5)`,
+        [p.fund_id, Number(p.amount_cents), 'void of payout #' + p.id, p.id, me]);
+    }
+  });
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/cash-payouts/:id/settle-advance', requireManager, async (req, res) => {
+  const me = req.session.userId;
+  const b = req.body || {};
+  const { rows } = await query('SELECT * FROM cash_payouts WHERE id = $1', [req.params.id]);
+  const p = rows[0];
+  if (!p || !p.is_advance) return res.status(404).json({ error: 'Not a staff advance' });
+  if (p.advance_status !== 'open') return res.status(400).json({ error: 'This advance is already ' + p.advance_status });
+  const how = b.how === 'expense' ? 'expense' : 'repay';
+  if (how === 'repay') {
+    await pcTx(async (cx) => {
+      await cx.query(`UPDATE cash_payouts SET advance_status = 'repaid', advance_settled_at = NOW() WHERE id = $1`, [p.id]);
+      if (p.fund_id) {
+        await cx.query('UPDATE petty_cash_funds SET balance_cents = balance_cents + $1 WHERE id = $2', [Number(p.amount_cents), p.fund_id]);
+        await cx.query(
+          `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, ref, related_payout_id, created_by)
+           VALUES ($1, 'advance_repay', $2, $3, $4, $5)`,
+          [p.fund_id, Number(p.amount_cents), 'advance #' + p.id + ' repaid', p.id, me]);
+      }
+    });
+  } else {
+    const catId = b.category_id ? parseInt(b.category_id, 10) : null;
+    if (!catId) return res.status(400).json({ error: 'Pick a category to expense the advance to' });
+    await query(
+      `UPDATE cash_payouts SET advance_status = 'expensed', advance_settled_at = NOW(),
+              category_id = $1, receipt_ref = COALESCE($2, receipt_ref) WHERE id = $3`,
+      [catId, b.receipt_ref ? String(b.receipt_ref).trim().slice(0, 120) : null, p.id]);
+  }
+  res.json({ ok: true });
+});
+
+// ---- funds ----
+app.get('/api/admin/petty-cash-funds', requireAdmin, async (_req, res) => {
+  const { rows } = await query(
+    `SELECT f.id, f.name, (f.balance_cents / 100.0)::float AS balance_usd, (f.float_cents / 100.0)::float AS float_usd,
+            (f.receipt_threshold_cents / 100.0)::float AS receipt_threshold_usd, f.location, f.notes,
+            f.custodian_id, f.is_active, f.created_at, f.last_reconciled_at,
+            (f.float_cents > 0 AND f.balance_cents < f.float_cents) AS needs_topup,
+            u.name AS custodian_name
+       FROM petty_cash_funds f LEFT JOIN users u ON u.id = f.custodian_id
+      ORDER BY f.is_active DESC, f.name`);
+  res.json({ funds: rows });
+});
+
+app.post('/api/admin/petty-cash-funds', requireManager, async (req, res) => {
+  const me = req.session.userId;
+  const b = req.body || {};
+  if (!String(b.name || '').trim()) return res.status(400).json({ error: 'A name is required' });
+  const opening = pcU2c(b.opening_balance_usd || 0) || 0;
+  const id = await pcTx(async (cx) => {
+    const { rows } = await cx.query(
+      'INSERT INTO petty_cash_funds (name, balance_cents, float_cents, receipt_threshold_cents, location, custodian_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+      [String(b.name).trim().slice(0, 120), opening, pcU2c(b.float_usd || 0) || 0, pcU2c(b.receipt_threshold_usd || 0) || 0,
+        b.location ? String(b.location).trim().slice(0, 120) : null,
+        b.custodian_id ? parseInt(b.custodian_id, 10) : null]);
+    const newId = rows[0].id;
+    if (opening !== 0) {
+      await cx.query(
+        `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, source, notes, created_by)
+         VALUES ($1, 'opening', $2, 'bank', 'Opening balance', $3)`, [newId, opening, me]);
+    }
+    return newId;
+  });
+  res.json({ ok: true, id });
+});
+
+app.patch('/api/admin/petty-cash-funds/:id', requireManager, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const b = req.body || {};
+  const me = req.session.userId;
+  const { rows } = await query('SELECT id, balance_cents FROM petty_cash_funds WHERE id = $1', [id]);
+  const fund = rows[0];
+  if (!fund) return res.status(404).json({ error: 'Not found' });
+  const sets = []; const vals = [];
+  const put = (frag, val) => { vals.push(val); sets.push(frag.replace('?', '$' + vals.length)); };
+  if (b.name !== undefined) put('name = ?', String(b.name).trim().slice(0, 120));
+  if (b.custodian_id !== undefined) put('custodian_id = ?', b.custodian_id ? parseInt(b.custodian_id, 10) : null);
+  if (b.float_usd !== undefined) put('float_cents = ?', pcU2c(b.float_usd) || 0);
+  if (b.receipt_threshold_usd !== undefined) put('receipt_threshold_cents = ?', pcU2c(b.receipt_threshold_usd) || 0);
+  if (b.location !== undefined) put('location = ?', b.location ? String(b.location).trim().slice(0, 120) : null);
+  if (b.notes !== undefined) put('notes = ?', b.notes ? String(b.notes).trim().slice(0, 500) : null);
+  let writeOff = false;
+  const bal = Number(fund.balance_cents);
+  if (b.is_active !== undefined) {
+    const active = !!b.is_active;
+    if (!active && bal !== 0 && !b.force)
+      return res.status(400).json({ error: 'Fund balance is ' + (bal / 100).toFixed(2) + ' — reconcile it to zero, or pass force to write it off.' });
+    if (!active && bal !== 0 && b.force) { writeOff = true; sets.push('balance_cents = 0'); }
+    put('is_active = ?', active);
+    sets.push('closed_at = ' + (active ? 'NULL' : 'NOW()'));
+  }
+  if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
+  await pcTx(async (cx) => {
+    if (writeOff) {
+      await cx.query(
+        `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, notes, created_by)
+         VALUES ($1, 'reconcile_adjust', $2, 'Written off on close', $3)`, [id, -bal, me]);
+    }
+    vals.push(id);
+    await cx.query(`UPDATE petty_cash_funds SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
+  });
+  res.json({ ok: true });
+});
+
+app.get('/api/admin/petty-cash-funds/:id', requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { rows } = await query(
+    `SELECT f.*, (f.balance_cents / 100.0)::float AS balance_usd, (f.float_cents / 100.0)::float AS float_usd,
+            (f.receipt_threshold_cents / 100.0)::float AS receipt_threshold_usd, u.name AS custodian_name
+       FROM petty_cash_funds f LEFT JOIN users u ON u.id = f.custodian_id WHERE f.id = $1`, [id]);
+  const fund = rows[0];
+  if (!fund) return res.status(404).json({ error: 'Not found' });
+  const { from, to } = req.query;
+  const [ledger, advances, counts] = await Promise.all([
+    pcFundLedger(id, from && to ? { from, to } : {}),
+    query(
+      `SELECT cp.id, (cp.amount_cents / 100.0)::float AS amount_usd, cp.advance_to, cp.reason, cp.created_at,
+              cp.advance_status, u.name AS authorized_by_name
+         FROM cash_payouts cp LEFT JOIN users u ON u.id = cp.authorized_by
+        WHERE cp.fund_id = $1 AND cp.is_advance = true AND cp.advance_status = 'open' ORDER BY cp.created_at`, [id]).then((r) => r.rows),
+    query(
+      `SELECT id, (counted_cents / 100.0)::float AS counted_usd, (expected_cents / 100.0)::float AS expected_usd,
+              (variance_cents / 100.0)::float AS variance_usd, notes, created_at
+         FROM petty_cash_counts WHERE fund_id = $1 ORDER BY created_at DESC LIMIT 30`, [id]).then((r) => r.rows),
+  ]);
+  fund.needs_topup = Number(fund.float_cents) > 0 && Number(fund.balance_cents) < Number(fund.float_cents);
+  res.json({ fund, ledger, open_advances: advances, counts, computed_balance_usd: (await pcRecomputeBalanceCents(id)) / 100 });
+});
+
+app.post('/api/admin/petty-cash-funds/:id/replenish', requireManager, async (req, res) => {
+  const me = req.session.userId;
+  const id = parseInt(req.params.id, 10);
+  const b = req.body || {};
+  const { rows } = await query('SELECT id, balance_cents, float_cents FROM petty_cash_funds WHERE id = $1 AND is_active = true', [id]);
+  const fund = rows[0];
+  if (!fund) return res.status(404).json({ error: 'Petty cash fund not found' });
+  let amountCents;
+  if (b.to_float) {
+    amountCents = (Number(fund.float_cents) || 0) - Number(fund.balance_cents);
+    if (amountCents <= 0) return res.status(400).json({ error: 'The fund is already at (or above) its float.' });
+  } else {
+    amountCents = pcU2c(Number(b.amount_usd || 0));
+    if (!(amountCents > 0)) return res.status(400).json({ error: 'A positive amount is required' });
+  }
+  const source = b.source === 'drawer' ? 'drawer' : 'bank';
+  let drawerSessionId = null;
+  if (source === 'drawer') {
+    const { rows: sr } = await query('SELECT id FROM cash_drawer_sessions WHERE id = $1 AND closed_at IS NULL', [parseInt(b.drawer_session_id, 10)]);
+    if (!sr.length) return res.status(400).json({ error: 'That cash drawer session is not open' });
+    drawerSessionId = sr[0].id;
+  }
+  await pcTx(async (cx) => {
+    await cx.query('UPDATE petty_cash_funds SET balance_cents = balance_cents + $1 WHERE id = $2', [amountCents, id]);
+    await cx.query(
+      `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, source, drawer_session_id, notes, created_by)
+       VALUES ($1, 'replenishment', $2, $3, $4, $5, $6)`,
+      [id, amountCents, source, drawerSessionId, b.notes ? String(b.notes).slice(0, 300) : null, me]);
+    if (source === 'drawer') {
+      await cx.query(
+        `INSERT INTO cash_payouts (amount_cents, reason, source_type, drawer_session_id, fund_id, authorized_by)
+         VALUES ($1, 'Petty cash replenishment', 'drawer', $2, $3, $4)`,
+        [amountCents, drawerSessionId, id, me]);
+    }
+  });
+  res.json({ ok: true, amount_usd: amountCents / 100 });
+});
+
+app.post('/api/admin/petty-cash-funds/:id/reconcile', requireManager, async (req, res) => {
+  const me = req.session.userId;
+  const id = parseInt(req.params.id, 10);
+  const b = req.body || {};
+  const { rows } = await query('SELECT id, balance_cents FROM petty_cash_funds WHERE id = $1 AND is_active = true', [id]);
+  const fund = rows[0];
+  if (!fund) return res.status(404).json({ error: 'Petty cash fund not found' });
+  const countedCents = pcU2c(Number(b.counted_usd));
+  if (countedCents == null || !Number.isFinite(countedCents) || countedCents < 0)
+    return res.status(400).json({ error: 'Enter the counted amount' });
+  const expectedCents = Number(fund.balance_cents);
+  const varianceCents = countedCents - expectedCents;
+  await pcTx(async (cx) => {
+    await cx.query(
+      `INSERT INTO petty_cash_counts (fund_id, counted_cents, expected_cents, variance_cents, notes, counted_by)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [id, countedCents, expectedCents, varianceCents, b.notes ? String(b.notes).slice(0, 300) : null, me]);
+    await cx.query('UPDATE petty_cash_funds SET balance_cents = $1, last_reconciled_at = NOW() WHERE id = $2', [countedCents, id]);
+    if (varianceCents !== 0) {
+      await cx.query(
+        `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, notes, created_by)
+         VALUES ($1, 'reconcile_adjust', $2, $3, $4)`,
+        [id, varianceCents, 'Count ' + (varianceCents < 0 ? 'short' : 'over') + ' by ' + Math.abs(varianceCents / 100).toFixed(2), me]);
+    }
+  });
+  res.json({ ok: true, expected_usd: expectedCents / 100, counted_usd: countedCents / 100, variance_usd: varianceCents / 100 });
+});
+
+app.post('/api/admin/petty-cash-funds/:id/transfer', requireManager, async (req, res) => {
+  const me = req.session.userId;
+  const id = parseInt(req.params.id, 10);
+  const b = req.body || {};
+  const toId = parseInt(b.to_fund_id, 10);
+  const amountCents = pcU2c(Number(b.amount_usd || 0));
+  if (!(amountCents > 0)) return res.status(400).json({ error: 'A positive amount is required' });
+  if (!toId || toId === id) return res.status(400).json({ error: 'Pick a different destination fund' });
+  const [srcR, dstR] = await Promise.all([
+    query('SELECT id, balance_cents FROM petty_cash_funds WHERE id = $1 AND is_active = true', [id]),
+    query('SELECT id FROM petty_cash_funds WHERE id = $1 AND is_active = true', [toId]),
+  ]);
+  const src = srcR.rows[0];
+  if (!src || !dstR.rows[0]) return res.status(404).json({ error: 'Fund not found' });
+  if (Number(src.balance_cents) < amountCents)
+    return res.status(400).json({ error: 'The source fund only has ' + (Number(src.balance_cents) / 100).toFixed(2) });
+  const note = b.notes ? String(b.notes).slice(0, 300) : null;
+  await pcTx(async (cx) => {
+    await cx.query('UPDATE petty_cash_funds SET balance_cents = balance_cents - $1 WHERE id = $2', [amountCents, id]);
+    await cx.query('UPDATE petty_cash_funds SET balance_cents = balance_cents + $1 WHERE id = $2', [amountCents, toId]);
+    await cx.query(
+      `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, source, related_fund_id, notes, created_by)
+       VALUES ($1, 'transfer_out', $2, 'fund', $3, $4, $5)`, [id, -amountCents, toId, note, me]);
+    await cx.query(
+      `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, source, related_fund_id, notes, created_by)
+       VALUES ($1, 'transfer_in', $2, 'fund', $3, $4, $5)`, [toId, amountCents, id, note, me]);
+  });
+  res.json({ ok: true });
+});
+
+// ---- petty cash report (for accounting) ----
+app.get('/api/admin/petty-cash-report', requireAdmin, async (req, res) => {
+  const from = req.query.from || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  const to = req.query.to || new Date().toISOString().slice(0, 10);
+  const fundId = req.query.fund_id ? parseInt(req.query.fund_id, 10) : null;
+  const dateFund = (p) => { let f = ''; if (fundId) { p.push(fundId); f = ` AND cp.fund_id = $${p.length}`; } return f; };
+  const mvFund = (p) => { let f = ''; if (fundId) { p.push(fundId); f = ` AND fund_id = $${p.length}`; } return f; };
+
+  const pCat = [from, to]; const fwCat = dateFund(pCat);
+  const pFund = [from, to]; const fwFund = dateFund(pFund);
+  const pRepl = [from, to]; const fwRepl = mvFund(pRepl);
+  const pVar = [from, to]; const fwVar = mvFund(pVar);
+  const pAdv = []; let fwAdv = ''; if (fundId) { pAdv.push(fundId); fwAdv = ` AND cp.fund_id = $${pAdv.length}`; }
+  const pLines = [from, to]; const fwLines = dateFund(pLines);
+
+  const [byCat, byFund, repl, variance, openAdv, lines] = await Promise.all([
+    query(
+      `SELECT COALESCE(cat.name, 'Uncategorised') AS category, COUNT(*)::int AS n,
+              (COALESCE(SUM(cp.amount_cents),0) / 100.0)::float AS spend_usd
+         FROM cash_payouts cp LEFT JOIN petty_cash_categories cat ON cat.id = cp.category_id
+        WHERE cp.source_type = 'fund' AND cp.voided = false AND (cp.is_advance = false OR cp.advance_status = 'expensed')
+          AND cp.created_at::date BETWEEN $1 AND $2${fwCat}
+        GROUP BY category ORDER BY spend_usd DESC`, pCat).then((r) => r.rows),
+    query(
+      `SELECT f.name AS fund, COUNT(*)::int AS n, (COALESCE(SUM(cp.amount_cents),0) / 100.0)::float AS spend_usd
+         FROM cash_payouts cp JOIN petty_cash_funds f ON f.id = cp.fund_id
+        WHERE cp.source_type = 'fund' AND cp.voided = false AND cp.created_at::date BETWEEN $1 AND $2${fwFund}
+        GROUP BY f.name ORDER BY spend_usd DESC`, pFund).then((r) => r.rows),
+    query(
+      `SELECT (COALESCE(SUM(delta_cents),0) / 100.0)::float AS s FROM petty_cash_movements
+        WHERE kind = 'replenishment' AND created_at::date BETWEEN $1 AND $2${fwRepl}`, pRepl).then((r) => r.rows[0]),
+    query(
+      `SELECT (COALESCE(SUM(delta_cents),0) / 100.0)::float AS s FROM petty_cash_movements
+        WHERE kind = 'reconcile_adjust' AND created_at::date BETWEEN $1 AND $2${fwVar}`, pVar).then((r) => r.rows[0]),
+    query(
+      `SELECT COALESCE(cp.advance_to, 'unnamed') AS advance_to, COUNT(*)::int AS count,
+              (COALESCE(SUM(cp.amount_cents),0) / 100.0)::float AS amount_usd
+         FROM cash_payouts cp
+        WHERE cp.is_advance = true AND cp.advance_status = 'open'${fwAdv}
+        GROUP BY advance_to ORDER BY amount_usd DESC`, pAdv).then((r) => r.rows),
+    query(
+      `SELECT cp.created_at, f.name AS fund,
+              COALESCE(cat.name, CASE WHEN cp.is_advance THEN 'Staff advance' ELSE 'Uncategorised' END) AS category,
+              cp.paid_to, cp.reason, cp.receipt_ref, (cp.amount_cents / 100.0)::float AS amount_usd,
+              cp.is_advance::int AS is_advance, cp.advance_status, cp.voided::int AS voided, u.name AS authorized_by
+         FROM cash_payouts cp
+         JOIN petty_cash_funds f ON f.id = cp.fund_id
+         LEFT JOIN petty_cash_categories cat ON cat.id = cp.category_id
+         LEFT JOIN users u ON u.id = cp.authorized_by
+        WHERE cp.source_type = 'fund' AND cp.created_at::date BETWEEN $1 AND $2${fwLines}
+        ORDER BY cp.created_at DESC LIMIT 1000`, pLines).then((r) => r.rows),
+  ]);
+  const totalSpend = byCat.reduce((s, x) => s + Number(x.spend_usd), 0);
+  res.json({
+    from, to,
+    totals: {
+      spend_usd: Math.round(totalSpend * 100) / 100,
+      replenishments_usd: (repl && repl.s) || 0,
+      reconcile_variance_usd: (variance && variance.s) || 0,
+    },
+    by_category: byCat, by_fund: byFund, open_advances: openAdv, lines,
+  });
 });
 
 // =============================================================================
