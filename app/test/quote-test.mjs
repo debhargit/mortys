@@ -21,13 +21,13 @@ function makeDB(db) {
       run() { const r = db.prepare(this._sql).run(...this._b); return { success: true, meta: { last_row_id: Number(r.lastInsertRowid), changes: r.changes } }; } }; },
     async batch(s) { const o = []; for (const x of s) o.push(x.run()); return o; } };
 }
-const ENV = { DB: makeDB(sdb), ORDER_NOTIFY_TO: '', SESSION_SECRET: 'test-secret-quote' };
+const ENV = { DB: makeDB(sdb), ORDER_NOTIFY_TO: '', SESSION_SECRET: 'test-secret-quote', FYGARO_JWT_SECRET: 'test-fygaro-secret' };
 const { sessionCookie } = await import(APP + 'functions/_lib/session.js');
 async function cookieFor(userId) { return (await sessionCookie(ENV, { userId, epoch: 0 })).split(';')[0]; }
 const routes = [];
 const app = {};
 for (const v of ['get', 'post', 'patch', 'delete', 'put']) app[v] = (p, ...r) => routes.push({ v, p, mws: r.slice(0, -1), h: r[r.length - 1] });
-for (const mod of ['auth', 'storefront', 'customer', 'admin_crm', 'admin_users']) {
+for (const mod of ['auth', 'storefront', 'customer', 'shipping', 'payments', 'admin_crm', 'admin_users']) {
   (await import(APP + 'functions/_routes/' + mod + '.js')).default(app);
 }
 console.log('mounted', routes.length);
@@ -173,6 +173,122 @@ n++; A('order + order_items rows written, cart cleared',
 sdb.prepare("INSERT INTO cart_items (user_id, product_img, qty) VALUES (501,'qz-2',1)").run();
 r = await call('post', '/api/checkout', { user: { id: 501 }, body: { payment_method: 'cash_pickup' } });
 n++; A('/api/checkout -> 400 when a cart line is unpriced', st === 400 && r.code === 'unpriced_items');
+
+// ---- 4d. shipping: fulfilment + address + fee folded into the total -----
+r = await call('get', '/api/config');
+n++; A('config: shipping block (parishes + carriers)', r.shipping && Array.isArray(r.shipping.parishes) && r.shipping.parishes.includes('Kingston') && Array.isArray(r.shipping.carriers));
+
+sdb.prepare('DELETE FROM cart_items').run();
+sdb.prepare("INSERT INTO cart_items (user_id, product_img, qty) VALUES (501,'qz-1',2)").run();
+r = await call('post', '/api/checkout', { user: { id: 501, show_prices: 1 }, body: {
+  payment_method: 'bank_transfer', fulfilment: 'delivery',
+  ship_name: 'Jane R', ship_phone: '876-555-0000', ship_line1: '5 Hope Rd', ship_parish: 'St. Andrew',
+  ship_carrier: 'manual', ship_fee_usd: 15,
+} });
+n++; A('/api/checkout delivery -> total = merch + shipping fee', st === 200 && Math.abs(r.total_usd - 105) < 0.01 && Math.abs(r.ship_fee_usd - 15) < 0.01 && r.fulfilment === 'delivery');
+n++; A('/api/checkout delivery -> ship_* persisted on the order row', (() => {
+  const o = q1('SELECT fulfilment, ship_fee_cents, ship_line1, ship_parish, ship_carrier FROM orders WHERE id = ?', r.order_id);
+  return o && o.fulfilment === 'delivery' && o.ship_fee_cents === 1500 && o.ship_line1 === '5 Hope Rd' && o.ship_parish === 'St. Andrew' && o.ship_carrier === 'manual';
+})());
+
+sdb.prepare("INSERT INTO cart_items (user_id, product_img, qty) VALUES (501,'qz-1',1)").run();
+r = await call('post', '/api/checkout', { user: { id: 501, show_prices: 1 }, body: { payment_method: 'cash_pickup', fulfilment: 'delivery', ship_fee_usd: 10 } });
+n++; A('/api/checkout delivery without an address -> 400 ship_incomplete', st === 400 && r.code === 'ship_incomplete');
+sdb.prepare('DELETE FROM cart_items').run();
+
+// ---- 4e. guest checkout: no session, explicit items, no points ---------
+r = await call('post', '/api/checkout/guest', { user: undefined, body: {
+  name: 'Walk Up', phone: '876-555-1212', payment_method: 'cash_pickup',
+  items: [{ img: 'qz-1', qty: 2 }],
+} });
+n++; A('/api/checkout/guest -> 200, order for qz-1 x2', st === 200 && r.order_id > 0 && Math.abs(r.total_usd - 90) < 0.01);
+n++; A('/api/checkout/guest -> guest order row (user_id NULL, contact + source)', (() => {
+  const o = q1('SELECT user_id, customer_name, customer_phone, source, fulfilment FROM orders WHERE id = ?', r.order_id);
+  return o && o.user_id === null && o.customer_name === 'Walk Up' && o.customer_phone === '876-555-1212' && o.source === 'storefront' && o.fulfilment === 'pickup';
+})());
+const guestOrderId = r.order_id;
+r = await call('post', '/api/checkout/guest', { user: undefined, body: { name: '', items: [{ img: 'qz-1', qty: 1 }] } });
+n++; A('/api/checkout/guest -> 400 without a name', st === 400);
+
+// ---- 4e2. "email me an invoice" payment method ------------------------
+sdb.prepare('DELETE FROM cart_items').run();
+sdb.prepare("INSERT INTO cart_items (user_id, product_img, qty) VALUES (501,'qz-1',1)").run();
+r = await call('post', '/api/checkout', { user: { id: 501, show_prices: 1 }, body: { payment_method: 'invoice_email' } });
+n++; A('/api/checkout -> accepts payment_method=invoice_email', st === 200 && r.payment_method === 'invoice_email' &&
+  q1('SELECT payment_method FROM orders WHERE id = ?', r.order_id).payment_method === 'invoice_email');
+r = await call('post', '/api/checkout/guest', { user: undefined, body: { name: 'No Mail', phone: '876-555-7777', payment_method: 'invoice_email', items: [{ img: 'qz-1', qty: 1 }] } });
+n++; A('/api/checkout/guest -> 400 invoice_email without an email', st === 400);
+r = await call('post', '/api/checkout/guest', { user: undefined, body: { name: 'Has Mail', email: 'hm@example.com', payment_method: 'invoice_email', items: [{ img: 'qz-1', qty: 1 }] } });
+n++; A('/api/checkout/guest -> invoice_email OK with an email', st === 200 && r.payment_method === 'invoice_email');
+sdb.prepare('DELETE FROM cart_items').run();
+
+// ---- 4e3. Fygaro hosted card checkout --------------------------------
+r = await call('post', '/api/checkout', { user: { id: 501, show_prices: 1 }, body: { payment_method: 'fygaro', items: [] } });
+n++; A('/api/checkout -> 400 fygaro while disabled', st === 400);
+sdb.prepare("UPDATE shop_settings SET fygaro_enabled = 1, fygaro_button_id = 'btn-abc-123', fygaro_currency = 'JMD' WHERE id = 1").run();
+r = await call('get', '/api/config');
+n++; A('config: payments.fygaro_enabled + method listed', r.payments.fygaro_enabled === true && r.payments.methods.includes('fygaro'));
+sdb.prepare("INSERT INTO cart_items (user_id, product_img, qty) VALUES (501,'qz-1',2)").run();
+r = await call('post', '/api/checkout', { user: { id: 501, show_prices: 1 }, body: { payment_method: 'fygaro' } });
+n++; A('/api/checkout fygaro -> order + a hosted checkout_url with a JWT', st === 200 && r.payment_method === 'fygaro' &&
+  typeof r.checkout_url === 'string' && r.checkout_url.includes('/pb/btn-abc-123/') && /[?&]jwt=/.test(r.checkout_url) &&
+  q1('SELECT payment_status FROM orders WHERE id = ?', r.order_id).payment_status === 'unpaid');
+r = await call('post', '/api/webhooks/fygaro', { user: undefined, body: { custom_reference: String(r.order_id), status: 'approved' } });
+n++; A('/api/webhooks/fygaro -> 400 without a valid signature', st === 400);
+sdb.prepare("UPDATE shop_settings SET fygaro_enabled = 0 WHERE id = 1").run();
+sdb.prepare('DELETE FROM cart_items').run();
+
+// ---- 4f. /api/orders/:id/print — guest reads their order by contact ----
+sdb.prepare("UPDATE orders SET customer_email = 'walkup@example.com' WHERE id = ?").run(guestOrderId);
+r = await call('get', '/api/orders/' + guestOrderId + '/print?email=walkup@example.com', { user: undefined });
+n++; A('/api/orders/:id/print?email= -> order + items for the guest', st === 200 && r.order && r.order.id === guestOrderId && Array.isArray(r.items) && r.items.length === 1);
+r = await call('get', '/api/orders/' + guestOrderId + '/print?email=someone@else.com', { user: undefined });
+n++; A('/api/orders/:id/print -> 403 on a wrong email', st === 403);
+
+// ---- 4g. shipping: live rate quote + signed token + booking -------------
+sdb.prepare("UPDATE shop_settings SET carrier_knutsford_enabled = 1, carrier_manual_enabled = 1, ship_local_flat_usd = 1200, ship_origin_parish = 'St. Andrew' WHERE id = 1").run();
+r = await call('get', '/api/config');
+n++; A('config: knutsford + manual in the enabled carrier list', Array.isArray(r.shipping.carriers) && r.shipping.carriers.includes('knutsford') && r.shipping.carriers.includes('manual'));
+
+r = await call('post', '/api/shipping/quote', { user: undefined, body: { parish: 'St. Ann', items: [{ img: 'qz-1', qty: 2 }] } });
+n++; A('/api/shipping/quote -> knutsford + manual quotes, each with a token', st === 200 && r.quotes.length >= 2 &&
+  r.quotes.some((x) => x.carrier === 'knutsford') && r.quotes.some((x) => x.carrier === 'manual') &&
+  r.quotes.every((x) => typeof x.token === 'string' && x.token.includes('.')));
+const knut = r.quotes.find((x) => x.carrier === 'knutsford');
+
+r = await call('post', '/api/shipping/quote', { user: undefined, body: { items: [{ img: 'qz-1', qty: 1 }] } });
+n++; A('/api/shipping/quote -> 400 without a parish', st === 400);
+
+// checkout trusting the signed quote token: fee + carrier come from the token
+sdb.prepare('DELETE FROM cart_items').run();
+sdb.prepare("INSERT INTO cart_items (user_id, product_img, qty) VALUES (501,'qz-1',2)").run();
+r = await call('post', '/api/checkout', { user: { id: 501, show_prices: 1 }, body: {
+  payment_method: 'cash_pickup', fulfilment: 'shipping',
+  ship_name: 'Dee', ship_line1: '1 Main St', ship_parish: 'St. Ann',
+  ship_carrier: 'manual', ship_fee_usd: 1,          // ignored — token wins
+  ship_quote_token: knut.token,
+} });
+n++; A('/api/checkout -> trusts the quote token (carrier + fee from token, shipment booked)', (() => {
+  if (st !== 200) return false;
+  const o = q1('SELECT ship_carrier, ship_fee_cents, fulfilment, tracking_number, ship_status FROM orders WHERE id = ?', r.order_id);
+  return o && o.ship_carrier === 'knutsford' && o.ship_fee_cents === Math.round(knut.amount * 100) &&
+    o.fulfilment === 'shipping' && !!o.tracking_number && o.ship_status === 'booked' &&
+    Math.abs(r.total_usd - (90 + knut.amount)) < 0.01;
+})());
+const shipOrderId = r.order_id;
+sdb.prepare("UPDATE orders SET customer_email = 'dee@example.com' WHERE id = ?").run(shipOrderId);
+
+r = await call('get', '/api/orders/' + shipOrderId + '/label?email=dee@example.com', { user: undefined });
+n++; A('/api/orders/:id/label -> 404 for a carrier with no label bytes (manual/knutsford)', st === 404);
+
+r = await call('get', '/api/orders/' + shipOrderId + '/tracking?email=dee@example.com', { user: undefined });
+n++; A('/api/orders/:id/tracking -> returns the tracking number + a status', st === 200 && r.tracking_number && typeof r.status === 'string');
+
+r = await call('post', '/api/admin/orders/' + shipOrderId + '/ship', { user: { id: 900 } });
+n++; A('POST /api/admin/orders/:id/ship -> re-books (ok)', st === 200 && r.ok === true && !!r.tracking_number);
+
+sdb.prepare("UPDATE shop_settings SET carrier_knutsford_enabled = 0, ship_local_flat_usd = 0 WHERE id = 1").run();
+sdb.prepare('DELETE FROM cart_items').run();
 
 // ---- 4c. flip back OFF for the rest of the suite -------------------------
 sdb.prepare("UPDATE shop_settings SET storefront_prices = 0 WHERE id = 1").run();

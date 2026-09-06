@@ -1,11 +1,11 @@
 // ============================================================================
-//  Vision Auto Solutions — Express + Postgres backend
+//  Morty's Auto Parts — Express + Postgres backend
 //  Serves the static site from this same folder and exposes /api/* endpoints.
 //
 //  Boot:
 //    npm install                    (first time only)
 //    cp .env.example .env           (edit DATABASE_URL etc.)
-//    psql -d visionautosolutions -f schema.sql  (first time only — or let the server run it)
+//    psql -d mortysautoparts -f schema.sql  (first time only — or let the server run it)
 //    node server.js
 // ============================================================================
 
@@ -135,7 +135,7 @@ function saveServerConfig(cfg) {
   fs.writeFileSync(SERVER_CONFIG_PATH, JSON.stringify(cfg, null, 2));
 }
 const SERVER_CFG = loadServerConfig();
-const PORT = parseInt(SERVER_CFG.port || process.env.PORT || '3056', 10);
+const PORT = parseInt(SERVER_CFG.port || process.env.PORT || '3057', 10);
 
 // ---- Postgres pool(s) --------------------------------------------------------
 // Two independent connections, configurable from Admin Setup -> Database
@@ -249,7 +249,7 @@ let pool;       // local -- admin/POS/everything else, always
 let onlinePool; // online -- public storefront fallback only, or null if never configured
 function applyDbConfig(cfg) {
   const localCfg = buildPoolConfig(cfg.local) || {
-    connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/visionautosolutions',
+    connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/mortysautoparts',
     max: 10,
   };
   const oldPool = pool, oldOnline = onlinePool;
@@ -314,7 +314,7 @@ async function queryWithFallback(text, params) {
 // running, instead of the operator having to type in a hostname or IP by
 // hand: this process detects its own local Postgres on boot and re-checks it
 // periodically (LOCAL_SERVER_STATUS below), and broadcasts a small UDP
-// announcement that other Vision Auto Solutions instances on the same LAN can pick up
+// announcement that other Morty's Auto Parts instances on the same LAN can pick up
 // passively, or query on demand -- so a second terminal machine can find an
 // already-installed local server without typing its IP. Read-only, LAN-only
 // (UDP broadcast doesn't cross a router/subnet), and every piece of it is
@@ -351,7 +351,7 @@ let LOCAL_SERVER_STATUS = { reachable: false, db_exists: false, checked_at: null
 async function detectLocalServer() {
   const cfg = loadDbConfig();
   const localCfg = buildPoolConfig(cfg.local) || { host: 'localhost', port: 5432, user: 'postgres', password: process.env.PGPASSWORD || 'postgres' };
-  const dbName = localCfg.database || 'visionautosolutions';
+  const dbName = localCfg.database || 'mortysautoparts';
   const probe = new Pool(Object.assign({}, localCfg, { database: 'postgres', max: 1, connectionTimeoutMillis: 3000 }));
   try {
     const r = await probe.query('SELECT 1 FROM pg_database WHERE datname = $1', [dbName]);
@@ -549,7 +549,7 @@ let discoverySocket = null;
 
 function announcePayload() {
   return {
-    type: 'VISIONAUTO_ANNOUNCE', instanceId: INSTANCE_ID, name: machineName(),
+    type: 'MELTHAHONDA_ANNOUNCE', instanceId: INSTANCE_ID, name: machineName(),
     host: primaryLocalIPv4(), port: PORT,
     has_local_db: LOCAL_SERVER_STATUS.reachable, db_exists: LOCAL_SERVER_STATUS.db_exists,
     time: Date.now(),
@@ -568,9 +568,9 @@ function startDiscoveryService() {
       let data;
       try { data = JSON.parse(msg.toString()); } catch (_) { return; }
       if (!data || data.instanceId === INSTANCE_ID) return; // ignore our own traffic
-      if (data.type === 'VISIONAUTO_DISCOVER') {
+      if (data.type === 'MELTHAHONDA_DISCOVER') {
         try { sock.send(Buffer.from(JSON.stringify(announcePayload())), rinfo.port, rinfo.address); } catch (_) {}
-      } else if (data.type === 'VISIONAUTO_ANNOUNCE' && data.host && data.port) {
+      } else if (data.type === 'MELTHAHONDA_ANNOUNCE' && data.host && data.port) {
         SEEN_SERVERS.set(data.host + ':' + data.port, {
           name: data.name || data.host, host: data.host, port: data.port,
           has_local_db: !!data.has_local_db, db_exists: !!data.db_exists,
@@ -598,7 +598,7 @@ startDiscoveryService();
 function sendDiscoveryQuery() {
   if (!discoverySocket) return;
   try {
-    discoverySocket.send(Buffer.from(JSON.stringify({ type: 'VISIONAUTO_DISCOVER', instanceId: INSTANCE_ID })), DISCOVERY_PORT, '255.255.255.255');
+    discoverySocket.send(Buffer.from(JSON.stringify({ type: 'MELTHAHONDA_DISCOVER', instanceId: INSTANCE_ID })), DISCOVERY_PORT, '255.255.255.255');
   } catch (_) {}
 }
 
@@ -768,7 +768,7 @@ app.use((req, _res, next) => {
 // a single laptop reachable only from localhost that was survivable; on a shop
 // LAN -- and in the portable build, where this same folder also holds the
 // launcher, its logs and (optionally) the bundled Postgres data directory --
-// it means http://<this-pc>:3040/db-config.json hands the Postgres password to
+// it means http://<this-pc>:3057/db-config.json hands the Postgres password to
 // anyone who asks for it, and /server.js hands over the whole backend source.
 // Deny the sensitive + executable set before express.static ever sees the
 // request. Dotfiles (.env) are already skipped by express.static's default
@@ -1027,7 +1027,7 @@ async function nextAccountNumber() {
 let walkinCustomerIdCache = null;
 async function getWalkinCustomerId() {
   if (walkinCustomerIdCache !== null) return walkinCustomerIdCache;
-  const { rows } = await query(`SELECT id FROM users WHERE email = 'walkin@visionautosolutions.local' LIMIT 1`);
+  const { rows } = await query(`SELECT id FROM users WHERE email = 'walkin@mortysautoparts.local' LIMIT 1`);
   walkinCustomerIdCache = rows.length ? rows[0].id : -1;
   return walkinCustomerIdCache;
 }
@@ -1066,8 +1066,8 @@ async function getShopSettings() {
   // meantime) -- mirrors the old hardcoded values so nothing looks different
   // until the table exists.
   return {
-    company_name: 'Vision Auto Solutions Ltd', address: '112C Waltham Park Road, Kingston 11',
-    country: 'Jamaica', phone: '(876) 758-5590', email: null, website: null, logo_url: null,
+    company_name: 'Morty\'s Auto Parts', address: '51 Red Hills Road, Kingston',
+    country: 'Jamaica', phone: '(876) 905-4111', email: null, website: null, logo_url: null,
     print_logo_on_invoice: true, default_print_template: 'receipt', quote_valid_days: 14,
     invoice_notice: 'Goods remain the property of the company until paid in full. Returns accepted within 14 days with the original invoice, in original condition. Electrical parts are non-returnable.',
     receipt_notice: 'Returns within 14 days with this receipt. Electrical parts non-returnable.',
@@ -1199,7 +1199,7 @@ let dbServerInstall = { running: false, ok: null, error: null, startedAt: null, 
 app.get('/api/admin/settings/db-server-status', requireManager, async (req, res) => {
   const cfg = loadDbConfig();
   const localCfg = buildPoolConfig(cfg.local) || { host: 'localhost', port: 5432, user: 'postgres', password: process.env.PGPASSWORD || 'postgres' };
-  const dbName = (localCfg.database || 'visionautosolutions');
+  const dbName = (localCfg.database || 'mortysautoparts');
   let reachable = false, dbExists = false, error = null;
   // Connect to the always-present `postgres` maintenance database, not the
   // app's own -- that's the one thing guaranteed to exist on any running
@@ -1223,7 +1223,7 @@ app.post('/api/admin/settings/db-server/create-database', requireManager, async 
   const localCfg = buildPoolConfig(cfg.local) || { host: 'localhost', port: 5432, user: 'postgres', password: process.env.PGPASSWORD || 'postgres' };
   // Identifier, not a value -- can't be parameterized. Whitelisted to
   // word characters only before it ever touches the query string.
-  const dbName = (localCfg.database || 'visionautosolutions').replace(/[^a-zA-Z0-9_]/g, '');
+  const dbName = (localCfg.database || 'mortysautoparts').replace(/[^a-zA-Z0-9_]/g, '');
   if (!dbName) return res.status(400).json({ ok: false, error: 'No database name configured' });
   const admin = new Pool(Object.assign({}, localCfg, { database: 'postgres', max: 1, connectionTimeoutMillis: 5000 }));
   try {
@@ -1484,7 +1484,7 @@ function effectiveLocalDbSettings() {
   if (local.host) {
     return {
       port: parseInt(local.port, 10) || 5432,
-      database: local.database || 'visionautosolutions',
+      database: local.database || 'mortysautoparts',
       user: local.user || 'postgres',
       password: local.password || '',
     };
@@ -1493,12 +1493,12 @@ function effectiveLocalDbSettings() {
     const u = new URL(process.env.DATABASE_URL || '');
     return {
       port: parseInt(u.port, 10) || 5432,
-      database: decodeURIComponent((u.pathname || '/visionautosolutions').replace(/^\//, '')) || 'visionautosolutions',
+      database: decodeURIComponent((u.pathname || '/mortysautoparts').replace(/^\//, '')) || 'mortysautoparts',
       user: decodeURIComponent(u.username || 'postgres'),
       password: decodeURIComponent(u.password || ''),
     };
   } catch (_) {
-    return { port: 5432, database: 'visionautosolutions', user: 'postgres', password: '' };
+    return { port: 5432, database: 'mortysautoparts', user: 'postgres', password: '' };
   }
 }
 
@@ -1754,7 +1754,7 @@ app.get('/join', (req, res) => {
     'b.code{display:block;font-family:ui-monospace,Consolas,monospace;font-size:19px;letter-spacing:2px;' +
     'background:rgba(255,255,255,.1);padding:12px;border-radius:8px;margin:14px 0;text-align:center;word-break:break-all}</style>' +
     '<div class="c"><h1>Connect this computer to the shop</h1>' +
-    '<p>On the computer you want to connect, open its Vision Auto Solutions folder and double-click ' +
+    '<p>On the computer you want to connect, open its Morty\'s Auto Parts folder and double-click ' +
     '<code>Connect To Shop Server.vbs</code>, then paste this code when it asks:</p>' +
     '<b class="code" id="c">(open the full link, including the part after #)</b>' +
     '<p>This code works <b>once</b> and expires shortly. If it stops working, ask for a new one from ' +
@@ -1804,8 +1804,8 @@ function backupOrigin() {
   return safeName(process.env.MH_BACKUP_ORIGIN || os.hostname() || 'shop', 'shop');
 }
 async function shopName() {
-  try { const { rows } = await query('SELECT company_name FROM shop_settings ORDER BY id LIMIT 1'); return (rows[0] && rows[0].company_name) || 'Vision Auto Solutions'; }
-  catch (_) { return 'Vision Auto Solutions'; }
+  try { const { rows } = await query('SELECT company_name FROM shop_settings ORDER BY id LIMIT 1'); return (rows[0] && rows[0].company_name) || 'Morty\'s Auto Parts'; }
+  catch (_) { return 'Morty\'s Auto Parts'; }
 }
 
 // One small JSON call to the receiver (ping / latest).
@@ -1901,7 +1901,7 @@ async function runBackup(opts) {
   backupRunning = true;
   const started = new Date();
   const stamp = started.toISOString().replace(/[:.]/g, '-').replace('Z', 'Z');
-  const filename = 'visionautosolutions-' + stamp + '.dump';
+  const filename = 'mortysautoparts-' + stamp + '.dump';
   const filePath = path.join(BACKUP_DIR, filename);
   try {
     fs.mkdirSync(BACKUP_DIR, { recursive: true });
@@ -2060,7 +2060,7 @@ app.post('/api/admin/backup/test', requireManager, async (req, res) => {
     const r = await backupApi('GET', url, '/api/backup/ping', key);
     if (r.status === 200 && r.json && r.json.ok) return res.json({ ok: true, reachable: true, authorized: true, server: r.json.server || null });
     if (r.status === 401 || r.status === 403) return res.json({ ok: false, reachable: true, authorized: false, error: 'The server is reachable but rejected the key.' });
-    return res.json({ ok: false, reachable: true, authorized: false, error: 'Unexpected response (HTTP ' + r.status + '). Is that a Vision Auto Solutions server?' });
+    return res.json({ ok: false, reachable: true, authorized: false, error: 'Unexpected response (HTTP ' + r.status + '). Is that a Morty\'s Auto Parts server?' });
   } catch (e) {
     return res.json({ ok: false, reachable: false, authorized: false, error: e.message });
   }
@@ -2208,7 +2208,7 @@ app.post('/api/auth/signup', async (req, res) => {
   }
 });
 
-// Emergency reset for admin@visionautosolutions.com → password123. Always works.
+// Emergency reset for admin@mortysautoparts.com → password123. Always works.
 // Restricted to JUST this one well-known email so it can never be used to
 // hijack a real customer/staff account.
 app.post('/api/auth/reset-default-admin', async (_req, res) => {
@@ -2216,14 +2216,14 @@ app.post('/api/auth/reset-default-admin', async (_req, res) => {
     const hash = await bcrypt.hash('password123', 10);
     const { rows } = await query(
       `INSERT INTO users (email, name, password_hash, via, is_admin)
-         VALUES ('admin@visionautosolutions.com', 'Vision Auto Solutions Admin', $1, 'local', true)
+         VALUES ('admin@mortysautoparts.com', 'Morty''s Auto Parts Admin', $1, 'local', true)
          ON CONFLICT (email) DO UPDATE
            SET is_admin = true, password_hash = EXCLUDED.password_hash
          RETURNING id`,
       [hash]
     );
-    console.log('[ok] admin@visionautosolutions.com password reset to default (via /api/auth/reset-default-admin)');
-    res.json({ ok: true, email: 'admin@visionautosolutions.com', password: 'password123' });
+    console.log('[ok] admin@mortysautoparts.com password reset to default (via /api/auth/reset-default-admin)');
+    res.json({ ok: true, email: 'admin@mortysautoparts.com', password: 'password123' });
   } catch (e) {
     // Same distinction sign-in makes. This is the recovery link someone clicks
     // *because* they cannot get in, so it is the second thing they try on a
@@ -2234,7 +2234,7 @@ app.post('/api/auth/reset-default-admin', async (_req, res) => {
       console.error('[reset admin] database unreachable:', e.message);
       return res.status(503).json({
         error: 'The database is not running, so the password cannot be reset. ' +
-               'Start the database first — run Test-Database.ps1 in the Vision Auto Solutions folder to find out why it will not start.',
+               'Start the database first — run Test-Database.ps1 in the Morty\'s Auto Parts folder to find out why it will not start.',
         db_down: true,
       });
     }
@@ -2636,7 +2636,7 @@ app.patch('/api/admin/users/:id', requireAdmin, requireCap('pos.edit_customer'),
 //
 //  users.email is NOT NULL UNIQUE, but a counter customer usually has no email
 //  to give. Rather than refuse them, mint one from their account number --
-//  <acct>@walkin.visionautosolutions.local -- which is unique, obviously synthetic, and
+//  <acct>@walkin.mortysautoparts.local -- which is unique, obviously synthetic, and
 //  never mailed. The password is random and discarded: this is a record of a
 //  person, not a login they will ever use.
 app.post('/api/admin/users', requireAdmin, async (req, res) => {
@@ -2646,7 +2646,7 @@ app.post('/api/admin/users', requireAdmin, async (req, res) => {
     if (!name) return res.status(400).json({ error: 'Name is required' });
 
     const acctNo = b.account_number ? String(b.account_number).trim() : await nextAccountNumber();
-    const email = String(b.email || '').trim().toLowerCase() || `${acctNo.toLowerCase()}@walkin.visionautosolutions.local`;
+    const email = String(b.email || '').trim().toLowerCase() || `${acctNo.toLowerCase()}@walkin.mortysautoparts.local`;
     const hash = await bcrypt.hash(require('crypto').randomBytes(24).toString('hex'), 10);
 
     const { rows } = await query(
@@ -2691,7 +2691,7 @@ app.delete('/api/admin/users/:id', requireManager, async (req, res) => {
   if (u[0].is_admin || u[0].is_staff) {
     return res.status(400).json({ error: 'That is a staff account — manage it under Settings → Users & Staff.' });
   }
-  if (u[0].email === 'walkin@visionautosolutions.local') {
+  if (u[0].email === 'walkin@mortysautoparts.local') {
     return res.status(400).json({ error: 'The walk-in customer is used by every counter sale and cannot be removed.' });
   }
 
@@ -2890,7 +2890,7 @@ app.post('/api/admin/users/:id/notifications', requireAdmin, async (req, res) =>
     [req.params.id, kind, body]
   );
   if (u[0].email) {
-    const subject = kind === 'dunning' ? 'Payment reminder — Vision Auto Solutions' : 'A note from Vision Auto Solutions';
+    const subject = kind === 'dunning' ? 'Payment reminder — Morty\'s Auto Parts' : 'A note from Morty\'s Auto Parts';
     mailer.sendEmail({ to: u[0].email, subject, text: body, html: `<p>${body.replace(/\n/g, '<br>')}</p>` })
       .catch((e) => console.warn('[notice email]', e.message));
   }
@@ -3965,13 +3965,8 @@ app.get('/api/admin/products/:img', requireAdmin, async (req, res) => {
   const { rows } = await query(
     `SELECT p.img, p.name, p.make_model, p.category, p.condition,
             p.price_usd::float AS price_usd, p.cost_usd::float AS cost_usd,
-            p.list_price_usd::float AS list_price_usd, p.trade_price_usd::float AS trade_price_usd,
-            p.core_charge_usd::float AS core_charge_usd, p.env_fee_usd::float AS env_fee_usd,
-            p.markup_pct::float AS markup_pct, p.cost_method, p.stock_unit,
-            p.warranty_days, p.serial_required,
-            p.stock_count, p.low_threshold, p.min_stock, p.is_active, p.sku, p.barcode,
-            p.location, p.bin_location,
-            p.supplier_id, p.supplier_sku, s.name AS supplier_name
+            p.stock_count, p.low_threshold, p.is_active, p.sku, p.barcode,
+            p.location, p.bin_location, p.supplier_id, s.name AS supplier_name
        FROM products p LEFT JOIN suppliers s ON s.id = p.supplier_id
       WHERE p.img = $1`, [req.params.img]);
   if (!rows.length) return res.status(404).json({ error: 'Not found' });
@@ -3980,28 +3975,15 @@ app.get('/api/admin/products/:img', requireAdmin, async (req, res) => {
 
 app.patch('/api/admin/products/:img', requireAdmin, async (req, res) => {
   const b = req.body || {};
-  const PRICE_FIELDS = ['price_usd', 'cost_usd', 'list_price_usd', 'trade_price_usd', 'core_charge_usd', 'env_fee_usd', 'markup_pct'];
-  if (PRICE_FIELDS.some((f) => b[f] != null) && !(await userCan(req, 'inventory.edit_price')))
+  if ((b.price_usd != null || b.cost_usd != null) && !(await userCan(req, 'inventory.edit_price')))
     return res.status(403).json({ error: 'Your account is not allowed to edit product pricing.' });
   if (b.stock_count != null && !(await userCan(req, 'inventory.adjust_stock')))
     return res.status(403).json({ error: 'Your account is not allowed to adjust stock counts.' });
   const sets = []; const params = [];
-  // dollars-or-blank -> Number or NULL
-  const money = (v) => (v === '' || v == null ? null : Number(v));
   if (b.stock_count != null){ params.push(parseInt(b.stock_count, 10)); sets.push(`stock_count = $${params.length}`); }
   if (b.price_usd != null){ params.push(Number(b.price_usd)); sets.push(`price_usd = $${params.length}`); }
-  if (b.cost_usd != null){ params.push(money(b.cost_usd)); sets.push(`cost_usd = $${params.length}`); }
-  if (b.list_price_usd != null){ params.push(money(b.list_price_usd)); sets.push(`list_price_usd = $${params.length}`); }
-  if (b.trade_price_usd != null){ params.push(money(b.trade_price_usd)); sets.push(`trade_price_usd = $${params.length}`); }
-  if (b.core_charge_usd != null){ params.push(money(b.core_charge_usd) ?? 0); sets.push(`core_charge_usd = $${params.length}`); }
-  if (b.env_fee_usd != null){ params.push(money(b.env_fee_usd) ?? 0); sets.push(`env_fee_usd = $${params.length}`); }
-  if (b.markup_pct != null){ params.push(money(b.markup_pct)); sets.push(`markup_pct = $${params.length}`); }
-  if (b.cost_method !== undefined){ params.push(String(b.cost_method || '').trim() || null); sets.push(`cost_method = $${params.length}`); }
-  if (b.stock_unit !== undefined){ params.push(String(b.stock_unit || '').trim() || null); sets.push(`stock_unit = $${params.length}`); }
-  if (b.warranty_days !== undefined){ params.push(b.warranty_days === '' || b.warranty_days == null ? null : Math.max(0, parseInt(b.warranty_days, 10) || 0)); sets.push(`warranty_days = $${params.length}`); }
-  if (b.serial_required !== undefined){ params.push(!!b.serial_required); sets.push(`serial_required = $${params.length}`); }
+  if (b.cost_usd != null){ params.push(b.cost_usd === '' ? null : Number(b.cost_usd)); sets.push(`cost_usd = $${params.length}`); }
   if (b.supplier_id !== undefined){ params.push(b.supplier_id ? parseInt(b.supplier_id, 10) : null); sets.push(`supplier_id = $${params.length}`); }
-  if (b.supplier_sku !== undefined){ params.push(String(b.supplier_sku || '').trim() || null); sets.push(`supplier_sku = $${params.length}`); }
   if (b.low_threshold != null){ params.push(Math.max(0, parseInt(b.low_threshold, 10) || 0)); sets.push(`low_threshold = $${params.length}`); }
   if (b.is_active != null){ params.push(!!b.is_active); sets.push(`is_active = $${params.length}`); }
   if (b.name != null){ params.push(String(b.name)); sets.push(`name = $${params.length}`); }
@@ -4106,7 +4088,7 @@ app.get('/api/vin/:vin', async (req, res) => {
 //  PUBLIC CONFIG
 // =============================================================================
 // ---- HEALTH ---------------------------------------------------------------
-// Unauthenticated readiness probe. Start Vision Auto Solutions.bat has advertised this
+// Unauthenticated readiness probe. Start Morty's Auto Parts.bat has advertised this
 // URL since day one but nothing ever implemented it, so anything watching it
 // (the portable launcher's "is it up yet?" poll, a second till waiting for
 // the counter PC to finish booting, an uptime monitor) was watching a 404.
@@ -4194,26 +4176,6 @@ const PRODUCT_SORTS = {
   stock_desc: 'stock_count DESC, name',
 };
 
-// The storefront (index.html / shop.html) asks with ?compact=1 and reads a
-// positional-array payload: { cats, rows:[[img, name, make_model, catIdx,
-// condIdx, price_cents, stock_count, bin], ...] } -- see absorb() in shop.html.
-// This mirrors the Cloudflare storefront route (functions/_routes/storefront.js)
-// so the shop loads the same whether it is served from Pages or from this
-// server. price_cents is sent as null: this server has no storefront
-// price-visibility setting and production defaults that off, and a null price is
-// exactly what flips the shop cart into a quote request client-side.
-function packCompact(rows, meta) {
-  const catIndex = {};
-  const cats = [];
-  const packed = rows.map((r) => {
-    const cat = r.category || '';
-    if (!(cat in catIndex)) { catIndex[cat] = cats.length; cats.push(cat); }
-    const condIdx = String(r.condition || '').toUpperCase() === 'USED' ? 1 : 0;
-    return [r.img, r.name, r.make_model || '', catIndex[cat], condIdx, null, r.stock_count, r.bin_location || ''];
-  });
-  return { cats, rows: packed, prices_visible: false, ...meta };
-}
-
 app.get('/api/products', async (req, res) => {
   try {
     // The storefront (public, unauthenticated) sends compact=1 on every
@@ -4223,18 +4185,14 @@ app.get('/api/products', async (req, res) => {
     // for. POS/admin calls (and anything else hitting this shared endpoint)
     // stay on the plain, local-only `query`, on purpose -- see the big
     // comment on queryWithFallback() near the pool setup.
-    const isCompact = !!req.query.compact;
-    const q = isCompact ? queryWithFallback : query;
+    const q = req.query.compact ? queryWithFallback : query;
     const { where, params } = buildProductWhere(req.query);
     const orderBy = PRODUCT_SORTS[req.query.sort] || PRODUCT_SORTS.name;
     // Hard cap on limit -- an unbounded page size is exactly the kind of
     // request that used to pull the entire catalogue (23k+ cards) into one
     // response and one DOM paint. 200 is generous for a single screen at any
-    // of the POS's grid/list/compact densities. The storefront's compact
-    // stream is the deliberate exception: shop.html pulls the whole catalogue
-    // in 4,000-row chunks, and a compact row is a tiny positional array, so a
-    // 5k-row page there is still a small response.
-    const limit = Math.min(isCompact ? 5000 : 200, Math.max(1, parseInt(req.query.limit, 10) || (isCompact ? 1000 : 60)));
+    // of the POS's grid/list/compact densities.
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 60));
     const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
 
     // The plain "just opened the POS terminal, nothing typed yet" case --
@@ -4274,9 +4232,7 @@ app.get('/api/products', async (req, res) => {
       // count_mode tells the UI how to phrase this: reltuples is a planner
       // estimate that can land either side of the truth, so "about 25,000" --
       // not "25,000+", which would claim a floor it cannot promise.
-      return res.json(isCompact
-        ? packCompact(rows, { total, limit, offset })
-        : { products: rows, total, limit, offset, approximate: true, count_mode: 'estimate' });
+      return res.json({ products: rows, total, limit, offset, approximate: true, count_mode: 'estimate' });
     }
 
     // The page and the count are two queries on purpose, run in parallel.
@@ -4326,9 +4282,7 @@ app.get('/api/products', async (req, res) => {
     // Never report fewer than the page already shows -- at a deep offset the
     // capped count would otherwise be smaller than the rows in hand.
     const total = Math.max(capped ? COUNT_CAP : counted, offset + rows.length);
-    res.json(isCompact
-      ? packCompact(rows, { total, limit, offset, approximate: capped })
-      : { products: rows, total, limit, offset, approximate: capped, count_mode: capped ? 'capped' : 'exact' });
+    res.json({ products: rows, total, limit, offset, approximate: capped, count_mode: capped ? 'capped' : 'exact' });
   } catch (e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
 
@@ -5110,15 +5064,15 @@ app.patch('/api/admin/work-orders/:id', requireAdmin, async (req, res) => {
       try {
         const { rows: w } = await query('SELECT wo_number, customer_name, customer_phone, vehicle_make, vehicle_model FROM work_orders WHERE id = $1', [req.params.id]);
         if (!w.length || !w[0].customer_phone) return;
-        const base = (process.env.PUBLIC_BASE_URL || 'https://visionautosolutions.com').replace(/\/$/, '');
+        const base = (process.env.PUBLIC_BASE_URL || 'https://mortysautoparts.com').replace(/\/$/, '');
         const trackUrl = `${base}/track.html?wo=${encodeURIComponent(w[0].wo_number)}&phone=${encodeURIComponent(w[0].customer_phone.replace(/[^\d]/g,'').slice(-7))}`;
         const vehicle = [w[0].vehicle_make, w[0].vehicle_model].filter(Boolean).join(' ');
         const msgs = {
-          in_progress: `Vision Auto Solutions: Your ${vehicle} (${w[0].wo_number}) is now in the bay. Track: ${trackUrl}`,
-          awaiting_parts: `Vision Auto Solutions: We're sourcing parts for your ${vehicle} (${w[0].wo_number}). We'll text when work resumes. ${trackUrl}`,
-          completed: `Vision Auto Solutions: ✓ Your ${vehicle} is ready for pickup! ${w[0].wo_number}. Open Mon-Sat 8:00-5:30. ${trackUrl}`,
-          billed: `Vision Auto Solutions: Invoice ready for ${vehicle} (${w[0].wo_number}). Come by to settle and collect. ${trackUrl}`,
-          paid: `Vision Auto Solutions: Thanks for your business, ${w[0].customer_name.split(' ')[0]}! Receipt: ${trackUrl}`,
+          in_progress: `Morty's Auto Parts: Your ${vehicle} (${w[0].wo_number}) is now in the bay. Track: ${trackUrl}`,
+          awaiting_parts: `Morty's Auto Parts: We're sourcing parts for your ${vehicle} (${w[0].wo_number}). We'll text when work resumes. ${trackUrl}`,
+          completed: `Morty's Auto Parts: ✓ Your ${vehicle} is ready for pickup! ${w[0].wo_number}. Open Mon-Sat 8:00-5:30. ${trackUrl}`,
+          billed: `Morty's Auto Parts: Invoice ready for ${vehicle} (${w[0].wo_number}). Come by to settle and collect. ${trackUrl}`,
+          paid: `Morty's Auto Parts: Thanks for your business, ${w[0].customer_name.split(' ')[0]}! Receipt: ${trackUrl}`,
         };
         const body = msgs[req.body.status];
         if (body && sms.sendSMS) {
@@ -6207,7 +6161,7 @@ app.post('/api/admin/import/parts', requireManager, uploadData.single('csv'), ha
 // A known-good starting file, so nobody has to reverse-engineer the columns.
 app.get('/api/admin/inventory/import/template.csv', requireAdmin, (_req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="visionautosolutions-inventory-template.csv"');
+  res.setHeader('Content-Disposition', 'attachment; filename="mortysautoparts-inventory-template.csv"');
   res.send(inventoryImport.TEMPLATE_CSV);
 });
 
@@ -6297,8 +6251,7 @@ app.delete('/api/admin/suppliers/:id', requireManager, async (req, res) => {
 // Extended product PATCH (the existing endpoint only handles a few fields)
 app.patch('/api/admin/products-ext/:img', requireAdmin, async (req, res) => {
   const fields = ['name','make_model','category','condition','price_usd','stock_count','low_threshold','is_active',
-    'sku','barcode','supplier_id','supplier_sku','cost_usd','list_price_usd','trade_price_usd',
-    'core_charge_usd','env_fee_usd','warranty_days','serial_required','cost_method','stock_unit',
+    'sku','barcode','supplier_id','cost_usd','core_charge_usd','env_fee_usd','warranty_days','serial_required',
     'weight_kg','dim_cm','bin_location','min_stock','markup_pct'];
   const sets = []; const vals = [];
   for (const f of fields) if (req.body && req.body[f] !== undefined) { sets.push(`${f} = $${sets.length+1}`); vals.push(req.body[f]); }
@@ -6325,11 +6278,9 @@ app.get('/api/admin/products-ext', requireAdmin, async (req, res) => {
   const { rows } = await query(
     `SELECT p.img, p.name, p.make_model, p.category, p.condition,
             p.price_usd::float AS price_usd, p.cost_usd::float AS cost_usd,
-            p.list_price_usd::float AS list_price_usd, p.trade_price_usd::float AS trade_price_usd,
             p.stock_count, p.low_threshold, p.min_stock, p.is_active,
             p.sku, p.barcode, p.core_charge_usd::float AS core_charge_usd,
             p.env_fee_usd::float AS env_fee_usd, p.warranty_days, p.serial_required,
-            p.cost_method, p.stock_unit, p.supplier_sku,
             p.weight_kg::float AS weight_kg, p.dim_cm, p.bin_location, p.markup_pct::float AS markup_pct,
             p.supplier_id, s.name AS supplier_name
        FROM products p LEFT JOIN suppliers s ON s.id = p.supplier_id
@@ -7121,7 +7072,7 @@ app.post('/api/admin/pos/customer', requireAdmin, requireCap('pos.add_customer')
     const phone = (b.phone || '').trim() || null;
     const priceTier = ['retail', 'trade', 'fleet', 'dealer'].includes(b.price_tier) ? b.price_tier : 'retail';
     const acctNo = await nextAccountNumber();
-    const email = (b.email || '').trim().toLowerCase() || `${acctNo.toLowerCase()}@walkin.visionautosolutions.local`;
+    const email = (b.email || '').trim().toLowerCase() || `${acctNo.toLowerCase()}@walkin.mortysautoparts.local`;
     const randomPassword = require('crypto').randomBytes(24).toString('hex');
     const hash = await bcrypt.hash(randomPassword, 10);
     const { rows } = await query(
@@ -7234,7 +7185,7 @@ app.get('/api/admin/pos/vehicle-models', requireAdmin, async (req, res) => {
 // fallback. Cached client-side for the session -- this row's id never changes.
 app.get('/api/admin/pos/walkin-customer', requireAdmin, async (req, res) => {
   const { rows } = await query(
-    `SELECT id, name, account_number FROM users WHERE email = 'walkin@visionautosolutions.local' LIMIT 1`
+    `SELECT id, name, account_number FROM users WHERE email = 'walkin@mortysautoparts.local' LIMIT 1`
   );
   if (!rows.length) return res.status(404).json({ error: 'Walk-in account not seeded yet' });
   res.json({ customer: rows[0] });
@@ -7608,7 +7559,7 @@ app.get('/api/invoice/:wo_number', async (req, res) => {
       // in here rather than changing that page's markup.
       address: shopSettings.address + (shopSettings.country ? ', ' + shopSettings.country : ''),
       phone: shopSettings.phone,
-      website: shopSettings.website || (process.env.PUBLIC_BASE_URL || 'https://visionautosolutions.com'),
+      website: shopSettings.website || (process.env.PUBLIC_BASE_URL || 'https://mortysautoparts.com'),
     },
   });
 });
@@ -8353,7 +8304,7 @@ async function initDb() {
     console.error('[initDb] schema apply failed:', e.message);
   }
 
-  // 2) Seed default admin (admin@visionautosolutions.com / password123) — always reset password
+  // 2) Seed default admin (admin@mortysautoparts.com / password123) — always reset password
   try {
     const hash = await bcrypt.hash('password123', 10);
     await query(
@@ -8361,9 +8312,9 @@ async function initDb() {
          VALUES ($1, $2, $3, $4, true)
        ON CONFLICT (email) DO UPDATE
          SET is_admin = true, password_hash = EXCLUDED.password_hash`,
-      ['admin@visionautosolutions.com', 'Admin', '(876) 758-5590', hash]
+      ['admin@mortysautoparts.com', 'Admin', '(876) 905-4111', hash]
     );
-    console.log('[initDb] default admin seeded (admin@visionautosolutions.com / password123)');
+    console.log('[initDb] default admin seeded (admin@mortysautoparts.com / password123)');
 
     // A default till PIN for that same account, so PIN sign-in works out of
     // the box on a new machine.
@@ -8377,7 +8328,7 @@ async function initDb() {
     // is_staff is set alongside it: PIN sign-in only considers staff, and the
     // seeded admin would otherwise be an admin who cannot use the keypad.
     const { rows: pinRow } = await query(
-      `SELECT id, (pin_hash IS NOT NULL) AS has_pin FROM users WHERE email = 'admin@visionautosolutions.com'`
+      `SELECT id, (pin_hash IS NOT NULL) AS has_pin FROM users WHERE email = 'admin@mortysautoparts.com'`
     );
     if (pinRow.length && !pinRow[0].has_pin) {
       const taken = await pinCollides(DEFAULT_ADMIN_PIN, pinRow[0].id);
@@ -8404,13 +8355,13 @@ async function initDb() {
   // account has no password anyone needs to keep working, so there's nothing
   // to force-reset, and doing so would be pointless churn on every boot.
   try {
-    const { rows: existing } = await query(`SELECT id FROM users WHERE email = 'walkin@visionautosolutions.local'`);
+    const { rows: existing } = await query(`SELECT id FROM users WHERE email = 'walkin@mortysautoparts.local'`);
     if (!existing.length) {
       const hash = await bcrypt.hash(require('crypto').randomBytes(24).toString('hex'), 10);
       const acctNo = await nextAccountNumber();
       await query(
         `INSERT INTO users (email, name, password_hash, via, is_admin, price_tier, account_number)
-           VALUES ('walkin@visionautosolutions.local', 'Cash Customer - Walk-in', $1, 'pos', false, 'retail', $2)`,
+           VALUES ('walkin@mortysautoparts.local', 'Cash Customer - Walk-in', $1, 'pos', false, 'retail', $2)`,
         [hash, acctNo]
       );
       console.log('[initDb] seeded "Cash Customer - Walk-in" account (' + acctNo + ')');
@@ -9031,7 +8982,7 @@ async function start() {
   // otherwise a blocked till would serve its admin panel for one heartbeat.
   await terminalHeartbeat();
   app.listen(PORT, () => {
-    console.log('[boot] Vision Auto Solutions server listening on http://localhost:' + PORT);
+    console.log('[boot] Morty\'s Auto Parts server listening on http://localhost:' + PORT);
   });
 
   // Off-site backup: only the database-owning machine runs the schedule.

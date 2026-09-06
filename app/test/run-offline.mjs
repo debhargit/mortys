@@ -3,7 +3,7 @@
 // any file fails or crashes.
 //
 // NOT run here: the jsdom scripts (verify-quote-ui.mjs against public/, and
-// the verify-*.mjs that hit https://visionautosolutions.com). They need `jsdom` and,
+// the verify-*.mjs that hit https://mortysautoparts.com). They need `jsdom` and,
 // for the live ones, network + the seed admin login -- run those by hand.
 // See README.md.
 import { readdirSync } from 'node:fs';
@@ -14,8 +14,11 @@ import path from 'node:path';
 const DIR = fileURLToPath(new URL('.', import.meta.url));
 const OFFLINE = [
   'verify-functions.mjs',
+  'p4test.mjs',
   'p6test.mjs', 'p7test.mjs', 'p8test.mjs',
-  'p11test.mjs', 'p12test.mjs', 'p13test.mjs', 'p14test.mjs', 'p15test.mjs',
+  'p11test.mjs', 'p12test.mjs', 'p13test.mjs', 'p14test.mjs', 'p15test.mjs', 'p16test.mjs', 'p17test.mjs', 'p18test.mjs',
+  'p19test.mjs', 'p20test.mjs', 'p21test.mjs', 'p22test.mjs', 'p23test.mjs', 'p24test.mjs', 'p25test.mjs',
+  'p26test.mjs', 'p27test.mjs', 'p28test.mjs', 'p29test.mjs', 'p30test.mjs', 'p31test.mjs', 'p32test.mjs', 'p33test.mjs', 'p34test.mjs',
   'presence-test.mjs', 'quote-test.mjs',
 ];
 const present = new Set(readdirSync(DIR));

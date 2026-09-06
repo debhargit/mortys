@@ -3,7 +3,7 @@
 // to Pages via context.next() — otherwise the static front-end in public/
 // (index.html, admin.html, images, …) would 404.
 //
-// Deployed to visionautosolutions.com 2026-08-31 (phases 1-8).
+// Deployed to mortsautoparts.com 2026-08-31 (phases 1-8).
 
 import { Hono } from 'hono';
 import { d1 } from './_lib/db.js';
@@ -13,10 +13,16 @@ import mountAdmin from './_routes/admin.js';           // Phase 3 (admin reads)
 import mountPos from './_routes/pos.js';               // Phase 4 (POS reads + hold/quote)
 import mountPosTxn from './_routes/pos_txn.js';         // Phase 5 (sale / void / return)
 import mountInventory from './_routes/inventory.js';    // Phase 6 (inventory + purchasing + CSV import)
+import mountProductMatrix from './_routes/product_matrix.js'; // matrix items (variant SKUs)
+import mountRedemptions from './_routes/redemptions.js'; // redeemable items (e.g. scratch cards)
+import mountWarranty from './_routes/warranty.js'; // warranty register + claims (migration 0056)
+import mountRecurring from './_routes/recurring.js'; // recurring charges/invoices
 import mountMedia from './_routes/media.js';            // Phase 7 (R2 uploads + send_email)
 import mountCrm from './_routes/crm.js';                // Phase 8 (customer reminders CRUD)
 import mountCron from './_routes/cron.js';              // Phase 8 (scheduled-job endpoints)
 import mountCustomer from './_routes/customer.js';      // Phase 10 (checkout, account, signup)
+import mountShipping from './_routes/shipping.js';      // storefront carrier rates / labels / tracking
+import mountPayments from './_routes/payments.js';      // storefront payment webhooks (Fygaro)
 import mountAdminCrm from './_routes/admin_crm.js';    // Phase 11 (admin CRM + storefront-admin)
 import mountAdminUsers from './_routes/admin_users.js'; // Phase 12 (users / staff / roles)
 import mountService from './_routes/service.js'; // Phase 13 (service centre)
@@ -32,10 +38,16 @@ mountAdmin(app);
 mountPos(app);
 mountPosTxn(app);
 mountInventory(app);
+mountProductMatrix(app);
+mountRedemptions(app);
+mountWarranty(app);
+mountRecurring(app);
 mountMedia(app);
 mountCrm(app);
 mountCron(app);
 mountCustomer(app);
+mountShipping(app);
+mountPayments(app);
 mountAdminCrm(app);
 mountAdminUsers(app);
 mountService(app);

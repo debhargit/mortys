@@ -101,6 +101,37 @@ r = await call('get', '/api/admin/reports/customers');
 A('reports/customers: new + loyalty + newsletter', typeof r.new_customers === 'number' && r.loyalty.earned === 100 && r.newsletter_signups === 1);
 r = await call('get', '/api/admin/reports/drawer-sessions');
 A('reports/drawer-sessions', Array.isArray(r.sessions) && r.sessions.length === 1 && r.sessions[0].opening_float === 200);
+
+// ---- new reports (supplier / customer-detail / order-ledger / users-staff /
+//      setup-config / inventory-custom / warehouse / audit-log) ----
+sdb.exec(`
+INSERT INTO suppliers (id,name,contact_name,phone,is_active) VALUES (5,'Acme Parts','Al','876-1',1);
+UPDATE products SET supplier_id = 5 WHERE img = 'r-1';
+UPDATE purchase_orders SET supplier_id = 5, received_date = datetime('now') WHERE id = 1;
+INSERT INTO users (id,email,name,password_hash,is_staff,admin_role,employee_no,created_at)
+ VALUES (820,'s@x.com','Staffer','h',1,'manager','E-001',datetime('now'));
+INSERT INTO warehouse_activity (kind,product_img,qty_delta,performed_by,created_at)
+ VALUES ('receipt','r-1',5,7,datetime('now'));
+`);
+
+r = await call('get', '/api/admin/reports/supplier');
+A('reports/supplier: Acme with a received PO + a SKU', r.suppliers.some((s) => s.name === 'Acme Parts' && s.pos === 1 && s.po_value === 200 && s.received_value === 200 && s.skus === 1) && r.totals.suppliers === 1);
+r = await call('get', '/api/admin/reports/customer-detail');
+A('reports/customer-detail: Cust One, storefront spend, points', r.customers.some((x) => x.name === 'Cust One' && x.orders === 1 && x.order_spend === 50 && x.points === 100) && typeof r.tiles.new_customers === 'number');
+r = await call('get', '/api/admin/reports/order-ledger');
+A('reports/order-ledger: line + tiles + fulfilment', r.orders.length === 1 && r.orders[0].id === 1 && r.tiles.n === 1 && r.tiles.unpaid === 50 && r.by_fulfilment[0].fulfilment === 'pickup');
+r = await call('get', '/api/admin/reports/users-staff');
+A('reports/users-staff: roster + role count', r.staff.some((s) => s.name === 'Staffer' && s.state === 'active' && s.pin_set === 'no') && r.tiles.total >= 2 && Array.isArray(r.roles));
+r = await call('get', '/api/admin/reports/setup-config');
+A('reports/setup-config: company + carriers + counts, no secrets', r.company && r.carriers.dhl.secret === 'no' && r.card_payment.fygaro_enabled === false && r.counts.suppliers === 1 && typeof r.storefront.public_pricing === 'boolean');
+r = await call('get', '/api/admin/reports/inventory-custom?cols=cost,retail,margin,supplier&category=Gadgets&active=1');
+A('reports/inventory-custom: requested cols + totals', r.cols.join(',') === 'cost,retail,margin,supplier' && r.rows.length === 2 && 'margin' in r.rows[0] && !('bin' in r.rows[0]) && r.totals.name === '2 SKUs' && r.totals.retail === 5 * 20 + 0 * 90);
+r = await call('get', '/api/admin/reports/inventory-custom?cols=stock&category=Gadgets&stock=out');
+A('reports/inventory-custom: stock=out filter', r.rows.length === 1 && r.rows[0].name === 'ZZ Gizmo');
+r = await call('get', '/api/admin/reports/warehouse');
+A('reports/warehouse: movement + bins', r.by_kind.some((k) => k.kind === 'receipt' && k.n === 1) && r.net_delta === 5 && Array.isArray(r.bins) && typeof r.unbinned === 'number');
+r = await call('get', '/api/admin/reports/audit-log');
+A('reports/audit-log: merged feed incl. warehouse + loyalty', Array.isArray(r.feed) && r.feed.some((e) => e.area === 'Warehouse') && r.feed.some((e) => e.area === 'Loyalty') && r.by_area.some((a) => a.area === 'Warehouse'));
 r = await call('get', '/api/admin/reports/x');
 A('reports/x: open session till read', r.kind === 'X' && r.cash.opening_float === 200 && r.cash.cash_sales === 34.5 && r.sales.count === 1);
 r = await call('get', '/api/admin/reports/z');
@@ -116,7 +147,7 @@ A('settings/server patch noop', r.ok && r.cloud === true);
 
 // ---- local-server installer ----
 r = await call('get', '/api/admin/local-server');
-A('local-server: no bundle -> defaults returned, url null', r.url === null && r.defaults && r.defaults.port === 3040);
+A('local-server: no bundle -> defaults returned, url null', r.url === null && r.defaults && r.defaults.port === 3057);
 r = await call('post', '/api/admin/local-server/installer', { body: { admin_email: 'a@b.com', admin_password: 'secret9' } });
 A('local-server installer: 400 when LOCAL_SERVER_URL unset', st === 400);
 ENV.LOCAL_SERVER_URL = 'https://example.com/mh-portable.zip';
@@ -130,7 +161,7 @@ A('installer: short password -> 400', st === 400);
 r = await call('post', '/api/admin/local-server/installer', {
   body: { shop_name: "O'Brien Auto", install_dir: 'C:\\Shop', port: 3055, admin_email: 'boss@shop.com', admin_password: 'strong-pw-1', open_firewall: true, install_service: false },
 });
-A('installer: 200 + .cmd attachment', st === 200 && /attachment; filename="Install Vision Auto Solutions Offline\.cmd"/.test(r.headers.get('content-disposition') || ''));
+A('installer: 200 + .cmd attachment', st === 200 && /attachment; filename="Install Morty's Auto Parts Offline\.cmd"/.test(r.headers.get('content-disposition') || ''));
 const cmdText = await r.text();
 const b64 = (cmdText.match(/set "MHPS=([A-Za-z0-9+/=]+)"/) || [])[1];
 const psText = b64 ? Buffer.from(b64, 'base64').toString('utf8') : '';
@@ -140,7 +171,7 @@ A('installer: presets baked into the PS (port, dir, hash, escaped quote)',
   /O''Brien Auto/.test(psText) && /\$Sha256\s+=\s+'ABC123'/.test(psText) && /\$DoService\s+=\s+\$false/.test(psText));
 A('installer: PS writes machine/server/offline-setup config + firewall + first-run',
   /machine-config\.json/.test(psText) && /offline-setup\.json/.test(psText) &&
-  /netsh advfirewall/.test(psText) && /Vision Auto Solutions Admin\.vbs/.test(psText) && /admin\.html/.test(psText));
+  /netsh advfirewall/.test(psText) && /Morty''s Auto Parts Admin\.vbs/.test(psText) && /admin\.html/.test(psText));
 delete ENV.LOCAL_SERVER_URL; delete ENV.LOCAL_SERVER_SHA256;
 
 // ---- marketing ----
@@ -219,5 +250,35 @@ r = await call('post', '/api/admin/import/services', { form: { csv: mkFile(csv) 
 A('import/services: 2 inserted, 1 skipped, cents', r.inserted === 2 && r.skipped === 1 && q1("SELECT default_price_cents p, default_labor_cents l FROM services WHERE code='SVC-A'").p === 8000 && q1("SELECT default_labor_cents l FROM services WHERE code='SVC-A'").l === 6000);
 r = await call('post', '/api/admin/import/services', { form: {} });
 A('import/services: no file -> 400', st === 400);
+
+// ---- reports/commission ------------------------------------------------
+// Mech Seven gets a 10% default; r-1 has no override (uses that default),
+// r-2 is knocked down to a 2% override; sale #1 (r-1 x1 @ $20, r-2 x1 @ $10,
+// seeded near the top of this file) gets credited to him.
+sdb.exec(`
+UPDATE mechanics SET commission_pct = 10 WHERE id = 7;
+UPDATE products SET commission_type = 'percent', commission_value = 2 WHERE img = 'r-2';
+UPDATE pos_sales SET sales_rep_id = 7, sales_rep_name = 'Mech Seven' WHERE id = 1;
+`);
+r = await call('get', '/api/admin/reports/commission');
+A('reports/commission: totals (rep default 10% + line override 2%)',
+  r.totals.lines === 2 && r.totals.revenue === 30 && Math.abs(r.totals.commission - 2.2) < 0.001);
+A('reports/commission: by_rep for Mech Seven', r.by_rep.length === 1 && r.by_rep[0].rep === 'Mech Seven' &&
+  Math.abs(r.by_rep[0].commission - 2.2) < 0.001 && r.by_rep[0].skipped_lines === 0 && r.by_rep[0].owed === 2.2);
+A('reports/commission: line detail shows each basis', r.detail.some((d) => d.description === 'ZZ Widget' && d.commission_type === 'rep default' && Math.abs(d.commission - 2) < 0.001) &&
+  r.detail.some((d) => d.description === 'ZZ Gizmo' && d.commission_type === 'percent' && Math.abs(d.commission - 0.2) < 0.001));
+const mechSevenId = 7;
+r = await call('get', '/api/admin/reports/commission');
+A('reports/commission: rep appears in the payout picker with the owed amount', r.reps.some((x) => x.id === mechSevenId && x.owed === 2.2));
+
+// "none" skips a line entirely, even under a rep with a default rate.
+sdb.exec(`UPDATE products SET commission_type = 'none' WHERE img = 'r-1';`);
+r = await call('get', '/api/admin/reports/commission');
+A('reports/commission: commission_type=none zeroes that line', Math.abs(r.by_rep[0].commission - 0.2) < 0.001 && r.by_rep[0].skipped_lines === 1);
+
+// Record a payout and confirm "owed" drops by exactly that amount.
+sdb.exec("INSERT INTO commission_payouts (mechanic_id, amount_cents, notes) VALUES (7, 15, 'partial payout')");
+r = await call('get', '/api/admin/reports/commission');
+A('reports/commission: a recorded payout reduces owed (all-time)', Math.abs(r.by_rep[0].paid_all_time - 0.15) < 0.001 && Math.abs(r.by_rep[0].owed - 0.05) < 0.001);
 
 console.log('\ndone');

@@ -19,9 +19,10 @@
 // the receive paths do every read, compute in JS, then one db.batch().
 import { d1 } from '../_lib/db.js';
 import { adminMw, managerMw, userCan } from '../_lib/guards.js';
-import { boolify } from '../_lib/util.js';
+import { boolify, safeJson } from '../_lib/util.js';
 import { usdToCents } from '../_lib/money.js';
-import { readUploadBody, putUpload } from '../_lib/uploads.js';
+import { readUploadBody, putUpload, deleteUpload } from '../_lib/uploads.js';
+import { PUSHABLE_FIELDS, toColumnValue, valuesEqual } from '../_lib/product_matrix.js';
 import {
   parseInventoryFile, TEMPLATE_CSV, FIELD_SYNONYMS,
 } from '../_lib/inventory_import.js';
@@ -86,30 +87,30 @@ export default function mount(app) {
     const db = d1(c.env);
     const me = c.get('user');
     const b = await c.req.json().catch(() => ({}));
-    const PRICE_FIELDS = ['price_usd', 'cost_usd', 'list_price_usd', 'trade_price_usd', 'core_charge_usd', 'env_fee_usd', 'markup_pct'];
-    if (PRICE_FIELDS.some((f) => b[f] != null) && !userCan(me, 'inventory.edit_price'))
+    if ((b.price_usd != null || b.cost_usd != null || b.list_price_usd != null || b.sale_price_usd !== undefined) && !userCan(me, 'inventory.edit_price'))
       return c.json({ error: 'Your account is not allowed to edit product pricing.' }, 403);
     if (b.stock_count != null && !userCan(me, 'inventory.adjust_stock'))
       return c.json({ error: 'Your account is not allowed to adjust stock counts.' }, 403);
 
     const sets = []; const vals = [];
     const put = (frag, v) => { sets.push(frag); vals.push(v); };
-    const cents = (v) => (v === '' || v == null ? null : usdToCents(v));
+    const numOrNull = (v) => (v === '' || v == null || !Number.isFinite(Number(v)) ? null : Number(v));
+    const intOrNull = (v) => (v === '' || v == null ? null : parseInt(v, 10));
     if (b.stock_count != null) put('stock_count = ?', parseInt(b.stock_count, 10));
     if (b.price_usd != null) put('price_cents = ?', usdToCents(b.price_usd));
-    if (b.cost_usd != null) put('cost_cents = ?', cents(b.cost_usd));
-    if (b.list_price_usd != null) put('list_price_cents = ?', cents(b.list_price_usd));
-    if (b.trade_price_usd != null) put('trade_price_cents = ?', cents(b.trade_price_usd));
-    // core_charge_cents / env_fee_cents are NOT NULL DEFAULT 0 — blank clears to 0, not NULL
-    if (b.core_charge_usd != null) put('core_charge_cents = ?', cents(b.core_charge_usd) || 0);
-    if (b.env_fee_usd != null) put('env_fee_cents = ?', cents(b.env_fee_usd) || 0);
-    if (b.markup_pct != null) put('markup_pct = ?', num(b.markup_pct));
-    if (b.cost_method !== undefined) put('cost_method = ?', String(b.cost_method || '').trim() || null);
-    if (b.stock_unit !== undefined) put('stock_unit = ?', String(b.stock_unit || '').trim() || null);
-    if (b.warranty_days !== undefined) put('warranty_days = ?', b.warranty_days === '' || b.warranty_days == null ? null : Math.max(0, parseInt(b.warranty_days, 10) || 0));
-    if (b.serial_required !== undefined) put('serial_required = ?', toBit(b.serial_required));
+    if (b.cost_usd != null) put('cost_cents = ?', b.cost_usd === '' ? null : usdToCents(b.cost_usd));
+    if (b.list_price_usd != null) put('list_price_cents = ?', b.list_price_usd === '' ? null : usdToCents(b.list_price_usd));
+    if (b.markup_pct !== undefined) put('markup_pct = ?', numOrNull(b.markup_pct));
     if (b.supplier_id !== undefined) put('supplier_id = ?', b.supplier_id ? parseInt(b.supplier_id, 10) : null);
-    if (b.supplier_sku !== undefined) put('supplier_sku = ?', String(b.supplier_sku || '').trim() || null);
+    if (b.supplier_part_no !== undefined) put('supplier_part_no = ?', String(b.supplier_part_no || '').trim() || null);
+    if (b.costing_method !== undefined) put('costing_method = ?', String(b.costing_method || '').trim() || null);
+    if (b.stock_uom !== undefined) put('stock_uom = ?', String(b.stock_uom || '').trim() || null);
+    if (b.purchase_uom !== undefined) put('purchase_uom = ?', String(b.purchase_uom || '').trim() || null);
+    if (b.units_per_purchase !== undefined) put('units_per_purchase = ?', numOrNull(b.units_per_purchase));
+    if (b.warranty_days !== undefined) put('warranty_days = ?', intOrNull(b.warranty_days));
+    if (b.serial_required !== undefined) put('serial_required = ?', toBit(b.serial_required));
+    if (b.core_charge_usd !== undefined) put('core_charge_cents = ?', usdToCents(b.core_charge_usd) || 0);
+    if (b.env_fee_usd !== undefined) put('env_fee_cents = ?', usdToCents(b.env_fee_usd) || 0);
     if (b.low_threshold != null) put('low_threshold = ?', Math.max(0, parseInt(b.low_threshold, 10) || 0));
     if (b.is_active != null) put('is_active = ?', toBit(b.is_active));
     if (b.name != null) put('name = ?', String(b.name));
@@ -120,6 +121,64 @@ export default function mount(app) {
     if (b.condition != null) put('condition = ?', String(b.condition));
     if (b.location != null) put('location = ?', String(b.location));
     if (b.bin_location != null) put('bin_location = ?', String(b.bin_location));
+    if (b.commission_type !== undefined) {
+      const t = String(b.commission_type || '').trim();
+      put('commission_type = ?', ['percent', 'amount', 'none'].includes(t) ? t : null);
+    }
+    if (b.commission_value !== undefined) put('commission_value = ?', numOrNull(b.commission_value));
+    if (b.sale_price_usd !== undefined) put('sale_price_cents = ?', b.sale_price_usd === '' ? null : usdToCents(b.sale_price_usd));
+    if (b.sale_starts_at !== undefined) put('sale_starts_at = ?', b.sale_starts_at || null);
+    if (b.sale_ends_at !== undefined) put('sale_ends_at = ?', b.sale_ends_at || null);
+    if (b.max_discount_pct !== undefined) put('max_discount_pct = ?', numOrNull(b.max_discount_pct));
+    if (b.is_redeemable !== undefined) put('is_redeemable = ?', toBit(b.is_redeemable));
+    if (b.restricted_instore_only !== undefined) put('restricted_instore_only = ?', toBit(b.restricted_instore_only));
+    if (b.restricted_manager_approval !== undefined) put('restricted_manager_approval = ?', toBit(b.restricted_manager_approval));
+    if (b.restricted_id_required !== undefined) put('restricted_id_required = ?', toBit(b.restricted_id_required));
+    if (b.restricted_tax_id_required !== undefined) put('restricted_tax_id_required = ?', toBit(b.restricted_tax_id_required));
+    if (b.item_type !== undefined) {
+      const t = String(b.item_type || '').trim();
+      put('item_type = ?', ['inventory', 'tracked', 'service'].includes(t) ? t : 'inventory');
+    }
+    // Kit flags. Turning is_kit ON is guarded (a matrix / redeemable product
+    // can't also be a kit); the recipe itself is set via the dedicated
+    // PUT .../kit-components below, which carries the fuller validation.
+    if (b.is_kit !== undefined) {
+      if (toBit(b.is_kit) === 1) {
+        const cur = await db.one('SELECT matrix_id, is_redeemable FROM products WHERE img = ?', c.req.param('img'));
+        if (cur && cur.matrix_id) return c.json({ error: 'A matrix / variant product cannot also be a kit.' }, 400);
+        if (cur && cur.is_redeemable) return c.json({ error: 'A redeemable product cannot also be a kit.' }, 400);
+      }
+      put('is_kit = ?', toBit(b.is_kit));
+    }
+    if (b.kit_price_mode !== undefined) {
+      const m = String(b.kit_price_mode || '').trim();
+      put('kit_price_mode = ?', ['fixed', 'rollup'].includes(m) ? m : 'fixed');
+    }
+    if (b.kit_line_mode !== undefined) {
+      const m = String(b.kit_line_mode || '').trim();
+      put('kit_line_mode = ?', ['single', 'exploded'].includes(m) ? m : 'single');
+    }
+
+    // Matrix-item bookkeeping: a plain save from the product editor always
+    // resubmits every field, not just the deltas, so "touched" alone can't
+    // mean "overridden" -- compare the incoming value to the matrix's
+    // *current* shared value instead. A field only diverges (and stops
+    // inheriting future "push to children" edits) when it now actually
+    // differs; retyping the shared value re-aligns it automatically.
+    const touchedShared = PUSHABLE_FIELDS.filter((f) => b[f.key] !== undefined);
+    if (touchedShared.length) {
+      const row = await db.one('SELECT matrix_id, matrix_overrides FROM products WHERE img = ?', c.req.param('img'));
+      const parent = row && row.matrix_id ? await db.one('SELECT * FROM product_matrices WHERE id = ?', row.matrix_id) : null;
+      if (parent) {
+        const ov = new Set(safeJson(row.matrix_overrides, []));
+        for (const f of touchedShared) {
+          const childVal = toColumnValue(f.kind, f.col, b[f.key]);
+          if (valuesEqual(f.kind, childVal, parent[f.col])) ov.delete(f.key); else ov.add(f.key);
+        }
+        put('matrix_overrides = ?', JSON.stringify([...ov]));
+      }
+    }
+
     if (!sets.length) return c.json({ error: 'Nothing to update' }, 400);
     sets.push('updated_at = CURRENT_TIMESTAMP');
     vals.push(c.req.param('img'));
@@ -154,14 +213,28 @@ export default function mount(app) {
       ? b.condition.toUpperCase() : 'USED';
     const exists = await db.one('SELECT img FROM products WHERE img = ?', img);
     if (exists) return c.json({ error: 'A product with that image key already exists' }, 409);
+    const nn = (v) => (v === '' || v == null || !Number.isFinite(Number(v)) ? null : Number(v));
+    const trimOrNull = (v) => (v && String(v).trim() ? String(v).trim() : null);
+    const itemType = ['inventory', 'tracked', 'service'].includes(String(b.item_type || '').trim()) ? b.item_type : 'inventory';
     await db.run(
-      `INSERT INTO products (img, name, make_model, category, condition, price_cents, stock_count, low_threshold, location, bin_location)
-         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO products
+         (img, name, make_model, category, condition, price_cents, cost_cents, list_price_cents,
+          stock_count, low_threshold, location, bin_location, sku, barcode, supplier_id, supplier_part_no,
+          markup_pct, costing_method, warranty_days, serial_required, stock_uom, purchase_uom, units_per_purchase, item_type)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       img, b.name, b.make_model || '', b.category, condition,
       b.price_usd ? usdToCents(b.price_usd) : null,
+      b.cost_usd ? usdToCents(b.cost_usd) : null,
+      b.list_price_usd ? usdToCents(b.list_price_usd) : null,
       b.stock_count != null ? parseInt(b.stock_count, 10) : 1,
       b.low_threshold != null ? parseInt(b.low_threshold, 10) : 0,
       b.location || null, b.bin_location || null,
+      trimOrNull(b.sku), trimOrNull(b.barcode),
+      b.supplier_id ? parseInt(b.supplier_id, 10) : null, trimOrNull(b.supplier_part_no),
+      nn(b.markup_pct), trimOrNull(b.costing_method),
+      b.warranty_days === '' || b.warranty_days == null ? null : parseInt(b.warranty_days, 10),
+      toBit(b.serial_required || 0),
+      trimOrNull(b.stock_uom), trimOrNull(b.purchase_uom), nn(b.units_per_purchase), itemType,
     );
     return c.json({ ok: true, img });
   });
@@ -169,6 +242,372 @@ export default function mount(app) {
   app.delete('/api/admin/products/:img', managerMw, async (c) => {
     await d1(c.env).run('UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE img = ?', c.req.param('img'));
     return c.json({ ok: true });
+  });
+
+  // =====================================================================
+  //  QUANTITY-BREAK (BULK) PRICING — replace the whole set for one product
+  // =====================================================================
+  app.put('/api/admin/products/:img/price-breaks', adminMw, async (c) => {
+    const db = d1(c.env);
+    if (!userCan(c.get('user'), 'inventory.edit_price'))
+      return c.json({ error: 'Your account is not allowed to edit product pricing.' }, 403);
+    const img = c.req.param('img');
+    const exists = await db.one('SELECT img FROM products WHERE img = ?', img);
+    if (!exists) return c.json({ error: 'Not found' }, 404);
+    const b = await c.req.json().catch(() => ({}));
+    const raw = Array.isArray(b.breaks) ? b.breaks : [];
+    const seen = new Set();
+    const rows = [];
+    for (const r of raw) {
+      const minQty = parseInt(r.min_qty, 10);
+      if (!Number.isInteger(minQty) || minQty < 2) return c.json({ error: 'Each tier needs a quantity of 2 or more' }, 400);
+      if (seen.has(minQty)) return c.json({ error: 'Duplicate quantity ' + minQty }, 400);
+      const priceCents = usdToCents(r.price_usd);
+      if (priceCents == null || priceCents < 0) return c.json({ error: 'Each tier needs a price' }, 400);
+      seen.add(minQty);
+      rows.push({ minQty, priceCents });
+    }
+    const stmts = [{ sql: 'DELETE FROM product_price_breaks WHERE product_img = ?', binds: [img] }];
+    for (const r of rows) {
+      stmts.push({ sql: 'INSERT INTO product_price_breaks (product_img, min_qty, price_cents) VALUES (?,?,?)', binds: [img, r.minQty, r.priceCents] });
+    }
+    await db.batch(stmts);
+    return c.json({ ok: true, count: rows.length });
+  });
+
+  // =====================================================================
+  //  PERCENTAGE QUANTITY DISCOUNTS — replace the whole set for one product.
+  //  Same shape as price-breaks above; the % comes off the retail price and
+  //  "cheapest wins" (see _lib/price_breaks.js).
+  // =====================================================================
+  app.put('/api/admin/products/:img/qty-discounts', adminMw, async (c) => {
+    const db = d1(c.env);
+    if (!userCan(c.get('user'), 'inventory.edit_price'))
+      return c.json({ error: 'Your account is not allowed to edit product pricing.' }, 403);
+    const img = c.req.param('img');
+    if (!(await db.one('SELECT img FROM products WHERE img = ?', img))) return c.json({ error: 'Not found' }, 404);
+    const b = await c.req.json().catch(() => ({}));
+    const raw = Array.isArray(b.discounts) ? b.discounts : [];
+    const seen = new Set();
+    const rows = [];
+    for (const r of raw) {
+      const minQty = parseInt(r.min_qty, 10);
+      if (!Number.isInteger(minQty) || minQty < 2) return c.json({ error: 'Each tier needs a quantity of 2 or more' }, 400);
+      if (seen.has(minQty)) return c.json({ error: 'Duplicate quantity ' + minQty }, 400);
+      const pct = Number(r.discount_pct);
+      if (!Number.isFinite(pct) || pct <= 0 || pct > 100) return c.json({ error: 'Each tier needs a discount between 0 and 100%' }, 400);
+      seen.add(minQty);
+      rows.push({ minQty, pct });
+    }
+    const stmts = [{ sql: 'DELETE FROM product_qty_discounts WHERE product_img = ?', binds: [img] }];
+    for (const r of rows) {
+      stmts.push({ sql: 'INSERT INTO product_qty_discounts (product_img, min_qty, discount_pct) VALUES (?,?,?)', binds: [img, r.minQty, r.pct] });
+    }
+    await db.batch(stmts);
+    return c.json({ ok: true, count: rows.length });
+  });
+
+  // =====================================================================
+  //  TIER PRICE BOOK — the per-item set price for trade / fleet / dealer.
+  //  Body: { prices: { trade?, fleet?, dealer? } } in USD; a blank / null /
+  //  omitted value clears that tier's override (it falls back to retail).
+  // =====================================================================
+  app.put('/api/admin/products/:img/tier-prices', adminMw, async (c) => {
+    const db = d1(c.env);
+    if (!userCan(c.get('user'), 'inventory.edit_price'))
+      return c.json({ error: 'Your account is not allowed to edit product pricing.' }, 403);
+    const img = c.req.param('img');
+    if (!(await db.one('SELECT img FROM products WHERE img = ?', img))) return c.json({ error: 'Not found' }, 404);
+    const b = await c.req.json().catch(() => ({}));
+    const prices = b.prices && typeof b.prices === 'object' ? b.prices : {};
+    const stmts = [{ sql: 'DELETE FROM product_tier_prices WHERE product_img = ?', binds: [img] }];
+    let count = 0;
+    for (const tier of ['trade', 'fleet', 'dealer']) {
+      const raw = prices[tier];
+      if (raw === undefined || raw === null || String(raw).trim() === '') continue;
+      const cents = usdToCents(raw);
+      if (cents == null || cents < 0) return c.json({ error: `"${tier}" price is not a valid amount` }, 400);
+      stmts.push({ sql: 'INSERT INTO product_tier_prices (product_img, tier, price_cents) VALUES (?,?,?)', binds: [img, tier, cents] });
+      count++;
+    }
+    await db.batch(stmts);
+    return c.json({ ok: true, count });
+  });
+
+  // =====================================================================
+  //  ALTERNATE / INTERCHANGE PART NUMBERS — replace the whole set. The
+  //  counter can scan or search any of these to pull the part up; they also
+  //  feed the storefront search. Same replace-the-whole-set shape as above.
+  // =====================================================================
+  app.put('/api/admin/products/:img/alt-numbers', adminMw, async (c) => {
+    const db = d1(c.env);
+    const img = c.req.param('img');
+    if (!(await db.one('SELECT img FROM products WHERE img = ?', img))) return c.json({ error: 'Not found' }, 404);
+    const b = await c.req.json().catch(() => ({}));
+    const raw = Array.isArray(b.numbers) ? b.numbers : [];
+    const seen = new Set();
+    const rows = [];
+    for (const r of raw) {
+      const number = String(r.number || '').trim().slice(0, 80);
+      if (!number) continue;
+      const key = number.toLowerCase();
+      if (seen.has(key)) return c.json({ error: 'Duplicate number ' + number }, 400);
+      seen.add(key);
+      let sub = r.substitute_img ? String(r.substitute_img).trim() : null;
+      if (sub) {
+        if (sub === img) return c.json({ error: 'A part cannot be its own substitute.' }, 400);
+        if (!(await db.one('SELECT img FROM products WHERE img = ?', sub))) return c.json({ error: 'Substitute part not found: ' + sub }, 400);
+      } else {
+        sub = null;
+      }
+      rows.push({
+        number,
+        kind: r.kind ? String(r.kind).trim().slice(0, 40) || null : null,
+        note: r.note ? String(r.note).trim().slice(0, 200) || null : null,
+        substitute_img: sub,
+      });
+    }
+    const stmts = [{ sql: 'DELETE FROM product_alt_numbers WHERE product_img = ?', binds: [img] }];
+    for (const r of rows) {
+      stmts.push({ sql: 'INSERT INTO product_alt_numbers (product_img, number, kind, note, substitute_img) VALUES (?,?,?,?,?)', binds: [img, r.number, r.kind, r.note, r.substitute_img] });
+    }
+    await db.batch(stmts);
+    return c.json({ ok: true, count: rows.length });
+  });
+
+  // =====================================================================
+  //  SERIAL REGISTER — serials on hand for a part (migration 0056).
+  //  Loading serials does NOT touch stock_count; the two are shown side by
+  //  side so a mismatch is visible.
+  // =====================================================================
+  app.get('/api/admin/products/:img/serials', adminMw, async (c) => {
+    const status = c.req.query('status');
+    const ok = ['in_stock', 'sold', 'returned', 'void', 'claimed'];
+    const where = status && ok.includes(status) ? ' AND s.status = ?' : '';
+    const rows = await d1(c.env).many(
+      `SELECT s.id, s.serial, s.status, s.sale_id, s.sold_at, s.warranty_until, s.returned_at,
+              s.received_at, s.received_note, s.notes,
+              ps.receipt_number, ps.customer_name
+         FROM product_serials s LEFT JOIN pos_sales ps ON ps.id = s.sale_id
+        WHERE s.product_img = ?${where}
+        ORDER BY s.status = 'in_stock' DESC, s.id DESC LIMIT 500`,
+      ...(where ? [c.req.param('img'), status] : [c.req.param('img')]));
+    const counts = await d1(c.env).many(
+      `SELECT status, COUNT(*) AS n FROM product_serials WHERE product_img = ? GROUP BY status`, c.req.param('img'));
+    return c.json({ serials: rows, counts: Object.fromEntries(counts.map((r) => [r.status, r.n])) });
+  });
+
+  app.post('/api/admin/products/:img/serials', adminMw, async (c) => {
+    const db = d1(c.env);
+    if (!userCan(c.get('user'), 'inventory.adjust_stock'))
+      return c.json({ error: 'Your account is not allowed to adjust stock counts.' }, 403);
+    const img = c.req.param('img');
+    if (!(await db.one('SELECT img FROM products WHERE img = ?', img))) return c.json({ error: 'Not found' }, 404);
+    const b = await c.req.json().catch(() => ({}));
+    const note = b.note ? String(b.note).trim().slice(0, 200) : null;
+    const raw = Array.isArray(b.serials) ? b.serials
+      : String(b.serials || '').split(/[\r\n,]+/);
+    const seen = new Set();
+    const list = [];
+    for (const s of raw) {
+      const v = String(s || '').trim().slice(0, 120);
+      if (!v || seen.has(v.toLowerCase())) continue;
+      seen.add(v.toLowerCase());
+      list.push(v);
+    }
+    if (!list.length) return c.json({ error: 'No serials given' }, 400);
+    const stmts = list.map((serial) => ({
+      sql: `INSERT OR IGNORE INTO product_serials (product_img, serial, status, received_note) VALUES (?,?,'in_stock',?)`,
+      binds: [img, serial, note],
+    }));
+    await db.batch(stmts);
+    const n = await db.one(`SELECT COUNT(*) AS n FROM product_serials WHERE product_img = ? AND status = 'in_stock'`, img);
+    return c.json({ ok: true, in_stock: n ? n.n : 0 });
+  });
+
+  app.patch('/api/admin/products/:img/serials/:id', adminMw, async (c) => {
+    const db = d1(c.env);
+    if (!userCan(c.get('user'), 'inventory.adjust_stock'))
+      return c.json({ error: 'Your account is not allowed to adjust stock counts.' }, 403);
+    const b = await c.req.json().catch(() => ({}));
+    const row = await db.one('SELECT id, status FROM product_serials WHERE id = ? AND product_img = ?', c.req.param('id'), c.req.param('img'));
+    if (!row) return c.json({ error: 'Not found' }, 404);
+    const sets = []; const vals = [];
+    if (b.status !== undefined) {
+      const t = String(b.status);
+      if (!['in_stock', 'void'].includes(t)) return c.json({ error: 'Can only set a serial to in_stock or void here' }, 400);
+      if (row.status === 'sold' || row.status === 'claimed') return c.json({ error: `A ${row.status} serial can't be changed here` }, 400);
+      sets.push('status = ?'); vals.push(t);
+    }
+    if (b.notes !== undefined) { sets.push('notes = ?'); vals.push(b.notes ? String(b.notes).slice(0, 300) : null); }
+    if (!sets.length) return c.json({ error: 'Nothing to update' }, 400);
+    vals.push(row.id);
+    await db.run(`UPDATE product_serials SET ${sets.join(', ')} WHERE id = ?`, ...vals);
+    return c.json({ ok: true });
+  });
+
+  // =====================================================================
+  //  PRODUCT IMAGES (migration 0057) — extra photos + a settable primary.
+  //  products.img stays the identity; these are the gallery shots.
+  // =====================================================================
+  app.get('/api/admin/products/:img/images', adminMw, async (c) => {
+    const db = d1(c.env);
+    const img = c.req.param('img');
+    const p = await db.one('SELECT img, primary_image_override FROM products WHERE img = ?', img);
+    if (!p) return c.json({ error: 'Not found' }, 404);
+    const rows = await db.many('SELECT id, url, caption, sort_order, created_at FROM product_images WHERE product_img = ? ORDER BY sort_order, id', img);
+    return c.json({ images: rows, primary_image_override: p.primary_image_override || null, img: p.img });
+  });
+
+  app.post('/api/admin/products/:img/images', adminMw, async (c) => {
+    const db = d1(c.env);
+    const img = c.req.param('img');
+    if (!(await db.one('SELECT img FROM products WHERE img = ?', img))) return c.json({ error: 'Not found' }, 404);
+    // multipart with one or more photo* file parts, and/or a JSON/newline urls list
+    const ct = c.req.header('content-type') || '';
+    const added = [];
+    const start = (await db.one('SELECT COALESCE(MAX(sort_order), -1) AS m FROM product_images WHERE product_img = ?', img)).m + 1;
+    let order = start;
+    const insert = async (url, caption) => {
+      const r = await db.run('INSERT INTO product_images (product_img, url, caption, sort_order) VALUES (?,?,?,?)',
+        img, url, caption || null, order++);
+      added.push({ id: r.meta ? r.meta.last_row_id : undefined, url, caption: caption || null, sort_order: order - 1 });
+    };
+    if (ct.includes('multipart/form-data') || ct.includes('application/x-www-form-urlencoded')) {
+      const body = await c.req.parseBody({ all: true });
+      const files = [];
+      for (const [k, v] of Object.entries(body)) {
+        if (!/^photo/i.test(k)) continue;
+        for (const f of (Array.isArray(v) ? v : [v])) if (f && typeof f !== 'string') files.push(f);
+      }
+      for (const f of files) {
+        if (f.size > 12 * 1024 * 1024) return c.json({ error: 'One image is over the 12 MB limit.' }, 413);
+        let upload;
+        try {
+          upload = await putUpload(c.env, { prefix: 'products', bytes: new Uint8Array(await f.arrayBuffer()), contentType: f.type, filename: f.name });
+        } catch (e) { return c.json({ error: e.message }, e.status || 400); }
+        await insert(upload.url, null);
+      }
+      for (const raw of String(body.urls || '').split(/[\r\n,]+/)) {
+        const u = raw.trim(); if (u) await insert(u, null);
+      }
+    } else {
+      const b = await c.req.json().catch(() => ({}));
+      const urls = Array.isArray(b.urls) ? b.urls : String(b.urls || '').split(/[\r\n,]+/);
+      for (const raw of urls) { const u = String(raw || '').trim(); if (u) await insert(u, null); }
+    }
+    if (!added.length) return c.json({ error: 'No images given' }, 400);
+    return c.json({ ok: true, images: added });
+  });
+
+  app.patch('/api/admin/products/:img/images/:id', adminMw, async (c) => {
+    const db = d1(c.env);
+    const b = await c.req.json().catch(() => ({}));
+    const row = await db.one('SELECT id FROM product_images WHERE id = ? AND product_img = ?', c.req.param('id'), c.req.param('img'));
+    if (!row) return c.json({ error: 'Not found' }, 404);
+    const sets = []; const vals = [];
+    if (b.caption !== undefined) { sets.push('caption = ?'); vals.push(b.caption ? String(b.caption).slice(0, 200) : null); }
+    if (b.sort_order !== undefined) { sets.push('sort_order = ?'); vals.push(parseInt(b.sort_order, 10) || 0); }
+    if (!sets.length) return c.json({ error: 'Nothing to update' }, 400);
+    vals.push(row.id);
+    await db.run(`UPDATE product_images SET ${sets.join(', ')} WHERE id = ?`, ...vals);
+    return c.json({ ok: true });
+  });
+
+  app.post('/api/admin/products/:img/images/:id/make-primary', adminMw, async (c) => {
+    const db = d1(c.env);
+    const img = c.req.param('img');
+    const id = c.req.param('id');
+    if (!(await db.one('SELECT img FROM products WHERE img = ?', img))) return c.json({ error: 'Not found' }, 404);
+    if (id === 'original') {
+      await db.run('UPDATE products SET primary_image_override = NULL WHERE img = ?', img);
+      return c.json({ ok: true, primary_image_override: null });
+    }
+    const row = await db.one('SELECT url FROM product_images WHERE id = ? AND product_img = ?', id, img);
+    if (!row) return c.json({ error: 'Image not found' }, 404);
+    await db.run('UPDATE products SET primary_image_override = ? WHERE img = ?', row.url, img);
+    return c.json({ ok: true, primary_image_override: row.url });
+  });
+
+  app.delete('/api/admin/products/:img/images/:id', adminMw, async (c) => {
+    const db = d1(c.env);
+    const img = c.req.param('img');
+    const row = await db.one('SELECT id, url FROM product_images WHERE id = ? AND product_img = ?', c.req.param('id'), img);
+    if (!row) return c.json({ error: 'Not found' }, 404);
+    await db.run('DELETE FROM product_images WHERE id = ?', row.id);
+    // If it was the chosen primary, fall back to the original photo.
+    await db.run('UPDATE products SET primary_image_override = NULL WHERE img = ? AND primary_image_override = ?', img, row.url);
+    if (/^\/uploads\//.test(row.url)) {
+      try { await deleteUpload(c.env, row.url.replace(/^\/uploads\//, '')); } catch (_) { /* best effort */ }
+    }
+    return c.json({ ok: true });
+  });
+
+  // =====================================================================
+  //  KIT COMPONENTS — replace the whole recipe for one kit product, and
+  //  (optionally) set the kit flags in the same batch so is_kit and its
+  //  rows can never drift apart. Same replace-the-whole-set shape as
+  //  price-breaks above.
+  // =====================================================================
+  app.put('/api/admin/products/:img/kit-components', adminMw, async (c) => {
+    const db = d1(c.env);
+    const img = c.req.param('img');
+    const kit = await db.one('SELECT img, matrix_id, is_redeemable, kit_line_mode FROM products WHERE img = ?', img);
+    if (!kit) return c.json({ error: 'Not found' }, 404);
+    if (kit.matrix_id) return c.json({ error: 'A matrix / variant product cannot also be a kit.' }, 400);
+    if (kit.is_redeemable) return c.json({ error: 'A redeemable product cannot also be a kit.' }, 400);
+
+    const b = await c.req.json().catch(() => ({}));
+    const raw = Array.isArray(b.components) ? b.components : [];
+    const lineMode = ['single', 'exploded'].includes(String(b.kit_line_mode || '').trim())
+      ? String(b.kit_line_mode).trim() : (kit.kit_line_mode || 'single');
+
+    const seen = new Set();
+    const rows = [];
+    for (const r of raw) {
+      const componentImg = String(r.component_img || '').trim();
+      if (!componentImg) return c.json({ error: 'Each component needs a part.' }, 400);
+      if (componentImg === img) return c.json({ error: 'A kit cannot contain itself.' }, 400);
+      if (seen.has(componentImg)) return c.json({ error: 'Duplicate component ' + componentImg }, 400);
+      const qtyEach = parseInt(r.qty_each, 10);
+      if (!Number.isInteger(qtyEach) || qtyEach < 1) return c.json({ error: 'Each component needs a quantity of 1 or more.' }, 400);
+      seen.add(componentImg);
+      rows.push({ componentImg, qtyEach, sortOrder: rows.length });
+    }
+    if (rows.length) {
+      const comps = await db.many(
+        `SELECT img, is_kit, serial_required FROM products WHERE img IN (${rows.map(() => '?').join(',')})`,
+        ...rows.map((r) => r.componentImg));
+      const byImg = new Map(comps.map((p) => [p.img, p]));
+      for (const r of rows) {
+        const p = byImg.get(r.componentImg);
+        if (!p) return c.json({ error: 'Component not found: ' + r.componentImg }, 400);
+        if (p.is_kit) return c.json({ error: 'A kit cannot contain another kit (' + r.componentImg + ').' }, 400);
+        if (p.serial_required)
+          return c.json({ error: '"' + r.componentImg + '" needs a serial number at sale, which a kit line cannot capture. Drop the component, or sell it on its own line.' }, 400);
+      }
+    }
+
+    const stmts = [{ sql: 'DELETE FROM kit_components WHERE kit_img = ?', binds: [img] }];
+    for (const r of rows) {
+      stmts.push({
+        sql: 'INSERT INTO kit_components (kit_img, component_img, qty_each, sort_order) VALUES (?,?,?,?)',
+        binds: [img, r.componentImg, r.qtyEach, r.sortOrder],
+      });
+    }
+    if (b.is_kit !== undefined || b.kit_price_mode !== undefined || b.kit_line_mode !== undefined) {
+      const sets = []; const vals = [];
+      if (b.is_kit !== undefined) { sets.push('is_kit = ?'); vals.push(toBit(b.is_kit)); }
+      if (b.kit_price_mode !== undefined) {
+        sets.push('kit_price_mode = ?');
+        vals.push(['fixed', 'rollup'].includes(String(b.kit_price_mode)) ? String(b.kit_price_mode) : 'fixed');
+      }
+      if (b.kit_line_mode !== undefined) { sets.push('kit_line_mode = ?'); vals.push(lineMode); }
+      vals.push(img);
+      stmts.push({ sql: `UPDATE products SET ${sets.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE img = ?`, binds: vals });
+    }
+    await db.batch(stmts);
+    return c.json({ ok: true, count: rows.length });
   });
 
   // =====================================================================
@@ -237,27 +676,22 @@ export default function mount(app) {
       stock_count: (v) => parseInt(v, 10), low_threshold: (v) => parseInt(v, 10),
       is_active: toBit, sku: null, barcode: null,
       supplier_id: (v) => (v ? parseInt(v, 10) : null),
-      supplier_sku: (v) => (v == null ? null : String(v).trim() || null),
+      supplier_part_no: (v) => (String(v || '').trim() || null),
       warranty_days: (v) => (v === '' || v == null ? null : parseInt(v, 10)),
       serial_required: toBit, weight_kg: num, dim_cm: null,
       bin_location: null, min_stock: (v) => (v === '' || v == null ? null : parseInt(v, 10)),
       markup_pct: num,
-      cost_method: (v) => (v == null ? null : String(v).trim() || null),
-      stock_unit: (v) => (v == null ? null : String(v).trim() || null),
-      price_usd: null, cost_usd: null, core_charge_usd: null, env_fee_usd: null,
-      list_price_usd: null, trade_price_usd: null,
+      costing_method: (v) => (String(v || '').trim() || null),
+      stock_uom: (v) => (String(v || '').trim() || null),
+      purchase_uom: (v) => (String(v || '').trim() || null),
+      units_per_purchase: num,
+      price_usd: null, cost_usd: null, list_price_usd: null, core_charge_usd: null, env_fee_usd: null,
     };
-    const CENTS = {
-      price_usd: 'price_cents', cost_usd: 'cost_cents',
-      core_charge_usd: 'core_charge_cents', env_fee_usd: 'env_fee_cents',
-      list_price_usd: 'list_price_cents', trade_price_usd: 'trade_price_cents',
-    };
-    // core_charge_cents / env_fee_cents are NOT NULL DEFAULT 0 — blank clears to 0.
-    const NOT_NULL_CENTS = new Set(['core_charge_usd', 'env_fee_usd']);
+    const CENTS = { price_usd: 'price_cents', cost_usd: 'cost_cents', list_price_usd: 'list_price_cents', core_charge_usd: 'core_charge_cents', env_fee_usd: 'env_fee_cents' };
     const sets = []; const vals = [];
     for (const [f, tf] of Object.entries(MAP)) {
       if (b[f] === undefined) continue;
-      if (CENTS[f]) { sets.push(`${CENTS[f]} = ?`); vals.push(usdToCents(b[f]) ?? (NOT_NULL_CENTS.has(f) ? 0 : null)); }
+      if (CENTS[f]) { sets.push(`${CENTS[f]} = ?`); vals.push(usdToCents(b[f])); }
       else { sets.push(`${f} = ?`); vals.push(tf ? tf(b[f]) : b[f]); }
     }
     if (!sets.length) return c.json({ error: 'Nothing to update' }, 400);
@@ -279,16 +713,16 @@ export default function mount(app) {
         where.push('(p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ? OR p.make_model LIKE ? OR p.category LIKE ?)');
       }
     }
-    if (lowOnly) where.push('p.stock_count <= COALESCE(p.low_threshold, 4)');
+    if (lowOnly) where.push("p.stock_count <= COALESCE(p.low_threshold, 4) AND p.item_type != 'service' AND p.is_kit = 0");
     const rows = await d1(c.env).many(
       `SELECT p.img, p.name, p.make_model, p.category, p.condition,
               p.price_cents / 100.0 AS price_usd, p.cost_cents / 100.0 AS cost_usd,
-              p.list_price_cents / 100.0 AS list_price_usd, p.trade_price_cents / 100.0 AS trade_price_usd,
               p.stock_count, p.low_threshold, p.min_stock, p.is_active,
               p.sku, p.barcode, p.core_charge_cents / 100.0 AS core_charge_usd,
               p.env_fee_cents / 100.0 AS env_fee_usd, p.warranty_days, p.serial_required,
-              p.cost_method, p.stock_unit, p.supplier_sku,
               p.weight_kg, p.dim_cm, p.bin_location, p.markup_pct,
+              p.list_price_cents / 100.0 AS list_price_usd, p.costing_method, p.supplier_part_no,
+              p.stock_uom, p.purchase_uom, p.units_per_purchase,
               p.supplier_id, s.name AS supplier_name
          FROM products p LEFT JOIN suppliers s ON s.id = p.supplier_id
          ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
@@ -469,6 +903,15 @@ export default function mount(app) {
         binds: ['receive', p.img, p.stock_count, p.stock_count + qty, qty,
           r.bin_location != null ? String(r.bin_location) : null, null, 'no_po', supplierId, activityNote],
       });
+      // Optional per-line serial / redemption-instrument load (0056).
+      for (const s of (Array.isArray(r.serials) ? r.serials : [])) {
+        const v = String(s || '').trim().slice(0, 120);
+        if (v) stmts.push({ sql: `INSERT OR IGNORE INTO product_serials (product_img, serial, status, received_note) VALUES (?,?,'in_stock',?)`, binds: [p.img, v, activityNote] });
+      }
+      for (const s of (Array.isArray(r.instruments) ? r.instruments : [])) {
+        const v = String(s || '').trim().toUpperCase().slice(0, 60);
+        if (v) stmts.push({ sql: `INSERT OR IGNORE INTO redemption_instruments (code, product_img, status, received_at, received_note) VALUES (?,?,'in_stock',CURRENT_TIMESTAMP,?)`, binds: [v, p.img, activityNote] });
+      }
       results.push({ ok: true, product_img: p.img, name: p.name, qty });
     }
     if (stmts.length) await db.batch(stmts);
@@ -483,7 +926,7 @@ export default function mount(app) {
   app.get('/api/admin/inventory/import/template.csv', adminMw, (c) =>
     c.body(TEMPLATE_CSV, 200, {
       'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': 'attachment; filename="visionautosolutions-inventory-template.csv"',
+      'Content-Disposition': 'attachment; filename="mortysautoparts-inventory-template.csv"',
     }));
 
   async function handleImport(c, fileFields) {

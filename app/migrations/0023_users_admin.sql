@@ -5,7 +5,7 @@
 --   customer_messages.staff_id                    (who replied)
 --   customer_notifications                        (dunning / manual notices)
 --
---   wrangler d1 migrations apply meltahonda-db --remote
+--   wrangler d1 migrations apply mortysautoparts-db --remote
 
 ALTER TABLE users ADD COLUMN company_name  TEXT;
 ALTER TABLE users ADD COLUMN customer_type TEXT;

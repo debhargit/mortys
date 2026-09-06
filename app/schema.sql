@@ -1,8 +1,8 @@
 -- ============================================================================
---  Vision Auto Solutions — Postgres Schema
+--  Morty's Auto Parts — Postgres Schema
 --  Run once on a fresh database, e.g.
---    createdb visionautosolutions
---    psql -d visionautosolutions -f schema.sql
+--    createdb mortysautoparts
+--    psql -d mortysautoparts -f schema.sql
 --
 --  Safe to re-run: every statement uses CREATE TABLE IF NOT EXISTS.
 -- ============================================================================
@@ -181,7 +181,7 @@ CREATE OR REPLACE VIEW user_points AS
   GROUP BY user_id;
 
 -- TRADE-IN OFFERS ------------------------------------------------------------
--- Customers offering their vehicle to Vision Auto Solutions as trade-in or outright sale.
+-- Customers offering their vehicle to Morty's Auto Parts as trade-in or outright sale.
 CREATE TABLE IF NOT EXISTS trade_in_offers (
   id               SERIAL PRIMARY KEY,
   user_id          INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -556,23 +556,16 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS weight_kg       NUMERIC(8,3);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS dim_cm          TEXT;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS min_stock       INTEGER;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS markup_pct      NUMERIC(6,2);
+-- 0034: reference list price, per-part costing-method label, supplier's own
+-- part number, and stocking vs. purchasing unit of measure.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS list_price_usd     NUMERIC(10,2);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS costing_method     TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS supplier_part_no   TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_uom          TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS purchase_uom       TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS units_per_purchase NUMERIC(10,3);
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON products (barcode);
 CREATE INDEX IF NOT EXISTS idx_products_sku     ON products (sku);
-
--- =============================================================================
---  Industry-standard part-department pricing / costing / stocking fields,
---  surfaced in the admin "Edit part" modal. list_price_usd = MSRP / list;
---  trade_price_usd = wholesale / trade-tier price (sits alongside the existing
---  retail price_usd and cost_usd). cost_method is the valuation basis
---  ('last' | 'average' | 'standard' | 'fifo'); stock_unit is the selling /
---  stocking unit of measure ('EACH','PAIR','SET','KIT','BOX','CASE',...);
---  supplier_sku is the vendor's own part number for the linked supplier_id.
--- =============================================================================
-ALTER TABLE products ADD COLUMN IF NOT EXISTS list_price_usd  NUMERIC(10,2);
-ALTER TABLE products ADD COLUMN IF NOT EXISTS trade_price_usd NUMERIC(10,2);
-ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_method     TEXT;
-ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_unit      TEXT;
-ALTER TABLE products ADD COLUMN IF NOT EXISTS supplier_sku    TEXT;
 
 -- =============================================================================
 --  PRODUCT SEARCH PERFORMANCE (P2, 2026-08-18)
@@ -1258,19 +1251,18 @@ BEGIN
     ALTER TABLE users ADD CONSTRAINT users_admin_role_check CHECK (admin_role IN ('owner','manager','cashier'));
   END IF;
 END $$;
--- Rebrand (2026): the default admin address moved to visionautosolutions.com,
--- first from melthahonda.com and then from a short-lived mortysautoparts.com
--- phase. Rename the existing row on installs that predate the final change so
--- the seed's ON CONFLICT (email) still matches and no second admin account is
--- created. No-op on fresh databases, and skipped if the new address is already
--- present (email is UNIQUE -- a blind UPDATE would abort the whole schema
--- apply).
-UPDATE users SET email = 'admin@visionautosolutions.com'
-  WHERE email IN ('admin@melthahonda.com', 'admin@mortysautoparts.com')
-    AND NOT EXISTS (SELECT 1 FROM users u2 WHERE u2.email = 'admin@visionautosolutions.com');
+-- Rebrand (2026): the default admin address moved from melthahonda.com to
+-- mortysautoparts.com. Rename the existing row on installs that predate
+-- the change so the seed's ON CONFLICT (email) still matches and no second
+-- admin account is created. No-op on fresh databases, and skipped if the
+-- new address is already present (email is UNIQUE -- a blind UPDATE would
+-- abort the whole schema apply).
+UPDATE users SET email = 'admin@mortysautoparts.com'
+  WHERE email = 'admin@melthahonda.com'
+    AND NOT EXISTS (SELECT 1 FROM users u2 WHERE u2.email = 'admin@mortysautoparts.com');
 
 -- The default seeded admin account is the shop owner.
-UPDATE users SET admin_role = 'owner' WHERE email = 'admin@visionautosolutions.com';
+UPDATE users SET admin_role = 'owner' WHERE email = 'admin@mortysautoparts.com';
 
 -- =============================================================================
 --  GIFT CARDS (P2, 2026-08-18)
@@ -1385,10 +1377,10 @@ CREATE INDEX IF NOT EXISTS idx_account_payments_customer ON account_payments (cu
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS shop_settings (
   id                     SERIAL PRIMARY KEY,
-  company_name           TEXT NOT NULL DEFAULT 'Vision Auto Solutions Ltd',
-  address                TEXT NOT NULL DEFAULT '112C Waltham Park Road, Kingston',
+  company_name           TEXT NOT NULL DEFAULT 'Morty''s Auto Parts',
+  address                TEXT NOT NULL DEFAULT '51 Red Hills Road, Kingston',
   country                TEXT NOT NULL DEFAULT 'Jamaica',
-  phone                  TEXT NOT NULL DEFAULT '(876) 758-5590',
+  phone                  TEXT NOT NULL DEFAULT '(876) 905-4111',
   email                  TEXT,
   website                TEXT,
   logo_url               TEXT,
@@ -1406,35 +1398,33 @@ CREATE TABLE IF NOT EXISTS shop_settings (
 -- Singleton: exactly one settings row. Seeded only if the table is empty,
 -- so re-running this file never overwrites an owner's saved settings.
 INSERT INTO shop_settings (id, website)
-  SELECT 1, 'https://visionautosolutions.com'
+  SELECT 1, 'https://mortysautoparts.com'
   WHERE NOT EXISTS (SELECT 1 FROM shop_settings);
 
--- Rebrand (2026): move the singleton row off an old brand ONLY where it
--- still holds a pre-rebrand default -- i.e. the operator never edited it
--- in Settings. A customised name/site is left alone. Covers both prior
--- brands: Meltha Honda, then the short-lived Morty's Auto Parts.
-UPDATE shop_settings SET company_name = 'Vision Auto Solutions Ltd'
-  WHERE company_name IN ('Meltha Honda Sales & Servs Ltd', 'Morty''s Auto Parts Ltd');
-UPDATE shop_settings SET website = 'https://visionautosolutions.com'
-  WHERE website IN ('https://melthahonda.miamimistress.com', 'https://melthahonda.com',
-                    'https://mortysautoparts.com', 'https://www.mortysautoparts.com');
-UPDATE shop_settings SET address = '112C Waltham Park Road, Kingston'
+-- Rebrand (2026): move the singleton row off the old brand ONLY where it
+-- still holds the pre-rebrand default -- i.e. the operator never edited it
+-- in Settings. A customised name/site is left alone.
+UPDATE shop_settings SET company_name = 'Morty''s Auto Parts'
+  WHERE company_name = 'Meltha Honda Sales & Servs Ltd';
+UPDATE shop_settings SET website = 'https://mortysautoparts.com'
+  WHERE website IN ('https://melthahonda.miamimistress.com', 'https://melthahonda.com');
+UPDATE shop_settings SET address = '51 Red Hills Road, Kingston'
   WHERE address = '127 Hagley Park Road, Kingston 11';
-UPDATE shop_settings SET phone = '(876) 758-5590'
+UPDATE shop_settings SET phone = '(876) 905-4111'
   WHERE phone = '(876) 758-8503';
 
--- Rebrand (2026): the synthetic walk-in / no-email customer domain moved to
--- @walkin.visionautosolutions.local, from @walkin.melthahonda.local and then
--- @walkin.mortysautoparts.local. Rename the existing rows (the singleton
--- "walkin@" record and every counter-created customer minted without a real
--- email) so the code that looks them up by the new address keeps matching.
--- Guarded so it is a no-op once migrated, and so the singleton rename is
--- skipped if the new address somehow already exists (email is UNIQUE).
-UPDATE users SET email = regexp_replace(email, '@walkin\.(melthahonda|mortysautoparts)\.local$', '@walkin.visionautosolutions.local')
-  WHERE email LIKE '%@walkin.melthahonda.local' OR email LIKE '%@walkin.mortysautoparts.local';
-UPDATE users SET email = 'walkin@visionautosolutions.local'
-  WHERE email IN ('walkin@melthahonda.local', 'walkin@mortysautoparts.local')
-    AND NOT EXISTS (SELECT 1 FROM users u2 WHERE u2.email = 'walkin@visionautosolutions.local');
+-- Rebrand (2026): the synthetic walk-in / no-email customer domain moved from
+-- @walkin.melthahonda.local to @walkin.mortysautoparts.local. Rename the
+-- existing rows (the singleton "walkin@" record and every counter-created
+-- customer minted without a real email) so the code that looks them up by the
+-- new address keeps matching. Guarded so it is a no-op once migrated, and so
+-- the singleton rename is skipped if the new address somehow already exists
+-- (email is UNIQUE).
+UPDATE users SET email = regexp_replace(email, '@walkin\.melthahonda\.local$', '@walkin.mortysautoparts.local')
+  WHERE email LIKE '%@walkin.melthahonda.local';
+UPDATE users SET email = 'walkin@mortysautoparts.local'
+  WHERE email = 'walkin@melthahonda.local'
+    AND NOT EXISTS (SELECT 1 FROM users u2 WHERE u2.email = 'walkin@mortysautoparts.local');
 
 -- =============================================================================
 --  POS HOLDS (2026-08-19) -- "Held tickets" (F7 Hold / F8 Recall -> Held tab).

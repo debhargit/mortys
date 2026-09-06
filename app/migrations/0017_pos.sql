@@ -3,8 +3,8 @@
 -- Columns the POS read paths (holds, quotes, sale list/detail, customer
 -- lookup) need that the D1 conversion left off.
 --
---   wrangler d1 migrations apply meltahonda-db --local
---   wrangler d1 migrations apply meltahonda-db
+--   wrangler d1 migrations apply mortysautoparts-db --local
+--   wrangler d1 migrations apply mortysautoparts-db
 
 -- ---- customer credit / contact fields (Postgres schema.sql added a block;
 -- the D1 conversion only kept price_tier + credit_type/length) -----------

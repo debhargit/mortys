@@ -17,6 +17,11 @@ import { adminMw, roleCanManage } from '../_lib/guards.js';
 import { safeJson, boolify } from '../_lib/util.js';
 import { CAPABILITIES } from '../_lib/capabilities.js';
 import { getShopSettings } from '../_lib/shop.js';
+import { loadBreaksForImg, ACTIVE_SALE_PRICE_SQL, effectiveBaseCents, loadTierPricesByImg } from '../_lib/price_breaks.js';
+import { loadKitComponentsForImg, kitRollupCents } from '../_lib/kits.js';
+import { loadAltNumbersForImg, loadSubstitutesForImg } from '../_lib/alt_numbers.js';
+import { loadImagesForImg, primaryUrl } from '../_lib/product_images.js';
+import { centsToUsd } from '../_lib/money.js';
 
 // 14-day zero-filled series from rows [{ day:'YYYY-MM-DD', <key> }]
 function fill14(rows, key) {
@@ -129,7 +134,8 @@ export default function mount(app) {
   app.get('/api/admin/products', adminMw, async (c) => {
     const rows = await d1(c.env).many(
       `SELECT img, name, make_model, category, condition, price_cents / 100.0 AS price_usd,
-              stock_count, low_threshold, is_active, created_at
+              stock_count, low_threshold, is_active, created_at,
+              COALESCE(primary_image_override, img) AS thumb_url
          FROM products ORDER BY created_at DESC, name ASC`
     );
     for (const r of rows) boolify(r, ['is_active']);
@@ -140,18 +146,55 @@ export default function mount(app) {
     const row = await d1(c.env).one(
       `SELECT p.img, p.name, p.make_model, p.category, p.condition,
               p.price_cents / 100.0 AS price_usd, p.cost_cents / 100.0 AS cost_usd,
-              p.list_price_cents / 100.0 AS list_price_usd, p.trade_price_cents / 100.0 AS trade_price_usd,
+              p.list_price_cents / 100.0 AS list_price_usd, p.markup_pct, p.costing_method,
+              p.stock_count, p.low_threshold, p.is_active, p.sku, p.barcode,
+              p.primary_image_override,
+              p.warranty_days, p.serial_required,
+              p.stock_uom, p.purchase_uom, p.units_per_purchase, p.supplier_part_no,
+              p.location, p.bin_location, p.supplier_id, s.name AS supplier_name,
+              p.commission_type, p.commission_value,
               p.core_charge_cents / 100.0 AS core_charge_usd, p.env_fee_cents / 100.0 AS env_fee_usd,
-              p.markup_pct, p.cost_method, p.stock_unit, p.warranty_days, p.serial_required,
-              p.stock_count, p.low_threshold, p.min_stock, p.is_active, p.sku, p.barcode,
-              p.location, p.bin_location,
-              p.supplier_id, p.supplier_sku, s.name AS supplier_name
+              p.matrix_id, p.matrix_axis1_value, p.matrix_axis2_value, p.matrix_overrides,
+              m.name AS matrix_name, m.axis1_label AS matrix_axis1_label, m.axis2_label AS matrix_axis2_label,
+              p.sale_price_cents / 100.0 AS sale_price_usd, p.sale_starts_at, p.sale_ends_at,
+              ${ACTIVE_SALE_PRICE_SQL} AS active_sale_cents,
+              p.max_discount_pct, p.is_redeemable, p.item_type,
+              p.is_kit, p.kit_price_mode, p.kit_line_mode,
+              p.restricted_instore_only, p.restricted_manager_approval, p.restricted_id_required, p.restricted_tax_id_required
          FROM products p LEFT JOIN suppliers s ON s.id = p.supplier_id
+                          LEFT JOIN product_matrices m ON m.id = p.matrix_id
         WHERE p.img = ?`,
       c.req.param('img')
     );
     if (!row) return c.json({ error: 'Not found' }, 404);
-    boolify(row, ['is_active', 'serial_required']);
+    boolify(row, ['is_active', 'serial_required', 'is_redeemable', 'is_kit',
+      'restricted_instore_only', 'restricted_manager_approval', 'restricted_id_required', 'restricted_tax_id_required']);
+    row.matrix_overrides = safeJson(row.matrix_overrides, []);
+    const allBreaks = await loadBreaksForImg(d1(c.env), row.img);
+    row.price_breaks = allBreaks.filter((b) => b.price_cents != null)
+      .map((b) => ({ min_qty: b.min_qty, price_usd: centsToUsd(b.price_cents) }));
+    row.qty_discounts = allBreaks.filter((b) => b.discount_pct != null)
+      .map((b) => ({ min_qty: b.min_qty, discount_pct: b.discount_pct }));
+    const tp = (await loadTierPricesByImg(d1(c.env), [row.img])).get(row.img) || {};
+    row.tier_prices = {
+      trade: tp.trade != null ? centsToUsd(tp.trade) : null,
+      fleet: tp.fleet != null ? centsToUsd(tp.fleet) : null,
+      dealer: tp.dealer != null ? centsToUsd(tp.dealer) : null,
+    };
+    row.images = await loadImagesForImg(d1(c.env), row.img);
+    row.primary_image_url = primaryUrl(row);
+    row.alt_numbers = await loadAltNumbersForImg(d1(c.env), row.img);
+    row.substitute_links = await loadSubstitutesForImg(d1(c.env), row.img);
+    const kitComps = await loadKitComponentsForImg(d1(c.env), row.img);
+    row.kit_components = kitComps.map((k) => ({
+      component_img: k.component_img, qty_each: k.qty_each, name: k.name,
+      price_usd: centsToUsd(k.price_cents || 0),
+      effective_price_usd: centsToUsd(effectiveBaseCents(k.price_cents, k.active_sale_cents) || 0),
+      item_type: k.item_type,
+    }));
+    row.kit_rollup_usd = centsToUsd(kitRollupCents(kitComps));
+    row.sale_active = row.active_sale_cents != null;
+    delete row.active_sale_cents;
     return c.json({ product: row });
   });
 
@@ -160,7 +203,7 @@ export default function mount(app) {
       `SELECT img, name, make_model, category, condition, price_cents / 100.0 AS price_usd,
               stock_count, low_threshold
          FROM products
-        WHERE is_active = 1 AND stock_count <= low_threshold
+        WHERE is_active = 1 AND item_type != 'service' AND is_kit = 0 AND stock_count <= low_threshold
         ORDER BY stock_count ASC, name ASC LIMIT 100`
     );
     return c.json({ products: rows, count: rows.length });
@@ -259,7 +302,7 @@ export default function mount(app) {
       n('SELECT COUNT(*) AS n FROM notify_subscriptions WHERE notified_at IS NULL'),
       n('SELECT COUNT(*) AS n FROM reviews WHERE approved = 0'),
       n("SELECT COUNT(*) AS n FROM orders WHERE status = 'pending'"),
-      n('SELECT COUNT(*) AS n FROM products WHERE stock_count <= low_threshold'),
+      n("SELECT COUNT(*) AS n FROM products WHERE item_type != 'service' AND is_kit = 0 AND stock_count <= low_threshold"),
     ]);
     return c.json({ new_inquiries, pending_appointments, pending_notifications, pending_reviews, pending_orders, low_stock_count });
   });
@@ -307,8 +350,8 @@ export default function mount(app) {
           FROM users u) t WHERE bal > 0.01`),
       db.one(`SELECT
           (SELECT COUNT(*) FROM orders WHERE status IN ('pending','confirmed'))                                    AS orders_pending,
-          (SELECT COUNT(*) FROM products WHERE is_active = 1 AND stock_count > 0 AND stock_count <= low_threshold)  AS low_stock,
-          (SELECT COUNT(*) FROM products WHERE is_active = 1 AND stock_count <= 0)                                  AS out_of_stock,
+          (SELECT COUNT(*) FROM products WHERE is_active = 1 AND item_type != 'service' AND is_kit = 0 AND stock_count > 0 AND stock_count <= low_threshold)  AS low_stock,
+          (SELECT COUNT(*) FROM products WHERE is_active = 1 AND item_type != 'service' AND is_kit = 0 AND stock_count <= 0)                                  AS out_of_stock,
           (SELECT COUNT(*) FROM parts_requisitions WHERE status IN ('pending','partial','backordered'))             AS parts_pulls_open,
           (SELECT COUNT(*) FROM pos_quotes WHERE status = 'open')                                                   AS quotes_open,
           (SELECT COUNT(*) FROM pos_holds)                                                                          AS holds`),

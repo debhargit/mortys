@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Order · Morty's Auto Parts</title>
+<style>
+  body{font-family:ui-monospace,Menlo,'Courier New',monospace;background:#f3f4f6;color:#000;margin:0;padding:14px;font-size:12px}
+  .doc{max-width:320px;margin:0 auto 16px;background:#fff;padding:14px 16px;border:1px dashed #ccc}
+  .center{text-align:center}
+  h1{margin:4px 0;font-size:14px}
+  h2{margin:0 0 4px;font-size:12px;letter-spacing:1px}
+  .sub{font-size:11px;color:#444}
+  hr{border:0;border-top:1px dashed #999;margin:8px 0}
+  .row{display:flex;justify-content:space-between;padding:1px 0}
+  .grand{font-weight:800;font-size:14px;border-top:2px solid #000;padding-top:5px;margin-top:5px}
+  .addr{font-size:13px;line-height:1.4;white-space:pre-line;margin:6px 0}
+  .trk{font-size:15px;font-weight:800;letter-spacing:1px;margin:6px 0}
+  .actions{max-width:320px;margin:14px auto;display:flex;gap:6px}
+  .actions button{flex:1;padding:9px;border:0;background:#d62828;color:#fff;font-weight:700;border-radius:6px;cursor:pointer;font-family:inherit}
+  .err{max-width:320px;margin:20px auto;color:#b91c1c;text-align:center}
+  @media print { body{background:#fff;padding:0} .actions{display:none} .doc{border:0;page-break-after:always} }
+</style>
+</head>
+<body>
+<div class="actions">
+  <button onclick="window.print()">🖨 Print</button>
+  <button onclick="window.close()">Close</button>
+</div>
+<div id="out"></div>
+<script>
+function fmt(n){ return 'J$' + Math.round(Number(n || 0)).toLocaleString('en-US'); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+async function load(){
+  var p = new URLSearchParams(location.search);
+  var id = p.get('order') || p.get('id');
+  var email = p.get('email') || p.get('t') || '';
+  if (!id){ document.getElementById('out').innerHTML = '<div class="err">Missing order number.</div>'; return; }
+  try {
+    var res = await fetch('/api/orders/' + encodeURIComponent(id) + '/print' + (email ? '?email=' + encodeURIComponent(email) : ''), { credentials: 'same-origin' });
+    var d = await res.json();
+    if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status));
+    render(d);
+    setTimeout(function(){ window.print(); }, 350);
+  } catch(e){
+    document.getElementById('out').innerHTML = '<div class="err">Could not load this order.<br/><span class="sub">' + esc(e.message) + '</span></div>';
+  }
+}
+
+function render(d){
+  var o = d.order, items = d.items || [], shop = d.shop || {};
+  var when = o.created_at ? new Date(o.created_at.replace(' ', 'T') + 'Z').toLocaleString('en-US') : '';
+  var merch = items.reduce(function(s, i){ return s + Number(i.price_usd || 0) * i.qty; }, 0);
+  var shipFee = Number(o.ship_fee_usd || 0);
+  var coupon = Number(o.coupon_discount_usd || 0);
+  var isShip = o.fulfilment && o.fulfilment !== 'pickup';
+
+  var receipt =
+    '<div class="doc">' +
+      '<div class="center"><h1>' + esc(shop.name || "Morty's Auto Parts") + '</h1>' +
+        '<div class="sub">' + esc(shop.address || '51 Red Hills Road, Kingston') + '<br/>' + esc(shop.phone || '876-905-4111') + '</div></div>' +
+      '<hr/>' +
+      '<div class="row"><span>Order:</span><b>#' + esc(o.id) + '</b></div>' +
+      (when ? '<div class="row"><span>Date:</span><b>' + esc(when) + '</b></div>' : '') +
+      (o.customer_name ? '<div class="row"><span>Customer:</span><b>' + esc(o.customer_name) + '</b></div>' : '') +
+      '<div class="row"><span>Fulfilment:</span><b>' + esc(o.fulfilment || 'pickup') + '</b></div>' +
+      '<hr/>' +
+      items.map(function(i){
+        return '<div style="padding:3px 0">' +
+          '<b>' + esc(i.name || i.product_img) + '</b>' + (i.make_model ? '<br/><span class="sub">' + esc(i.make_model) + '</span>' : '') +
+          '<div class="row"><span>' + i.qty + ' × ' + fmt(i.price_usd) + '</span><b>' + fmt(i.qty * Number(i.price_usd || 0)) + '</b></div>' +
+        '</div>';
+      }).join('') +
+      '<hr/>' +
+      '<div class="row"><span>Subtotal</span><b>' + fmt(merch) + '</b></div>' +
+      (coupon > 0 ? '<div class="row"><span>Coupon ' + esc(o.coupon_code || '') + '</span><b>−' + fmt(coupon) + '</b></div>' : '') +
+      (shipFee > 0 ? '<div class="row"><span>Shipping</span><b>' + fmt(shipFee) + '</b></div>' : '') +
+      '<div class="row grand"><span>TOTAL</span><b>' + fmt(o.total_usd) + '</b></div>' +
+      '<hr/>' +
+      '<div class="row"><span>Payment</span><b>' + esc((o.payment_method || '').replace('_', ' ')) + '</b></div>' +
+      '<div class="row"><span>Status</span><b>' + esc(o.payment_status || 'unpaid') + '</b></div>' +
+      '<hr/>' +
+      '<div class="center sub">Thank you for your order!<br/>Returns within 14 days with this receipt.</div>' +
+    '</div>';
+
+  var label = '';
+  if (isShip){
+    var addr = [o.ship_line1, o.ship_line2, [o.ship_city, o.ship_parish].filter(Boolean).join(', ')].filter(Boolean).join('\n');
+    label =
+      '<div class="doc">' +
+        '<div class="center"><h2>' + (o.fulfilment === 'shipping' ? 'SHIPPING LABEL' : 'DELIVERY NOTE') + '</h2>' +
+          '<div class="sub">Order #' + esc(o.id) + '</div></div>' +
+        '<hr/>' +
+        '<div class="sub">FROM</div>' +
+        '<div class="addr">' + esc([shop.name, shop.address, shop.phone].filter(Boolean).join('\n')) + '</div>' +
+        '<hr/>' +
+        '<div class="sub">SHIP TO</div>' +
+        '<div class="addr"><b>' + esc(o.ship_name || o.customer_name || '') + '</b>\n' + esc(addr) + (o.ship_phone ? '\n' + esc(o.ship_phone) : '') + '</div>' +
+        (o.ship_instructions ? '<div class="sub">Note: ' + esc(o.ship_instructions) + '</div>' : '') +
+        '<hr/>' +
+        '<div class="row"><span>Carrier</span><b>' + esc(o.ship_carrier || 'manual') + (o.ship_service ? ' · ' + esc(o.ship_service) : '') + '</b></div>' +
+        (o.tracking_number
+          ? '<div class="center trk">' + esc(o.tracking_number) + '</div>'
+          : '<div class="center sub">Tracking number pending</div>') +
+      '</div>';
+    // A real carrier label (PDF/PNG), when one was booked, prints on its own page.
+    if (o.tracking_number && o.ship_carrier && o.ship_carrier !== 'manual'){
+      var lu = '/api/orders/' + encodeURIComponent(o.id) + '/label' + (new URLSearchParams(location.search).get('email') ? '?email=' + encodeURIComponent(new URLSearchParams(location.search).get('email')) : '');
+      label += '<div class="doc"><div class="center sub">Carrier label</div><iframe src="' + lu + '" style="width:100%;height:640px;border:0"></iframe></div>';
+    }
+  }
+
+  document.getElementById('out').innerHTML = receipt + label;
+}
+load();
+</script>
+</body>
+</html>

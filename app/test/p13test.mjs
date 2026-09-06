@@ -56,6 +56,22 @@ await call('patch', '/api/admin/mechanics/' + mid, { specialty: 'Brakes', hourly
 A('mechanic patch', q1('SELECT specialty s, hourly_rate_cents c FROM mechanics WHERE id=?', mid).s === 'Brakes' && q1('SELECT hourly_rate_cents c FROM mechanics WHERE id=?', mid).c === 3250);
 r = await call('get', '/api/admin/mechanics?role=mechanic');
 A('mechanic list (rate -> usd, bool)', r.mechanics[0].hourly_rate_usd === 32.5 && r.mechanics[0].is_active === true);
+
+// sales rep commission: default rate on the mechanic, and payout ledger
+await call('patch', '/api/admin/mechanics/' + mid, { commission_pct: 5 });
+r = await call('get', '/api/admin/mechanics?role=mechanic');
+A('mechanic commission_pct patch + list', r.mechanics[0].commission_pct === 5);
+await call('patch', '/api/admin/mechanics/' + mid, { commission_pct: '' });
+r = await call('get', '/api/admin/mechanics?role=mechanic');
+A('mechanic commission_pct clears back to null', r.mechanics[0].commission_pct == null);
+await call('patch', '/api/admin/mechanics/' + mid, { commission_pct: 5 });
+r = await call('post', '/api/admin/mechanics/' + mid + '/commission-payouts', { amount_usd: 40, notes: 'Weekly payout' });
+A('commission payout recorded', r.ok && q1('SELECT amount_cents c FROM commission_payouts WHERE mechanic_id=?', mid).c === 4000);
+r = await call('get', '/api/admin/mechanics/' + mid + '/commission-payouts');
+A('commission payout list', r.payouts.length === 1 && r.payouts[0].amount_usd === 40 && r.payouts[0].notes === 'Weekly payout');
+r = await call('post', '/api/admin/mechanics/' + mid + '/commission-payouts', { amount_usd: 0 });
+A('commission payout rejects a non-positive amount', st === 400);
+
 await call('delete', '/api/admin/mechanics/' + mid);
 A('mechanic soft-delete', q1('SELECT is_active a FROM mechanics WHERE id=?', mid).a === 0);
 sdb.exec(`UPDATE mechanics SET is_active=1 WHERE id=${mid}`);

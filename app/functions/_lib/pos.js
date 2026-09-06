@@ -60,6 +60,15 @@ export function genGiftCardCode() {
   return `GC-${part()}-${part()}`;
 }
 
+// Same shape as genGiftCardCode() but a different prefix, so a redemption
+// instrument's code (e.g. a lottery scratch card sold through the regular
+// sale flow) reads as visibly distinct from a gift card on a receipt.
+export function genRedemptionCode() {
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const part = () => Array.from({ length: 4 }, () => A[Math.floor(Math.random() * A.length)]).join('');
+  return `RD-${part()}-${part()}`;
+}
+
 // Next id for a table whose PK is INTEGER PRIMARY KEY AUTOINCREMENT. D1 batches
 // can't feed one statement's last_row_id into the next, so pre-assign the id
 // and bind it as a literal in the child inserts. SQLite keeps sqlite_sequence

@@ -5,7 +5,7 @@
 -- gift-card admin. Only new structure here is customer_contacts (schema.sql
 -- had it; D1 never did).
 --
---   wrangler d1 migrations apply meltahonda-db --remote
+--   wrangler d1 migrations apply mortysautoparts-db --remote
 
 CREATE TABLE IF NOT EXISTS customer_contacts (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,

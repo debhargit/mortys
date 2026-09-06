@@ -4,8 +4,8 @@
 -- cron-worker). Adds the customer_reminders table (never carried over from
 -- schema.sql) and a job_runs audit log. Throttle state lives in app_config.
 --
---   wrangler d1 migrations apply meltahonda-db --local
---   wrangler d1 migrations apply meltahonda-db
+--   wrangler d1 migrations apply mortysautoparts-db --local
+--   wrangler d1 migrations apply mortysautoparts-db
 
 -- ---- customer reminders (CRM follow-ups; feeds the reminders-digest job) ---
 CREATE TABLE IF NOT EXISTS customer_reminders (

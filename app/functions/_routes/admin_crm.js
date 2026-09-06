@@ -303,14 +303,40 @@ export default function mount(app) {
   });
 
   // ---- coupons ---------------------------------------
+  // A coupon with no coupon_scopes rows applies to the whole cart, exactly as
+  // before; one with rows is restricted to matching categories/products.
+  async function scopesFor(db, codes) {
+    const map = new Map(codes.map((code) => [code, []]));
+    if (!codes.length) return map;
+    const rows = await db.many(
+      `SELECT coupon_code, category, product_img FROM coupon_scopes WHERE coupon_code IN (${codes.map(() => '?').join(',')})`,
+      ...codes
+    );
+    for (const r of rows) map.get(r.coupon_code).push({ category: r.category || null, product_img: r.product_img || null });
+    return map;
+  }
+  async function replaceScopes(db, code, scopes) {
+    const stmts = [{ sql: 'DELETE FROM coupon_scopes WHERE coupon_code = ?', binds: [code] }];
+    for (const s of scopes) {
+      const category = s.category ? String(s.category).trim() || null : null;
+      const productImg = s.product_img ? String(s.product_img).trim() || null : null;
+      if (!category && !productImg) continue;
+      stmts.push({ sql: 'INSERT INTO coupon_scopes (coupon_code, category, product_img) VALUES (?,?,?)', binds: [code, category, productImg] });
+    }
+    await db.batch(stmts);
+  }
+
   app.get('/api/admin/coupons', adminMw, async (c) => {
-    const coupons = await d1(c.env).many(
+    const db = d1(c.env);
+    const coupons = await db.many(
       `SELECT code, kind, amount, min_subtotal, max_redemptions, redeemed_count,
               expires_at, is_active, description, created_at
          FROM coupons ORDER BY created_at DESC`);
-    return c.json({ coupons: coupons.map((r) => boolify(r, ['is_active'])) });
+    const scopeMap = await scopesFor(db, coupons.map((r) => r.code));
+    return c.json({ coupons: coupons.map((r) => ({ ...boolify(r, ['is_active']), scopes: scopeMap.get(r.code) || [] })) });
   });
   app.post('/api/admin/coupons', managerMw, async (c) => {
+    const db = d1(c.env);
     const b = await c.req.json().catch(() => ({}));
     const code = String(b.code || '').trim().toUpperCase();
     const kind = b.kind === 'percent' ? 'percent' : 'flat';
@@ -318,11 +344,12 @@ export default function mount(app) {
     if (!code || !amount || amount <= 0) return c.json({ error: 'code and positive amount required' }, 400);
     if (kind === 'percent' && amount > 100) return c.json({ error: 'percent cannot exceed 100' }, 400);
     try {
-      await d1(c.env).run(
+      await db.run(
         `INSERT INTO coupons (code, kind, amount, min_subtotal, max_redemptions, expires_at, is_active, description)
            VALUES (?,?,?,?,?,?,?,?)`,
         code, kind, amount, Number(b.min_subtotal || 0), b.max_redemptions ? parseInt(b.max_redemptions, 10) : null,
         b.expires_at || null, b.is_active === false ? 0 : 1, b.description || null);
+      if (Array.isArray(b.scopes) && b.scopes.length) await replaceScopes(db, code, b.scopes);
       return c.json({ ok: true, code });
     } catch (e) {
       if (String(e.message || '').includes('UNIQUE')) return c.json({ error: 'That coupon code already exists' }, 400);
@@ -330,13 +357,15 @@ export default function mount(app) {
     }
   });
   app.patch('/api/admin/coupons/:code', managerMw, async (c) => {
+    const db = d1(c.env);
     const b = await c.req.json().catch(() => ({}));
+    const code = String(c.req.param('code')).toUpperCase();
     const fields = ['amount', 'min_subtotal', 'max_redemptions', 'expires_at', 'is_active', 'description'];
     const sets = []; const vals = [];
     for (const f of fields) if (b[f] !== undefined) { sets.push(`${f} = ?`); vals.push(f === 'is_active' ? bit(b[f]) : b[f]); }
-    if (!sets.length) return c.json({ error: 'No fields to update' }, 400);
-    vals.push(String(c.req.param('code')).toUpperCase());
-    await d1(c.env).run(`UPDATE coupons SET ${sets.join(', ')} WHERE code = ?`, ...vals);
+    if (sets.length) { vals.push(code); await db.run(`UPDATE coupons SET ${sets.join(', ')} WHERE code = ?`, ...vals); }
+    if (Array.isArray(b.scopes)) await replaceScopes(db, code, b.scopes);
+    if (!sets.length && !Array.isArray(b.scopes)) return c.json({ error: 'No fields to update' }, 400);
     return c.json({ ok: true });
   });
   app.delete('/api/admin/coupons/:code', managerMw, async (c) => {

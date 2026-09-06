@@ -2,7 +2,7 @@
 //   POST /api/auth/signup, POST /api/auth/reset-default-admin, PATCH /api/me
 //   POST /api/checkout, GET /api/orders, GET /api/orders/:id
 //   GET  /api/points, GET /api/config, GET /api/vin/:vin
-//   POST /api/newsletter, POST /api/service, POST /api/coupon/validate
+//   POST /api/newsletter, POST /api/coupon/validate
 //   GET/POST/DELETE /api/vehicles[/:id]         (saved_vehicles)
 //   GET/POST/DELETE /api/my-addresses[/:id]
 //   GET/POST /api/my-messages
@@ -18,6 +18,14 @@ import { sessionCookie } from '../_lib/session.js';
 import { publicUser } from './auth.js';
 import { sendEmail, templates } from '../_lib/mailer.js';
 import { getShopSettings } from '../_lib/shop.js';
+import { verifyQuote } from '../_lib/carriers/index.js';
+import { bookShipment } from './shipping.js';
+import { fygaroEnabled, buildCheckoutUrl } from '../_lib/fygaro.js';
+import { bestUnitPriceCents, loadBreaksByImg, loadActiveSaleCentsByImg, effectiveBaseCents, loadTierPricesByImg, tierCentsFor } from '../_lib/price_breaks.js';
+import { loadKitComponentsByImg, kitRollupCents } from '../_lib/kits.js';
+import { loadCoupon, computeCouponDiscount } from '../_lib/coupons.js';
+
+const SITE_BASE = 'https://mortsautoparts.com';
 
 const POINTS_USD_RATE = 0.05;
 const r2 = (n) => Math.round(n * 100) / 100;
@@ -27,6 +35,75 @@ const digits7 = (s) => String(s || '').replace(/[^\d]/g, '').slice(-7);
 async function pointsBalance(db, userId) {
   const r = await db.one('SELECT COALESCE(SUM(delta),0) AS b FROM points_transactions WHERE user_id = ?', userId);
   return (r && r.b) || 0;
+}
+
+// Reprice a fetched line list against each product's active sale price and
+// quantity breaks -- checkout always starts from products.price_cents (never
+// a client-supplied price), so this only ever brings the charged price
+// *down* to whichever of {regular, sale, bulk} the line qualifies for right
+// now. Mutates price_usd in place; skips lines with no price (already
+// flagged unpriced elsewhere).
+async function userTier(db, uid) {
+  if (!uid) return 'retail';
+  const r = await db.one('SELECT price_tier FROM users WHERE id = ?', uid);
+  return (r && r.price_tier) || 'retail';
+}
+
+async function repriceForQty(db, items, tier) {
+  const imgs = items.map((it) => it.product_img);
+  const [breaksByImg, saleByImg, tierByImg] = await Promise.all([
+    loadBreaksByImg(db, imgs), loadActiveSaleCentsByImg(db, imgs),
+    tier && tier !== 'retail' ? loadTierPricesByImg(db, imgs) : Promise.resolve(new Map()),
+  ]);
+  for (const it of items) {
+    if (it.price_usd == null) continue;
+    const retailCents = cents(it.price_usd);   // checkout always starts from products.price_cents
+    const tierCents = tierCentsFor(tierByImg.get(it.product_img), tier);
+    const effBase = effectiveBaseCents(retailCents, saleByImg.get(it.product_img), tierCents);
+    const breaks = breaksByImg.get(it.product_img) || [];
+    const effCents = bestUnitPriceCents(effBase, breaks, it.qty, retailCents);
+    if (effCents != null && effCents < retailCents) it.price_usd = r2(effCents / 100);
+  }
+  // A roll-up kit is priced from its components, not products.price_cents.
+  const rollupImgs = items.filter((it) => it.is_kit && it.kit_price_mode === 'rollup').map((it) => it.product_img);
+  if (rollupImgs.length) {
+    const compMap = await loadKitComponentsByImg(db, rollupImgs);
+    for (const it of items) {
+      if (it.is_kit && it.kit_price_mode === 'rollup') {
+        it.price_usd = r2(kitRollupCents(compMap.get(it.product_img) || []) / 100);
+      }
+    }
+  }
+  return items;
+}
+
+// A kit inherits its components' online-block: a kit whose recipe contains a
+// restricted or redeemable part can't be sold online either. Returns the
+// sub-list of `items` that may not check out online.
+async function blockedForOnline(db, items) {
+  const blocked = items.filter(onlineCheckoutBlocked);
+  const done = new Set(blocked.map((it) => it.product_img));
+  const kitImgs = items.filter((it) => it.is_kit && !done.has(it.product_img)).map((it) => it.product_img);
+  if (kitImgs.length) {
+    const compMap = await loadKitComponentsByImg(db, kitImgs);
+    for (const it of items) {
+      if (!it.is_kit || done.has(it.product_img)) continue;
+      if ((compMap.get(it.product_img) || []).some(onlineCheckoutBlocked)) blocked.push(it);
+    }
+  }
+  return blocked;
+}
+
+// Anything that needs a human at the counter -- an explicit in-store-only
+// flag, or a safeguard (manager approval / ID / Tax ID) that an unattended
+// web checkout has no way to actually satisfy -- blocks online checkout
+// entirely, same as instore_only always has. A redeemable item (e.g. a
+// lottery scratch card) is blocked too: minting its redemption code only
+// happens inside the POS sale path, so selling one online today would just
+// charge the customer with no code ever created.
+function onlineCheckoutBlocked(it) {
+  return !!(it.restricted_instore_only || it.restricted_manager_approval ||
+    it.restricted_id_required || it.restricted_tax_id_required || it.is_redeemable);
 }
 async function nextAccountNumber(db) {
   const rows = await db.many("SELECT account_number AS a FROM users WHERE account_number LIKE 'C-%'");
@@ -39,26 +116,75 @@ async function nextId(db, table) {
   return r.n;
 }
 
-async function loadCoupon(db, rawCode) {
-  const code = String(rawCode || '').trim().toUpperCase();
-  if (!code) return { ok: false, error: 'Coupon code required' };
-  const c = await db.one(
-    `SELECT code, kind, amount, min_subtotal, max_redemptions, redeemed_count, expires_at, is_active, description
-       FROM coupons WHERE code = ?`, code);
-  if (!c) return { ok: false, error: 'Invalid coupon code' };
-  if (!c.is_active) return { ok: false, error: 'This coupon is no longer active' };
-  if (c.expires_at && new Date(c.expires_at) < new Date()) return { ok: false, error: 'This coupon has expired' };
-  if (c.max_redemptions != null && c.redeemed_count >= c.max_redemptions)
-    return { ok: false, error: 'This coupon has reached its redemption limit' };
-  return { ok: true, coupon: c };
+// loadCoupon/computeCouponDiscount now live in _lib/coupons.js, shared with
+// the POS tender (pos_txn.js) so a code behaves identically at the counter.
+
+// ---- shipping -------------------------------------------------------
+const PARISHES = [
+  'Kingston', 'St. Andrew', 'St. Catherine', 'Clarendon', 'Manchester',
+  'St. Elizabeth', 'Westmoreland', 'Hanover', 'St. James', 'Trelawny',
+  'St. Ann', 'St. Mary', 'Portland', 'St. Thomas',
+];
+const CARRIERS = ['dhl', 'fedex', 'knutsford', 'manual'];
+
+function enabledCarriers(s) {
+  const out = [];
+  if (s.carrier_dhl_enabled) out.push('dhl');
+  if (s.carrier_fedex_enabled) out.push('fedex');
+  if (s.carrier_knutsford_enabled) out.push('knutsford');
+  if (s.carrier_manual_enabled !== false && s.carrier_manual_enabled !== 0) out.push('manual');
+  return out;
 }
-function computeCouponDiscount(coupon, subtotal) {
-  if (subtotal < Number(coupon.min_subtotal || 0))
-    return { discount: 0, reason: `Minimum subtotal $${Number(coupon.min_subtotal).toFixed(2)} not met` };
-  const raw = coupon.kind === 'percent'
-    ? r2(subtotal * (Number(coupon.amount) / 100))
-    : Number(coupon.amount);
-  return { discount: Math.min(raw, subtotal), reason: null };
+
+// Pull the fulfilment + address off a checkout body into { fulfilment, fee,
+// cols } where `cols` is the exact set of orders columns to write. A pickup
+// order writes nothing but the default 'pickup'. The fee is trusted from the
+// client for now (clamped >= 0); Phase 3 swaps it for a signed quote token.
+// `trusted` is the verified /api/shipping/quote token payload, when present:
+// { carrier, service, amount }. It wins over the raw client fee/carrier so a
+// shopper can't hand-edit the freight down.
+function parseShip(b, trusted) {
+  const ful = ['pickup', 'delivery', 'shipping'].includes(b.fulfilment) ? b.fulfilment : 'pickup';
+  if (ful === 'pickup') return { fulfilment: 'pickup', fee: 0, cols: { fulfilment: 'pickup' } };
+  const s = (v, n = 200) => (v == null ? null : (String(v).trim().slice(0, n) || null));
+  const fee = trusted ? Math.max(0, r2(trusted.amount)) : Math.max(0, r2(Number(b.ship_fee_usd) || 0));
+  const carrier = trusted && CARRIERS.includes(trusted.carrier) ? trusted.carrier
+    : (CARRIERS.includes(b.ship_carrier) ? b.ship_carrier : 'manual');
+  return {
+    fulfilment: ful,
+    fee,
+    cols: {
+      fulfilment: ful,
+      ship_name: s(b.ship_name, 120),
+      ship_phone: s(b.ship_phone, 40),
+      ship_line1: s(b.ship_line1),
+      ship_line2: s(b.ship_line2),
+      ship_city: s(b.ship_city, 80),
+      ship_parish: PARISHES.includes(b.ship_parish) ? b.ship_parish : null,
+      ship_instructions: s(b.ship_instructions, 600),
+      ship_carrier: carrier,
+      ship_service: (trusted && trusted.service) ? String(trusted.service).slice(0, 80) : s(b.ship_service, 80),
+      ship_fee_cents: cents(fee),
+    },
+  };
+}
+function shipError(ship) {
+  if (ship.fulfilment === 'pickup') return null;
+  if (!ship.cols.ship_line1) return 'A delivery address (street) is required.';
+  if (!ship.cols.ship_parish) return 'Please choose a parish.';
+  if (!ship.cols.ship_name) return 'A recipient name is required for delivery.';
+  return null;
+}
+// Build an `INSERT INTO orders` statement from a column->value map, so the
+// authed and guest checkout paths can share one insert with different
+// columns -- also reused by _lib/recurring.js to generate an order the same
+// way checkout does, outside of any request.
+export function orderInsertStmt(orderId, cols) {
+  const keys = Object.keys(cols);
+  return {
+    sql: `INSERT INTO orders (id, ${keys.join(', ')}) VALUES (?, ${keys.map(() => '?').join(', ')})`,
+    binds: [orderId, ...keys.map((k) => cols[k])],
+  };
 }
 
 export default function mount(app) {
@@ -89,16 +215,16 @@ export default function mount(app) {
   app.post('/api/auth/reset-default-admin', async (c) => {
     const db = d1(c.env);
     const hash = await bcrypt.hash('password123', 10);
-    const existing = await db.one("SELECT id FROM users WHERE email = 'admin@visionautosolutions.com'");
+    const existing = await db.one("SELECT id FROM users WHERE email = 'admin@mortysautoparts.com'");
     if (existing) {
       await db.run('UPDATE users SET is_admin = 1, password_hash = ? WHERE id = ?', hash, existing.id);
     } else {
       const id = await nextId(db, 'users');
       await db.run(
         `INSERT INTO users (id, email, name, password_hash, via, is_admin)
-           VALUES (?, 'admin@visionautosolutions.com', 'Vision Auto Solutions Admin', ?, 'local', 1)`, id, hash);
+           VALUES (?, 'admin@mortysautoparts.com', 'Morty''s Auto Parts Admin', ?, 'local', 1)`, id, hash);
     }
-    return c.json({ ok: true, email: 'admin@visionautosolutions.com', password: 'password123' });
+    return c.json({ ok: true, email: 'admin@mortysautoparts.com', password: 'password123' });
   });
 
   // ---- self-serve profile edit ------------------------------------
@@ -144,10 +270,21 @@ export default function mount(app) {
     if (!showPrices) {
       try { const u = await currentUser(c.req.raw, c.env); showPrices = !!(u && (u.is_admin || u.is_staff || u.show_prices)); } catch { /* guest */ }
     }
+    const fygaro = ordering && fygaroEnabled(c.env, s);
     return c.json({
-      payments: { stripe_enabled: false, stripe_publishable_key: null, methods: ordering ? ['cash_pickup', 'bank_transfer'] : [] },
+      payments: {
+        stripe_enabled: false, stripe_publishable_key: null,
+        fygaro_enabled: !!fygaro,
+        methods: ordering ? ['cash_pickup', 'bank_transfer', ...(fygaro ? ['fygaro'] : [])] : [],
+      },
       ordering_enabled: ordering,
       show_prices: showPrices,
+      shipping: {
+        carriers: enabledCarriers(s),
+        parishes: PARISHES,
+        origin_parish: s.ship_origin_parish || null,
+        local_flat_usd: Number(s.ship_local_flat_usd) || 0,
+      },
     });
   });
 
@@ -158,18 +295,18 @@ export default function mount(app) {
     const r = await loadCoupon(db, (await c.req.json().catch(() => ({}))).code);
     if (!r.ok) return c.json({ error: r.error }, 400);
     const items = await db.many(
-      'SELECT c.qty, p.price_cents / 100.0 AS price_usd FROM cart_items c JOIN products p ON p.img = c.product_img WHERE c.user_id = ?', uid);
+      'SELECT c.product_img, c.qty, p.price_cents / 100.0 AS price_usd, p.category FROM cart_items c JOIN products p ON p.img = c.product_img WHERE c.user_id = ?', uid);
+    await repriceForQty(db, items, await userTier(db, uid));
     const subtotal = r2(items.reduce((s, it) => s + Number(it.price_usd || 0) * it.qty, 0));
-    const { discount, reason } = computeCouponDiscount(r.coupon, subtotal);
+    const { discount, reason } = computeCouponDiscount(r.coupon, items, r.scopes);
     if (discount === 0 && reason) return c.json({ error: reason }, 400);
     return c.json({ code: r.coupon.code, kind: r.coupon.kind, amount: r.coupon.amount, description: r.coupon.description, subtotal, discount_usd: discount });
   });
 
   // ---- checkout ------------------------------------------------
-  // Online ordering is disabled: the storefront is quote-first now. A cart
-  // "checkout" must go to POST /api/inquiry, which files a quote request the
-  // counter prices by hand. This route stays mounted only to give a stale
-  // client a clear answer instead of silently creating an order.
+  // Checkout for a signed-in customer. Prices come from the server-side cart;
+  // shipping (fulfilment + address + fee) rides along and the fee is added to
+  // the order total after discounts. Card is still rejected (no Stripe here).
   app.post('/api/checkout', authMw, async (c) => {
     const settings = await getShopSettings(c.env);
     if (!settings.storefront_prices) {
@@ -182,16 +319,31 @@ export default function mount(app) {
     const uid = c.get('user').id;
     const b = await c.req.json().catch(() => ({}));
     const method = b.payment_method || 'cash_pickup';
-    if (!['cash_pickup', 'bank_transfer', 'stripe'].includes(method)) return c.json({ error: 'Invalid payment_method' }, 400);
+    if (!['cash_pickup', 'bank_transfer', 'stripe', 'fygaro', 'invoice_email'].includes(method)) return c.json({ error: 'Invalid payment_method' }, 400);
     if (method === 'stripe') return c.json({ error: 'Online card payment is not available' }, 400);
+    if (method === 'fygaro' && !fygaroEnabled(c.env, settings)) return c.json({ error: 'Card payment is not available right now.' }, 400);
+
+    const ship = parseShip(b, await verifyQuote(c.env, b.ship_quote_token));
+    const shipErr = shipError(ship);
+    if (shipErr) return c.json({ error: shipErr, code: 'ship_incomplete' }, 400);
 
     const items = await db.many(
-      `SELECT c.product_img, c.qty, p.price_cents / 100.0 AS price_usd, p.name, p.make_model
+      `SELECT c.product_img, c.qty, p.price_cents / 100.0 AS price_usd, p.name, p.make_model, p.category,
+              p.is_kit, p.kit_price_mode,
+              p.restricted_instore_only, p.restricted_manager_approval, p.restricted_id_required, p.restricted_tax_id_required, p.is_redeemable
          FROM cart_items c JOIN products p ON p.img = c.product_img WHERE c.user_id = ?`, uid);
     if (!items.length) return c.json({ error: 'Cart is empty' }, 400);
     if (items.some((it) => it.price_usd == null)) {
       return c.json({ error: 'Some items in your cart are not priced — remove them or submit a quote request for the whole cart.', code: 'unpriced_items' }, 400);
     }
+    const instoreOnly = await blockedForOnline(db, items);
+    if (instoreOnly.length) {
+      return c.json({
+        error: `${instoreOnly.map((it) => it.name).join(', ')} can only be purchased in-store — remove ${instoreOnly.length === 1 ? 'it' : 'them'} from your cart to check out online.`,
+        code: 'restricted_instore_only',
+      }, 400);
+    }
+    await repriceForQty(db, items, await userTier(db, uid));
     const subtotal = r2(items.reduce((s, it) => s + Number(it.price_usd || 0) * it.qty, 0));
     let total = subtotal;
 
@@ -199,7 +351,7 @@ export default function mount(app) {
     if (b.coupon_code) {
       const cr = await loadCoupon(db, b.coupon_code);
       if (cr.ok) {
-        const cd = computeCouponDiscount(cr.coupon, total);
+        const cd = computeCouponDiscount(cr.coupon, items, cr.scopes);
         if (cd.discount > 0) { couponCode = cr.coupon.code; couponDiscount = cd.discount; total = r2(total - couponDiscount); }
       }
     }
@@ -213,12 +365,15 @@ export default function mount(app) {
       total = Math.max(0, r2(total - pointsDiscount));
     }
 
+    const merchTotal = total;                       // earns points; freight excluded
+    const grandTotal = r2(merchTotal + ship.fee);   // what the customer pays
+
     const orderId = await nextId(db, 'orders');
-    const stmts = [
-      { sql: `INSERT INTO orders (id, user_id, total_cents, notes, payment_method, coupon_code, coupon_discount_cents)
-                VALUES (?,?,?,?,?,?,?)`,
-        binds: [orderId, uid, cents(total), b.notes || null, method, couponCode, cents(couponDiscount)] },
-    ];
+    const stmts = [orderInsertStmt(orderId, {
+      user_id: uid, total_cents: cents(grandTotal), notes: b.notes || null,
+      payment_method: method, coupon_code: couponCode, coupon_discount_cents: cents(couponDiscount),
+      ...ship.cols,
+    })];
     for (const it of items) {
       stmts.push({ sql: 'INSERT INTO order_items (order_id, product_img, qty, price_cents) VALUES (?,?,?,?)',
         binds: [orderId, it.product_img, it.qty, cents(it.price_usd || 0)] });
@@ -235,7 +390,7 @@ export default function mount(app) {
     stmts.push({ sql: 'DELETE FROM cart_items WHERE user_id = ?', binds: [uid] });
     await db.batch(stmts);
 
-    const earnedPoints = Math.floor(total);
+    const earnedPoints = Math.floor(merchTotal);
     if (earnedPoints > 0) {
       await db.run("INSERT INTO points_transactions (user_id, delta, reason, reference_id) VALUES (?,?,'purchase',?)",
         uid, earnedPoints, orderId);
@@ -244,12 +399,141 @@ export default function mount(app) {
     const u = await db.one('SELECT email, name FROM users WHERE id = ?', uid);
     if (u && u.email) {
       const li = items.map((it) => ({ product_img: it.product_img, qty: it.qty, price_usd: it.price_usd, name: it.name, make_model: it.make_model }));
-      c.executionCtx?.waitUntil?.(sendEmail(c.env, { to: u.email, ...templates.orderEmail({ name: u.name, orderId, items: li, total }) }).catch(() => {}));
+      const tpl = method === 'invoice_email'
+        ? templates.invoiceEmail({ name: u.name, orderId, items: li, total: grandTotal, payUrl: `https://mortsautoparts.com/order-print.html?order=${orderId}` })
+        : templates.orderEmail({ name: u.name, orderId, items: li, total: grandTotal });
+      c.executionCtx?.waitUntil?.(sendEmail(c.env, { to: u.email, ...tpl }).catch(() => {}));
     }
 
+    let shipResult = null;
+    if (ship.fulfilment !== 'pickup') {
+      shipResult = await bookShipment(c.env, orderId).catch(() => null);
+    }
+
+    const checkoutUrl = method === 'fygaro'
+      ? await buildCheckoutUrl({ env: c.env, settings, orderId, amount: grandTotal, redirectUrl: `${SITE_BASE}/order-success.html?order=${orderId}` })
+      : null;
+
     return c.json({
-      order_id: orderId, subtotal_usd: subtotal, total_usd: total, status: 'pending', payment_method: method,
-      checkout_url: null, points_redeemed: redeemPts, points_discount_usd: pointsDiscount, points_earned: earnedPoints,
+      order_id: orderId, subtotal_usd: subtotal, total_usd: grandTotal, ship_fee_usd: ship.fee, fulfilment: ship.fulfilment,
+      status: 'pending', payment_method: method, checkout_url: checkoutUrl,
+      tracking_number: shipResult && shipResult.tracking_number || null,
+      ship_status: shipResult ? shipResult.ship_status : null,
+      points_redeemed: redeemPts, points_discount_usd: pointsDiscount, points_earned: earnedPoints,
+      coupon_code: couponCode, coupon_discount_usd: couponDiscount,
+    });
+  });
+
+  // Guest checkout — no account. Same body as /api/checkout plus contact
+  // (name / email / phone) and an explicit items:[{img,qty}] list, since a
+  // guest has no server-side cart. No loyalty points; coupons still apply.
+  app.post('/api/checkout/guest', async (c) => {
+    const settings = await getShopSettings(c.env);
+    if (!settings.storefront_prices) {
+      return c.json({
+        error: 'Online ordering is disabled. Please submit a quote request and the parts desk will price it and call you back.',
+        code: 'quote_only',
+      }, 400);
+    }
+    const db = d1(c.env);
+    const b = await c.req.json().catch(() => ({}));
+
+    const name = (b.name || '').trim();
+    const email = (b.email || '').trim().toLowerCase();
+    const phone = (b.phone || '').trim();
+    if (!name || (!email && !phone)) return c.json({ error: 'Name and an email or phone are required' }, 400);
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return c.json({ error: 'That email address looks wrong' }, 400);
+
+    const method = b.payment_method || 'cash_pickup';
+    if (!['cash_pickup', 'bank_transfer', 'fygaro', 'invoice_email'].includes(method)) return c.json({ error: 'Invalid payment_method' }, 400);
+    if (method === 'invoice_email' && !email) return c.json({ error: 'An email address is required to receive an invoice.' }, 400);
+    if (method === 'fygaro' && !fygaroEnabled(c.env, settings)) return c.json({ error: 'Card payment is not available right now.' }, 400);
+
+    const ship = parseShip(b, await verifyQuote(c.env, b.ship_quote_token));
+    const shipErr = shipError(ship);
+    if (shipErr) return c.json({ error: shipErr, code: 'ship_incomplete' }, 400);
+
+    const reqItems = (Array.isArray(b.items) ? b.items : []).filter((it) => it && it.img);
+    if (!reqItems.length) return c.json({ error: 'Cart is empty' }, 400);
+    const imgs = [...new Set(reqItems.map((it) => String(it.img)))].slice(0, 200);
+    const rows = await db.many(
+      `SELECT img, price_cents / 100.0 AS price_usd, name, make_model, category, is_kit, kit_price_mode,
+              restricted_instore_only, restricted_manager_approval, restricted_id_required, restricted_tax_id_required, is_redeemable
+         FROM products WHERE img IN (${imgs.map(() => '?').join(',')})`, ...imgs);
+    const byImg = new Map(rows.map((r) => [r.img, r]));
+    const items = reqItems.map((it) => {
+      const p = byImg.get(String(it.img));
+      if (!p) return null;
+      return { product_img: p.img, qty: Math.max(1, parseInt(it.qty, 10) || 1), price_usd: p.price_usd, name: p.name, make_model: p.make_model, category: p.category,
+        is_kit: p.is_kit, kit_price_mode: p.kit_price_mode,
+        restricted_instore_only: p.restricted_instore_only, restricted_manager_approval: p.restricted_manager_approval,
+        restricted_id_required: p.restricted_id_required, restricted_tax_id_required: p.restricted_tax_id_required, is_redeemable: p.is_redeemable };
+    }).filter(Boolean);
+    if (!items.length) return c.json({ error: 'None of those items are still available' }, 400);
+    if (items.some((it) => it.price_usd == null)) {
+      return c.json({ error: 'Some items in your cart are not priced — submit a quote request for the whole cart.', code: 'unpriced_items' }, 400);
+    }
+    const instoreOnly = await blockedForOnline(db, items);
+    if (instoreOnly.length) {
+      return c.json({
+        error: `${instoreOnly.map((it) => it.name).join(', ')} can only be purchased in-store — remove ${instoreOnly.length === 1 ? 'it' : 'them'} from your cart to check out online.`,
+        code: 'restricted_instore_only',
+      }, 400);
+    }
+    await repriceForQty(db, items, 'retail');   // guest checkout is always retail
+
+    const subtotal = r2(items.reduce((s, it) => s + Number(it.price_usd || 0) * it.qty, 0));
+    let total = subtotal;
+    let couponCode = null, couponDiscount = 0;
+    if (b.coupon_code) {
+      const cr = await loadCoupon(db, b.coupon_code);
+      if (cr.ok) {
+        const cd = computeCouponDiscount(cr.coupon, items, cr.scopes);
+        if (cd.discount > 0) { couponCode = cr.coupon.code; couponDiscount = cd.discount; total = r2(total - couponDiscount); }
+      }
+    }
+    const grandTotal = r2(total + ship.fee);
+
+    const orderId = await nextId(db, 'orders');
+    const stmts = [orderInsertStmt(orderId, {
+      user_id: null, total_cents: cents(grandTotal), notes: b.notes || null,
+      payment_method: method, coupon_code: couponCode, coupon_discount_cents: cents(couponDiscount),
+      customer_name: name, customer_email: email || null, customer_phone: phone || null, source: 'storefront',
+      ...ship.cols,
+    })];
+    for (const it of items) {
+      stmts.push({ sql: 'INSERT INTO order_items (order_id, product_img, qty, price_cents) VALUES (?,?,?,?)',
+        binds: [orderId, it.product_img, it.qty, cents(it.price_usd || 0)] });
+    }
+    if (couponCode) {
+      stmts.push({ sql: `INSERT OR IGNORE INTO coupon_redemptions (coupon_code, user_id, order_id, discount_usd) VALUES (?,?,?,?)`,
+        binds: [couponCode, null, orderId, couponDiscount] });
+      stmts.push({ sql: 'UPDATE coupons SET redeemed_count = redeemed_count + 1 WHERE code = ?', binds: [couponCode] });
+    }
+    await db.batch(stmts);
+
+    if (email) {
+      const li = items.map((it) => ({ product_img: it.product_img, qty: it.qty, price_usd: it.price_usd, name: it.name, make_model: it.make_model }));
+      const tpl = method === 'invoice_email'
+        ? templates.invoiceEmail({ name, orderId, items: li, total: grandTotal, payUrl: `https://mortsautoparts.com/order-print.html?order=${orderId}&email=${encodeURIComponent(email)}` })
+        : templates.orderEmail({ name, orderId, items: li, total: grandTotal });
+      c.executionCtx?.waitUntil?.(sendEmail(c.env, { to: email, ...tpl }).catch(() => {}));
+    }
+
+    let shipResult = null;
+    if (ship.fulfilment !== 'pickup') {
+      shipResult = await bookShipment(c.env, orderId).catch(() => null);
+    }
+
+    const checkoutUrl = method === 'fygaro'
+      ? await buildCheckoutUrl({ env: c.env, settings, orderId, amount: grandTotal, redirectUrl: `${SITE_BASE}/order-success.html?order=${orderId}` })
+      : null;
+
+    return c.json({
+      order_id: orderId, subtotal_usd: subtotal, total_usd: grandTotal, ship_fee_usd: ship.fee, fulfilment: ship.fulfilment,
+      status: 'pending', payment_method: method, checkout_url: checkoutUrl,
+      tracking_number: shipResult && shipResult.tracking_number || null,
+      ship_status: shipResult ? shipResult.ship_status : null,
       coupon_code: couponCode, coupon_discount_usd: couponDiscount,
     });
   });
@@ -261,16 +545,47 @@ export default function mount(app) {
          FROM orders WHERE user_id = ? ORDER BY created_at DESC`, c.get('user').id);
     return c.json({ orders });
   });
+  const ORDER_DETAIL_COLS = `id, total_cents / 100.0 AS total_usd, ship_fee_cents / 100.0 AS ship_fee_usd,
+      coupon_code, coupon_discount_cents / 100.0 AS coupon_discount_usd,
+      status, payment_method, payment_status, notes, created_at,
+      customer_name, customer_email, customer_phone,
+      fulfilment, ship_name, ship_phone, ship_line1, ship_line2, ship_city, ship_parish,
+      ship_instructions, ship_carrier, ship_service, ship_status, tracking_number`;
+
   app.get('/api/orders/:id', authMw, async (c) => {
     const db = d1(c.env);
     const order = await db.one(
-      `SELECT id, total_cents / 100.0 AS total_usd, status, payment_method, payment_status, notes, created_at
-         FROM orders WHERE id = ? AND user_id = ?`, c.req.param('id'), c.get('user').id);
+      `SELECT ${ORDER_DETAIL_COLS} FROM orders WHERE id = ? AND user_id = ?`, c.req.param('id'), c.get('user').id);
     if (!order) return c.json({ error: 'Order not found' }, 404);
     const items = await db.many(
       `SELECT oi.product_img, oi.qty, oi.price_cents / 100.0 AS price_usd, p.name, p.make_model
          FROM order_items oi LEFT JOIN products p ON p.img = oi.product_img WHERE oi.order_id = ?`, c.req.param('id'));
     return c.json({ order, items });
+  });
+
+  // Order detail for the print/receipt page. No session needed: a guest passes
+  // ?email= and it must match the order's captured contact email; a signed-in
+  // customer can also read their own order this way.
+  app.get('/api/orders/:id/print', async (c) => {
+    const db = d1(c.env);
+    const id = c.req.param('id');
+    const order = await db.one(`SELECT ${ORDER_DETAIL_COLS}, user_id FROM orders WHERE id = ?`, id);
+    if (!order) return c.json({ error: 'Order not found' }, 404);
+    const email = (c.req.query('email') || '').trim().toLowerCase();
+    let ok = email && order.customer_email && email === String(order.customer_email).toLowerCase();
+    if (!ok && order.user_id != null) {
+      try { const u = await currentUser(c.req.raw, c.env); ok = !!(u && (u.id === order.user_id || u.is_admin || u.is_staff)); } catch { /* guest */ }
+    }
+    if (!ok) return c.json({ error: 'Not authorised to view this order' }, 403);
+    delete order.user_id;
+    const items = await db.many(
+      `SELECT oi.product_img, oi.qty, oi.price_cents / 100.0 AS price_usd, p.name, p.make_model
+         FROM order_items oi LEFT JOIN products p ON p.img = oi.product_img WHERE oi.order_id = ?`, id);
+    const shop = await getShopSettings(c.env);
+    return c.json({
+      order, items,
+      shop: { name: shop.company_name, address: shop.address, phone: shop.phone, email: shop.email },
+    });
   });
 
   // ---- newsletter -----------------------------------------
@@ -280,22 +595,6 @@ export default function mount(app) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return c.json({ error: 'Valid email required' }, 400);
     await d1(c.env).run('INSERT OR IGNORE INTO newsletter_subscribers (email, source) VALUES (?, ?)', email, b.source || null);
     return c.json({ ok: true });
-  });
-
-  // ---- service booking ----------------------------------
-  app.post('/api/service', async (c) => {
-    const db = d1(c.env);
-    const b = await c.req.json().catch(() => ({}));
-    if (!b.name || !b.phone) return c.json({ error: 'name and phone are required' }, 400);
-    let uid = null;
-    try { const u = await currentUser(c.req.raw, c.env); uid = u ? u.id : null; } catch { /* anon booking */ }
-    const r = await db.run(
-      `INSERT INTO service_appointments
-         (user_id, name, phone, email, vehicle_make, vehicle_model, vehicle_year, service_type, preferred_date, time_slot, notes)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-      uid, b.name, b.phone, b.email || null, b.make || null, b.model || null,
-      b.year ? parseInt(b.year, 10) : null, b.service_type || null, b.preferred_date || null, b.time_slot || null, b.notes || null);
-    return c.json({ id: r.meta ? r.meta.last_row_id : undefined });
   });
 
   // ---- VIN decode (NHTSA proxy) -----------------------

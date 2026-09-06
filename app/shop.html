@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Shop Parts — Vision Auto Solutions Ltd</title>
-<meta name="description" content="Browse in-stock Honda and Acura parts at Vision Auto Solutions Ltd, Kingston Jamaica. Filter by category, search by model, compare prices." />
+<title>Shop Parts — Morty's Auto Parts</title>
+<meta name="description" content="Genuine &amp; aftermarket parts for Toyota, Honda, Nissan, Suzuki, Mitsubishi, Isuzu, Subaru &amp; Mazda — Morty's Auto Parts, Kingston Jamaica. Filter by category, search by model, compare prices." />
 <style>
 
   :root{
@@ -110,8 +110,7 @@
 
   header.main .row{display:flex;align-items:center;justify-content:space-between;height:56px;gap:16px}
   .brand{display:flex;align-items:center;gap:12px}
-  .logo{width:48px;height:48px;border-radius:50%;overflow:hidden;border:3px solid var(--accent);box-shadow:0 4px 12px rgba(0,0,0,.2);flex-shrink:0;background:#fff}
-  .logo img{width:100%;height:100%;object-fit:cover;display:block}
+  .logo{width:48px;height:48px;border-radius:10px;background:linear-gradient(160deg,var(--sky) 52%,var(--red) 52%);display:grid;place-items:center;color:#fff;font-weight:800;letter-spacing:.5px;box-shadow:0 4px 14px rgba(14,165,233,.35);text-shadow:0 1px 3px rgba(0,0,0,.3)}
   .brand h1{
     font-size:26px;margin:0;line-height:1.1;font-weight:900;letter-spacing:.3px;
     color:var(--sky);
@@ -119,7 +118,7 @@
   @media (min-width:980px){
     .brand h1{font-size:30px}
     header.main .row{height:62px}
-    .logo{width:54px;height:54px}
+    .logo{width:54px;height:54px;font-size:17px}
   }
   .brand small{color:var(--muted);font-size:12px;letter-spacing:.4px;text-transform:uppercase}
   nav.primary{display:flex;gap:6px}
@@ -367,16 +366,6 @@
   .row-active{outline:2px solid var(--sky);outline-offset:2px}
 
 
-  /* SERVICES */
-  .services-bg{background:#fff;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
-  .services{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
-  .svc{background:linear-gradient(180deg,#fff,#fafafa);border:1px solid var(--line);border-radius:14px;padding:28px;transition:transform .2s,box-shadow .2s}
-  .svc:hover{transform:translateY(-3px);box-shadow:var(--shadow)}
-  .svc .ico{width:54px;height:54px;border-radius:12px;display:grid;place-items:center;margin-bottom:14px;background:var(--navy)}
-  .svc .ico svg{width:28px;height:28px;fill:var(--accent)}
-  .svc h4{margin:0 0 8px;font-size:18px}
-  .svc p{margin:0;color:var(--muted);font-size:14px}
-
   /* RECENTLY VIEWED */
   .recent-strip{padding:20px 0;background:#0f1720;color:#fff;display:none}
   .recent-strip.show{display:block}
@@ -497,7 +486,7 @@
   footer a:hover{color:var(--accent)}
   footer ul{list-style:none;padding:0;margin:0;display:grid;gap:4px}
   footer .brand-foot{display:flex;align-items:center;gap:10px;margin-bottom:6px}
-  footer .brand-foot .logo{width:32px;height:32px;border-width:2px}
+  footer .brand-foot .logo{width:32px;height:32px;font-size:12px}
   footer .brand-foot b{color:#fff;font-size:14px}
   footer .copy{border-top:1px solid rgba(255,255,255,.08);padding:8px 0;font-size:12px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;color:#94a3b8}
   footer .note{background:rgba(255,183,3,.08);border:1px solid rgba(255,183,3,.25);color:#fde68a;padding:6px 10px;border-radius:6px;font-size:12px;margin-bottom:10px}
@@ -777,6 +766,10 @@
   .pay-methods small{display:block;color:var(--muted);font-weight:500;font-size:11px;margin-top:2px;margin-left:24px;line-height:1.3}
   body[data-theme="dark"] .pay-methods label{background:#0f1f33;color:#e5e7eb;border-color:rgba(255,255,255,.1)}
   body[data-theme="dark"] .pay-methods label.active{background:rgba(214,40,40,.18)}
+  /* SHIPPING */
+  .shFld{width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:7px;font-size:13px;font-family:inherit;box-sizing:border-box;background:var(--card,#fff);color:inherit}
+  #shipBox .shFul{transition:all .15s}
+  .ship-line{grid-column:1/-1;display:flex;justify-content:space-between;font-size:12px;color:#0369a1;padding:4px 0 0}
   .cart-checkout{width:100%;background:#25d366;color:#fff;border:none;padding:13px;border-radius:10px;font-weight:800;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px}
   .cart-checkout.stripe{background:#635bff}
   .cart-checkout.stripe:hover{background:#4f46e5}
@@ -812,10 +805,9 @@
     background:#075e54;color:#fff;padding:14px 16px;display:flex;gap:12px;align-items:center;
   }
   .wa-head .avi{
-    width:42px;height:42px;border-radius:50%;background:#fff;overflow:hidden;
+    width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#d62828,#a31f1f);
     display:grid;place-items:center;color:#fff;font-weight:800;font-size:14px;flex-shrink:0;
   }
-  .wa-head .avi img{width:100%;height:100%;object-fit:cover;display:block}
   .wa-head b{display:block;font-size:14px}
   .wa-head small{font-size:11.5px;opacity:.85;display:flex;gap:5px;align-items:center}
   .wa-head small::before{content:"";width:7px;height:7px;border-radius:50%;background:#4ade80}
@@ -883,7 +875,7 @@
     .find-card .grid,.form-card .row2{grid-template-columns:1fr}
     header.main .hrow{gap:8px;padding:4px 10px}
     .brand{gap:8px}
-    .logo{width:34px;height:34px;border-width:2px;flex-shrink:0}
+    .logo{width:34px;height:34px;font-size:11px;border-radius:8px;flex-shrink:0}
     .brand h1{font-size:13.5px;line-height:1.15}
     .curr-select{padding:7px 20px 7px 7px;font-size:11px;background-position:right 6px center}
     .nav-actions{gap:0}
@@ -971,8 +963,8 @@
 <div class="topbar">
   <div class="container row">
     <div class="info">
-      <span><svg viewBox="0 0 24 24"><path d="M12 2C8 2 5 5 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-4-3-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg> 112C Waltham Park Road, Kingston</span>
-      <span><svg viewBox="0 0 24 24"><path d="M6.6 10.8a15.3 15.3 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1.1-.3 1.2.4 2.5.6 3.8.6.6 0 1.1.5 1.1 1.1V20c0 .6-.5 1.1-1.1 1.1C10.2 21.1 2.9 13.8 2.9 4.6 2.9 4 3.4 3.5 4 3.5h3.4c.6 0 1.1.5 1.1 1.1 0 1.3.2 2.6.6 3.8.1.4 0 .8-.3 1.1l-2.2 2.3z"/></svg> +1 (876) 758-5590</span>
+      <span><svg viewBox="0 0 24 24"><path d="M12 2C8 2 5 5 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-4-3-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg> 51 Red Hills Road, Kingston</span>
+      <span><svg viewBox="0 0 24 24"><path d="M6.6 10.8a15.3 15.3 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1.1-.3 1.2.4 2.5.6 3.8.6.6 0 1.1.5 1.1 1.1V20c0 .6-.5 1.1-1.1 1.1C10.2 21.1 2.9 13.8 2.9 4.6 2.9 4 3.4 3.5 4 3.5h3.4c.6 0 1.1.5 1.1 1.1 0 1.3.2 2.6.6 3.8.1.4 0 .8-.3 1.1l-2.2 2.3z"/></svg> +1 (876) 905-4111</span>
       <span><svg viewBox="0 0 24 24"><path d="M12 6a6 6 0 1 0 0 12 6 6 0 0 0 0-12zm0 11a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm.5-8h-1v4l3.3 2 .5-.9-2.8-1.6V9z"/></svg> Mon–Sat 8:00am – 5:30pm</span>
     </div>
     <a class="pill" href="index.html#inquiry">Request a Part →</a>
@@ -983,10 +975,10 @@
 <header class="main">
   <div class="hrow">
     <a href="index.html" class="brand">
-      <div class="logo"><img src="vision_logo.jpg" alt="Vision Auto Solutions"></div>
+      <div class="logo"><img src="mortys-logo.svg" alt="Morty's Auto Parts" style="width:100%;height:100%;object-fit:cover;border-radius:inherit"></div>
       <div>
-        <h1>Vision Auto Solutions Ltd</h1>
-        <small>Parts</small>
+        <h1>Morty's Auto Parts</h1>
+        <small>Kingston, Jamaica</small>
       </div>
     </a>
     <div class="nav-search-wrap">
@@ -998,16 +990,13 @@
     <nav class="primary">
       <a href="index.html">🏠 Home</a>
       <a href="shop.html" class="active">Shop Now</a>
+      <a href="index.html#contact">Contact</a>
     </nav>
     <div class="nav-actions">
       <button class="btn" id="themeToggle" aria-label="Toggle theme">
         <svg id="iconSun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/></svg>
         <svg id="iconMoon" viewBox="0 0 24 24" style="display:none"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
       </button>
-      <select class="curr-select" id="currSelect" aria-label="Currency">
-        <option value="USD">USD $</option>
-        <option value="JMD">JMD J$</option>
-      </select>
       <button class="btn" id="navCart" aria-label="Cart">
         <svg viewBox="0 0 24 24"><path d="M7 18a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm10 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7.2 14h9.5c.8 0 1.4-.5 1.7-1.2L21.7 6H5.2L4.3 4H1v2h2l3.6 7.6-1.4 2.4c-.7 1.2.1 2.8 1.5 2.8H19v-2H7.2l1.1-2z"/></svg>
         <span class="cnt" id="navCartBadge">0</span>
@@ -1026,7 +1015,7 @@
   <div class="container inner">
     <div>
       <div class="bc"><a href="index.html">Home</a><span>/</span><span style="color:#e2e8f0">Shop Parts</span></div>
-      <h2>Honda &amp; Acura Parts Catalogue</h2>
+      <h2>Auto Parts Catalogue</h2>
       <p style="margin:4px 0 0;color:#94a3b8;font-size:13px">Full stock listing · Kingston counter · Same-day quotes</p>
     </div>
     <div class="shop-hero-stats">
@@ -1104,9 +1093,6 @@
           <label class="sb-field"><span>Price</span>
             <select id="fPrice"><option value="all">Any</option><option value="priced">Priced only</option><option value="quote">Call for price</option><option value="lt50">Under $50</option><option value="50to200">$50 – $200</option><option value="gt200">Over $200</option></select>
           </label>
-          <label class="sb-field"><span>Bin</span>
-            <input id="fBin" type="search" placeholder="e.g. D-08" autocomplete="off"/>
-          </label>
         </div>
 
         <div class="sb-sec">
@@ -1151,7 +1137,7 @@
       <!-- ── RESULTS ────────────────────────────────────────────────────── -->
       <div class="parts-main">
         <div class="res-head">
-          <span class="res-count"><b id="partsCount">—</b> · prices in <span id="currLabel">USD</span></span>
+          <span class="res-count"><b id="partsCount">—</b> · prices in <span id="currLabel">J$</span></span>
           <div class="refines" id="refineChips"></div>
         </div>
         <div class="pagination pagination-top" id="partsPaginationTop"></div>
@@ -1165,9 +1151,9 @@
     <div style="text-align:center;padding:48px 20px 32px;border-top:1px solid var(--line);margin-top:40px">
       <div style="font-size:32px;margin-bottom:10px">🔍</div>
       <h4 style="margin:0 0 8px;font-size:18px">Can't find what you need?</h4>
-      <p style="color:var(--muted);margin:0 0 18px;font-size:14px">We source parts for all Honda and Acura models — call us or submit a request.</p>
+      <p style="color:var(--muted);margin:0 0 18px;font-size:14px">We source parts for every major Japanese make — call us or submit a request.</p>
       <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
-        <a href="tel:+18767585590" class="cta">📞 Call +1 (876) 758-5590</a>
+        <a href="tel:+18769054111" class="cta">📞 Call +1 (876) 905-4111</a>
         <a href="index.html#inquiry" class="btn-outline" style="color:var(--ink);border-color:var(--line)">Submit a Part Request →</a>
       </div>
     </div>
@@ -1188,7 +1174,7 @@
       <p>Our team is ready to check stock and quote you on the spot.</p>
     </div>
     <div class="actions">
-      <a class="btn-white" href="tel:+18767585590">📞 +1 (876) 758-5590</a>
+      <a class="btn-white" href="tel:+18769054111">📞 +1 (876) 905-4111</a>
       <a class="btn-ghost" href="index.html#inquiry">Request a Part</a>
     </div>
   </div>
@@ -1200,10 +1186,10 @@
     <div class="cols">
       <div>
         <div class="brand-foot">
-          <div class="logo"><img src="vision_logo.jpg" alt="Vision Auto Solutions"></div>
-          <div><b>Vision Auto Solutions Ltd</b><br/><small style="color:#94a3b8">Kingston, Jamaica</small></div>
+          <div class="logo"><img src="mortys-logo.svg" alt="Morty's Auto Parts" style="width:100%;height:100%;object-fit:cover;border-radius:inherit"></div>
+          <div><b>Morty's Auto Parts</b><br/><small style="color:#94a3b8">Kingston, Jamaica</small></div>
         </div>
-        <p style="color:#94a3b8;margin:0;max-width:340px">New and used OEM parts for Honda and Acura vehicles. Accessories, tires, lubricants and batteries at bargain prices.</p>
+        <p style="color:#94a3b8;margin:0;max-width:340px">New genuine and aftermarket parts for Toyota, Honda, Nissan, Suzuki, Mitsubishi, Isuzu, Subaru &amp; Mazda. Accessories, tires, lubricants and batteries at bargain prices.</p>
       </div>
       <div>
         <h5>Shop</h5>
@@ -1219,12 +1205,12 @@
       <div>
         <h5>Contact</h5>
         <ul>
-          <li>📍 112C Waltham Park Road, Kingston</li>
-          <li>📞 <a href="tel:+18767585590">+1 (876) 758-5590</a></li>
+          <li>📍 51 Red Hills Road, Kingston</li>
+          <li>📞 <a href="tel:+18769054111">+1 (876) 905-4111</a></li>
           <li>🕒 Mon–Sat 8:00am – 5:30pm</li>
         </ul>
         <h5 style="margin-top:10px">Stay in the loop</h5>
-        <p style="font-size:12px;color:#94a3b8;margin:0 0 4px">New stock arrivals &amp; weekly specials.</p>
+        <p style="font-size:12px;color:#94a3b8;margin:0 0 4px">New stock arrivals &amp; parts specials.</p>
         <form class="news-form" id="newsForm" onsubmit="event.preventDefault(); window._foxdSubscribe && window._foxdSubscribe(this);">
           <input type="email" id="newsEmail" required placeholder="your@email.com" autocomplete="email" />
           <button type="submit">Subscribe</button>
@@ -1233,7 +1219,7 @@
       </div>
     </div>
     <div class="copy">
-      <span>© <span id="yr"></span> Vision Auto Solutions Ltd. All rights reserved.</span>
+      <span>© <span id="yr"></span> Morty's Auto Parts. All rights reserved.</span>
       <span style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
         <span>Built for Kingston drivers.</span>
       </span>
@@ -1243,11 +1229,11 @@
 
 <!-- MOBILE NAV -->
 <nav class="m-nav">
-  <a href="tel:+18767585590" class="call">
+  <a href="tel:+18769054111" class="call">
     <svg viewBox="0 0 24 24"><path d="M6.6 10.8a15.3 15.3 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1.1-.3 1.2.4 2.5.6 3.8.6.6 0 1.1.5 1.1 1.1V20c0 .6-.5 1.1-1.1 1.1C10.2 21.1 2.9 13.8 2.9 4.6 2.9 4 3.4 3.5 4 3.5h3.4c.6 0 1.1.5 1.1 1.1 0 1.3.2 2.6.6 3.8.1.4 0 .8-.3 1.1l-2.2 2.3z"/></svg>
     Call
   </a>
-  <a href="https://wa.me/18767585590" target="_blank" rel="noopener" class="wa">
+  <a href="https://wa.me/18769054111" target="_blank" rel="noopener" class="wa">
     <svg viewBox="0 0 24 24"><path d="M12 2C6.5 2 2 6.5 2 12c0 1.8.5 3.6 1.4 5.1L2 22l5-1.4A9.9 9.9 0 0 0 12 22c5.5 0 10-4.5 10-10S17.5 2 12 2zm5.1 13.6c-.2.6-1.2 1.1-1.7 1.2-.4.1-.9.1-2.9-.6-2.5-1-4.1-3.6-4.2-3.8-.1-.2-.9-1.2-.9-2.3 0-1.1.6-1.6.8-1.8.2-.2.4-.3.6-.3h.5c.2 0 .4.1.5.3.2.4.6 1.4.6 1.5 0 .2 0 .4-.1.5l-.4.5c-.1.1-.2.2-.1.4.2.4.8 1.3 1.5 2.1.7.7 1.6 1.2 2 1.4.2.1.4.1.5-.1l.5-.5c.1-.2.3-.2.5-.1l1.5.7c.2.1.4.2.4.4-.1.3-.1.7-.1.8z"/></svg>
     WhatsApp
   </a>
@@ -1306,6 +1292,9 @@ document.addEventListener('DOMContentLoaded', function(){
       +         '<div id="photoNote" style="display:none;color:#b45309;font-size:11.5px;margin-top:6px"></div>'
       +       '</div>'
       +     '</details>'
+      // FULFILMENT — pickup (default) vs delivery / courier. Mirrors the POS
+      // tender modal. Hidden while the cart is a save-order (no shipping yet).
+      +     '<div id="shipBox" style="display:none;border-top:1px dashed var(--line);padding-top:10px;margin-bottom:10px"></div>'
       // GUEST CONTACT — shown only when nobody is signed in, so we still have a
       // way to reach the customer and the counter still gets the order.
       +     '<div id="guestBox" style="display:none;border-top:1px dashed var(--line);padding-top:10px;margin-bottom:10px">'
@@ -1315,8 +1304,15 @@ document.addEventListener('DOMContentLoaded', function(){
       +       '<input id="guestPhone" type="tel" placeholder="Phone" autocomplete="tel" style="width:100%;padding:9px 11px;border:1px solid #d1d5db;border-radius:7px;font-size:13.5px;font-family:inherit;box-sizing:border-box"/>'
       +       '<div id="guestErr" style="display:none;color:#b91c1c;font-size:12px;margin-top:6px"></div>'
       +     '</div>'
-      +     '<label id="payStripeOpt" style="display:none;align-items:center;gap:6px;font-size:12.5px;margin-bottom:8px;color:#374151"><input type="checkbox" id="payStripeChk"/> Pay with card (Stripe)</label>'
+      +     '<div id="payMethods" class="pay-methods" style="display:none">'
+      +       '<div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700;margin-bottom:6px">Payment</div>'
+      +       '<label class="active"><span class="row"><input type="radio" name="payMethod" value="cash_pickup" checked/> 💵 Cash on pickup</span><small>Pay at the counter when you collect.</small></label>'
+      +       '<label><span class="row"><input type="radio" name="payMethod" value="bank_transfer"/> 🏦 Bank transfer</span><small>Account details come with your confirmation.</small></label>'
+      +       '<label id="payCardOpt" style="display:none"><span class="row"><input type="radio" name="payMethod" value="fygaro"/> 💳 Credit / debit card</span><small>Pay now on Fygaro\'s secure card page.</small></label>'
+      +       '<label><span class="row"><input type="radio" name="payMethod" value="invoice_email"/> 📧 Email me an invoice</span><small>We\'ll email a payable invoice — settle by transfer or at the counter.</small></label>'
+      +     '</div>'
       +     '<button id="cartCheckout" type="button" style="width:100%;background:var(--red);color:#fff;border:0;border-radius:8px;padding:12px;font-weight:800;cursor:pointer;font-family:inherit;font-size:14.5px"><span id="checkoutLabel">Checkout</span></button>'
+      +     '<button id="quoteToggle" type="button" style="display:none;width:100%;background:none;border:0;color:#6b7280;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;padding:8px 0 0;text-decoration:underline"></button>'
       +   '</div>'
       + '</aside>'
       + '<button id="cartFab" class="cart-fab" type="button" aria-label="Open cart"><svg viewBox="0 0 24 24"><path d="M7 18a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm10 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM1 2h3.27l1.34 7.16h12.27l1.39-7.16H22l-1.7 8.74a2 2 0 0 1-1.96 1.6H6.92l-.42 2.16H20v2H5.27c-.94 0-1.66-.86-1.48-1.78L5.27 9.16 3.43 2H1V2z"/></svg><span class="cb" id="cartFabBadge">0</span></button>'
@@ -1463,34 +1459,21 @@ document.addEventListener('DOMContentLoaded', function(){
   // things you cannot sell.
   const parts = [];
 
-  // USD, keyed by image filename. Filled from price_cents as the catalogue
-  // streams in; a part missing here has no price set and renders as
-  // "Call for price" rather than as free.
+  // Sell price, keyed by image filename, in Jamaican dollars exactly as the
+  // catalogue upload stored them in products.price_cents.
   const prices = {};
 
 
 
   // CURRENCY
-  const JMD_RATE = 157.5;
-  let currency = 'USD';
-  try { currency = localStorage.getItem('mh_curr') || 'USD'; } catch(e){}
-  function fmt(usd){
-    if (!usd) return 'Call for price';
-    if (currency === 'USD') return '$' + usd.toLocaleString('en-US');
-    return 'J$' + Math.round(usd * JMD_RATE).toLocaleString('en-US');
+  // Prices are shown exactly as stored — Jamaican dollars, no conversion,
+  // no second currency line.
+  function fmt(jmd){
+    if (!jmd) return 'Call for price';
+    return 'J$' + Math.round(jmd).toLocaleString('en-US');
   }
-  function altFmt(usd){
-    if (!usd) return '';
-    if (currency === 'USD') return '≈ J$' + Math.round(usd * JMD_RATE).toLocaleString('en-US');
-    return '≈ $' + usd.toLocaleString('en-US');
-  }
-  function setCurrency(c){
-    currency = c;
-    try { localStorage.setItem('mh_curr', c); } catch(e){}
-    var sel = document.getElementById('currSelect');
-    if (sel && sel.value !== c) sel.value = c;
-    var lbl = document.getElementById('currLabel');
-    if (lbl) lbl.textContent = c;
+  function altFmt(){ return ''; }
+  function setCurrency(){
     render(currentFilter);
     renderCart();
     if (window._foxdRenderFeatured) window._foxdRenderFeatured();
@@ -1508,6 +1491,40 @@ document.addEventListener('DOMContentLoaded', function(){
       b.textContent = count;
       b.classList.toggle('show', count > 0);
     });
+  }
+
+  // FULFILMENT / SHIPPING state — mirrors the POS tender modal's ship block.
+  // In memory only; recipient name/phone seed from a restored guest contact.
+  var SHIP = { fulfilment:'pickup', name:'', phone:'', line1:'', line2:'', city:'', parish:'', carrier:'', service:'', fee:'', instructions:'', quoteToken:'' };
+  try {
+    var _g = JSON.parse(localStorage.getItem('mh_guest') || '{}');
+    if (_g && _g.name) SHIP.name = _g.name;
+    if (_g && _g.phone) SHIP.phone = _g.phone;
+  } catch(e){}
+  window._foxdShipping = null;   // { carriers, parishes, origin_parish, local_flat_usd } from /api/config
+  var PARISHES_FALLBACK = ['Kingston','St. Andrew','St. Catherine','Clarendon','Manchester','St. Elizabeth','Westmoreland','Hanover','St. James','Trelawny','St. Ann','St. Mary','Portland','St. Thomas'];
+  var CARRIER_LABELS = { dhl:'DHL Express', fedex:'FedEx', knutsford:'Knutsford Express', manual:'Other / courier' };
+  function shipFeeNum(){ return SHIP.fulfilment === 'pickup' ? 0 : Math.max(0, Number(SHIP.fee) || 0); }
+  function shipPayload(){
+    if (SHIP.fulfilment === 'pickup') return { fulfilment:'pickup' };
+    var p = {
+      fulfilment: SHIP.fulfilment,
+      ship_name: SHIP.name, ship_phone: SHIP.phone,
+      ship_line1: SHIP.line1, ship_line2: SHIP.line2,
+      ship_city: SHIP.city, ship_parish: SHIP.parish,
+      ship_carrier: SHIP.carrier || 'manual', ship_service: SHIP.service,
+      ship_fee_usd: shipFeeNum(), ship_instructions: SHIP.instructions
+    };
+    if (SHIP.quoteToken) p.ship_quote_token = SHIP.quoteToken;   // server trusts this over the raw fee
+    return p;
+  }
+  // Client-side mirror of the server's shipError() so we can point at the field.
+  function shipClientError(){
+    if (SHIP.fulfilment === 'pickup') return null;
+    if (!(SHIP.line1 || '').trim()) return 'Add a street address for delivery.';
+    if (!SHIP.parish) return 'Choose a parish for delivery.';
+    if (!(SHIP.name || '').trim()) return 'Add a recipient name for delivery.';
+    return null;
   }
   function esc(s){ return String(s).replace(/"/g,'&quot;'); }
   // esc() only quotes attribute values. Anything the shopper typed that lands
@@ -1582,17 +1599,24 @@ document.addEventListener('DOMContentLoaded', function(){
     document.getElementById('cartPanel').classList.remove('show');
     document.getElementById('cartOverlay').classList.remove('show');
   }
-  // Almost nothing in the seeded catalogue is priced, so a cart is far more
-  // often a quote request than an order. One unpriced line is enough to make
-  // the whole cart a quote — we can't invoice half of it and quote the rest.
+  // A line the shop can't both price and fill from stock can't be paid for
+  // online. One such line is enough to turn the whole cart into a saved
+  // order — we can't invoice half of it and hold the rest for pricing.
+  //   - no price set          -> parts desk has to quote it
+  //   - stock unknown / null  -> can't confirm we can supply it
+  //   - on-hand < wanted qty  -> short; needs a back-order or restock
   function cartQuoteLines(){
-    return Object.keys(cart).filter(function(img){ return !prices[img]; });
+    return Object.keys(cart).filter(function(img){
+      if (!prices[img]) return true;
+      var q = liveStock[img];
+      return q == null || q < cart[img];
+    });
   }
-  // Quote-first unless the shop has switched on public pricing + checkout
-  // (Admin → Settings → "Public storefront pricing"), reported by
-  // /api/config as ordering_enabled. Until that call lands, assume quote-first.
+  // The cart is a quote request (no online payment) when the shopper asked for
+  // one, or when a line still needs a price or a stock check.
+  var quoteMode = false;   // shopper chose "Request a Quote instead"
   function cartIsQuote(){
-    return !window._foxdOrderingEnabled;
+    return quoteMode || cartQuoteLines().length > 0;
   }
   // The parts the customer wants, in the shape /api/inquiry stores.
   function cartQuoteItems(){
@@ -1607,7 +1631,7 @@ document.addEventListener('DOMContentLoaded', function(){
   function updateCheckoutLabel(){
     var quote = cartIsQuote();
     var lbl = document.getElementById('checkoutLabel');
-    if (lbl) lbl.textContent = quote ? 'Request a Quote' : 'Checkout via WhatsApp';
+    if (lbl) lbl.textContent = quote ? 'Request for Quote' : 'Checkout via WhatsApp';
     var btn = document.getElementById('cartCheckout');
     if (btn) btn.style.background = quote ? 'var(--navy)' : 'var(--red)';
     ['couponInput','couponApply','ptRedeem','couponApplied'].forEach(function(id){
@@ -1616,12 +1640,129 @@ document.addEventListener('DOMContentLoaded', function(){
       if (quote) el.style.display = 'none';
       else if (id === 'couponInput' || id === 'couponApply') el.style.display = '';
     });
-    // Card payment is meaningless before there's a price. Only restore it if
-    // the backend actually reported Stripe as enabled.
-    var stripeOpt = document.getElementById('payStripeOpt');
-    if (stripeOpt) stripeOpt.style.display = (!quote && window._foxdStripeEnabled) ? '' : 'none';
+    // Payment options only make sense once the cart is payable (not a
+    // save-order). The card radio shows only if the backend reported Stripe.
+    var payMethods = document.getElementById('payMethods');
+    if (payMethods) payMethods.style.display = quote ? 'none' : '';
+    var cardOpt = document.getElementById('payCardOpt');
+    if (cardOpt) cardOpt.style.display = (!quote && window._foxdFygaroEnabled) ? '' : 'none';
+    var shipBox = document.getElementById('shipBox');
+    if (shipBox) shipBox.style.display = quote ? 'none' : '';
     var gHint = document.getElementById('guestHint');
     if (gHint) gHint.textContent = quote ? 'Where should we send your quote?' : 'Where should we send your confirmation?';
+    // "Request a quote instead" toggle — only meaningful when the cart could
+    // otherwise be checked out (every line priced + in stock).
+    var qt = document.getElementById('quoteToggle');
+    if (qt){
+      var forced = cartQuoteLines().length > 0;
+      qt.style.display = forced ? 'none' : '';
+      qt.textContent = quoteMode ? '← Back to checkout' : 'Prefer a quote? Request one instead';
+    }
+  }
+
+  // Fulfilment picker + address fields. Rebuilt only when the fulfilment tab
+  // changes (or forced) — renderCart() calls this every render, and rebuilding
+  // mid-keystroke would steal focus from the address fields. Carrier is a plain
+  // pick from the enabled list and the fee is typed; a live rate lookup is
+  // wired in a later pass.
+  var _shipRenderedFor = null;
+  function renderShip(force){
+    var box = document.getElementById('shipBox');
+    if (!box) return;
+    if (!force && _shipRenderedFor === SHIP.fulfilment && box.children.length) return;
+    _shipRenderedFor = SHIP.fulfilment;
+    var cfg = window._foxdShipping || {};
+    var parishes = (cfg.parishes && cfg.parishes.length) ? cfg.parishes : PARISHES_FALLBACK;
+    var carriers = (cfg.carriers && cfg.carriers.length) ? cfg.carriers : ['manual'];
+    var ful = SHIP.fulfilment;
+    var tabs = [['pickup','🏪 Pickup'],['delivery','🚚 Delivery'],['shipping','📦 Courier']];
+    var h = '<div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#6b7280;font-weight:700;margin-bottom:6px">How is it leaving?</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:' + (ful === 'pickup' ? '0' : '8px') + '">' +
+      tabs.map(function(o){
+        var on = ful === o[0];
+        return '<button type="button" class="shFul" data-ful="' + o[0] + '" style="padding:8px 4px;border:2px solid ' + (on?'var(--navy)':'#d1d5db') + ';border-radius:7px;background:' + (on?'var(--navy)':'transparent') + ';color:' + (on?'#fff':'inherit') + ';font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">' + o[1] + '</button>';
+      }).join('') + '</div>';
+    if (ful !== 'pickup'){
+      h += '<div style="display:grid;gap:6px">' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">' +
+          '<input id="shName" class="shFld" placeholder="Recipient name" value="' + esc(SHIP.name || '') + '"/>' +
+          '<input id="shPhone" class="shFld" placeholder="Recipient phone" value="' + esc(SHIP.phone || '') + '"/>' +
+        '</div>' +
+        '<input id="shLine1" class="shFld" placeholder="Street address" value="' + esc(SHIP.line1 || '') + '"/>' +
+        '<input id="shLine2" class="shFld" placeholder="Apt / building / landmark (optional)" value="' + esc(SHIP.line2 || '') + '"/>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">' +
+          '<input id="shCity" class="shFld" placeholder="Town / city" value="' + esc(SHIP.city || '') + '"/>' +
+          '<select id="shParish" class="shFld"><option value="">— parish —</option>' +
+            parishes.map(function(p){ return '<option' + (SHIP.parish === p ? ' selected' : '') + '>' + p + '</option>'; }).join('') +
+          '</select>' +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:2fr 1fr;gap:6px">' +
+          (carriers.length > 1
+            ? '<select id="shCarrier" class="shFld">' + carriers.map(function(cc){ return '<option value="' + cc + '"' + (SHIP.carrier === cc ? ' selected' : '') + '>' + (CARRIER_LABELS[cc] || cc) + '</option>'; }).join('') + '</select>'
+            : '<input id="shCarrier" class="shFld" placeholder="Carrier / method" value="' + esc(SHIP.carrier || '') + '"/>') +
+          '<div style="display:flex;align-items:center;gap:3px"><span style="font-size:12px;color:#6b7280">Fee $</span><input id="shFee" class="shFld" type="number" min="0" step="0.01" placeholder="0.00" value="' + esc(String(SHIP.fee || '')) + '" style="text-align:right"/></div>' +
+        '</div>' +
+        '<input id="shInstr" class="shFld" placeholder="Delivery instructions (optional)" value="' + esc(SHIP.instructions || '') + '"/>' +
+        '<button type="button" id="shRateBtn" class="btn" style="justify-self:start;font-size:12px;background:var(--navy);color:#fff">Get live rates</button>' +
+        '<div id="shRates" style="display:grid;gap:5px"></div>' +
+      '</div>';
+    }
+    box.innerHTML = h;
+    box.querySelectorAll('.shFul').forEach(function(btn){
+      btn.addEventListener('click', function(){ SHIP.fulfilment = btn.dataset.ful; SHIP.quoteToken = ''; _shipRates = null; renderShip(true); renderCart(); });
+    });
+    // Editing any field by hand invalidates a live quote (its token no longer
+    // matches the address/carrier), so drop it and fall back to the typed fee.
+    var fields = { shName:'name', shPhone:'phone', shLine1:'line1', shLine2:'line2', shCity:'city', shParish:'parish', shCarrier:'carrier', shInstr:'instructions' };
+    Object.keys(fields).forEach(function(id){
+      var el = document.getElementById(id);
+      if (el) el.addEventListener('input', function(){ SHIP[fields[id]] = el.value; if (id === 'shParish' || id === 'shCarrier') SHIP.quoteToken = ''; });
+    });
+    if (carriers.length <= 1 && ful !== 'pickup' && !SHIP.carrier) SHIP.carrier = carriers[0] || 'manual';
+    var feeEl = document.getElementById('shFee');
+    if (feeEl) feeEl.addEventListener('input', function(){ SHIP.fee = feeEl.value; SHIP.quoteToken = ''; renderCart(); });
+    var rb = document.getElementById('shRateBtn');
+    if (rb) rb.addEventListener('click', fetchShipRates);
+    renderShipRates();
+  }
+
+  var _shipRates = null;   // last /api/shipping/quote result
+  function renderShipRates(){
+    var box = document.getElementById('shRates');
+    if (!box) return;
+    if (!_shipRates){ box.innerHTML = ''; return; }
+    if (!_shipRates.length){ box.innerHTML = '<div style="font-size:11.5px;color:#6b7280">No live rates — enter a carrier and fee above.</div>'; return; }
+    box.innerHTML = _shipRates.map(function(q, i){
+      var on = SHIP.quoteToken === q.token;
+      return '<button type="button" class="shRate" data-i="' + i + '" style="text-align:left;border:2px solid ' + (on?'var(--navy)':'#d1d5db') + ';border-radius:7px;padding:7px 9px;background:' + (on?'rgba(11,27,43,.05)':'transparent') + ';cursor:pointer;font-family:inherit;font-size:12.5px">' +
+        '<b>' + esc(q.service_label || q.carrier) + '</b> — ' + esc(String(q.currency || '')) + ' ' + Number(q.amount).toLocaleString('en-US') +
+        (q.eta_days ? ' <span style="color:#6b7280">· ~' + q.eta_days + 'd</span>' : '') + '</button>';
+    }).join('');
+    box.querySelectorAll('.shRate').forEach(function(bt){
+      bt.addEventListener('click', function(){
+        var q = _shipRates[+bt.dataset.i];
+        SHIP.carrier = q.carrier; SHIP.service = q.service || ''; SHIP.fee = q.amount; SHIP.quoteToken = q.token;
+        renderShip(true); renderCart();
+      });
+    });
+  }
+  async function fetchShipRates(){
+    var rb = document.getElementById('shRateBtn');
+    if (!SHIP.parish){ if (rb) rb.textContent = 'Choose a parish first'; return; }
+    if (rb){ rb.disabled = true; rb.textContent = 'Getting rates…'; }
+    try {
+      var res = await fetch('/api/shipping/quote', {
+        method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin',
+        body: JSON.stringify({
+          parish: SHIP.parish, city: SHIP.city, country: 'JM',
+          items: Object.keys(cart).map(function(img){ return { img: img, qty: cart[img] }; })
+        })
+      });
+      var d = await res.json();
+      _shipRates = (d && d.quotes) || [];
+    } catch(e){ _shipRates = []; }
+    if (rb){ rb.disabled = false; rb.textContent = 'Refresh rates'; }
+    renderShipRates();
   }
 
   function renderCart(){
@@ -1674,23 +1815,29 @@ document.addEventListener('DOMContentLoaded', function(){
       var amtEl = document.getElementById('couponAppliedAmt');
       if (amtEl) amtEl.textContent = fmt(disc);
     }
-    // A quote cart has no total to show — quoting one would be a number we
-    // haven't got. Say what happens next instead.
+    // A quote cart has no payable total — the shopper asked for a quote, or a
+    // line still needs a price / stock check. Say what happens next instead.
     var quoteLines = cartQuoteLines().length;
-    if (quoteLines){
+    var isQuote = cartIsQuote();
+    var shipFee = isQuote ? 0 : shipFeeNum();
+    var shipLine = shipFee > 0
+      ? '<div class="ship-line"><span>Shipping (' + (CARRIER_LABELS[SHIP.carrier] || SHIP.carrier || SHIP.fulfilment) + ')</span><b>' + fmt(shipFee) + '</b></div>'
+      : '';
+    if (isQuote){
       document.getElementById('cartTotal').innerHTML =
-        '<div><div class="lbl">Total</div><div style="font-size:11.5px;color:#6b7280;font-weight:600">' +
-          quoteLines + ' of ' + items.length + ' need pricing' +
-        '</div></div>' +
-        '<div style="text-align:right"><b style="font-size:13.5px">We\'ll quote you</b>' +
+        '<div><div class="lbl">Total</div>' +
+          (quoteLines ? '<div style="font-size:11.5px;color:#6b7280;font-weight:600">' + quoteLines + ' of ' + items.length + ' need a price or stock check</div>' : '') +
+        '</div>' +
+        '<div style="text-align:right"><b style="font-size:13.5px">We\'ll send you a quote</b>' +
           (displayTotal ? '<div class="alt">' + fmt(displayTotal) + ' priced so far</div>' : '') +
         '</div>';
     } else {
       document.getElementById('cartTotal').innerHTML =
         '<div><div class="lbl">Total</div></div>' +
-        '<div style="text-align:right"><b>' + fmt(displayTotal) + '</b><div class="alt">' + altFmt(displayTotal) + '</div></div>' +
-        couponLine;
+        '<div style="text-align:right"><b>' + fmt(displayTotal + shipFee) + '</b><div class="alt">' + altFmt(displayTotal + shipFee) + '</div></div>' +
+        shipLine + couponLine;
     }
+    renderShip();
     updateCheckoutLabel();
     box.querySelectorAll('[data-inc]').forEach(function(b){ b.addEventListener('click', function(){ setQty(b.dataset.inc, cart[b.dataset.inc]+1); }); });
     box.querySelectorAll('[data-dec]').forEach(function(b){ b.addEventListener('click', function(){ setQty(b.dataset.dec, cart[b.dataset.dec]-1); }); });
@@ -1849,16 +1996,25 @@ document.addEventListener('DOMContentLoaded', function(){
     if (live <= 4) return {level:'low', count:live, label:'Low Stock'};
     return {level:'in', label:'In Stock'};
   }
-  // Card blurb. This was the flat string "In-stock at our Kingston counter"
-  // printed on every card, which contradicted the Out of Stock badge sitting
-  // directly above it on the ~18,800 parts that are currently at zero.
-  function descFor(st){
-    if (st.level === 'out') return 'Not on the shelf right now — we can source it. Call to check.';
-    if (st.level === 'unknown') return 'Call the counter to confirm availability and fitment.';
-    return 'In stock at our Kingston counter. Call to confirm fitment.';
+  // Card description: the actual part — condition, category, what it fits and
+  // (when it reads like a code rather than a photo filename) its part number.
+  // A short stock-aware clause is appended only when the part is off the shelf
+  // or unconfirmed, so it never contradicts the "In Stock" badge above it.
+  function descFor(p, st){
+    p = p || {};
+    var cond = p.b === 'USED' ? 'Used' : 'New';
+    var cat = p.c ? p.c.charAt(0).toUpperCase() + p.c.slice(1) : '';
+    var segs = [cond + (cat ? ' · ' + cat : '')];
+    if (p.m) segs.push('fits ' + p.m);
+    if (p.i && p.i.indexOf('/') === -1 && !/\.(jpe?g|png|webp|gif|svg)$/i.test(p.i)) segs.push('No. ' + p.i);
+    var line = segs.join(' · ');
+    if (st && st.level === 'out') return line + ' — not on the shelf now; we can source it.';
+    if (st && st.level === 'unknown') return line + ' — call to confirm availability.';
+    return line;
   }
   function stockBadgeHTML(st){
-    var txt = (st.level === 'low') ? 'Only ' + st.count + ' left' : st.label;
+    // Storefront shows availability, never the on-hand count.
+    var txt = (st.level === 'low') ? 'Low stock' : st.label;
     return '<span class="stock ' + st.level + '">' + txt + '</span>';
   }
   // No urgency badge. This hashed the image filename and presented the result
@@ -2119,18 +2275,13 @@ document.addEventListener('DOMContentLoaded', function(){
         var badgeCls = p.b === 'USED' ? 'used' : 'new';
         var btnLabel = inCart ? '✓ In Cart' : (st.level === 'out' ? 'Notify Me' : 'Add to Cart');
         var btnClass = 'add' + (inCart ? ' in' : '') + (st.level === 'out' ? ' notify' : '');
-        var qty = liveStock[p.i];
-        var qtyTxt = qty === undefined ? '—' : qty;
-        var qtyCol = st.level === 'out' ? '#b91c1c' : (st.level === 'low' ? '#b45309' : '#166534');
         return '<tr>' +
           '<td style="color:var(--muted);font-size:11px;text-align:center">' + rowNum + '</td>' +
-          '<td><img class="c-img" src="' + photoOf(p.i) + '" alt="' + esc(p.n) + '" loading="lazy" onerror="this.style.opacity=.2"/></td>' +
+          '<td><img class="c-img" src="' + photoOf(p.thumb || p.i) + '" alt="' + esc(p.n) + '" loading="lazy" onerror="this.style.opacity=.2"/></td>' +
           '<td><div class="c-name">' + esc(p.n) + '</div><div style="font-size:10.5px;color:var(--muted);font-family:ui-monospace,Menlo,Consolas,monospace">' + esc(p.i) + '</div></td>' +
           '<td style="font-size:12px;color:var(--muted);max-width:160px">' + esc(p.m) + '</td>' +
           '<td><span style="font-size:11px;color:var(--muted)">' + catLabel(p.c) + '</span></td>' +
           '<td><span class="c-badge ' + badgeCls + '">' + p.b + '</span></td>' +
-          '<td style="text-align:center;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px">' + (p.bin ? esc(p.bin) : '<span style="color:var(--muted)">—</span>') + '</td>' +
-          '<td style="text-align:center;font-weight:800;font-size:12.5px;color:' + qtyCol + '">' + qtyTxt + '</td>' +
           '<td class="c-price">' + fmt(usd) + '</td>' +
           '<td class="c-act"><button class="' + btnClass + '" data-img="' + esc(p.i) + '">' + btnLabel + '</button></td>' +
         '</tr>';
@@ -2144,8 +2295,6 @@ document.addEventListener('DOMContentLoaded', function(){
             '<th>Vehicle / Fitment</th>' +
             '<th>Category</th>' +
             '<th>Cond.</th>' +
-            '<th style="text-align:center">Bin</th>' +
-            '<th style="text-align:center">Qty</th>' +
             '<th style="text-align:right">Price</th>' +
             '<th style="text-align:right">Action</th>' +
           '</tr></thead>' +
@@ -2170,13 +2319,13 @@ document.addEventListener('DOMContentLoaded', function(){
             stockBadgeHTML(st) +
             '<label class="cmp-check' + isCmp + '" title="Compare"><input type="checkbox" data-cmp="' + esc(p.i) + '" ' + cmpChk + '/>Compare</label>' +
             '<button type="button" class="wish-btn' + isWish + '" data-wish="' + esc(p.i) + '" aria-label="Save to wishlist"></button>' +
-            '<img src="' + photoOf(p.i) + '" alt="' + p.n + '" loading="lazy" onerror="this.style.opacity=0.25"/>' +
+            '<img src="' + photoOf(p.thumb || p.i) + '" alt="' + p.n + '" loading="lazy" onerror="this.style.opacity=0.25"/>' +
           '</div>' +
           '<div class="body">' +
             '<div class="make">' + p.m + '</div>' +
             '<h5>' + p.n + '</h5>' +
             urgencyHTML(p, st) +
-            '<p class="desc">' + descFor(st) + '</p>' +
+            '<p class="desc">' + descFor(p, st) + '</p>' +
             '<div class="foot">' + priceBlock + buttonHTML(p, usd, inCart, st) + '</div>' +
           '</div>' +
         '</article>';
@@ -2613,15 +2762,16 @@ document.addEventListener('DOMContentLoaded', function(){
     var heartIcon = isWish ? '❤' : '♡';
     // Track recently viewed
     if (typeof trackView === 'function') try { trackView(img); } catch(_){}
-    // Build photo column
+    // Build photo column (a single photo up front; the lazy fetch below adds
+    // a thumbnail strip when the part has a gallery).
     var photo = document.getElementById('pdPhoto');
     photo.innerHTML =
       '<span class="b ' + (p.b==='USED'?'used':'') + '">' + p.b + '</span>' +
-      '<img src="' + photoOf(img) + '" alt="' + esc(p.n) + '" onerror="this.style.opacity=0.25"/>';
+      '<img id="pdMainImg" src="' + photoOf(p.thumb || img) + '" alt="' + esc(p.n) + '" onerror="this.style.opacity=0.25"/>';
     // Build info column
     var info = document.getElementById('pdInfo');
     var stockTxt = st.level === 'out' ? '<span style="color:#b91c1c;font-weight:700">Out of Stock</span>'
-                : st.level === 'low' ? '<span style="color:#b45309;font-weight:700">Low — only ' + st.count + ' left</span>'
+                : st.level === 'low' ? '<span style="color:#b45309;font-weight:700">Low stock</span>'
                 : '<span style="color:#15803d;font-weight:700">In Stock at Kingston counter</span>';
     var actions = st.level === 'out'
       ? '<button class="add" type="button" data-pdnotify="' + esc(img) + '" style="background:#6366f1">🔔 Notify me</button>'
@@ -2636,7 +2786,7 @@ document.addEventListener('DOMContentLoaded', function(){
         '<div style="grid-column:1/-1"><b>Availability</b>' + stockTxt + '</div>' +
       '</div>' +
       '<p style="margin:6px 0;font-size:13.5px;color:var(--muted);line-height:1.5">' +
-        'Inspected and pulled by our team. Call <a href="tel:+18767585590">(876) 758-5590</a> ' +
+        'Inspected and pulled by our team. Call <a href="tel:+18769054111">(876) 905-4111</a> ' +
         'to confirm fitment for your specific vehicle, or use the parts inquiry form below for a no-obligation quote.' +
       '</p>' +
       '<div class="actions">' +
@@ -2692,6 +2842,65 @@ document.addEventListener('DOMContentLoaded', function(){
         render(currentFilter); // refresh card hearts
       });
     });
+    // Substitute / superseding parts — a lazy fetch (only when a shopper
+    // actually opens a product); the strip is additive so a failed fetch just
+    // means no strip.
+    (function(){
+      var box = document.querySelector('.pd-box');
+      var old = box && box.querySelector('.pd-subs');
+      if (old) old.remove();
+      fetch('/api/products/' + encodeURIComponent(img), { credentials:'same-origin' })
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(d){
+          // Photo gallery: swap the single #pdPhoto image for a main image +
+          // thumbnail strip when the part has more than one photo.
+          var imgs = d && d.product && d.product.images;
+          var pdPhoto = document.getElementById('pdPhoto');
+          var mainImg = document.getElementById('pdMainImg');
+          if (imgs && imgs.length > 1 && pdPhoto && mainImg) {
+            mainImg.src = photoOf(imgs[0].url);
+            var strip = pdPhoto.querySelector('.pd-thumbs');
+            if (strip) strip.remove();
+            strip = document.createElement('div');
+            strip.className = 'pd-thumbs';
+            strip.style.cssText = 'display:flex;gap:6px;margin-top:8px;flex-wrap:wrap';
+            strip.innerHTML = imgs.map(function(g, i){
+              return '<img data-gi="' + i + '" src="' + photoOf(g.url) + '" alt="' + esc(g.caption || '') + '" ' +
+                'style="width:52px;height:52px;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid ' + (i === 0 ? '#1e40af' : 'transparent') + '" onerror="this.style.opacity=.3"/>';
+            }).join('');
+            pdPhoto.appendChild(strip);
+            strip.querySelectorAll('img').forEach(function(t){
+              t.addEventListener('click', function(){
+                mainImg.src = t.src;
+                strip.querySelectorAll('img').forEach(function(x){ x.style.borderColor = 'transparent'; });
+                t.style.borderColor = '#1e40af';
+              });
+            });
+          }
+          var subs = d && d.product && d.product.substitutes;
+          if (!subs || !subs.length || !box) return;
+          var groups = {};
+          subs.forEach(function(s){ (groups[s.relationship || 'substitute'] = groups[s.relationship || 'substitute'] || []).push(s); });
+          var sec = document.createElement('div');
+          sec.className = 'pd-subs';
+          sec.style.gridColumn = '1 / -1';
+          sec.innerHTML = Object.keys(groups).map(function(label){
+            return '<h4>' + esc(label.charAt(0).toUpperCase() + label.slice(1)) + '</h4>' +
+              '<div class="strip">' + groups[label].map(function(s){
+                var sp = (s.price_usd != null) ? s.price_usd : (prices[s.img] || 0);
+                return '<a data-pdrel="' + esc(s.img) + '">' +
+                  '<img src="' + photoOf(s.img) + '" alt="" loading="lazy" onerror="this.style.opacity=0.25"/>' +
+                  '<div class="pad"><b>' + esc(s.name || s.img) + '</b><span>' + fmt(sp) + '</span></div>' +
+                '</a>';
+              }).join('') + '</div>';
+          }).join('');
+          box.appendChild(sec);
+          sec.querySelectorAll('[data-pdrel]').forEach(function(a){
+            a.addEventListener('click', function(){ openProductDetail(a.dataset.pdrel); });
+          });
+        })
+        .catch(function(){});
+    })();
     // Update URL hash for sharing / deep-linking
     try { history.replaceState(null, '', '#part=' + encodeURIComponent(img)); } catch(_){}
     document.getElementById('pdModal').classList.add('show');
@@ -2878,8 +3087,11 @@ document.addEventListener('DOMContentLoaded', function(){
   var couponInp = document.getElementById('couponInput');
   if (couponInp) couponInp.addEventListener('keypress', function(e){ if (e.key === 'Enter'){ e.preventDefault(); couponBtn && couponBtn.click(); } });
 
-  var currSel = document.getElementById('currSelect');
-  if (currSel) currSel.addEventListener('change', function(){ setCurrency(currSel.value); });
+  (function(){
+    var qt = document.getElementById('quoteToggle');
+    if (qt) qt.addEventListener('click', function(){ quoteMode = !quoteMode; renderCart(); });
+  })();
+
   document.getElementById('cartCheckout').addEventListener('click', async function(){
     var items = Object.keys(cart);
     if (items.length === 0) return;
@@ -2888,7 +3100,7 @@ document.addEventListener('DOMContentLoaded', function(){
     var slider = document.getElementById('ptSlider');
     var redeemPts = slider && !slider.disabled ? parseInt(slider.value, 10) || 0 : 0;
     var couponCode = window._foxdAppliedCoupon ? window._foxdAppliedCoupon.code : null;
-    var orderId = null, checkoutUrl = null, lastResult = null;
+    var orderId = null, checkoutUrl = null, lastResult = null, printEmail = '';
     var errEl = document.getElementById('guestErr');
     if (errEl){ errEl.style.display = 'none'; errEl.textContent = ''; }
 
@@ -2965,8 +3177,8 @@ document.addEventListener('DOMContentLoaded', function(){
       }
 
       var qmsg = (quoteId
-        ? "Hi Vision Auto Solutions, I submitted quote request #" + quoteId + ":\n\n"
-        : "Hi Vision Auto Solutions, I'd like a quote on:\n\n");
+        ? "Hi Morty's Auto Parts, I submitted quote request #" + quoteId + ":\n\n"
+        : "Hi Morty's Auto Parts, I'd like a quote on:\n\n");
       cartQuoteItems().forEach(function(it){
         qmsg += "• " + it.name + (it.make_model ? " (" + it.make_model + ")" : "") + " — part " + it.img + " × " + it.qty + "\n";
       });
@@ -2974,10 +3186,11 @@ document.addEventListener('DOMContentLoaded', function(){
       if (qVeh) qmsg += "\nVehicle: " + qVeh;
       if (vehicle.vin) qmsg += "\nVIN: " + vehicle.vin.toUpperCase();
       qmsg += "\n\nName: " + qName + (qPhone ? "\nPhone: " + qPhone : '') + "\n\nCould you price these for me? Thank you!";
-      window.open('https://wa.me/18767585590?text=' + encodeURIComponent(qmsg), '_blank', 'noopener');
+      window.open('https://wa.me/18769054111?text=' + encodeURIComponent(qmsg), '_blank', 'noopener');
 
       if (quoteId){
         cart = {};
+        quoteMode = false;
         orderPhotos.forEach(function(p){ try { URL.revokeObjectURL(p.url); } catch(e){} });
         orderPhotos = [];
         renderPhotoStrip();
@@ -2993,10 +3206,19 @@ document.addEventListener('DOMContentLoaded', function(){
       return;
     }
 
+    // Delivery / courier needs a complete address before the order can be taken.
+    var shipErr = shipClientError();
+    if (shipErr){
+      if (errEl){ errEl.textContent = shipErr; errEl.style.display = 'block'; }
+      var sbx = document.getElementById('shipBox');
+      if (sbx) sbx.scrollIntoView({ behavior:'smooth', block:'nearest' });
+      return;
+    }
+
     if (window._foxdApi){
       if (window._foxdSignedIn){
         try {
-          var r = await sendOrder('/api/checkout', { payment_method: method, redeem_points: redeemPts, coupon_code: couponCode });
+          var r = await sendOrder('/api/checkout', Object.assign({ payment_method: method, redeem_points: redeemPts, coupon_code: couponCode }, shipPayload()));
           lastResult = r;
           orderId = r && r.order_id;
           checkoutUrl = r && r.checkout_url;
@@ -3008,9 +3230,11 @@ document.addEventListener('DOMContentLoaded', function(){
         var gEmail = (document.getElementById('guestEmail') || {}).value || '';
         var gPhone = (document.getElementById('guestPhone') || {}).value || '';
         gName = gName.trim(); gEmail = gEmail.trim(); gPhone = gPhone.trim();
-        if (!gName || (!gEmail && !gPhone)){
+        if (!gName || (!gEmail && !gPhone) || (method === 'invoice_email' && !gEmail)){
           if (errEl){
-            errEl.textContent = !gName ? 'Please enter your name.' : 'Add an email or phone so we can confirm your order.';
+            errEl.textContent = !gName ? 'Please enter your name.'
+              : (method === 'invoice_email' && !gEmail) ? 'Add an email address to receive your invoice.'
+              : 'Add an email or phone so we can confirm your order.';
             errEl.style.display = 'block';
           }
           var gb = document.getElementById('guestBox');
@@ -3018,13 +3242,15 @@ document.addEventListener('DOMContentLoaded', function(){
           return;
         }
         try {
-          var gr = await sendOrder('/api/checkout/guest', {
+          var gr = await sendOrder('/api/checkout/guest', Object.assign({
             name: gName, email: gEmail, phone: gPhone,
             payment_method: method === 'stripe' ? 'cash_pickup' : method,
             items: items.map(function(img){ return { img: img, qty: cart[img] }; })
-          });
+          }, shipPayload()));
           lastResult = gr;
           orderId = gr && gr.order_id;
+          checkoutUrl = gr && gr.checkout_url;
+          printEmail = gEmail;
           try { localStorage.setItem('mh_guest', JSON.stringify({ name:gName, email:gEmail, phone:gPhone })); } catch(e){}
         } catch(e){
           if (errEl){ errEl.textContent = e.message || 'Could not place the order — please try WhatsApp.'; errEl.style.display = 'block'; }
@@ -3033,14 +3259,15 @@ document.addEventListener('DOMContentLoaded', function(){
       }
     }
     if (checkoutUrl){
-      // Stripe: hand off to hosted checkout. Server has already cleared the DB cart.
+      // Card payment: hand off to the processor's hosted page. The order is
+      // already recorded (pending/unpaid); its webhook marks it paid.
       window.location.href = checkoutUrl;
       return;
     }
     var label = method === 'bank_transfer' ? 'bank-transfer order' : 'order';
     var msg = (orderId
-      ? "Hi Vision Auto Solutions, I placed " + label + " #" + orderId + ":\n\n"
-      : "Hi Vision Auto Solutions, I'd like to place an order:\n\n");
+      ? "Hi Morty's Auto Parts, I placed " + label + " #" + orderId + ":\n\n"
+      : "Hi Morty's Auto Parts, I'd like to place an order:\n\n");
     var total = 0;
     items.forEach(function(img){
       var p = parts.find(function(pt){ return pt.i === img; }) || {n:img, m:''};
@@ -3053,14 +3280,39 @@ document.addEventListener('DOMContentLoaded', function(){
     if (vehLine) msg += "\nVehicle: " + vehLine;
     if (vehicle.vin) msg += "\nVIN: " + vehicle.vin.toUpperCase();
     if (orderPhotos.length) msg += "\n(" + orderPhotos.length + " photo" + (orderPhotos.length===1?'':'s') + " attached to order #" + (orderId || '—') + ")";
-    msg += "\nPayment: " + (method === 'bank_transfer' ? 'Bank transfer' : 'Cash on pickup');
-    msg += "\nTotal: " + fmt(total) + "  (" + altFmt(total) + ")\n\nThank you!";
-    window.open('https://wa.me/18767585590?text=' + encodeURIComponent(msg), '_blank', 'noopener');
+    var shipFeeW = shipFeeNum();
+    if (SHIP.fulfilment !== 'pickup'){
+      msg += "\n\n" + (SHIP.fulfilment === 'shipping' ? 'Courier' : 'Delivery') + " to:\n" +
+        [SHIP.name, SHIP.phone].filter(Boolean).join(' · ') + "\n" +
+        [SHIP.line1, SHIP.line2, SHIP.city, SHIP.parish].filter(Boolean).join(', ');
+      if (SHIP.carrier) msg += "\nCarrier: " + (CARRIER_LABELS[SHIP.carrier] || SHIP.carrier);
+      if (SHIP.instructions) msg += "\nNote: " + SHIP.instructions;
+      if (shipFeeW > 0) msg += "\nShipping: " + fmt(shipFeeW);
+    } else {
+      msg += "\nCollection: counter pickup";
+    }
+    msg += "\nPayment: " + (method === 'bank_transfer' ? 'Bank transfer' : method === 'invoice_email' ? 'Invoice by email' : 'Cash on pickup');
+    msg += "\nTotal: " + fmt(total + shipFeeW) + "\n\nThank you!";
+    // "Email me an invoice" that the backend accepted needs no WhatsApp hand-off
+    // — the invoice email is on its way. Only fall back to WhatsApp if the order
+    // didn't record (backend offline).
+    if (!(orderId && method === 'invoice_email')){
+      window.open('https://wa.me/18769054111?text=' + encodeURIComponent(msg), '_blank', 'noopener');
+    }
     if (orderId){
+      // Pop the receipt (+ shipping label for a courier order) and fire the
+      // print dialog. A blocked popup is harmless — the WhatsApp tab already
+      // opened above and the cart still clears below.
+      try {
+        window.open('/order-print.html?order=' + encodeURIComponent(orderId) + (printEmail ? '&email=' + encodeURIComponent(printEmail) : ''), '_blank', 'noopener');
+      } catch(e){}
       cart = {};
       // The order owns these now — clear them so the next order starts fresh.
       orderPhotos.forEach(function(p){ try { URL.revokeObjectURL(p.url); } catch(e){} });
       orderPhotos = [];
+      SHIP.fulfilment = 'pickup'; SHIP.fee = ''; SHIP.carrier = ''; SHIP.service = ''; SHIP.instructions = ''; SHIP.quoteToken = '';
+      _shipRates = null; _shipRenderedFor = null;
+      quoteMode = false;
       // renderCart() bails out early once the cart is empty, so clear the strip
       // here rather than relying on it.
       renderPhotoStrip();
@@ -3101,20 +3353,25 @@ document.addEventListener('DOMContentLoaded', function(){
       // A quote cart isn't being paid for yet, so the payment method has no
       // say over the button -- updateCheckoutLabel() owns it in that case.
       if (cartIsQuote()){ btn.classList.remove('stripe'); updateCheckoutLabel(); return; }
-      if (method === 'stripe'){ btn.classList.add('stripe'); lbl.textContent = 'Pay with card →'; }
-      else { btn.classList.remove('stripe'); lbl.textContent = 'Checkout via WhatsApp'; }
+      btn.classList.remove('stripe');
+      if (method === 'fygaro'){ btn.classList.add('stripe'); lbl.textContent = 'Pay by card →'; }
+      else if (method === 'invoice_email'){ lbl.textContent = 'Email my invoice'; }
+      else { lbl.textContent = 'Checkout via WhatsApp'; }
     }
     document.querySelectorAll('input[name="payMethod"]').forEach(function(r){
       r.addEventListener('change', updatePay);
     });
-    // Ask the backend whether the storefront is in ordering mode (prices shown,
-    // checkout on) or quote-first mode. Plain fetch -- this runs before the
-    // _foxdApi helper is wired up. Default to quote-first until it answers.
+    // Ask the backend for card-payment availability and the shipping config
+    // (enabled carriers + parish list). Plain fetch -- this runs before the
+    // _foxdApi helper is wired up. Whether a cart checks out or is saved is
+    // decided per-cart from price + stock, not from config.
     fetch('/api/config', { credentials:'same-origin' })
       .then(function(res){ return res.ok ? res.json() : null; })
       .then(function(r){
         if (r && r.payments && r.payments.stripe_enabled) window._foxdStripeEnabled = true;
-        window._foxdOrderingEnabled = !!(r && r.ordering_enabled);
+        if (r && r.payments && r.payments.fygaro_enabled) window._foxdFygaroEnabled = true;
+        if (r && r.shipping) window._foxdShipping = r.shipping;
+        _shipRenderedFor = null;   // force renderShip() to pick up the carrier/parish list
         updateCheckoutLabel();
         renderCart();
       }).catch(function(){});
@@ -3180,7 +3437,7 @@ document.addEventListener('DOMContentLoaded', function(){
             var btn = usd
               ? '<button class="add ' + (inCart?'in':'') + '" data-img="' + esc(p.i) + '">' + (inCart ? '✓ Added' : '+ Add') + '</button>'
               : '<button class="add quote ' + (inCart?'in':'') + '" data-img="' + esc(p.i) + '">' + (inCart ? '✓ Added' : '+ Get Quote') + '</button>';
-            return '<article class="part"><div class="img"><span class="badge ' + (p.b==='USED'?'used':'') + '">' + p.b + '</span><img src="' + photoOf(p.i) + '" alt="' + p.n + '" loading="lazy" onerror="this.style.opacity=0.25"/></div><div class="body"><div class="make">' + p.m + '</div><h5>' + p.n + '</h5><p class="desc">' + descFor(st) + '</p><div class="foot">' + priceBlock + btn + '</div></div></article>';
+            return '<article class="part"><div class="img"><span class="badge ' + (p.b==='USED'?'used':'') + '">' + p.b + '</span><img src="' + photoOf(p.thumb || p.i) + '" alt="' + p.n + '" loading="lazy" onerror="this.style.opacity=0.25"/></div><div class="body"><div class="make">' + p.m + '</div><h5>' + p.n + '</h5><p class="desc">' + descFor(p, st) + '</p><div class="foot">' + priceBlock + btn + '</div></div></article>';
           }).join('');
           document.getElementById('partsCount').textContent = matched.length + ' items';
           g.querySelectorAll('.add').forEach(function(b){ b.addEventListener('click', function(){ addToCart(b.dataset.img); }); });
@@ -3380,7 +3637,7 @@ document.addEventListener('DOMContentLoaded', function(){
             var btn = usd
               ? '<button class="add ' + (inCart?'in':'') + '" data-img="' + esc(p.i) + '">' + (inCart ? '✓ Added' : '+ Add') + '</button>'
               : '<button class="add quote ' + (inCart?'in':'') + '" data-img="' + esc(p.i) + '">' + (inCart ? '✓ Added' : '+ Get Quote') + '</button>';
-            return '<article class="part"><div class="img"><span class="badge ' + (p.b==='USED'?'used':'') + '">' + p.b + '</span><img src="' + photoOf(p.i) + '" alt="' + p.n + '" loading="lazy" onerror="this.style.opacity=0.25"/></div><div class="body"><div class="make">' + p.m + '</div><h5>' + p.n + '</h5><p class="desc">' + descFor(st) + '</p><div class="foot">' + priceBlock + btn + '</div></div></article>';
+            return '<article class="part"><div class="img"><span class="badge ' + (p.b==='USED'?'used':'') + '">' + p.b + '</span><img src="' + photoOf(p.thumb || p.i) + '" alt="' + p.n + '" loading="lazy" onerror="this.style.opacity=0.25"/></div><div class="body"><div class="make">' + p.m + '</div><h5>' + p.n + '</h5><p class="desc">' + descFor(p, st) + '</p><div class="foot">' + priceBlock + btn + '</div></div></article>';
           }).join('');
           document.getElementById('partsCount').textContent = matched.length + ' items';
           g.querySelectorAll('.add').forEach(function(b){ b.addEventListener('click', function(){ addToCart(b.dataset.img); }); });
@@ -3491,7 +3748,7 @@ document.addEventListener('DOMContentLoaded', function(){
       nameWrap.style.display = (m === 'signup') ? '' : 'none';
       phoneWrap.style.display = (m === 'signup') ? '' : 'none';
       submitBtn.textContent = (m === 'signup') ? 'Create Account' : 'Sign In';
-      document.getElementById('signinTitle').textContent = (m === 'signup') ? 'Create your account' : 'Welcome to Vision Auto Solutions';
+      document.getElementById('signinTitle').textContent = (m === 'signup') ? 'Create your account' : 'Welcome to Morty\'s Auto Parts';
     }
     tabs.forEach(function(t){ t.addEventListener('click', function(){ setMode(t.dataset.tab); }); });
     function refreshUI(){
@@ -3582,8 +3839,8 @@ document.addEventListener('DOMContentLoaded', function(){
       var st = stockOf(p.i);
       var priceBlock = '<span class="price">' + fmt(usd) + (usd ? '<span class="alt">' + altFmt(usd) + '</span>' : '') + '</span>';
       return '<article class="part' + (st.level==='out'?' outstock':'') + '">' +
-        '<div class="img"><span class="badge ' + (p.b==='USED'?'used':'') + '">' + p.b + '</span>' + stockBadgeHTML(st) + '<img src="' + photoOf(p.i) + '" alt="' + p.n + '" loading="lazy" onerror="this.style.opacity=0.25"/></div>' +
-        '<div class="body"><div class="make">' + p.m + '</div><h5>' + p.n + '</h5>' + urgencyHTML(p, st) + '<p class="desc">' + descFor(st) + '</p><div class="foot">' + priceBlock + buttonHTML(p, usd, inCart, st) + '</div></div>' +
+        '<div class="img"><span class="badge ' + (p.b==='USED'?'used':'') + '">' + p.b + '</span>' + stockBadgeHTML(st) + '<img src="' + photoOf(p.thumb || p.i) + '" alt="' + p.n + '" loading="lazy" onerror="this.style.opacity=0.25"/></div>' +
+        '<div class="body"><div class="make">' + p.m + '</div><h5>' + p.n + '</h5>' + urgencyHTML(p, st) + '<p class="desc">' + descFor(p, st) + '</p><div class="foot">' + priceBlock + buttonHTML(p, usd, inCart, st) + '</div></div>' +
       '</article>';
     }).join('');
     fg.querySelectorAll('.add:not(.notify)').forEach(function(b){ b.addEventListener('click', function(){ addToCart(b.dataset.img); }); });
@@ -3778,7 +4035,7 @@ document.addEventListener('DOMContentLoaded', function(){
   })();
 
   // INITIAL
-  setCurrency(currency);
+  setCurrency();
   saveCart();
   renderCart();
   if (window._foxdRenderFeatured) window._foxdRenderFeatured();
@@ -3787,11 +4044,11 @@ document.addEventListener('DOMContentLoaded', function(){
   // HERO SLIDER
   (function(){
     var slides = [
-      {img:"honda crv 2020.jpg", cap:"2020 Honda CR-V"},
-      {img:"honda crv 2020.jpg", cap:"Honda Civic — OEM Parts In Stock"},
-      {img:"honda crv 2020.jpg", cap:"Honda Accord — Engines &amp; Body Parts"},
-      {img:"honda crv 2020.jpg", cap:"Honda Odyssey — Sliding Door Specialists"},
-      {img:"honda crv 2020.jpg", cap:"Acura MDX — JDM Engines Available"}
+      {img:"honda crv 2020.jpg", cap:"Genuine &amp; Aftermarket Auto Parts"},
+      {img:"honda crv 2020.jpg", cap:"Toyota · Honda · Nissan · Suzuki — parts in stock"},
+      {img:"honda crv 2020.jpg", cap:"Mitsubishi · Isuzu · Subaru · Mazda"},
+      {img:"honda crv 2020.jpg", cap:"Engine, brakes, suspension &amp; body parts"},
+      {img:"honda crv 2020.jpg", cap:"Same-day quotes · Islandwide delivery"}
     ];
     var track = document.getElementById('sliderTrack');
     var dots = document.getElementById('sliderDots');
@@ -3852,7 +4109,7 @@ document.addEventListener('DOMContentLoaded', function(){
       + '<div id="signinOverlay" style="position:fixed;inset:0;background:rgba(11,27,43,.85);z-index:9999;display:none;align-items:center;justify-content:center;padding:20px">'
       +   '<div style="background:#fff;border-radius:14px;max-width:420px;width:100%;padding:28px;box-shadow:0 24px 60px rgba(0,0,0,.4);position:relative;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif">'
       +     '<button id="signinClose" type="button" aria-label="Close" style="position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:8px;background:#f1f5f9;border:1px solid #e5e7eb;font-size:20px;color:#374151;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;transition:background .15s,color .15s" onmouseover="this.style.background=\'#fee2e2\';this.style.color=\'#d62828\'" onmouseout="this.style.background=\'#f1f5f9\';this.style.color=\'#374151\'">&times;</button>'
-      +     '<h2 id="signinTitle" style="margin:0 0 6px;font-size:20px;color:#0b1b2b">Welcome to Vision Auto Solutions</h2>'
+      +     '<h2 id="signinTitle" style="margin:0 0 6px;font-size:20px;color:#0b1b2b">Welcome to Morty\'s Auto Parts</h2>'
       +     '<p style="color:#6b7280;font-size:13px;margin:0 0 16px">Sign in to track orders, save vehicles, and earn loyalty points.</p>'
       +     '<div id="signinTabs" style="display:flex;border-bottom:1px solid #e5e7eb;margin-bottom:14px;gap:0">'
       +       '<button type="button" data-tab="signin" class="active" style="flex:1;background:none;border:0;padding:10px;font-weight:700;color:#0b1b2b;border-bottom:2px solid #d62828;cursor:pointer;font-family:inherit">Sign In</button>'
@@ -3894,7 +4151,7 @@ document.addEventListener('DOMContentLoaded', function(){
       nameWrap.style.display = (m === 'signup') ? '' : 'none';
       phoneWrap.style.display = (m === 'signup') ? '' : 'none';
       submitBtn.textContent = (m === 'signup') ? 'Create Account' : 'Sign In';
-      document.getElementById('signinTitle').textContent = (m === 'signup') ? 'Create your account' : 'Welcome to Vision Auto Solutions';
+      document.getElementById('signinTitle').textContent = (m === 'signup') ? 'Create your account' : 'Welcome to Morty\'s Auto Parts';
     }
     tabs.forEach(function(t){ t.addEventListener('click', function(){ setMode(t.dataset.tab); }); });
     closeBtn.addEventListener('click', close);
@@ -4002,8 +4259,14 @@ document.addEventListener('DOMContentLoaded', function(){
   // never reshuffles what the shopper is already looking at.
   (function loadCatalogue(){
     var VALID_CATS = {engine:1,body:1,suspension:1,electrical:1,brakes:1,wheels:1,fluids:1,accessories:1};
-    var FIRST_CHUNK = 1000;
-    var CHUNK = 4000;
+    // /api/products?compact=1 is capped at 5000 (see storefront.js), not the
+    // 200 a plain /api/products call gets -- pull in 5000s so a ~17k-part
+    // catalogue takes ~4 requests, not ~90. Each request also re-runs a full
+    // COUNT(*) that this loader never reads (see absorb()), so an accidental
+    // drop to small pages here silently multiplies that scan by however many
+    // more chunks it takes -- this bit us once already (Sep 2026, blew the
+    // D1 free-tier daily row-read cap from a handful of storefront visits).
+    var PAGE = 5000;
     var first = true;
     var loaded = 0;
 
@@ -4013,29 +4276,42 @@ document.addEventListener('DOMContentLoaded', function(){
     }
 
     function absorb(data){
-      var cats = data.cats || [];
-      var rows = data.rows || [];
-      var mapped = rows.map(function(r){
-        // [img, name, make_model, catIdx, condIdx, price_cents, stock_count, bin]
-        var img = r[0];
-        if (r[5] != null) prices[img] = r[5] / 100;
-        liveStock[img] = r[6];
-        var cat = cats[r[3]];
-        var name = r[1] || img;
-        var make = r[2] || '';
-        var bin = r[7] || '';
+      var raw = (data && (data.products || data.rows)) || [];
+      var cats = (data && data.cats) || [];
+      var mapped = raw.map(function(r){
+        // /api/products?compact=1 returns positional-array rows:
+        //   [img, name, make_model, catIdx, condIdx, priceCents, stock, bin, alt?]
+        // A non-compact caller returns objects ({img, name, price_usd, ...}).
+        // Handle both so the loader can't silently absorb nothing again.
+        var isArr = Array.isArray(r);
+        var img  = isArr ? r[0] : r.img;
+        var name = (isArr ? r[1] : r.name) || img;
+        var make = (isArr ? r[2] : r.make_model) || '';
+        var cat  = String((isArr ? (cats[r[3]] || '') : r.category) || '').toLowerCase();
+        var cond = isArr ? (r[4] === 1 ? 'USED' : 'NEW') : (r.condition === 'USED' ? 'USED' : 'NEW');
+        var altStr = isArr ? (r[8] || '') : '';
+        var thumb = isArr ? (r[9] || '') : (r.thumb_url || '');
+        if (isArr) {
+          if (r[5] != null && !isNaN(r[5])) prices[img] = Number(r[5]) / 100;
+        } else {
+          var pu = parseFloat(r.price_usd);
+          if (!isNaN(pu)) prices[img] = pu;
+        }
+        liveStock[img] = isArr ? r[6] : r.stock_count;
         return {
           n: name,
           m: make,
           c: VALID_CATS[cat] ? cat : 'accessories',
-          b: r[4] === 1 ? 'USED' : 'NEW',
+          b: cond,
           i: img,
-          bin: bin,
+          thumb: thumb || img,   // effective primary photo (may be an overridden gallery image)
+          bin: '',   // bin location is warehouse-internal — not shown or searchable on the storefront
           // Precomputed lowercase haystack. Building this once at load is what
           // makes search fast -- the old filter concatenated and lowercased
-          // three fields for all 23k parts on every keystroke. Part number is
-          // included because that is what customers actually search by.
-          s: (name + ' ' + make + ' ' + cat + ' ' + img + ' ' + bin).toLowerCase()
+          // several fields for all ~17k parts on every keystroke. Part number
+          // and any alternate/interchange numbers are included because that is
+          // what customers actually search by.
+          s: (name + ' ' + make + ' ' + cat + ' ' + img + (altStr ? ' ' + altStr : '')).toLowerCase()
         };
       });
       // `parts` starts empty now, so this only matters if a retry ever
@@ -4053,15 +4329,16 @@ document.addEventListener('DOMContentLoaded', function(){
       return fetch('/api/products?compact=1&limit=' + size + '&offset=' + offset, { credentials:'same-origin' })
         .then(function(r){ return r.ok ? r.json() : null; })
         .then(function(data){
-          if (!data || !data.rows || !data.rows.length) return 0;
+          var rows = data && (data.products || data.rows);
+          if (!rows || !rows.length) return 0;
           var n = absorb(data);
           setStat(loaded, false);
           return n;
         });
     }
 
-    // First chunk paints; everything after it quietly extends the list.
-    pull(0, FIRST_CHUNK)
+    // First page paints; everything after it quietly extends the list.
+    pull(0, PAGE)
       .then(function(n){
         // Nothing came back. There is no placeholder list to fall back on any
         // more, so say so rather than leaving the shopper staring at an empty
@@ -4075,8 +4352,8 @@ document.addEventListener('DOMContentLoaded', function(){
         // items in their cart is offered "Request a Quote" instead of checkout.
         renderCart();
         (function next(){
-          pull(loaded, CHUNK).then(function(got){
-            if (got >= CHUNK) { next(); return; }
+          pull(loaded, PAGE).then(function(got){
+            if (got >= PAGE) { next(); return; }
             setStat(loaded, true);
             // Re-render once at the end so counts and pagination settle. The
             // shopper keeps their page and filter -- appended rows only ever
@@ -4101,7 +4378,7 @@ document.addEventListener('DOMContentLoaded', function(){
             '<h3 style="margin:0 0 6px;color:#0b1b2b;font-size:17px">We could not load the parts catalogue</h3>' +
             '<p style="margin:0 0 14px;font-size:14px">Something went wrong at our end. Please try again in a moment.</p>' +
             '<button type="button" onclick="location.reload()" style="background:#0b1b2b;color:#fff;border:0;padding:10px 22px;border-radius:7px;font-weight:700;cursor:pointer;font-family:inherit">Reload</button>' +
-            '<p style="margin:14px 0 0;font-size:13px">Or call the counter on <a href="tel:8767585590" style="color:#c1121f;font-weight:700">(876) 758-5590</a></p>' +
+            '<p style="margin:14px 0 0;font-size:13px">Or call the counter on <a href="tel:8769054111" style="color:#c1121f;font-weight:700">(876) 905-4111</a></p>' +
           '</div>';
       }
       setStat(0, true);
@@ -4128,11 +4405,11 @@ document.addEventListener('DOMContentLoaded', function(){
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.5 2 2 6.5 2 12c0 1.8.5 3.6 1.4 5.1L2 22l5-1.4A9.9 9.9 0 0 0 12 22c5.5 0 10-4.5 10-10S17.5 2 12 2zm5.1 13.6c-.2.6-1.2 1.1-1.7 1.2-.4.1-.9.1-2.9-.6-2.5-1-4.1-3.6-4.2-3.8-.1-.2-.9-1.2-.9-2.3 0-1.1.6-1.6.8-1.8.2-.2.4-.3.6-.3h.5c.2 0 .4.1.5.3.2.4.6 1.4.6 1.5 0 .2 0 .4-.1.5l-.4.5c-.1.1-.2.2-.1.4.2.4.8 1.3 1.5 2.1.7.7 1.6 1.2 2 1.4.2.1.4.1.5-.1l.5-.5c.1-.2.3-.2.5-.1l1.5.7c.2.1.4.2.4.4-.1.3-.1.7-.1.8z"/></svg>
 </button>
 
-<div class="wa-card" id="waCard" role="dialog" aria-label="Chat with Vision Auto Solutions">
+<div class="wa-card" id="waCard" role="dialog" aria-label="Chat with Morty's Auto Parts">
   <div class="wa-head">
-    <div class="avi"><img src="vision_logo.jpg" alt="Vision Auto Solutions"></div>
+    <div class="avi">MAP</div>
     <div style="min-width:0">
-      <b>Vision Auto Solutions</b>
+      <b>Morty's Auto Parts</b>
       <small id="waStatus">Checking hours…</small>
     </div>
     <button class="wa-close" id="waClose" type="button" aria-label="Close chat">&times;</button>
@@ -4148,7 +4425,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
 <script>
 (function(){
-  var WA_NUMBER = '18767585590';
+  var WA_NUMBER = '18769054111';
   // Mon-Sat 08:00-17:30, closed Sunday -- the same hours printed in the topbar,
   // the service card and the footer. Kept in one place here so the "online"
   // dot cannot end up contradicting the rest of the page.
@@ -4218,6 +4495,7 @@ document.addEventListener('DOMContentLoaded', function(){
   var QUICK = [
     ['Is this part in stock?',  'Hi, I would like to check if a part is in stock.'],
     ['Get a price quote',       'Hi, could I get a price quote for a part?'],
+    ['Delivery options',        'Hi, what are the delivery options for an order?'],
     ['Opening hours',           'Hi, what are your opening hours?']
   ];
   function quickRow(){
@@ -4239,7 +4517,7 @@ document.addEventListener('DOMContentLoaded', function(){
     if (seeded) return;
     seeded = true;
     var open = isOpen();
-    bubble('👋 Welcome to <b>Vision Auto Solutions</b> — Honda and Acura parts, Waltham Park Road.');
+    bubble('👋 Welcome to <b>Morty\'s Auto Parts</b> — genuine &amp; aftermarket parts, Red Hills Road.');
     setTimeout(function(){
       bubble(open === false
         ? 'We are closed right now, but send your message anyway and we will reply as soon as we open.'
@@ -4255,7 +4533,7 @@ document.addEventListener('DOMContentLoaded', function(){
     var msg = (text || '').trim() || 'Hi, I have a question about a part.';
     window.open('https://wa.me/' + WA_NUMBER + '?text=' + encodeURIComponent(msg), '_blank', 'noopener');
     input.value = '';
-    bubble('✅ Opening WhatsApp with your message. If nothing happened, call <a href="tel:8767585590" style="color:#075e54;font-weight:700">(876) 758-5590</a>.');
+    bubble('✅ Opening WhatsApp with your message. If nothing happened, call <a href="tel:8769054111" style="color:#075e54;font-weight:700">(876) 905-4111</a>.');
   }
 
   // ---- open / close --------------------------------------------------------

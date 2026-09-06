@@ -3,10 +3,10 @@
 import { d1 } from './db.js';
 
 const FALLBACK = {
-  company_name: 'Vision Auto Solutions Ltd',
-  address: '112C Waltham Park Road, Kingston 11',
+  company_name: 'Morty\'s Auto Parts',
+  address: '51 Red Hills Road, Kingston',
   country: 'Jamaica',
-  phone: '(876) 758-5590',
+  phone: '(876) 905-4111',
   email: null, website: null, logo_url: null,
   print_logo_on_invoice: true,
   default_print_template: 'receipt',
@@ -15,6 +15,21 @@ const FALLBACK = {
   receipt_notice: 'Returns within 14 days with this receipt. Electrical parts non-returnable.',
   statement_notice: 'Please settle any outstanding balance promptly. Contact us with any questions about this statement.',
   storefront_prices: false,
+  pos_enforce_login: 0,
+  pos_enforce_customer: 0,
+  pos_default_fulfilment: null,
+  // shipping (migration 0037) — origin + per-carrier switches
+  ship_origin_name: null, ship_origin_phone: null,
+  ship_origin_line1: null, ship_origin_line2: null,
+  ship_origin_city: null, ship_origin_parish: null, ship_origin_country: 'JM',
+  carrier_dhl_enabled: 0, carrier_dhl_account: null,
+  carrier_fedex_enabled: 0, carrier_fedex_account: null,
+  carrier_knutsford_enabled: 0,
+  carrier_manual_enabled: 1,
+  ship_default_weight_kg: 2.0,
+  ship_local_flat_usd: 0,
+  // Fygaro hosted card checkout (migration 0038)
+  fygaro_enabled: 0, fygaro_button_id: null, fygaro_currency: 'JMD',
 };
 
 export async function getShopSettings(env) {
@@ -23,6 +38,11 @@ export async function getShopSettings(env) {
     if (row) {
       row.print_logo_on_invoice = !!row.print_logo_on_invoice;
       row.storefront_prices = !!row.storefront_prices;
+      row.pos_enforce_login = !!row.pos_enforce_login;
+      row.pos_enforce_customer = !!row.pos_enforce_customer;
+      for (const k of ['carrier_dhl_enabled', 'carrier_fedex_enabled', 'carrier_knutsford_enabled', 'carrier_manual_enabled', 'fygaro_enabled']) {
+        if (k in row) row[k] = !!row[k];
+      }
       return row;
     }
   } catch { /* table not migrated yet */ }

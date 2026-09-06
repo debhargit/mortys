@@ -3,6 +3,8 @@
 // (guards.js) enforces it as a deny-list.
 export const CAPABILITIES = [
   { key: 'pos.access',             group: 'POS',       label: 'Open the POS terminal' },
+  { key: 'pos.finalise_invoice',   group: 'POS',       label: 'Ring a sale / invoice at checkout (off = checkout saves an order for a cashier)' },
+  { key: 'cashier.access',         group: 'POS',       label: 'Open the Cashier module (take payment on POS orders)' },
   { key: 'pos.line_discount',      group: 'POS',       label: 'Give a per-line discount' },
   { key: 'pos.ticket_discount',    group: 'POS',       label: 'Give a whole-ticket discount' },
   { key: 'pos.price_override',     group: 'POS',       label: 'Change a line’s unit price' },
@@ -16,6 +18,8 @@ export const CAPABILITIES = [
   { key: 'pos.hold_recall',        group: 'POS',       label: 'Hold and recall tickets' },
   { key: 'pos.open_close_shift',   group: 'POS',       label: 'Open / close a cash-drawer shift' },
   { key: 'pos.reprint_receipt',    group: 'POS',       label: 'Reprint a receipt' },
+  { key: 'pos.serial_freetype',    group: 'POS',       label: 'Sell with a serial number that isn’t in the part’s register' },
+  { key: 'pos.redeemable_mint',    group: 'POS',       label: 'Sell a redeemable item with no pre-loaded instrument (mint a code)' },
   { key: 'inventory.edit_price',   group: 'Inventory', label: 'Edit a product price' },
   { key: 'inventory.adjust_stock', group: 'Inventory', label: 'Adjust stock counts' },
   { key: 'customers.view_balances', group: 'Customers', label: 'See customer account balances' },

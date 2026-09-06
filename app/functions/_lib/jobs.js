@@ -8,6 +8,7 @@
 // is a no-op. Every run is logged to job_runs.
 import { d1 } from './db.js';
 import { sendEmail, templates } from './mailer.js';
+import { generateRecurringCharges } from './recurring.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -28,7 +29,7 @@ function digestHtml(title, intro, rows) {
     <h2 style="margin:0 0 6px">${esc(title)}</h2>
     <p style="margin:0 0 12px;color:#475569">${esc(intro)}</p>
     <table cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-size:13px">${rows}</table>
-    <p style="margin:14px 0 0;color:#94a3b8;font-size:12px">Sent by the Vision Auto Solutions scheduled jobs.</p>
+    <p style="margin:14px 0 0;color:#94a3b8;font-size:12px">Sent by the Morty's Auto Parts scheduled jobs.</p>
   </body></html>`;
 }
 
@@ -85,7 +86,7 @@ export async function remindersDigest(env) {
        </tr>`).join('');
     await sendEmail(env, {
       to,
-      subject: `${due.length} customer reminder${due.length === 1 ? '' : 's'} due — Vision Auto Solutions`,
+      subject: `${due.length} customer reminder${due.length === 1 ? '' : 's'} due — Morty's Auto Parts`,
       text: due.map((r) => `${r.due_date}  ${r.customer_name || '—'}  ${r.subject}`).join('\n'),
       html: digestHtml('Customer reminders due', `${due.length} follow-up${due.length === 1 ? '' : 's'} pending as of ${today()}.`, rows),
     });
@@ -102,7 +103,7 @@ export async function lowStockDigest(env) {
     `SELECT img, name, make_model, category, stock_count, low_threshold,
             price_cents / 100.0 AS price_usd
        FROM products
-      WHERE is_active = 1 AND stock_count <= low_threshold
+      WHERE is_active = 1 AND item_type != 'service' AND is_kit = 0 AND stock_count <= low_threshold
       ORDER BY (stock_count <= 0) DESC, stock_count ASC, name ASC LIMIT 200`);
   if (!low.length) return { low: 0, emailed: false };
 
@@ -121,7 +122,7 @@ export async function lowStockDigest(env) {
        </tr>`).join('');
     await sendEmail(env, {
       to,
-      subject: `${low.length} part${low.length === 1 ? '' : 's'} at or below reorder level${out ? ` (${out} out of stock)` : ''} — Vision Auto Solutions`,
+      subject: `${low.length} part${low.length === 1 ? '' : 's'} at or below reorder level${out ? ` (${out} out of stock)` : ''} — Morty's Auto Parts`,
       text: low.map((r) => `${r.stock_count}/${r.low_threshold}  ${r.name}  ${r.make_model || ''}`).join('\n'),
       html: digestHtml('Low stock', `${low.length} active part${low.length === 1 ? '' : 's'} at or below the reorder level as of ${today()}${out ? `, ${out} of them out of stock` : ''}.`, rows),
     });
@@ -134,6 +135,7 @@ export const JOBS = {
   'back-in-stock': notifyBackInStock,
   'reminders-digest': remindersDigest,
   'low-stock-digest': lowStockDigest,
+  'recurring-charges': generateRecurringCharges,
 };
 
 // Run one job by name, logging the outcome to job_runs. Throws for an unknown

@@ -7,20 +7,19 @@
    ---------------------------------------------------------------------
    Features:
      1. Vehicle Fitment Finder      (year / make / model selector)
-     2. Service Booking Widget      (install / fitting appointments)
-     3. Loyalty Rewards             (points by phone, redeemable)
-     4. Quick Reorder               (past inquiries, 1-click resend)
-     5. Compare Products            (side-by-side, up to 3 items)
-     6. Bundle / Multi-buy Pricing  (4-tire discount, etc.)
-     7. Floating "Help me find a part" launcher
+     2. Loyalty Rewards             (points by phone, redeemable)
+     3. Quick Reorder               (past inquiries, 1-click resend)
+     4. Compare Products            (side-by-side, up to 3 items)
+     5. Bundle / Multi-buy Pricing  (4-tire discount, etc.)
+     6. Floating "Help me find a part" launcher
    ---------------------------------------------------------------------
    No external dependencies. Browser-only. localStorage backed.
    Multi-tenant safe — keys are namespaced under sp_*.
    ===================================================================== */
 (function(){
 'use strict';
-if(window.__visionautoEnhancements) return;
-window.__visionautoEnhancements = true;
+if(window.__mortysautoEnhancements) return;
+window.__mortysautoEnhancements = true;
 
 /* ---------- helpers ---------- */
 function r(k, fb){ try{const v=localStorage.getItem(k);return v?JSON.parse(v):fb}catch(_){return fb} }
@@ -264,7 +263,7 @@ function makeRewardsModal(){
   m.innerHTML = `
     <div class="sp-modal-inner">
       <div class="sp-modal-head">
-        <div><h3>⭐ Vision Auto Rewards</h3><p>Earn points on purchases &amp; services. Redeem for discounts.</p></div>
+        <div><h3>⭐ Morty's Auto Rewards</h3><p>Earn points on purchases &amp; services. Redeem for discounts.</p></div>
         <button class="sp-close" data-act="close">×</button>
       </div>
       <div class="sp-modal-body">
@@ -303,7 +302,7 @@ function renderLoyaltyInner(m, rec){
         <b>How to earn:</b><br>
         • +100 points per completed purchase (J$1 = 1 pt)<br>
         • +50 points for product reviews<br>
-        <b>Redeem:</b> 500 pts = J$500 off · 2000 pts = J$2,500 off · 5000 pts = J$6,000 off
+        <b>Redeem:</b> 500 pts = J$500 off · 2000 pts = J$2,500 off · 5000 pts = J$7,000 off
       </div>`;
     return;
   }
@@ -616,6 +615,26 @@ window.spEnh = {
   loadVehicle, saveVehicle,
   addPoints, loyaltyGet, loyaltyAll,
   computeBundle, renderFabBadges
+};
+
+})();
+orage', e => {
+    if(e.key === 'sp_active_phone' || e.key === 'sp_loyalty' || e.key === 'va_compare') renderFabBadges();
+  });
+}
+
+if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+else boot();
+
+window.spEnh = {
+  openFitment, openRewards, openCompare, openHistory,
+  loadVehicle, saveVehicle,
+  addPoints, loyaltyGet, loyaltyAll,
+  computeBundle, renderFabBadges
+};
+
+})();
+eBundle, renderFabBadges
 };
 
 })();

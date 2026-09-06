@@ -17,6 +17,44 @@ import { sendEmail } from '../_lib/mailer.js';
 import { readUploadBody } from '../_lib/uploads.js';
 import { safeJson } from '../_lib/util.js';
 import { getShopSettings } from '../_lib/shop.js';
+import { bestUnitPriceCents, loadBreaksByImg, ACTIVE_SALE_PRICE_SQL, effectiveBaseCents, loadTierPricesByImg, tierCentsFor } from '../_lib/price_breaks.js';
+import { loadKitComponentsByImg, kitRollupCents, kitBuildableQty } from '../_lib/kits.js';
+import { loadAltNumbersByImg, loadSubstitutesByImg, loadSubstitutesForImg } from '../_lib/alt_numbers.js';
+import { loadSerialStockByImg, loadRedeemableStockByImg } from '../_lib/serials.js';
+import { loadImagesForImg, galleryFor, primaryUrl } from '../_lib/product_images.js';
+import { centsToUsd } from '../_lib/money.js';
+
+// Attach each row's price_breaks (ascending by min_qty, in USD) and its
+// active sale price (null when there's no sale or it's outside its window)
+// from a pre-fetched img -> breaks Map -- shared by the list and
+// single-product endpoints below so both expose pricing the same way.
+// price_cents/active_sale_cents ride along on the row purely to compute this
+// and are stripped before the row goes out.
+// `pctx` = { show, tier, staff } from pricingCtx(). `tierByImg` is a
+// loadTierPricesByImg() Map. The headline price_usd stays retail (same as
+// today -- sale prices aren't folded into it either); tier / percent / sale
+// ride alongside as their own fields and the client (or the cart / checkout
+// resolver) composes them.
+function withPricing(row, breaksByImg, tierByImg, pctx) {
+  const b = breaksByImg.get(row.img) || [];
+  row.price_breaks = b.filter((x) => x.price_cents != null).map((x) => ({ min_qty: x.min_qty, price_usd: centsToUsd(x.price_cents) }));
+  row.qty_discounts = b.filter((x) => x.discount_pct != null).map((x) => ({ min_qty: x.min_qty, discount_pct: x.discount_pct }));
+  row.sale_price_usd = row.active_sale_cents != null ? centsToUsd(row.active_sale_cents) : null;
+  const tp = (tierByImg && tierByImg.get(row.img)) || null;
+  const myTierCents = tierCentsFor(tp, pctx && pctx.tier);
+  row.tier_price_usd = myTierCents != null ? centsToUsd(myTierCents) : null;
+  // The POS grid (staff viewer) needs every tier's price + the % rows so its
+  // client can resolve per whichever customer is attached at the till.
+  if (pctx && pctx.staff) {
+    row.tier_prices = {
+      trade: tp && tp.trade != null ? centsToUsd(tp.trade) : null,
+      fleet: tp && tp.fleet != null ? centsToUsd(tp.fleet) : null,
+      dealer: tp && tp.dealer != null ? centsToUsd(tp.dealer) : null,
+    };
+  }
+  delete row.price_cents; delete row.active_sale_cents;
+  return row;
+}
 
 // Who may see prices on the storefront endpoints:
 //   * any admin / staff account — ALWAYS (the POS grid uses these endpoints)
@@ -24,15 +62,21 @@ import { getShopSettings } from '../_lib/shop.js';
 //   * everyone, when the global shop_settings.storefront_prices switch is on
 // Otherwise prices are stripped and the front-end shows "Call for price" and
 // routes checkout to a quote request. See migrations 0027 / 0028.
+// One pass over the viewer: may they see prices, what tier do they buy at,
+// are they staff (the POS grid). Replaces canSeePrices at the pricing sites
+// so currentUser is fetched once, not three times.
+async function pricingCtx(c) {
+  let u = null;
+  try { u = await currentUser(c.req.raw, c.env); } catch { /* guest */ }
+  const staff = !!(u && (u.is_admin || u.is_staff));
+  let show = staff || !!(u && u.show_prices);
+  if (!show) {
+    try { const s = await getShopSettings(c.env); show = !!(s && s.storefront_prices); } catch { show = false; }
+  }
+  return { show, staff, tier: (u && u.price_tier) || 'retail' };
+}
 async function canSeePrices(c) {
-  try {
-    const u = await currentUser(c.req.raw, c.env);
-    if (u && (u.is_admin || u.is_staff || u.show_prices)) return true;
-  } catch { /* guest */ }
-  try {
-    const s = await getShopSettings(c.env);
-    return !!(s && s.storefront_prices);
-  } catch { return false; }
+  return (await pricingCtx(c)).show;
 }
 
 // server.js buildProductWhere(), for SQLite.
@@ -54,9 +98,13 @@ function productWhere(q) {
   if (q.q) {
     const terms = String(q.q).split(',').map((t) => t.trim().toLowerCase()).filter(Boolean).slice(0, 4);
     for (const t of terms) {
-      where.push("(lower(name) LIKE ? OR lower(make_model) LIKE ? OR lower(coalesce(sku,'')) LIKE ?)");
+      // The alt-number match is a non-correlated IN (no reference to the outer
+      // products row) so SQLite evaluates it once against the small,
+      // lower(number)-indexed product_alt_numbers table -- see migration 0054.
+      where.push("(lower(name) LIKE ? OR lower(make_model) LIKE ? OR lower(coalesce(sku,'')) LIKE ?"
+        + " OR img IN (SELECT product_img FROM product_alt_numbers WHERE lower(number) LIKE ?))");
       const s = '%' + t + '%';
-      binds.push(s, s, s);
+      binds.push(s, s, s, s);
     }
   }
   return { where: where.join(' AND '), binds };
@@ -74,10 +122,17 @@ const SORTS = {
 
 const LIST_COLS = `
   img, name, make_model, category, condition,
-  price_cents / 100.0 AS price_usd,
+  price_cents, price_cents / 100.0 AS price_usd,
   stock_count, low_threshold, sku, NULL AS barcode, bin_location, location,
-  CASE WHEN stock_count <= 0 THEN 'out'
-       WHEN stock_count <= low_threshold THEN 'low' ELSE 'in' END AS stock_level`;
+  CASE WHEN item_type = 'service' THEN 'in'
+       WHEN stock_count <= 0 THEN 'out'
+       WHEN stock_count <= low_threshold THEN 'low' ELSE 'in' END AS stock_level,
+  serial_required, warranty_days, item_type,
+  core_charge_cents / 100.0 AS core_charge_usd, env_fee_cents / 100.0 AS env_fee_usd,
+  matrix_id, ${ACTIVE_SALE_PRICE_SQL} AS active_sale_cents,
+  max_discount_pct, is_redeemable, is_kit, kit_price_mode,
+  COALESCE(primary_image_override, img) AS thumb_url,
+  restricted_instore_only, restricted_manager_approval, restricted_id_required, restricted_tax_id_required`;
 
 const COUNT_CAP = 5000;
 
@@ -86,7 +141,8 @@ export default function mount(app) {
     try {
       const db = d1(c.env);
       const q = c.req.query();
-      const showPrices = await canSeePrices(c);
+      const pctx = await pricingCtx(c);
+      const showPrices = pctx.show;
       // With prices hidden, a price filter or price sort would leak the very
       // numbers we're withholding (binary-search the catalogue by price_max).
       // Drop them for un-approved callers.
@@ -118,12 +174,40 @@ export default function mount(app) {
       const capped = !isCompact && counted > COUNT_CAP;
       const total = Math.max(capped ? COUNT_CAP : counted, offset + rows.length);
 
+      // Kit rows carry no stock of their own -- swap in the derived buildable
+      // quantity, and (for a roll-up kit) the summed component price -- so the
+      // storefront grid and the POS parts search both see a real number.
+      // Bounded second query, only for the handful of kits actually on the page.
+      const kitImgs = rows.filter((r) => r.is_kit).map((r) => r.img);
+      if (kitImgs.length) {
+        const compMap = await loadKitComponentsByImg(db, kitImgs);
+        for (const r of rows) {
+          if (!r.is_kit) continue;
+          const comps = compMap.get(r.img) || [];
+          const buildable = kitBuildableQty(comps);
+          r.stock_count = Number.isFinite(buildable) ? buildable : 9999;
+          r.stock_level = r.stock_count <= 0 ? 'out'
+            : (r.low_threshold != null && r.stock_count <= r.low_threshold) ? 'low' : 'in';
+          if (r.kit_price_mode === 'rollup') {
+            const roll = kitRollupCents(comps);
+            r.price_cents = roll;
+            r.price_usd = roll / 100;
+            r.active_sale_cents = null;   // roll-up already reflects component sale prices
+          }
+        }
+      }
+
       // The storefront (index.html / shop.html) asks with ?compact=1 and reads
       // a positional-array format: { cats, rows:[[img,name,make_model,catIdx,
-      // condIdx,price_cents,stock_count,bin], ...] }. price_cents is null when
-      // this caller may not see prices, which is what flips a cart into a
-      // quote request client-side.
+      // condIdx,price_cents,stock_count,bin, alt?, thumb?], ...] }. price_cents
+      // is null when this caller may not see prices, which is what flips a
+      // cart into a quote request client-side. `alt` (element 8) is a
+      // space-joined string of the part's alternate numbers; `thumb` (element
+      // 9) is the effective primary-image url when it differs from `img`. Each
+      // is only emitted when it has a value -- and thumb forces alt to a
+      // placeholder so the positions stay fixed.
       if (q.compact) {
+        const altByImg = await loadAltNumbersByImg(db, rows.map((r) => r.img));
         const catIndex = {};
         const cats = [];
         const packed = rows.map((r) => {
@@ -131,12 +215,43 @@ export default function mount(app) {
           if (!(cat in catIndex)) { catIndex[cat] = cats.length; cats.push(cat); }
           const priceCents = showPrices && r.price_usd != null ? Math.round(r.price_usd * 100) : null;
           const condIdx = String(r.condition || '').toUpperCase() === 'USED' ? 1 : 0;
-          return [r.img, r.name, r.make_model || '', catIndex[cat], condIdx, priceCents, r.stock_count, r.bin_location || ''];
+          const alt = (altByImg.get(r.img) || []).map((a) => a.number).join(' ');
+          const thumb = r.thumb_url && r.thumb_url !== r.img ? r.thumb_url : '';
+          const row = [r.img, r.name, r.make_model || '', catIndex[cat], condIdx, priceCents, r.stock_count, r.bin_location || ''];
+          if (thumb) { row.push(alt, thumb); } else if (alt) { row.push(alt); }
+          return row;
         });
         return c.json({ cats, rows: packed, total, limit, offset, prices_visible: showPrices });
       }
 
-      const list = showPrices ? rows : rows.map((r) => ({ ...r, price_usd: null }));
+      let list = showPrices ? rows : rows.map((r) => ({ ...r, price_usd: null }));
+      if (showPrices) {
+        const imgList = list.map((r) => r.img);
+        const [breaksByImg, tierByImg] = await Promise.all([loadBreaksByImg(db, imgList), loadTierPricesByImg(db, imgList)]);
+        list = list.map((r) => withPricing(r, breaksByImg, tierByImg, pctx));
+        // The POS grid (staff) shows an "alternatives" expander per row; give
+        // it the linked substitutes without a second round-trip.
+        if (pctx.staff && !isCompact) {
+          const subMap = await loadSubstitutesByImg(db, imgList);
+          for (const r of list) {
+            const s = subMap.get(r.img);
+            if (s && (s.forward.length || s.reverse.length)) r.substitutes = s;
+          }
+          // In-stock serials / redemption instruments for the counter picker.
+          const serialImgs = list.filter((r) => r.serial_required).map((r) => r.img);
+          const redeemImgs = list.filter((r) => r.is_redeemable).map((r) => r.img);
+          if (serialImgs.length) {
+            const sm = await loadSerialStockByImg(db, serialImgs);
+            for (const r of list) { const e = sm.get(r.img); if (e) r.serials_available = e.available; }
+          }
+          if (redeemImgs.length) {
+            const rm = await loadRedeemableStockByImg(db, redeemImgs);
+            for (const r of list) { const n = rm.get(r.img); if (n) r.redeemables_available = n; }
+          }
+        }
+      } else {
+        list = list.map((r) => { delete r.price_cents; delete r.active_sale_cents; return r; });
+      }
       return c.json({ products: list, total, limit, offset, prices_visible: showPrices, approximate: capped, count_mode: capped ? 'capped' : 'exact' });
     } catch (e) {
       return c.json({ error: 'Server error' }, 500);
@@ -155,14 +270,35 @@ export default function mount(app) {
 
   app.get('/api/products/:img', async (c) => {
     const row = await d1(c.env).one(
-      'SELECT *, price_cents / 100.0 AS price_usd, cost_cents / 100.0 AS cost_usd FROM products WHERE img = ? AND is_active = 1',
+      `SELECT *, price_cents / 100.0 AS price_usd, cost_cents / 100.0 AS cost_usd,
+              ${ACTIVE_SALE_PRICE_SQL} AS active_sale_cents
+         FROM products WHERE img = ? AND is_active = 1`,
       c.req.param('img')
     );
     if (!row) return c.json({ error: 'Not found' }, 404);
-    if (!(await canSeePrices(c))) {
+    const pctx = await pricingCtx(c);
+    if (!pctx.show) {
       row.price_usd = null; row.price_cents = null;
+      row.active_sale_cents = null; row.sale_price_usd = null;
       row.cost_usd = null; row.cost_cents = null;
+    } else {
+      const [breaksByImg, tierByImg] = await Promise.all([
+        loadBreaksByImg(d1(c.env), [row.img]), loadTierPricesByImg(d1(c.env), [row.img]),
+      ]);
+      withPricing(row, breaksByImg, tierByImg, pctx);
+      // Substitute parts a shopper might want instead -- forward links only
+      // (a shopper doesn't need "this supersedes an older part"), and only
+      // ones that are actually orderable: active + in stock.
+      const subs = (await loadSubstitutesForImg(d1(c.env), row.img)).forward
+        .filter((s) => s.is_active && s.stock_level !== 'out')
+        .map((s) => ({ img: s.img, name: s.name, sku: s.sku, price_usd: s.price_usd, stock_level: s.stock_level, relationship: s.relationship }));
+      if (subs.length) row.substitutes = subs;
     }
+    // Photo gallery -- always (photos aren't price-gated). Effective primary
+    // first, then the original if it was overridden, then the extras.
+    const extras = await loadImagesForImg(d1(c.env), row.img);
+    row.images = galleryFor(row, extras).map((g) => ({ url: g.url, caption: g.caption, is_primary: g.is_primary }));
+    row.primary_image_url = primaryUrl(row);
     return c.json({ product: row });
   });
 
@@ -177,15 +313,40 @@ export default function mount(app) {
 
   // ---- cart (D1 cart_items has no product_id; key on product_img) ----------
   app.get('/api/cart', authMw, async (c) => {
-    const rows = await d1(c.env).many(
-      `SELECT c.product_img AS img, c.qty, p.name, p.make_model, p.price_cents / 100.0 AS price_usd, p.condition
+    const db = d1(c.env);
+    const rows = await db.many(
+      `SELECT c.product_img AS img, c.qty, p.name, p.make_model, p.price_cents, p.price_cents / 100.0 AS price_usd, p.condition,
+              ${ACTIVE_SALE_PRICE_SQL} AS active_sale_cents
          FROM cart_items c JOIN products p ON p.img = c.product_img
         WHERE c.user_id = ? ORDER BY c.updated_at DESC`,
       c.get('user').id
     );
-    const showPrices = await canSeePrices(c);
-    if (!showPrices) rows.forEach((r) => { r.price_usd = null; });
-    const total = showPrices ? rows.reduce((s, r) => s + Number(r.price_usd || 0) * r.qty, 0) : null;
+    const pctx = await pricingCtx(c);
+    const showPrices = pctx.show;
+    let total = null;
+    if (showPrices) {
+      const [breaksByImg, tierByImg] = await Promise.all([
+        loadBreaksByImg(db, rows.map((r) => r.img)), loadTierPricesByImg(db, rows.map((r) => r.img)),
+      ]);
+      total = 0;
+      rows.forEach((r) => {
+        const breaks = breaksByImg.get(r.img) || [];
+        const tierCents = tierCentsFor(tierByImg.get(r.img), pctx.tier);
+        r.sale_price_usd = r.active_sale_cents != null ? centsToUsd(r.active_sale_cents) : null;
+        r.tier_price_usd = tierCents != null ? centsToUsd(tierCents) : null;
+        const baseCents = effectiveBaseCents(r.price_cents, r.active_sale_cents, tierCents);
+        const effCents = bestUnitPriceCents(baseCents, breaks, r.qty, r.price_cents);
+        r.effective_price_usd = centsToUsd(effCents);
+        r.price_breaks = breaks.filter((x) => x.price_cents != null).map((x) => ({ min_qty: x.min_qty, price_usd: centsToUsd(x.price_cents) }));
+        r.qty_discounts = breaks.filter((x) => x.discount_pct != null).map((x) => ({ min_qty: x.min_qty, discount_pct: x.discount_pct }));
+        delete r.active_sale_cents;
+        total += Number(r.effective_price_usd || 0) * r.qty;
+        delete r.price_cents;
+      });
+      total = Math.round(total * 100) / 100;
+    } else {
+      rows.forEach((r) => { r.price_usd = null; delete r.price_cents; });
+    }
     return c.json({ cart: rows, total_usd: total, prices_visible: showPrices });
   });
 
@@ -365,7 +526,7 @@ export default function mount(app) {
       c.executionCtx?.waitUntil?.(sendEmail(c.env, {
         to: email,
         subject: `We got your quote request #${id}`,
-        text: `Hi ${name},\n\nThanks -- our parts desk is checking availability and pricing and will get back to you.\n\nYour request:\n${partDescription}\n\n-- Vision Auto Solutions`,
+        text: `Hi ${name},\n\nThanks -- our parts desk is checking availability and pricing and will get back to you.\n\nYour request:\n${partDescription}\n\n-- Morty's Auto Parts`,
       }).catch(() => {}));
     }
 

@@ -3,7 +3,7 @@
 -- Customer-facing completion: checkout (coupons + loyalty), signup, account
 -- pages (addresses / messages / saved vehicles), newsletter, service booking.
 --
---   wrangler d1 migrations apply meltahonda-db --remote
+--   wrangler d1 migrations apply mortysautoparts-db --remote
 
 -- ---- coupons (schema.sql had them; D1 never did) ------------------------
 CREATE TABLE IF NOT EXISTS coupons (

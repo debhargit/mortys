@@ -4,8 +4,8 @@
 -- out (0001_init.sql's header lists `wishlist` among the ones "referenced by
 -- server.js ... that were never migrated"). See app/PORT.md, Phase 2.
 --
---   wrangler d1 migrations apply meltahonda-db --local
---   wrangler d1 migrations apply meltahonda-db
+--   wrangler d1 migrations apply mortysautoparts-db --local
+--   wrangler d1 migrations apply mortysautoparts-db
 
 CREATE TABLE IF NOT EXISTS wishlist (
   user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

@@ -5,8 +5,8 @@
 -- products / suppliers, so functions/_routes/inventory.js can write the same
 -- columns the Express handlers do.
 --
---   wrangler d1 migrations apply meltahonda-db --local
---   wrangler d1 migrations apply meltahonda-db
+--   wrangler d1 migrations apply mortysautoparts-db --local
+--   wrangler d1 migrations apply mortysautoparts-db
 --
 -- Money stays *_cents (see migration 0004 header); the route layer converts
 -- at the SELECT boundary and with _lib/money.js.

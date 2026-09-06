@@ -220,10 +220,10 @@ for (const [table, { cols }] of ordered) {
 }
 
 const sh = ['#!/usr/bin/env bash', 'set -euo pipefail',
-  'DB=${1:-meltahonda-db}', 'FLAGS=${2:---remote}', '',
+  'DB=${1:-mortysautoparts-db}', 'FLAGS=${2:---remote}', '',
   ...written.map((f) => `npx wrangler d1 execute "$DB" $FLAGS --file "$(dirname "$0")/${f}"`), ''].join('\n');
 fs.writeFileSync(path.join(OUT, '_import.sh'), sh);
-const ps = ['param([string]$Db = "meltahonda-db", [string]$Flags = "--remote")',
+const ps = ['param([string]$Db = "mortysautoparts-db", [string]$Flags = "--remote")',
   '$ErrorActionPreference = "Stop"',
   ...written.map((f) => `npx wrangler d1 execute $Db $Flags.Split(" ") --file "$PSScriptRoot/${f}"`), ''].join('\n');
 fs.writeFileSync(path.join(OUT, '_import.ps1'), ps);
