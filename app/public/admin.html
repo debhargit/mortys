@@ -1819,11 +1819,14 @@ async function renderProducts(panel){
     '</details>';
   var toolbar =
     '<div style="padding:10px 16px;background:var(--card);border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
-      '<input id="prodSearch" placeholder="Search part no., name or vehicle…" autocomplete="off" value="' + esc(PROD_STATE.q) + '" style="flex:1;min-width:220px;padding:9px 11px;border:1px solid var(--line);border-radius:6px;font-size:13px"/>' +
+      '<div style="position:relative;flex:1;min-width:220px">' +
+        '<input id="prodSearch" placeholder="Search part no., name or vehicle…" autocomplete="off" value="' + esc(PROD_STATE.q) + '" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:6px;font-size:13px;box-sizing:border-box"/>' +
+      '</div>' +
       '<select id="prodCat" style="padding:9px;border:1px solid var(--line);border-radius:6px"><option value="">All categories</option>' +
         cats.map(function(c){ return '<option value="'+c[0]+'"' + (PROD_STATE.cat===c[0]?' selected':'') + '>'+c[1]+'</option>'; }).join('') +
       '</select>' +
       '<label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--muted);white-space:nowrap"><input type="checkbox" id="prodInStock"' + (PROD_STATE.inStock?' checked':'') + '/> In stock only</label>' +
+      mhAaSelectHTML('prodFontSize') +
       '<span id="prodStatus" style="font-size:12.5px;color:var(--muted);margin-left:auto"></span>' +
     '</div>';
 
@@ -2005,7 +2008,7 @@ async function renderProducts(panel){
       return;
     }
 
-    list.innerHTML = '<table id="prodTable" tabindex="0" style="outline:none"><thead><tr>' +
+    list.innerHTML = '<table id="prodTable" tabindex="0" style="outline:none;font-size:' + posFS(13) + '"><thead><tr>' +
       '<th>Part</th><th>Cat.</th><th>Cond.</th><th>Loc.</th><th>Bin</th><th>Price (USD)</th><th>Stock</th><th>Lvl</th><th></th>' +
       '</tr></thead><tbody>' +
       PROD_STATE.rows.map(function(p, i){
@@ -3184,6 +3187,16 @@ async function renderProducts(panel){
     PROD_STATE.inStock = e.target.checked; load(false);
   });
 
+  // "Aa" text size — shared with the POS; re-render the list at the new scale.
+  mhWireAaSelect('prodFontSize', function(){ load(false); });
+
+  // POS-style live results dropdown under the search box: pick a match to jump
+  // straight into its edit modal. The box still filters the list as you type.
+  mhPartSearchDropdown(document.getElementById('prodSearch'), function(p){
+    var full = PROD_STATE.rows.find(function(x){ return x.img === p.img; });
+    productEditModal(full || p, function(){ load(false); });
+  });
+
   load(false);
 }
 
@@ -3624,6 +3637,99 @@ function posBarFS(px){ return Math.round(px * posBarScale() * 10) / 10 + 'px'; }
 // Widths have to move with the text or a large setting just clips the
 // placeholder inside a control that stayed 170px wide.
 function posBarPx(px){ return Math.round(px * posBarScale()) + 'px'; }
+
+// ---- shared "Aa" text-size control + POS-styled part search dropdown -------
+// The POS Parts Search Window's "Aa" size selector writes POS_PREFS.fontSize
+// (persisted per-user in ui_prefs). These let other screens -- the Inventory
+// list, the PO receive view -- offer the same control and the same look, so a
+// counter hand who bumped the text size for the register gets it everywhere.
+function mhAaSelectHTML(id){
+  var opts = [['sm', 'Small'], ['md', 'Default'], ['lg', 'Large'], ['xl', 'Extra large']];
+  return '<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);white-space:nowrap" title="Text size for this list — shared with the POS Parts Search Window">' +
+    '<span style="font-weight:700">Aa</span>' +
+    '<select id="' + id + '" style="padding:6px 7px;border:1px solid var(--line);border-radius:6px;font-size:12px">' +
+      opts.map(function(o){ return '<option value="' + o[0] + '"' + (POS_PREFS.fontSize === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') +
+    '</select></label>';
+}
+function mhWireAaSelect(id, onChange){
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('change', function(){
+    POS_PREFS.fontSize = this.value;
+    posSavePrefs();                 // deferred write, flushed on exit like the POS control
+    if (onChange) onChange();
+  });
+}
+
+// Attaches a floating, POS-styled results list to `inputEl`. As the user types
+// (>= 2 chars) it queries /api/products and shows matches as rows that scale
+// with POS_PREFS.fontSize. ArrowDown/ArrowUp move the highlight and scroll it
+// into view; Enter or click fires onPick(product); Esc / blur closes it.
+// Mirrors the row layout of the POS search list.
+function mhPartSearchDropdown(inputEl, onPick){
+  if (!inputEl || inputEl.__mhPartDD) return;
+  inputEl.__mhPartDD = true;
+  var host = inputEl.parentElement;
+  if (host && getComputedStyle(host).position === 'static') host.style.position = 'relative';
+  var box = document.createElement('div');
+  box.style.cssText = 'display:none;position:absolute;z-index:80;left:0;right:0;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 14px 36px rgba(0,0,0,.30);max-height:min(50vh,360px);overflow-y:auto;overscroll-behavior:contain';
+  (host || inputEl.parentNode).appendChild(box);
+  var rows = [], sel = -1, seq = 0, deb = null;
+  var fs = function(px){ return (typeof posFS === 'function') ? posFS(px) : px + 'px'; };
+  function paint(){
+    var kids = box.children;
+    for (var i = 0; i < kids.length; i++) kids[i].style.background = (i === sel) ? 'var(--hover)' : 'var(--card)';
+    if (sel >= 0 && kids[sel]) kids[sel].scrollIntoView({ block: 'nearest' });
+  }
+  function close(){ box.style.display = 'none'; box.innerHTML = ''; rows = []; sel = -1; }
+  function choose(p){ if (!p) return; close(); try { onPick(p); } catch (_) {} }
+  function render(){
+    if (!rows.length){ close(); return; }
+    box.innerHTML = rows.map(function(p, i){
+      var lvlColor = p.stock_level === 'out' ? '#b91c1c' : p.stock_level === 'low' ? '#b45309' : 'var(--muted)';
+      var stock = (p.stock_count != null) ? '<span style="flex-shrink:0;color:' + lvlColor + '">' + p.stock_count + ' in stk</span>' : '';
+      var price = (p.price_usd != null) ? '<b style="flex-shrink:0">$' + Number(p.price_usd).toFixed(2) + '</b>' : '';
+      return '<button type="button" data-i="' + i + '" style="display:flex;gap:9px;align-items:baseline;width:100%;text-align:left;border:0;border-bottom:1px solid var(--hover);background:var(--card);color:var(--ink);padding:' + fs(8) + ' ' + fs(10) + ';cursor:pointer;font-family:inherit;font-size:' + fs(12) + '">' +
+        '<code style="flex-shrink:0;font-weight:700;max-width:170px;word-break:break-all">' + esc(p.sku || p.img) + '</code>' +
+        '<span style="flex:1;min-width:0;font-weight:600">' + esc(p.name || '') +
+          (p.make_model ? ' <span style="font-weight:400;color:var(--muted)">— ' + esc(p.make_model) + '</span>' : '') + '</span>' +
+        price + stock +
+      '</button>';
+    }).join('');
+    box.style.display = 'block';
+    sel = 0; paint();
+    box.querySelectorAll('button').forEach(function(b){
+      b.addEventListener('mousedown', function(e){ e.preventDefault(); choose(rows[parseInt(b.dataset.i, 10)]); });
+      b.addEventListener('mouseenter', function(){ sel = parseInt(b.dataset.i, 10); paint(); });
+    });
+  }
+  function run(){
+    var q = inputEl.value.trim();
+    clearTimeout(deb);
+    if (q.length < 2){ close(); return; }
+    deb = setTimeout(async function(){
+      var my = ++seq;
+      try {
+        var r = await api('/api/products?limit=30&offset=0&q=' + encodeURIComponent(q));
+        if (my !== seq) return;
+        rows = r.products || []; render();
+      } catch (_) { if (my === seq){ rows = []; close(); } }
+    }, 200);
+  }
+  inputEl.addEventListener('input', run);
+  inputEl.addEventListener('keydown', function(e){
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+      if (!rows.length) return;
+      e.preventDefault();
+      sel = Math.max(0, Math.min(rows.length - 1, (sel < 0 ? 0 : sel) + (e.key === 'ArrowDown' ? 1 : -1)));
+      paint();
+    } else if (e.key === 'Enter'){
+      if (rows.length){ e.preventDefault(); choose(rows[sel >= 0 ? sel : 0]); }
+    } else if (e.key === 'Escape'){ close(); }
+  });
+  inputEl.addEventListener('blur', function(){ setTimeout(close, 140); });
+}
+
 function posViewBtn(mode, glyph, label){
   var active = POS_PREFS.view === mode;
   return '<button type="button" class="posViewBtn" data-view="' + mode + '" title="' + label + '" aria-pressed="' + active + '" style="' +
@@ -10596,7 +10702,8 @@ async function renderPoDetail(panel, id){
       (po.notes ? '<div><div class="lbl">Notes</div>' + esc(po.notes) + '</div>' : '') +
     '</div>' +
     '<div style="padding:14px 16px">' +
-      '<table><thead><tr><th>Description</th><th>SKU</th><th>Ordered</th><th>Received</th><th>Unit cost</th><th>Total</th>' + (canReceive ? '<th>Receive now</th><th>Sell price</th><th>Bin</th>' : '') + '</tr></thead><tbody>' +
+      '<div style="display:flex;justify-content:flex-end;margin-bottom:8px">' + mhAaSelectHTML('poFontSize') + '</div>' +
+      '<table style="font-size:' + posFS(13) + '"><thead><tr><th>Description</th><th>SKU</th><th>Ordered</th><th>Received</th><th>Unit cost</th><th>Total</th>' + (canReceive ? '<th>Receive now</th><th>Sell price</th><th>Bin</th>' : '') + '</tr></thead><tbody>' +
         d.items.map(function(it){
           var outstanding = it.qty_ordered - it.qty_received;
           return '<tr><td>' + esc(it.description) + (it.product_name ? '<br/><small style="color:var(--muted)">' + esc(it.product_name) + '</small>' : '') + '</td>' +
@@ -10620,6 +10727,8 @@ async function renderPoDetail(panel, id){
     '<details style="border-top:1px solid var(--line);background:var(--card-soft)">' +
       '<summary style="padding:12px 16px;cursor:pointer;font-weight:700;color:var(--heading)">+ Add line item</summary>' +
       '<form id="poItemForm" style="padding:14px 18px;display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:10px;max-width:760px" onsubmit="event.preventDefault();submitPoItem(' + id + ');">' +
+        '<div style="grid-column:1/-1;position:relative"><label class="lbl">Find an existing part <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional — fills the fields below)</span></label>' +
+          '<input id="poiSearch" autocomplete="off" placeholder="🔎 search part no., name or vehicle…" class="fld"/></div>' +
         '<div style="grid-column:1/-1"><label class="lbl">Description *</label><input id="poiDesc" required class="fld"/></div>' +
         '<div><label class="lbl">SKU</label><input id="poiSku" class="fld"/></div>' +
         '<div><label class="lbl">Qty *</label><input id="poiQty" type="number" min="1" value="1" required class="fld"/></div>' +
@@ -10631,6 +10740,26 @@ async function renderPoDetail(panel, id){
     '</details>';
 
   document.getElementById('poBack').addEventListener('click', function(){ PO_VIEW_ID = null; renderPurchaseOrders(panel); });
+
+  // "Aa" text size — shared with the POS; re-render this PO at the new scale.
+  mhWireAaSelect('poFontSize', function(){ renderPoDetail(panel, id); });
+
+  // POS-style part search on the "+ Add line item" form: pick a match to fill
+  // Description / SKU / Unit cost / Product img.
+  var poiSearch = document.getElementById('poiSearch');
+  if (poiSearch) mhPartSearchDropdown(poiSearch, function(p){
+    var set = function(elId, v){ var el = document.getElementById(elId); if (el && v != null && v !== '') el.value = v; };
+    set('poiDesc', p.name);
+    set('poiSku', p.sku);
+    set('poiImg', p.img);
+    // /api/products omits cost — pull the admin row for it.
+    api('/api/admin/products/' + encodeURIComponent(p.img)).then(function(r){
+      var f = r && r.product; if (f && f.cost_usd != null) set('poiCost', f.cost_usd);
+    }).catch(function(){});
+    poiSearch.value = '';
+    var dEl = document.getElementById('poiDesc'); if (dEl) dEl.focus();
+  });
+
   var recvBtn = document.getElementById('poReceiveGo');
   if (recvBtn) recvBtn.addEventListener('click', async function(){
     var items = [];
