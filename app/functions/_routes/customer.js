@@ -25,7 +25,7 @@ import { bestUnitPriceCents, loadBreaksByImg, loadActiveSaleCentsByImg, effectiv
 import { loadKitComponentsByImg, kitRollupCents } from '../_lib/kits.js';
 import { loadCoupon, computeCouponDiscount } from '../_lib/coupons.js';
 
-const SITE_BASE = 'https://mortsautoparts.com';
+const SITE_BASE = 'https://visionautosolutions.com';
 
 const POINTS_USD_RATE = 0.05;
 const r2 = (n) => Math.round(n * 100) / 100;
@@ -215,16 +215,16 @@ export default function mount(app) {
   app.post('/api/auth/reset-default-admin', async (c) => {
     const db = d1(c.env);
     const hash = await bcrypt.hash('password123', 10);
-    const existing = await db.one("SELECT id FROM users WHERE email = 'admin@mortysautoparts.com'");
+    const existing = await db.one("SELECT id FROM users WHERE email = 'admin@visionautosolutions.com'");
     if (existing) {
       await db.run('UPDATE users SET is_admin = 1, password_hash = ? WHERE id = ?', hash, existing.id);
     } else {
       const id = await nextId(db, 'users');
       await db.run(
         `INSERT INTO users (id, email, name, password_hash, via, is_admin)
-           VALUES (?, 'admin@mortysautoparts.com', 'Morty''s Auto Parts Admin', ?, 'local', 1)`, id, hash);
+           VALUES (?, 'admin@visionautosolutions.com', 'Vision Auto Solutions Admin', ?, 'local', 1)`, id, hash);
     }
-    return c.json({ ok: true, email: 'admin@mortysautoparts.com', password: 'password123' });
+    return c.json({ ok: true, email: 'admin@visionautosolutions.com', password: 'password123' });
   });
 
   // ---- self-serve profile edit ------------------------------------
@@ -400,7 +400,7 @@ export default function mount(app) {
     if (u && u.email) {
       const li = items.map((it) => ({ product_img: it.product_img, qty: it.qty, price_usd: it.price_usd, name: it.name, make_model: it.make_model }));
       const tpl = method === 'invoice_email'
-        ? templates.invoiceEmail({ name: u.name, orderId, items: li, total: grandTotal, payUrl: `https://mortsautoparts.com/order-print.html?order=${orderId}` })
+        ? templates.invoiceEmail({ name: u.name, orderId, items: li, total: grandTotal, payUrl: `https://visionautosolutions.com/order-print.html?order=${orderId}` })
         : templates.orderEmail({ name: u.name, orderId, items: li, total: grandTotal });
       c.executionCtx?.waitUntil?.(sendEmail(c.env, { to: u.email, ...tpl }).catch(() => {}));
     }
@@ -515,7 +515,7 @@ export default function mount(app) {
     if (email) {
       const li = items.map((it) => ({ product_img: it.product_img, qty: it.qty, price_usd: it.price_usd, name: it.name, make_model: it.make_model }));
       const tpl = method === 'invoice_email'
-        ? templates.invoiceEmail({ name, orderId, items: li, total: grandTotal, payUrl: `https://mortsautoparts.com/order-print.html?order=${orderId}&email=${encodeURIComponent(email)}` })
+        ? templates.invoiceEmail({ name, orderId, items: li, total: grandTotal, payUrl: `https://visionautosolutions.com/order-print.html?order=${orderId}&email=${encodeURIComponent(email)}` })
         : templates.orderEmail({ name, orderId, items: li, total: grandTotal });
       c.executionCtx?.waitUntil?.(sendEmail(c.env, { to: email, ...tpl }).catch(() => {}));
     }

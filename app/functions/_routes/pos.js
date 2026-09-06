@@ -333,7 +333,7 @@ export default function mount(app) {
 
   app.get('/api/admin/pos/walkin-customer', adminMw, async (c) => {
     const row = await d1(c.env).one(
-      "SELECT id, name, account_number FROM users WHERE email = 'walkin@mortysautoparts.local' LIMIT 1"
+      "SELECT id, name, account_number FROM users WHERE email = 'walkin@visionautosolutions.local' LIMIT 1"
     );
     if (!row) return c.json({ error: 'Walk-in account not seeded yet' }, 404);
     return c.json({ customer: row });

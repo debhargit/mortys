@@ -1,5 +1,5 @@
 ===============================================================================
-  MORTY'S AUTO PARTS  --  PORTABLE ADMIN
+  VISION AUTO SOLUTIONS  --  PORTABLE ADMIN
 ===============================================================================
 
   Everything needed to run the admin panel and POS is inside this folder.
@@ -28,7 +28,7 @@
         Uses the database on another computer, so it shares the same stock,
         sales and customers as everyone else. On its very first run it
         searches the network for the main PC automatically and remembers
-        what it finds. If nothing answers, run Morty's Auto Parts Settings.vbs
+        what it finds. If nothing answers, run Vision Auto Solutions Settings.vbs
         and type the main PC's IP address.
 
   Both kinds run the full admin panel and POS. The only difference is where
@@ -56,13 +56,13 @@
   STARTING IT
 -------------------------------------------------------------------------------
 
-  Double-click:            Morty's Auto Parts Admin.exe
+  Double-click:            Vision Auto Solutions Admin.exe
 
   It starts the server if it isn't already running, waits for it to be
   ready, then opens the admin panel in your browser. Double-clicking it
   again later just opens the panel -- it will not start a second copy.
 
-  (There is also a Morty's Auto Parts Admin.vbs that does exactly the same job.
+  (There is also a Vision Auto Solutions Admin.vbs that does exactly the same job.
   It is a fallback for machines that block .exe files; use the .exe unless
   you have a reason not to.)
 
@@ -72,7 +72,7 @@
   Default sign-in, created automatically the first time the database is set
   up:
 
-        Email     admin@mortysautoparts.com
+        Email     admin@visionautosolutions.com
         Password  password123
 
   ** Change that password immediately from Admin -> Staff. **
@@ -83,7 +83,7 @@
   STOPPING IT
 -------------------------------------------------------------------------------
 
-  Double-click:            Stop Morty's Auto Parts Admin.exe
+  Double-click:            Stop Vision Auto Solutions Admin.exe
 
   Because the server has no window, this is the only way to shut it down
   short of restarting Windows. Closing the browser does NOT stop it -- the
@@ -98,7 +98,7 @@
   the same network can use it with just a browser -- they do not need a copy
   of this folder:
 
-        http://<the-ip-of-that-pc>:3057/admin.html
+        http://<the-ip-of-that-pc>:3056/admin.html
 
   To find that IP: press Windows+R, type  cmd  , press Enter, type
   ipconfig, and look for "IPv4 Address" (something like 192.168.1.20).
@@ -117,7 +117,7 @@
   POINTING IT AT A DIFFERENT DATABASE
 -------------------------------------------------------------------------------
 
-  Double-click:            Morty's Auto Parts Settings.vbs
+  Double-click:            Vision Auto Solutions Settings.vbs
 
   Use this when the admin panel will not load, or shows no data, because the
   database address is wrong. It asks for the database server address, port,
@@ -218,13 +218,13 @@
 
   "The admin server did not finish starting"
         Almost always the database. Check boot.log, then run
-        Morty's Auto Parts Settings.vbs and confirm the address.
+        Vision Auto Solutions Settings.vbs and confirm the address.
 
   The page loads but everything is empty
         The server is up but its database is not. Same fix as above.
 
   It was working, now the browser says it cannot connect
-        The server may have stopped. Run Morty's Auto Parts Admin.vbs again.
+        The server may have stopped. Run Vision Auto Solutions Admin.vbs again.
         If it keeps happening, server.log will say why -- the supervisor
         restarts the server automatically after a crash and logs each one.
 
@@ -257,13 +257,13 @@
         If this copy carries its own database, that database survives a
         rebuild. Back up data\pgdata before doing anything drastic to it.
 
-  Keep the folder somewhere SHORT, like  C:\MortysAutoParts
+  Keep the folder somewhere SHORT, like  C:\VisionAutoSolutions
         Some of the product photos have file names over 200 characters long.
         Windows still refuses to handle a full path longer than 260, so if
         you put this folder somewhere deep -- inside Documents, inside
         OneDrive, inside a dated subfolder -- Windows Explorer will copy most
         of it and quietly skip those photos. The build prints how much room
-        is left. C:\MortysAutoParts or D:\MortysAutoParts is always safe.
+        is left. C:\VisionAutoSolutions or D:\VisionAutoSolutions is always safe.
 
   If this copy carries its own database (runtime\pgsql exists)
         It runs a private PostgreSQL on port 5433, reachable only from this
@@ -271,6 +271,6 @@
         lives in data\pgdata. Nothing else on the network shares it -- if you
         want several machines working from the same records, one machine
         should hold the database and the rest should be pointed at its IP
-        address with Morty's Auto Parts Settings.vbs.
+        address with Vision Auto Solutions Settings.vbs.
 
 ===============================================================================

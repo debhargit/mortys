@@ -1,6 +1,6 @@
 <#
 ================================================================================
-  Install.ps1  --  set this PC up as a Morty's Auto Parts till
+  Install.ps1  --  set this PC up as a Vision Auto Solutions till
 
   Right-click and choose "Run with PowerShell", or from an elevated prompt:
 
@@ -9,7 +9,7 @@
   What it does, and why each step is here rather than left to whoever is
   standing at the counter:
 
-    1. Copies the package to C:\MortysAutoParts.
+    1. Copies the package to C:\VisionAutoSolutions.
        Not cosmetic. This package contains file names past Windows' 260-character
        limit, and Explorer skips those silently when copying -- no error, no
        prompt, just a folder that looks complete and is not. A short destination
@@ -34,7 +34,7 @@
 #>
 
 param(
-  [string] $Destination = 'C:\MortysAutoParts',
+  [string] $Destination = 'C:\VisionAutoSolutions',
   [switch] $KeepDatabase = $true
 )
 
@@ -49,7 +49,7 @@ function Info($m) { Write-Host "        $m" -ForegroundColor DarkGray }
 
 Write-Host ''
 Write-Host '===============================================' -ForegroundColor White
-Write-Host '  Morty''s Auto Parts -- install this till'             -ForegroundColor White
+Write-Host '  Vision Auto Solutions -- install this till'             -ForegroundColor White
 Write-Host '===============================================' -ForegroundColor White
 Info "from : $SOURCE"
 Info "to   : $Destination"
@@ -140,35 +140,35 @@ if (Test-Path $pgExe) {
 
 # ---- 3. the service ----------------------------------------------------------
 Head '3. Registering the Windows service'
-$svcExe = Join-Path $Destination 'Morty''s Auto Parts Service.exe'
-if (-not (Test-Path $svcExe)) { Bad 'Morty''s Auto Parts Service.exe is missing from the package' }
+$svcExe = Join-Path $Destination 'Vision Auto Solutions Service.exe'
+if (-not (Test-Path $svcExe)) { Bad 'Vision Auto Solutions Service.exe is missing from the package' }
 else {
-  # Service name is baked into Morty's Auto Parts Service.exe (no source in
-  # this repo) -- it registers itself as 'MortysAutoPartsAdmin', so that is what we
+  # Service name is baked into Vision Auto Solutions Service.exe (no source in
+  # this repo) -- it registers itself as 'VisionAutoSolutionsAdmin', so that is what we
   # look for here too.
-  $existing = Get-Service -Name 'MortysAutoPartsAdmin' -EA SilentlyContinue
-  if ($existing) { Info 'already registered -- stopping it to update'; & sc.exe stop MortysAutoPartsAdmin | Out-Null; Start-Sleep -Seconds 6 }
+  $existing = Get-Service -Name 'VisionAutoSolutionsAdmin' -EA SilentlyContinue
+  if ($existing) { Info 'already registered -- stopping it to update'; & sc.exe stop VisionAutoSolutionsAdmin | Out-Null; Start-Sleep -Seconds 6 }
   $out = & $svcExe --install 2>&1
   $out | ForEach-Object { Info $_ }
   Start-Sleep -Seconds 3
-  $svc = Get-Service -Name 'MortysAutoPartsAdmin' -EA SilentlyContinue
+  $svc = Get-Service -Name 'VisionAutoSolutionsAdmin' -EA SilentlyContinue
   if ($svc) { Ok "service registered, currently $($svc.Status)" } else { Bad 'the service did not register' }
 }
 
 # ---- 4. shortcut -------------------------------------------------------------
 Head '4. Desktop shortcut'
 try {
-  $port = 3057
+  $port = 3056
   $sc = Join-Path $Destination 'app\server-config.json'
   if (Test-Path $sc) { $j = Get-Content $sc -Raw | ConvertFrom-Json; if ($j.port) { $port = [int]$j.port } }
-  $lnk = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Morty''s Auto Parts Admin.lnk'
+  $lnk = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Vision Auto Solutions Admin.lnk'
   $w = New-Object -ComObject WScript.Shell
   $s = $w.CreateShortcut($lnk)
   # Points at the URL, not at an executable: the service is already running the
   # app, so there is nothing to launch -- and nothing for Application Control
   # to refuse.
   $s.TargetPath = "http://localhost:$port/admin.html"
-  $s.Description = 'Open the Morty''s Auto Parts admin panel and POS'
+  $s.Description = 'Open the Vision Auto Solutions admin panel and POS'
   $s.Save()
   Ok "created for all users -> http://localhost:$port/admin.html"
 } catch { Bad "could not create the shortcut: $($_.Exception.Message)" }
@@ -176,7 +176,7 @@ try {
 # ---- 5. does it actually answer ----------------------------------------------
 Head '5. Waiting for the till to come up'
 Info 'first run builds the database and loads the catalogue -- a few minutes'
-$port = 3057
+$port = 3056
 try { $sc = Join-Path $Destination 'app\server-config.json'; if (Test-Path $sc) { $j = Get-Content $sc -Raw | ConvertFrom-Json; if ($j.port) { $port = [int]$j.port } } } catch {}
 $deadline = (Get-Date).AddMinutes(6)
 $up = $false
@@ -200,7 +200,7 @@ if ($fail.Count -eq 0) {
   Write-Host '  Installed. This PC is ready.' -ForegroundColor Green
   Write-Host ''
   Write-Host "    Open:      http://localhost:$port/admin.html"
-  Write-Host '    Sign in:   admin@mortysautoparts.com / password123'
+  Write-Host '    Sign in:   admin@visionautosolutions.com / password123'
   Write-Host '    Change that password once you are in.' -ForegroundColor Yellow
   Write-Host ''
   Write-Host '  It starts on its own every time this PC is switched on.'

@@ -45,9 +45,9 @@ export function getAdapter(code) {
 // Shipper origin — shop_settings, backfilled from the known shop details.
 export function originFrom(s) {
   return {
-    name: s.ship_origin_name || s.company_name || "Morty's Auto Parts",
+    name: s.ship_origin_name || s.company_name || "Vision Auto Solutions",
     phone: s.ship_origin_phone || s.phone || '',
-    line1: s.ship_origin_line1 || s.address || '51 Red Hills Road',
+    line1: s.ship_origin_line1 || s.address || '112C Waltham Park Road',
     line2: s.ship_origin_line2 || '',
     city: s.ship_origin_city || 'Kingston',
     parish: s.ship_origin_parish || 'St. Andrew',

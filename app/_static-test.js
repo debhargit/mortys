@@ -25,11 +25,11 @@ const server = app.listen(0, () => {
   (async () => {
     const adm = await req('/admin.html');
     const admBody = adm.body.toString();
-    console.log('/admin.html →', adm.status, '| type:', adm.type, '| has "Morty\'s Auto Parts Admin":', admBody.includes('Morty\'s Auto Parts Admin'));
+    console.log('/admin.html →', adm.status, '| type:', adm.type, '| has "Vision Auto Solutions Admin":', admBody.includes('Vision Auto Solutions Admin'));
     
     const idx = await req('/');
     const idxBody = idx.body.toString();
-    console.log('/ →', idx.status, '| type:', idx.type, '| has "Morty\'s Auto Parts":', idxBody.includes('Morty\'s Auto Parts'));
+    console.log('/ →', idx.status, '| type:', idx.type, '| has "Vision Auto Solutions":', idxBody.includes('Vision Auto Solutions'));
     
     const pos = await req('/posinvoice.html');
     console.log('/posinvoice.html →', pos.status, '| type:', pos.type, '| has "POS Invoice":', pos.body.toString().includes('POS Invoice'));

@@ -1,16 +1,16 @@
 // ============================================================================
-//  Morty's Auto Parts — one-shot database bootstrap
+//  Vision Auto Solutions — one-shot database bootstrap
 //
 //  Run once after installing Postgres:    node db-init.js
 //
 //  It will:
 //    1. Connect to the default "postgres" database
-//    2. Create the "mortysautoparts" database if it doesn't exist
+//    2. Create the "visionautosolutions" database if it doesn't exist
 //    3. Run schema.sql against the new database
 //
 //  Reads DATABASE_URL from .env to pick up your credentials. If you haven't
 //  customised .env yet, the defaults match the .env.example
-//  (user=postgres, password=postgres, host=localhost, db=mortysautoparts).
+//  (user=postgres, password=postgres, host=localhost, db=visionautosolutions).
 // ============================================================================
 
 'use strict';
@@ -22,12 +22,12 @@ const { Client } = require('pg');
 
 const DATABASE_URL =
   process.env.DATABASE_URL ||
-  'postgresql://postgres:postgres@localhost:5432/mortysautoparts';
+  'postgresql://postgres:postgres@localhost:5432/visionautosolutions';
 
 // Pull the target database name out of the URL so we can connect to the
 // `postgres` system database first to issue CREATE DATABASE.
 const url = new URL(DATABASE_URL);
-const targetDb = url.pathname.replace(/^\//, '') || 'mortysautoparts';
+const targetDb = url.pathname.replace(/^\//, '') || 'visionautosolutions';
 const adminUrl = new URL(DATABASE_URL);
 adminUrl.pathname = '/postgres';
 
@@ -87,7 +87,7 @@ main().catch((e) => {
   console.error('[fatal] db-init failed:', e.message);
   if (e.code === '28P01') {
     console.error('  → Auth failed. Edit .env and set DATABASE_URL with the correct postgres password.');
-    console.error('  → Default expected:  postgresql://postgres:postgres@localhost:5432/mortysautoparts');
+    console.error('  → Default expected:  postgresql://postgres:postgres@localhost:5432/visionautosolutions');
   }
   if (e.code === 'ECONNREFUSED') {
     console.error('  → Postgres isn\'t listening. Start the Postgres service first.');

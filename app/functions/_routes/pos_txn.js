@@ -238,7 +238,7 @@ export async function createPosSale(env, b, me) {
   }
 
   // ----- 2. loyalty redemption -----
-  const walkinRow = await db.one("SELECT id FROM users WHERE email = 'walkin@mortysautoparts.local' LIMIT 1");
+  const walkinRow = await db.one("SELECT id FROM users WHERE email = 'walkin@visionautosolutions.local' LIMIT 1");
   const walkinId = walkinRow ? walkinRow.id : -1;
   const isWalkin = b.customer_id && Number(b.customer_id) === walkinId;
   const redeemPts = isWalkin ? 0 : Math.max(0, parseInt(b.loyalty_points_redeemed || 0, 10) || 0);

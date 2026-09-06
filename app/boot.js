@@ -1,8 +1,8 @@
 // ============================================================================
-//  Morty's Auto Parts Admin — portable supervisor
+//  Vision Auto Solutions Admin — portable supervisor
 //
 //  This is the process that actually runs when someone double-clicks
-//  "Morty's Auto Parts Admin.vbs". The .vbs does nothing except launch
+//  "Vision Auto Solutions Admin.vbs". The .vbs does nothing except launch
 //    runtime\node.exe app\boot.js
 //  with window style 0, so no console window is ever created visibly. Every
 //  piece of real logic lives here instead of in VBScript, because here we
@@ -74,13 +74,13 @@ function writeJson(file, obj) {
 }
 
 const CFG = Object.assign({
-  appPort: 3057,
+  appPort: 3056,
   openBrowser: true,
   bundledPostgres: false,
   pgPort: 5433,
   pgUser: 'postgres',
   pgPassword: 'postgres',
-  database: 'mortysautoparts',
+  database: 'visionautosolutions',
   dbHost: 'localhost',
   dbPort: 5432,
   dbUser: 'postgres',
@@ -195,7 +195,7 @@ function networkCidr(address, netmask) {
 //      address is never touched -- someone chose that on purpose.
 //
 //   3. Server build whose bundled database has been opened to the LAN (a
-//      pg_hba.conf line tagged mortys-lan-*, or legacy vision-/meltha-lan-*): rewrite
+//      pg_hba.conf line tagged vision-lan-*, or legacy vision-/meltha-lan-*): rewrite
 //      that line's subnet to the current one and reload PostgreSQL. It only
 //      maintains a rule that already exists -- it never opens a database that
 //      is still loopback-only.
@@ -262,7 +262,7 @@ async function refreshNetworkConfig() {
         const lines = fs.readFileSync(hbaPath, 'utf8').split(/\r?\n/);
         let changed = false;
         const next = lines.map((ln) => {
-          if (!/(?:mortys|vision|meltha)-lan-(test|auto)/.test(ln)) return ln;
+          if (!/(?:vision|vision|meltha)-lan-(test|auto)/.test(ln)) return ln;
           // Only the address/CIDR column is rewritten; the connection type
           // (host / hostssl), database, user and auth method the opener chose
           // are left exactly as they are.
@@ -319,8 +319,8 @@ function initPostgres() {
     try { fs.unlinkSync(pwFile); } catch (_) {}
   }
 
-  // Bind the bundled server to loopback only. The Morty's Auto Parts app
-  // server is what the rest of the LAN talks to (port 3057); nothing outside this PC
+  // Bind the bundled server to loopback only. The Vision Auto Solutions app
+  // server is what the rest of the LAN talks to (port 3056); nothing outside this PC
   // has any business opening a raw Postgres connection, and leaving 5433 open
   // on a shop network would be handing out the whole database.
   const confPath = path.join(PGDATA_DIR, 'postgresql.conf');
@@ -328,7 +328,7 @@ function initPostgres() {
     let conf = fs.readFileSync(confPath, 'utf8');
     conf += [
       '',
-      '# --- Morty\'s Auto Parts portable overrides ---',
+      '# --- Vision Auto Solutions portable overrides ---',
       "listen_addresses = 'localhost'",
       'port = ' + CFG.pgPort,
       'max_connections = 50',
@@ -395,7 +395,7 @@ function repairPgDataDirs() {
 // `ssl = on` lines, which is harmless, but two ssl_cert_file lines pointing
 // anywhere different would not be.
 async function ensurePostgresTls() {
-  const marker = '# --- Morty\'s Auto Parts TLS ---';
+  const marker = '# --- Vision Auto Solutions TLS ---';
   const confPath = path.join(PGDATA_DIR, 'postgresql.conf');
   if (!fs.existsSync(confPath)) return false;
   try {
@@ -411,7 +411,7 @@ async function ensurePostgresTls() {
     //
     // Writing the full path baked this machine's folder into a file that
     // travels with the package, so every copy carried something like
-    // C:/Users/.../dist/MortysAutoParts-Admin-Portable/data/pgdata/server.crt.
+    // C:/Users/.../dist/VisionAutoSolutions-Admin-Portable/data/pgdata/server.crt.
     // On any other PC that path does not exist and the database refuses to
     // start outright:
     //
@@ -538,7 +538,7 @@ async function ensureDatabase(conn) {
 
 // ------------------------------------------------------------- discovery --
 // server.js already speaks a tiny UDP protocol on port 41235: it broadcasts
-// MELTHAHONDA_ANNOUNCE every few seconds and answers MELTHAHONDA_DISCOVER
+// VISIONAUTO_ANNOUNCE every few seconds and answers VISIONAUTO_DISCOVER
 // queries with the same payload. That exists so Admin -> Setup can list the
 // machines on the LAN, and it costs nothing to reuse here: a new till can find
 // the shop's server by asking the network instead of by someone reading an IP
@@ -579,7 +579,7 @@ function discoverServer(timeoutMs) {
     sock.on('message', (msg) => {
       let data;
       try { data = JSON.parse(msg.toString()); } catch (_) { return; }
-      if (!data || data.type !== 'MELTHAHONDA_ANNOUNCE' || !data.host) return;
+      if (!data || data.type !== 'VISIONAUTO_ANNOUNCE' || !data.host) return;
       if (found.some((f) => f.host === data.host)) return;
       found.push({
         host: data.host, port: data.port, name: data.name || data.host,
@@ -595,7 +595,7 @@ function discoverServer(timeoutMs) {
       try {
         sock.setBroadcast(true);
         const query = Buffer.from(JSON.stringify({
-          type: 'MELTHAHONDA_DISCOVER', instanceId: 'portable-boot-' + process.pid,
+          type: 'VISIONAUTO_DISCOVER', instanceId: 'portable-boot-' + process.pid,
         }));
         sock.send(query, 41235, '255.255.255.255');
       } catch (e) {
@@ -625,7 +625,7 @@ async function seedAppConfig() {
       // settle on is written to db-config.json and never re-derived, so the
       // till doesn't wander to a different machine later.
       if (!host || String(host).toLowerCase() === 'auto') {
-        log('discovery: looking for a Morty\'s Auto Parts server on the network...');
+        log('discovery: looking for a Vision Auto Solutions server on the network...');
         const server = await discoverServer(5000);
         if (server) {
           host = server.host;
@@ -633,7 +633,7 @@ async function seedAppConfig() {
         } else {
           host = 'localhost';
           log('discovery: nothing answered - falling back to localhost. ' +
-              'Run "Morty\'s Auto Parts Settings.vbs" to set the server address by hand.');
+              'Run "Vision Auto Solutions Settings.vbs" to set the server address by hand.');
         }
       }
       local = { host, port: CFG.dbPort, database: CFG.database, user: CFG.dbUser, password: CFG.dbPassword };
@@ -713,7 +713,7 @@ async function runSupervisor() {
     } else {
       log('database server not reachable at ' + dbHost + ':' + dbPort +
           ' - starting anyway so the admin page loads. Fix the address with ' +
-          '"Morty\'s Auto Parts Settings.vbs", or start PostgreSQL on that machine.');
+          '"Vision Auto Solutions Settings.vbs", or start PostgreSQL on that machine.');
     }
   }
 

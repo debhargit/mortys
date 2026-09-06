@@ -10,7 +10,7 @@ import { orderInsertStmt } from '../_routes/customer.js';
 import { sendEmail, templates } from './mailer.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
-const SITE_BASE = 'https://mortsautoparts.com';
+const SITE_BASE = 'https://visionautosolutions.com';
 
 export function advanceDate(dateStr, frequency) {
   const d = new Date(dateStr + 'T00:00:00Z');

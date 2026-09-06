@@ -1,5 +1,5 @@
 ' ===========================================================================
-'  Morty's Auto Parts Admin — settings
+'  Vision Auto Solutions Admin — settings
 '
 '  Points this portable copy at a database and a port, without a terminal and
 '  without needing to sign in first.
@@ -34,7 +34,7 @@ nodeExe   = fso.BuildPath(scriptDir, "runtime\node.exe")
 bootJs    = fso.BuildPath(appDir, "boot.js")
 
 If Not fso.FolderExists(appDir) Then
-    MsgBox "This portable copy is incomplete - the app folder is missing.", vbCritical, "Morty's Auto Parts Settings"
+    MsgBox "This portable copy is incomplete - the app folder is missing.", vbCritical, "Vision Auto Solutions Settings"
     WScript.Quit 1
 End If
 
@@ -49,9 +49,9 @@ machine = JsonStr(fso.BuildPath(appDir, "machine-config.json"), "name")
 
 If dbHost  = "" Then dbHost  = JsonStr(fso.BuildPath(appDir, "portable.json"), "dbHost")
 If dbPort  = "" Then dbPort  = "5432"
-If dbName  = "" Then dbName  = "mortysautoparts"
+If dbName  = "" Then dbName  = "visionautosolutions"
 If dbUser  = "" Then dbUser  = "postgres"
-If appPort = "" Then appPort = "3057"
+If appPort = "" Then appPort = "3056"
 If dbHost  = "" Then dbHost  = "localhost"
 
 ' --- Prompt ----------------------------------------------------------------
@@ -85,7 +85,7 @@ answer = MsgBox("Save these settings?" & vbCrLf & vbCrLf & _
                 "Admin port : " & appPort & vbCrLf & _
                 "Machine name : " & IIfStr(machine = "", "(Windows computer name)", machine) & vbCrLf & vbCrLf & _
                 "The admin server will be restarted if it is running.", _
-                vbQuestion + vbYesNo, "Morty's Auto Parts Settings")
+                vbQuestion + vbYesNo, "Vision Auto Solutions Settings")
 If answer <> vbYes Then WScript.Quit 0
 
 ' --- Write -----------------------------------------------------------------
@@ -102,7 +102,7 @@ WriteFile fso.BuildPath(appDir, "db-config.json"), _
     "}"
 
 WriteFile fso.BuildPath(appDir, "server-config.json"), _
-    "{" & vbCrLf & "  ""port"": " & CleanInt(appPort, 3057) & vbCrLf & "}"
+    "{" & vbCrLf & "  ""port"": " & CleanInt(appPort, 3056) & vbCrLf & "}"
 
 WriteFile fso.BuildPath(appDir, "machine-config.json"), _
     "{" & vbCrLf & "  ""name"": """ & JsonEsc(machine) & """" & vbCrLf & "}"
@@ -114,12 +114,12 @@ If wasRunning And fso.FileExists(nodeExe) Then
     WScript.Sleep 1500
     sh.Run """" & nodeExe & """ """ & bootJs & """", 0, False
     MsgBox "Settings saved. The admin server is restarting." & vbCrLf & vbCrLf & _
-           "Give it a few seconds, then open ""Morty's Auto Parts Admin.vbs"".", _
-           vbInformation, "Morty's Auto Parts Settings"
+           "Give it a few seconds, then open ""Vision Auto Solutions Admin.vbs"".", _
+           vbInformation, "Vision Auto Solutions Settings"
 Else
     MsgBox "Settings saved." & vbCrLf & vbCrLf & _
-           "Open ""Morty's Auto Parts Admin.vbs"" to start the admin server.", _
-           vbInformation, "Morty's Auto Parts Settings"
+           "Open ""Vision Auto Solutions Admin.vbs"" to start the admin server.", _
+           vbInformation, "Vision Auto Solutions Settings"
 End If
 
 WScript.Quit 0
@@ -135,7 +135,7 @@ WScript.Quit 0
 ' aborts the script. AskOptional keeps blank as a real value.
 Function AskRequired(prompt, currentValue)
     Dim v
-    v = Trim(InputBox(prompt, "Morty's Auto Parts Settings", currentValue))
+    v = Trim(InputBox(prompt, "Vision Auto Solutions Settings", currentValue))
     If v = "" Then
         WScript.Quit 0
     End If
@@ -143,7 +143,7 @@ Function AskRequired(prompt, currentValue)
 End Function
 
 Function AskOptional(prompt, currentValue)
-    AskOptional = Trim(InputBox(prompt, "Morty's Auto Parts Settings", currentValue))
+    AskOptional = Trim(InputBox(prompt, "Vision Auto Solutions Settings", currentValue))
 End Function
 
 Function IIfStr(cond, a, b)

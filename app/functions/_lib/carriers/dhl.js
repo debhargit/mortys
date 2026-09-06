@@ -18,7 +18,7 @@ function cfg(env) {
 }
 
 function headers(c) {
-  const ref = 'MORTYS-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  const ref = 'VISION-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
   return {
     'Authorization': 'Basic ' + btoa(c.key + ':' + c.secret),
     'Content-Type': 'application/json',

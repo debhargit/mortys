@@ -1,16 +1,16 @@
 @echo off
 rem ===========================================================================
-rem  Start Website.bat  --  launch the Morty's Auto Parts / Morty's Auto Parts site
+rem  Start Website.bat  --  launch the Vision Auto Solutions / Vision Auto Solutions site
 rem
 rem  Runs the bundled Node runtime against app\boot.js, which starts the
 rem  database (if this build ships one), supervises server.js and serves the
-rem  site on http://localhost:3057/ .
+rem  site on http://localhost:3056/ .
 rem
 rem  The listening port is read by server.js from app\server-config.json
 rem  (that file wins over the PORT environment variable), so this script
-rem  makes sure server-config.json says 3057 before it starts -- other keys
+rem  makes sure server-config.json says 3056 before it starts -- other keys
 rem  in that file are preserved. This is a persistent change: every launch
-rem  method will use 3057 until server-config.json is changed again.
+rem  method will use 3056 until server-config.json is changed again.
 rem
 rem  Usage:
 rem     Start Website.bat            start the server (opens the site in a browser)
@@ -20,12 +20,12 @@ rem
 rem  boot.js is single-instance safe: starting it twice just exits.
 rem ===========================================================================
 setlocal
-title Morty's Auto Parts / Morty's Auto Parts - Website Server (port 3057)
+title Vision Auto Solutions / Vision Auto Solutions - Website Server (port 3056)
 
 rem -- Always run from the folder this script lives in --------------------------
 cd /d "%~dp0"
 
-set "PORT=3057"
+set "PORT=3056"
 set "BOOT=%~dp0app\boot.js"
 set "CFG=%~dp0app\server-config.json"
 
@@ -53,7 +53,7 @@ if errorlevel 1 if /i "%NODE%"=="node" (
 rem -- Control commands go straight to boot.js, with its exit code ------------
 if not "%~1"=="" goto passthru
 
-rem -- Make sure server-config.json pins the port to 3057 (keeps other keys) ---
+rem -- Make sure server-config.json pins the port to 3056 (keeps other keys) ---
 "%NODE%" -e "var f=process.argv[1],fs=require('fs'),t='',c={};try{t=fs.readFileSync(f,'utf8');if(t.charCodeAt(0)===65279)t=t.slice(1);c=JSON.parse(t);}catch(e){}if(c.port!==%PORT%){c.port=%PORT%;fs.writeFileSync(f,JSON.stringify(c,null,2));console.log('server-config.json port set to %PORT%');}" "%CFG%"
 
 rem -- On a plain start, open the site once the server has had time to boot ----

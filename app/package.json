@@ -1,8 +1,8 @@
 {
-  "name": "mortys-auto-parts",
+  "name": "vision-auto-solutions",
   "version": "1.0.0",
   "private": true,
-  "description": "Morty's Auto Parts — static site + Postgres-backed API",
+  "description": "Vision Auto Solutions — static site + Postgres-backed API",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -11,10 +11,10 @@
     "init-db": "psql \"$DATABASE_URL\" -f schema.sql",
     "cf:build": "node tools/sync-public.mjs",
     "cf:build:check": "node tools/sync-public.mjs --check",
-    "cf:dev": "npm run cf:build && wrangler pages dev public --d1 DB=mortysautoparts-db --compatibility-flags nodejs_compat",
-    "cf:deploy": "npm run cf:build && wrangler pages deploy public --project-name mortysautoparts --branch main",
-    "cf:migrate:local": "wrangler d1 migrations apply mortysautoparts-db --local",
-    "cf:migrate": "wrangler d1 migrations apply mortysautoparts-db",
+    "cf:dev": "npm run cf:build && wrangler pages dev public --d1 DB=visionautosolutions-db --compatibility-flags nodejs_compat",
+    "cf:deploy": "npm run cf:build && wrangler pages deploy public --project-name visionautosolutions --branch main",
+    "cf:migrate:local": "wrangler d1 migrations apply visionautosolutions-db --local",
+    "cf:migrate": "wrangler d1 migrations apply visionautosolutions-db",
     "cf:data": "node tools/pg2d1.mjs --out dist/d1-data",
     "cf:data:selftest": "node tools/pg2d1.mjs --selftest"
   },

@@ -18,8 +18,8 @@
    ===================================================================== */
 (function(){
 'use strict';
-if(window.__mortysautoEnhancements) return;
-window.__mortysautoEnhancements = true;
+if(window.__visionautoEnhancements) return;
+window.__visionautoEnhancements = true;
 
 /* ---------- helpers ---------- */
 function r(k, fb){ try{const v=localStorage.getItem(k);return v?JSON.parse(v):fb}catch(_){return fb} }
@@ -263,7 +263,7 @@ function makeRewardsModal(){
   m.innerHTML = `
     <div class="sp-modal-inner">
       <div class="sp-modal-head">
-        <div><h3>⭐ Morty's Auto Rewards</h3><p>Earn points on purchases &amp; services. Redeem for discounts.</p></div>
+        <div><h3>⭐ Vision Auto Solutions Auto Rewards</h3><p>Earn points on purchases &amp; services. Redeem for discounts.</p></div>
         <button class="sp-close" data-act="close">×</button>
       </div>
       <div class="sp-modal-body">

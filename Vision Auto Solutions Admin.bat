@@ -1,28 +1,28 @@
 @echo off
 rem ===========================================================================
-rem  Morty's Auto Parts Admin.bat  --  batch counterpart of "Morty's Auto Parts Admin.vbs"
+rem  Vision Auto Solutions Admin.bat  --  batch counterpart of "Vision Auto Solutions Admin.vbs"
 rem
 rem  Double-click to:
-rem     1. pin the listening port to 3057 in app\server-config.json
+rem     1. pin the listening port to 3056 in app\server-config.json
 rem     2. open the admin panel if the server already answers
 rem     3. otherwise start app\boot.js (bundled Node), wait for /api/health,
-rem        then open http://localhost:3057/admin.html
+rem        then open http://localhost:3056/admin.html
 rem
 rem  Unlike the .vbs, a .bat cannot launch a console program with the window
 rem  genuinely hidden -- boot.js is started minimised instead. For a truly
 rem  windowless autostart at login, keep using "Start Service Only.vbs".
 rem
 rem  Usage:
-rem     Morty's Auto Parts Admin.bat            start + open the admin panel
-rem     Morty's Auto Parts Admin.bat --status   print one line of JSON about the instance
-rem     Morty's Auto Parts Admin.bat --stop     stop a running instance
+rem     Vision Auto Solutions Admin.bat            start + open the admin panel
+rem     Vision Auto Solutions Admin.bat --status   print one line of JSON about the instance
+rem     Vision Auto Solutions Admin.bat --stop     stop a running instance
 rem ===========================================================================
 setlocal
-title Morty's Auto Parts Admin (port 3057)
+title Vision Auto Solutions Admin (port 3056)
 
 cd /d "%~dp0"
 
-set "PORT=3057"
+set "PORT=3056"
 set "BOOT=%~dp0app\boot.js"
 set "CFG=%~dp0app\server-config.json"
 set "URL=http://localhost:%PORT%/admin.html"
@@ -50,7 +50,7 @@ if errorlevel 1 if /i "%NODE%"=="node" (
 rem -- Pass control commands straight through to boot.js ----------------------
 if not "%~1"=="" goto passthru
 
-rem -- Pin the port to 3057 (other keys in server-config.json are preserved) --
+rem -- Pin the port to 3056 (other keys in server-config.json are preserved) --
 "%NODE%" -e "var f=process.argv[1],fs=require('fs'),t='',c={};try{t=fs.readFileSync(f,'utf8');if(t.charCodeAt(0)===65279)t=t.slice(1);c=JSON.parse(t);}catch(e){}if(c.port!==%PORT%){c.port=%PORT%;fs.writeFileSync(f,JSON.stringify(c,null,2));console.log('server-config.json port set to %PORT%');}" "%CFG%"
 
 rem -- Already up? Just open the panel --------------------------------------
@@ -61,8 +61,8 @@ call :health && (
 )
 
 rem -- Start boot.js minimised (batch can't fully hide a console) -----------
-echo Starting the Morty's Auto Parts admin server on port %PORT% ...
-start "Morty's Auto Parts Admin server" /min "%NODE%" "%BOOT%"
+echo Starting the Vision Auto Solutions admin server on port %PORT% ...
+start "Vision Auto Solutions Admin server" /min "%NODE%" "%BOOT%"
 
 rem -- Wait up to ~75s for readiness (first run initialises the database) ---
 set /a tries=0

@@ -1,4 +1,4 @@
-name = "mortysautoparts"
+name = "visionautosolutions"
 compatibility_date = "2026-07-01"
 # nodejs_compat: bcryptjs (functions/_lib/password path) touches node:crypto for
 # its RNG fallback. Everything else in functions/ is WebCrypto / Web-standard.
@@ -7,18 +7,18 @@ pages_build_output_dir = "public"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "mortysautoparts-db"
+database_name = "visionautosolutions-db"
 migrations_dir = "migrations"
-# mortysautoparts-db on the debhargithub@gmail.com account
-# (ce557e06f410b0e79dbd1cbe3adeef8b). Created 2026-09-03.
-database_id = "bf998f24-7329-467f-959e-898589aa5c17"
+# visionautosolutions-db on the haldaneharrison46@gmail.com account
+# (9a6d4645171dc984e737d3544ff01a37). Created 2026-09-01.
+database_id = "53b55748-5ae3-4fc7-85d1-8d463891a3ef"
 
 # Where new-order alerts go, and the From line for outbound email. Override
 # any of these without touching code.
 [vars]
-ORDER_NOTIFY_TO = "admin@mortsautoparts.com"
-ORDER_NOTIFY_SMS = "876-905-4111"
-EMAIL_FROM = "Morty's Auto Parts <noreply@mortsautoparts.com>"
+ORDER_NOTIFY_TO = "admin@visionautosolutions.com"
+ORDER_NOTIFY_SMS = "876-758-5590"
+EMAIL_FROM = "Vision Auto Solutions <noreply@visionautosolutions.com>"
 # The hosted site is HTTPS-only, so the session cookie must carry Secure.
 # (_lib/session.js reads this; unset = no Secure flag.)
 COOKIE_SECURE = "true"
@@ -28,7 +28,7 @@ COOKIE_SECURE = "true"
 # zip somewhere the shop can reach (a GitHub release asset, an R2 public
 # bucket, a file share) and point this at it. Leave blank and the panel
 # shows the build-it-yourself steps instead of a download button.
-# LOCAL_SERVER_URL     = "https://github.com/debhargit/mortys/releases/download/portable-vX/MortysAutoParts-portable.zip"
+# LOCAL_SERVER_URL     = "https://github.com/debhargit/meltha/releases/download/portable-vX/VisionAutoSolutions-portable.zip"
 # LOCAL_SERVER_VERSION = "X.Y.Z"
 # LOCAL_SERVER_SIZE    = "~240 MB"
 # LOCAL_SERVER_SHA256  = "<sha256 of the zip>"
@@ -36,7 +36,7 @@ COOKIE_SECURE = "true"
 # Phase 8 scheduled jobs (functions/_routes/cron.js). Set the shared secret
 # the companion cron-worker authenticates with — until it is set, every
 # /api/cron/* call is refused (jobs never run open):
-#   npx wrangler pages secret put CRON_SECRET --project-name mortysautoparts
+#   npx wrangler pages secret put CRON_SECRET --project-name visionautosolutions
 # Use the same value for `npx wrangler secret put CRON_SECRET` in app/cron-worker.
 
 # Transactional email (Phase 7). functions/_lib/mailer.js targets this
@@ -45,7 +45,7 @@ COOKIE_SECURE = "true"
 # it just logs instead of delivering.
 #
 # To turn it on:
-#   1. npx wrangler email sending enable mortsautoparts.com
+#   1. npx wrangler email sending enable visionautosolutions.com
 #      (currently returns "Unauthorized [code: 2036]" -- Email Sending needs a
 #       one-time opt-in in the dashboard, and the API token needs its scope)
 #   2. uncomment the two lines below and redeploy
@@ -55,12 +55,12 @@ COOKIE_SECURE = "true"
 # Storefront carrier integration (functions/_lib/carriers/*). Non-secret bits
 # — shipper origin address, per-carrier on/off + account numbers — live in the
 # shop_settings row (Admin -> Settings). API credentials are secrets:
-#   npx wrangler pages secret put DHL_API_KEY     --project-name mortysautoparts
-#   npx wrangler pages secret put DHL_API_SECRET  --project-name mortysautoparts
-#   npx wrangler pages secret put DHL_ACCOUNT     --project-name mortysautoparts
-#   npx wrangler pages secret put FEDEX_CLIENT_ID     --project-name mortysautoparts
-#   npx wrangler pages secret put FEDEX_CLIENT_SECRET --project-name mortysautoparts
-#   npx wrangler pages secret put FEDEX_ACCOUNT       --project-name mortysautoparts
+#   npx wrangler pages secret put DHL_API_KEY     --project-name visionautosolutions
+#   npx wrangler pages secret put DHL_API_SECRET  --project-name visionautosolutions
+#   npx wrangler pages secret put DHL_ACCOUNT     --project-name visionautosolutions
+#   npx wrangler pages secret put FEDEX_CLIENT_ID     --project-name visionautosolutions
+#   npx wrangler pages secret put FEDEX_CLIENT_SECRET --project-name visionautosolutions
+#   npx wrangler pages secret put FEDEX_ACCOUNT       --project-name visionautosolutions
 # Optional: DHL_TEST=1 / FEDEX_SANDBOX=1 (or DHL_BASE / FEDEX_BASE) to hit the
 # carriers' test endpoints. Missing creds -> that carrier just returns no rates
 # and refuses to book; Knutsford + "manual" keep working with a table rate and a
@@ -70,7 +70,7 @@ COOKIE_SECURE = "true"
 # Fygaro hosted card checkout (functions/_lib/fygaro.js). The Payment Button
 # UUID, display currency and on/off live in shop_settings (Admin -> Settings).
 # The JWT signing secret is a wrangler secret:
-#   npx wrangler pages secret put FYGARO_JWT_SECRET --project-name mortysautoparts
+#   npx wrangler pages secret put FYGARO_JWT_SECRET --project-name visionautosolutions
 # In the Fygaro dashboard, set the button's webhook URL to
 #   https://<site>/api/webhooks/fygaro
 # and its return URL to https://<site>/order-success.html (the checkout also
@@ -81,8 +81,8 @@ COOKIE_SECURE = "true"
 # absent, upload endpoints return a clean 501 and nothing else is affected.
 #
 # To turn it on (R2 needs a one-time dashboard opt-in first):
-#   npx wrangler r2 bucket create mortysautoparts-uploads
+#   npx wrangler r2 bucket create visionautosolutions-uploads
 #   then uncomment below and redeploy
 # [[r2_buckets]]
 # binding = "UPLOADS"
-# bucket_name = "mortysautoparts-uploads"
+# bucket_name = "visionautosolutions-uploads"

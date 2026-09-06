@@ -1,14 +1,14 @@
-// Load LIVE mortysautoparts.com/admin into jsdom, sign in for real, open the
+// Load LIVE visionautosolutions.com/admin into jsdom, sign in for real, open the
 // Dashboard tab, and assert it renders the real (imported) numbers with no
 // uncaught error.
 import jsdomPkg from 'jsdom';
 const { JSDOM, VirtualConsole } = jsdomPkg;
-const ORIGIN = 'https://mortysautoparts.com';
+const ORIGIN = 'https://visionautosolutions.com';
 
 // 1. real signin -> capture mh_session cookie
 const si = await fetch(ORIGIN + '/api/auth/signin', {
   method: 'POST', headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ email: 'admin@mortysautoparts.com', password: 'password123' }),
+  body: JSON.stringify({ email: 'admin@visionautosolutions.com', password: 'password123' }),
 });
 const setCookie = si.headers.get('set-cookie') || '';
 const cookie = setCookie.split(';')[0];

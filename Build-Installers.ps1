@@ -5,14 +5,14 @@
   Turns
         Make-Migration-Package.ps1  ->  Make Migration Package.exe
         Restore-On-New-PC.ps1       ->  Restore On New PC.exe
-        Stop-Admin-Server.ps1       ->  Stop Morty's Auto Parts Admin.exe
+        Stop-Admin-Server.ps1       ->  Stop Vision Auto Solutions Admin.exe
 
   so they can be double-clicked like the other tools in this folder, with no
   "Run with PowerShell" and no execution-policy prompt.
 
   Uses ps2exe (PowerShell Gallery). It compiles with the .NET Framework C#
   compiler that ships in Windows -- no Visual Studio, no dotnet SDK. The
-  result is the same kind of small .NET exe as Morty's Auto Parts Service.exe.
+  result is the same kind of small .NET exe as Vision Auto Solutions Service.exe.
 
   Run once on a machine with internet:
 
@@ -38,7 +38,7 @@ Import-Module ps2exe
 $common = @{
   noConsole    = $true          # no PowerShell window -- ever. The scripts talk
                                 # through a small status box and one final dialog.
-  company      = 'Morty''s Auto Parts'
+  company      = 'Vision Auto Solutions'
   version      = '1.0.0.0'
 }
 
@@ -47,13 +47,13 @@ $common = @{
 # stop tool only signals boot.js and does not.
 $targets = @(
   @{ In = 'Make-Migration-Package.ps1'; Out = 'Make Migration Package.exe'; Admin = $true;
-     Title = 'Morty''s Auto Parts -- Make Migration Package';
+     Title = 'Vision Auto Solutions -- Make Migration Package';
      Desc  = 'Copy this till, database and all, to a drive for another PC' }
   @{ In = 'Restore-On-New-PC.ps1';      Out = 'Restore On New PC.exe';      Admin = $true;
-     Title = 'Morty''s Auto Parts -- Restore On New PC';
+     Title = 'Vision Auto Solutions -- Restore On New PC';
      Desc  = 'Rebuild the till on this computer from a migration package' }
-  @{ In = 'Stop-Admin-Server.ps1';      Out = 'Stop Morty''s Auto Parts Admin.exe'; Admin = $false;
-     Title = 'Stop Morty''s Auto Parts Admin';
+  @{ In = 'Stop-Admin-Server.ps1';      Out = 'Stop Vision Auto Solutions Admin.exe'; Admin = $false;
+     Title = 'Stop Vision Auto Solutions Admin';
      Desc  = 'Shut down the windowless admin/POS server on this machine' }
 )
 

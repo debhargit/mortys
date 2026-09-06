@@ -1,4 +1,4 @@
-// mortysautoparts-cron — see wrangler.toml. Turns Cron Triggers into authenticated
+// visionautosolutions-cron — see wrangler.toml. Turns Cron Triggers into authenticated
 // HTTP calls against the Pages project's /api/cron/* endpoints (functions/
 // _routes/cron.js). Keep the job names in sync with functions/_lib/jobs.js.
 
@@ -29,11 +29,11 @@ export default {
     ctx.waitUntil(Promise.all(jobs.map((j) => hit(env, j))));
   },
 
-  // Manual kick: GET https://mortysautoparts-cron.<subdomain>.workers.dev/?key=<CRON_SECRET>&job=low-stock-digest
+  // Manual kick: GET https://visionautosolutions-cron.<subdomain>.workers.dev/?key=<CRON_SECRET>&job=low-stock-digest
   async fetch(req, env) {
     const u = new URL(req.url);
     if (!env.CRON_SECRET || u.searchParams.get('key') !== env.CRON_SECRET) {
-      return new Response('mortysautoparts-cron: ok\n', { status: 200 });
+      return new Response('visionautosolutions-cron: ok\n', { status: 200 });
     }
     const job = u.searchParams.get('job') || '_all';
     return Response.json(await hit(env, job));

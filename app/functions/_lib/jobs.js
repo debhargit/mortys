@@ -29,7 +29,7 @@ function digestHtml(title, intro, rows) {
     <h2 style="margin:0 0 6px">${esc(title)}</h2>
     <p style="margin:0 0 12px;color:#475569">${esc(intro)}</p>
     <table cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-size:13px">${rows}</table>
-    <p style="margin:14px 0 0;color:#94a3b8;font-size:12px">Sent by the Morty's Auto Parts scheduled jobs.</p>
+    <p style="margin:14px 0 0;color:#94a3b8;font-size:12px">Sent by the Vision Auto Solutions scheduled jobs.</p>
   </body></html>`;
 }
 
@@ -86,7 +86,7 @@ export async function remindersDigest(env) {
        </tr>`).join('');
     await sendEmail(env, {
       to,
-      subject: `${due.length} customer reminder${due.length === 1 ? '' : 's'} due — Morty's Auto Parts`,
+      subject: `${due.length} customer reminder${due.length === 1 ? '' : 's'} due — Vision Auto Solutions`,
       text: due.map((r) => `${r.due_date}  ${r.customer_name || '—'}  ${r.subject}`).join('\n'),
       html: digestHtml('Customer reminders due', `${due.length} follow-up${due.length === 1 ? '' : 's'} pending as of ${today()}.`, rows),
     });
@@ -122,7 +122,7 @@ export async function lowStockDigest(env) {
        </tr>`).join('');
     await sendEmail(env, {
       to,
-      subject: `${low.length} part${low.length === 1 ? '' : 's'} at or below reorder level${out ? ` (${out} out of stock)` : ''} — Morty's Auto Parts`,
+      subject: `${low.length} part${low.length === 1 ? '' : 's'} at or below reorder level${out ? ` (${out} out of stock)` : ''} — Vision Auto Solutions`,
       text: low.map((r) => `${r.stock_count}/${r.low_threshold}  ${r.name}  ${r.make_model || ''}`).join('\n'),
       html: digestHtml('Low stock', `${low.length} active part${low.length === 1 ? '' : 's'} at or below the reorder level as of ${today()}${out ? `, ${out} of them out of stock` : ''}.`, rows),
     });

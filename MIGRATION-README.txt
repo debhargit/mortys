@@ -49,7 +49,7 @@
   permission prompt.
 
   Pick where to build the folder (a USB stick, an external drive, any folder
-  -- keep the path short). It builds  <that place>\MortysAutoParts-Migration ,
+  -- keep the path short). It builds  <that place>\VisionAutoSolutions-Migration ,
   about 400 MB, and tells you when it is done. The till keeps serving the
   whole time.
 
@@ -58,14 +58,14 @@
   STEP 2  --  on the NEW computer
 -------------------------------------------------------------------------------
 
-  Copy the  MortysAutoParts-Migration  folder onto the new PC's C: drive (so it
-  becomes  C:\MortysAutoParts-Migration ), or just leave it on the USB stick.
+  Copy the  VisionAutoSolutions-Migration  folder onto the new PC's C: drive (so it
+  becomes  C:\VisionAutoSolutions-Migration ), or just leave it on the USB stick.
 
   Open the folder. Double-click   Restore On New PC.exe   and click Yes at the
   permission prompt.
 
   When the "This computer is the till now" message appears, open the
-  "Morty's Auto Parts Admin" desktop shortcut and sign in with the same email and
+  "Vision Auto Solutions Admin" desktop shortcut and sign in with the same email and
   password as the old machine.
 
   The new PC now starts the till automatically, hidden, every time it is
@@ -83,7 +83,7 @@
 
   If other computers on the network could reach the old till but not the new
   one, run  Allow Network Access.vbs  once on the new machine. Other PCs then
-  use   http://<new-PC-IP>:3057/admin.html
+  use   http://<new-PC-IP>:3056/admin.html
 
 
 -------------------------------------------------------------------------------
@@ -104,10 +104,10 @@
     not.
 
   * Re-running Restore On New PC.exe later replaces the program files and
-    leaves C:\MortysAutoParts\data alone -- it will not overwrite records the new
+    leaves C:\VisionAutoSolutions\data alone -- it will not overwrite records the new
     till has taken since the move.
 
-  * Logs, if a step fails: C:\MortysAutoParts\data\logs (boot.log, server.log,
-    postgres.log), plus the tool's own log under %TEMP%\MortysAutoParts.
+  * Logs, if a step fails: C:\VisionAutoSolutions\data\logs (boot.log, server.log,
+    postgres.log), plus the tool's own log under %TEMP%\VisionAutoSolutions.
 
 ===============================================================================

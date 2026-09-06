@@ -3,10 +3,10 @@
 import { d1 } from './db.js';
 
 const FALLBACK = {
-  company_name: 'Morty\'s Auto Parts',
-  address: '51 Red Hills Road, Kingston',
+  company_name: 'Vision Auto Solutions',
+  address: '112C Waltham Park Road, Kingston',
   country: 'Jamaica',
-  phone: '(876) 905-4111',
+  phone: '(876) 758-5590',
   email: null, website: null, logo_url: null,
   print_logo_on_invoice: true,
   default_print_template: 'receipt',
