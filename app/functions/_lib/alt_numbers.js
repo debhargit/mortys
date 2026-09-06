@@ -4,6 +4,18 @@
 // on screen, never a join folded into a list SELECT.
 import { ACTIVE_SALE_PRICE_SQL, effectiveBaseCents } from './price_breaks.js';
 
+// D1 caps bound parameters at 100 per query. The storefront compact catalogue
+// (shop.html pulls it in 5,000-row pages) calls loadAltNumbersByImg with the
+// whole page's img list, so an unsplit `IN (?,?,…)` blew straight past the cap
+// and every catalogue load 500'd with "Server error". Split the lookup into
+// sub-100 batches and merge.
+const D1_IN_CHUNK = 90;
+function inChunks(arr) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += D1_IN_CHUNK) out.push(arr.slice(i, i + D1_IN_CHUNK));
+  return out;
+}
+
 // Relationship labels derived from the row's free-text `kind`. Forward = "for
 // THIS part, the linked part is ...". Reverse = seen from the linked part's
 // side ("this part is <reverse> <the other part>").
@@ -51,17 +63,21 @@ export async function loadAltNumbersByImg(db, imgs) {
   const list = [...new Set((imgs || []).filter(Boolean))];
   const map = new Map();
   if (!list.length) return map;
-  const rows = await db.many(
-    `SELECT an.product_img, an.number, an.kind, an.note, an.substitute_img,
-            s.name AS s_name, s.sku AS s_sku, s.is_active AS s_active,
-            s.price_cents AS s_price_cents, ${ACTIVE_SALE_PRICE_SQL} AS s_sale_cents,
-            s.stock_count AS s_stock, s.low_threshold AS s_low, s.item_type AS s_item_type
-       FROM product_alt_numbers an
-       LEFT JOIN products s ON s.img = an.substitute_img
-      WHERE an.product_img IN (${list.map(() => '?').join(',')})
-      ORDER BY an.product_img, an.id`,
-    ...list
-  );
+  const rows = [];
+  for (const batch of inChunks(list)) {
+    const part = await db.many(
+      `SELECT an.product_img, an.number, an.kind, an.note, an.substitute_img,
+              s.name AS s_name, s.sku AS s_sku, s.is_active AS s_active,
+              s.price_cents AS s_price_cents, ${ACTIVE_SALE_PRICE_SQL} AS s_sale_cents,
+              s.stock_count AS s_stock, s.low_threshold AS s_low, s.item_type AS s_item_type
+         FROM product_alt_numbers an
+         LEFT JOIN products s ON s.img = an.substitute_img
+        WHERE an.product_img IN (${batch.map(() => '?').join(',')})
+        ORDER BY an.product_img, an.id`,
+      ...batch
+    );
+    for (const r of part) rows.push(r);
+  }
   for (const r of rows) {
     if (!map.has(r.product_img)) map.set(r.product_img, []);
     map.get(r.product_img).push({
@@ -99,17 +115,21 @@ export async function loadSubstitutesByImg(db, imgs) {
     }
   }
 
-  const revRows = await db.many(
-    `SELECT an.substitute_img AS target, an.kind, an.note,
-            p.img, p.name, p.sku, p.is_active, p.price_cents,
-            ${ACTIVE_SALE_PRICE_SQL} AS sale_cents,
-            p.stock_count, p.low_threshold, p.item_type
-       FROM product_alt_numbers an
-       JOIN products p ON p.img = an.product_img
-      WHERE an.substitute_img IN (${list.map(() => '?').join(',')}) AND p.is_active = 1
-      ORDER BY an.substitute_img, an.id`,
-    ...list
-  );
+  const revRows = [];
+  for (const batch of inChunks(list)) {
+    const part = await db.many(
+      `SELECT an.substitute_img AS target, an.kind, an.note,
+              p.img, p.name, p.sku, p.is_active, p.price_cents,
+              ${ACTIVE_SALE_PRICE_SQL} AS sale_cents,
+              p.stock_count, p.low_threshold, p.item_type
+         FROM product_alt_numbers an
+         JOIN products p ON p.img = an.product_img
+        WHERE an.substitute_img IN (${batch.map(() => '?').join(',')}) AND p.is_active = 1
+        ORDER BY an.substitute_img, an.id`,
+      ...batch
+    );
+    for (const r of part) revRows.push(r);
+  }
   for (const r of revRows) {
     const bucket = out.get(r.target);
     if (!bucket) continue;
