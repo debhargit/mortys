@@ -10441,8 +10441,10 @@ async function submitSupplier(){
 // ============= PURCHASE ORDERS =============
 var PO_VIEW_ID = null; // set when drilled into a single PO's detail
 var PO_NEW_LINES = []; // line items on the "+ New purchase order" builder: {img, description, sku, qty, cost}
+var PO_RUN_MODE = false; // true = show the multi-supplier "purchase run" planner
 async function renderPurchaseOrders(panel){
   if (PO_VIEW_ID) return renderPoDetail(panel, PO_VIEW_ID);
+  if (PO_RUN_MODE) return renderPurchaseRun(panel);
   PO_NEW_LINES = [];
   panel.innerHTML = '<div class="empty">Loading…</div>';
   var r, sup;
@@ -10452,6 +10454,10 @@ async function renderPurchaseOrders(panel){
   } catch (e) { panel.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return; }
 
   panel.innerHTML =
+    '<div style="padding:10px 16px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+      '<button type="button" class="btn" id="poRunBtn" style="background:#ede9fe;color:#6d28d9;border:0">🧮 Purchase run — plan across suppliers</button>' +
+      '<small style="color:var(--muted)">Browse stock, let the system flag what needs ordering, split into a PO per supplier.</small>' +
+    '</div>' +
     '<details style="border-bottom:1px solid var(--line);background:var(--card-soft)">' +
       '<summary style="padding:12px 16px;cursor:pointer;font-weight:700;color:var(--heading)">+ New purchase order</summary>' +
       '<form id="newPo" style="padding:14px 18px;display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:820px" onsubmit="event.preventDefault();submitPo();">' +
@@ -10529,6 +10535,8 @@ async function renderPurchaseOrders(panel){
   panel.querySelectorAll('[data-open]').forEach(function(b){
     b.addEventListener('click', function(){ PO_VIEW_ID = b.getAttribute('data-open'); renderPurchaseOrders(panel); });
   });
+  var poRunBtn = document.getElementById('poRunBtn');
+  if (poRunBtn) poRunBtn.addEventListener('click', function(){ PO_RUN_MODE = true; renderPurchaseOrders(panel); });
 
   // ---- Inline "add a new supplier" on the New PO form ---------------------
   var poSupSel = document.getElementById('poSupplier');
@@ -10876,6 +10884,219 @@ async function submitPoItem(id){
   } catch (e) {
     msg.style.background = '#fee2e2'; msg.style.color = '#b91c1c'; msg.textContent = e.message;
   }
+}
+
+// ============= PURCHASE RUN — multi-supplier planner =============
+// Browse stock -> per line the system analyses demand vs. stock and suggests
+// an order qty (service-level reorder point + EOQ) -> pick a supplier per line
+// -> Generate POs fans the run out into one draft PO per supplier.
+var PO_RUN = [];                    // { img, name, sku, supplier_id, qty, unit_cost_usd, analysis }
+var PO_RUN_SUPPLIERS = [];          // all active suppliers
+var PO_RUN_SUP_CACHE = {};          // img -> approved product_suppliers rows
+var PO_RUN_PARAMS = { window_days: 90, service_level: 95 };
+
+function poRunChip(a){
+  if (!a) return '<span style="color:var(--muted);font-size:11.5px">analysing…</span>';
+  var map = { order:['#fee2e2','#b91c1c','🔴 order'], low:['#fef3c7','#92400e','🟡 low'],
+              ok:['#dcfce7','#166534','⚪ ok'], dead:['#e5e7eb','#374151','⚫ no movement'], none:['#e5e7eb','#374151','— none'] };
+  var m = map[a.recommend] || map.ok;
+  return '<span title="' + esc(a.reason || '') + '" style="display:inline-block;background:' + m[0] + ';color:' + m[1] + ';font-size:10.5px;font-weight:800;padding:1px 7px;border-radius:9px">' + m[2] + '</span>' +
+    '<div style="font-size:10.5px;color:var(--muted);margin-top:2px">' + a.per_week + '/wk · stock ' + a.stock_count + (a.on_order ? ' +' + a.on_order + ' on order' : '') +
+      ' · ROP ' + a.reorder_point + (a.days_cover != null ? ' · ~' + a.days_cover + 'd cover' : '') + '</div>';
+}
+function poRunSupplierOptions(line){
+  var approved = PO_RUN_SUP_CACHE[line.img] || [];
+  var seen = {};
+  var opts = '';
+  approved.forEach(function(s){ seen[s.supplier_id] = 1;
+    opts += '<option value="' + s.supplier_id + '"' + (String(s.supplier_id) === String(line.supplier_id) ? ' selected' : '') + '>' +
+      esc(s.supplier_name) + (s.is_preferred ? ' ★' : '') + (s.unit_cost_usd != null ? ' — ' + fmtMoney(s.unit_cost_usd) : '') + '</option>'; });
+  if (approved.length) opts += '<option disabled>──────────</option>';
+  PO_RUN_SUPPLIERS.forEach(function(s){ if (seen[s.id]) return;
+    opts += '<option value="' + s.id + '"' + (String(s.id) === String(line.supplier_id) ? ' selected' : '') + '>' + esc(s.name) + '</option>'; });
+  return opts;
+}
+async function poRunEnsureSuppliers(img){
+  if (PO_RUN_SUP_CACHE[img]) return PO_RUN_SUP_CACHE[img];
+  try { PO_RUN_SUP_CACHE[img] = (await api('/api/admin/product-suppliers/' + encodeURIComponent(img))).suppliers || []; }
+  catch (_) { PO_RUN_SUP_CACHE[img] = []; }
+  return PO_RUN_SUP_CACHE[img];
+}
+async function renderPurchaseRun(panel){
+  panel.innerHTML = '<div class="empty">Loading…</div>';
+  try { PO_RUN_SUPPLIERS = (await api('/api/admin/suppliers?active=true')).suppliers || []; }
+  catch (e) { panel.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return; }
+  panel.innerHTML =
+    '<div style="padding:10px 16px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+      '<button type="button" class="btn" id="poRunBack">‹ Purchase orders</button>' +
+      '<button type="button" class="btn ok" id="poRunAuto">⚡ Auto-fill from stock analysis</button>' +
+      '<div style="position:relative;flex:1;min-width:220px">' +
+        '<input id="poRunSearch" class="fld" autocomplete="off" placeholder="🔎 add a part to the run — ↑/↓, Enter"/>' +
+      '</div>' +
+      '<button type="button" class="btn" id="poRunClear" style="background:#fee2e2;color:#b91c1c;border:0">Clear run</button>' +
+    '</div>' +
+    '<div id="poRunBody"></div>';
+  document.getElementById('poRunBack').addEventListener('click', function(){ PO_RUN_MODE = false; renderPurchaseOrders(panel); });
+  document.getElementById('poRunClear').addEventListener('click', function(){ PO_RUN = []; poRunRender(); });
+  document.getElementById('poRunAuto').addEventListener('click', poRunAutoFill);
+  mhPartSearchDropdown(document.getElementById('poRunSearch'), function(p){
+    document.getElementById('poRunSearch').value = '';
+    poRunAddByImg(p.img, p);
+  });
+  poRunRender();
+}
+function poRunRender(){
+  var body = document.getElementById('poRunBody');
+  if (!body) return;
+  if (!PO_RUN.length){
+    body.innerHTML = '<div class="empty" style="padding:36px 20px">Nothing in the run yet.<br/><small>Use ⚡ Auto-fill to pull everything that needs ordering, or search for a part above.</small></div>';
+    return;
+  }
+  // group preview
+  var groups = {};
+  PO_RUN.forEach(function(l){ var k = l.supplier_id || 0; (groups[k] = groups[k] || []).push(l); });
+  var supName = function(id){ var s = PO_RUN_SUPPLIERS.find(function(x){ return String(x.id) === String(id); }); return s ? s.name : '— no supplier —'; };
+  var grandTotal = PO_RUN.reduce(function(s, l){ return s + (Number(l.qty)||0) * (Number(l.unit_cost_usd)||0); }, 0);
+  var nSup = Object.keys(groups).filter(function(k){ return k !== '0'; }).length;
+  var mini = 'padding:4px 6px;border:1px solid var(--line);border-radius:5px;font-size:12px;font-family:inherit';
+
+  body.innerHTML =
+    '<div style="padding:14px 16px;overflow-x:auto">' +
+      '<table style="width:100%;min-width:900px"><thead><tr>' +
+        '<th style="text-align:left">Part</th><th style="width:200px">Analysis</th><th style="width:200px">Supplier</th>' +
+        '<th style="width:70px">Qty</th><th style="width:96px">Unit cost</th><th style="width:90px;text-align:right">Line</th><th style="width:34px"></th>' +
+      '</tr></thead><tbody>' +
+      PO_RUN.map(function(l, i){
+        var line = (Number(l.qty)||0) * (Number(l.unit_cost_usd)||0);
+        return '<tr>' +
+          '<td><b style="font-size:12.5px">' + esc(l.name || l.img) + '</b><br/><small style="color:var(--muted)">' + esc(l.sku || l.img) + '</small></td>' +
+          '<td>' + poRunChip(l.analysis) + (l.analysis ? ' <button type="button" class="btn poRunWhy" data-i="' + i + '" style="padding:0 6px;font-size:10px">?</button>' : '') + '</td>' +
+          '<td><select class="poRunSup" data-i="' + i + '" style="width:100%;' + mini + '">' + poRunSupplierOptions(l) + '</select></td>' +
+          '<td><input type="number" min="1" class="poRunQty" data-i="' + i + '" value="' + (l.qty != null ? l.qty : 1) + '" style="width:100%;' + mini + '"/></td>' +
+          '<td><input type="number" min="0" step="0.01" class="poRunCost" data-i="' + i + '" value="' + (l.unit_cost_usd != null && l.unit_cost_usd !== '' ? l.unit_cost_usd : '') + '" placeholder="0.00" style="width:100%;' + mini + '"/></td>' +
+          '<td style="text-align:right">' + fmtMoney(line) + '</td>' +
+          '<td><button type="button" class="btn poRunDel" data-i="' + i + '" style="background:#fee2e2;color:#b91c1c;border:0">×</button></td>' +
+        '</tr>';
+      }).join('') +
+      '</tbody></table>' +
+    '</div>' +
+    '<div style="padding:12px 16px;border-top:1px solid var(--line);display:flex;gap:16px;align-items:center;flex-wrap:wrap;position:sticky;bottom:0;background:var(--card)">' +
+      '<div style="font-size:12.5px">' + PO_RUN.length + ' line' + (PO_RUN.length===1?'':'s') + ' · <b>' + nSup + '</b> supplier' + (nSup===1?'':'s') + ' · <b>' + fmtMoney(grandTotal) + '</b></div>' +
+      Object.keys(groups).map(function(k){ var g = groups[k]; var t = g.reduce(function(s,l){ return s + (Number(l.qty)||0)*(Number(l.unit_cost_usd)||0); }, 0);
+        return '<span style="font-size:11.5px;color:' + (k==='0'?'#b91c1c':'var(--muted)') + '">' + esc(supName(k)) + ': ' + g.length + ' · ' + fmtMoney(t) + '</span>'; }).join(' &nbsp;') +
+      '<button type="button" class="btn ok" id="poRunGo" style="margin-left:auto"' + (nSup ? '' : ' disabled') + '>Generate ' + (nSup||'') + ' purchase order' + (nSup===1?'':'s') + '</button>' +
+      '<span id="poRunMsg" style="font-size:12.5px"></span>' +
+    '</div>';
+
+  var bind = function(cls, fn){ body.querySelectorAll('.' + cls).forEach(function(el){
+    el.addEventListener('change', function(){ fn(PO_RUN[+el.dataset.i], el.value, el); poRunRender(); }); }); };
+  bind('poRunSup', function(l, v){
+    l.supplier_id = parseInt(v, 10) || null;
+    var appr = (PO_RUN_SUP_CACHE[l.img] || []).find(function(s){ return String(s.supplier_id) === String(l.supplier_id); });
+    if (appr && appr.unit_cost_usd != null) l.unit_cost_usd = Number(appr.unit_cost_usd);
+  });
+  bind('poRunQty',  function(l, v){ l.qty = Math.max(1, parseInt(v, 10) || 1); });
+  bind('poRunCost', function(l, v){ l.unit_cost_usd = v === '' ? '' : Number(v); });
+  body.querySelectorAll('.poRunDel').forEach(function(el){ el.addEventListener('click', function(){ PO_RUN.splice(+el.dataset.i, 1); poRunRender(); }); });
+  body.querySelectorAll('.poRunWhy').forEach(function(el){ el.addEventListener('click', function(){ poRunWhy(PO_RUN[+el.dataset.i]); }); });
+  var go = document.getElementById('poRunGo');
+  if (go) go.addEventListener('click', poRunGenerate);
+}
+function poRunWhy(l){
+  var a = l.analysis; if (!a) return;
+  posModal('Reorder analysis — ' + esc(l.name || l.img),
+    '<table style="width:100%;font-size:12.5px"><tbody>' +
+      [['Recommendation', (a.recommend||'').toUpperCase() + ' — ' + esc(a.reason || '')],
+       ['On hand / on order / position', a.stock_count + ' / ' + a.on_order + ' / ' + a.position],
+       ['Demand (last ' + a.window_days + 'd)', a.window_qty + ' units · ' + a.per_week + '/week · avg ' + a.avg_daily + '/day'],
+       ['Demand variability (σ/day)', a.sigma_daily],
+       ['Lead time', a.lead_days + ' days'],
+       ['Service level', a.service_level + '% (Z = ' + a.z + ')'],
+       ['Reorder point', a.reorder_point + '  = avg/day × lead + Z × σ over lead'],
+       ['EOQ', a.eoq + (a.pack > 1 ? '  (pack of ' + a.pack + ')' : '')],
+       ['Suggested order qty', '<b>' + a.suggested_qty + '</b>'],
+       ['Days of cover at current pace', a.days_cover != null ? a.days_cover + ' days' : '—'],
+       ['Preferred supplier', a.preferred_supplier ? esc(a.preferred_supplier.name) + (a.preferred_supplier.unit_cost_usd != null ? ' @ ' + fmtMoney(a.preferred_supplier.unit_cost_usd) : '') : '—']]
+      .map(function(r){ return '<tr><td style="color:var(--muted);padding:3px 10px 3px 0;white-space:nowrap;vertical-align:top">' + r[0] + '</td><td style="padding:3px 0">' + r[1] + '</td></tr>'; }).join('') +
+    '</tbody></table>', 560);
+}
+async function poRunAddByImg(img, hint){
+  if (PO_RUN.find(function(x){ return x.img === img; })) { posToast('Already in the run'); return; }
+  var line = { img: img, name: (hint && hint.name) || img, sku: (hint && hint.sku) || '', supplier_id: null, qty: 1, unit_cost_usd: '', analysis: null };
+  PO_RUN.push(line); poRunRender();
+  await poRunEnsureSuppliers(img);
+  try {
+    var a = (await api('/api/admin/reorder-analysis?img=' + encodeURIComponent(img) +
+      '&window_days=' + PO_RUN_PARAMS.window_days + '&service_level=' + PO_RUN_PARAMS.service_level)).items[0];
+    if (a) {
+      line.analysis = a; line.name = a.name; line.sku = a.sku || line.sku;
+      line.supplier_id = (a.preferred_supplier && a.preferred_supplier.id) || (PO_RUN_SUPPLIERS[0] && PO_RUN_SUPPLIERS[0].id) || null;
+      var appr = (PO_RUN_SUP_CACHE[img] || []).find(function(s){ return String(s.supplier_id) === String(line.supplier_id); });
+      line.unit_cost_usd = (appr && appr.unit_cost_usd != null) ? Number(appr.unit_cost_usd)
+        : (a.preferred_supplier && a.preferred_supplier.unit_cost_usd != null) ? Number(a.preferred_supplier.unit_cost_usd)
+        : (a.unit_cost_usd || '');
+      line.qty = a.suggested_qty > 0 ? a.suggested_qty : Math.max(a.pack || 1, 1);
+    }
+  } catch (_) {}
+  poRunRender();
+}
+function poRunAutoFill(){
+  posModal('Auto-fill the run from stock analysis',
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px">' +
+      '<div><label class="lbl">Demand window (days)</label><input id="afWin" type="number" min="14" max="365" value="' + PO_RUN_PARAMS.window_days + '" class="fld"/></div>' +
+      '<div><label class="lbl">Service level %</label><input id="afSvc" type="number" min="50" max="99.9" step="0.5" value="' + PO_RUN_PARAMS.service_level + '" class="fld"/></div>' +
+      '<label style="grid-column:1/-1;display:flex;gap:7px;align-items:center;font-size:12.5px"><input type="checkbox" id="afLow"/> also include “low / getting close” lines</label>' +
+      '<div id="afMsg" style="grid-column:1/-1;font-size:12.5px;color:var(--muted)"></div>' +
+      '<div style="grid-column:1/-1"><button type="button" class="btn ok" id="afGo">Analyse stock &amp; fill</button></div>' +
+    '</div>', 520);
+  document.getElementById('afGo').addEventListener('click', async function(){
+    var w = parseInt(document.getElementById('afWin').value, 10) || 90;
+    var svc = Number(document.getElementById('afSvc').value) || 95;
+    var only = document.getElementById('afLow').checked ? 'needs' : 'order';
+    PO_RUN_PARAMS = { window_days: w, service_level: svc };
+    var m = document.getElementById('afMsg'); m.textContent = 'Analysing the catalogue… (this can take a moment)';
+    try {
+      var r = await api('/api/admin/reorder-analysis?only=' + only + '&window_days=' + w + '&service_level=' + svc + '&limit=20000');
+      var items = r.items || [];
+      var added = 0;
+      for (var k = 0; k < items.length; k++){
+        var a = items[k];
+        if (PO_RUN.find(function(x){ return x.img === a.img; })) continue;
+        var supId = (a.preferred_supplier && a.preferred_supplier.id) || (PO_RUN_SUPPLIERS[0] && PO_RUN_SUPPLIERS[0].id) || null;
+        PO_RUN.push({ img: a.img, name: a.name, sku: a.sku || '', supplier_id: supId,
+          qty: a.suggested_qty > 0 ? a.suggested_qty : Math.max(a.pack || 1, 1),
+          unit_cost_usd: (a.preferred_supplier && a.preferred_supplier.unit_cost_usd != null) ? Number(a.preferred_supplier.unit_cost_usd) : (a.unit_cost_usd || ''),
+          analysis: a });
+        if (a.preferred_supplier) PO_RUN_SUP_CACHE[a.img] = PO_RUN_SUP_CACHE[a.img] || [{ supplier_id: a.preferred_supplier.id, supplier_name: a.preferred_supplier.name, unit_cost_usd: a.preferred_supplier.unit_cost_usd, is_preferred: true }];
+        added++;
+      }
+      posCloseModal();
+      poRunRender();
+      posToast(added ? ('Added ' + added + ' line' + (added===1?'':'s') + ' that need ordering') : 'Nothing needs ordering right now 🎉', !added);
+    } catch (e) { m.textContent = e.message; m.style.color = 'var(--red)'; }
+  });
+}
+async function poRunGenerate(){
+  var msg = document.getElementById('poRunMsg');
+  var noSup = PO_RUN.filter(function(l){ return !l.supplier_id; });
+  if (noSup.length) { msg.style.color = 'var(--red)'; msg.textContent = noSup.length + ' line(s) have no supplier.'; return; }
+  var bad = PO_RUN.filter(function(l){ return !(Number(l.qty) > 0) || !(Number(l.unit_cost_usd) >= 0) || l.unit_cost_usd === ''; });
+  if (bad.length) { msg.style.color = 'var(--red)'; msg.textContent = bad.length + ' line(s) need a qty and a unit cost.'; return; }
+  var go = document.getElementById('poRunGo'); go.disabled = true;
+  msg.style.color = 'var(--muted)'; msg.textContent = 'Creating purchase orders…';
+  try {
+    var res = await api('/api/admin/purchase-orders/bulk', { method: 'POST', body: {
+      source: 'run',
+      lines: PO_RUN.map(function(l){ return {
+        product_img: l.img, supplier_id: l.supplier_id, sku: l.sku || null,
+        description: l.name || l.img, qty: l.qty, unit_cost_usd: Number(l.unit_cost_usd),
+      }; }),
+    }});
+    var pos = res.pos || [];
+    posToast('Created ' + pos.length + ' PO' + (pos.length===1?'':'s') + ': ' + pos.map(function(p){ return p.po_number + ' (' + (p.supplier_name||'') + ', ' + p.line_count + ')'; }).join(', '));
+    PO_RUN = []; PO_RUN_MODE = false;
+    show('purchaseorders');
+  } catch (e) { msg.style.color = 'var(--red)'; msg.textContent = e.message; go.disabled = false; }
 }
 
 // ============= WAREHOUSE (activity log / stock counts / bin check) =============

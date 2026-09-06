@@ -74,6 +74,21 @@ async function nextPoNumber(db) {
   return `PO-${year}-${String(((r && r.n) || 0) + 1).padStart(4, '0')}`;
 }
 
+// Inverse standard-normal CDF (Acklam) — turns a service level into the safety
+// factor Z for the reorder point. Mirrors the server.js copy.
+function zFromP(p) {
+  p = Math.min(0.999999, Math.max(0.000001, Number(p) || 0.95));
+  const a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02, 1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00];
+  const b = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02, 6.680131188771972e+01, -1.328068155288572e+01];
+  const cc = [-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00, -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00];
+  const d = [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00, 3.754408661907416e+00];
+  const plow = 0.02425, phigh = 1 - plow;
+  let q, r;
+  if (p < plow) { q = Math.sqrt(-2 * Math.log(p)); return (((((cc[0]*q+cc[1])*q+cc[2])*q+cc[3])*q+cc[4])*q+cc[5]) / ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1); }
+  if (p <= phigh) { q = p - 0.5; r = q*q; return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q / (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1); }
+  q = Math.sqrt(-2 * Math.log(1 - p)); return -(((((cc[0]*q+cc[1])*q+cc[2])*q+cc[3])*q+cc[4])*q+cc[5]) / ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+}
+
 const PO_USD_ALIASES = `total_cents / 100.0 AS total_usd,
   subtotal_cents / 100.0 AS subtotal_usd,
   shipping_cents / 100.0 AS shipping_usd,
@@ -827,6 +842,180 @@ export default function mount(app) {
     );
     await recalcPoTotals(db, id);
     return c.json({ ok: true });
+  });
+
+  // ---- purchasing planner: approved suppliers per part ----
+  app.get('/api/admin/product-suppliers/:img', adminMw, async (c) => {
+    const rows = await d1(c.env).many(
+      `SELECT ps.*, ps.unit_cost_cents / 100.0 AS unit_cost_usd, s.name AS supplier_name, s.is_active AS supplier_active
+         FROM product_suppliers ps JOIN suppliers s ON s.id = ps.supplier_id
+        WHERE ps.product_img = ? ORDER BY ps.is_preferred DESC, s.name`, c.req.param('img'));
+    return c.json({ suppliers: rows });
+  });
+  app.post('/api/admin/product-suppliers', managerMw, async (c) => {
+    const db = d1(c.env);
+    const b = await c.req.json().catch(() => ({}));
+    if (!b.product_img || !b.supplier_id) return c.json({ error: 'product_img and supplier_id required' }, 400);
+    const num = (v) => (v == null || v === '' ? null : parseInt(v, 10));
+    const cost = (b.unit_cost_usd == null || b.unit_cost_usd === '') ? null : usdToCents(b.unit_cost_usd);
+    const stmts = [];
+    if (b.is_preferred) stmts.push({ sql: 'UPDATE product_suppliers SET is_preferred = 0 WHERE product_img = ?', binds: [b.product_img] });
+    stmts.push({
+      sql: `INSERT INTO product_suppliers (product_img, supplier_id, supplier_part_no, unit_cost_cents, lead_time_days, min_order_qty, pack_size, is_preferred, notes)
+              VALUES (?,?,?,?,?,?,?,?,?)
+            ON CONFLICT (product_img, supplier_id) DO UPDATE SET
+              supplier_part_no = excluded.supplier_part_no, unit_cost_cents = excluded.unit_cost_cents,
+              lead_time_days = excluded.lead_time_days, min_order_qty = excluded.min_order_qty,
+              pack_size = excluded.pack_size, is_preferred = excluded.is_preferred,
+              notes = excluded.notes, updated_at = CURRENT_TIMESTAMP`,
+      binds: [b.product_img, parseInt(b.supplier_id, 10), b.supplier_part_no || null, cost,
+        num(b.lead_time_days), num(b.min_order_qty), num(b.pack_size), b.is_preferred ? 1 : 0, b.notes || null],
+    });
+    if (b.is_preferred) stmts.push({ sql: 'UPDATE products SET supplier_id = ? WHERE img = ?', binds: [parseInt(b.supplier_id, 10), b.product_img] });
+    await db.batch(stmts);
+    return c.json({ ok: true });
+  });
+  app.delete('/api/admin/product-suppliers/:id', managerMw, async (c) => {
+    await d1(c.env).run('DELETE FROM product_suppliers WHERE id = ?', c.req.param('id'));
+    return c.json({ ok: true });
+  });
+
+  // ---- service-level reorder analysis ----
+  app.get('/api/admin/reorder-analysis', adminMw, async (c) => {
+    const db = d1(c.env);
+    const q = c.req.query();
+    const windowDays = Math.min(365, Math.max(7, parseInt(q.window_days, 10) || 90));
+    const serviceLevel = Number(q.service_level) || 95;
+    const leadFallback = parseInt(q.lead_fallback, 10) || 7;
+    const reviewDays = parseInt(q.review_days, 10) || 7;
+    const orderCost = Number(q.order_cost) || 25;
+    const holdRate = Number(q.hold_rate) || 0.25;
+    const Z = zFromP(serviceLevel / 100);
+    const since = new Date(Date.now() - windowDays * 86400000).toISOString();
+
+    const filt = ["p.is_active = 1", "COALESCE(p.item_type,'inventory') <> 'service'", "COALESCE(p.is_kit,0) = 0"];
+    const binds = [since, since, since];
+    if (q.img) { filt.push('p.img = ?'); binds.push(q.img); }
+    if (q.q) { const like = '%' + String(q.q).toLowerCase() + '%'; filt.push("(lower(p.name) LIKE ? OR lower(COALESCE(p.sku,'')) LIKE ? OR lower(p.img) LIKE ?)"); binds.push(like, like, like); }
+    if (q.category) { filt.push('p.category = ?'); binds.push(q.category); }
+    const limit = Math.min(20000, Math.max(1, parseInt(q.limit, 10) || 4000));
+
+    const rows = await db.many(
+      `WITH demand AS (
+         SELECT product_img, date(d) AS day, SUM(qy) AS qy FROM (
+           SELECT si.product_img, ps.created_at AS d, si.qty AS qy
+             FROM pos_sale_items si JOIN pos_sales ps ON ps.id = si.sale_id
+            WHERE ps.voided = 0 AND ps.created_at >= ? AND si.product_img IS NOT NULL
+           UNION ALL
+           SELECT oi.product_img, o.created_at, oi.qty
+             FROM order_items oi JOIN orders o ON o.id = oi.order_id
+            WHERE o.status <> 'cancelled' AND o.created_at >= ?
+           UNION ALL
+           SELECT wp.product_img, wp.created_at, wp.qty
+             FROM work_order_parts wp WHERE wp.created_at >= ? AND wp.product_img IS NOT NULL
+         ) GROUP BY product_img, date(d)
+       ),
+       dstats AS (SELECT product_img, SUM(qy) total_qty, COUNT(*) active_days, SUM(qy*qy) sumsq FROM demand GROUP BY product_img),
+       onord AS (
+         SELECT poi.product_img, SUM(MAX(poi.qty_ordered - COALESCE(poi.qty_received,0), 0)) on_order
+           FROM purchase_order_items poi JOIN purchase_orders po ON po.id = poi.po_id
+          WHERE po.status NOT IN ('received','cancelled') AND poi.product_img IS NOT NULL
+          GROUP BY poi.product_img
+       ),
+       pref AS (SELECT * FROM (
+         SELECT ps.*, ROW_NUMBER() OVER (PARTITION BY ps.product_img ORDER BY ps.is_preferred DESC, ps.id) rn
+           FROM product_suppliers ps) WHERE rn = 1)
+       SELECT p.img, p.name, p.sku, p.category, p.condition, p.stock_count, p.low_threshold,
+              p.reorder_point, p.reorder_qty, p.units_per_purchase, p.cost_cents,
+              COALESCE(ds.total_qty,0) total_qty, COALESCE(ds.sumsq,0) sumsq, COALESCE(ds.active_days,0) active_days,
+              COALESCE(oo.on_order,0) on_order,
+              pr.supplier_id pref_supplier_id, s.name pref_supplier_name, pr.supplier_part_no pref_part_no,
+              pr.unit_cost_cents pref_cost_cents, COALESCE(pr.lead_time_days, s.lead_time_days) pref_lead_days,
+              COALESCE(pr.min_order_qty, pr.pack_size) pref_pack
+         FROM products p
+         LEFT JOIN dstats ds ON ds.product_img = p.img
+         LEFT JOIN onord  oo ON oo.product_img = p.img
+         LEFT JOIN pref   pr ON pr.product_img = p.img
+         LEFT JOIN suppliers s ON s.id = pr.supplier_id
+        WHERE ${filt.join(' AND ')}
+        ORDER BY p.name LIMIT ${limit}`, ...binds);
+
+    let items = rows.map((r) => {
+      const muD = Number(r.total_qty || 0) / windowDays;
+      let sigmaD = Math.sqrt(Math.max(Number(r.sumsq || 0) / windowDays - muD * muD, 0));
+      sigmaD = Math.max(sigmaD, Math.sqrt(Math.max(muD, 0)));
+      const lead = Number(r.pref_lead_days) || leadFallback;
+      const rop = Math.max(Math.round(muD * lead + Z * sigmaD * Math.sqrt(lead)), Number(r.low_threshold) || 0, Number(r.reorder_point) || 0);
+      const stock = Number(r.stock_count) || 0;
+      const onOrder = Number(r.on_order) || 0;
+      const position = stock + onOrder;
+      const unitCost = (r.pref_cost_cents != null ? Number(r.pref_cost_cents) : (r.cost_cents != null ? Number(r.cost_cents) : 0)) / 100 || 0;
+      const annual = muD * 365;
+      const holdCost = holdRate * unitCost;
+      const eoq = (holdCost > 0 && annual > 0) ? Math.sqrt((2 * annual * orderCost) / holdCost) : 0;
+      let pack = Math.max(1, Number(r.pref_pack) || Math.round(Number(r.units_per_purchase) || 0) || 1);
+      let suggested = 0;
+      if (position <= rop) {
+        let need = Math.max(rop + muD * reviewDays - position, 1);
+        need = Math.max(need, eoq || 0);
+        suggested = Math.ceil(need / pack) * pack;
+        if (r.reorder_qty != null) suggested = Math.max(Number(r.reorder_qty), pack);
+      }
+      let recommend;
+      if (Number(r.total_qty || 0) === 0 && stock > 0) recommend = 'dead';
+      else if (Number(r.total_qty || 0) === 0 && stock === 0) recommend = 'none';
+      else if (position <= rop) recommend = 'order';
+      else if (position <= rop * 1.25) recommend = 'low';
+      else recommend = 'ok';
+      const daysCover = muD > 0 ? Math.round((stock / muD) * 10) / 10 : null;
+      return {
+        img: r.img, name: r.name, sku: r.sku || null, category: r.category, condition: r.condition,
+        stock_count: stock, on_order: onOrder, position, window_days: windowDays,
+        window_qty: Number(r.total_qty || 0), per_week: Math.round(muD * 7 * 10) / 10,
+        avg_daily: Math.round(muD * 1000) / 1000, sigma_daily: Math.round(sigmaD * 100) / 100,
+        lead_days: lead, service_level: serviceLevel, z: Math.round(Z * 100) / 100,
+        reorder_point: rop, eoq: Math.round(eoq), pack, suggested_qty: suggested,
+        days_cover: daysCover, unit_cost_usd: unitCost,
+        preferred_supplier: r.pref_supplier_id ? { id: r.pref_supplier_id, name: r.pref_supplier_name, part_no: r.pref_part_no || null, unit_cost_usd: r.pref_cost_cents != null ? Number(r.pref_cost_cents) / 100 : null } : null,
+        recommend,
+        reason: recommend === 'order' ? `Position ${position} ≤ reorder point ${rop}` : recommend === 'low' ? `Position ${position}, reorder point ${rop}` : recommend === 'dead' ? `No sales in ${windowDays} days but ${stock} on hand` : recommend === 'none' ? 'No demand and no stock' : `Position ${position} above reorder point ${rop}`,
+      };
+    });
+    if (q.only === 'order') items = items.filter((x) => x.recommend === 'order');
+    else if (q.only === 'needs') items = items.filter((x) => x.recommend === 'order' || x.recommend === 'low');
+    return c.json({ items, count: items.length });
+  });
+
+  // ---- multi-supplier purchase run: one draft PO per supplier ----
+  app.post('/api/admin/purchase-orders/bulk', managerMw, async (c) => {
+    const db = d1(c.env);
+    const b = await c.req.json().catch(() => ({}));
+    const lines = (Array.isArray(b.lines) ? b.lines : [])
+      .map((l) => ({ product_img: l.product_img || null, supplier_id: parseInt(l.supplier_id, 10),
+        description: String(l.description || '').trim(), sku: (l.sku || '').trim() || null,
+        qty: parseInt(l.qty, 10), costCents: usdToCents(l.unit_cost_usd) }))
+      .filter((l) => l.supplier_id && l.description && l.qty > 0 && l.costCents != null && l.costCents >= 0);
+    if (!lines.length) return c.json({ error: 'No valid lines (each needs a supplier, description, qty and cost).' }, 400);
+    const bySupplier = new Map();
+    for (const l of lines) { if (!bySupplier.has(l.supplier_id)) bySupplier.set(l.supplier_id, []); bySupplier.get(l.supplier_id).push(l); }
+    const created = [];
+    for (const [supplierId, group] of bySupplier) {
+      const poNum = await nextPoNumber(db);
+      const r = await db.run(
+        `INSERT INTO purchase_orders (po_number, supplier_id, expected_date, notes, created_by) VALUES (?,?,?,?,?)`,
+        poNum, supplierId, b.expected_date || null, b.notes || (b.source === 'auto' ? 'Auto reorder run' : 'Purchase run'), c.get('user').id);
+      const poId = r.meta ? r.meta.last_row_id : undefined;
+      await db.batch(group.map((l) => ({
+        sql: `INSERT INTO purchase_order_items (po_id, product_img, sku, description, qty_ordered, unit_cost_cents, total_cents, condition, notes)
+                VALUES (?,?,?,?,?,?,?, 'NEW', ?)`,
+        binds: [poId, l.product_img, l.sku, l.description, l.qty, l.costCents, l.qty * l.costCents, null],
+      })));
+      await recalcPoTotals(db, poId);
+      const s = await db.one('SELECT name FROM suppliers WHERE id = ?', supplierId);
+      const subtotal = group.reduce((a, l) => a + l.qty * l.costCents, 0);
+      created.push({ supplier_id: supplierId, supplier_name: s ? s.name : null, po_id: poId, po_number: poNum, line_count: group.length, total_usd: subtotal / 100 });
+    }
+    return c.json({ ok: true, pos: created });
   });
 
   app.delete('/api/admin/purchase-orders/:poId/items/:id', managerMw, async (c) => {

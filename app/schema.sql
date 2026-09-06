@@ -2125,3 +2125,42 @@ CREATE TABLE IF NOT EXISTS petty_cash_counts (
   created_at     TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_pc_counts_fund ON petty_cash_counts (fund_id, created_at);
+
+-- =============================================================================
+--  PURCHASING PLANNER — multiple approved suppliers per part + reorder tuning.
+--
+--  A part can be bought from more than one vendor, each with their own catalogue
+--  number, cost, lead time and minimum order quantity. One is flagged
+--  is_preferred and drives the default on the "purchase run" screen and the
+--  service-level reorder analysis.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS product_suppliers (
+  id                SERIAL PRIMARY KEY,
+  product_img       TEXT NOT NULL REFERENCES products(img) ON DELETE CASCADE,
+  supplier_id       INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+  supplier_part_no  TEXT,
+  unit_cost_usd     NUMERIC(10,2),
+  lead_time_days    INTEGER,
+  min_order_qty     INTEGER,
+  pack_size         INTEGER,
+  is_preferred      BOOLEAN NOT NULL DEFAULT false,
+  notes             TEXT,
+  created_at        TIMESTAMPTZ DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (product_img, supplier_id)
+);
+CREATE INDEX IF NOT EXISTS idx_product_suppliers_prod ON product_suppliers (product_img);
+CREATE INDEX IF NOT EXISTS idx_product_suppliers_sup  ON product_suppliers (supplier_id);
+
+-- Optional manual overrides of the computed reorder point / order quantity.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS reorder_point INTEGER;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS reorder_qty   INTEGER;
+
+-- One-time backfill: seed a preferred product_suppliers row from the single
+-- products.supplier_id every part already carries, so the planner has a
+-- default supplier to work with before anyone edits the new table.
+INSERT INTO product_suppliers (product_img, supplier_id, supplier_part_no, unit_cost_usd, is_preferred)
+SELECT p.img, p.supplier_id, p.supplier_part_no, p.cost_usd, true
+  FROM products p
+ WHERE p.supplier_id IS NOT NULL
+ON CONFLICT (product_img, supplier_id) DO NOTHING;
