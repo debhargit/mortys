@@ -764,13 +764,31 @@ export default function mount(app) {
     const db = d1(c.env);
     const b = await c.req.json().catch(() => ({}));
     if (!b.supplier_id) return c.json({ error: 'supplier_id required' }, 400);
+    // Optional: create the PO with its line items in one shot (the "new PO"
+    // builder sends them all together). Drop rows missing description/qty/cost.
+    const items = Array.isArray(b.items)
+      ? b.items.filter((it) => it && String(it.description || '').trim() && it.qty_ordered && it.unit_cost_usd != null)
+      : [];
     const poNum = await nextPoNumber(db);
     const r = await db.run(
       `INSERT INTO purchase_orders (po_number, supplier_id, expected_date, notes, created_by)
          VALUES (?,?,?,?,?)`,
       poNum, b.supplier_id, b.expected_date || null, b.notes || null, c.get('user').id,
     );
-    return c.json({ ok: true, id: r.meta ? r.meta.last_row_id : undefined, po_number: poNum });
+    const poId = r.meta ? r.meta.last_row_id : undefined;
+    if (items.length && poId != null) {
+      await db.batch(items.map((it) => {
+        const qty = parseInt(it.qty_ordered, 10);
+        const costCents = usdToCents(it.unit_cost_usd) || 0;
+        return {
+          sql: `INSERT INTO purchase_order_items (po_id, product_img, sku, description, qty_ordered, unit_cost_cents, total_cents, condition, notes)
+                  VALUES (?,?,?,?,?,?,?,?,?)`,
+          binds: [poId, it.product_img || null, it.sku || null, String(it.description).trim(), qty, costCents, qty * costCents, it.condition || 'NEW', it.notes || null],
+        };
+      }));
+      await recalcPoTotals(db, poId);
+    }
+    return c.json({ ok: true, id: poId, po_number: poNum });
   });
 
   app.patch('/api/admin/purchase-orders/:id', managerMw, async (c) => {

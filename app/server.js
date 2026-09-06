@@ -6319,15 +6319,39 @@ app.get('/api/admin/purchase-orders/:id', requireAdmin, async (req, res) => {
 app.post('/api/admin/purchase-orders', requireManager, async (req, res) => {
   const b = req.body || {};
   if (!b.supplier_id) return res.status(400).json({ error: 'supplier_id required' });
+  // Optional: create the PO with its line items in one shot (the "new PO"
+  // builder sends them all together). Rows missing a description / qty / cost
+  // are dropped so a half-filled blank line can't block the create.
+  const items = Array.isArray(b.items)
+    ? b.items.filter((it) => it && String(it.description || '').trim() && it.qty_ordered && it.unit_cost_usd != null)
+    : [];
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
     const poNum = await nextPoNumber();
-    const { rows } = await query(
+    const { rows } = await client.query(
       `INSERT INTO purchase_orders (po_number, supplier_id, expected_date, notes, created_by)
          VALUES ($1,$2,$3,$4,$5) RETURNING id`,
       [poNum, b.supplier_id, b.expected_date || null, b.notes || null, req.session.userId]
     );
-    res.json({ ok: true, id: rows[0].id, po_number: poNum });
-  } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+    const poId = rows[0].id;
+    for (const it of items) {
+      const qty = parseInt(it.qty_ordered, 10);
+      const cost = Number(it.unit_cost_usd);
+      const total = Math.round(qty * cost * 100) / 100;
+      await client.query(
+        `INSERT INTO purchase_order_items (po_id, product_img, product_id, sku, description, qty_ordered, unit_cost_usd, total_usd, condition, notes)
+           VALUES ($1,$2,(SELECT id FROM products WHERE img = $2),$3,$4,$5,$6,$7,$8,$9)`,
+        [poId, it.product_img || null, it.sku || null, String(it.description).trim(), qty, cost, total, it.condition || 'NEW', it.notes || null]
+      );
+    }
+    await client.query('COMMIT');
+    if (items.length) await recalcPoTotals(poId);
+    res.json({ ok: true, id: poId, po_number: poNum });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error(e); res.status(500).json({ error: e.message });
+  } finally { client.release(); }
 });
 
 app.patch('/api/admin/purchase-orders/:id', requireManager, async (req, res) => {

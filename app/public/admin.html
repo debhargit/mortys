@@ -10440,8 +10440,10 @@ async function submitSupplier(){
 
 // ============= PURCHASE ORDERS =============
 var PO_VIEW_ID = null; // set when drilled into a single PO's detail
+var PO_NEW_LINES = []; // line items on the "+ New purchase order" builder: {img, description, sku, qty, cost}
 async function renderPurchaseOrders(panel){
   if (PO_VIEW_ID) return renderPoDetail(panel, PO_VIEW_ID);
+  PO_NEW_LINES = [];
   panel.innerHTML = '<div class="empty">Loading…</div>';
   var r, sup;
   try {
@@ -10452,7 +10454,7 @@ async function renderPurchaseOrders(panel){
   panel.innerHTML =
     '<details style="border-bottom:1px solid var(--line);background:var(--card-soft)">' +
       '<summary style="padding:12px 16px;cursor:pointer;font-weight:700;color:var(--heading)">+ New purchase order</summary>' +
-      '<form id="newPo" style="padding:14px 18px;display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:640px" onsubmit="event.preventDefault();submitPo();">' +
+      '<form id="newPo" style="padding:14px 18px;display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:820px" onsubmit="event.preventDefault();submitPo();">' +
         '<div><label class="lbl">Supplier *</label><select id="poSupplier" required class="fld">' +
           '<option value="">— choose —</option>' +
           sup.suppliers.map(function(s){ return '<option value="' + s.id + '">' + esc(s.name) + '</option>'; }).join('') +
@@ -10469,6 +10471,14 @@ async function renderPurchaseOrders(panel){
         '</div>' +
         '<div><label class="lbl">Expected date</label><input id="poExpected" type="date" class="fld"/></div>' +
         '<div style="grid-column:1/-1"><label class="lbl">Notes</label><input id="poNotes" class="fld"/></div>' +
+        '<div style="grid-column:1/-1">' +
+          '<label class="lbl">Line items <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional — add now, or later on the PO)</span></label>' +
+          '<div style="position:relative">' +
+            '<input id="poItemSearch" class="fld" autocomplete="off" placeholder="🔎 search a part to add — ↑/↓, Enter"/>' +
+          '</div>' +
+          '<div id="poLinesWrap" style="margin-top:8px;overflow-x:auto"></div>' +
+          '<button type="button" class="btn" id="poAddBlank" style="margin-top:6px">+ Add a blank line</button>' +
+        '</div>' +
         '<div id="poMsg" style="grid-column:1/-1;display:none;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
         '<button type="submit" style="grid-column:1/-1;background:var(--red);color:#fff;border:0;padding:11px 22px;border-radius:7px;font-weight:700;cursor:pointer">Create PO</button>' +
       '</form>' +
@@ -10548,6 +10558,65 @@ async function renderPurchaseOrders(panel){
       } catch (e) { m.textContent = e.message; m.style.color = 'var(--red)'; sv.disabled = false; }
     });
   }
+
+  // ---- Line-items builder on the New PO form -----------------------------
+  var poLinesWrap = document.getElementById('poLinesWrap');
+  function poLinesRender(){
+    if (!poLinesWrap) return;
+    if (!PO_NEW_LINES.length) { poLinesWrap.innerHTML = ''; return; }
+    var mini = 'width:100%;padding:4px 6px;border:1px solid var(--line);border-radius:5px;font-size:12px;font-family:inherit';
+    var sub = PO_NEW_LINES.reduce(function(s, l){ return s + (Number(l.qty) || 0) * (Number(l.cost) || 0); }, 0);
+    poLinesWrap.innerHTML = '<table style="width:100%;min-width:640px"><thead><tr>' +
+      '<th style="text-align:left">Description</th><th style="width:110px">SKU</th><th style="width:64px">Qty</th>' +
+      '<th style="width:96px">Unit cost</th><th style="width:90px;text-align:right">Line</th><th style="width:34px"></th>' +
+      '</tr></thead><tbody>' +
+      PO_NEW_LINES.map(function(l, i){
+        var line = (Number(l.qty) || 0) * (Number(l.cost) || 0);
+        return '<tr>' +
+          '<td><input class="poLnDesc" data-i="' + i + '" value="' + esc(l.description || '') + '" placeholder="part / description" style="' + mini + '"/></td>' +
+          '<td><input class="poLnSku" data-i="' + i + '" value="' + esc(l.sku || '') + '" style="' + mini + '"/></td>' +
+          '<td><input type="number" min="1" class="poLnQty" data-i="' + i + '" value="' + (l.qty != null ? l.qty : 1) + '" style="' + mini + '"/></td>' +
+          '<td><input type="number" min="0" step="0.01" class="poLnCost" data-i="' + i + '" value="' + (l.cost != null && l.cost !== '' ? l.cost : '') + '" placeholder="0.00" style="' + mini + '"/></td>' +
+          '<td style="text-align:right">' + fmtMoney(line) + '</td>' +
+          '<td><button type="button" class="btn poLnDel" data-i="' + i + '" style="background:#fee2e2;color:#b91c1c;border:0">×</button></td>' +
+        '</tr>';
+      }).join('') + '</tbody>' +
+      '<tfoot><tr><td colspan="4" style="text-align:right;font-weight:700">Subtotal</td><td style="text-align:right;font-weight:700">' + fmtMoney(sub) + '</td><td></td></tr></tfoot>' +
+      '</table>';
+    var bind = function(cls, fn){ poLinesWrap.querySelectorAll('.' + cls).forEach(function(el){
+      el.addEventListener('input', function(){ fn(PO_NEW_LINES[+el.dataset.i], el.value); });
+      el.addEventListener('change', poLinesRender);
+    }); };
+    bind('poLnDesc', function(l, v){ l.description = v; });
+    bind('poLnSku',  function(l, v){ l.sku = v.trim(); });
+    bind('poLnQty',  function(l, v){ l.qty = v; });
+    bind('poLnCost', function(l, v){ l.cost = v; });
+    poLinesWrap.querySelectorAll('.poLnDel').forEach(function(el){
+      el.addEventListener('click', function(){ PO_NEW_LINES.splice(+el.dataset.i, 1); poLinesRender(); });
+    });
+  }
+  var poBlank = document.getElementById('poAddBlank');
+  if (poBlank) poBlank.addEventListener('click', function(){
+    PO_NEW_LINES.push({ img: null, description: '', sku: '', qty: 1, cost: '' });
+    poLinesRender();
+    var last = poLinesWrap.querySelector('tbody tr:last-child .poLnDesc'); if (last) last.focus();
+  });
+  var poItemSearch = document.getElementById('poItemSearch');
+  if (poItemSearch) mhPartSearchDropdown(poItemSearch, function(p){
+    var ex = PO_NEW_LINES.find(function(x){ return x.img && x.img === p.img; });
+    if (ex) { ex.qty = (Number(ex.qty) || 0) + 1; poLinesRender(); }
+    else {
+      var line = { img: p.img, description: p.name + (p.make_model ? ' — ' + p.make_model : ''), sku: p.sku || '', qty: 1, cost: '' };
+      PO_NEW_LINES.push(line);
+      poLinesRender();
+      // /api/products omits cost — pull the admin row for it.
+      api('/api/admin/products/' + encodeURIComponent(p.img)).then(function(r){
+        var f = r && r.product;
+        if (f && f.cost_usd != null && (line.cost === '' || line.cost == null)) { line.cost = Number(f.cost_usd); poLinesRender(); }
+      }).catch(function(){});
+    }
+    poItemSearch.value = '';
+  });
 
   // ---- Receive without a PO -------------------------------------------------
   var rcvLines = [];   // { img, name, sku, qty, cost, sell, bin }
@@ -10672,11 +10741,21 @@ async function submitPo(){
   try {
     var supplierId = document.getElementById('poSupplier').value;
     if (!supplierId || supplierId === '__new__') throw new Error('Choose a supplier, or create one with ➕ Add a new supplier…');
-    await api('/api/admin/purchase-orders', { method:'POST', body: {
+    var items = (PO_NEW_LINES || []).map(function(l){
+      var qty = parseInt(l.qty, 10), cost = Number(l.cost);
+      return { product_img: l.img || null, sku: (l.sku || '').trim() || null,
+        description: (l.description || '').trim(), qty_ordered: qty, unit_cost_usd: cost };
+    }).filter(function(it){ return it.description && it.qty_ordered > 0 && isFinite(it.unit_cost_usd) && it.unit_cost_usd >= 0; });
+    if ((PO_NEW_LINES || []).length && !items.length) throw new Error('Each line needs a description, a quantity and a unit cost.');
+    var res = await api('/api/admin/purchase-orders', { method:'POST', body: {
       supplier_id: supplierId,
       expected_date: document.getElementById('poExpected').value || null,
       notes: document.getElementById('poNotes').value.trim() || null,
+      items: items,
     }});
+    PO_NEW_LINES = [];
+    posToast('Purchase order ' + (res.po_number || '') + ' created' + (items.length ? ' with ' + items.length + ' line' + (items.length === 1 ? '' : 's') : ''));
+    PO_VIEW_ID = res.id || null;
     show('purchaseorders');
   } catch (e) {
     msg.style.background = '#fee2e2'; msg.style.color = '#b91c1c'; msg.textContent = e.message;
