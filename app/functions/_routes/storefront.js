@@ -139,8 +139,29 @@ const COUNT_CAP = 5000;
 export default function mount(app) {
   app.get('/api/products', async (c) => {
     try {
-      const db = d1(c.env);
       const q = c.req.query();
+      const isCompact = !!q.compact;
+
+      // Edge-cache the anonymous whole-catalogue load. shop.html pulls the
+      // entire ~20k-row catalogue on every visit; uncached that is ~20k+ D1
+      // row-reads per visitor, and a handful of storefront visits exhausts the
+      // account's D1 daily read budget (shared across every DB on the account
+      // -- one blown limit takes every hosted site down at once). Signed-in
+      // callers bypass: a B2B account may see tier prices, and staff hit this
+      // endpoint for the POS grid. ~5 min TTL; each Cloudflare colo does at
+      // most one real scan per window instead of one per visitor.
+      const anon = !/(?:^|;\s*)mh_session=/.test(c.req.header('Cookie') || '');
+      const useCache = isCompact && anon && c.req.method === 'GET' && typeof caches !== 'undefined';
+      let cacheKey = null;
+      if (useCache) {
+        const u = new URL(c.req.url);
+        u.searchParams.sort();
+        cacheKey = new Request(u.toString(), { method: 'GET' });
+        const hit = await caches.default.match(cacheKey);
+        if (hit) return hit;
+      }
+
+      const db = d1(c.env);
       const pctx = await pricingCtx(c);
       const showPrices = pctx.show;
       // With prices hidden, a price filter or price sort would leak the very
@@ -151,28 +172,31 @@ export default function mount(app) {
       let sortKey = q.sort;
       if (!showPrices && (sortKey === 'price_asc' || sortKey === 'price_desc')) sortKey = 'name';
       const orderBy = SORTS[sortKey] || SORTS.name;
-      // The storefront (?compact=1) streams the whole ~23k-row catalogue in
-      // large chunks (shop.html pulls in 4,000s), so it needs a much higher
-      // ceiling than the 200 the POS/admin grid ever asks for. Compact rows
-      // are tiny positional arrays, so a 5k-row page is still a small response.
-      const isCompact = !!q.compact;
+      // ?compact=1 needs a much higher ceiling than the 200 the POS/admin grid
+      // asks for -- compact rows are tiny positional arrays, so a 5k-row page
+      // is still a small response.
       const maxLimit = isCompact ? 5000 : 200;
       const limit = Math.min(maxLimit, Math.max(1, parseInt(q.limit, 10) || (isCompact ? 1000 : 60)));
       const offset = Math.max(0, parseInt(q.offset, 10) || 0);
 
+      // The compact caller counts client-side over the rows it loads, so the
+      // COUNT(*) it used to run alongside every 5k-chunk was ~5x the catalogue
+      // in wasted D1 row-reads per visit. Skip it for compact unless a caller
+      // explicitly asks with &count=1.
+      const wantCount = !isCompact || q.count === '1';
       const [rows, cnt] = await Promise.all([
         db.many(`SELECT ${LIST_COLS} FROM products WHERE ${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
           ...binds, limit, offset),
-        // Compact = full-catalogue load: give it the true count (a COUNT(*)
-        // over ~23k rows is trivial). Everything else keeps the server.js cap
-        // so a huge search shows "5,000+" instead of forcing a full scan.
-        isCompact
-          ? db.one(`SELECT COUNT(*) AS n FROM products WHERE ${where}`, ...binds)
-          : db.one(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM products WHERE ${where} LIMIT ${COUNT_CAP + 1}) t`, ...binds),
+        !wantCount ? Promise.resolve(null)
+          : isCompact
+            ? db.one(`SELECT COUNT(*) AS n FROM products WHERE ${where}`, ...binds)
+            : db.one(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM products WHERE ${where} LIMIT ${COUNT_CAP + 1}) t`, ...binds),
       ]);
       const counted = (cnt && cnt.n) || 0;
       const capped = !isCompact && counted > COUNT_CAP;
-      const total = Math.max(capped ? COUNT_CAP : counted, offset + rows.length);
+      const total = cnt
+        ? Math.max(capped ? COUNT_CAP : counted, offset + rows.length)
+        : offset + rows.length;
 
       // Kit rows carry no stock of their own -- swap in the derived buildable
       // quantity, and (for a roll-up kit) the summed component price -- so the
@@ -221,7 +245,14 @@ export default function mount(app) {
           if (thumb) { row.push(alt, thumb); } else if (alt) { row.push(alt); }
           return row;
         });
-        return c.json({ cats, rows: packed, total, limit, offset, prices_visible: showPrices });
+        const payload = { cats, rows: packed, total, limit, offset, prices_visible: showPrices };
+        if (useCache && cacheKey) {
+          const res = c.json(payload);
+          res.headers.set('Cache-Control', 'public, max-age=600');
+          c.executionCtx?.waitUntil?.(caches.default.put(cacheKey, res.clone()));
+          return res;
+        }
+        return c.json(payload);
       }
 
       let list = showPrices ? rows : rows.map((r) => ({ ...r, price_usd: null }));

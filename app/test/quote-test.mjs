@@ -117,9 +117,14 @@ n++; A('row shape [img,name,mm,catIdx,condIdx,price,stock,bin]', byImg['qz-1'][0
 const TOTAL = q1('SELECT COUNT(*) c FROM products WHERE is_active = 1').c;   // 602
 r = await call('get', '/api/products?compact=1&limit=4000');
 n++; A('compact: limit=4000 honoured (not capped at 200)', r.rows.length === TOTAL && TOTAL > 500);
-n++; A('compact: total is the true row count, not the 5000 cap', r.total === TOTAL);
+// compact skips the COUNT(*) by default now (the client counts client-side over
+// what it loads; the COUNT on every 5k-chunk was ~5x the catalogue in wasted D1
+// row-reads and blew the free-tier daily read cap). total is best-effort.
+n++; A('compact: total is best-effort without &count=1 (offset+rows)', r.total === TOTAL);
 r = await call('get', '/api/products?compact=1&limit=250&offset=100');
-n++; A('compact: paginates (limit 250, offset 100)', r.rows.length === 250 && r.offset === 100 && r.total === TOTAL);
+n++; A('compact: paginates (limit 250, offset 100), total = offset+rows', r.rows.length === 250 && r.offset === 100 && r.total === 350);
+r = await call('get', '/api/products?compact=1&limit=250&offset=100&count=1');
+n++; A('compact: &count=1 restores the true total', r.rows.length === 250 && r.total === TOTAL);
 r = await call('get', '/api/products?limit=4000');   // non-compact stays capped
 n++; A('non-compact still capped at 200', r.products.length === 200);
 
