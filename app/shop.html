@@ -1091,7 +1091,7 @@
             <select id="fAvail"><option value="all">Any</option><option value="in">In stock</option><option value="low">Low stock</option><option value="out">Out of stock</option></select>
           </label>
           <label class="sb-field"><span>Price</span>
-            <select id="fPrice"><option value="all">Any</option><option value="priced">Priced only</option><option value="quote">Call for price</option><option value="lt50">Under $50</option><option value="50to200">$50 – $200</option><option value="gt200">Over $200</option></select>
+            <select id="fPrice"><option value="all">Any</option><option value="lt50">Under $50</option><option value="50to200">$50 – $200</option><option value="gt200">Over $200</option></select>
           </label>
         </div>
 
@@ -4291,12 +4291,19 @@ document.addEventListener('DOMContentLoaded', function(){
         var cond = isArr ? (r[4] === 1 ? 'USED' : 'NEW') : (r.condition === 'USED' ? 'USED' : 'NEW');
         var altStr = isArr ? (r[8] || '') : '';
         var thumb = isArr ? (r[9] || '') : (r.thumb_url || '');
+        var priceVal = null;
         if (isArr) {
-          if (r[5] != null && !isNaN(r[5])) prices[img] = Number(r[5]) / 100;
+          if (r[5] != null && !isNaN(r[5])) priceVal = Number(r[5]) / 100;
         } else {
           var pu = parseFloat(r.price_usd);
-          if (!isNaN(pu)) prices[img] = pu;
+          if (!isNaN(pu)) priceVal = pu;
         }
+        // The storefront lists only parts that are sellable at the POS --
+        // ones with a real sell price. Skip anything quote-only here so a
+        // stray unpriced row can never reach the grid (the fetch already
+        // sends price_min, this is the backstop).
+        if (!(priceVal > 0)) return null;
+        prices[img] = priceVal;
         liveStock[img] = isArr ? r[6] : r.stock_count;
         return {
           n: name,
@@ -4313,7 +4320,7 @@ document.addEventListener('DOMContentLoaded', function(){
           // what customers actually search by.
           s: (name + ' ' + make + ' ' + cat + ' ' + img + (altStr ? ' ' + altStr : '')).toLowerCase()
         };
-      });
+      }).filter(Boolean);
       // `parts` starts empty now, so this only matters if a retry ever
       // re-absorbs the first chunk -- it keeps the list from doubling up.
       if (first){
@@ -4326,7 +4333,12 @@ document.addEventListener('DOMContentLoaded', function(){
     }
 
     function pull(offset, size){
-      return fetch('/api/products?compact=1&limit=' + size + '&offset=' + offset, { credentials:'same-origin' })
+      // price_min=0.01 restricts the storefront to parts the counter could
+      // actually ring up on the POS -- i.e. ones with a sell price set.
+      // Unpriced catalogue rows (the bulk of the ~17k) are quote-only and
+      // are deliberately left off the shop grid. absorb() re-checks the
+      // price as a backstop in case the param is ever ignored.
+      return fetch('/api/products?compact=1&price_min=0.01&limit=' + size + '&offset=' + offset, { credentials:'same-origin' })
         .then(function(r){ return r.ok ? r.json() : null; })
         .then(function(data){
           var rows = data && (data.products || data.rows);
