@@ -2189,3 +2189,13 @@ CREATE INDEX IF NOT EXISTS idx_po_payments_po ON purchase_order_payments (po_id)
 
 -- Existing POs start owing their full total -- nothing paid yet.
 UPDATE purchase_orders SET balance_due_usd = total_usd WHERE amount_paid_usd = 0;
+
+-- =============================================================================
+--  sku had no index (only products.img, the primary key, does). The
+--  receival/sales importers (functions/_routes/inventory.js, pos_txn.js;
+--  server.js's equivalents) match existing stock with "img IN (...) OR sku
+--  IN (...)", and an unindexed sku forces the planner to fall back to a full
+--  table scan for that half of the OR instead of an index lookup on both
+--  sides. Partial (WHERE sku IS NOT NULL) since most rows may have no sku.
+-- =============================================================================
+CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku) WHERE sku IS NOT NULL;

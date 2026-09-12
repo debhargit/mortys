@@ -282,10 +282,29 @@ export default function mount(app) {
     }
     const matchOf = (it) => (it.account_number && byAccount.get(it.account_number)) || (it.email && byEmail.get(it.email)) || null;
 
-    let willAdd = 0, willUpdate = 0;
-    for (const it of items) { if (matchOf(it)) willUpdate++; else willAdd++; }
+    // Same identity a row matches an existing customer by (account_number ||
+    // email) also has to be unique among the NEW rows in this file: once
+    // commit is one batch, two new rows both claiming the same account
+    // number or email would abort the whole batch on the second INSERT's
+    // UNIQUE violation rather than failing just that one row. "Later row
+    // wins", same as the duplicate warning already in `issues`, so this
+    // drops all but the last occurrence of each key — computed here rather
+    // than only at commit time so the preview's counts match what commit
+    // will actually do.
+    const lastLineForKey = new Map(); // key -> line number of the LAST row with it
+    for (const it of items) {
+      const key = it.account_number || it.email;
+      if (key) lastLineForKey.set(key, it.line);
+    }
+    const toProcess = items.filter((it) => {
+      const key = it.account_number || it.email;
+      return !key || lastLineForKey.get(key) === it.line;
+    });
 
-    const sample = items.slice(0, 15).map((it) => {
+    let willAdd = 0, willUpdate = 0;
+    for (const it of toProcess) { if (matchOf(it)) willUpdate++; else willAdd++; }
+
+    const sample = toProcess.slice(0, 15).map((it) => {
       const existing = matchOf(it);
       return {
         name: it.name, email: it.email, account_number: it.account_number || (existing ? existing.account_number : null),
@@ -328,52 +347,62 @@ export default function mount(app) {
       return 'C-' + String(acctSeq).padStart(6, '0');
     }
 
+    // One db.batch() (chunked) instead of a db.run() per row: a Workers
+    // request caps how many D1 calls it can make (subrequests), and a
+    // customer file of any real size would blow past that at one call per
+    // row. bcrypt cost is 4, not the usual 10, for the same reason a whole
+    // batch of these matters here and doesn't for a single "+ New customer"
+    // click: this hash guards nothing (a discarded random UUID, never a
+    // login anyone will ever attempt), so paying bcrypt's default cost
+    // hundreds of times over would burn real CPU time for no security this
+    // throwaway value has anyway.
     let inserted = 0, updated = 0;
-    const results = [];
-    for (const it of items) {
+    const stmts = [];
+    for (const it of toProcess) {
       const existing = matchOf(it);
-      try {
-        if (existing) {
-          const sets = ['name = ?']; const vals = [it.name];
-          const fill = (col, val) => { if (val != null) { sets.push(col + ' = ?'); vals.push(val); } };
-          fill('phone', it.phone);
-          fill('company_name', it.company_name);
-          fill('price_tier', it.price_tier);
-          fill('credit_type', it.credit_type);
-          fill('credit_limit_cents', it.credit_limit_usd != null ? Math.round(it.credit_limit_usd * 100) : null);
-          fill('payment_terms_days', it.payment_terms_days);
-          fill('discount_pct', it.discount_pct);
-          fill('tax_id', it.tax_id);
-          if (mapped.customer_type != null) { sets.push('customer_type = ?'); vals.push(it.customer_type); }
-          if (mapped.notes != null) { sets.push('internal_notes = ?'); vals.push(it.notes); }
-          if (mapped.tax_exempt != null) { sets.push('tax_exempt = ?'); vals.push(bit(it.tax_exempt)); }
-          vals.push(existing.id);
-          await db.run(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, ...vals);
-          updated++;
-          results.push({ ok: true, line: it.line, action: 'update', id: existing.id, name: it.name });
-        } else {
-          const acctNo = it.account_number || await nextAcctNumber();
-          const email = it.email || `${acctNo.toLowerCase()}@walkin.mortysautoparts.local`;
-          const hash = await bcrypt.hash(crypto.randomUUID(), 10);
-          const r = await db.run(
-            `INSERT INTO users (email, name, password_hash, phone, via, is_admin, is_staff, price_tier, account_number,
-                                company_name, customer_type, credit_type, credit_limit_cents,
-                                payment_terms_days, discount_pct, tax_exempt, tax_id, internal_notes)
-               VALUES (lower(?),?,?,?, 'pos', 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            email, it.name, hash, it.phone, it.price_tier || 'retail', acctNo,
+      if (existing) {
+        const sets = ['name = ?']; const vals = [it.name];
+        const fill = (col, val) => { if (val != null) { sets.push(col + ' = ?'); vals.push(val); } };
+        fill('phone', it.phone);
+        fill('company_name', it.company_name);
+        fill('price_tier', it.price_tier);
+        fill('credit_type', it.credit_type);
+        fill('credit_limit_cents', it.credit_limit_usd != null ? Math.round(it.credit_limit_usd * 100) : null);
+        fill('payment_terms_days', it.payment_terms_days);
+        fill('discount_pct', it.discount_pct);
+        fill('tax_id', it.tax_id);
+        if (mapped.customer_type != null) { sets.push('customer_type = ?'); vals.push(it.customer_type); }
+        if (mapped.notes != null) { sets.push('internal_notes = ?'); vals.push(it.notes); }
+        if (mapped.tax_exempt != null) { sets.push('tax_exempt = ?'); vals.push(bit(it.tax_exempt)); }
+        vals.push(existing.id);
+        stmts.push({ sql: `UPDATE users SET ${sets.join(', ')} WHERE id = ?`, binds: vals });
+        updated++;
+      } else {
+        const acctNo = it.account_number || await nextAcctNumber();
+        const email = it.email || `${acctNo.toLowerCase()}@walkin.mortysautoparts.local`;
+        const hash = await bcrypt.hash(crypto.randomUUID(), 4);
+        stmts.push({
+          sql: `INSERT INTO users (email, name, password_hash, phone, via, is_admin, is_staff, price_tier, account_number,
+                              company_name, customer_type, credit_type, credit_limit_cents,
+                              payment_terms_days, discount_pct, tax_exempt, tax_id, internal_notes)
+             VALUES (lower(?),?,?,?, 'pos', 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          binds: [email, it.name, hash, it.phone, it.price_tier || 'retail', acctNo,
             it.company_name, it.customer_type, it.credit_type,
             it.credit_limit_usd != null ? Math.round(it.credit_limit_usd * 100) : null,
-            it.payment_terms_days, it.discount_pct, bit(it.tax_exempt), it.tax_id, it.notes);
-          inserted++;
-          results.push({ ok: true, line: it.line, action: 'new', id: r.meta.last_row_id, name: it.name, account_number: acctNo });
-        }
-      } catch (e) {
-        results.push({ ok: false, line: it.line, error: e.message, name: it.name });
+            it.payment_terms_days, it.discount_pct, bit(it.tax_exempt), it.tax_id, it.notes],
+        });
+        inserted++;
       }
     }
 
+    try {
+      for (const grp of chunk(stmts, 100)) await db.batch(grp);
+    } catch (e) {
+      return c.json({ error: 'Import failed and nothing was changed: ' + e.message }, 500);
+    }
+
     return c.json(Object.assign(
-      { ok: true, mode: 'commit', committed: true, inserted, updated, failed: results.filter((r) => !r.ok).length, results: results.filter((r) => !r.ok).slice(0, 50) },
+      { ok: true, mode: 'commit', committed: true, inserted, updated, failed: 0, results: [] },
       summary));
   });
 

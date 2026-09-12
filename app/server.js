@@ -2812,7 +2812,11 @@ app.post('/api/admin/customers/import', requireAdmin, uploadData.single('file'),
       } else {
         const acctNo = it.account_number || await nextAcctNumber();
         const email = it.email || `${acctNo.toLowerCase()}@walkin.mortysautoparts.local`;
-        const hash = await bcrypt.hash(require('crypto').randomBytes(24).toString('hex'), 10);
+        // Cost 4, not the usual 10: this hash guards nothing (a discarded
+        // random value, never a login anyone will attempt), so paying
+        // bcrypt's default cost hundreds of times over in one import would
+        // burn real time for no security this throwaway value has anyway.
+        const hash = await bcrypt.hash(require('crypto').randomBytes(24).toString('hex'), 4);
         await query(
           `INSERT INTO users (email, name, password_hash, phone, via, is_admin, is_staff,
                               price_tier, account_number, company_name, customer_type,
