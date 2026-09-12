@@ -232,7 +232,8 @@ async function readTabular(buffer, filename) {
 // are recognisable column names, and takes the best. Assuming row 0 is the
 // header is what breaks the shop's own export, which repeats a title banner
 // across two full rows before the real "Item,Description,..." line.
-function detectHeader(rows, maxScan) {
+function detectHeader(rows, maxScan, lookup) {
+  const headerLookup = lookup || HEADER_LOOKUP;
   const limit = Math.min(rows.length, maxScan || 25);
   let best = { index: -1, score: 0, mapping: null };
 
@@ -244,7 +245,7 @@ function detectHeader(rows, maxScan) {
     rows[i].forEach((cell, col) => {
       const key = normaliseHeader(cell);
       if (!key) return;
-      const field = HEADER_LOOKUP.get(key);
+      const field = headerLookup.get(key);
       // One spreadsheet column per field: with "Bin 1" and "Bin 2" both
       // mapping through, first match wins and the rest are left unmapped.
       if (field && !seen.has(field)) {
@@ -421,6 +422,8 @@ module.exports = {
   detectHeader,
   buildItems,
   normaliseHeader,
+  cellText,
+  isBlankRow,
   toMoney,
   toInt,
   normaliseCondition,

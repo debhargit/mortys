@@ -12,11 +12,24 @@ import { adminMw, managerMw } from '../_lib/guards.js';
 import { CAPABILITY_KEYS } from '../_lib/capabilities.js';
 import { safeJson, boolify } from '../_lib/util.js';
 import { userPermState, roleExists, roleCanManage } from '../_lib/perms.js';
+import {
+  parseInvoicePaymentsFile, INVOICE_PAYMENTS_TEMPLATE_CSV, INVOICE_PAYMENTS_FIELD_SYNONYMS,
+} from '../_lib/invoice_payments_import.js';
+import {
+  parseCustomersFile, CUSTOMERS_TEMPLATE_CSV, CUSTOMERS_FIELD_SYNONYMS,
+} from '../_lib/customers_import.js';
 
 const cents = (u) => Math.round((Number(u) || 0) * 100);
 const bit = (v) => (v ? 1 : 0);
 const PIN_MIN = 4, PIN_MAX = 8;
 const slug = (s) => String(s || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+const IMPORT_MAX_BYTES = 8 * 1024 * 1024; // 8 MB, same cap as the other importers
+
+function chunk(arr, n) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+}
 
 const actingRole = (c) => (c.get('user') || {}).admin_role || null;
 const actingId = (c) => (c.get('user') || {}).id;
@@ -194,6 +207,176 @@ export default function mount(app) {
     return c.json({ ok: true, customer });
   });
 
+  // =====================================================================
+  //  CUSTOMER IMPORT (CSV/TSV) — bulk create + update
+  // =====================================================================
+  // Same two-step shape as the inventory importer (mode=preview reports
+  // without writing, mode=commit does the work). A row matches an existing
+  // customer by account number or email and updates it; anything else
+  // becomes a new customer, same fields the "+ New customer" form writes.
+  //
+  // Update semantics deliberately split in two: contact/credit details
+  // (phone, tier, credit limit, terms...) only ever *fill* a blank — an
+  // empty cell never erases what's already on file, the same rule the
+  // inventory importer uses for price/cost. customer_type, notes and
+  // tax_exempt instead go by whether the file mapped that column at all:
+  // if it did, this row's value (blank included) is written, since a file
+  // that bothers to carry a tax-exempt column is asserting one way or the
+  // other, not leaving it alone.
+  app.get('/api/admin/customers/import/columns', adminMw, (c) => c.json({ fields: CUSTOMERS_FIELD_SYNONYMS }));
+
+  app.get('/api/admin/customers/import/template.csv', adminMw, (c) =>
+    c.body(CUSTOMERS_TEMPLATE_CSV, 200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="mortysautoparts-customers-template.csv"',
+    }));
+
+  app.post('/api/admin/customers/import', adminMw, async (c) => {
+    const db = d1(c.env);
+
+    const cl = parseInt(c.req.header('content-length') || '0', 10);
+    if (cl && cl > IMPORT_MAX_BYTES)
+      return c.json({ error: `File too large — the limit is ${IMPORT_MAX_BYTES / 1024 / 1024} MB.` }, 413);
+
+    let body;
+    try { body = await c.req.parseBody(); }
+    catch { return c.json({ error: 'Could not read the upload (expected multipart/form-data).' }, 400); }
+
+    const file = (body.file && typeof body.file !== 'string') ? body.file : null;
+    if (!file) return c.json({ error: 'Choose a .csv or .tsv file to import.' }, 400);
+    if (file.size > IMPORT_MAX_BYTES)
+      return c.json({ error: `File too large — the limit is ${IMPORT_MAX_BYTES / 1024 / 1024} MB.` }, 413);
+
+    const mode = String(c.req.query('mode') || body.mode || 'preview').toLowerCase();
+    const sourceName = file.name || 'upload.csv';
+
+    let parsed;
+    try {
+      parsed = parseCustomersFile(new Uint8Array(await file.arrayBuffer()), sourceName);
+    } catch (e) {
+      if (e.userFacing) return c.json({ error: e.message }, 400);
+      return c.json({ error: 'Could not read that file: ' + e.message }, 400);
+    }
+
+    const { items, issues, mapped, ignoredColumns, headerLine, format, detail, totalDataRows } = parsed;
+    if (!items.length)
+      return c.json({
+        error: 'No usable rows found. The header row was line ' + headerLine + ' and none of the rows under it had a name.',
+        mapped, ignoredColumns, issues: issues.slice(0, 50),
+      }, 400);
+
+    // Match by account_number or email. (chunked — SQLite caps bound params.)
+    const acctKeys = [...new Set(items.filter((it) => it.account_number).map((it) => it.account_number))];
+    const emailKeys = [...new Set(items.filter((it) => it.email).map((it) => it.email))]; // already lower-cased by the parser
+    const byAccount = new Map();
+    const byEmail = new Map();
+    for (const grp of chunk(acctKeys, 100)) {
+      const rows = await db.many(
+        `SELECT id, account_number, email, name FROM users WHERE account_number IN (${grp.map(() => '?').join(',')})`, ...grp);
+      for (const r of rows) if (r.account_number) byAccount.set(r.account_number, r);
+    }
+    for (const grp of chunk(emailKeys, 100)) {
+      const rows = await db.many(
+        `SELECT id, account_number, email, name FROM users WHERE lower(email) IN (${grp.map(() => '?').join(',')})`, ...grp);
+      for (const r of rows) if (r.email) byEmail.set(r.email.toLowerCase(), r);
+    }
+    const matchOf = (it) => (it.account_number && byAccount.get(it.account_number)) || (it.email && byEmail.get(it.email)) || null;
+
+    let willAdd = 0, willUpdate = 0;
+    for (const it of items) { if (matchOf(it)) willUpdate++; else willAdd++; }
+
+    const sample = items.slice(0, 15).map((it) => {
+      const existing = matchOf(it);
+      return {
+        name: it.name, email: it.email, account_number: it.account_number || (existing ? existing.account_number : null),
+        price_tier: it.price_tier, credit_limit_usd: it.credit_limit_usd,
+        action: existing ? 'update' : 'new',
+      };
+    });
+
+    const summary = {
+      file: sourceName, format, detail,
+      header_line: headerLine,
+      mapped_columns: mapped,
+      ignored_columns: ignoredColumns,
+      rows_in_file: totalDataRows,
+      rows_usable: items.length,
+      will_add: willAdd,
+      will_update: willUpdate,
+      issues: issues.slice(0, 200),
+      issue_count: issues.length,
+      sample,
+    };
+
+    if (mode !== 'commit')
+      return c.json(Object.assign({ ok: true, mode: 'preview', committed: false }, summary));
+
+    // ---- commit ----
+    // Account numbers for new customers are assigned from one shared counter
+    // read once up front, then incremented in memory per row -- a fresh
+    // MAX()+1 query per row would hand out the same number twice within
+    // this same file.
+    let acctSeq = null;
+    async function nextAcctNumber() {
+      if (acctSeq == null) {
+        const rows = await db.many("SELECT account_number AS a FROM users WHERE account_number LIKE 'C-%'");
+        let mx = 0;
+        for (const r of rows) { const m = String(r.a || '').match(/(\d+)\s*$/); if (m) mx = Math.max(mx, +m[1]); }
+        acctSeq = mx;
+      }
+      acctSeq += 1;
+      return 'C-' + String(acctSeq).padStart(6, '0');
+    }
+
+    let inserted = 0, updated = 0;
+    const results = [];
+    for (const it of items) {
+      const existing = matchOf(it);
+      try {
+        if (existing) {
+          const sets = ['name = ?']; const vals = [it.name];
+          const fill = (col, val) => { if (val != null) { sets.push(col + ' = ?'); vals.push(val); } };
+          fill('phone', it.phone);
+          fill('company_name', it.company_name);
+          fill('price_tier', it.price_tier);
+          fill('credit_type', it.credit_type);
+          fill('credit_limit_cents', it.credit_limit_usd != null ? Math.round(it.credit_limit_usd * 100) : null);
+          fill('payment_terms_days', it.payment_terms_days);
+          fill('discount_pct', it.discount_pct);
+          fill('tax_id', it.tax_id);
+          if (mapped.customer_type != null) { sets.push('customer_type = ?'); vals.push(it.customer_type); }
+          if (mapped.notes != null) { sets.push('internal_notes = ?'); vals.push(it.notes); }
+          if (mapped.tax_exempt != null) { sets.push('tax_exempt = ?'); vals.push(bit(it.tax_exempt)); }
+          vals.push(existing.id);
+          await db.run(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, ...vals);
+          updated++;
+          results.push({ ok: true, line: it.line, action: 'update', id: existing.id, name: it.name });
+        } else {
+          const acctNo = it.account_number || await nextAcctNumber();
+          const email = it.email || `${acctNo.toLowerCase()}@walkin.mortysautoparts.local`;
+          const hash = await bcrypt.hash(crypto.randomUUID(), 10);
+          const r = await db.run(
+            `INSERT INTO users (email, name, password_hash, phone, via, is_admin, is_staff, price_tier, account_number,
+                                company_name, customer_type, credit_type, credit_limit_cents,
+                                payment_terms_days, discount_pct, tax_exempt, tax_id, internal_notes)
+               VALUES (lower(?),?,?,?, 'pos', 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            email, it.name, hash, it.phone, it.price_tier || 'retail', acctNo,
+            it.company_name, it.customer_type, it.credit_type,
+            it.credit_limit_usd != null ? Math.round(it.credit_limit_usd * 100) : null,
+            it.payment_terms_days, it.discount_pct, bit(it.tax_exempt), it.tax_id, it.notes);
+          inserted++;
+          results.push({ ok: true, line: it.line, action: 'new', id: r.meta.last_row_id, name: it.name, account_number: acctNo });
+        }
+      } catch (e) {
+        results.push({ ok: false, line: it.line, error: e.message, name: it.name });
+      }
+    }
+
+    return c.json(Object.assign(
+      { ok: true, mode: 'commit', committed: true, inserted, updated, failed: results.filter((r) => !r.ok).length, results: results.filter((r) => !r.ok).slice(0, 50) },
+      summary));
+  });
+
   app.patch('/api/admin/users/:id', adminMw, async (c) => {
     const db = d1(c.env);
     const b = await c.req.json().catch(() => ({}));
@@ -333,6 +516,146 @@ export default function mount(app) {
       id, cents(amount), b.method, b.reference || null, b.notes || null, actingId(c));
     const after = before - amount;
     return c.json({ ok: true, id: r.meta.last_row_id, balance_before_usd: before, balance_after_usd: after, overpaid: after < 0 });
+  });
+
+  // =====================================================================
+  //  INVOICE / ACCOUNT PAYMENTS IMPORT (CSV/TSV) — bulk "Record a payment"
+  // =====================================================================
+  // Each usable row becomes one account_payments row against the matched
+  // customer's running balance — the bulk version of the single-payment form
+  // above. A row's "reference" (invoice #, cheque #, whatever the file calls
+  // it) is kept for the paper trail but, like a manual entry, settles the
+  // account as a whole rather than one specific invoice — this system has no
+  // separate per-invoice balance (see accountBalance() above).
+  app.get('/api/admin/account-payments/import/columns', adminMw, (c) => c.json({ fields: INVOICE_PAYMENTS_FIELD_SYNONYMS }));
+
+  app.get('/api/admin/account-payments/import/template.csv', adminMw, (c) =>
+    c.body(INVOICE_PAYMENTS_TEMPLATE_CSV, 200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="mortysautoparts-invoice-payments-template.csv"',
+    }));
+
+  app.post('/api/admin/account-payments/import', managerMw, async (c) => {
+    const db = d1(c.env);
+
+    const cl = parseInt(c.req.header('content-length') || '0', 10);
+    if (cl && cl > IMPORT_MAX_BYTES)
+      return c.json({ error: `File too large — the limit is ${IMPORT_MAX_BYTES / 1024 / 1024} MB.` }, 413);
+
+    let body;
+    try { body = await c.req.parseBody(); }
+    catch { return c.json({ error: 'Could not read the upload (expected multipart/form-data).' }, 400); }
+
+    const file = (body.file && typeof body.file !== 'string') ? body.file : null;
+    if (!file) return c.json({ error: 'Choose a .csv or .tsv file to import.' }, 400);
+    if (file.size > IMPORT_MAX_BYTES)
+      return c.json({ error: `File too large — the limit is ${IMPORT_MAX_BYTES / 1024 / 1024} MB.` }, 413);
+
+    const mode = String(c.req.query('mode') || body.mode || 'preview').toLowerCase();
+    const sourceName = file.name || 'upload.csv';
+
+    let parsed;
+    try {
+      parsed = parseInvoicePaymentsFile(new Uint8Array(await file.arrayBuffer()), sourceName);
+    } catch (e) {
+      if (e.userFacing) return c.json({ error: e.message }, 400);
+      return c.json({ error: 'Could not read that file: ' + e.message }, 400);
+    }
+
+    const { lines, issues, mapped, ignoredColumns, headerLine, format, detail, totalDataRows } = parsed;
+    if (!lines.length)
+      return c.json({
+        error: 'No usable rows found. The header row was line ' + headerLine +
+               ' and none of the rows under it had a customer, an amount and a date.',
+        mapped, ignoredColumns, issues: issues.slice(0, 50),
+      }, 400);
+    if (mapped.account_number == null && mapped.email == null)
+      return c.json({
+        error: 'No customer column found. A column must hold the account number or email ' +
+               '(named Account Number, Email or similar) so rows can be matched to a customer.',
+        mapped, ignoredColumns,
+      }, 400);
+    if (mapped.amount_usd == null)
+      return c.json({ error: 'No amount column found (named Amount, Payment Amount or similar).', mapped, ignoredColumns }, 400);
+    if (mapped.date == null)
+      return c.json({ error: 'No date column found (named Date, Payment Date or similar).', mapped, ignoredColumns }, 400);
+
+    // Match each row's account_number/email to a customer. (chunked — SQLite
+    // caps bound params; account_number and email each get their own IN list.)
+    const acctKeys = [...new Set(lines.filter((l) => l.account_number).map((l) => l.account_number))];
+    const emailKeys = [...new Set(lines.filter((l) => l.email).map((l) => l.email.toLowerCase()))];
+    const byAccount = new Map();
+    const byEmail = new Map();
+    for (const grp of chunk(acctKeys, 100)) {
+      const rows = await db.many(
+        `SELECT id, account_number, email, name FROM users WHERE account_number IN (${grp.map(() => '?').join(',')})`, ...grp);
+      for (const r of rows) if (r.account_number) byAccount.set(r.account_number, r);
+    }
+    for (const grp of chunk(emailKeys, 100)) {
+      const rows = await db.many(
+        `SELECT id, account_number, email, name FROM users WHERE lower(email) IN (${grp.map(() => '?').join(',')})`, ...grp);
+      for (const r of rows) if (r.email) byEmail.set(r.email.toLowerCase(), r);
+    }
+    const matchOf = (l) => (l.account_number && byAccount.get(l.account_number))
+      || (l.email && byEmail.get(l.email.toLowerCase())) || null;
+
+    const unmatched = [];
+    let totalAmount = 0, minDate = null, maxDate = null;
+    for (const l of lines) {
+      const cust = matchOf(l);
+      if (!cust) { unmatched.push(l); continue; }
+      totalAmount += l.amount_usd;
+      if (minDate == null || l.date < minDate) minDate = l.date;
+      if (maxDate == null || l.date > maxDate) maxDate = l.date;
+    }
+    const matchIssues = unmatched.map((l) => ({
+      line: l.line, level: 'skipped',
+      message: 'no customer matches ' + (l.account_number ? ('account "' + l.account_number + '"') : ('email "' + l.email + '"')),
+    }));
+    const allIssues = issues.concat(matchIssues);
+
+    const sample = lines.slice(0, 15).map((l) => {
+      const cust = matchOf(l);
+      return {
+        date: l.date, account_number: l.account_number, email: l.email,
+        customer_name: cust ? cust.name : null, amount_usd: l.amount_usd,
+        method: l.method, reference: l.reference, matched: !!cust,
+      };
+    });
+
+    const summary = {
+      file: sourceName, format, detail,
+      header_line: headerLine,
+      mapped_columns: mapped,
+      ignored_columns: ignoredColumns,
+      rows_in_file: totalDataRows,
+      rows_usable: lines.length,
+      will_seed: lines.length - unmatched.length,
+      unmatched: unmatched.length,
+      total_amount_usd: Math.round(totalAmount * 100) / 100,
+      date_range: minDate ? { from: minDate, to: maxDate } : null,
+      issues: allIssues.slice(0, 200),
+      issue_count: allIssues.length,
+      sample,
+    };
+
+    if (mode !== 'commit')
+      return c.json(Object.assign({ ok: true, mode: 'preview', committed: false }, summary));
+
+    // ---- commit ----
+    const usable = lines.filter((l) => matchOf(l));
+    const stmts = usable.map((l) => {
+      const cust = matchOf(l);
+      return {
+        sql: `INSERT INTO account_payments (customer_id, amount_cents, method, reference, notes, received_by, created_at)
+              VALUES (?,?,?,?,?,?,?)`,
+        binds: [cust.id, cents(l.amount_usd), l.method, l.reference,
+          l.notes || ('Imported from ' + sourceName), actingId(c), l.date + ' 12:00:00'],
+      };
+    });
+    for (const grp of chunk(stmts, 100)) await db.batch(grp);
+
+    return c.json(Object.assign({ ok: true, mode: 'commit', committed: true, seeded: usable.length }, summary));
   });
 
   // ---- admin-side message thread ----

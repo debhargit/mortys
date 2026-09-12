@@ -155,7 +155,8 @@ function readTabular(buffer, filename) {
   return { rows, format: 'csv', detail: 'separator "' + delimName + '"' };
 }
 
-function detectHeader(rows, maxScan) {
+function detectHeader(rows, maxScan, lookup) {
+  const headerLookup = lookup || HEADER_LOOKUP;
   const limit = Math.min(rows.length, maxScan || 25);
   let best = { index: -1, score: 0, mapping: null };
 
@@ -167,7 +168,7 @@ function detectHeader(rows, maxScan) {
     rows[i].forEach((cell, col) => {
       const key = normaliseHeader(cell);
       if (!key) return;
-      const field = HEADER_LOOKUP.get(key);
+      const field = headerLookup.get(key);
       if (field && !seen.has(field)) {
         seen.add(field);
         mapping[field] = col;
@@ -321,4 +322,7 @@ export const TEMPLATE_CSV = [
   'ALT-889,Alternator 130A,Honda CR-V 2015-2019,Electrical,REBUILT,145,95,2,C-04,Main Warehouse',
 ].join('\r\n') + '\r\n';
 
-export { FIELD_SYNONYMS, normaliseCondition, toMoney, toInt };
+export {
+  FIELD_SYNONYMS, normaliseCondition, toMoney, toInt,
+  normaliseHeader, cellText, isBlankRow, readTabular, detectHeader,
+};

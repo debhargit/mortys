@@ -1,12 +1,15 @@
 // Phase 5 — POS transactions: POST /api/admin/pos/sale, /sales/:id/void,
-// /sales/:id/return.
+// /sales/:id/return. Also the historical-sales CSV importer (seeds
+// pos_sales/pos_sale_items so reports and reorder-analysis have history to
+// work from) — GET /api/admin/sales/import/{columns,template.csv},
+// POST /api/admin/sales/import.
 //
 // D1 has no interactive transactions, so each is: do every read, compute the
 // whole result in JS, then one atomic db.batch() of the writes. The sale id
 // (and return id) are pre-assigned from MAX(id)+1 so child inserts can bind
 // them as literals instead of relying on last_insert_rowid() mid-batch.
 import { d1 } from '../_lib/db.js';
-import { adminMw, userCan } from '../_lib/guards.js';
+import { adminMw, managerMw, userCan } from '../_lib/guards.js';
 import {
   TAX_RATE, POINTS_USD_RATE, POS_SALE_USD,
   nextReceiptNumber, nextInvoiceNumber, nextReturnNumber, nextId, genGiftCardCode, genRedemptionCode,
@@ -14,6 +17,15 @@ import {
 import { loadCoupon, computeCouponDiscount } from '../_lib/coupons.js';
 import { loadKitComponentsByImg, explodeKitLine } from '../_lib/kits.js';
 import { loadTierPricesByImg, tierCentsFor } from '../_lib/price_breaks.js';
+import { parseSalesFile, SALES_TEMPLATE_CSV, SALES_FIELD_SYNONYMS } from '../_lib/sales_import.js';
+
+const IMPORT_MAX_BYTES = 8 * 1024 * 1024; // 8 MB, same cap as the other importers
+
+function chunk(arr, n) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+}
 
 const r2 = (n) => Math.round(n * 100) / 100;
 const cts = (usd) => Math.round((Number(usd) || 0) * 100);
@@ -967,5 +979,165 @@ export default function mount(app) {
         returnNumber, id, line.id, qty, refundCents, b.refund_method, me.id, b.notes ? String(b.notes).slice(0, 300) : null);
     } catch (e) { return c.json({ error: e.message }, 500); }
     return c.json({ ok: true, return_number: returnNumber, refund_usd: refundCents / 100, qty });
+  });
+
+  // =====================================================================
+  //  HISTORICAL SALES IMPORT (CSV/TSV) — seed pos_sales for reporting
+  // =====================================================================
+  // Each row becomes its own pos_sales row plus one pos_sale_items line — not
+  // a live checkout: no stock deduction, no cash-drawer or loyalty effect,
+  // just the historical record reports and the reorder-analysis demand calc
+  // read. receipt_number is always freshly generated (never taken from the
+  // file) so a duplicated or colliding value in the file can't break the
+  // import; whatever the file called it is kept in `reference` instead.
+  app.get('/api/admin/sales/import/columns', adminMw, (c) => c.json({ fields: SALES_FIELD_SYNONYMS }));
+
+  app.get('/api/admin/sales/import/template.csv', adminMw, (c) =>
+    c.body(SALES_TEMPLATE_CSV, 200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="mortysautoparts-sales-history-template.csv"',
+    }));
+
+  app.post('/api/admin/sales/import', managerMw, async (c) => {
+    const db = d1(c.env);
+
+    const cl = parseInt(c.req.header('content-length') || '0', 10);
+    if (cl && cl > IMPORT_MAX_BYTES)
+      return c.json({ error: `File too large — the limit is ${IMPORT_MAX_BYTES / 1024 / 1024} MB.` }, 413);
+
+    let body;
+    try { body = await c.req.parseBody(); }
+    catch { return c.json({ error: 'Could not read the upload (expected multipart/form-data).' }, 400); }
+
+    const file = (body.file && typeof body.file !== 'string') ? body.file : null;
+    if (!file) return c.json({ error: 'Choose a .csv or .tsv file to import.' }, 400);
+    if (file.size > IMPORT_MAX_BYTES)
+      return c.json({ error: `File too large — the limit is ${IMPORT_MAX_BYTES / 1024 / 1024} MB.` }, 413);
+
+    const mode = String(c.req.query('mode') || body.mode || 'preview').toLowerCase();
+    const sourceName = file.name || 'upload.csv';
+
+    let parsed;
+    try {
+      parsed = parseSalesFile(new Uint8Array(await file.arrayBuffer()), sourceName);
+    } catch (e) {
+      if (e.userFacing) return c.json({ error: e.message }, 400);
+      return c.json({ error: 'Could not read that file: ' + e.message }, 400);
+    }
+
+    const { lines, issues, mapped, ignoredColumns, headerLine, format, detail, totalDataRows } = parsed;
+    if (!lines.length)
+      return c.json({
+        error: 'No usable rows found. The header row was line ' + headerLine +
+               ' and none of the rows under it had a part number, quantity and sale date.',
+        mapped, ignoredColumns, issues: issues.slice(0, 50),
+      }, 400);
+    if (mapped.sku == null)
+      return c.json({
+        error: 'No part-number column found. One column must hold the part number ' +
+               '(named Item, Part No, SKU or similar) so rows can be matched to existing stock.',
+        mapped, ignoredColumns,
+      }, 400);
+    if (mapped.qty == null)
+      return c.json({ error: 'No quantity column found (named Qty, Quantity or similar).', mapped, ignoredColumns }, 400);
+    if (mapped.date == null)
+      return c.json({ error: 'No date column found (named Date, Sale Date or similar).', mapped, ignoredColumns }, 400);
+
+    // Which keys match an existing product? (chunked — SQLite caps bound params)
+    const keys = [...new Set(lines.map((l) => l.key))];
+    const matched = new Map(); // key -> product row
+    for (const grp of chunk(keys, 50)) {
+      const placeholders = grp.map(() => '?').join(',');
+      const rows = await db.many(
+        `SELECT img, sku, name, price_cents FROM products WHERE img IN (${placeholders}) OR sku IN (${placeholders})`,
+        ...grp, ...grp);
+      for (const key of grp) {
+        if (matched.has(key)) continue;
+        const p = rows.find((r) => r.img === key || r.sku === key);
+        if (p) matched.set(key, p);
+      }
+    }
+    const unmatchedKeys = keys.filter((k) => !matched.has(k));
+    const matchIssues = unmatchedKeys.map((k) => {
+      const line = lines.find((l) => l.key === k);
+      return { line: line ? line.line : null, level: 'skipped', message: 'no product matches part "' + k + '"' };
+    });
+    const allIssues = issues.concat(matchIssues);
+
+    const resolvedPrice = (l, p) => (l.unit_price_usd != null ? l.unit_price_usd : (p.price_cents != null ? p.price_cents / 100 : 0));
+
+    let totalQty = 0, totalRevenue = 0, minDate = null, maxDate = null;
+    for (const l of lines) {
+      const p = matched.get(l.key);
+      if (!p) continue;
+      totalQty += l.qty;
+      totalRevenue += l.qty * resolvedPrice(l, p);
+      if (minDate == null || l.date < minDate) minDate = l.date;
+      if (maxDate == null || l.date > maxDate) maxDate = l.date;
+    }
+
+    const sample = lines.slice(0, 15).map((l) => {
+      const p = matched.get(l.key);
+      return {
+        sku: l.key, name: p ? p.name : '(no match)', qty: l.qty, date: l.date,
+        unit_price_usd: p ? resolvedPrice(l, p) : l.unit_price_usd,
+        customer: l.customer, matched: !!p,
+      };
+    });
+
+    const summary = {
+      file: sourceName, format, detail,
+      header_line: headerLine,
+      mapped_columns: mapped,
+      ignored_columns: ignoredColumns,
+      rows_in_file: totalDataRows,
+      rows_usable: lines.length,
+      unique_parts: keys.length,
+      will_seed: keys.length - unmatchedKeys.length,
+      unmatched: unmatchedKeys.length,
+      total_qty: totalQty,
+      total_revenue_usd: Math.round(totalRevenue * 100) / 100,
+      date_range: minDate ? { from: minDate, to: maxDate } : null,
+      issues: allIssues.slice(0, 200),
+      issue_count: allIssues.length,
+      sample,
+    };
+
+    if (mode !== 'commit')
+      return c.json(Object.assign({ ok: true, mode: 'preview', committed: false }, summary));
+
+    // ---- commit ----
+    const usable = lines.filter((l) => matched.has(l.key));
+    const saleIdBase = await nextId(c.env, 'pos_sales');
+    const itemIdBase = await nextId(c.env, 'pos_sale_items');
+    const runId = Date.now();
+    const stmts = [];
+    usable.forEach((l, i) => {
+      const p = matched.get(l.key);
+      const price = resolvedPrice(l, p);
+      const priceCents = Math.round(price * 100);
+      const totalCents = priceCents * l.qty;
+      const saleId = saleIdBase + i;
+      const receiptNumber = 'HIST-' + runId + '-' + String(i).padStart(5, '0');
+      stmts.push({
+        sql: `INSERT INTO pos_sales
+          (id, receipt_number, customer_name, subtotal_cents, tax_cents, discount_cents, total_cents,
+           payment_method, reference, notes, created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+        binds: [saleId, receiptNumber, l.customer, totalCents, 0, 0, totalCents,
+          l.payment_method || 'cash', l.receipt, 'Imported from ' + sourceName,
+          l.date + ' 12:00:00'],
+      });
+      stmts.push({
+        sql: `INSERT INTO pos_sale_items (id, sale_id, product_img, description, qty, unit_price_cents, total_cents)
+              VALUES (?,?,?,?,?,?,?)`,
+        binds: [itemIdBase + i, saleId, p.img, p.name, l.qty, priceCents, totalCents],
+      });
+    });
+    for (const grp of chunk(stmts, 100)) await db.batch(grp);
+
+    return c.json(Object.assign(
+      { ok: true, mode: 'commit', committed: true, seeded: usable.length },
+      summary));
   });
 }

@@ -2164,3 +2164,28 @@ SELECT p.img, p.supplier_id, p.supplier_part_no, p.cost_usd, true
   FROM products p
  WHERE p.supplier_id IS NOT NULL
 ON CONFLICT (product_img, supplier_id) DO NOTHING;
+
+-- =============================================================================
+--  SUPPLIER PAYMENTS (accounts payable) -- logs money paid out against a
+--  purchase order. Scoped to one PO, not a running per-supplier ledger: the
+--  customer side settles a whole account at once (account_payments) because
+--  a charge sale has no per-invoice balance to track, but a PO already is the
+--  natural unit of "what's owed" here, so a payment applies against one.
+-- =============================================================================
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS amount_paid_usd NUMERIC(10,2) NOT NULL DEFAULT 0;
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS balance_due_usd NUMERIC(10,2) NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS purchase_order_payments (
+  id           SERIAL PRIMARY KEY,
+  po_id        INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+  amount_usd   NUMERIC(10,2) NOT NULL CHECK (amount_usd > 0),
+  method       TEXT,
+  reference    TEXT,
+  notes        TEXT,
+  received_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_po_payments_po ON purchase_order_payments (po_id);
+
+-- Existing POs start owing their full total -- nothing paid yet.
+UPDATE purchase_orders SET balance_due_usd = total_usd WHERE amount_paid_usd = 0;

@@ -12,6 +12,9 @@
 //   GET  /api/admin/inventory/import/columns
 //   GET  /api/admin/inventory/import/template.csv
 //   POST /api/admin/inventory/import           POST /api/admin/import/parts (alias)
+//   GET  /api/admin/receive/import/columns
+//   GET  /api/admin/receive/import/template.csv
+//   POST /api/admin/receive/import             (CSV import for receive-without-a-PO)
 //
 // D1 notes: money is *_cents (converted at the SELECT boundary / with money.js);
 // products has no `id` — children link on product_img; warehouse_activity has
@@ -26,6 +29,12 @@ import { PUSHABLE_FIELDS, toColumnValue, valuesEqual } from '../_lib/product_mat
 import {
   parseInventoryFile, TEMPLATE_CSV, FIELD_SYNONYMS,
 } from '../_lib/inventory_import.js';
+import {
+  parseReceivalFile, RECEIVE_TEMPLATE_CSV, RECEIVE_FIELD_SYNONYMS,
+} from '../_lib/receive_import.js';
+import {
+  parseSupplierPaymentsFile, SUPPLIER_PAYMENTS_TEMPLATE_CSV, SUPPLIER_PAYMENTS_FIELD_SYNONYMS,
+} from '../_lib/supplier_payments_import.js';
 
 const IMPORT_MAX_BYTES = 8 * 1024 * 1024; // 8 MB — a 20k-row CSV is ~2 MB
 
@@ -92,7 +101,9 @@ function zFromP(p) {
 const PO_USD_ALIASES = `total_cents / 100.0 AS total_usd,
   subtotal_cents / 100.0 AS subtotal_usd,
   shipping_cents / 100.0 AS shipping_usd,
-  tax_cents / 100.0 AS tax_usd`;
+  tax_cents / 100.0 AS tax_usd,
+  amount_paid_cents / 100.0 AS amount_paid_usd,
+  balance_due_cents / 100.0 AS balance_due_usd`;
 
 export default function mount(app) {
   // =====================================================================
@@ -772,7 +783,12 @@ export default function mount(app) {
               p.name AS product_name, p.stock_count AS current_stock
          FROM purchase_order_items poi LEFT JOIN products p ON p.img = poi.product_img
         WHERE poi.po_id = ? ORDER BY poi.id`, id);
-    return c.json({ purchase_order: po, items });
+    const payments = await db.many(
+      `SELECT pop.id, pop.amount_cents / 100.0 AS amount_usd, pop.method, pop.reference, pop.notes,
+              pop.received_by, pop.created_at, COALESCE(u.name, u.email) AS received_by_name
+         FROM purchase_order_payments pop LEFT JOIN users u ON u.id = pop.received_by
+        WHERE pop.po_id = ? ORDER BY pop.created_at DESC`, id);
+    return c.json({ purchase_order: po, items, payments });
   });
 
   app.post('/api/admin/purchase-orders', managerMw, async (c) => {
@@ -1062,29 +1078,11 @@ export default function mount(app) {
     return c.json({ ok: true, status: newStatus });
   });
 
-  // Stock straight into inventory without a PO. Each item matches a product by
-  // img (exact) or sku. Lands in warehouse_activity so the movement is auditable.
-  app.post('/api/admin/receive', managerMw, async (c) => {
-    const db = d1(c.env);
-    if (!userCan(c.get('user'), 'inventory.adjust_stock'))
-      return c.json({ error: 'Your account is not allowed to adjust stock counts.' }, 403);
-    const b = await c.req.json().catch(() => ({}));
-    const rows = Array.isArray(b.items) ? b.items : [];
-    if (!rows.length) return c.json({ error: 'items[] required' }, 400);
-    const supplierId = b.supplier_id ? parseInt(b.supplier_id, 10) : null;
-    const invoice = String(b.invoice || b.reference || '').trim();
-    const note = String(b.notes || '').trim();
-    let supplierName = null;
-    if (supplierId) {
-      const sr = await db.one('SELECT name FROM suppliers WHERE id = ?', supplierId);
-      supplierName = sr ? sr.name : null;
-    }
-    const activityNote = [
-      supplierName ? 'supplier: ' + supplierName : '',
-      invoice ? 'invoice ' + invoice : '',
-      note,
-    ].filter(Boolean).join(' · ') || 'Received without a PO';
-
+  // Shared by the manual "receive without a PO" form and the CSV import commit
+  // below: match each row to a product by img (exact) or sku, then build the
+  // stock/cost/price/bin updates plus the warehouse_activity audit row. Kept
+  // as one function so both entry points move stock the same way.
+  async function buildReceiveStmts(db, rows, activityNote, supplierId) {
     const stmts = [];
     const results = [];
     for (const r of rows) {
@@ -1104,11 +1102,15 @@ export default function mount(app) {
       if (r.location != null) stmts.push({ sql: 'UPDATE products SET location = ? WHERE img = ?', binds: [String(r.location), p.img] });
       if (r.bin_location != null) stmts.push({ sql: 'UPDATE products SET bin_location = ? WHERE img = ?', binds: [String(r.bin_location), p.img] });
       if (supplierId) stmts.push({ sql: 'UPDATE products SET supplier_id = COALESCE(supplier_id, ?) WHERE img = ?', binds: [supplierId, p.img] });
+      // date_received backdates the audit row for a historical import (a
+      // delivery entered after the fact); COALESCE falls back to "now" when
+      // the row didn't carry one.
+      const dateReceived = r.date_received ? String(r.date_received).trim() + ' 12:00:00' : null;
       stmts.push({
-        sql: `INSERT INTO warehouse_activity (kind, product_img, qty_before, qty_after, qty_delta, bin_location, performed_by, ref_kind, ref_id, notes)
-                VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        sql: `INSERT INTO warehouse_activity (kind, product_img, qty_before, qty_after, qty_delta, bin_location, performed_by, ref_kind, ref_id, notes, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,COALESCE(?, CURRENT_TIMESTAMP))`,
         binds: ['receive', p.img, p.stock_count, p.stock_count + qty, qty,
-          r.bin_location != null ? String(r.bin_location) : null, null, 'no_po', supplierId, activityNote],
+          r.bin_location != null ? String(r.bin_location) : null, null, 'no_po', supplierId, activityNote, dateReceived],
       });
       // Optional per-line serial / redemption-instrument load (0056).
       for (const s of (Array.isArray(r.serials) ? r.serials : [])) {
@@ -1121,8 +1123,334 @@ export default function mount(app) {
       }
       results.push({ ok: true, product_img: p.img, name: p.name, qty });
     }
+    return { stmts, results };
+  }
+
+  function receiveActivityNote(supplierName, invoice, note) {
+    return [
+      supplierName ? 'supplier: ' + supplierName : '',
+      invoice ? 'invoice ' + invoice : '',
+      note,
+    ].filter(Boolean).join(' · ') || 'Received without a PO';
+  }
+
+  // Stock straight into inventory without a PO. Each item matches a product by
+  // img (exact) or sku. Lands in warehouse_activity so the movement is auditable.
+  app.post('/api/admin/receive', managerMw, async (c) => {
+    const db = d1(c.env);
+    if (!userCan(c.get('user'), 'inventory.adjust_stock'))
+      return c.json({ error: 'Your account is not allowed to adjust stock counts.' }, 403);
+    const b = await c.req.json().catch(() => ({}));
+    // A batch-level date (one delivery, one date) fills in any item that
+    // didn't carry its own -- items[].date_received still wins when given.
+    const batchDate = b.date_received || b.date || null;
+    const rows = (Array.isArray(b.items) ? b.items : [])
+      .map((it) => (it.date_received ? it : Object.assign({}, it, { date_received: batchDate })));
+    if (!rows.length) return c.json({ error: 'items[] required' }, 400);
+    const supplierId = b.supplier_id ? parseInt(b.supplier_id, 10) : null;
+    const invoice = String(b.invoice || b.reference || '').trim();
+    const note = String(b.notes || '').trim();
+    let supplierName = null;
+    if (supplierId) {
+      const sr = await db.one('SELECT name FROM suppliers WHERE id = ?', supplierId);
+      supplierName = sr ? sr.name : null;
+    }
+    const activityNote = receiveActivityNote(supplierName, invoice, note);
+
+    const { stmts, results } = await buildReceiveStmts(db, rows, activityNote, supplierId);
     if (stmts.length) await db.batch(stmts);
     return c.json({ ok: results.every((x) => x.ok), received: results.filter((x) => x.ok).length, results });
+  });
+
+  // =====================================================================
+  //  STOCK RECEIVAL IMPORT (CSV/TSV) — bulk "receive without a PO"
+  // =====================================================================
+  app.get('/api/admin/receive/import/columns', adminMw, (c) => c.json({ fields: RECEIVE_FIELD_SYNONYMS }));
+
+  app.get('/api/admin/receive/import/template.csv', adminMw, (c) =>
+    c.body(RECEIVE_TEMPLATE_CSV, 200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="mortysautoparts-stock-receival-template.csv"',
+    }));
+
+  app.post('/api/admin/receive/import', managerMw, async (c) => {
+    const db = d1(c.env);
+    if (!userCan(c.get('user'), 'inventory.adjust_stock'))
+      return c.json({ error: 'Your account is not allowed to adjust stock counts.' }, 403);
+
+    const cl = parseInt(c.req.header('content-length') || '0', 10);
+    if (cl && cl > IMPORT_MAX_BYTES)
+      return c.json({ error: `File too large — the limit is ${IMPORT_MAX_BYTES / 1024 / 1024} MB.` }, 413);
+
+    let body;
+    try { body = await c.req.parseBody(); }
+    catch { return c.json({ error: 'Could not read the upload (expected multipart/form-data).' }, 400); }
+
+    const file = (body.file && typeof body.file !== 'string') ? body.file : null;
+    if (!file) return c.json({ error: 'Choose a .csv or .tsv file to import.' }, 400);
+    if (file.size > IMPORT_MAX_BYTES)
+      return c.json({ error: `File too large — the limit is ${IMPORT_MAX_BYTES / 1024 / 1024} MB.` }, 413);
+
+    const mode = String(c.req.query('mode') || body.mode || 'preview').toLowerCase();
+    const supplierId = body.supplier_id ? parseInt(body.supplier_id, 10) : null;
+    const invoice = String(body.invoice || '').trim();
+    const note = String(body.notes || '').trim();
+    // A batch-level date (set once on the upload form) fills in any row that
+    // didn't carry its own "date" column — a per-row date in the file still wins.
+    const batchDate = body.date_received ? String(body.date_received).trim() : null;
+    const sourceName = file.name || 'upload.csv';
+
+    let parsed;
+    try {
+      parsed = parseReceivalFile(new Uint8Array(await file.arrayBuffer()), sourceName);
+    } catch (e) {
+      if (e.userFacing) return c.json({ error: e.message }, 400);
+      return c.json({ error: 'Could not read that file: ' + e.message }, 400);
+    }
+
+    if (batchDate) for (const l of parsed.lines) if (!l.date_received) l.date_received = batchDate;
+
+    const { lines, issues, mapped, ignoredColumns, headerLine, format, detail, totalDataRows } = parsed;
+    if (!lines.length)
+      return c.json({
+        error: 'No usable rows found. The header row was line ' + headerLine +
+               ' and none of the rows under it had both a part number and a quantity.',
+        mapped, ignoredColumns, issues: issues.slice(0, 50),
+      }, 400);
+    if (mapped.sku == null)
+      return c.json({
+        error: 'No part-number column found. One column must hold the part number ' +
+               '(named Item, Part No, SKU or similar) so rows can be matched to existing stock.',
+        mapped, ignoredColumns,
+      }, 400);
+    if (mapped.qty == null)
+      return c.json({
+        error: 'No quantity column found. One column must hold the quantity received ' +
+               '(named Qty, Quantity, Received or similar).',
+        mapped, ignoredColumns,
+      }, 400);
+
+    // Which keys match an existing product? (chunked — SQLite caps bound params)
+    const keys = [...new Set(lines.map((l) => l.key))];
+    const matched = new Map(); // key -> product row
+    for (const grp of chunk(keys, 50)) {
+      const placeholders = grp.map(() => '?').join(',');
+      const rows = await db.many(
+        `SELECT img, sku, name, stock_count, cost_cents, price_cents, bin_location
+           FROM products WHERE img IN (${placeholders}) OR sku IN (${placeholders})`,
+        ...grp, ...grp);
+      for (const key of grp) {
+        if (matched.has(key)) continue;
+        const p = rows.find((r) => r.img === key || r.sku === key);
+        if (p) matched.set(key, p);
+      }
+    }
+    const unmatchedKeys = keys.filter((k) => !matched.has(k));
+    const totalQty = lines.reduce((s, l) => s + (matched.has(l.key) ? l.qty : 0), 0);
+
+    const matchIssues = unmatchedKeys.map((k) => {
+      const line = lines.find((l) => l.key === k);
+      return { line: line ? line.line : null, level: 'skipped', message: 'no product matches part "' + k + '"' };
+    });
+    const allIssues = issues.concat(matchIssues);
+
+    const sample = lines.slice(0, 15).map((l) => {
+      const p = matched.get(l.key);
+      return {
+        sku: l.key, name: p ? p.name : (l.name || '(no match)'), qty: l.qty,
+        unit_cost_usd: l.unit_cost_usd, price_usd: l.price_usd, bin_location: l.bin_location,
+        date_received: l.date_received, current_stock: p ? p.stock_count : null, matched: !!p,
+      };
+    });
+
+    const summary = {
+      file: sourceName, format, detail,
+      header_line: headerLine,
+      mapped_columns: mapped,
+      ignored_columns: ignoredColumns,
+      rows_in_file: totalDataRows,
+      rows_usable: lines.length,
+      unique_parts: keys.length,
+      will_receive: keys.length - unmatchedKeys.length,
+      unmatched: unmatchedKeys.length,
+      total_qty: totalQty,
+      issues: allIssues.slice(0, 200),
+      issue_count: allIssues.length,
+      sample,
+    };
+
+    if (mode !== 'commit')
+      return c.json(Object.assign({ ok: true, mode: 'preview', committed: false }, summary));
+
+    // ---- commit ----
+    let supplierName = null;
+    if (supplierId) {
+      const sr = await db.one('SELECT name FROM suppliers WHERE id = ?', supplierId);
+      supplierName = sr ? sr.name : null;
+    }
+    const activityNote = receiveActivityNote(supplierName, invoice, note || ('imported from ' + sourceName));
+
+    const receiveRows = lines
+      .filter((l) => matched.has(l.key))
+      .map((l) => ({
+        sku: l.key, qty: l.qty, unit_cost_usd: l.unit_cost_usd, price_usd: l.price_usd,
+        bin_location: l.bin_location, date_received: l.date_received,
+      }));
+    const { stmts, results } = await buildReceiveStmts(db, receiveRows, activityNote, supplierId);
+    if (stmts.length) await db.batch(stmts);
+
+    return c.json(Object.assign(
+      { ok: true, mode: 'commit', committed: true, received: results.filter((x) => x.ok).length },
+      summary));
+  });
+
+  // =====================================================================
+  //  SUPPLIER PAYMENTS IMPORT (CSV/TSV) — accounts payable
+  // =====================================================================
+  // Each row logs a payment against one purchase order (matched by po_number,
+  // which is unique) and reduces that PO's balance due. Unlike the customer
+  // side (one running ledger per account — a charge sale has no per-invoice
+  // balance to track), a PO already is the natural unit of "what's owed"
+  // here, so a payment always applies to a specific one, never to the
+  // supplier as a whole.
+  app.get('/api/admin/purchase-orders/payments/import/columns', adminMw, (c) => c.json({ fields: SUPPLIER_PAYMENTS_FIELD_SYNONYMS }));
+
+  app.get('/api/admin/purchase-orders/payments/import/template.csv', adminMw, (c) =>
+    c.body(SUPPLIER_PAYMENTS_TEMPLATE_CSV, 200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="mortysautoparts-supplier-payments-template.csv"',
+    }));
+
+  app.post('/api/admin/purchase-orders/payments/import', managerMw, async (c) => {
+    const db = d1(c.env);
+
+    const cl = parseInt(c.req.header('content-length') || '0', 10);
+    if (cl && cl > IMPORT_MAX_BYTES)
+      return c.json({ error: `File too large — the limit is ${IMPORT_MAX_BYTES / 1024 / 1024} MB.` }, 413);
+
+    let body;
+    try { body = await c.req.parseBody(); }
+    catch { return c.json({ error: 'Could not read the upload (expected multipart/form-data).' }, 400); }
+
+    const file = (body.file && typeof body.file !== 'string') ? body.file : null;
+    if (!file) return c.json({ error: 'Choose a .csv or .tsv file to import.' }, 400);
+    if (file.size > IMPORT_MAX_BYTES)
+      return c.json({ error: `File too large — the limit is ${IMPORT_MAX_BYTES / 1024 / 1024} MB.` }, 413);
+
+    const mode = String(c.req.query('mode') || body.mode || 'preview').toLowerCase();
+    const sourceName = file.name || 'upload.csv';
+
+    let parsed;
+    try {
+      parsed = parseSupplierPaymentsFile(new Uint8Array(await file.arrayBuffer()), sourceName);
+    } catch (e) {
+      if (e.userFacing) return c.json({ error: e.message }, 400);
+      return c.json({ error: 'Could not read that file: ' + e.message }, 400);
+    }
+
+    const { lines, issues, mapped, ignoredColumns, headerLine, format, detail, totalDataRows } = parsed;
+    if (!lines.length)
+      return c.json({
+        error: 'No usable rows found. The header row was line ' + headerLine +
+               ' and none of the rows under it had a PO number, an amount and a date.',
+        mapped, ignoredColumns, issues: issues.slice(0, 50),
+      }, 400);
+    if (mapped.po_number == null)
+      return c.json({ error: 'No PO number column found (named PO Number, PO or similar).', mapped, ignoredColumns }, 400);
+    if (mapped.amount_usd == null)
+      return c.json({ error: 'No amount column found (named Amount, Payment Amount or similar).', mapped, ignoredColumns }, 400);
+    if (mapped.date == null)
+      return c.json({ error: 'No date column found (named Date, Payment Date or similar).', mapped, ignoredColumns }, 400);
+
+    // Match each row's po_number to a purchase order. (chunked — SQLite caps bound params.)
+    const poNumbers = [...new Set(lines.map((l) => l.po_number))];
+    const matched = new Map(); // po_number -> po row
+    for (const grp of chunk(poNumbers, 100)) {
+      const rows = await db.many(
+        `SELECT po.id, po.po_number, po.total_cents, po.amount_paid_cents, s.name AS supplier_name
+           FROM purchase_orders po LEFT JOIN suppliers s ON s.id = po.supplier_id
+          WHERE po.po_number IN (${grp.map(() => '?').join(',')})`, ...grp);
+      for (const r of rows) matched.set(r.po_number, r);
+    }
+    const unmatchedNumbers = poNumbers.filter((n) => !matched.has(n));
+    const matchIssues = unmatchedNumbers.map((n) => {
+      const line = lines.find((l) => l.po_number === n);
+      return { line: line ? line.line : null, level: 'skipped', message: 'no purchase order matches "' + n + '"' };
+    });
+    const allIssues = issues.concat(matchIssues);
+
+    let matchedCount = 0, totalAmount = 0, minDate = null, maxDate = null;
+    for (const l of lines) {
+      if (!matched.has(l.po_number)) continue;
+      matchedCount++;
+      totalAmount += l.amount_usd;
+      if (minDate == null || l.date < minDate) minDate = l.date;
+      if (maxDate == null || l.date > maxDate) maxDate = l.date;
+    }
+
+    const sample = lines.slice(0, 15).map((l) => {
+      const po = matched.get(l.po_number);
+      return {
+        date: l.date, po_number: l.po_number, supplier_name: po ? po.supplier_name : null,
+        amount_usd: l.amount_usd, method: l.method, reference: l.reference,
+        balance_before_usd: po ? Math.max(po.total_cents - po.amount_paid_cents, 0) / 100 : null,
+        matched: !!po,
+      };
+    });
+
+    const summary = {
+      file: sourceName, format, detail,
+      header_line: headerLine,
+      mapped_columns: mapped,
+      ignored_columns: ignoredColumns,
+      rows_in_file: totalDataRows,
+      rows_usable: lines.length,
+      will_seed: matchedCount,
+      unmatched: unmatchedNumbers.length,
+      total_amount_usd: Math.round(totalAmount * 100) / 100,
+      date_range: minDate ? { from: minDate, to: maxDate } : null,
+      issues: allIssues.slice(0, 200),
+      issue_count: allIssues.length,
+      sample,
+    };
+
+    if (mode !== 'commit')
+      return c.json(Object.assign({ ok: true, mode: 'preview', committed: false }, summary));
+
+    // ---- commit ----
+    const usable = lines.filter((l) => matched.has(l.po_number));
+    const performedBy = c.get('user').id;
+
+    // Multiple rows can pay down the same PO -- accumulate the total each PO
+    // owes before writing, so two partial payments to one PO in the same
+    // file both land instead of the second clobbering the first.
+    const byPo = new Map(); // po id -> { po, sumCents }
+    for (const l of usable) {
+      const po = matched.get(l.po_number);
+      const g = byPo.get(po.id) || { po, sumCents: 0 };
+      g.sumCents += Math.round(l.amount_usd * 100);
+      byPo.set(po.id, g);
+    }
+
+    const stmts = usable.map((l) => {
+      const po = matched.get(l.po_number);
+      return {
+        sql: `INSERT INTO purchase_order_payments (po_id, amount_cents, method, reference, notes, received_by, created_at)
+              VALUES (?,?,?,?,?,?,?)`,
+        binds: [po.id, Math.round(l.amount_usd * 100), l.method, l.reference,
+          l.notes || ('Imported from ' + sourceName), performedBy, l.date + ' 12:00:00'],
+      };
+    });
+    for (const { po, sumCents } of byPo.values()) {
+      const newPaid = po.amount_paid_cents + sumCents;
+      const newBalance = Math.max(po.total_cents - newPaid, 0);
+      stmts.push({ sql: 'UPDATE purchase_orders SET amount_paid_cents = ?, balance_due_cents = ? WHERE id = ?', binds: [newPaid, newBalance, po.id] });
+    }
+    for (const grp of chunk(stmts, 100)) await db.batch(grp);
+
+    return c.json(Object.assign(
+      { ok: true, mode: 'commit', committed: true, seeded: usable.length },
+      summary));
   });
 
   // =====================================================================

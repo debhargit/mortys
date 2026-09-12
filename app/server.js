@@ -2672,6 +2672,168 @@ app.post('/api/admin/users', requireAdmin, async (req, res) => {
   }
 });
 
+// =====================================================================
+//  CUSTOMER IMPORT (CSV/TSV/xlsx) — bulk create + update
+// =====================================================================
+// Same two-step shape as the inventory importer (mode=preview reports
+// without writing, mode=commit does the work). A row matches an existing
+// customer by account number or email and updates it; anything else
+// becomes a new customer, same fields the "+ New customer" form writes.
+//
+// Update semantics deliberately split in two: contact/credit details
+// (phone, tier, credit limit, terms...) only ever *fill* a blank — an
+// empty cell never erases what's already on file, the same rule the
+// inventory importer uses for price/cost. customer_type, notes and
+// tax_exempt instead go by whether the file mapped that column at all: if
+// it did, this row's value (blank included) is written, since a file that
+// bothers to carry a tax-exempt column is asserting one way or the other,
+// not leaving it alone.
+app.get('/api/admin/customers/import/template.csv', requireAdmin, (_req, res) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="mortysautoparts-customers-template.csv"');
+  res.send(customersImport.CUSTOMERS_TEMPLATE_CSV);
+});
+
+app.get('/api/admin/customers/import/columns', requireAdmin, (_req, res) => {
+  res.json({ fields: customersImport.FIELD_SYNONYMS });
+});
+
+app.post('/api/admin/customers/import', requireAdmin, uploadData.single('file'), async (req, res) => {
+  const mode = (req.query.mode || req.body.mode || 'preview').toLowerCase();
+
+  let parsed, sourceName;
+  try {
+    const { buf, name } = readUploadedFile(req);
+    sourceName = name;
+    parsed = await customersImport.parseCustomersFile(buf, name);
+  } catch (e) {
+    if (e.userFacing) return res.status(400).json({ error: e.message });
+    console.error('[customers import] parse failed:', e);
+    return res.status(400).json({ error: 'Could not read that file: ' + e.message });
+  }
+
+  const { items, issues, mapped, ignoredColumns, headerLine, format, detail, totalDataRows } = parsed;
+  if (!items.length) {
+    return res.status(400).json({
+      error: 'No usable rows found. The header row was line ' + headerLine + ' and none of the rows under it had a name.',
+      mapped, ignoredColumns, issues: issues.slice(0, 50),
+    });
+  }
+
+  const acctKeys = [...new Set(items.filter((it) => it.account_number).map((it) => it.account_number))];
+  const emailKeys = [...new Set(items.filter((it) => it.email).map((it) => it.email))]; // already lower-cased by the parser
+  const byAccount = new Map();
+  const byEmail = new Map();
+  if (acctKeys.length) {
+    const { rows } = await query('SELECT id, account_number, email, name FROM users WHERE account_number = ANY($1::text[])', [acctKeys]);
+    for (const r of rows) if (r.account_number) byAccount.set(r.account_number, r);
+  }
+  if (emailKeys.length) {
+    const { rows } = await query('SELECT id, account_number, email, name FROM users WHERE lower(email) = ANY($1::text[])', [emailKeys]);
+    for (const r of rows) if (r.email) byEmail.set(r.email.toLowerCase(), r);
+  }
+  const matchOf = (it) => (it.account_number && byAccount.get(it.account_number)) || (it.email && byEmail.get(it.email)) || null;
+
+  let willAdd = 0, willUpdate = 0;
+  for (const it of items) { if (matchOf(it)) willUpdate++; else willAdd++; }
+
+  const sample = items.slice(0, 15).map((it) => {
+    const existing = matchOf(it);
+    return {
+      name: it.name, email: it.email, account_number: it.account_number || (existing ? existing.account_number : null),
+      price_tier: it.price_tier, credit_limit_usd: it.credit_limit_usd,
+      action: existing ? 'update' : 'new',
+    };
+  });
+
+  const summary = {
+    file: sourceName, format, detail,
+    header_line: headerLine,
+    mapped_columns: mapped,
+    ignored_columns: ignoredColumns,
+    rows_in_file: totalDataRows,
+    rows_usable: items.length,
+    will_add: willAdd,
+    will_update: willUpdate,
+    issues: issues.slice(0, 200),
+    issue_count: issues.length,
+    sample,
+  };
+
+  if (mode !== 'commit') {
+    return res.json(Object.assign({ ok: true, mode: 'preview', committed: false }, summary));
+  }
+
+  // ---- commit ----
+  // Deliberately not one wrapping transaction: a bad row here (a duplicate
+  // email two rows in the file both claim, say) should not undo every good
+  // row that already went in, and a per-row failure inside a single
+  // Postgres transaction poisons it for every row after -- each write commits
+  // on its own, same partial-success shape the D1 side has no choice but to
+  // use anyway (no interactive transactions there).
+  let inserted = 0, updated = 0;
+  const failures = [];
+
+  // Account numbers for new customers come from one shared counter read once
+  // up front, then incremented in memory per row -- a fresh MAX()+1 query per
+  // row would hand out the same number twice within this same file.
+  let acctSeq = null;
+  async function nextAcctNumber() {
+    if (acctSeq == null) {
+      const { rows } = await query(
+        `SELECT COALESCE(MAX(substring(account_number from 3)::bigint), 0) AS n
+           FROM users WHERE account_number ~ '^C-[0-9]+$'`);
+      acctSeq = Number(rows[0].n);
+    }
+    acctSeq += 1;
+    return `C-${String(acctSeq).padStart(6, '0')}`;
+  }
+
+  for (const it of items) {
+    const existing = matchOf(it);
+    try {
+      if (existing) {
+        const sets = ['name = $1']; const vals = [it.name];
+        const fill = (col, val) => { if (val != null) { vals.push(val); sets.push(`${col} = $${vals.length}`); } };
+        fill('phone', it.phone);
+        fill('company_name', it.company_name);
+        fill('price_tier', it.price_tier);
+        fill('credit_type', it.credit_type);
+        fill('credit_limit_usd', it.credit_limit_usd);
+        fill('payment_terms_days', it.payment_terms_days);
+        fill('discount_pct', it.discount_pct);
+        fill('tax_id', it.tax_id);
+        if (mapped.customer_type != null) { vals.push(it.customer_type); sets.push(`customer_type = $${vals.length}`); }
+        if (mapped.notes != null) { vals.push(it.notes); sets.push(`internal_notes = $${vals.length}`); }
+        if (mapped.tax_exempt != null) { vals.push(!!it.tax_exempt); sets.push(`tax_exempt = $${vals.length}`); }
+        vals.push(existing.id);
+        await query(`UPDATE users SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
+        updated++;
+      } else {
+        const acctNo = it.account_number || await nextAcctNumber();
+        const email = it.email || `${acctNo.toLowerCase()}@walkin.mortysautoparts.local`;
+        const hash = await bcrypt.hash(require('crypto').randomBytes(24).toString('hex'), 10);
+        await query(
+          `INSERT INTO users (email, name, password_hash, phone, via, is_admin, is_staff,
+                              price_tier, account_number, company_name, customer_type,
+                              credit_type, credit_limit_usd, payment_terms_days, discount_pct,
+                              tax_exempt, tax_id, internal_notes)
+             VALUES ($1,$2,$3,$4,'pos',false,false,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+          [email, it.name, hash, it.phone, it.price_tier || 'retail', acctNo,
+           it.company_name, it.customer_type, it.credit_type, it.credit_limit_usd,
+           it.payment_terms_days, it.discount_pct, !!it.tax_exempt, it.tax_id, it.notes]);
+        inserted++;
+      }
+    } catch (e) {
+      failures.push({ line: it.line, name: it.name, error: e.code === '23505' ? 'A customer with that email or account number already exists' : e.message });
+    }
+  }
+
+  return res.json(Object.assign(
+    { ok: true, mode: 'commit', committed: true, inserted, updated, failed: failures.length, results: failures.slice(0, 50) },
+    summary));
+});
+
 // ---- delete a customer -------------------------------------------------------
 //  Refused outright once there is history behind them, and this is not
 //  cautiousness for its own sake: orders, pos_sales and account_payments all
@@ -2935,6 +3097,146 @@ app.post('/api/admin/users/:id/account-payments', requireManager, async (req, re
     // the account in credit (a negative balance) rather than at zero.
     overpaid: balanceAfter < 0,
   });
+});
+
+// =====================================================================
+//  INVOICE / ACCOUNT PAYMENTS IMPORT (CSV/TSV/xlsx) — bulk "Record a payment"
+// =====================================================================
+// Each usable row becomes one account_payments row against the matched
+// customer's running balance — the bulk version of the single-payment form
+// above. A row's "reference" (invoice #, cheque #, whatever the file calls
+// it) is kept for the paper trail but, like a manual entry, settles the
+// account as a whole rather than one specific invoice — this system has no
+// separate per-invoice balance (see getAccountBalance() above).
+app.get('/api/admin/account-payments/import/template.csv', requireAdmin, (_req, res) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="mortysautoparts-invoice-payments-template.csv"');
+  res.send(invoicePaymentsImport.INVOICE_PAYMENTS_TEMPLATE_CSV);
+});
+
+app.get('/api/admin/account-payments/import/columns', requireAdmin, (_req, res) => {
+  res.json({ fields: invoicePaymentsImport.FIELD_SYNONYMS });
+});
+
+app.post('/api/admin/account-payments/import', requireManager, uploadData.single('file'), async (req, res) => {
+  const mode = (req.query.mode || req.body.mode || 'preview').toLowerCase();
+
+  let parsed, sourceName;
+  try {
+    const { buf, name } = readUploadedFile(req);
+    sourceName = name;
+    parsed = await invoicePaymentsImport.parseInvoicePaymentsFile(buf, name);
+  } catch (e) {
+    if (e.userFacing) return res.status(400).json({ error: e.message });
+    console.error('[invoice payments import] parse failed:', e);
+    return res.status(400).json({ error: 'Could not read that file: ' + e.message });
+  }
+
+  const { lines, issues, mapped, ignoredColumns, headerLine, format, detail, totalDataRows } = parsed;
+  if (!lines.length) {
+    return res.status(400).json({
+      error: 'No usable rows found. The header row was line ' + headerLine +
+             ' and none of the rows under it had a customer, an amount and a date.',
+      mapped, ignoredColumns, issues: issues.slice(0, 50),
+    });
+  }
+  if (mapped.account_number == null && mapped.email == null) {
+    return res.status(400).json({
+      error: 'No customer column found. A column must hold the account number or email ' +
+             '(named Account Number, Email or similar) so rows can be matched to a customer.',
+      mapped, ignoredColumns,
+    });
+  }
+  if (mapped.amount_usd == null) {
+    return res.status(400).json({ error: 'No amount column found (named Amount, Payment Amount or similar).', mapped, ignoredColumns });
+  }
+  if (mapped.date == null) {
+    return res.status(400).json({ error: 'No date column found (named Date, Payment Date or similar).', mapped, ignoredColumns });
+  }
+
+  const acctKeys = [...new Set(lines.filter((l) => l.account_number).map((l) => l.account_number))];
+  const emailKeys = [...new Set(lines.filter((l) => l.email).map((l) => l.email.toLowerCase()))];
+  const byAccount = new Map();
+  const byEmail = new Map();
+  if (acctKeys.length) {
+    const { rows } = await query('SELECT id, account_number, email, name FROM users WHERE account_number = ANY($1::text[])', [acctKeys]);
+    for (const r of rows) if (r.account_number) byAccount.set(r.account_number, r);
+  }
+  if (emailKeys.length) {
+    const { rows } = await query('SELECT id, account_number, email, name FROM users WHERE lower(email) = ANY($1::text[])', [emailKeys]);
+    for (const r of rows) if (r.email) byEmail.set(r.email.toLowerCase(), r);
+  }
+  const matchOf = (l) => (l.account_number && byAccount.get(l.account_number))
+    || (l.email && byEmail.get(l.email.toLowerCase())) || null;
+
+  const unmatched = [];
+  let totalAmount = 0, minDate = null, maxDate = null;
+  for (const l of lines) {
+    const cust = matchOf(l);
+    if (!cust) { unmatched.push(l); continue; }
+    totalAmount += l.amount_usd;
+    if (minDate == null || l.date < minDate) minDate = l.date;
+    if (maxDate == null || l.date > maxDate) maxDate = l.date;
+  }
+  const matchIssues = unmatched.map((l) => ({
+    line: l.line, level: 'skipped',
+    message: 'no customer matches ' + (l.account_number ? ('account "' + l.account_number + '"') : ('email "' + l.email + '"')),
+  }));
+  const allIssues = issues.concat(matchIssues);
+
+  const sample = lines.slice(0, 15).map((l) => {
+    const cust = matchOf(l);
+    return {
+      date: l.date, account_number: l.account_number, email: l.email,
+      customer_name: cust ? cust.name : null, amount_usd: l.amount_usd,
+      method: l.method, reference: l.reference, matched: !!cust,
+    };
+  });
+
+  const summary = {
+    file: sourceName, format, detail,
+    header_line: headerLine,
+    mapped_columns: mapped,
+    ignored_columns: ignoredColumns,
+    rows_in_file: totalDataRows,
+    rows_usable: lines.length,
+    will_seed: lines.length - unmatched.length,
+    unmatched: unmatched.length,
+    total_amount_usd: Math.round(totalAmount * 100) / 100,
+    date_range: minDate ? { from: minDate, to: maxDate } : null,
+    issues: allIssues.slice(0, 200),
+    issue_count: allIssues.length,
+    sample,
+  };
+
+  if (mode !== 'commit') {
+    return res.json(Object.assign({ ok: true, mode: 'preview', committed: false }, summary));
+  }
+
+  // ---- commit ----
+  const usable = lines.filter((l) => matchOf(l));
+  const client = await pool.connect();
+  let seeded = 0;
+  try {
+    await client.query('BEGIN');
+    for (const l of usable) {
+      const cust = matchOf(l);
+      await client.query(
+        `INSERT INTO account_payments (customer_id, amount_usd, method, reference, notes, received_by, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [cust.id, l.amount_usd, l.method, l.reference, l.notes || ('Imported from ' + sourceName),
+         req.session.userId, l.date + ' 12:00:00']
+      );
+      seeded++;
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('[invoice payments import] commit failed:', e);
+    return res.status(500).json({ error: 'Import failed and nothing was changed: ' + e.message });
+  } finally { client.release(); }
+
+  return res.json(Object.assign({ ok: true, mode: 'commit', committed: true, seeded }, summary));
 });
 
 // In-app messages (admin side: list + reply)
@@ -5588,12 +5890,15 @@ app.get('/api/admin/external-refs', requireAdmin, (req, res) => {
 // =============================================================================
 async function logActivity(kind, opts) {
   try {
+    // created_at lets a historical import backdate the audit row to when the
+    // stock actually arrived; COALESCE keeps every other caller's behaviour
+    // (no opts.created_at) identical to before -- NOW().
     await query(
-      `INSERT INTO warehouse_activity (kind, product_img, product_id, qty_before, qty_after, qty_delta, bin_location, performed_by, ref_kind, ref_id, notes)
-         VALUES ($1,$2,(SELECT id FROM products WHERE img = $2),$3,$4,$5,$6,$7,$8,$9,$10)`,
+      `INSERT INTO warehouse_activity (kind, product_img, product_id, qty_before, qty_after, qty_delta, bin_location, performed_by, ref_kind, ref_id, notes, created_at)
+         VALUES ($1,$2,(SELECT id FROM products WHERE img = $2),$3,$4,$5,$6,$7,$8,$9,$10,COALESCE($11, NOW()))`,
       [kind, opts.product_img || null, opts.qty_before || null, opts.qty_after || null,
        opts.qty_delta || null, opts.bin_location || null, opts.performed_by || null,
-       opts.ref_kind || null, opts.ref_id || null, opts.notes || null]
+       opts.ref_kind || null, opts.ref_id || null, opts.notes || null, opts.created_at || null]
     );
   } catch (e) { console.warn('[activity]', e.message); }
 }
@@ -5967,6 +6272,11 @@ function csvToObjects(text) {
 // catalogue -- letting one wrong upload silently overwrite 23,000 rows with
 // no chance to look first is not a risk worth taking for one saved click.
 const inventoryImport = require('./inventory-import');
+const receiveImport = require('./receive-import');
+const salesImport = require('./sales-import');
+const invoicePaymentsImport = require('./invoice-payments-import');
+const customersImport = require('./customers-import');
+const supplierPaymentsImport = require('./supplier-payments-import');
 
 // Which product columns an uploaded file is allowed to write, and how each
 // behaves on a row that already exists.
@@ -6313,7 +6623,12 @@ app.get('/api/admin/purchase-orders/:id', requireAdmin, async (req, res) => {
   const { rows: po } = await query(`SELECT po.*, s.name AS supplier_name, s.phone AS supplier_phone, s.email AS supplier_email FROM purchase_orders po LEFT JOIN suppliers s ON s.id = po.supplier_id WHERE po.id = $1`, [req.params.id]);
   if (!po.length) return res.status(404).json({ error: 'PO not found' });
   const { rows: items } = await query(`SELECT poi.*, p.name AS product_name, p.stock_count AS current_stock FROM purchase_order_items poi LEFT JOIN products p ON p.id = poi.product_id WHERE poi.po_id = $1 ORDER BY poi.id`, [req.params.id]);
-  res.json({ purchase_order: po[0], items });
+  const { rows: payments } = await query(
+    `SELECT pop.id, pop.amount_usd, pop.method, pop.reference, pop.notes, pop.received_by, pop.created_at,
+            COALESCE(u.name, u.email) AS received_by_name
+       FROM purchase_order_payments pop LEFT JOIN users u ON u.id = pop.received_by
+      WHERE pop.po_id = $1 ORDER BY pop.created_at DESC`, [req.params.id]);
+  res.json({ purchase_order: po[0], items, payments });
 });
 
 app.post('/api/admin/purchase-orders', requireManager, async (req, res) => {
@@ -6713,9 +7028,58 @@ app.post('/api/admin/purchase-orders/bulk', requireManager, async (req, res) => 
 // stock_count goes up, cost_usd is refreshed when a unit cost is given, and it
 // lands in warehouse_activity so the movement is auditable. Each item must
 // match an existing product by img (exact) or sku.
+// Shared by the manual endpoint below and the CSV import commit further down:
+// match each row to a product by img (exact) or sku, apply the stock/cost/
+// price/bin updates and log the warehouse_activity row, inside the caller's
+// transaction. Kept as one function so both entry points move stock the same
+// way.
+async function receiveRowsIntoStock(client, rows, activityNote, supplierId) {
+  const results = [];
+  for (const r of rows) {
+    const qty = parseInt(r.qty, 10);
+    if (!qty || qty < 1) { results.push({ ok: false, error: 'qty must be a positive whole number', item: r }); continue; }
+    const key = String(r.product_img || r.sku || '').trim();
+    if (!key) { results.push({ ok: false, error: 'product_img or sku required', item: r }); continue; }
+    const { rows: pr } = await client.query(
+      'SELECT img, name, stock_count FROM products WHERE img = $1 OR (sku IS NOT NULL AND sku = $1) LIMIT 1', [key]);
+    if (!pr.length) { results.push({ ok: false, error: 'no product matches "' + key + '"', item: r }); continue; }
+    const p = pr[0];
+    await client.query('UPDATE products SET stock_count = stock_count + $1 WHERE img = $2', [qty, p.img]);
+    const num = function (v) { return (v != null && v !== '') && Number.isFinite(Number(v)) ? Number(v) : null; };
+    const cost = num(r.unit_cost_usd);
+    const price = num(r.price_usd);
+    if (cost != null)  await client.query('UPDATE products SET cost_usd  = $1 WHERE img = $2', [cost, p.img]);
+    if (price != null) await client.query('UPDATE products SET price_usd = $1 WHERE img = $2', [price, p.img]);
+    if (r.name != null && String(r.name).trim()) await client.query('UPDATE products SET name = $1 WHERE img = $2', [String(r.name).trim(), p.img]);
+    if (r.location != null) await client.query('UPDATE products SET location = $1 WHERE img = $2', [String(r.location), p.img]);
+    if (r.bin_location != null) await client.query('UPDATE products SET bin_location = $1 WHERE img = $2', [String(r.bin_location), p.img]);
+    if (supplierId) await client.query('UPDATE products SET supplier_id = COALESCE(supplier_id, $1) WHERE img = $2', [supplierId, p.img]);
+    await logActivity('receive', {
+      product_img: p.img, qty_before: p.stock_count, qty_after: p.stock_count + qty, qty_delta: qty,
+      bin_location: r.bin_location != null ? String(r.bin_location) : null,
+      ref_kind: 'no_po', ref_id: supplierId, notes: activityNote,
+      created_at: r.date_received ? String(r.date_received).trim() + ' 12:00:00' : null,
+    });
+    results.push({ ok: true, product_img: p.img, name: p.name, qty_added: qty, stock_after: p.stock_count + qty });
+  }
+  return results;
+}
+
+function receiveActivityNote(supplierName, invoice, note) {
+  return [
+    supplierName ? 'supplier: ' + supplierName : '',
+    invoice ? 'invoice ' + invoice : '',
+    note,
+  ].filter(Boolean).join(' · ') || 'Received without a PO';
+}
+
 app.post('/api/admin/receive', requireManager, requireCap('inventory.adjust_stock'), async (req, res) => {
   const b = req.body || {};
-  const rows = Array.isArray(b.items) ? b.items : [];
+  // A batch-level date (one delivery, one date) fills in any item that
+  // didn't carry its own -- items[].date_received still wins when given.
+  const batchDate = b.date_received || b.date || null;
+  const rows = (Array.isArray(b.items) ? b.items : [])
+    .map((it) => (it.date_received ? it : Object.assign({}, it, { date_received: batchDate })));
   if (!rows.length) return res.status(400).json({ error: 'items[] required' });
   const supplierId = b.supplier_id ? parseInt(b.supplier_id, 10) : null;
   const invoice = String(b.invoice || b.reference || '').trim();
@@ -6725,42 +7089,13 @@ app.post('/api/admin/receive', requireManager, requireCap('inventory.adjust_stoc
     const { rows: sr } = await query('SELECT name FROM suppliers WHERE id = $1', [supplierId]);
     supplierName = sr.length ? sr[0].name : null;
   }
-  const activityNote = [
-    supplierName ? 'supplier: ' + supplierName : '',
-    invoice ? 'invoice ' + invoice : '',
-    note,
-  ].filter(Boolean).join(' · ') || 'Received without a PO';
+  const activityNote = receiveActivityNote(supplierName, invoice, note);
 
   const client = await pool.connect();
-  const results = [];
+  let results;
   try {
     await client.query('BEGIN');
-    for (const r of rows) {
-      const qty = parseInt(r.qty, 10);
-      if (!qty || qty < 1) { results.push({ ok: false, error: 'qty must be a positive whole number', item: r }); continue; }
-      const key = String(r.product_img || r.sku || '').trim();
-      if (!key) { results.push({ ok: false, error: 'product_img or sku required', item: r }); continue; }
-      const { rows: pr } = await client.query(
-        'SELECT img, name, stock_count FROM products WHERE img = $1 OR (sku IS NOT NULL AND sku = $1) LIMIT 1', [key]);
-      if (!pr.length) { results.push({ ok: false, error: 'no product matches "' + key + '"', item: r }); continue; }
-      const p = pr[0];
-      await client.query('UPDATE products SET stock_count = stock_count + $1 WHERE img = $2', [qty, p.img]);
-      const num = function (v) { return (v != null && v !== '') && Number.isFinite(Number(v)) ? Number(v) : null; };
-      const cost = num(r.unit_cost_usd);
-      const price = num(r.price_usd);
-      if (cost != null)  await client.query('UPDATE products SET cost_usd  = $1 WHERE img = $2', [cost, p.img]);
-      if (price != null) await client.query('UPDATE products SET price_usd = $1 WHERE img = $2', [price, p.img]);
-      if (r.name != null && String(r.name).trim()) await client.query('UPDATE products SET name = $1 WHERE img = $2', [String(r.name).trim(), p.img]);
-      if (r.location != null) await client.query('UPDATE products SET location = $1 WHERE img = $2', [String(r.location), p.img]);
-      if (r.bin_location != null) await client.query('UPDATE products SET bin_location = $1 WHERE img = $2', [String(r.bin_location), p.img]);
-      if (supplierId) await client.query('UPDATE products SET supplier_id = COALESCE(supplier_id, $1) WHERE img = $2', [supplierId, p.img]);
-      await logActivity('receive', {
-        product_img: p.img, qty_before: p.stock_count, qty_after: p.stock_count + qty, qty_delta: qty,
-        bin_location: r.bin_location != null ? String(r.bin_location) : null,
-        ref_kind: 'no_po', ref_id: supplierId, notes: activityNote,
-      });
-      results.push({ ok: true, product_img: p.img, name: p.name, qty_added: qty, stock_after: p.stock_count + qty });
-    }
+    results = await receiveRowsIntoStock(client, rows, activityNote, supplierId);
     await client.query('COMMIT');
     res.json({ ok: results.every((x) => x.ok), received: results });
   } catch (e) {
@@ -6768,6 +7103,300 @@ app.post('/api/admin/receive', requireManager, requireCap('inventory.adjust_stoc
     console.error('[receive no-po]', e);
     res.status(500).json({ error: e.message });
   } finally { client.release(); }
+});
+
+// =====================================================================
+//  STOCK RECEIVAL IMPORT (CSV/TSV/xlsx) — bulk "receive without a PO"
+// =====================================================================
+// Same two-step shape as the inventory importer above (mode=preview reports
+// without writing, mode=commit does the work), but this file only ever adds
+// quantity to parts that already exist — it never creates a product — so the
+// preview calls out anything that doesn't match existing stock instead of
+// counting it as new.
+app.get('/api/admin/receive/import/template.csv', requireAdmin, (_req, res) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="mortysautoparts-stock-receival-template.csv"');
+  res.send(receiveImport.RECEIVE_TEMPLATE_CSV);
+});
+
+app.get('/api/admin/receive/import/columns', requireAdmin, (_req, res) => {
+  res.json({ fields: receiveImport.FIELD_SYNONYMS });
+});
+
+app.post('/api/admin/receive/import', requireManager, requireCap('inventory.adjust_stock'), uploadData.single('file'), async (req, res) => {
+  const mode = (req.query.mode || req.body.mode || 'preview').toLowerCase();
+  const supplierId = req.body.supplier_id ? parseInt(req.body.supplier_id, 10) : null;
+  const invoice = String(req.body.invoice || '').trim();
+  const note = String(req.body.notes || '').trim();
+  // A batch-level date (set once on the upload form) fills in any row that
+  // didn't carry its own "date" column — a per-row date in the file still wins.
+  const batchDate = req.body.date_received ? String(req.body.date_received).trim() : null;
+
+  let parsed, sourceName;
+  try {
+    const { buf, name } = readUploadedFile(req);
+    sourceName = name;
+    parsed = await receiveImport.parseReceivalFile(buf, name);
+  } catch (e) {
+    if (e.userFacing) return res.status(400).json({ error: e.message });
+    console.error('[receive import] parse failed:', e);
+    return res.status(400).json({ error: 'Could not read that file: ' + e.message });
+  }
+
+  if (batchDate) for (const l of parsed.lines) if (!l.date_received) l.date_received = batchDate;
+
+  const { lines, issues, mapped, ignoredColumns, headerLine, format, detail, totalDataRows } = parsed;
+  if (!lines.length) {
+    return res.status(400).json({
+      error: 'No usable rows found. The header row was line ' + headerLine +
+             ' and none of the rows under it had both a part number and a quantity.',
+      mapped, ignoredColumns, issues: issues.slice(0, 50),
+    });
+  }
+  if (mapped.sku == null) {
+    return res.status(400).json({
+      error: 'No part-number column found. One column must hold the part number ' +
+             '(named Item, Part No, SKU or similar) so rows can be matched to existing stock.',
+      mapped, ignoredColumns,
+    });
+  }
+  if (mapped.qty == null) {
+    return res.status(400).json({
+      error: 'No quantity column found. One column must hold the quantity received ' +
+             '(named Qty, Quantity, Received or similar).',
+      mapped, ignoredColumns,
+    });
+  }
+
+  const keys = lines.map((l) => l.key);
+  const uniqueKeys = [...new Set(keys)];
+  const { rows: productRows } = await query(
+    'SELECT img, sku, name, stock_count, cost_usd, price_usd, bin_location FROM products WHERE img = ANY($1::text[]) OR sku = ANY($1::text[])',
+    [uniqueKeys]
+  );
+  const matched = new Map(); // key -> product row
+  for (const key of uniqueKeys) {
+    const p = productRows.find((r) => r.img === key || r.sku === key);
+    if (p) matched.set(key, p);
+  }
+  const unmatchedKeys = uniqueKeys.filter((k) => !matched.has(k));
+  const totalQty = lines.reduce((s, l) => s + (matched.has(l.key) ? l.qty : 0), 0);
+
+  const matchIssues = unmatchedKeys.map((k) => {
+    const line = lines.find((l) => l.key === k);
+    return { line: line ? line.line : null, level: 'skipped', message: 'no product matches part "' + k + '"' };
+  });
+  const allIssues = issues.concat(matchIssues);
+
+  const sample = lines.slice(0, 15).map((l) => {
+    const p = matched.get(l.key);
+    return {
+      sku: l.key, name: p ? p.name : (l.name || '(no match)'), qty: l.qty,
+      unit_cost_usd: l.unit_cost_usd, price_usd: l.price_usd, bin_location: l.bin_location,
+      date_received: l.date_received, current_stock: p ? p.stock_count : null, matched: !!p,
+    };
+  });
+
+  const summary = {
+    file: sourceName, format, detail,
+    header_line: headerLine,
+    mapped_columns: mapped,
+    ignored_columns: ignoredColumns,
+    rows_in_file: totalDataRows,
+    rows_usable: lines.length,
+    unique_parts: uniqueKeys.length,
+    will_receive: uniqueKeys.length - unmatchedKeys.length,
+    unmatched: unmatchedKeys.length,
+    total_qty: totalQty,
+    issues: allIssues.slice(0, 200),
+    issue_count: allIssues.length,
+    sample,
+  };
+
+  if (mode !== 'commit') {
+    return res.json(Object.assign({ ok: true, mode: 'preview', committed: false }, summary));
+  }
+
+  // ---- commit ----
+  let supplierName = null;
+  if (supplierId) {
+    const { rows: sr } = await query('SELECT name FROM suppliers WHERE id = $1', [supplierId]);
+    supplierName = sr.length ? sr[0].name : null;
+  }
+  const activityNote = receiveActivityNote(supplierName, invoice, note || ('imported from ' + sourceName));
+
+  const receiveRows = lines
+    .filter((l) => matched.has(l.key))
+    .map((l) => ({
+      sku: l.key, qty: l.qty, unit_cost_usd: l.unit_cost_usd, price_usd: l.price_usd,
+      bin_location: l.bin_location, date_received: l.date_received,
+    }));
+
+  const client = await pool.connect();
+  let results;
+  try {
+    await client.query('BEGIN');
+    results = await receiveRowsIntoStock(client, receiveRows, activityNote, supplierId);
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('[receive import] commit failed:', e);
+    return res.status(500).json({ error: 'Import failed and nothing was changed: ' + e.message });
+  } finally { client.release(); }
+
+  return res.json(Object.assign(
+    { ok: true, mode: 'commit', committed: true, received: results.filter((x) => x.ok).length },
+    summary));
+});
+
+// =====================================================================
+//  SUPPLIER PAYMENTS IMPORT (CSV/TSV/xlsx) — accounts payable
+// =====================================================================
+// Each row logs a payment against one purchase order (matched by po_number,
+// which is unique) and reduces that PO's balance due. Unlike the customer
+// side (one running ledger per account — a charge sale has no per-invoice
+// balance to track), a PO already is the natural unit of "what's owed" here,
+// so a payment always applies to a specific one, never to the supplier as
+// a whole.
+app.get('/api/admin/purchase-orders/payments/import/template.csv', requireAdmin, (_req, res) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="mortysautoparts-supplier-payments-template.csv"');
+  res.send(supplierPaymentsImport.SUPPLIER_PAYMENTS_TEMPLATE_CSV);
+});
+
+app.get('/api/admin/purchase-orders/payments/import/columns', requireAdmin, (_req, res) => {
+  res.json({ fields: supplierPaymentsImport.FIELD_SYNONYMS });
+});
+
+app.post('/api/admin/purchase-orders/payments/import', requireManager, uploadData.single('file'), async (req, res) => {
+  const mode = (req.query.mode || req.body.mode || 'preview').toLowerCase();
+
+  let parsed, sourceName;
+  try {
+    const { buf, name } = readUploadedFile(req);
+    sourceName = name;
+    parsed = await supplierPaymentsImport.parseSupplierPaymentsFile(buf, name);
+  } catch (e) {
+    if (e.userFacing) return res.status(400).json({ error: e.message });
+    console.error('[supplier payments import] parse failed:', e);
+    return res.status(400).json({ error: 'Could not read that file: ' + e.message });
+  }
+
+  const { lines, issues, mapped, ignoredColumns, headerLine, format, detail, totalDataRows } = parsed;
+  if (!lines.length) {
+    return res.status(400).json({
+      error: 'No usable rows found. The header row was line ' + headerLine +
+             ' and none of the rows under it had a PO number, an amount and a date.',
+      mapped, ignoredColumns, issues: issues.slice(0, 50),
+    });
+  }
+  if (mapped.po_number == null) {
+    return res.status(400).json({ error: 'No PO number column found (named PO Number, PO or similar).', mapped, ignoredColumns });
+  }
+  if (mapped.amount_usd == null) {
+    return res.status(400).json({ error: 'No amount column found (named Amount, Payment Amount or similar).', mapped, ignoredColumns });
+  }
+  if (mapped.date == null) {
+    return res.status(400).json({ error: 'No date column found (named Date, Payment Date or similar).', mapped, ignoredColumns });
+  }
+
+  const poNumbers = [...new Set(lines.map((l) => l.po_number))];
+  const matched = new Map(); // po_number -> po row
+  if (poNumbers.length) {
+    const { rows } = await query(
+      `SELECT po.id, po.po_number, po.total_usd, po.amount_paid_usd, s.name AS supplier_name
+         FROM purchase_orders po LEFT JOIN suppliers s ON s.id = po.supplier_id
+        WHERE po.po_number = ANY($1::text[])`,
+      [poNumbers]
+    );
+    for (const r of rows) matched.set(r.po_number, r);
+  }
+  const unmatchedNumbers = poNumbers.filter((n) => !matched.has(n));
+  const matchIssues = unmatchedNumbers.map((n) => {
+    const line = lines.find((l) => l.po_number === n);
+    return { line: line ? line.line : null, level: 'skipped', message: 'no purchase order matches "' + n + '"' };
+  });
+  const allIssues = issues.concat(matchIssues);
+
+  let matchedCount = 0, totalAmount = 0, minDate = null, maxDate = null;
+  for (const l of lines) {
+    if (!matched.has(l.po_number)) continue;
+    matchedCount++;
+    totalAmount += l.amount_usd;
+    if (minDate == null || l.date < minDate) minDate = l.date;
+    if (maxDate == null || l.date > maxDate) maxDate = l.date;
+  }
+
+  const sample = lines.slice(0, 15).map((l) => {
+    const po = matched.get(l.po_number);
+    return {
+      date: l.date, po_number: l.po_number, supplier_name: po ? po.supplier_name : null,
+      amount_usd: l.amount_usd, method: l.method, reference: l.reference,
+      balance_before_usd: po ? Math.max(Number(po.total_usd) - Number(po.amount_paid_usd), 0) : null,
+      matched: !!po,
+    };
+  });
+
+  const summary = {
+    file: sourceName, format, detail,
+    header_line: headerLine,
+    mapped_columns: mapped,
+    ignored_columns: ignoredColumns,
+    rows_in_file: totalDataRows,
+    rows_usable: lines.length,
+    will_seed: matchedCount,
+    unmatched: unmatchedNumbers.length,
+    total_amount_usd: Math.round(totalAmount * 100) / 100,
+    date_range: minDate ? { from: minDate, to: maxDate } : null,
+    issues: allIssues.slice(0, 200),
+    issue_count: allIssues.length,
+    sample,
+  };
+
+  if (mode !== 'commit') {
+    return res.json(Object.assign({ ok: true, mode: 'preview', committed: false }, summary));
+  }
+
+  // ---- commit ----
+  const usable = lines.filter((l) => matched.has(l.po_number));
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Multiple rows can pay down the same PO -- accumulate the total each PO
+    // owes before writing, so two partial payments to one PO in the same
+    // file both land instead of the second clobbering the first.
+    const byPo = new Map(); // po id -> { po, sum }
+    for (const l of usable) {
+      const po = matched.get(l.po_number);
+      const g = byPo.get(po.id) || { po, sum: 0 };
+      g.sum += l.amount_usd;
+      byPo.set(po.id, g);
+    }
+
+    for (const l of usable) {
+      const po = matched.get(l.po_number);
+      await client.query(
+        `INSERT INTO purchase_order_payments (po_id, amount_usd, method, reference, notes, received_by, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [po.id, l.amount_usd, l.method, l.reference, l.notes || ('Imported from ' + sourceName),
+         req.session.userId, l.date + ' 12:00:00']
+      );
+    }
+    for (const { po, sum } of byPo.values()) {
+      const newPaid = Math.round((Number(po.amount_paid_usd) + sum) * 100) / 100;
+      const newBalance = Math.max(Math.round((Number(po.total_usd) - newPaid) * 100) / 100, 0);
+      await client.query('UPDATE purchase_orders SET amount_paid_usd = $1, balance_due_usd = $2 WHERE id = $3', [newPaid, newBalance, po.id]);
+    }
+
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('[supplier payments import] commit failed:', e);
+    return res.status(500).json({ error: 'Import failed and nothing was changed: ' + e.message });
+  } finally { client.release(); }
+
+  return res.json(Object.assign({ ok: true, mode: 'commit', committed: true, seeded: usable.length }, summary));
 });
 
 // =============================================================================
@@ -6795,6 +7424,160 @@ async function nextQuoteNumber() {
   const { rows } = await query(`SELECT COUNT(*)::int AS n FROM pos_quotes WHERE quote_number LIKE $1`, [`Q-${year}-%`]);
   return `Q-${year}-${String(rows[0].n + 1).padStart(4, '0')}`;
 }
+
+// =====================================================================
+//  HISTORICAL SALES IMPORT (CSV/TSV/xlsx) — seed pos_sales for reporting
+// =====================================================================
+// Each row becomes its own pos_sales row plus one pos_sale_items line — not
+// a live checkout: no stock deduction, no cash-drawer or loyalty effect,
+// just the historical record reports and the reorder-analysis demand calc
+// read. receipt_number is always freshly generated (never taken from the
+// file) so a duplicated or colliding value in the file can't break the
+// import; whatever the file called it is kept in `reference` instead.
+app.get('/api/admin/sales/import/template.csv', requireAdmin, (_req, res) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="mortysautoparts-sales-history-template.csv"');
+  res.send(salesImport.SALES_TEMPLATE_CSV);
+});
+
+app.get('/api/admin/sales/import/columns', requireAdmin, (_req, res) => {
+  res.json({ fields: salesImport.FIELD_SYNONYMS });
+});
+
+app.post('/api/admin/sales/import', requireManager, uploadData.single('file'), async (req, res) => {
+  const mode = (req.query.mode || req.body.mode || 'preview').toLowerCase();
+
+  let parsed, sourceName;
+  try {
+    const { buf, name } = readUploadedFile(req);
+    sourceName = name;
+    parsed = await salesImport.parseSalesFile(buf, name);
+  } catch (e) {
+    if (e.userFacing) return res.status(400).json({ error: e.message });
+    console.error('[sales import] parse failed:', e);
+    return res.status(400).json({ error: 'Could not read that file: ' + e.message });
+  }
+
+  const { lines, issues, mapped, ignoredColumns, headerLine, format, detail, totalDataRows } = parsed;
+  if (!lines.length) {
+    return res.status(400).json({
+      error: 'No usable rows found. The header row was line ' + headerLine +
+             ' and none of the rows under it had a part number, quantity and sale date.',
+      mapped, ignoredColumns, issues: issues.slice(0, 50),
+    });
+  }
+  if (mapped.sku == null) {
+    return res.status(400).json({
+      error: 'No part-number column found. One column must hold the part number ' +
+             '(named Item, Part No, SKU or similar) so rows can be matched to existing stock.',
+      mapped, ignoredColumns,
+    });
+  }
+  if (mapped.qty == null) {
+    return res.status(400).json({ error: 'No quantity column found (named Qty, Quantity or similar).', mapped, ignoredColumns });
+  }
+  if (mapped.date == null) {
+    return res.status(400).json({ error: 'No date column found (named Date, Sale Date or similar).', mapped, ignoredColumns });
+  }
+
+  const keys = lines.map((l) => l.key);
+  const uniqueKeys = [...new Set(keys)];
+  const { rows: productRows } = await query(
+    'SELECT img, sku, name, price_usd FROM products WHERE img = ANY($1::text[]) OR sku = ANY($1::text[])',
+    [uniqueKeys]
+  );
+  const matched = new Map(); // key -> product row
+  for (const key of uniqueKeys) {
+    const p = productRows.find((r) => r.img === key || r.sku === key);
+    if (p) matched.set(key, p);
+  }
+  const unmatchedKeys = uniqueKeys.filter((k) => !matched.has(k));
+  const matchIssues = unmatchedKeys.map((k) => {
+    const line = lines.find((l) => l.key === k);
+    return { line: line ? line.line : null, level: 'skipped', message: 'no product matches part "' + k + '"' };
+  });
+  const allIssues = issues.concat(matchIssues);
+
+  const resolvedPrice = (l, p) => (l.unit_price_usd != null ? l.unit_price_usd : (p.price_usd != null ? Number(p.price_usd) : 0));
+
+  let totalQty = 0, totalRevenue = 0, minDate = null, maxDate = null;
+  for (const l of lines) {
+    const p = matched.get(l.key);
+    if (!p) continue;
+    totalQty += l.qty;
+    totalRevenue += l.qty * resolvedPrice(l, p);
+    if (minDate == null || l.date < minDate) minDate = l.date;
+    if (maxDate == null || l.date > maxDate) maxDate = l.date;
+  }
+
+  const sample = lines.slice(0, 15).map((l) => {
+    const p = matched.get(l.key);
+    return {
+      sku: l.key, name: p ? p.name : '(no match)', qty: l.qty, date: l.date,
+      unit_price_usd: p ? resolvedPrice(l, p) : l.unit_price_usd,
+      customer: l.customer, matched: !!p,
+    };
+  });
+
+  const summary = {
+    file: sourceName, format, detail,
+    header_line: headerLine,
+    mapped_columns: mapped,
+    ignored_columns: ignoredColumns,
+    rows_in_file: totalDataRows,
+    rows_usable: lines.length,
+    unique_parts: uniqueKeys.length,
+    will_seed: uniqueKeys.length - unmatchedKeys.length,
+    unmatched: unmatchedKeys.length,
+    total_qty: totalQty,
+    total_revenue_usd: Math.round(totalRevenue * 100) / 100,
+    date_range: minDate ? { from: minDate, to: maxDate } : null,
+    issues: allIssues.slice(0, 200),
+    issue_count: allIssues.length,
+    sample,
+  };
+
+  if (mode !== 'commit') {
+    return res.json(Object.assign({ ok: true, mode: 'preview', committed: false }, summary));
+  }
+
+  // ---- commit ----
+  const usable = lines.filter((l) => matched.has(l.key));
+  const client = await pool.connect();
+  let seeded = 0;
+  try {
+    await client.query('BEGIN');
+    const runId = Date.now();
+    for (let i = 0; i < usable.length; i++) {
+      const l = usable[i];
+      const p = matched.get(l.key);
+      const price = resolvedPrice(l, p);
+      const total = Math.round(price * l.qty * 100) / 100;
+      const receiptNumber = 'HIST-' + runId + '-' + String(i).padStart(5, '0');
+      const { rows: sr } = await client.query(
+        `INSERT INTO pos_sales (receipt_number, customer_name, subtotal_usd, tax_usd, discount_usd, total_usd,
+           payment_method, reference, notes, created_at)
+         VALUES ($1,$2,$3,0,0,$3,$4,$5,$6,$7) RETURNING id`,
+        [receiptNumber, l.customer, total, l.payment_method || 'cash', l.receipt,
+         'Imported from ' + sourceName, l.date + ' 12:00:00']
+      );
+      const saleId = sr[0].id;
+      await client.query(
+        `INSERT INTO pos_sale_items (sale_id, product_img, description, qty, unit_price_usd, total_usd)
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [saleId, p.img, p.name, l.qty, price, total]
+      );
+      seeded++;
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('[sales import] commit failed:', e);
+    return res.status(500).json({ error: 'Import failed and nothing was changed: ' + e.message });
+  } finally { client.release(); }
+
+  return res.json(Object.assign({ ok: true, mode: 'commit', committed: true, seeded }, summary));
+});
 
 // =============================================================================
 //  POS HOLDS -- park a cart mid-sale (F7), pick it back up later (F8 ->

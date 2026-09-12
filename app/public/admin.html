@@ -1739,6 +1739,587 @@ async function startInventoryImport(file, onDone){
   });
 }
 
+// ============= STOCK RECEIVAL IMPORT =============
+// Same upload -> preview -> confirm shape as inventory import above, but this
+// one only ever adds quantity to parts that already exist — it never creates
+// products — so the preview calls out anything in the file that doesn't
+// match existing stock instead of counting it as new.
+async function receiveImportPost(file, mode, extra){
+  var fd = new FormData();
+  fd.append('file', file);
+  if (extra) Object.keys(extra).forEach(function(k){ if (extra[k] != null) fd.append(k, extra[k]); });
+  var url = '/api/admin/receive/import?mode=' + encodeURIComponent(mode);
+  var res = await fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' });
+  var data = null;
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+  return data;
+}
+
+function rcvImportSampleTable(sample){
+  if (!sample || !sample.length) return '';
+  var th = function(label, align){ return '<th style="text-align:' + (align || 'left') + ';padding:6px 9px;background:var(--card-soft);border-bottom:1px solid var(--line);white-space:nowrap">' + label + '</th>'; };
+  var td = function(html, align){ return '<td style="text-align:' + (align || 'left') + ';padding:5px 9px;border-bottom:1px solid var(--card-soft2);white-space:nowrap">' + html + '</td>'; };
+  return '<details style="margin-top:10px" open><summary style="cursor:pointer;font-weight:700;font-size:13px;color:var(--heading)">First ' + sample.length + ' rows as the server read them</summary>' +
+    '<div style="overflow:auto;margin-top:8px;border:1px solid var(--line);border-radius:6px">' +
+      '<table style="width:100%;border-collapse:collapse;font-size:12.5px">' +
+        '<thead><tr>' + th('Part') + th('Matched to') + th('Qty', 'right') + th('Cost', 'right') + th('Price', 'right') + th('Bin') + th('Date') + '</tr></thead><tbody>' +
+        sample.map(function(r){
+          var matchCell = r.matched
+            ? '<b>' + esc(r.name) + '</b>' + (r.current_stock != null ? ' <span style="color:var(--muted)">(' + r.current_stock + ' on hand)</span>' : '')
+            : '<span style="color:#b91c1c">no match</span>';
+          return '<tr' + (r.matched ? '' : ' style="background:#fee2e2"') + '>' +
+            td(esc(r.sku)) + td(matchCell) + td(r.qty, 'right') +
+            td(r.unit_cost_usd == null ? '—' : fmtMoney(r.unit_cost_usd), 'right') +
+            td(r.price_usd == null ? '—' : fmtMoney(r.price_usd), 'right') +
+            td(esc(r.bin_location || '—')) +
+            td(esc(r.date_received || 'today')) +
+          '</tr>';
+        }).join('') +
+      '</tbody></table>' +
+    '</div></details>';
+}
+
+async function startReceiveImport(file, formVals, onDone){
+  posModal('📥 Import stock receival',
+    '<div id="rcvImpBody" style="font-size:13.5px;color:var(--muted);padding:14px 2px">' +
+      'Reading <b>' + esc(file.name) + '</b>…' +
+    '</div>', 780);
+
+  var preview;
+  try {
+    preview = await receiveImportPost(file, 'preview', formVals);
+  } catch (e) {
+    document.getElementById('rcvImpBody').innerHTML =
+      '<div style="background:#fee2e2;color:#991b1b;border-radius:8px;padding:12px 14px;font-size:13.5px">' +
+        '<b>Could not read that file.</b><div style="margin-top:6px">' + esc(e.message) + '</div>' +
+      '</div>';
+    return;
+  }
+
+  var body = document.getElementById('rcvImpBody');
+  if (!body) return; // operator closed the dialog while it was parsing
+
+  body.innerHTML =
+    '<div style="font-size:12.5px;color:var(--muted);margin-bottom:10px">' +
+      esc(preview.file) + ' · ' + esc(preview.format) + ' (' + esc(preview.detail) + ') · ' +
+      preview.rows_in_file + ' rows read, ' + preview.unique_parts + ' distinct parts' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+      invImportStat(preview.will_receive, 'to receive', '#047857') +
+      invImportStat(preview.total_qty, 'total qty', '#1d4ed8') +
+      invImportStat(preview.unmatched, 'unmatched', preview.unmatched ? '#b91c1c' : 'var(--muted)') +
+      invImportStat(preview.issue_count, 'to review', preview.issue_count ? '#b45309' : 'var(--muted)') +
+    '</div>' +
+    invImportMappingRow(preview) +
+    rcvImportSampleTable(preview.sample) +
+    invImportIssueRows(preview.issues) +
+    '<div id="rcvImpMsg" style="display:none;margin-top:10px;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">' +
+      '<button type="button" id="rcvImpCancel" class="btn">Cancel</button>' +
+      '<button type="button" id="rcvImpGo"' + (preview.will_receive ? '' : ' disabled') + ' style="background:var(--red);color:#fff;border:0;border-radius:7px;padding:10px 20px;font-weight:700;cursor:pointer;font-size:13.5px;font-family:inherit">' +
+        'Receive ' + preview.will_receive + ' part' + (preview.will_receive === 1 ? '' : 's') +
+      '</button>' +
+    '</div>';
+
+  document.getElementById('rcvImpCancel').addEventListener('click', posCloseModal);
+
+  var goBtn = document.getElementById('rcvImpGo');
+  if (goBtn) goBtn.addEventListener('click', async function(){
+    var btn = this;
+    var msg = document.getElementById('rcvImpMsg');
+    btn.disabled = true;
+    btn.textContent = 'Receiving…';
+    msg.style.display = 'block';
+    msg.style.background = 'var(--card-soft)';
+    msg.style.color = 'var(--muted)';
+    msg.textContent = 'Writing ' + preview.will_receive + ' line' + (preview.will_receive === 1 ? '' : 's') + ' into stock.';
+
+    try {
+      // Re-sent rather than cached server-side, same tradeoff as the
+      // inventory importer above.
+      var r = await receiveImportPost(file, 'commit', formVals);
+      msg.style.background = '#dcfce7';
+      msg.style.color = '#166534';
+      msg.innerHTML = '<b>Done.</b> ' + r.received + ' line' + (r.received === 1 ? '' : 's') + ' received into stock.';
+      btn.textContent = 'Received';
+      document.getElementById('rcvImpCancel').textContent = 'Close';
+      if (onDone) onDone();
+    } catch (e) {
+      msg.style.background = '#fee2e2';
+      msg.style.color = '#991b1b';
+      msg.innerHTML = '<b>Import failed — nothing was changed.</b><div style="margin-top:4px">' + esc(e.message) + '</div>';
+      btn.disabled = false;
+      btn.textContent = 'Try again';
+    }
+  });
+}
+
+// ============= HISTORICAL SALES IMPORT =============
+// Same upload -> preview -> confirm shape as the other importers above, but
+// this one only ever reads products (to match and to fill in a missing
+// price) — it writes new pos_sales/pos_sale_items rows and touches nothing
+// else: no stock deduction, no cash drawer, no loyalty. Backfilling history,
+// not ringing up a sale.
+async function salesImportPost(file, mode){
+  var fd = new FormData();
+  fd.append('file', file);
+  var url = '/api/admin/sales/import?mode=' + encodeURIComponent(mode);
+  var res = await fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' });
+  var data = null;
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+  return data;
+}
+
+function salesImportSampleTable(sample){
+  if (!sample || !sample.length) return '';
+  var th = function(label, align){ return '<th style="text-align:' + (align || 'left') + ';padding:6px 9px;background:var(--card-soft);border-bottom:1px solid var(--line);white-space:nowrap">' + label + '</th>'; };
+  var td = function(html, align){ return '<td style="text-align:' + (align || 'left') + ';padding:5px 9px;border-bottom:1px solid var(--card-soft2);white-space:nowrap">' + html + '</td>'; };
+  return '<details style="margin-top:10px" open><summary style="cursor:pointer;font-weight:700;font-size:13px;color:var(--heading)">First ' + sample.length + ' rows as the server read them</summary>' +
+    '<div style="overflow:auto;margin-top:8px;border:1px solid var(--line);border-radius:6px">' +
+      '<table style="width:100%;border-collapse:collapse;font-size:12.5px">' +
+        '<thead><tr>' + th('Date') + th('Part') + th('Qty', 'right') + th('Price', 'right') + th('Customer') + '</tr></thead><tbody>' +
+        sample.map(function(r){
+          var partCell = r.matched
+            ? '<b>' + esc(r.name) + '</b> <span style="color:var(--muted)">' + esc(r.sku) + '</span>'
+            : esc(r.sku) + ' <span style="color:#b91c1c">no match</span>';
+          return '<tr' + (r.matched ? '' : ' style="background:#fee2e2"') + '>' +
+            td(esc(r.date)) + td(partCell) + td(r.qty, 'right') +
+            td(r.unit_price_usd == null ? '—' : fmtMoney(r.unit_price_usd), 'right') +
+            td(esc(r.customer || '—')) +
+          '</tr>';
+        }).join('') +
+      '</tbody></table>' +
+    '</div></details>';
+}
+
+async function startSalesImport(file, onDone){
+  posModal('📥 Import sales history',
+    '<div id="salesImpBody" style="font-size:13.5px;color:var(--muted);padding:14px 2px">' +
+      'Reading <b>' + esc(file.name) + '</b>…' +
+    '</div>', 780);
+
+  var preview;
+  try {
+    preview = await salesImportPost(file, 'preview');
+  } catch (e) {
+    document.getElementById('salesImpBody').innerHTML =
+      '<div style="background:#fee2e2;color:#991b1b;border-radius:8px;padding:12px 14px;font-size:13.5px">' +
+        '<b>Could not read that file.</b><div style="margin-top:6px">' + esc(e.message) + '</div>' +
+      '</div>';
+    return;
+  }
+
+  var body = document.getElementById('salesImpBody');
+  if (!body) return; // operator closed the dialog while it was parsing
+
+  var range = preview.date_range ? (preview.date_range.from + ' to ' + preview.date_range.to) : '—';
+  body.innerHTML =
+    '<div style="font-size:12.5px;color:var(--muted);margin-bottom:10px">' +
+      esc(preview.file) + ' · ' + esc(preview.format) + ' (' + esc(preview.detail) + ') · ' +
+      preview.rows_in_file + ' rows read, ' + preview.unique_parts + ' distinct parts · ' + esc(range) +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+      invImportStat(preview.will_seed, 'sales to seed', '#047857') +
+      invImportStat(preview.total_qty, 'total qty', '#1d4ed8') +
+      invImportStat(fmtMoney(preview.total_revenue_usd), 'revenue', '#1d4ed8') +
+      invImportStat(preview.unmatched, 'unmatched', preview.unmatched ? '#b91c1c' : 'var(--muted)') +
+      invImportStat(preview.issue_count, 'to review', preview.issue_count ? '#b45309' : 'var(--muted)') +
+    '</div>' +
+    invImportMappingRow(preview) +
+    salesImportSampleTable(preview.sample) +
+    invImportIssueRows(preview.issues) +
+    '<div id="salesImpMsg" style="display:none;margin-top:10px;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">' +
+      '<button type="button" id="salesImpCancel" class="btn">Cancel</button>' +
+      '<button type="button" id="salesImpGo"' + (preview.will_seed ? '' : ' disabled') + ' style="background:var(--red);color:#fff;border:0;border-radius:7px;padding:10px 20px;font-weight:700;cursor:pointer;font-size:13.5px;font-family:inherit">' +
+        'Seed ' + preview.will_seed + ' sale' + (preview.will_seed === 1 ? '' : 's') +
+      '</button>' +
+    '</div>';
+
+  document.getElementById('salesImpCancel').addEventListener('click', posCloseModal);
+
+  var goBtn = document.getElementById('salesImpGo');
+  if (goBtn) goBtn.addEventListener('click', async function(){
+    var btn = this;
+    var msg = document.getElementById('salesImpMsg');
+    btn.disabled = true;
+    btn.textContent = 'Seeding…';
+    msg.style.display = 'block';
+    msg.style.background = 'var(--card-soft)';
+    msg.style.color = 'var(--muted)';
+    msg.textContent = 'Writing ' + preview.will_seed + ' historical sale' + (preview.will_seed === 1 ? '' : 's') + ' — this can take a moment for a large file.';
+
+    try {
+      // Re-sent rather than cached server-side, same tradeoff as the other
+      // importers above.
+      var r = await salesImportPost(file, 'commit');
+      msg.style.background = '#dcfce7';
+      msg.style.color = '#166534';
+      msg.innerHTML = '<b>Done.</b> ' + r.seeded + ' historical sale' + (r.seeded === 1 ? '' : 's') + ' seeded.';
+      btn.textContent = 'Seeded';
+      document.getElementById('salesImpCancel').textContent = 'Close';
+      if (onDone) onDone();
+    } catch (e) {
+      msg.style.background = '#fee2e2';
+      msg.style.color = '#991b1b';
+      msg.innerHTML = '<b>Import failed — nothing was changed.</b><div style="margin-top:4px">' + esc(e.message) + '</div>';
+      btn.disabled = false;
+      btn.textContent = 'Try again';
+    }
+  });
+}
+
+// ============= INVOICE / ACCOUNT PAYMENTS IMPORT =============
+// Same upload -> preview -> confirm shape as the other importers above. This
+// one only ever reads users (to match a customer by account number or
+// email) — it writes new account_payments rows and nothing else: no invoice
+// is marked paid individually, since this system settles a charge
+// customer's balance as one running ledger, not per invoice.
+async function invPayImportPost(file, mode){
+  var fd = new FormData();
+  fd.append('file', file);
+  var url = '/api/admin/account-payments/import?mode=' + encodeURIComponent(mode);
+  var res = await fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' });
+  var data = null;
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+  return data;
+}
+
+function invPayImportSampleTable(sample){
+  if (!sample || !sample.length) return '';
+  var th = function(label, align){ return '<th style="text-align:' + (align || 'left') + ';padding:6px 9px;background:var(--card-soft);border-bottom:1px solid var(--line);white-space:nowrap">' + label + '</th>'; };
+  var td = function(html, align){ return '<td style="text-align:' + (align || 'left') + ';padding:5px 9px;border-bottom:1px solid var(--card-soft2);white-space:nowrap">' + html + '</td>'; };
+  return '<details style="margin-top:10px" open><summary style="cursor:pointer;font-weight:700;font-size:13px;color:var(--heading)">First ' + sample.length + ' rows as the server read them</summary>' +
+    '<div style="overflow:auto;margin-top:8px;border:1px solid var(--line);border-radius:6px">' +
+      '<table style="width:100%;border-collapse:collapse;font-size:12.5px">' +
+        '<thead><tr>' + th('Date') + th('Customer') + th('Amount', 'right') + th('Method') + th('Reference') + '</tr></thead><tbody>' +
+        sample.map(function(r){
+          var custCell = r.matched
+            ? '<b>' + esc(r.customer_name) + '</b> <span style="color:var(--muted)">' + esc(r.account_number || r.email) + '</span>'
+            : esc(r.account_number || r.email || '—') + ' <span style="color:#b91c1c">no match</span>';
+          return '<tr' + (r.matched ? '' : ' style="background:#fee2e2"') + '>' +
+            td(esc(r.date)) + td(custCell) + td(fmtMoney(r.amount_usd), 'right') +
+            td(esc(posMethodLabel(r.method))) + td(esc(r.reference || '—')) +
+          '</tr>';
+        }).join('') +
+      '</tbody></table>' +
+    '</div></details>';
+}
+
+async function startInvoicePaymentsImport(file, onDone){
+  posModal('📥 Import invoice payments',
+    '<div id="invPayImpBody" style="font-size:13.5px;color:var(--muted);padding:14px 2px">' +
+      'Reading <b>' + esc(file.name) + '</b>…' +
+    '</div>', 780);
+
+  var preview;
+  try {
+    preview = await invPayImportPost(file, 'preview');
+  } catch (e) {
+    document.getElementById('invPayImpBody').innerHTML =
+      '<div style="background:#fee2e2;color:#991b1b;border-radius:8px;padding:12px 14px;font-size:13.5px">' +
+        '<b>Could not read that file.</b><div style="margin-top:6px">' + esc(e.message) + '</div>' +
+      '</div>';
+    return;
+  }
+
+  var body = document.getElementById('invPayImpBody');
+  if (!body) return; // operator closed the dialog while it was parsing
+
+  var range = preview.date_range ? (preview.date_range.from + ' to ' + preview.date_range.to) : '—';
+  body.innerHTML =
+    '<div style="font-size:12.5px;color:var(--muted);margin-bottom:10px">' +
+      esc(preview.file) + ' · ' + esc(preview.format) + ' (' + esc(preview.detail) + ') · ' +
+      preview.rows_in_file + ' rows read · ' + esc(range) +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+      invImportStat(preview.will_seed, 'payments to seed', '#047857') +
+      invImportStat(fmtMoney(preview.total_amount_usd), 'total', '#1d4ed8') +
+      invImportStat(preview.unmatched, 'unmatched', preview.unmatched ? '#b91c1c' : 'var(--muted)') +
+      invImportStat(preview.issue_count, 'to review', preview.issue_count ? '#b45309' : 'var(--muted)') +
+    '</div>' +
+    invImportMappingRow(preview) +
+    invPayImportSampleTable(preview.sample) +
+    invImportIssueRows(preview.issues) +
+    '<div style="margin-top:10px;padding:10px 12px;background:var(--card-soft);border:1px solid var(--line);border-radius:8px;font-size:12px;color:var(--muted)">' +
+      'Each row settles the matched customer\'s overall account balance, same as a manual "Record a payment" — this system has no separate balance per invoice.' +
+    '</div>' +
+    '<div id="invPayImpMsg" style="display:none;margin-top:10px;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">' +
+      '<button type="button" id="invPayImpCancel" class="btn">Cancel</button>' +
+      '<button type="button" id="invPayImpGo"' + (preview.will_seed ? '' : ' disabled') + ' style="background:var(--red);color:#fff;border:0;border-radius:7px;padding:10px 20px;font-weight:700;cursor:pointer;font-size:13.5px;font-family:inherit">' +
+        'Seed ' + preview.will_seed + ' payment' + (preview.will_seed === 1 ? '' : 's') +
+      '</button>' +
+    '</div>';
+
+  document.getElementById('invPayImpCancel').addEventListener('click', posCloseModal);
+
+  var goBtn = document.getElementById('invPayImpGo');
+  if (goBtn) goBtn.addEventListener('click', async function(){
+    var btn = this;
+    var msg = document.getElementById('invPayImpMsg');
+    btn.disabled = true;
+    btn.textContent = 'Seeding…';
+    msg.style.display = 'block';
+    msg.style.background = 'var(--card-soft)';
+    msg.style.color = 'var(--muted)';
+    msg.textContent = 'Writing ' + preview.will_seed + ' payment' + (preview.will_seed === 1 ? '' : 's') + '.';
+
+    try {
+      // Re-sent rather than cached server-side, same tradeoff as the other
+      // importers above.
+      var r = await invPayImportPost(file, 'commit');
+      msg.style.background = '#dcfce7';
+      msg.style.color = '#166534';
+      msg.innerHTML = '<b>Done.</b> ' + r.seeded + ' payment' + (r.seeded === 1 ? '' : 's') + ' seeded.';
+      btn.textContent = 'Seeded';
+      document.getElementById('invPayImpCancel').textContent = 'Close';
+      if (onDone) onDone();
+    } catch (e) {
+      msg.style.background = '#fee2e2';
+      msg.style.color = '#991b1b';
+      msg.innerHTML = '<b>Import failed — nothing was changed.</b><div style="margin-top:4px">' + esc(e.message) + '</div>';
+      btn.disabled = false;
+      btn.textContent = 'Try again';
+    }
+  });
+}
+
+// ============= CUSTOMER IMPORT =============
+// Same upload -> preview -> confirm shape as the other importers above.
+// Unlike the historical ones (sales, payments), this one both creates AND
+// updates -- a row matches an existing customer by account number or email
+// and fills in blanks on their record; anything else becomes a new one.
+async function custImportPost(file, mode){
+  var fd = new FormData();
+  fd.append('file', file);
+  var url = '/api/admin/customers/import?mode=' + encodeURIComponent(mode);
+  var res = await fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' });
+  var data = null;
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+  return data;
+}
+
+function custImportSampleTable(sample){
+  if (!sample || !sample.length) return '';
+  var th = function(label, align){ return '<th style="text-align:' + (align || 'left') + ';padding:6px 9px;background:var(--card-soft);border-bottom:1px solid var(--line);white-space:nowrap">' + label + '</th>'; };
+  var td = function(html, align){ return '<td style="text-align:' + (align || 'left') + ';padding:5px 9px;border-bottom:1px solid var(--card-soft2);white-space:nowrap">' + html + '</td>'; };
+  return '<details style="margin-top:10px" open><summary style="cursor:pointer;font-weight:700;font-size:13px;color:var(--heading)">First ' + sample.length + ' rows as the server read them</summary>' +
+    '<div style="overflow:auto;margin-top:8px;border:1px solid var(--line);border-radius:6px">' +
+      '<table style="width:100%;border-collapse:collapse;font-size:12.5px">' +
+        '<thead><tr>' + th('Name') + th('Email') + th('Account #') + th('Tier') + th('Credit limit', 'right') + th('Action') + '</tr></thead><tbody>' +
+        sample.map(function(r){
+          var actionColour = r.action === 'update' ? '#1d4ed8' : '#047857';
+          return '<tr>' +
+            td('<b>' + esc(r.name) + '</b>') + td(esc(r.email || '—')) + td(esc(r.account_number || '—')) +
+            td(esc(r.price_tier || '—')) + td(r.credit_limit_usd == null ? '—' : fmtMoney(r.credit_limit_usd), 'right') +
+            td('<b style="color:' + actionColour + '">' + r.action + '</b>') +
+          '</tr>';
+        }).join('') +
+      '</tbody></table>' +
+    '</div></details>';
+}
+
+async function startCustomersImport(file, onDone){
+  posModal('📥 Import customers',
+    '<div id="custImpBody" style="font-size:13.5px;color:var(--muted);padding:14px 2px">' +
+      'Reading <b>' + esc(file.name) + '</b>…' +
+    '</div>', 780);
+
+  var preview;
+  try {
+    preview = await custImportPost(file, 'preview');
+  } catch (e) {
+    document.getElementById('custImpBody').innerHTML =
+      '<div style="background:#fee2e2;color:#991b1b;border-radius:8px;padding:12px 14px;font-size:13.5px">' +
+        '<b>Could not read that file.</b><div style="margin-top:6px">' + esc(e.message) + '</div>' +
+      '</div>';
+    return;
+  }
+
+  var body = document.getElementById('custImpBody');
+  if (!body) return; // operator closed the dialog while it was parsing
+
+  var total = preview.will_add + preview.will_update;
+  body.innerHTML =
+    '<div style="font-size:12.5px;color:var(--muted);margin-bottom:10px">' +
+      esc(preview.file) + ' · ' + esc(preview.format) + ' (' + esc(preview.detail) + ') · ' +
+      preview.rows_in_file + ' rows read, ' + preview.rows_usable + ' usable' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+      invImportStat(preview.will_add, 'new customers', '#047857') +
+      invImportStat(preview.will_update, 'updated', '#1d4ed8') +
+      invImportStat(preview.issue_count, 'to review', preview.issue_count ? '#b45309' : 'var(--muted)') +
+    '</div>' +
+    invImportMappingRow(preview) +
+    custImportSampleTable(preview.sample) +
+    invImportIssueRows(preview.issues) +
+    '<div id="custImpMsg" style="display:none;margin-top:10px;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">' +
+      '<button type="button" id="custImpCancel" class="btn">Cancel</button>' +
+      '<button type="button" id="custImpGo"' + (total ? '' : ' disabled') + ' style="background:var(--red);color:#fff;border:0;border-radius:7px;padding:10px 20px;font-weight:700;cursor:pointer;font-size:13.5px;font-family:inherit">' +
+        'Import ' + total + ' customer' + (total === 1 ? '' : 's') +
+      '</button>' +
+    '</div>';
+
+  document.getElementById('custImpCancel').addEventListener('click', posCloseModal);
+
+  var goBtn = document.getElementById('custImpGo');
+  if (goBtn) goBtn.addEventListener('click', async function(){
+    var btn = this;
+    var msg = document.getElementById('custImpMsg');
+    btn.disabled = true;
+    btn.textContent = 'Importing…';
+    msg.style.display = 'block';
+    msg.style.background = 'var(--card-soft)';
+    msg.style.color = 'var(--muted)';
+    msg.textContent = 'Writing ' + total + ' customer' + (total === 1 ? '' : 's') + ' — this can take a moment for a large file.';
+
+    try {
+      // Re-sent rather than cached server-side, same tradeoff as the other
+      // importers above.
+      var r = await custImportPost(file, 'commit');
+      msg.style.background = '#dcfce7';
+      msg.style.color = '#166534';
+      msg.innerHTML = '<b>Done.</b> ' + r.inserted + ' added, ' + r.updated + ' updated' +
+        (r.failed ? ', ' + r.failed + ' failed' : '') + '.';
+      if (r.failed) {
+        msg.innerHTML += '<div style="margin-top:6px;font-size:12px">' +
+          r.results.map(function(f){ return 'line ' + f.line + ' (' + esc(f.name) + '): ' + esc(f.error); }).join('<br>') +
+        '</div>';
+      }
+      btn.textContent = 'Imported';
+      document.getElementById('custImpCancel').textContent = 'Close';
+      if (onDone) onDone();
+    } catch (e) {
+      msg.style.background = '#fee2e2';
+      msg.style.color = '#991b1b';
+      msg.innerHTML = '<b>Import failed — nothing was changed.</b><div style="margin-top:4px">' + esc(e.message) + '</div>';
+      btn.disabled = false;
+      btn.textContent = 'Try again';
+    }
+  });
+}
+
+// ============= SUPPLIER PAYMENTS IMPORT (accounts payable) =============
+// Same upload -> preview -> confirm shape as the other importers above. Each
+// row matches a specific purchase order by its PO number (unique) and logs a
+// payment against it, reducing that PO's balance due -- no per-supplier
+// running balance, no manual entry screen; this is import-only for now.
+async function poPayImportPost(file, mode){
+  var fd = new FormData();
+  fd.append('file', file);
+  var url = '/api/admin/purchase-orders/payments/import?mode=' + encodeURIComponent(mode);
+  var res = await fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' });
+  var data = null;
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+  return data;
+}
+
+function poPayImportSampleTable(sample){
+  if (!sample || !sample.length) return '';
+  var th = function(label, align){ return '<th style="text-align:' + (align || 'left') + ';padding:6px 9px;background:var(--card-soft);border-bottom:1px solid var(--line);white-space:nowrap">' + label + '</th>'; };
+  var td = function(html, align){ return '<td style="text-align:' + (align || 'left') + ';padding:5px 9px;border-bottom:1px solid var(--card-soft2);white-space:nowrap">' + html + '</td>'; };
+  return '<details style="margin-top:10px" open><summary style="cursor:pointer;font-weight:700;font-size:13px;color:var(--heading)">First ' + sample.length + ' rows as the server read them</summary>' +
+    '<div style="overflow:auto;margin-top:8px;border:1px solid var(--line);border-radius:6px">' +
+      '<table style="width:100%;border-collapse:collapse;font-size:12.5px">' +
+        '<thead><tr>' + th('Date') + th('PO # / Supplier') + th('Amount', 'right') + th('Balance before', 'right') + th('Method') + '</tr></thead><tbody>' +
+        sample.map(function(r){
+          var poCell = r.matched
+            ? '<b>' + esc(r.po_number) + '</b> <span style="color:var(--muted)">' + esc(r.supplier_name || '') + '</span>'
+            : esc(r.po_number) + ' <span style="color:#b91c1c">no match</span>';
+          return '<tr' + (r.matched ? '' : ' style="background:#fee2e2"') + '>' +
+            td(esc(r.date)) + td(poCell) +
+            td(fmtMoney(r.amount_usd), 'right') +
+            td(r.balance_before_usd == null ? '—' : fmtMoney(r.balance_before_usd), 'right') +
+            td(esc(posMethodLabel(r.method))) +
+          '</tr>';
+        }).join('') +
+      '</tbody></table>' +
+    '</div></details>';
+}
+
+async function startSupplierPaymentsImport(file, onDone){
+  posModal('💳 Import supplier payments',
+    '<div id="poPayImpBody" style="font-size:13.5px;color:var(--muted);padding:14px 2px">' +
+      'Reading <b>' + esc(file.name) + '</b>…' +
+    '</div>', 780);
+
+  var preview;
+  try {
+    preview = await poPayImportPost(file, 'preview');
+  } catch (e) {
+    document.getElementById('poPayImpBody').innerHTML =
+      '<div style="background:#fee2e2;color:#991b1b;border-radius:8px;padding:12px 14px;font-size:13.5px">' +
+        '<b>Could not read that file.</b><div style="margin-top:6px">' + esc(e.message) + '</div>' +
+      '</div>';
+    return;
+  }
+
+  var body = document.getElementById('poPayImpBody');
+  if (!body) return; // operator closed the dialog while it was parsing
+
+  var range = preview.date_range ? (preview.date_range.from + ' to ' + preview.date_range.to) : '—';
+  body.innerHTML =
+    '<div style="font-size:12.5px;color:var(--muted);margin-bottom:10px">' +
+      esc(preview.file) + ' · ' + esc(preview.format) + ' (' + esc(preview.detail) + ') · ' +
+      preview.rows_in_file + ' rows read · ' + esc(range) +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+      invImportStat(preview.will_seed, 'payments to log', '#047857') +
+      invImportStat(fmtMoney(preview.total_amount_usd), 'total', '#1d4ed8') +
+      invImportStat(preview.unmatched, 'unmatched POs', preview.unmatched ? '#b91c1c' : 'var(--muted)') +
+      invImportStat(preview.issue_count, 'to review', preview.issue_count ? '#b45309' : 'var(--muted)') +
+    '</div>' +
+    invImportMappingRow(preview) +
+    poPayImportSampleTable(preview.sample) +
+    invImportIssueRows(preview.issues) +
+    '<div id="poPayImpMsg" style="display:none;margin-top:10px;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">' +
+      '<button type="button" id="poPayImpCancel" class="btn">Cancel</button>' +
+      '<button type="button" id="poPayImpGo"' + (preview.will_seed ? '' : ' disabled') + ' style="background:var(--red);color:#fff;border:0;border-radius:7px;padding:10px 20px;font-weight:700;cursor:pointer;font-size:13.5px;font-family:inherit">' +
+        'Log ' + preview.will_seed + ' payment' + (preview.will_seed === 1 ? '' : 's') +
+      '</button>' +
+    '</div>';
+
+  document.getElementById('poPayImpCancel').addEventListener('click', posCloseModal);
+
+  var goBtn = document.getElementById('poPayImpGo');
+  if (goBtn) goBtn.addEventListener('click', async function(){
+    var btn = this;
+    var msg = document.getElementById('poPayImpMsg');
+    btn.disabled = true;
+    btn.textContent = 'Logging…';
+    msg.style.display = 'block';
+    msg.style.background = 'var(--card-soft)';
+    msg.style.color = 'var(--muted)';
+    msg.textContent = 'Writing ' + preview.will_seed + ' payment' + (preview.will_seed === 1 ? '' : 's') + '.';
+
+    try {
+      // Re-sent rather than cached server-side, same tradeoff as the other
+      // importers above.
+      var r = await poPayImportPost(file, 'commit');
+      msg.style.background = '#dcfce7';
+      msg.style.color = '#166534';
+      msg.innerHTML = '<b>Done.</b> ' + r.seeded + ' payment' + (r.seeded === 1 ? '' : 's') + ' logged.';
+      btn.textContent = 'Logged';
+      document.getElementById('poPayImpCancel').textContent = 'Close';
+      if (onDone) onDone();
+    } catch (e) {
+      msg.style.background = '#fee2e2';
+      msg.style.color = '#991b1b';
+      msg.innerHTML = '<b>Import failed — nothing was changed.</b><div style="margin-top:4px">' + esc(e.message) + '</div>';
+      btn.disabled = false;
+      btn.textContent = 'Try again';
+    }
+  });
+}
+
 async function renderProducts(panel){
   // The category list has to match what's actually stored, or filtering (and
   // any part added through this form) silently misses every existing row.
@@ -10492,6 +11073,11 @@ async function renderPurchaseOrders(panel){
     '<details style="border-bottom:1px solid var(--line);background:var(--card-soft)">' +
       '<summary style="padding:12px 16px;cursor:pointer;font-weight:700;color:var(--heading)">📦 Receive stock without a PO</summary>' +
       '<div style="padding:14px 18px;max-width:900px">' +
+        '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;padding:8px 10px;background:var(--card);border:1px solid var(--line);border-radius:8px">' +
+          '<label class="btn" style="background:#fef3c7;color:#92400e;cursor:pointer;margin:0">📥 Import receival<input type="file" id="rcvImportInput" accept=".csv,.tsv,.txt,.xlsx,.xlsm" style="display:none"/></label>' +
+          '<a class="btn" href="/api/admin/receive/import/template.csv" download style="text-decoration:none;background:var(--card-soft2)">📄 Template</a>' +
+          '<small style="color:var(--muted)">CSV, TSV or Excel — part number + quantity received, matched to existing stock automatically. You get a preview before anything changes.</small>' +
+        '</div>' +
         '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">' +
           '<div><label class="lbl">Supplier</label><select id="rcvSupplier" class="fld" style="width:220px">' +
             '<option value="">— none / walk-in —</option>' +
@@ -10499,6 +11085,7 @@ async function renderPurchaseOrders(panel){
             '<option value="__new__">➕ Add a new supplier…</option>' +
           '</select></div>' +
           '<div><label class="lbl">Supplier invoice #</label><input id="rcvInvoice" class="fld" style="width:180px"/></div>' +
+          '<div><label class="lbl">Date received</label><input type="date" id="rcvDate" class="fld" style="width:150px" value="' + new Date().toISOString().slice(0,10) + '"/></div>' +
         '</div>' +
         '<div id="rcvNewSup" style="display:none;margin-bottom:10px;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--card)">' +
           '<div style="display:grid;grid-template-columns:2fr 1fr auto;gap:8px;align-items:end">' +
@@ -10516,6 +11103,14 @@ async function renderPurchaseOrders(panel){
           '<button class="btn ok" id="rcvGo" disabled>Receive 0 items</button>' +
           '<span id="rcvMsg" style="font-size:12.5px"></span>' +
         '</div>' +
+      '</div>' +
+    '</details>' +
+    '<details style="border-bottom:1px solid var(--line);background:var(--card-soft)">' +
+      '<summary style="padding:12px 16px;cursor:pointer;font-weight:700;color:var(--heading)">💳 Import supplier payments</summary>' +
+      '<div style="padding:14px 18px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">' +
+        '<label class="btn" style="background:#fef3c7;color:#92400e;cursor:pointer;margin:0">📥 Import payments<input type="file" id="poPayImportInput" accept=".csv,.tsv,.txt,.xlsx,.xlsm" style="display:none"/></label>' +
+        '<a class="btn" href="/api/admin/purchase-orders/payments/import/template.csv" download style="text-decoration:none;background:var(--card-soft2)">📄 Template</a>' +
+        '<small style="color:var(--muted)">Log payments made to suppliers (date, PO number, amount) — matched to a specific purchase order and reduces its balance owed. You get a preview before anything is written.</small>' +
       '</div>' +
     '</details>' +
     (r.purchase_orders.length
@@ -10723,6 +11318,27 @@ async function renderPurchaseOrders(panel){
     }, 200);
   });
   document.addEventListener('click', function(e){ if (rcvResults && !rcvResults.contains(e.target) && e.target !== rcvSearch) rcvResults.style.display = 'none'; });
+
+  var rcvImportInput = document.getElementById('rcvImportInput');
+  if (rcvImportInput) rcvImportInput.addEventListener('change', function(){
+    var file = this.files && this.files[0];
+    // Reset immediately: without this, picking the same file again after a
+    // cancel fires no change event and the button looks broken.
+    this.value = '';
+    if (!file) return;
+    var supplierVal = (rcvSupSel && rcvSupSel.value && rcvSupSel.value !== '__new__') ? rcvSupSel.value : null;
+    var invoiceVal = document.getElementById('rcvInvoice').value.trim() || null;
+    var dateVal = document.getElementById('rcvDate').value || null;
+    startReceiveImport(file, { supplier_id: supplierVal, invoice: invoiceVal, date_received: dateVal }, function(){ renderPurchaseOrders(panel); });
+  });
+
+  var poPayImportInput = document.getElementById('poPayImportInput');
+  if (poPayImportInput) poPayImportInput.addEventListener('change', function(){
+    var file = this.files && this.files[0];
+    this.value = '';
+    if (file) startSupplierPaymentsImport(file, function(){ renderPurchaseOrders(panel); });
+  });
+
   rcvGo.addEventListener('click', async function(){
     if (!rcvLines.length) return;
     rcvGo.disabled = true; rcvMsg.textContent = 'Receiving…'; rcvMsg.style.color = 'var(--muted)';
@@ -10730,6 +11346,7 @@ async function renderPurchaseOrders(panel){
       var res = await api('/api/admin/receive', { method: 'POST', body: {
         supplier_id: (rcvSupSel && rcvSupSel.value && rcvSupSel.value !== '__new__') ? rcvSupSel.value : null,
         invoice: document.getElementById('rcvInvoice').value.trim() || null,
+        date_received: document.getElementById('rcvDate').value || null,
         items: rcvLines.map(function(l){ return {
           product_img: l.img, qty: l.qty, unit_cost_usd: l.cost, price_usd: l.sell,
           name: l.name, bin_location: l.bin,
@@ -10786,6 +11403,10 @@ async function renderPoDetail(panel, id){
       '<div><div class="lbl">Status</div>' + badge(po.status, po.status === 'received' ? 'ok' : (po.status === 'cancelled' ? 'bad' : 'pending')) + '</div>' +
       '<div><div class="lbl">Total</div><b>' + fmtMoney(po.total_usd) + '</b>' +
         (Number(po.shipping_usd) > 0 ? '<br/><small>+' + fmtMoney(po.shipping_usd) + ' shipping</small>' : '') + '</div>' +
+      (Number(po.amount_paid_usd) > 0 || Number(po.balance_due_usd) > 0
+        ? '<div><div class="lbl">Paid</div><b style="color:#166534">' + fmtMoney(po.amount_paid_usd) + '</b></div>' +
+          '<div><div class="lbl">Balance owed</div><b style="color:' + (Number(po.balance_due_usd) > 0 ? '#b91c1c' : '#166534') + '">' + fmtMoney(po.balance_due_usd) + '</b></div>'
+        : '') +
       (po.notes ? '<div><div class="lbl">Notes</div>' + esc(po.notes) + '</div>' : '') +
     '</div>' +
     '<div style="padding:14px 16px">' +
@@ -10824,7 +11445,22 @@ async function renderPoDetail(panel, id){
         '<div id="poiMsg" style="grid-column:1/-1;display:none;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
         '<button type="submit" style="grid-column:1/-1;background:var(--red);color:#fff;border:0;padding:11px 22px;border-radius:7px;font-weight:700;cursor:pointer">Add item</button>' +
       '</form>' +
-    '</details>';
+    '</details>' +
+    // Read-only for now: logged only via the supplier-payments CSV import on
+    // the Purchase Orders list screen — there is no manual "record a
+    // payment" form here yet.
+    (d.payments && d.payments.length
+      ? '<div style="padding:14px 16px;border-top:1px solid var(--line)">' +
+          '<div class="lbl" style="margin-bottom:8px">💳 Payments</div>' +
+          '<table style="font-size:12.5px"><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th>Amount</th><th>By</th></tr></thead><tbody>' +
+            d.payments.map(function(p){
+              return '<tr><td>' + fmtDate(p.created_at) + '</td><td>' + esc(posMethodLabel(p.method)) + '</td>' +
+                '<td>' + esc(p.reference || '—') + '</td><td><b>' + fmtMoney(p.amount_usd) + '</b></td>' +
+                '<td>' + esc(p.received_by_name || '—') + '</td></tr>';
+            }).join('') +
+          '</tbody></table>' +
+        '</div>'
+      : '');
 
   document.getElementById('poBack').addEventListener('click', function(){ PO_VIEW_ID = null; renderPurchaseOrders(panel); });
 
@@ -11446,6 +12082,22 @@ async function renderCustomers(panel){
         '<button type="submit" style="grid-column:1/-1;background:var(--red);color:#fff;border:0;padding:11px 22px;border-radius:7px;font-weight:700;cursor:pointer">Create customer</button>' +
       '</form>' +
     '</details>' +
+    '<details style="border-bottom:1px solid var(--line);background:var(--card-soft)">' +
+      '<summary style="padding:12px 16px;cursor:pointer;font-weight:700;color:var(--heading)">📥 Import customers</summary>' +
+      '<div style="padding:14px 18px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">' +
+        '<label class="btn" style="background:#fef3c7;color:#92400e;cursor:pointer;margin:0">📥 Import customers<input type="file" id="custImportInput" accept=".csv,.tsv,.txt,.xlsx,.xlsm" style="display:none"/></label>' +
+        '<a class="btn" href="/api/admin/customers/import/template.csv" download style="text-decoration:none;background:var(--card-soft2)">📄 Template</a>' +
+        '<small style="color:var(--muted)">Bulk-create or update customers (name, phone, email, price tier, credit terms…). Matched by account number or email — a row that matches only fills in blanks, never erases what\'s on file. You get a preview before anything changes.</small>' +
+      '</div>' +
+    '</details>' +
+    '<details style="border-bottom:1px solid var(--line);background:var(--card-soft)">' +
+      '<summary style="padding:12px 16px;cursor:pointer;font-weight:700;color:var(--heading)">📥 Import invoice payments</summary>' +
+      '<div style="padding:14px 18px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">' +
+        '<label class="btn" style="background:#fef3c7;color:#92400e;cursor:pointer;margin:0">📥 Import payments<input type="file" id="invPayImportInput" accept=".csv,.tsv,.txt,.xlsx,.xlsm" style="display:none"/></label>' +
+        '<a class="btn" href="/api/admin/account-payments/import/template.csv" download style="text-decoration:none;background:var(--card-soft2)">📄 Template</a>' +
+        '<small style="color:var(--muted)">Seed past payments (date, customer account # or email, amount) against a charge customer\'s balance — the bulk version of Record a payment. You get a preview before anything is written.</small>' +
+      '</div>' +
+    '</details>' +
     '<div id="custList"><div class="empty">Loading…</div></div>';
 
   async function load(){
@@ -11536,6 +12188,23 @@ async function renderCustomers(panel){
   document.getElementById('custGo').addEventListener('click', load);
   document.getElementById('custType').addEventListener('change', load);
   document.getElementById('custQ').addEventListener('keydown', function(e){ if (e.key === 'Enter') load(); });
+
+  var invPayImportInput = document.getElementById('invPayImportInput');
+  if (invPayImportInput) invPayImportInput.addEventListener('change', function(){
+    var file = this.files && this.files[0];
+    // Reset immediately: without this, picking the same file again after a
+    // cancel fires no change event and the button looks broken.
+    this.value = '';
+    if (file) startInvoicePaymentsImport(file, load);
+  });
+
+  var custImportInput = document.getElementById('custImportInput');
+  if (custImportInput) custImportInput.addEventListener('change', function(){
+    var file = this.files && this.files[0];
+    this.value = '';
+    if (file) startCustomersImport(file, load);
+  });
+
   await load();
 }
 
@@ -14135,6 +14804,11 @@ async function renderReports(panel){
   REPORT_DEFS.forEach(function(d){ if (d.key === '__overview') return; (groups[d.group] = groups[d.group] || []).push(d); });
 
   panel.innerHTML =
+    '<div style="padding:12px 18px 0;display:flex;gap:10px;flex-wrap:wrap;align-items:center">' +
+      '<label class="btn" style="background:#fef3c7;color:#92400e;cursor:pointer;margin:0">📥 Import sales history<input type="file" id="salesImportInput" accept=".csv,.tsv,.txt,.xlsx,.xlsm" style="display:none"/></label>' +
+      '<a class="btn" href="/api/admin/sales/import/template.csv" download style="text-decoration:none;background:var(--card-soft2)">📄 Template</a>' +
+      '<small style="color:var(--muted)">Seed past sales (date, part, qty, price) so reports and reorder analysis have history to work from. You get a preview before anything is written.</small>' +
+    '</div>' +
     '<div style="display:grid;grid-template-columns:210px 1fr;gap:0;align-items:start">' +
       '<div class="panel" style="margin:16px 0 18px 18px">' +
         '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">📑 Reports</div>' +
@@ -14230,6 +14904,15 @@ async function renderReports(panel){
       run();
     };
   }
+
+  var salesImportInput = document.getElementById('salesImportInput');
+  if (salesImportInput) salesImportInput.addEventListener('change', function(){
+    var file = this.files && this.files[0];
+    // Reset immediately: without this, picking the same file again after a
+    // cancel fires no change event and the button looks broken.
+    this.value = '';
+    if (file) startSalesImport(file, function(){ if (RPT_CURRENT) run(); });
+  });
 
   Array.prototype.forEach.call(panel.querySelectorAll('.rptPick'), function(b){
     b.onclick = function(){
