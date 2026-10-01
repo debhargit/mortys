@@ -4492,14 +4492,46 @@ app.get('/api/products', async (req, res) => {
     // stay on the plain, local-only `query`, on purpose -- see the big
     // comment on queryWithFallback() near the pool setup.
     const q = req.query.compact ? queryWithFallback : query;
+    const isCompact = !!req.query.compact;
     const { where, params } = buildProductWhere(req.query);
     const orderBy = PRODUCT_SORTS[req.query.sort] || PRODUCT_SORTS.name;
     // Hard cap on limit -- an unbounded page size is exactly the kind of
     // request that used to pull the entire catalogue (23k+ cards) into one
     // response and one DOM paint. 200 is generous for a single screen at any
     // of the POS's grid/list/compact densities.
-    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 60));
+    //
+    // ?compact=1 is the exception, and it has to be: shop.html walks the whole
+    // catalogue in pages of 5000 and stops when a page comes back short, so a
+    // 200-row cap here does not merely slow it down -- the second page returns
+    // 200, that reads as "the end", and the storefront silently shows 400 parts
+    // out of 72,888. The Cloudflare side (functions/_routes/storefront.js) has
+    // always allowed 5000 for compact; this matches it rather than leaving the
+    // two runtimes disagreeing about the same endpoint's contract. Compact rows
+    // are small positional arrays, so a 5k page is still a modest response.
+    const maxLimit = isCompact ? 5000 : 200;
+    const limit = Math.min(maxLimit, Math.max(1, parseInt(req.query.limit, 10) || (isCompact ? 1000 : 60)));
     const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+
+    // Positional-array packing for the storefront, byte-compatible with the
+    // Cloudflare route: { cats, rows:[[img,name,make_model,catIdx,condIdx,
+    // price_cents,stock_count,bin], ...] }. This runtime has no alternate
+    // numbers or gallery overrides, so elements 8 (alt) and 9 (thumb) are
+    // simply absent -- shop.html's absorb() already treats both as optional.
+    const packCompact = (rows) => {
+      const catIndex = {};
+      const cats = [];
+      const packed = rows.map((r) => {
+        const cat = r.category || '';
+        if (!(cat in catIndex)) { catIndex[cat] = cats.length; cats.push(cat); }
+        return [
+          r.img, r.name, r.make_model || '', catIndex[cat],
+          String(r.condition || '').toUpperCase() === 'USED' ? 1 : 0,
+          r.price_usd != null ? Math.round(Number(r.price_usd) * 100) : null,
+          r.stock_count, r.bin_location || '',
+        ];
+      });
+      return { cats, rows: packed };
+    };
 
     // The plain "just opened the POS terminal, nothing typed yet" case --
     // no search, no category/condition/stock filter -- is the single most
@@ -4538,6 +4570,10 @@ app.get('/api/products', async (req, res) => {
       // count_mode tells the UI how to phrase this: reltuples is a planner
       // estimate that can land either side of the truth, so "about 25,000" --
       // not "25,000+", which would claim a floor it cannot promise.
+      if (isCompact) {
+        return res.json(Object.assign(packCompact(rows),
+          { total, limit, offset, approximate: true, count_mode: 'estimate', prices_visible: true }));
+      }
       return res.json({ products: rows, total, limit, offset, approximate: true, count_mode: 'estimate' });
     }
 
@@ -4588,6 +4624,10 @@ app.get('/api/products', async (req, res) => {
     // Never report fewer than the page already shows -- at a deep offset the
     // capped count would otherwise be smaller than the rows in hand.
     const total = Math.max(capped ? COUNT_CAP : counted, offset + rows.length);
+    if (isCompact) {
+      return res.json(Object.assign(packCompact(rows),
+        { total, limit, offset, approximate: capped, count_mode: capped ? 'capped' : 'exact', prices_visible: true }));
+    }
     res.json({ products: rows, total, limit, offset, approximate: capped, count_mode: capped ? 'capped' : 'exact' });
   } catch (e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
 });

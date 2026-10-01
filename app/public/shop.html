@@ -4353,7 +4353,16 @@ document.addEventListener('DOMContentLoaded', function(){
         renderCart();
         (function next(){
           pull(loaded, PAGE).then(function(got){
-            if (got >= PAGE) { next(); return; }
+            // Keep going while the server is still handing us rows -- NOT
+            // while it hands us a full PAGE of them. Those are not the same
+            // test, and the difference was a silent catalogue truncation: a
+            // runtime that caps the page size below PAGE (the in-shop
+            // server.js capped compact calls at 200) returns a short page that
+            // is not the last page, "got >= PAGE" reads it as the end, and the
+            // storefront quietly shows 400 parts out of 72,888 with no error.
+            // `loaded` is the next offset either way, so short pages compose
+            // correctly; only an empty one means there is nothing left.
+            if (got > 0) { next(); return; }
             setStat(loaded, true);
             // Re-render once at the end so counts and pagination settle. The
             // shopper keeps their page and filter -- appended rows only ever
