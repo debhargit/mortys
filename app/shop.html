@@ -630,8 +630,45 @@
   .cart-fab .cb.show{display:grid}
   .cart-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:299;display:none}
   .cart-overlay.show{display:block}
-  .cart-panel{position:fixed;top:0;right:-440px;width:400px;max-width:100vw;height:100vh;background:#fff;box-shadow:-20px 0 60px rgba(0,0,0,.18);z-index:300;display:flex;flex-direction:column;transition:right .3s ease}
+  .cart-panel{position:fixed;top:0;right:-440px;width:400px;max-width:100vw;height:100vh;background:#fff;box-shadow:-20px 0 60px rgba(0,0,0,.18);z-index:300;display:flex;flex-direction:column;transition:right .3s ease,width .25s ease}
   .cart-panel.show{right:0}
+  /* The items list must never be squeezed out of an open cart.
+     #cartItems scrolls, so its flex auto-minimum is 0 and it can be crushed to
+     zero height; #cartFoot does not scroll, so it refuses to shrink below its
+     content. A signed-out shopper's foot carries coupon + loyalty + vehicle +
+     shipping + guest contact + four payment methods, which on a phone is taller
+     than the viewport on its own -- and the cart would open showing a checkout
+     form and none of the things being bought. So: give the list a floor, and
+     let the foot scroll instead of pushing. */
+  #cartBody{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+  /* The foot's max-height is what actually guarantees the list its room; the
+     floor here is reinforcement. 28vh + 55vh + the header still fits a 400px
+     landscape phone, which a 30vh floor would overflow by a pixel. */
+  #cartItems{flex:1 1 auto;min-height:28vh;overflow-y:auto}
+  /* border-top and background live here rather than inline so the fullscreen
+     rule below can turn the divider into a left edge -- an inline style would
+     outrank it. */
+  #cartFoot{flex:0 0 auto;max-height:55vh;overflow-y:auto;border-top:1px solid var(--line);background:#fafafa}
+  /* FULLSCREEN -------------------------------------------------------------
+     Same panel, full viewport. Below 900px it stays a single scrolling column
+     (a phone has no second column to give); above it the checkout rail moves
+     beside the list, which is the point of the extra width -- totals and the
+     Checkout button stay in view while a long cart scrolls. */
+  .cart-panel.full{width:100vw;max-width:100vw;box-shadow:none}
+  .cart-panel.full #cartItems{min-height:0}
+  @media (min-width:900px){
+    .cart-panel.full #cartBody{flex-direction:row}
+    .cart-panel.full #cartItems{padding:18px 26px}
+    .cart-panel.full #cartFoot{flex:0 0 420px;width:420px;max-height:none;border-top:0;border-left:1px solid var(--line)}
+    /* A cart row stretched across 1400px reads as a scattering of fragments
+       rather than a list, so the rows keep a comfortable measure and the
+       spare width stays margin. */
+    .cart-panel.full .cart-item,.cart-panel.full .cart-empty{max-width:760px}
+  }
+  .cart-full-btn{background:none;border:0;padding:4px;margin-right:2px;color:#6b7280;cursor:pointer;line-height:0;border-radius:6px}
+  .cart-full-btn:hover{background:#f3f4f6;color:var(--navy)}
+  .cart-full-btn svg{width:18px;height:18px;fill:currentColor;display:block}
+  body[data-theme="dark"] .cart-full-btn:hover{background:#1e3a5f;color:#e5e7eb}
   .cart-head{padding:18px 20px;background:var(--navy);color:#fff;display:flex;justify-content:space-between;align-items:center}
   .cart-head h4{margin:0;font-size:18px}
   .cart-head button{background:transparent;border:none;color:#fff;font-size:24px;cursor:pointer;opacity:.85}
@@ -1256,10 +1293,16 @@ document.addEventListener('DOMContentLoaded', function(){
       + '<aside id="cartPanel" class="cart-panel" aria-label="Shopping cart">'
       +   '<header style="display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--line)">'
       +     '<h3 style="margin:0;font-size:18px;color:var(--navy)">Your Cart <span id="cartBadge" style="background:var(--red);color:#fff;border-radius:10px;padding:2px 8px;font-size:12px;margin-left:6px;display:none">0</span></h3>'
-      +     '<button id="cartClose" type="button" aria-label="Close cart" style="background:none;border:0;font-size:26px;color:#6b7280;cursor:pointer;line-height:1">&times;</button>'
+      +     '<div style="display:flex;align-items:center;gap:2px">'
+      +       '<button id="cartFullscreen" class="cart-full-btn" type="button" aria-pressed="false" aria-label="Expand cart to full screen" title="Full screen (F)">'
+      +         '<svg id="cartFullIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5v2H6v3H4zm11-5h5v5h-2V6h-3V4zM4 15h2v3h3v2H4v-5zm14 3v-3h2v5h-5v-2h3z"/></svg>'
+      +       '</button>'
+      +       '<button id="cartClose" type="button" aria-label="Close cart" style="background:none;border:0;font-size:26px;color:#6b7280;cursor:pointer;line-height:1">&times;</button>'
+      +     '</div>'
       +   '</header>'
-      +   '<div id="cartItems" style="flex:1;overflow-y:auto;padding:14px 18px"></div>'
-      +   '<div id="cartFoot" style="border-top:1px solid var(--line);padding:14px 18px;background:#fafafa">'
+      +   '<div id="cartBody">'
+      +   '<div id="cartItems" style="padding:14px 18px"></div>'
+      +   '<div id="cartFoot" style="padding:14px 18px">'
       +     '<div style="display:flex;gap:6px;margin-bottom:10px">'
       +       '<input id="couponInput" placeholder="Coupon code" style="flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;font-family:inherit"/>'
       +       '<button id="couponApply" type="button" style="background:var(--navy);color:#fff;border:0;border-radius:6px;padding:8px 14px;font-weight:700;cursor:pointer;font-family:inherit;font-size:13px">Apply</button>'
@@ -1371,6 +1414,31 @@ document.addEventListener('DOMContentLoaded', function(){
     window.openCart = function(){ overlay.classList.add('show'); panel.classList.add('show'); };
     window.closeCart = function(){ overlay.classList.remove('show'); panel.classList.remove('show'); };
     fab.addEventListener('click', window.openCart);
+
+    // FULLSCREEN CART -----------------------------------------------------
+    // Sticky across visits: someone who wants the big cart wants it every
+    // time, and re-opening a drawer to re-expand it on every order is the
+    // kind of small friction nobody reports but everybody feels. The icon
+    // swaps to "contract" arrows so the button says which way it goes.
+    var EXPAND_PATH  = 'M4 9V4h5v2H6v3H4zm11-5h5v5h-2V6h-3V4zM4 15h2v3h3v2H4v-5zm14 3v-3h2v5h-5v-2h3z';
+    var COLLAPSE_PATH = 'M9 4h2v5H6V7h3V4zm4 0h2v3h3v2h-5V4zM6 15h5v5H9v-3H6v-2zm7 0h5v2h-3v3h-2v-5z';
+    var fullBtn = document.getElementById('cartFullscreen');
+    var fullIcon = document.getElementById('cartFullIcon');
+    function applyCartFull(on){
+      panel.classList.toggle('full', !!on);
+      if (fullBtn){
+        fullBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        fullBtn.setAttribute('aria-label', on ? 'Exit full screen cart' : 'Expand cart to full screen');
+        fullBtn.title = (on ? 'Exit full screen' : 'Full screen') + ' (F)';
+      }
+      if (fullIcon) fullIcon.firstChild.setAttribute('d', on ? COLLAPSE_PATH : EXPAND_PATH);
+      try { localStorage.setItem('mh_cart_full', on ? '1' : '0'); } catch(e){}
+    }
+    window.toggleCartFull = function(){ applyCartFull(!panel.classList.contains('full')); };
+    var _wantFull = '0';
+    try { _wantFull = localStorage.getItem('mh_cart_full') || '0'; } catch(e){}
+    if (_wantFull === '1') applyCartFull(true);
+    if (fullBtn) fullBtn.addEventListener('click', window.toggleCartFull);
 
     // Scroll buttons
     var topBtn = document.getElementById('scrollTopBtn');
@@ -1590,6 +1658,10 @@ document.addEventListener('DOMContentLoaded', function(){
         window._foxdApi('/api/cart/' + encodeURIComponent(img), { method:'PATCH', body:{ qty: qty } }).catch(function(){});
       }
     }
+  }
+  function cartIsOpen(){
+    var p = document.getElementById('cartPanel');
+    return !!(p && p.classList.contains('show'));
   }
   function openCart(){
     document.getElementById('cartPanel').classList.add('show');
@@ -2545,11 +2617,11 @@ document.addEventListener('DOMContentLoaded', function(){
       kbdOverlay.innerHTML =
         '<div class="kbd-box"><h3>Keyboard shortcuts</h3><table>' +
         '<tr><td><kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>K</kbd></td><td>Focus search</td></tr>' +
-        '<tr><td><kbd>Esc</kbd></td><td>Clear search / close</td></tr>' +
+        '<tr><td><kbd>Esc</kbd></td><td>Close the cart / clear search</td></tr>' +
         '<tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Previous / next page</td></tr>' +
         '<tr><td><kbd>Shift</kbd>+<kbd>←</kbd> / <kbd>→</kbd></td><td>First / last page</td></tr>' +
         '<tr><td><kbd>v</kbd></td><td>Cycle grid → list → compact</td></tr>' +
-        '<tr><td><kbd>f</kbd></td><td>Show / hide filters</td></tr>' +
+        '<tr><td><kbd>f</kbd></td><td>Show / hide filters &mdash; or full screen, with the cart open</td></tr>' +
         '<tr><td><kbd>c</kbd></td><td>Open cart</td></tr>' +
         '<tr><td><kbd>r</kbd></td><td>Reset all filters</td></tr>' +
         '<tr><td><kbd>Enter</kbd> in search</td><td>Add a comma and keep refining</td></tr>' +
@@ -2655,6 +2727,10 @@ document.addEventListener('DOMContentLoaded', function(){
 
     if (e.key === 'Escape'){
       if (kbdOverlay && kbdOverlay.classList.contains('show')){ toggleKbdHelp(false); return; }
+      // Escape closes the cart. It always should have, and fullscreen makes it
+      // matter: a full-viewport panel leaves no overlay to click past, so the
+      // × would otherwise be the only way out.
+      if (cartIsOpen()){ e.preventDefault(); closeCart(); return; }
       if (document.activeElement === searchInput && searchInput.value){
         searchInput.value = ''; currentSearch = ''; currentPage = 1; render(currentFilter); return;
       }
@@ -2712,7 +2788,13 @@ document.addEventListener('DOMContentLoaded', function(){
         setView(order[(order.indexOf(currentView) + 1) % order.length]);
         break;
       }
-      case 'f': case 'F': { var fb = document.getElementById('filterToggleBtn'); if (fb) fb.click(); break; }
+      // f means "filters" on the grid, but the cart covers the grid when it is
+      // open, so there it means the cart's own fullscreen toggle -- same key,
+      // whichever panel the shopper is actually looking at.
+      case 'f': case 'F': {
+        if (cartIsOpen()){ if (window.toggleCartFull) window.toggleCartFull(); break; }
+        var fb = document.getElementById('filterToggleBtn'); if (fb) fb.click(); break;
+      }
       case 'c': case 'C': if (window.openCart) window.openCart(); break;
       case 'r': case 'R': if (fReset) fReset.click(); break;
     }

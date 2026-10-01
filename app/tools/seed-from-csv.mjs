@@ -13,6 +13,7 @@
 //    sales       INVOICE.csv + INVDETAI.csv       -> pos_sales, pos_sale_items
 //    payments    INVPAY.csv / Payments.csv        -> sale_payments, account_payments
 //    rebuild     INVDETAI.csv (headerless invoices) -> pos_sales, pos_sale_items, users
+//    creditnotes CN* invoice numbers               -> negates them in pos_sales
 //    receivals   "ibventory received.csv"         -> warehouse_activity
 //
 //  Re-runnable. Every row this script owns is either keyed (suppliers.name,
@@ -914,6 +915,84 @@ try {
     say(`  payments  : ${out.tenders.length} counter tenders, ${out.settlements.length} account settlements; `
       + `${out.stats.onCredit} sold on credit, ${out.stats.owing} left part-paid, `
       + `${out.stats.noRows} with no payment row; ${out.stats.refunds} refund/credit-note rows noted`);
+  }
+
+  // --------------------------------------------------- 6c. credit notes ----
+  // An invoice number starting "CN" is a credit note, not a sale. The old
+  // export does not say so anywhere in the data -- the rows carry positive
+  // totals, STATUS 'A' and ordinary-looking lines, which is why 13,027 of them
+  // (J$54.8m) landed as revenue. Left alone they overstate sales, overstate tax
+  // collected, and -- worse for the buying reports -- count returned units as
+  // demand, so the reorder and order-quality reports would recommend restocking
+  // things that came back.
+  //
+  // The fix is at the data level, not in the reports: negate the money and the
+  // quantities. Then every existing aggregate nets out correctly on its own,
+  // with no report needing to learn what a "CN" prefix means. Line quantities
+  // are negated too, which is the part that matters for demand.
+  //
+  // Only 1,253 of them (the ones with a header row in INVOICE.csv) name the
+  // invoice they reverse, in CR_NUMBER. The other 11,774 point at themselves,
+  // so their original is not recoverable from this export; they are still
+  // credited, just not linked.
+  if (wants('creditnotes')) {
+    const CN_NOTE = SEED_TAG + ' credit note';
+    const origOf = new Map();                 // CN number -> invoice it reverses
+    for (const r of invoices) {
+      const num = clean(r.INV_NUMBER);
+      if (!/^CN/i.test(num)) continue;
+      const cr = clean(r.CR_NUMBER);
+      if (cr && cr !== num) origOf.set(num, cr);
+    }
+
+    // Idempotent by construction: only rows that still read as a positive sale
+    // are flipped, so a second run is a no-op rather than a double negation.
+    const { rows: pending } = await client.query(
+      `SELECT id, receipt_number FROM pos_sales
+        WHERE receipt_number LIKE 'CN%' AND total_usd > 0`);
+    const ids = pending.map((r) => r.id);
+    let flipped = 0;
+    for (let i = 0; i < ids.length; i += 5000) {
+      const batch = ids.slice(i, i + 5000);
+      const r1 = await client.query(
+        `UPDATE pos_sales
+            SET subtotal_usd = -subtotal_usd, tax_usd = -tax_usd, total_usd = -total_usd,
+                discount_usd = -discount_usd, amount_paid_usd = -amount_paid_usd,
+                balance_due_usd = 0, payment_status = 'paid',
+                notes = $2 || ' — reverses ' || COALESCE(reference, 'an unrecorded invoice')
+          WHERE id = ANY($1::int[])`, [batch, CN_NOTE]);
+      flipped += r1.rowCount;
+      // Quantities as well as money: a credit note's lines are units coming
+      // back, and the demand side of the buying reports reads qty, not value.
+      await client.query(
+        `UPDATE pos_sale_items SET qty = -qty, total_usd = -total_usd
+          WHERE sale_id = ANY($1::int[]) AND qty > 0`, [batch]);
+      // The tender moves with it, or sale_payments stops footing to the sale.
+      await client.query(
+        `UPDATE sale_payments SET amount_usd = -amount_usd
+          WHERE sale_id = ANY($1::int[]) AND amount_usd > 0`, [batch]);
+    }
+
+    // Record which invoice each one reverses, where the file says.
+    const linkRows = [...origOf.entries()];
+    let linked = 0;
+    for (let i = 0; i < linkRows.length; i += 5000) {
+      const s = linkRows.slice(i, i + 5000);
+      const r = await client.query(
+        `UPDATE pos_sales p SET reference = v.orig,
+                notes = $3 || ' — reverses ' || v.orig
+           FROM (SELECT * FROM unnest($1::text[], $2::text[]) AS t(cn, orig)) v
+          WHERE p.receipt_number = v.cn`,
+        [s.map((x) => x[0]), s.map((x) => x[1]), CN_NOTE]);
+      linked += r.rowCount;
+    }
+
+    const { rows: [sum] } = await client.query(
+      `SELECT COUNT(*)::int AS n, COALESCE(SUM(total_usd),0)::float AS value
+         FROM pos_sales WHERE receipt_number LIKE 'CN%'`);
+    say(`credit notes: ${flipped} flipped from sale to credit this run `
+      + `(${sum.n} CN invoices total, J$${Math.round(-sum.value).toLocaleString()} credited back); `
+      + `${linked} linked to the invoice they reverse, ${sum.n - linked} have no recoverable original`);
   }
 
   // ------------------------------------------------------- 7. receivals ----

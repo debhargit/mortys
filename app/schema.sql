@@ -1201,6 +1201,29 @@ CREATE INDEX IF NOT EXISTS idx_wo_parts_product_id ON work_order_parts (product_
 CREATE INDEX IF NOT EXISTS idx_wh_activity_product_id ON warehouse_activity (product_id);
 CREATE INDEX IF NOT EXISTS idx_po_items_product_id ON purchase_order_items (product_id);
 CREATE INDEX IF NOT EXISTS idx_pos_items_product_id ON pos_sale_items (product_id);
+-- pos_sale_items.sale_id had no index, which is the single most expensive
+-- omission in this schema: every lookup of "the lines on this sale" was a
+-- sequential scan. The Orders list felt it worst -- its per-row item_count
+-- subquery turned one page into one scan of this table per sale, measured at
+-- 26.9s against 290k sales / 469k lines, versus 2ms for the same page without
+-- the count. Every sale-detail open, receipt reprint and return paid a smaller
+-- version of the same bill.
+CREATE INDEX IF NOT EXISTS idx_pos_items_sale_id ON pos_sale_items (sale_id);
+-- product_img is how every demand question is asked ("what has this part sold"):
+-- reorder analysis, order-quality scoring and dead-stock all filter on it, and
+-- all three were sequential scans without this.
+CREATE INDEX IF NOT EXISTS idx_pos_items_product_img ON pos_sale_items (product_img);
+-- The supplier report asks six per-supplier questions for every vendor; without
+-- these two it was 4.6s for 192 rows.
+CREATE INDEX IF NOT EXISTS idx_products_supplier_id ON products (supplier_id);
+CREATE INDEX IF NOT EXISTS idx_po_supplier_id ON purchase_orders (supplier_id);
+-- Same omission on the returns side, and on the tender rows the Z report and
+-- every balance calculation join through.
+CREATE INDEX IF NOT EXISTS idx_pos_return_items_sale_item ON pos_sale_return_items (sale_item_id);
+CREATE INDEX IF NOT EXISTS idx_sale_payments_sale_id ON sale_payments (sale_id);
+CREATE INDEX IF NOT EXISTS idx_account_payments_customer ON account_payments (customer_id);
+CREATE INDEX IF NOT EXISTS idx_account_payments_reference ON account_payments (reference);
+CREATE INDEX IF NOT EXISTS idx_warehouse_activity_kind_at ON warehouse_activity (kind, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_stock_items_product_id ON stock_count_items (product_id);
 CREATE INDEX IF NOT EXISTS idx_pr_items_product_id ON parts_requisition_items (product_id);
 
