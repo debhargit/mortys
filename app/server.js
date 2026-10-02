@@ -11443,6 +11443,703 @@ app.get('/api/admin/reports/audit-log', requireAdmin, async (req, res) => {
 });
 
 // =============================================================================
+//  DRILL-DOWN ANALYSIS — supplier, customer, bin
+// =============================================================================
+// The buying advice here is computed from this shop's own history, not sent to a
+// language model. That is deliberate: the admin panel runs on a counter PC that
+// is often offline, the numbers have to be reproducible when someone asks "why
+// does it say order 40", and the arithmetic below -- demand rate, lead-time
+// cover, safety stock, ABC class, trend -- is what actually decides a reorder.
+// Every figure a recommendation rests on is returned alongside it so the
+// reasoning can be checked rather than taken on faith.
+//
+// scoreItems() is shared by the supplier and bin views so a part cannot be
+// called overstocked on one screen and healthy on the next.
+//
+//   rate        units sold per day over the range
+//   lead_demand what sells while a reorder is in transit
+//   safety      half the lead-time demand -- cheap insurance, easy to explain
+//   reorder_at  lead_demand + safety: the level at which to place the order
+//   cover_days  how long the shelf lasts at the current rate
+//   order_qty   enough for 90 days plus safety, less what is already on hand
+//   order_by    the date the order has to be placed to avoid a stockout
+//   trend       second half of the range against the first
+//   abc         A = top 80% of revenue, B = next 15%, C = the tail
+function scoreItems(rows, days, defaultLead) {
+  const span = Math.max(1, days);
+  const ranked = rows.slice().sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
+  const totalRev = ranked.reduce((a, r) => a + (r.revenue || 0), 0);
+  let cum = 0;
+  for (const r of ranked) {
+    cum += r.revenue || 0;
+    const share = totalRev > 0 ? cum / totalRev : 1;
+    r.abc = r.revenue > 0 ? (share <= 0.8 ? 'A' : share <= 0.95 ? 'B' : 'C') : '-';
+  }
+  const today = new Date();
+  for (const r of rows) {
+    const lead = Number(r.lead_time_days) > 0 ? Number(r.lead_time_days) : defaultLead;
+    const rate = (r.sold || 0) / span;
+    r.rate = Math.round(rate * 1000) / 1000;
+    r.lead_demand = Math.ceil(rate * lead);
+    r.safety = Math.ceil(rate * lead * 0.5);
+    r.reorder_at = r.lead_demand + r.safety;
+    r.cover_days = rate > 0 ? Math.round((r.stock / rate) * 10) / 10 : null;
+    r.order_qty = rate > 0 ? Math.max(0, Math.ceil(rate * 90 + r.safety - r.stock)) : 0;
+    r.order_cost = Math.round(r.order_qty * Number(r.cost_usd || 0) * 100) / 100;
+    if (rate > 0) {
+      const slackDays = Math.max(0, Math.floor((r.stock / rate) - lead));
+      const d = new Date(today.getTime() + slackDays * 86400000);
+      r.order_by = d.toISOString().slice(0, 10);
+      r.order_now = slackDays <= 0;
+    } else { r.order_by = null; r.order_now = false; }
+    const a = r.sold_first || 0, b = r.sold_second || 0;
+    r.trend = (a + b) === 0 ? 'no sales'
+      : b > a * 1.25 ? 'rising' : b < a * 0.75 ? 'falling' : 'steady';
+    r.margin = Math.round(((r.revenue || 0) - (r.cogs || 0)) * 100) / 100;
+    r.margin_pct = r.revenue > 0 ? Math.round((r.margin / r.revenue) * 1000) / 10 : null;
+    // The weakness column. Ordered so the most actionable wins.
+    r.flag = (r.sold || 0) === 0 && r.stock > 0 ? 'dead — no sales, cash on the shelf'
+      : r.stock <= 0 && rate > 0 ? 'stocked out while still selling'
+      : r.order_now ? 'below reorder point — order now'
+      : r.cover_days != null && r.cover_days > 365 ? 'over a year of stock'
+      : r.cover_days != null && r.cover_days > 180 ? 'overstocked — 6 months+'
+      : r.margin_pct != null && r.margin_pct < 10 && r.revenue > 0 ? 'thin margin'
+      : r.trend === 'rising' ? 'demand rising — review quantity'
+      : 'healthy';
+  }
+  return rows;
+}
+
+// Per-part sales and receipts over a range, for an optional product filter.
+// `sold_first` / `sold_second` split the range in half so a trend can be read
+// without a second round trip.
+//
+// Written as pre-aggregated CTEs joined once, not as per-row correlated
+// subqueries. The correlated version needed seven lookups for every product it
+// returned and measured 4.5s for one supplier's 500 lines and 5.2s across the
+// catalogue; grouping the sales and receipts once first does the same work in a
+// couple of hash joins. The CTEs scan the range, not the whole history, so they
+// stay small whatever the range is.
+const ITEM_ANALYSIS_SQL = (extraWhere) => `
+  WITH mid AS (SELECT ($1::date + (($2::date - $1::date)/2)) AS d),
+  sales AS (
+    SELECT i.product_img,
+           SUM(i.qty)::int AS sold,
+           SUM(i.total_usd)::float AS revenue,
+           SUM(CASE WHEN ps.created_at::date <= (SELECT d FROM mid) THEN i.qty ELSE 0 END)::int AS sold_first,
+           SUM(CASE WHEN ps.created_at::date >  (SELECT d FROM mid) THEN i.qty ELSE 0 END)::int AS sold_second
+      FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+     WHERE ps.voided = false AND ps.created_at::date BETWEEN $1::date AND $2::date
+     GROUP BY i.product_img),
+  ever_sold AS (
+    SELECT i.product_img, MAX(ps.created_at)::date AS last_sold
+      FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+     WHERE ps.voided = false GROUP BY i.product_img),
+  recv AS (
+    SELECT wa.product_img, SUM(wa.qty_delta)::int AS received
+      FROM warehouse_activity wa
+     WHERE wa.kind = 'receive' AND wa.created_at::date BETWEEN $1::date AND $2::date
+     GROUP BY wa.product_img),
+  ever_recv AS (
+    SELECT wa.product_img, MAX(wa.created_at)::date AS last_received
+      FROM warehouse_activity wa WHERE wa.kind = 'receive' GROUP BY wa.product_img)
+  SELECT pr.img, pr.sku, pr.name, COALESCE(pr.category,'-') AS category,
+         COALESCE(NULLIF(pr.bin_location,''),'(unbinned)') AS bin,
+         pr.stock_count AS stock, pr.cost_usd::float AS cost_usd, pr.price_usd::float AS price_usd,
+         COALESCE(s.name,'-') AS supplier, s.lead_time_days,
+         COALESCE(sa.sold,0) AS sold,
+         COALESCE(sa.revenue,0)::float AS revenue,
+         (COALESCE(sa.sold,0) * COALESCE(pr.cost_usd,0))::float AS cogs,
+         COALESCE(sa.sold_first,0) AS sold_first,
+         COALESCE(sa.sold_second,0) AS sold_second,
+         COALESCE(rc.received,0) AS received,
+         er.last_received::text AS last_received,
+         es.last_sold::text AS last_sold
+    FROM products pr
+    LEFT JOIN suppliers s  ON s.id = pr.supplier_id
+    LEFT JOIN sales sa     ON sa.product_img = pr.img
+    LEFT JOIN ever_sold es ON es.product_img = pr.img
+    LEFT JOIN recv rc      ON rc.product_img = pr.img
+    LEFT JOIN ever_recv er ON er.product_img = pr.img
+   WHERE ${extraWhere}`;
+
+const dayCount = (from, to) =>
+  Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1);
+
+// ---- supplier drill-down ---------------------------------------------------
+app.get('/api/admin/reports/supplier-detail', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const id = parseInt(req.query.supplier_id, 10);
+  const { rows: list } = await query(
+    `SELECT s.id, s.name, (SELECT COUNT(*)::int FROM products pr WHERE pr.supplier_id = s.id) AS skus
+       FROM suppliers s WHERE s.is_active = true ORDER BY skus DESC, s.name ASC`);
+  if (!id) return res.json({ from, to, suppliers: list, supplier: null });
+
+  const sup = (await query('SELECT * FROM suppliers WHERE id = $1', [id])).rows[0];
+  if (!sup) return res.status(404).json({ error: 'That supplier no longer exists.' });
+
+  // No LIMIT: the tiles and the order total have to cover every part this
+  // supplier carries, not the top slice. Scoring a truncated list is how a
+  // supplier with 11,542 SKUs reported 500 of them as its whole book. Only the
+  // display lists are cut down, after the arithmetic.
+  const [items, recv, byDay, byType, unattributed] = await Promise.all([
+    query(ITEM_ANALYSIS_SQL('pr.supplier_id = $3') + ' ORDER BY revenue DESC', [from, to, id]),
+    query(`SELECT wa.created_at::date::text AS day, wa.product_img AS sku,
+                  COALESCE(pr.name, wa.product_img) AS product, wa.qty_delta AS qty, wa.kind AS type,
+                  (wa.meta_json->>'unit_cost_usd')::float AS unit_cost,
+                  COALESCE(NULLIF(wa.meta_json->>'reference',''),
+                           NULLIF(wa.meta_json->>'bill_no',''), '—') AS reference,
+                  (wa.qty_delta * COALESCE((wa.meta_json->>'unit_cost_usd')::float, 0))::float AS line_cost
+             FROM warehouse_activity wa JOIN products pr ON pr.img = wa.product_img
+            WHERE pr.supplier_id = $3 AND wa.created_at::date BETWEEN $1::date AND $2::date
+            ORDER BY wa.created_at DESC LIMIT 400`, [from, to, id]),
+    query(`SELECT wa.created_at::date::text AS day, COUNT(*)::int AS receipts,
+                  COALESCE(SUM(wa.qty_delta),0)::int AS units,
+                  COALESCE(SUM(wa.qty_delta * COALESCE((wa.meta_json->>'unit_cost_usd')::float,0)),0)::float AS cost
+             FROM warehouse_activity wa JOIN products pr ON pr.img = wa.product_img
+            WHERE pr.supplier_id = $3 AND wa.kind = 'receive'
+              AND wa.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY 1`, [from, to, id]),
+    query(`SELECT wa.kind AS type, COUNT(*)::int AS movements,
+                  COALESCE(SUM(wa.qty_delta),0)::int AS units
+             FROM warehouse_activity wa JOIN products pr ON pr.img = wa.product_img
+            WHERE pr.supplier_id = $3 AND wa.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY movements DESC`, [from, to, id]),
+    query(`SELECT COUNT(*)::int AS n FROM warehouse_activity wa
+             LEFT JOIN products pr ON pr.img = wa.product_img
+            WHERE wa.kind = 'receive' AND pr.supplier_id IS NULL`),
+  ]);
+
+  const days = dayCount(from, to);
+  const scored = scoreItems(items.rows, days, Number(sup.lead_time_days) || 7);
+  const sum = (f) => Math.round(scored.reduce((a, r) => a + (f(r) || 0), 0) * 100) / 100;
+  const buy = scored.filter((r) => r.order_qty > 0).sort((a, b) => (b.order_now - a.order_now) || (b.revenue - a.revenue));
+  const totals = {
+    skus: scored.length,
+    stock_units: scored.reduce((a, r) => a + r.stock, 0),
+    stock_cost: sum((r) => r.stock * Number(r.cost_usd || 0)),
+    received_units: scored.reduce((a, r) => a + r.received, 0),
+    sold_units: scored.reduce((a, r) => a + r.sold, 0),
+    revenue: sum((r) => r.revenue), cogs: sum((r) => r.cogs),
+    dead_lines: scored.filter((r) => r.sold === 0 && r.stock > 0).length,
+    dead_cost: sum((r) => (r.sold === 0 && r.stock > 0 ? r.stock * Number(r.cost_usd || 0) : 0)),
+    stockouts: scored.filter((r) => r.stock <= 0 && r.sold > 0).length,
+    order_lines: buy.length, order_cost: sum((r) => (r.order_qty > 0 ? r.order_cost : 0)),
+    order_now_lines: buy.filter((r) => r.order_now).length,
+  };
+  totals.margin = Math.round((totals.revenue - totals.cogs) * 100) / 100;
+  totals.margin_pct = totals.revenue > 0 ? Math.round((totals.margin / totals.revenue) * 1000) / 10 : null;
+  totals.sell_through_pct = totals.received_units > 0
+    ? Math.round((totals.sold_units / totals.received_units) * 1000) / 10 : null;
+
+  // What to say about this supplier, in plain words, from the figures above.
+  const advice = [];
+  if (totals.order_now_lines) advice.push({ kind: 'order', text: totals.order_now_lines + ' line(s) are at or below their reorder point and should go on the next order — ' + totals.order_lines + ' lines in total, about J$' + Math.round(totals.order_cost).toLocaleString() + ' at cost.' });
+  if (totals.stockouts) advice.push({ kind: 'risk', text: totals.stockouts + ' part(s) are out of stock but still selling. Those are lost sales now, not later.' });
+  if (totals.dead_lines) advice.push({ kind: 'cut', text: totals.dead_lines + ' part(s) from this supplier have not sold at all in this range, holding J$' + Math.round(totals.dead_cost).toLocaleString() + ' at cost. Stop reordering these before adding anything new.' });
+  const rising = scored.filter((r) => r.trend === 'rising' && r.sold > 0).length;
+  if (rising) advice.push({ kind: 'order', text: rising + ' part(s) are selling faster in the second half of this range than the first — raise their quantities rather than reordering the same amount.' });
+  const lead = Number(sup.lead_time_days) || 7;
+  advice.push({ kind: 'when', text: 'Lead time on file is ' + lead + ' day(s), so every reorder point below assumes ' + lead + ' days of cover plus half again as safety. Set a real lead time on the supplier record if that is wrong — it moves every date on this page.' });
+  if (totals.margin_pct != null) advice.push({ kind: 'margin', text: 'Parts from this supplier run at ' + totals.margin_pct + '% gross margin over the range. Compare against the Suppliers report before committing to a bigger order.' });
+  if (!recv.rows.length) advice.push({ kind: 'data', text: 'No receipts are recorded against this supplier in this range, so quantities here are inferred from sales alone.' });
+
+  res.json({ from, to, days, suppliers: list,
+    supplier: { id: sup.id, name: sup.name, contact_name: sup.contact_name, phone: sup.phone,
+      email: sup.email, payment_terms: sup.payment_terms, lead_time_days: sup.lead_time_days,
+      account_number: sup.account_number },
+    totals,
+    // Totals above are over all of them; these two lists are trimmed for the
+    // page, and say so.
+    items: scored.slice(0, 400), items_shown: Math.min(400, scored.length), items_total: scored.length,
+    buy_list: buy.slice(0, 200), buy_shown: Math.min(200, buy.length), buy_total: buy.length,
+    receivals: recv.rows, by_day: byDay.rows, by_type: byType.rows, advice,
+    unattributed_receivals: unattributed.rows[0].n });
+});
+
+// ---- customer drill-down: what they buy -----------------------------------
+app.get('/api/admin/reports/customer-items', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const id = parseInt(req.query.customer_id, 10);
+  const { rows: list } = await query(
+    `SELECT u.id, COALESCE(NULLIF(u.name,''), u.email) AS name,
+            COALESCE((SELECT SUM(ps.total_usd) FROM pos_sales ps
+                       WHERE ps.customer_id = u.id AND ps.voided = false),0)::float AS spend
+       FROM users u WHERE u.is_staff = false
+      ORDER BY spend DESC LIMIT 400`);
+  if (!id) return res.json({ from, to, customers: list, customer: null });
+
+  const cust = (await query('SELECT * FROM users WHERE id = $1', [id])).rows[0];
+  if (!cust) return res.status(404).json({ error: 'That customer no longer exists.' });
+  const p = [from, to, id];
+
+  const [items, byMonth, invoices, tiles] = await Promise.all([
+    query(`SELECT i.product_img AS sku, COALESCE(pr.name, i.description) AS product,
+                  COALESCE(pr.category,'-') AS category, COALESCE(s.name,'-') AS supplier,
+                  COUNT(DISTINCT ps.id)::int AS orders,
+                  COALESCE(SUM(i.qty),0)::int AS qty,
+                  COALESCE(SUM(i.total_usd),0)::float AS revenue,
+                  COALESCE(SUM(i.qty * COALESCE(pr.cost_usd,0)),0)::float AS cogs,
+                  MAX(ps.created_at)::date::text AS last_bought,
+                  MIN(ps.created_at)::date::text AS first_bought,
+                  pr.stock_count AS stock_now
+             FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+             LEFT JOIN products pr ON pr.img = i.product_img
+             LEFT JOIN suppliers s ON s.id = pr.supplier_id
+            WHERE ps.voided = false AND ps.customer_id = $3
+              AND ps.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY i.product_img, pr.name, i.description, pr.category, s.name, pr.stock_count
+            ORDER BY revenue DESC LIMIT 400`, p),
+    query(`SELECT to_char(ps.created_at,'YYYY-MM') AS month, COUNT(*)::int AS invoices,
+                  COALESCE(SUM(ps.total_usd),0)::float AS spend
+             FROM pos_sales ps
+            WHERE ps.voided = false AND ps.customer_id = $3
+              AND ps.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY 1`, p),
+    query(`SELECT ps.receipt_number, ps.created_at::date::text AS day, ps.payment_method,
+                  ps.total_usd::float AS total, ps.balance_due_usd::float AS balance
+             FROM pos_sales ps
+            WHERE ps.voided = false AND ps.customer_id = $3
+              AND ps.created_at::date BETWEEN $1::date AND $2::date
+            ORDER BY ps.created_at DESC LIMIT 200`, p),
+    query(`SELECT COUNT(*)::int AS invoices, COALESCE(SUM(total_usd),0)::float AS spend,
+                  MIN(created_at)::date::text AS first_seen, MAX(created_at)::date::text AS last_seen
+             FROM pos_sales WHERE voided = false AND customer_id = $1`, [id]),
+  ]);
+
+  const days = dayCount(from, to);
+  for (const r of items.rows) {
+    r.margin = Math.round((r.revenue - r.cogs) * 100) / 100;
+    r.margin_pct = r.revenue > 0 ? Math.round((r.margin / r.revenue) * 1000) / 10 : null;
+    // How often they come back for it, and therefore when they are next due.
+    const span = r.first_bought && r.last_bought
+      ? Math.max(1, Math.round((Date.parse(r.last_bought) - Date.parse(r.first_bought)) / 86400000)) : null;
+    r.every_days = r.orders > 1 && span ? Math.round(span / (r.orders - 1)) : null;
+    r.due_in_days = r.every_days
+      ? r.every_days - Math.round((Date.now() - Date.parse(r.last_bought)) / 86400000) : null;
+    r.note = r.due_in_days == null ? 'bought once — no pattern yet'
+      : r.due_in_days <= 0 ? 'overdue to reorder — follow up'
+      : r.due_in_days <= 14 ? 'due within ' + r.due_in_days + ' days'
+      : 'next due in about ' + r.due_in_days + ' days';
+    r.can_supply = r.stock_now == null ? 'not stocked' : r.stock_now >= (r.qty / Math.max(1, r.orders)) ? 'in stock' : 'short';
+  }
+  const bal = (await query(
+    `SELECT COALESCE((SELECT SUM(sp.amount_usd) FROM sale_payments sp JOIN pos_sales ps ON ps.id = sp.sale_id
+                       WHERE sp.method = 'account' AND ps.customer_id = $1 AND ps.voided = false),0)::float
+            - COALESCE((SELECT SUM(amount_usd) FROM account_payments WHERE customer_id = $1),0)::float AS balance`,
+    [id])).rows[0];
+
+  const t = tiles.rows[0];
+  const overdue = items.rows.filter((r) => r.due_in_days != null && r.due_in_days <= 0);
+  const soon = items.rows.filter((r) => r.due_in_days != null && r.due_in_days > 0 && r.due_in_days <= 14);
+  const short = items.rows.filter((r) => r.can_supply === 'short');
+  const advice = [];
+  if (overdue.length) advice.push({ kind: 'call', text: overdue.length + ' part(s) are past this customer’s usual reorder interval. Worth a call — the top one is ' + overdue[0].product + ', normally every ' + overdue[0].every_days + ' days.' });
+  if (soon.length) advice.push({ kind: 'when', text: soon.length + ' part(s) fall due within two weeks. Have them on the shelf before they ask.' });
+  if (short.length) advice.push({ kind: 'risk', text: short.length + ' part(s) this customer buys regularly are short or out of stock. They are the lines most likely to send them elsewhere.' });
+  if (bal.balance > 0.005) advice.push({ kind: 'money', text: 'This account owes J$' + Math.round(bal.balance).toLocaleString() + '. Settle or agree terms before taking a large order on credit.' });
+  const topCat = {};
+  for (const r of items.rows) topCat[r.category] = (topCat[r.category] || 0) + r.revenue;
+  const best = Object.entries(topCat).sort((a, b) => b[1] - a[1])[0];
+  if (best) advice.push({ kind: 'sell', text: 'Spend concentrates in ' + best[0] + ' (J$' + Math.round(best[1]).toLocaleString() + '). That is the category to quote first and stock deepest for them.' });
+
+  res.json({ from, to, days, customers: list,
+    customer: { id: cust.id, name: cust.name || cust.email, email: cust.email, phone: cust.phone,
+      account_number: cust.account_number, customer_type: cust.customer_type,
+      payment_terms_days: cust.payment_terms_days },
+    totals: Object.assign({}, t, { balance: Math.round(bal.balance * 100) / 100,
+      lines: items.rows.length,
+      margin: Math.round(items.rows.reduce((a, r) => a + r.margin, 0) * 100) / 100 }),
+    items: items.rows, by_month: byMonth.rows, invoices: invoices.rows, advice });
+});
+
+// ---- bin / location analysis ----------------------------------------------
+// Compares where stock sits against how fast it moves. A fast mover in a far
+// bin costs a walk on every sale; a dead line in a prime bin costs the space.
+app.get('/api/admin/reports/bin-analysis', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const p = [from, to];
+  const [bins, items, unbinned, spread] = await Promise.all([
+    // Same pre-aggregate-once shape as ITEM_ANALYSIS_SQL: the correlated
+            // version of this measured 7.8s because it ran one sales lookup for
+            // every one of 41k active products.
+    query(`WITH sales AS (
+             SELECT i.product_img, SUM(i.qty)::int AS sold
+               FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+              WHERE ps.voided = false AND ps.created_at::date BETWEEN $1::date AND $2::date
+              GROUP BY i.product_img)
+           SELECT COALESCE(NULLIF(pr.bin_location,''),'(unbinned)') AS bin,
+                  COUNT(*)::int AS skus, COALESCE(SUM(pr.stock_count),0)::int AS units,
+                  COALESCE(SUM(pr.stock_count * COALESCE(pr.cost_usd,0)),0)::float AS stock_cost,
+                  COALESCE(SUM(sa.sold),0)::int AS sold,
+                  COUNT(*) FILTER (WHERE pr.stock_count <= 0)::int AS empty_lines
+             FROM products pr LEFT JOIN sales sa ON sa.product_img = pr.img
+            WHERE pr.is_active = true
+            GROUP BY 1 ORDER BY stock_cost DESC LIMIT 80`, p),
+    query(ITEM_ANALYSIS_SQL('pr.is_active = true AND pr.stock_count > 0')
+      + ' ORDER BY revenue DESC LIMIT 300', p),
+    query(`SELECT COUNT(*)::int AS skus, COALESCE(SUM(stock_count),0)::int AS units,
+                  COALESCE(SUM(stock_count * COALESCE(cost_usd,0)),0)::float AS stock_cost,
+                  -- The true bin count, because the bins list below is capped at
+                  -- 80 and "bins in use: 80" would be a cap, not a fact.
+                  (SELECT COUNT(DISTINCT bin_location)::int FROM products
+                    WHERE is_active = true AND bin_location IS NOT NULL AND bin_location <> '') AS bins_total
+             FROM products WHERE is_active = true AND (bin_location IS NULL OR bin_location = '')`),
+    query(`SELECT pr.sku, pr.name, COUNT(DISTINCT pr.bin_location)::int AS bins
+             FROM products pr WHERE pr.is_active = true AND pr.bin_location IS NOT NULL
+            GROUP BY pr.sku, pr.name HAVING COUNT(DISTINCT pr.bin_location) > 1
+            ORDER BY bins DESC LIMIT 50`),
+  ]);
+  const days = dayCount(from, to);
+  const scored = scoreItems(items.rows, days, 7);
+  for (const b of bins.rows) {
+    b.turns = b.stock_cost > 0 && b.sold > 0 ? Math.round((b.sold / Math.max(1, b.units)) * 100) / 100 : 0;
+    b.dead = b.sold === 0;
+  }
+  const fastFar = scored.filter((r) => r.abc === 'A' && r.bin === '(unbinned)').slice(0, 50);
+  const deadPrime = bins.rows.filter((b) => b.dead && b.stock_cost > 0).slice(0, 50);
+  const advice = [];
+  if (unbinned.rows[0].skus) advice.push({ kind: 'risk', text: unbinned.rows[0].skus.toLocaleString() + ' stocked part(s) have no bin at all, holding J$' + Math.round(unbinned.rows[0].stock_cost).toLocaleString() + ' at cost. Nobody can pick what nobody can find — bin these first.' });
+  if (fastFar.length) advice.push({ kind: 'move', text: fastFar.length + ' of your A-class (top 80% of revenue) parts have no bin recorded. These are the ones picked most often, so they are the ones worth binning first.' });
+  if (deadPrime.length) advice.push({ kind: 'cut', text: deadPrime.length + ' bin(s) hold stock that did not sell at all in this range. That is shelf space earning nothing.' });
+  if (spread.rows.length) advice.push({ kind: 'tidy', text: spread.rows.length + ' part number(s) appear in more than one bin. Pickers will find one and assume that is all of it, so counts drift.' });
+  res.json({ from, to, days, bins: bins.rows, items: scored,
+    unbinned: unbinned.rows[0], split_across_bins: spread.rows,
+    fast_unbinned: fastFar, dead_bins: deadPrime, advice });
+});
+
+// =============================================================================
+//  RANKING, TURNOVER AND BATCH REPORTS
+// =============================================================================
+// "Best selling item" and "best selling item by customer / supplier / rep / bin"
+// are the same question asked down a different column, so they are one endpoint
+// with a dimension rather than five near-identical reports. Same for the
+// profitability pair. `by=overall` gives the plain item ranking; any other
+// dimension gives each group's own top sellers, which is what "by customer"
+// actually means in a shop -- not a filter, a per-customer answer.
+const RANK_DIMS = {
+  overall:  { sql: "'All sales'",                                              label: 'Overall' },
+  customer: { sql: "COALESCE(NULLIF(ps.customer_name,''),'Walk-in')",          label: 'Customer' },
+  supplier: { sql: "COALESCE(s.name,'(no supplier)')",                         label: 'Supplier' },
+  rep:      { sql: "COALESCE(NULLIF(ps.sales_rep_name,''), NULLIF(ps.cashier_name,''),'(no rep)')", label: 'Sales rep' },
+  bin:      { sql: "COALESCE(NULLIF(pr.bin_location,''),'(unbinned)')",        label: 'Bin' },
+  location: { sql: "COALESCE(NULLIF(pr.location,''),'(no location)')",         label: 'Location' },
+};
+// Credit notes carry negative qty and value, so they net out of every ranking
+// here on their own -- a part that was sold and returned does not rank.
+function rankingSql(dimSql, metric, perGroup) {
+  // The window's ORDER BY cannot name `profit`: it is an alias defined in the
+  // same SELECT list, and Postgres resolves window ordering before those exist.
+  // Rank on the expression instead.
+  const rankBy = metric === 'profit' ? '(revenue - cogs)' : metric;
+  return `
+    WITH base AS (
+      SELECT ${dimSql} AS dim, i.product_img AS sku,
+             COALESCE(pr.name, i.description) AS product,
+             COALESCE(pr.category,'-') AS category,
+             COALESCE(s.name,'(no supplier)') AS supplier,
+             COALESCE(NULLIF(pr.bin_location,''),'(unbinned)') AS bin,
+             SUM(i.qty)::int AS units,
+             SUM(i.total_usd)::float AS revenue,
+             (SUM(i.qty) * COALESCE(pr.cost_usd,0))::float AS cogs,
+             COUNT(DISTINCT ps.id)::int AS tickets,
+             MAX(ps.created_at)::date::text AS last_sold
+        FROM pos_sale_items i
+        JOIN pos_sales ps ON ps.id = i.sale_id
+        LEFT JOIN products pr ON pr.img = i.product_img
+        LEFT JOIN suppliers s ON s.id = pr.supplier_id
+       WHERE ps.voided = false AND ps.created_at::date BETWEEN $1::date AND $2::date
+       GROUP BY 1, 2, 3, 4, 5, 6, pr.cost_usd),
+    scored AS (
+      SELECT *, (revenue - cogs) AS profit,
+             CASE WHEN revenue > 0 THEN round(((revenue - cogs) / revenue * 100)::numeric, 1) END AS margin_pct,
+             -- 15,717 active parts carry no cost price, which computes as 100%
+             -- margin. Say so per line instead of reporting a fiction.
+             (cogs > 0) AS cost_known,
+             ROW_NUMBER() OVER (PARTITION BY dim ORDER BY ${rankBy} DESC) AS rn,
+             -- Group totals, so the breakdown leads with the biggest groups
+             -- rather than sorting junk customer names to the top alphabetically.
+             SUM(units) OVER (PARTITION BY dim) AS dim_units,
+             SUM(revenue - cogs) OVER (PARTITION BY dim) AS dim_profit
+        FROM base WHERE units > 0)
+    SELECT * FROM scored WHERE rn <= ${perGroup}
+     ORDER BY ${metric === 'profit' ? 'dim_profit' : 'dim_units'} DESC, dim ASC, rn ASC LIMIT 1200`;
+}
+
+async function rankingReport(req, res, metric) {
+  const { from, to } = reportRange(req);
+  const key = RANK_DIMS[req.query.by] ? req.query.by : 'overall';
+  const dim = RANK_DIMS[key];
+  const perGroup = key === 'overall' ? 200 : 3;
+  const [rows, groups, recv] = await Promise.all([
+    query(rankingSql(dim.sql, metric, perGroup), [from, to]),
+    query(`SELECT ${dim.sql} AS dim, COUNT(DISTINCT ps.id)::int AS tickets,
+                  SUM(i.qty)::int AS units, SUM(i.total_usd)::float AS revenue,
+                  SUM(i.qty * COALESCE(pr.cost_usd,0))::float AS cogs
+             FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+             LEFT JOIN products pr ON pr.img = i.product_img
+             LEFT JOIN suppliers s ON s.id = pr.supplier_id
+            WHERE ps.voided = false AND ps.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY ${metric === 'profit' ? '(SUM(i.total_usd) - SUM(i.qty * COALESCE(pr.cost_usd,0)))' : metric} DESC
+            LIMIT 300`, [from, to]),
+    // What each part cost to bring in over the range -- the "based on order from
+    // receival" side, so a profitable line can be read against what was bought.
+    query(`SELECT wa.product_img AS sku, SUM(wa.qty_delta)::int AS received,
+                  SUM(wa.qty_delta * COALESCE((wa.meta_json->>'unit_cost_usd')::float,0))::float AS received_cost
+             FROM warehouse_activity wa
+            WHERE wa.kind = 'receive' AND wa.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1`, [from, to]),
+  ]);
+  const recvBy = new Map(recv.rows.map((r) => [r.sku, r]));
+  for (const r of rows.rows) {
+    const rc = recvBy.get(r.sku);
+    r.received = rc ? rc.received : 0;
+    r.received_cost = rc ? Math.round(rc.received_cost * 100) / 100 : 0;
+    r.profit = Math.round(r.profit * 100) / 100;
+    r.sell_through_pct = r.received > 0 ? Math.round((r.units / r.received) * 1000) / 10 : null;
+    r.profit_per_unit = r.units > 0 ? Math.round((r.profit / r.units) * 100) / 100 : null;
+  }
+  for (const g of groups.rows) {
+    g.profit = Math.round((g.revenue - g.cogs) * 100) / 100;
+    g.margin_pct = g.revenue > 0 ? Math.round((g.profit / g.revenue) * 1000) / 10 : null;
+  }
+  const totals = {
+    units: groups.rows.reduce((a, g) => a + g.units, 0),
+    revenue: Math.round(groups.rows.reduce((a, g) => a + g.revenue, 0) * 100) / 100,
+    profit: Math.round(groups.rows.reduce((a, g) => a + g.profit, 0) * 100) / 100,
+    groups: groups.rows.length, lines: rows.rows.length,
+  };
+  totals.margin_pct = totals.revenue > 0 ? Math.round((totals.profit / totals.revenue) * 1000) / 10 : null;
+  totals.lines_no_cost = rows.rows.filter((r) => !r.cost_known).length;
+  // Margin is only as good as the cost prices behind it, and this catalogue is
+  // missing a lot of them. Quantify it rather than let a 100% margin stand.
+  const cov = (await query(
+    `SELECT COUNT(*) FILTER (WHERE COALESCE(pr.cost_usd,0) = 0)::int AS no_cost,
+            COUNT(*)::int AS total
+       FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+       LEFT JOIN products pr ON pr.img = i.product_img
+      WHERE ps.voided = false AND ps.created_at::date BETWEEN $1::date AND $2::date`,
+    [from, to])).rows[0];
+  const advice = [];
+  if (cov.no_cost) {
+    advice.push({ kind: 'data', text: cov.no_cost.toLocaleString() + ' of ' + cov.total.toLocaleString() +
+      ' sold lines in this range have no cost price on the part, so their cost counts as zero and they show a 100% margin. ' +
+      'Profit rankings favour them unfairly until those costs are filled in — the Margin % column reads “no cost” where that applies.' });
+  }
+  advice.push({ kind: 'margin', text: metric === 'profit'
+    ? 'Ranked on gross profit (revenue less quantity × the part’s current cost), not revenue. A part can top revenue and still rank low here.'
+    : 'Ranked on units sold. Revenue and profit are shown alongside so a high-volume, low-margin line is visible as such.' });
+  res.json({ from, to, by: key, by_label: dim.label, per_group: perGroup, metric,
+    dims: Object.keys(RANK_DIMS).map((k) => ({ key: k, label: RANK_DIMS[k].label })),
+    totals, rows: rows.rows, groups: groups.rows, advice });
+}
+
+app.get('/api/admin/reports/best-sellers', requireAdmin, (req, res) => rankingReport(req, res, 'units'));
+app.get('/api/admin/reports/most-profitable', requireAdmin, (req, res) => rankingReport(req, res, 'profit'));
+
+// ---- inventory turnover ----------------------------------------------------
+// turns = cost of goods sold in the range / inventory held at cost, annualised
+// to the range so a 30-day window and a 12-month one are comparable. DSI is the
+// days of sales the shelf represents.
+//
+// The honest limit: this schema keeps no historical stock snapshots, so the
+// denominator is inventory as it stands TODAY, not the average over the range.
+// On a shop whose stock level is roughly stable that is close; right after a big
+// delivery or a clear-out it will read low or high, and the report says so
+// rather than implying a precision it does not have.
+app.get('/api/admin/reports/inventory-turnover', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const p = [from, to];
+  const days = dayCount(from, to);
+  const annualise = 365 / days;
+  const shape = (rows) => {
+    for (const r of rows) {
+      r.turns = r.stock_cost > 0 ? Math.round((r.cogs / r.stock_cost) * annualise * 100) / 100 : null;
+      r.dsi = r.turns > 0 ? Math.round(365 / r.turns) : null;
+      r.verdict = r.cogs <= 0 ? 'not selling'
+        : r.turns == null ? 'no stock held'
+        : r.turns >= 6 ? 'fast — keep stocked'
+        : r.turns >= 2 ? 'healthy'
+        : r.turns >= 0.5 ? 'slow — order less'
+        : 'very slow — stop reordering';
+    }
+    return rows;
+  };
+  const COGS_CTE = `WITH cogs AS (
+      SELECT i.product_img, SUM(i.qty * COALESCE(pr.cost_usd,0))::float AS cogs,
+             SUM(i.total_usd)::float AS revenue, SUM(i.qty)::int AS units
+        FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+        LEFT JOIN products pr ON pr.img = i.product_img
+       WHERE ps.voided = false AND ps.created_at::date BETWEEN $1::date AND $2::date
+       GROUP BY i.product_img)`;
+  const [overall, byCategory, bySupplier, byBin, items] = await Promise.all([
+    query(`${COGS_CTE}
+           SELECT COALESCE(SUM(c.cogs),0)::float AS cogs, COALESCE(SUM(c.revenue),0)::float AS revenue,
+                  (SELECT COALESCE(SUM(stock_count * COALESCE(cost_usd,0)),0)::float
+                     FROM products WHERE is_active = true) AS stock_cost
+             FROM cogs c`, p),
+    query(`${COGS_CTE}
+           SELECT COALESCE(pr.category,'-') AS category,
+                  COALESCE(SUM(c.cogs),0)::float AS cogs,
+                  COALESCE(SUM(c.revenue),0)::float AS revenue,
+                  COALESCE(SUM(pr.stock_count * COALESCE(pr.cost_usd,0)),0)::float AS stock_cost
+             FROM products pr LEFT JOIN cogs c ON c.product_img = pr.img
+            WHERE pr.is_active = true GROUP BY 1 ORDER BY cogs DESC`, p),
+    query(`${COGS_CTE}
+           SELECT COALESCE(s.name,'(no supplier)') AS supplier,
+                  COALESCE(SUM(c.cogs),0)::float AS cogs,
+                  COALESCE(SUM(c.revenue),0)::float AS revenue,
+                  COALESCE(SUM(pr.stock_count * COALESCE(pr.cost_usd,0)),0)::float AS stock_cost
+             FROM products pr LEFT JOIN suppliers s ON s.id = pr.supplier_id
+             LEFT JOIN cogs c ON c.product_img = pr.img
+            WHERE pr.is_active = true GROUP BY 1 ORDER BY cogs DESC LIMIT 60`, p),
+    query(`${COGS_CTE}
+           SELECT COALESCE(NULLIF(pr.bin_location,''),'(unbinned)') AS bin,
+                  COALESCE(SUM(c.cogs),0)::float AS cogs,
+                  COALESCE(SUM(c.revenue),0)::float AS revenue,
+                  COALESCE(SUM(pr.stock_count * COALESCE(pr.cost_usd,0)),0)::float AS stock_cost
+             FROM products pr LEFT JOIN cogs c ON c.product_img = pr.img
+            WHERE pr.is_active = true GROUP BY 1 ORDER BY stock_cost DESC LIMIT 60`, p),
+    query(`${COGS_CTE}
+           SELECT pr.sku, pr.name, COALESCE(pr.category,'-') AS category,
+                  COALESCE(NULLIF(pr.bin_location,''),'(unbinned)') AS bin,
+                  pr.stock_count AS stock,
+                  COALESCE(c.units,0) AS units, COALESCE(c.cogs,0)::float AS cogs,
+                  COALESCE(c.revenue,0)::float AS revenue,
+                  (pr.stock_count * COALESCE(pr.cost_usd,0))::float AS stock_cost
+             FROM products pr LEFT JOIN cogs c ON c.product_img = pr.img
+            WHERE pr.is_active = true AND pr.stock_count > 0
+            ORDER BY stock_cost DESC LIMIT 300`, p),
+  ]);
+  const o = shape(overall.rows)[0];
+  const slow = shape(items.rows).filter((r) => r.turns != null && r.turns < 0.5).length;
+  const cov = (await query(
+    `SELECT COUNT(*) FILTER (WHERE COALESCE(cost_usd,0) = 0)::int AS no_cost, COUNT(*)::int AS total
+       FROM products WHERE is_active = true`)).rows[0];
+  const advice = [];
+  advice.push({ kind: 'data', text: 'Turns are annualised from a ' + days + '-day range, against inventory as it stands today — this schema keeps no historical stock snapshots, so read it as an indication rather than an audited figure.' });
+  if (cov.no_cost) {
+    advice.push({ kind: 'data', text: cov.no_cost.toLocaleString() + ' of ' + cov.total.toLocaleString() +
+      ' active parts have no cost price. Those contribute nothing to COGS but their stock still counts in the denominator, so every turns figure below is understated — the gap, not the trading, is what makes the shop-wide number look stalled.' });
+  }
+  if (o.turns != null) advice.push({ kind: 'margin', text: 'The shop as a whole turns its stock ' + o.turns + ' times a year, which is about ' + (o.dsi || '—') + ' days of inventory. Under 2 is slow for fast-moving parts.' });
+  if (slow) advice.push({ kind: 'cut', text: slow + ' of the ' + items.rows.length + ' highest-value lines turn less than half a time a year. Those are the first candidates to stop reordering.' });
+  res.json({ from, to, days, totals: o, by_category: shape(byCategory.rows),
+    by_supplier: shape(bySupplier.rows), by_bin: shape(byBin.rows), items: items.rows, advice });
+});
+
+// ---- best receival batch ---------------------------------------------------
+// A "batch" is a day's receiving from one supplier. The source export carried no
+// bill or order number (every reference field is blank), so the day is the only
+// grouping the data actually supports -- naming it a batch rather than a PO is
+// the honest description of what is being measured.
+//
+// Scored on what happened in the 90 days after it landed: how much of it sold,
+// what it earned, and how long it took. profit_per_day is the one that ranks
+// them, because a batch that earns the same money in a third of the time tied up
+// a third of the cash.
+app.get('/api/admin/reports/receival-batches', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const p = [from, to];
+  const { rows } = await query(
+    `WITH recv AS (
+       SELECT wa.created_at::date AS day, wa.product_img,
+              COALESCE(s.name,'(no supplier)') AS supplier,
+              SUM(wa.qty_delta)::int AS qty,
+              SUM(wa.qty_delta * COALESCE((wa.meta_json->>'unit_cost_usd')::float,0))::float AS cost
+         FROM warehouse_activity wa
+         LEFT JOIN products pr ON pr.img = wa.product_img
+         LEFT JOIN suppliers s ON s.id = pr.supplier_id
+        WHERE wa.kind = 'receive' AND wa.created_at::date BETWEEN $1::date AND $2::date
+        GROUP BY 1, 2, 3 HAVING SUM(wa.qty_delta) > 0),
+     -- Bound the sale lines once, to the only window any batch can draw on
+     -- (the earliest receipt through 90 days past the latest). Without this the
+     -- planner re-walks pos_sale_items for every batch and the query took 3.8s.
+     win AS (
+       SELECT i.product_img, i.qty, i.total_usd, ps.created_at::date AS d
+         FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+        WHERE ps.voided = false
+          AND ps.created_at::date BETWEEN $1::date AND ($2::date + 90)),
+     sold AS (
+       SELECT r.day, r.supplier, SUM(w.qty)::int AS sold,
+              SUM(w.total_usd)::float AS revenue,
+              SUM(w.qty * COALESCE(pr.cost_usd,0))::float AS cogs,
+              MIN((w.d - r.day))::int AS first_sale_days,
+              MAX((w.d - r.day))::int AS last_sale_days
+         FROM recv r
+         JOIN win w ON w.product_img = r.product_img
+          AND w.d >= r.day AND w.d <= r.day + 90
+         LEFT JOIN products pr ON pr.img = r.product_img
+        GROUP BY 1, 2)
+     SELECT b.day::text AS day, b.supplier, b.lines, b.units_in, b.cost_in,
+            COALESCE(sd.sold,0) AS sold, COALESCE(sd.revenue,0)::float AS revenue,
+            COALESCE(sd.cogs,0)::float AS cogs,
+            sd.first_sale_days, sd.last_sale_days
+       FROM (SELECT day, supplier, COUNT(*)::int AS lines,
+                    SUM(qty)::int AS units_in, SUM(cost)::float AS cost_in
+               FROM recv GROUP BY day, supplier) b
+       LEFT JOIN sold sd ON sd.day = b.day AND sd.supplier = b.supplier
+      ORDER BY b.day DESC LIMIT 400`, p);
+
+  const rnd = (n) => Math.round(n * 100) / 100;
+  for (const r of rows) {
+    r.profit = rnd(r.revenue - r.cogs);
+    r.margin_pct = r.revenue > 0 ? Math.round((r.profit / r.revenue) * 1000) / 10 : null;
+    r.sell_through_pct = r.units_in > 0 ? Math.round((r.sold / r.units_in) * 1000) / 10 : null;
+    // Days of shelf time actually used: how long it took to shift what shifted.
+    r.days_to_sell = r.sold > 0 ? (r.last_sale_days || 0) + 1 : null;
+    // Pace: at the rate it sold, how long the whole batch would take to clear.
+    r.est_clear_days = r.sold > 0 && r.days_to_sell
+      ? Math.round((r.units_in / (r.sold / r.days_to_sell)) * 10) / 10 : null;
+    r.profit_per_day = r.days_to_sell ? rnd(r.profit / r.days_to_sell) : null;
+    r.verdict = r.sold === 0 ? 'never sold — dead buy'
+      : r.sell_through_pct >= 90 ? 'cleared — buy more next time'
+      : r.sell_through_pct >= 50 ? 'good'
+      : r.sell_through_pct >= 20 ? 'slow — order less'
+      : 'mostly unsold — stop';
+  }
+  const scored = rows.filter((r) => r.sold > 0);
+  const best = scored.slice().sort((a, b) => (b.profit_per_day || 0) - (a.profit_per_day || 0));
+  const worst = rows.slice().sort((a, b) => (a.sell_through_pct || 0) - (b.sell_through_pct || 0));
+  const totals = {
+    batches: rows.length, units_in: rows.reduce((a, r) => a + r.units_in, 0),
+    cost_in: rnd(rows.reduce((a, r) => a + r.cost_in, 0)),
+    sold: rows.reduce((a, r) => a + r.sold, 0),
+    revenue: rnd(rows.reduce((a, r) => a + r.revenue, 0)),
+    profit: rnd(rows.reduce((a, r) => a + r.profit, 0)),
+    dead_batches: rows.filter((r) => r.sold === 0).length,
+    avg_days_to_sell: scored.length
+      ? Math.round(scored.reduce((a, r) => a + (r.days_to_sell || 0), 0) / scored.length) : null,
+  };
+  totals.sell_through_pct = totals.units_in > 0
+    ? Math.round((totals.sold / totals.units_in) * 1000) / 10 : null;
+  // The imported receival cost is a placeholder on almost every row (LCOST was
+  // 1.00 in the source export), which makes "cost in" and anything derived from
+  // it arithmetic on a constant. Measure how bad it is and say so, rather than
+  // presenting J$13,797 of cost that is really just 13,797 units.
+  const ph = (await query(
+    `SELECT COUNT(*) FILTER (WHERE (meta_json->>'unit_cost_usd')::float = 1)::int AS placeholder,
+            COUNT(*)::int AS total
+       FROM warehouse_activity
+      WHERE kind = 'receive' AND created_at::date BETWEEN $1::date AND $2::date`, p)).rows[0];
+  const advice = [];
+  advice.push({ kind: 'data', text: 'A batch here is one day’s receiving from one supplier — the export carried no bill or order number, so that is the finest grouping the data supports. Each is measured over the 90 days after it landed.' });
+  if (ph.placeholder) {
+    const pct = Math.round((ph.placeholder / Math.max(1, ph.total)) * 100);
+    advice.push({ kind: 'data', text: 'Unit cost reads exactly 1.00 on ' + pct + '% of receipts in this range (' +
+      ph.placeholder.toLocaleString() + ' of ' + ph.total.toLocaleString() + ') — a placeholder in the imported history, not a real price. ' +
+      'Treat “Cost in” and “Profit / day” as rankings, not money, until purchase costs are recorded.' });
+  }
+  if (totals.sell_through_pct != null && totals.sell_through_pct > 100) {
+    advice.push({ kind: 'data', text: 'Sell-through above 100% is expected here: sales in the 90-day window include stock that was already on the shelf when the delivery landed, not only the units it brought. Read it as “this part moved faster than this delivery supplied”.' });
+  }
+  if (best.length) advice.push({ kind: 'order', text: 'Best batch by profit per day on the shelf: ' + best[0].supplier + ' on ' + best[0].day + ' — J$' + Math.round(best[0].profit).toLocaleString() + ' profit in ' + best[0].days_to_sell + ' days. Repeat that shape of order.' });
+  if (totals.dead_batches) advice.push({ kind: 'cut', text: totals.dead_batches + ' batch(es) sold nothing at all in their first 90 days. Those suppliers and dates are worth reviewing before the next order.' });
+  if (totals.avg_days_to_sell) advice.push({ kind: 'when', text: 'Typical batch takes about ' + totals.avg_days_to_sell + ' days to shift what it shifts. Order cycles shorter than that will stack stock faster than it leaves.' });
+  res.json({ from, to, totals, batches: rows, best: best.slice(0, 40), worst: worst.slice(0, 40), advice });
+});
+
+// =============================================================================
 //  LAST ROUTES — nothing routable may be registered below this point
 // =============================================================================
 // Express matches in registration order, so these two have to come after every

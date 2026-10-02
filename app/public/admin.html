@@ -172,11 +172,24 @@
   }
 
   .tiles{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:24px}
-  @media(max-width:900px){.tiles{grid-template-columns:repeat(3,1fr)}}
-  @media(max-width:540px){.tiles{grid-template-columns:repeat(2,1fr)}}
-  .tile{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+  /* !important because every report renderer sets grid-template-columns inline,
+     and an inline style outranks a media query -- so these breakpoints never
+     fired on a report and the tiles just got squeezed. auto-fit rather than a
+     fixed count, because the inline count is not knowable from here: it packs as
+     many >=168px tiles as fit and drops a column when they no longer do. */
+  @media(max-width:1180px){.tiles{grid-template-columns:repeat(auto-fit,minmax(168px,1fr))!important}}
+  @media(max-width:540px){.tiles{grid-template-columns:repeat(2,1fr)!important}}
+  .tile{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
   .tile .lbl{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700}
-  .tile .val{font-size:28px;font-weight:900;color:var(--heading);line-height:1;margin-top:6px}
+  /* A stock valuation reads J$494,120,980.09 -- sixteen characters, which at
+     28px/900 needs about 280px and does not fit a quarter-width tile. It used to
+     overflow, and on the last tile of a row that means running off the edge of
+     the panel: the figure was rendered but not visible. The size steps down with
+     the length of the value instead, which holds at any panel width. */
+  .tile .val{font-size:28px;font-weight:900;color:var(--heading);line-height:1.05;margin-top:6px;
+             overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+  .tile .val.v-long{font-size:21px}
+  .tile .val.v-xlong{font-size:17px;letter-spacing:-.2px}
   /* A tile that has details behind it says so, and acts like it. A plain .tile
      is still inert -- only ones given a target become clickable. */
   .tile-link{cursor:pointer;transition:border-color .15s,box-shadow .15s}
@@ -673,8 +686,12 @@ function tile(lbl, val, cls, target){
     ? ' data-tile-target="' + target + '" role="button" tabindex="0" aria-label="' +
       String(lbl).replace(/<[^>]*>/g, '') + ' — show details"'
     : '';
+  // Size the figure to its own length. Measured on the text, not the markup, so
+  // a value carrying a <span> is not judged by its tags.
+  var plain = String(val == null ? '' : val).replace(/<[^>]*>/g, '').trim();
+  var size = plain.length >= 14 ? ' v-xlong' : plain.length >= 11 ? ' v-long' : '';
   return '<div class="tile ' + (cls || '') + (target ? ' tile-link' : '') + '"' + link + '>' +
-    '<div class="lbl">' + lbl + '</div><div class="val">' + val + '</div></div>';
+    '<div class="lbl">' + lbl + '</div><div class="val' + size + '">' + val + '</div></div>';
 }
 
 // One delegated handler for every clickable tile, anywhere in the panel. Tiles
@@ -14813,6 +14830,13 @@ var REPORT_DEFS = [
   { key:'receivals',   label:'📦 Goods Received',        group:'Operations',blurb:'What came in: by day, part and supplier, with PO receipts.' },
   { key:'reorder',     label:'🛒 Reorder / Purchasing',  group:'Operations',blurb:'What to buy now, with suggested quantity and supplier.' },
   { key:'order-quality',label:'🎯 Was It a Good Order?',  group:'Operations',blurb:'Scores past buys against what actually sold, and sizes a better one.' },
+  { key:'best-sellers', label:'🏆 Best Sellers',          group:'Ranking',   blurb:'Top items by units — overall or per customer, supplier, rep, bin.' },
+  { key:'most-profitable',label:'💹 Most Profitable',      group:'Ranking',   blurb:'Top items by gross profit, against what they cost to bring in.' },
+  { key:'inventory-turnover',label:'🔄 Inventory Turnover',group:'Ranking',   blurb:'Turns and days of stock, by category, supplier and bin.' },
+  { key:'receival-batches',label:'📦 Best Receival Batch', group:'Ranking',   blurb:'Each delivery scored on what it sold, earned and how fast.' },
+  { key:'supplier-detail',label:'🔎 Supplier Deep Dive',  group:'Analysis',  blurb:'Pick a supplier: every item, receival and what to order next.' },
+  { key:'customer-items',label:'🔎 Customer Deep Dive',   group:'Analysis',  blurb:'Pick a customer: what they buy, how often, what is due.' },
+  { key:'bin-analysis', label:'🗄 Bin & Location Analysis',group:'Analysis', blurb:'Where stock sits against how fast it moves.' },
   { key:'customer-list',label:'📇 Customer List',        group:'Directory', dated:false, blurb:'Full customer directory with terms, spend and balance.' },
   { key:'vendor-list', label:'🏷 Vendor List',           group:'Directory', dated:false, blurb:'Full supplier directory with terms, lead time and SKUs.' },
   { key:'valuation',   label:'💰 Stock Valuation',       group:'Operations',blurb:'Stock at cost / retail, by category and location.' },
@@ -14969,8 +14993,22 @@ function rptChartSvg(colsIn, rows, mode){
 }
 
 // cols: [{k, label, money:true, num:true, hours:true, right:true}]
-function rptTable(title, cols, rows, emptyMsg){
-  RPT_TABLES.push({ title: title, cols: cols, rows: rows || [] });
+// opts.total: add a footer row summing every money / num / hours column. A
+// per-category breakdown is nearly always asked "and what does that come to",
+// and answering it in the table beats making the reader add up twelve rows.
+function rptTable(title, cols, rows, emptyMsg, opts){
+  var totalRow = null;
+  if (opts && opts.total && rows && rows.length) {
+    totalRow = {};
+    var first = true;
+    for (var ci = 0; ci < cols.length; ci++) {
+      var c = cols[ci];
+      if (c.money || c.num || c.hours) {
+        totalRow[c.k] = rows.reduce(function(a, r){ return a + (Number(r[c.k]) || 0); }, 0);
+      } else if (first) { totalRow[c.k] = 'Total (' + rows.length + ')'; first = false; }
+    }
+  }
+  RPT_TABLES.push({ title: title, cols: cols, rows: (rows || []).concat(totalRow ? [totalRow] : []) });
   var head = '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">' + title + '</div>';
   if (!rows || !rows.length) {
     return '<div class="panel">' + head + '<div class="empty">' + esc(emptyMsg || 'Nothing in this range.') + '</div></div>';
@@ -14986,8 +15024,124 @@ function rptTable(title, cols, rows, emptyMsg){
       return '<td style="text-align:' + (c.right || c.money || c.num || c.hours ? 'right' : 'left') + '">' + txt + '</td>';
     }).join('') + '</tr>';
   }).join('');
-  return '<div class="panel">' + head +
-    '<table><thead><tr>' + th + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+  var foot = '';
+  if (totalRow) {
+    foot = '<tfoot><tr style="font-weight:800;border-top:2px solid var(--line)">' + cols.map(function(c){
+      var v = totalRow[c.k];
+      var txt = v == null ? ''
+        : c.money ? rMoney(v) : c.hours ? rHours(v) : c.num ? rNum(v) : esc(String(v));
+      return '<td style="text-align:' + (c.right || c.money || c.num || c.hours ? 'right' : 'left') + '">' + txt + '</td>';
+    }).join('') + '</tr></tfoot>';
+  }
+  return '<div class="panel">' + head + chart +
+    '<table><thead><tr>' + th + '</tr></thead><tbody>' + body + '</tbody>' + foot + '</table></div>';
+}
+
+// A <select> drawn at the top of a drill-down report. The options come down with
+// the report itself, so the picker is always in step with what the server can
+// actually answer for, and picking one just re-runs the report.
+var RPT_ENTITY = { 'supplier-detail': null, 'customer-items': null };
+function rptEntityPicker(id, label, options, selected, labelFn){
+  return '<div style="padding:14px 18px 0;display:flex;gap:9px;align-items:center;flex-wrap:wrap">' +
+    '<label class="lbl" style="margin:0">' + esc(label) + '</label>' +
+    '<select id="' + id + '" class="fld" style="width:auto;min-width:330px;max-width:100%">' +
+      '<option value="">— choose a ' + esc(label.toLowerCase()) + ' —</option>' +
+      (options || []).map(function(o){
+        return '<option value="' + o.id + '"' + (String(o.id) === String(selected) ? ' selected' : '') + '>' +
+          esc(labelFn ? labelFn(o) : o.name) + '</option>';
+      }).join('') +
+    '</select>' +
+    '<span style="font-size:11.5px;color:var(--muted)">' + rNum((options || []).length) + ' to choose from</span>' +
+  '</div>';
+}
+
+// The recommendation block. Kept visually distinct from the tables because it is
+// the one part of a report that is an opinion rather than a figure -- every
+// number it rests on is in the tables below it.
+var ADVICE_ICON = { order:'🛒', risk:'⚠️', cut:'✂️', when:'🕐', margin:'📈', data:'ℹ️',
+                    call:'📞', sell:'💡', move:'🚚', tidy:'🧹', money:'💰' };
+function rptAdvice(list){
+  if (!list || !list.length) return '';
+  return '<div style="padding:0 18px 16px">' +
+    '<div class="panel" style="border-left:3px solid var(--sky,#0ea5e9)">' +
+      '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">' +
+        '🧠 What the figures suggest' +
+        '<span style="font-weight:600;color:var(--muted);margin-left:8px">computed from this shop’s own history</span>' +
+      '</div>' +
+      '<ul style="margin:0;padding:12px 14px 14px 32px;font-size:12.5px;line-height:1.6">' +
+        list.map(function(a){
+          return '<li style="margin-bottom:5px">' + (ADVICE_ICON[a.kind] || '•') + ' ' + esc(a.text) + '</li>';
+        }).join('') +
+      '</ul>' +
+    '</div></div>';
+}
+
+// Best Sellers and Most Profitable are the same table read by a different
+// measure, so they share a renderer. `by=overall` is a flat ranking; any other
+// dimension is each group's own top three, which is what "best seller by
+// customer" means at a counter -- per customer, not filtered to one.
+var RPT_RANK_BY = 'overall';
+function rptRanking(r, metric){
+  var profitFirst = metric === 'profit';
+  var head = '<div style="padding:14px 18px 0;display:flex;gap:9px;align-items:center;flex-wrap:wrap">' +
+    '<label class="lbl" style="margin:0">Break down by</label>' +
+    '<select id="rptRankBy" class="fld" style="width:auto">' +
+      (r.dims || []).map(function(d){
+        return '<option value="' + d.key + '"' + (d.key === r.by ? ' selected' : '') + '>' + esc(d.label) + '</option>';
+      }).join('') +
+    '</select>' +
+    '<span style="font-size:11.5px;color:var(--muted)">' +
+      (r.by === 'overall' ? 'ranking every item' : 'top ' + r.per_group + ' per ' + esc(r.by_label.toLowerCase())) +
+    '</span></div>';
+  var t = r.totals;
+  var tiles = '<div style="padding:12px 18px 4px"><div class="tiles" style="grid-template-columns:repeat(5,1fr);margin-bottom:14px">' +
+      tile('units sold', rNum(t.units)) +
+      tile('revenue', rMoney(t.revenue)) +
+      tile('gross profit', rMoney(t.profit)) +
+      tile('margin', t.margin_pct == null ? '—' : rPct(t.margin_pct)) +
+      tile(esc(r.by_label) + ' groups', rNum(t.groups), '', 'rptRankGroups') +
+    '</div></div>';
+  // Columns reorder so the measure being ranked on reads first after the name.
+  var itemCols = [{ k:'product', label:'Part' }, { k:'sku', label:'SKU' }]
+    .concat(r.by === 'overall' ? [] : [{ k:'dim', label:r.by_label }, { k:'rn', label:'#', num:true }])
+    .concat(profitFirst
+      ? [{ k:'profit', label:'Gross profit', money:true }, { k:'margin_pct', label:'Margin %' },
+         { k:'units', label:'Units', num:true }, { k:'revenue', label:'Revenue', money:true }]
+      : [{ k:'units', label:'Units', num:true }, { k:'revenue', label:'Revenue', money:true },
+         { k:'profit', label:'Gross profit', money:true }, { k:'margin_pct', label:'Margin %' }])
+    .concat([
+      { k:'profit_per_unit', label:'Profit / unit', money:true },
+      { k:'received', label:'Received', num:true },
+      { k:'received_cost', label:'Cost in', money:true },
+      { k:'sell_through_pct', label:'Sell-through %' },
+      { k:'tickets', label:'Tickets', num:true },
+      { k:'category', label:'Category' }, { k:'supplier', label:'Supplier' },
+      { k:'bin', label:'Bin' }, { k:'last_sold', label:'Last sold' },
+    ]);
+  // A part with no cost price on file computes as 100% margin. Say "no cost"
+  // instead — the figure is absent, not excellent.
+  var fmtPct = function(rows){ return (rows || []).map(function(x){
+    return Object.assign({}, x, {
+      margin_pct: x.cost_known === false ? 'no cost'
+        : (x.margin_pct == null ? '—' : x.margin_pct + '%'),
+      sell_through_pct: x.sell_through_pct == null ? '—' : x.sell_through_pct + '%',
+    }); }); };
+  var groupCols = [{ k:'dim', label:r.by_label }, { k:'tickets', label:'Tickets', num:true },
+    { k:'units', label:'Units', num:true }, { k:'revenue', label:'Revenue', money:true },
+    { k:'profit', label:'Gross profit', money:true }, { k:'margin_pct', label:'Margin %' }];
+  return head + tiles + rptAdvice(r.advice) +
+    '<div style="padding:0 18px 16px">' +
+      rptTable(profitFirst ? '💹 Most profitable items' : '🏆 Best selling items',
+        itemCols, fmtPct(r.rows), 'Nothing sold in this range.', { total:true }) +
+      '<p style="font-size:11.5px;color:var(--muted);margin:8px 2px">' +
+        'Received and Cost in are what came through the door in the same range, so a profitable line can be read ' +
+        'against what it cost to stock. Credit notes carry negative quantities, so a part sold and returned does not rank.' +
+      '</p>' +
+    '</div>' +
+    (r.by === 'overall' ? '' :
+      '<div style="padding:0 18px 22px" id="rptRankGroups">' +
+        rptTable('📊 ' + esc(r.by_label) + ' totals', groupCols, fmtPct(r.groups), null, { total:true }) +
+      '</div>');
 }
 
 function rptGrid(html){
@@ -15193,6 +15347,11 @@ async function renderReports(panel){
     if (RPT_CURRENT === 'z') qs = RPT_SESSION_ID ? '?session_id=' + RPT_SESSION_ID : '';
     if (RPT_CURRENT === 'inventory-custom') qs = '?' + rptInvQS();
     if (RPT_CURRENT === 'serial-lookup') qs = '?q=' + encodeURIComponent(SERIAL_Q);
+    if (RPT_CURRENT === 'best-sellers' || RPT_CURRENT === 'most-profitable') qs = range + '&by=' + RPT_RANK_BY;
+    if (RPT_CURRENT === 'supplier-detail' && RPT_ENTITY['supplier-detail'])
+      qs = range + '&supplier_id=' + encodeURIComponent(RPT_ENTITY['supplier-detail']);
+    if (RPT_CURRENT === 'customer-items' && RPT_ENTITY['customer-items'])
+      qs = range + '&customer_id=' + encodeURIComponent(RPT_ENTITY['customer-items']);
     rptInvPicker(RPT_CURRENT === 'inventory-custom');
     rptSerialPicker(RPT_CURRENT === 'serial-lookup');
     box.innerHTML = '<div class="empty">Loading…</div>';
@@ -15237,6 +15396,15 @@ async function renderReports(panel){
 
     var selEl = document.getElementById('rptSession');
     if (selEl) selEl.onchange = function(){ RPT_SESSION_ID = selEl.value || null; run(); };
+
+    // Drill-down pickers. Rebuilt with the report body on every render, so the
+    // handler is attached here rather than once at setup.
+    var rankBy = document.getElementById('rptRankBy');
+    if (rankBy) rankBy.onchange = function(){ RPT_RANK_BY = rankBy.value; run(); };
+    var supPick = document.getElementById('rptSupplierPick');
+    if (supPick) supPick.onchange = function(){ RPT_ENTITY['supplier-detail'] = supPick.value || null; run(); };
+    var custPick = document.getElementById('rptCustomerPick');
+    if (custPick) custPick.onchange = function(){ RPT_ENTITY['customer-items'] = custPick.value || null; run(); };
 
     var payGo = document.getElementById('commPayGo');
     if (payGo) payGo.addEventListener('click', async function(){
@@ -15597,6 +15765,222 @@ var RPT_RENDERERS = {
       '</div>';
   },
 
+  // ---- ranking -----------------------------------------------------------
+  'best-sellers': function(r){ return rptRanking(r, 'units'); },
+  'most-profitable': function(r){ return rptRanking(r, 'profit'); },
+
+  'inventory-turnover': function(r){
+    var t = r.totals;
+    var cols = function(first){ return [
+      first, { k:'cogs', label:'COGS (range)', money:true },
+      { k:'revenue', label:'Revenue', money:true },
+      { k:'stock_cost', label:'Stock at cost', money:true },
+      { k:'turns', label:'Turns / yr' }, { k:'dsi', label:'Days of stock', num:true },
+      { k:'verdict', label:'Reading' },
+    ]; };
+    return '<div style="padding:16px 18px 4px"><div class="tiles" style="grid-template-columns:repeat(5,1fr);margin-bottom:14px">' +
+        tile('stock at cost', rMoney(t.stock_cost)) +
+        tile('COGS in range', rMoney(t.cogs)) +
+        tile('revenue in range', rMoney(t.revenue)) +
+        tile('turns / year', t.turns == null ? '—' : t.turns) +
+        tile('days of stock', t.dsi == null ? '—' : rNum(t.dsi), t.dsi > 365 ? 'warn' : '') +
+      '</div></div>' +
+      rptAdvice(r.advice) +
+      '<div style="padding:0 18px 16px">' +
+        rptTable('📂 By category', cols({ k:'category', label:'Category' }), r.by_category, null, { total:true }) +
+      '</div>' +
+      '<div style="padding:0 18px 16px">' +
+        rptTable('🏭 By supplier (top 60 by COGS)', cols({ k:'supplier', label:'Supplier' }), r.by_supplier) +
+      '</div>' +
+      '<div style="padding:0 18px 16px">' +
+        rptTable('🗄 By bin (top 60 by stock value)', cols({ k:'bin', label:'Bin' }), r.by_bin) +
+      '</div>' +
+      '<div style="padding:0 18px 22px">' +
+        rptTable('📦 Highest-value lines', [
+          { k:'name', label:'Part' }, { k:'sku', label:'SKU' }, { k:'bin', label:'Bin' },
+          { k:'stock', label:'On hand', num:true }, { k:'units', label:'Sold', num:true },
+          { k:'stock_cost', label:'Stock at cost', money:true }, { k:'cogs', label:'COGS', money:true },
+          { k:'turns', label:'Turns / yr' }, { k:'dsi', label:'Days of stock', num:true },
+          { k:'verdict', label:'Reading' },
+        ], r.items) +
+      '</div>';
+  },
+
+  'receival-batches': function(r){
+    var t = r.totals;
+    var batchCols = [
+      { k:'day', label:'Received' }, { k:'supplier', label:'Supplier' },
+      { k:'lines', label:'Lines', num:true }, { k:'units_in', label:'Units in', num:true },
+      { k:'cost_in', label:'Cost in', money:true }, { k:'sold', label:'Sold 90d', num:true },
+      { k:'sell_through_pct', label:'Sell-through %' },
+      { k:'revenue', label:'Revenue', money:true }, { k:'profit', label:'Profit', money:true },
+      { k:'margin_pct', label:'Margin %' },
+      { k:'days_to_sell', label:'Days to sell', num:true },
+      { k:'est_clear_days', label:'Est. clear (d)' },
+      { k:'profit_per_day', label:'Profit / day', money:true },
+      { k:'verdict', label:'Verdict' },
+    ];
+    var pct = function(rows){ return (rows || []).map(function(x){
+      return Object.assign({}, x, {
+        sell_through_pct: x.sell_through_pct == null ? '—' : x.sell_through_pct + '%',
+        margin_pct: x.margin_pct == null ? '—' : x.margin_pct + '%',
+        est_clear_days: x.est_clear_days == null ? '—' : x.est_clear_days,
+      }); }); };
+    return '<div style="padding:16px 18px 4px"><div class="tiles" style="grid-template-columns:repeat(6,1fr);margin-bottom:14px">' +
+        tile('batches', rNum(t.batches), '', 'rptBatchAll') +
+        tile('cost in', rMoney(t.cost_in)) +
+        tile('sold through', t.sell_through_pct == null ? '—' : rPct(t.sell_through_pct)) +
+        tile('profit', rMoney(t.profit)) +
+        tile('avg days to sell', t.avg_days_to_sell == null ? '—' : rNum(t.avg_days_to_sell)) +
+        tile('never sold', rNum(t.dead_batches), t.dead_batches ? 'alert' : '') +
+      '</div></div>' +
+      rptAdvice(r.advice) +
+      '<div style="padding:0 18px 16px">' +
+        rptTable('🥇 Best batches — profit per day on the shelf', batchCols, pct(r.best),
+          'No batch sold anything in its first 90 days.') +
+      '</div>' +
+      '<div style="padding:0 18px 16px">' +
+        rptTable('🥀 Weakest batches — lowest sell-through', batchCols, pct(r.worst),
+          'Nothing was received in this range.') +
+      '</div>' +
+      '<div style="padding:0 18px 22px" id="rptBatchAll">' +
+        rptTable('📦 Every batch', batchCols, pct(r.batches), null, { total:true }) +
+      '</div>';
+  },
+
+  // ---- drill-down analysis -----------------------------------------------
+  'supplier-detail': function(r){
+    var head = rptEntityPicker('rptSupplierPick', 'Supplier', r.suppliers,
+      r.supplier && r.supplier.id, function(o){ return o.name + ' (' + o.skus + ' SKUs)'; });
+    if (!r.supplier) return head + '<div class="empty" style="padding:26px 18px">Choose a supplier above.</div>';
+    var s = r.supplier, t = r.totals;
+    return head +
+      '<div style="padding:4px 18px 0;font-size:12.5px;color:var(--muted)">' +
+        '<b style="color:var(--heading);font-size:14px">' + esc(s.name) + '</b>' +
+        (s.contact_name ? ' · ' + esc(s.contact_name) : '') + (s.phone ? ' · ' + esc(s.phone) : '') +
+        (s.payment_terms ? ' · terms ' + esc(s.payment_terms) : '') +
+        ' · lead time ' + (s.lead_time_days || 7) + 'd' +
+      '</div>' +
+      '<div style="padding:12px 18px 4px"><div class="tiles" style="grid-template-columns:repeat(6,1fr);margin-bottom:14px">' +
+        tile('SKUs', rNum(t.skus)) +
+        tile('stock at cost', rMoney(t.stock_cost)) +
+        tile('sold (range)', rMoney(t.revenue)) +
+        tile('margin', rMoney(t.margin) + (t.margin_pct != null ? ' · ' + rPct(t.margin_pct) : '')) +
+        tile('to order', rMoney(t.order_cost), t.order_now_lines ? 'warn' : '', 'rptSupBuy') +
+        tile('dead stock', rMoney(t.dead_cost), t.dead_cost > 0 ? 'alert' : '') +
+      '</div></div>' +
+      rptAdvice(r.advice) +
+      '<div style="padding:0 18px 16px" id="rptSupBuy">' +
+        rptTable('🛒 What to order — and when', [
+          { k:'name', label:'Part' }, { k:'sku', label:'SKU' },
+          { k:'stock', label:'On hand', num:true }, { k:'sold', label:'Sold', num:true },
+          { k:'rate', label:'Per day' }, { k:'reorder_at', label:'Reorder at', num:true },
+          { k:'cover_days', label:'Cover (d)' }, { k:'order_qty', label:'Order', num:true },
+          { k:'order_cost', label:'Est. cost', money:true }, { k:'order_by', label:'Order by' },
+          { k:'abc', label:'Class' }, { k:'trend', label:'Trend' }, { k:'flag', label:'Note' },
+        ], r.buy_list, 'Nothing from this supplier needs reordering on this range.', { total:true }) +
+        (r.buy_total > r.buy_shown ? '<p style="font-size:11.5px;color:var(--muted);margin:8px 2px">Showing the ' + rNum(r.buy_shown) + ' most valuable of ' + rNum(r.buy_total) + ' lines to reorder; the tile totals cover all of them.</p>' : '') +
+      '</div>' +
+      '<div style="padding:0 18px 16px">' +
+        rptTable('📦 Every item from this supplier', [
+          { k:'name', label:'Part' }, { k:'sku', label:'SKU' }, { k:'category', label:'Category' },
+          { k:'bin', label:'Bin' }, { k:'stock', label:'On hand', num:true },
+          { k:'received', label:'Received', num:true }, { k:'sold', label:'Sold', num:true },
+          { k:'revenue', label:'Revenue', money:true }, { k:'margin', label:'Margin', money:true },
+          { k:'margin_pct', label:'Margin %' }, { k:'abc', label:'Class' },
+          { k:'last_received', label:'Last in' }, { k:'last_sold', label:'Last out' },
+          { k:'flag', label:'Weakness' },
+        ], r.items, null, { total:true }) +
+        (r.items_total > r.items_shown ? '<p style="font-size:11.5px;color:var(--muted);margin:8px 2px">Showing ' + rNum(r.items_shown) + ' of ' + rNum(r.items_total) + ' parts by revenue; the tiles and this table footer cover all ' + rNum(r.items_total) + '.</p>' : '') +
+      '</div>' +
+      rptGrid(
+        rptTable('📅 Receivals by day', [{ k:'day', label:'Day' }, { k:'receipts', label:'Receipts', num:true }, { k:'units', label:'Units', num:true }, { k:'cost', label:'At cost', money:true }], r.by_day, 'No receipts recorded for this supplier in range.', { total:true }) +
+        rptTable('🔀 Movements by type', [{ k:'type', label:'Type' }, { k:'movements', label:'Movements', num:true }, { k:'units', label:'Units', num:true }], r.by_type)
+      ) +
+      '<div style="padding:0 18px 22px">' +
+        rptTable('🧾 Receivals in detail', [
+          { k:'day', label:'Day' }, { k:'reference', label:'Reference' }, { k:'type', label:'Type' },
+          { k:'sku', label:'SKU' }, { k:'product', label:'Part' },
+          { k:'qty', label:'Qty', num:true }, { k:'unit_cost', label:'Unit cost', money:true },
+          { k:'line_cost', label:'Line cost', money:true },
+        ], r.receivals, 'No receipts recorded for this supplier in range.') +
+        '<p style="font-size:11.5px;color:var(--muted);margin:8px 2px">Reference is blank on imported history — the source export carried no bill or order number. ' +
+          rNum(r.unattributed_receivals) + ' receipts across the shop belong to parts with no supplier on file and cannot appear on any supplier page.</p>' +
+      '</div>';
+  },
+
+  'customer-items': function(r){
+    var head = rptEntityPicker('rptCustomerPick', 'Customer', r.customers,
+      r.customer && r.customer.id, function(o){ return o.name + (o.spend ? ' — ' + rMoney(o.spend) : ''); });
+    if (!r.customer) return head + '<div class="empty" style="padding:26px 18px">Choose a customer above.</div>';
+    var c = r.customer, t = r.totals;
+    return head +
+      '<div style="padding:4px 18px 0;font-size:12.5px;color:var(--muted)">' +
+        '<b style="color:var(--heading);font-size:14px">' + esc(c.name) + '</b>' +
+        (c.account_number ? ' · acct ' + esc(c.account_number) : '') +
+        (c.customer_type ? ' · ' + esc(c.customer_type) : '') +
+        (c.phone ? ' · ' + esc(c.phone) : '') +
+        (c.payment_terms_days != null ? ' · ' + c.payment_terms_days + 'd terms' : '') +
+      '</div>' +
+      '<div style="padding:12px 18px 4px"><div class="tiles" style="grid-template-columns:repeat(5,1fr);margin-bottom:14px">' +
+        tile('invoices (all time)', rNum(t.invoices)) +
+        tile('spend (all time)', rMoney(t.spend)) +
+        tile('distinct parts', rNum(t.lines), '', 'rptCustItems') +
+        tile('margin (range)', rMoney(t.margin)) +
+        tile('balance owing', rMoney(t.balance), t.balance > 0 ? 'warn' : '') +
+      '</div></div>' +
+      rptAdvice(r.advice) +
+      '<div style="padding:0 18px 16px" id="rptCustItems">' +
+        rptTable('🧩 What this customer buys', [
+          { k:'product', label:'Part' }, { k:'sku', label:'SKU' }, { k:'category', label:'Category' },
+          { k:'supplier', label:'Supplier' }, { k:'orders', label:'Times', num:true },
+          { k:'qty', label:'Qty', num:true }, { k:'revenue', label:'Revenue', money:true },
+          { k:'margin', label:'Margin', money:true }, { k:'margin_pct', label:'Margin %' },
+          { k:'every_days', label:'Every (d)', num:true }, { k:'last_bought', label:'Last bought' },
+          { k:'stock_now', label:'On hand', num:true }, { k:'can_supply', label:'Can supply' },
+          { k:'note', label:'Next due' },
+        ], r.items, 'This customer bought nothing in this range.', { total:true }) +
+      '</div>' +
+      rptGrid(
+        rptTable('📈 Spend by month', [{ k:'month', label:'Month' }, { k:'invoices', label:'Invoices', num:true }, { k:'spend', label:'Spend', money:true }], r.by_month, null, { total:true }) +
+        rptTable('🧾 Invoices', [{ k:'receipt_number', label:'Invoice' }, { k:'day', label:'Day' }, { k:'payment_method', label:'Paid by' }, { k:'total', label:'Total', money:true }, { k:'balance', label:'Owing', money:true }], r.invoices)
+      );
+  },
+
+  'bin-analysis': function(r){
+    var u = r.unbinned;
+    return '<div style="padding:16px 18px 4px"><div class="tiles" style="grid-template-columns:repeat(4,1fr);margin-bottom:14px">' +
+        tile('bins in use', rNum(u.bins_total), '', 'rptBinTable') +
+        tile('unbinned SKUs', rNum(u.skus), u.skus ? 'warn' : '') +
+        tile('unbinned at cost', rMoney(u.stock_cost), u.stock_cost > 0 ? 'warn' : '') +
+        tile('parts in >1 bin', rNum((r.split_across_bins || []).length), '', 'rptBinSplit') +
+      '</div></div>' +
+      rptAdvice(r.advice) +
+      '<div style="padding:0 18px 16px" id="rptBinTable">' +
+        rptTable('🗄 Bins — stock held against what moved', [
+          { k:'bin', label:'Bin' }, { k:'skus', label:'SKUs', num:true },
+          { k:'units', label:'Units', num:true }, { k:'stock_cost', label:'At cost', money:true },
+          { k:'sold', label:'Sold (range)', num:true }, { k:'turns', label:'Turns' },
+          { k:'empty_lines', label:'Empty lines', num:true },
+        ], r.bins, null, { total:true }) +
+      '</div>' +
+      rptGrid(
+        rptTable('🚚 A-class parts with no bin', [{ k:'name', label:'Part' }, { k:'sku', label:'SKU' }, { k:'sold', label:'Sold', num:true }, { k:'revenue', label:'Revenue', money:true }], r.fast_unbinned, 'Every A-class part has a bin.') +
+        rptTable('🪦 Bins that sold nothing', [{ k:'bin', label:'Bin' }, { k:'skus', label:'SKUs', num:true }, { k:'stock_cost', label:'At cost', money:true }], r.dead_bins, 'Every bin moved something.')
+      ) +
+      '<div style="padding:0 18px 16px" id="rptBinSplit">' +
+        rptTable('🔀 Part numbers split across bins', [{ k:'sku', label:'SKU' }, { k:'name', label:'Part' }, { k:'bins', label:'Bins', num:true }], r.split_across_bins, 'No part number appears in more than one bin.') +
+      '</div>' +
+      '<div style="padding:0 18px 22px">' +
+        rptTable('📦 Stocked parts by value moved', [
+          { k:'name', label:'Part' }, { k:'sku', label:'SKU' }, { k:'bin', label:'Bin' },
+          { k:'stock', label:'On hand', num:true }, { k:'sold', label:'Sold', num:true },
+          { k:'cover_days', label:'Cover (d)' }, { k:'abc', label:'Class' },
+          { k:'revenue', label:'Revenue', money:true }, { k:'flag', label:'Weakness' },
+        ], r.items) +
+      '</div>';
+  },
+
   // ---- directories -------------------------------------------------------
   'customer-list': function(r){
     var t = r.totals;
@@ -15827,14 +16211,20 @@ var RPT_RENDERERS = {
 
   valuation: function(r){
     var t = r.totals;
-    return '<div style="padding:16px 18px 4px"><div class="tiles" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">' +
+    return '<div style="padding:16px 18px 4px"><div class="tiles" style="grid-template-columns:repeat(5,1fr);margin-bottom:16px">' +
         tile('lines in stock', rNum(t.lines)) + tile('units', rNum(t.units)) +
-        tile('stock at cost', rMoney(t.cost_value)) + tile('at retail', rMoney(t.retail_value)) +
+        tile('total at cost', rMoney(t.cost_value)) +
+        tile('total at retail', rMoney(t.retail_value), '', 'rptValCat') +
+        tile('potential gross', rMoney(t.potential_gross)) +
+      '</div>' +
+      '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">' +
+        'A snapshot of stock on hand right now — the date range only decides what counts as dead stock below. ' +
+        'Potential gross is retail less cost, if every unit sold at its current price.' +
       '</div></div>' +
-      rptGrid(
-        rptTable('📂 Value by category', [{ k:'category', label:'Category' }, { k:'lines', label:'Lines', num:true }, { k:'units', label:'Units', num:true }, { k:'cost_value', label:'At cost', money:true }, { k:'retail_value', label:'At retail', money:true }], r.by_category) +
-        rptTable('📍 Value by location', [{ k:'location', label:'Location' }, { k:'lines', label:'Lines', num:true }, { k:'units', label:'Units', num:true }, { k:'cost_value', label:'At cost', money:true }], r.by_location)
-      ) +
+      '<div id="rptValCat">' + rptGrid(
+        rptTable('📂 Value by category', [{ k:'category', label:'Category' }, { k:'lines', label:'Lines', num:true }, { k:'units', label:'Units', num:true }, { k:'cost_value', label:'At cost', money:true }, { k:'retail_value', label:'At retail', money:true }], r.by_category, null, { total:true }) +
+        rptTable('📍 Value by location (top 60)', [{ k:'location', label:'Location' }, { k:'lines', label:'Lines', num:true }, { k:'units', label:'Units', num:true }, { k:'cost_value', label:'At cost', money:true }], r.by_location, null, { total:true })
+      ) + '</div>' +
       '<div style="padding:0 18px 22px">' +
         rptTable('🪦 Dead stock — no sale in this range (top 100 by tied-up cost)', [
           { k:'sku', label:'SKU' }, { k:'name', label:'Part' }, { k:'category', label:'Cat.' },
