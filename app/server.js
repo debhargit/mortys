@@ -8929,197 +8929,2267 @@ app.get('/api/admin/reports/customers', requireAdmin, async (req, res) => {
     loyalty: loyalty.rows[0], newsletter_signups: newsletter.rows[0].n });
 });
 
-// ---- stock valuation + dead stock -------------------------------------------
-// GET /api/admin/reports/valuation?from&to&filter=<field>&value=<v>
+// =============================================================================
+//  MONEY, ACCOUNTING, ORDERING AND DIRECTORY REPORTS
+// =============================================================================
+// Four things the report set had no answer for: what came in (payments), what
+// is still owed either way (receivables / payables), what the books need per
+// day (journal), and the plain lists a shop is asked for constantly (customers,
+// vendors, staff) -- plus goods received and what to reorder.
 //
-// `filter` narrows every figure in the report -- the tiles, both breakdowns and
-// the item list all describe the same filtered slice, so the totals always add
-// up to what is on screen. Supported fields:
-//   (none)      every active part with stock on hand
-//   category    category = value
-//   location    bin/shelf = value
-//   dead        only parts with no sale in the date range
-//   supplier    supplier_id = value
-//   qty_lt      stock_count < value
-//   price_lt    price_usd   < value
-//   name_eq     name        = value   (case-insensitive, exact)
-//   vehicle_eq  make_model  = value   (case-insensitive, exact)
-//
-// Money comes back as floats to match the rest of this module. `facets` feeds
-// the UI's dropdowns so the client never has to guess the valid values.
-const VALUATION_FILTERS = ['', 'category', 'location', 'dead', 'supplier', 'qty_lt', 'price_lt', 'name_eq', 'vehicle_eq'];
+// One rule runs through all of the money ones, and it is the reason they agree
+// with each other: a sale_payments row with method='account' is NOT cash. It is
+// the debit side of a charge sale. So "payments received" excludes it and
+// "receivables" is built from it. Getting that backwards double-counts every
+// credit sale, once as income and again as a debt.
 
-app.get('/api/admin/reports/valuation', requireAdmin, async (req, res) => {
+// A charge sale's unpaid remainder, per sale, as a reusable fragment: account
+// debits on the sale minus everything the customer has since paid against it.
+// account_payments.reference carries the receipt number it settled.
+const AR_OPEN_SQL = `
+  SELECT s.id, s.receipt_number, s.created_at, s.customer_id,
+         COALESCE(NULLIF(s.customer_name,''),'Walk-in') AS customer_name,
+         SUM(sp.amount_usd)::float AS charged,
+         COALESCE((SELECT SUM(ap.amount_usd) FROM account_payments ap
+                    WHERE ap.reference = s.receipt_number), 0)::float AS settled
+    FROM pos_sales s
+    JOIN sale_payments sp ON sp.sale_id = s.id AND sp.method = 'account'
+   WHERE s.voided = false
+   GROUP BY s.id, s.receipt_number, s.created_at, s.customer_id, s.customer_name`;
+
+// ---- payments received -----------------------------------------------------
+app.get('/api/admin/reports/payments', requireAdmin, async (req, res) => {
   const { from, to } = reportRange(req);
-  const filter = VALUATION_FILTERS.includes(String(req.query.filter || '')) ? String(req.query.filter || '') : '';
-  const value = req.query.value == null ? '' : String(req.query.value).trim();
-
-  // products.location is unused by the admin UI (it writes the shelf into
-  // bin_location), so the "location" dimension reads bin_location first and
-  // only falls back to location for rows written before that split.
-  const LOC = `COALESCE(NULLIF(BTRIM(p.bin_location), ''), NULLIF(BTRIM(p.location), ''), '-')`;
-
-  // $1/$2 are always the range (the dead-stock flag needs them even when the
-  // report is unfiltered); a filter value becomes $3.
-  const params = [from, to];
-  let where = `p.is_active = true AND p.stock_count > 0`;
-  let deadOnly = false;
-  let needsValue = true;
-  switch (filter) {
-    case 'category':   where += ` AND LOWER(COALESCE(p.category,'')) = LOWER($3)`; break;
-    case 'location':   where += ` AND LOWER(${LOC}) = LOWER($3)`; break;
-    case 'supplier':   where += ` AND p.supplier_id = ($3)::int`; break;
-    case 'qty_lt':     where += ` AND p.stock_count < ($3)::numeric`; break;
-    case 'price_lt':   where += ` AND COALESCE(p.price_usd,0) < ($3)::numeric`; break;
-    case 'name_eq':    where += ` AND LOWER(BTRIM(COALESCE(p.name,''))) = LOWER(BTRIM($3))`; break;
-    case 'vehicle_eq': where += ` AND LOWER(BTRIM(COALESCE(p.make_model,''))) = LOWER(BTRIM($3))`; break;
-    case 'dead':       deadOnly = true; needsValue = false; break;
-    default:           needsValue = false;
-  }
-  if (needsValue) {
-    if (value === '') return res.status(400).json({ error: 'This filter needs a value.' });
-    if ((filter === 'qty_lt' || filter === 'price_lt') && !Number.isFinite(Number(value))) {
-      return res.status(400).json({ error: 'Enter a number for this filter.' });
-    }
-    if (filter === 'supplier' && !Number.isInteger(Number(value))) {
-      return res.status(400).json({ error: 'Pick a supplier.' });
-    }
-    params.push(value);
-  }
-
-  // "Sold in range" is collected once into two sets and then anti-joined,
-  // rather than asked per product as
-  //   NOT EXISTS (... WHERE i.product_id = p.id OR i.product_img = p.img ...)
-  // -- that OR cannot use either index, so it degenerates into 36.5k products x
-  // 1.05M sale lines and the request never returns. Two separate sets let the
-  // planner hash-anti-join both, which is a second or so.
-  //
-  // Both keys are needed: the POS writes product_img on every line, but a line
-  // whose SKU no longer exists in the catalogue (23% of the imported history)
-  // has product_id NULL, and a line edited in the app may carry only the id.
-  const soldCte = `
-    sold_ids AS (
-      SELECT DISTINCT i.product_id AS id
-        FROM pos_sale_items i JOIN pos_sales s ON s.id = i.sale_id
-       WHERE s.voided = false AND s.created_at::date BETWEEN $1::date AND $2::date
-         AND i.product_id IS NOT NULL
-    ),
-    sold_imgs AS (
-      SELECT DISTINCT i.product_img AS img
-        FROM pos_sale_items i JOIN pos_sales s ON s.id = i.sale_id
-       WHERE s.voided = false AND s.created_at::date BETWEEN $1::date AND $2::date
-         AND i.product_img IS NOT NULL
-    ),
-    stock AS (
-      SELECT p.id, p.img, p.sku, p.name, COALESCE(p.make_model,'') AS make_model,
-             COALESCE(NULLIF(BTRIM(p.category),''),'-') AS category,
-             ${LOC} AS location, p.stock_count,
-             COALESCE(p.cost_usd,0)  AS cost_usd,
-             COALESCE(p.price_usd,0) AS price_usd,
-             p.stock_count * COALESCE(p.cost_usd,0)  AS stock_cost,
-             p.stock_count * COALESCE(p.price_usd,0) AS stock_retail,
-             COALESCE(sup.name,'-') AS supplier,
-             (NOT EXISTS (SELECT 1 FROM sold_ids d  WHERE d.id  = p.id)
-              AND NOT EXISTS (SELECT 1 FROM sold_imgs d WHERE d.img = p.img)) AS is_dead
-        FROM products p LEFT JOIN suppliers sup ON sup.id = p.supplier_id
-       WHERE ${where}
-    ),
-    sel AS (SELECT * FROM stock${deadOnly ? ' WHERE is_dead' : ''})`;
-
-  // One round trip: the sold sets and the stock scan are evaluated once and
-  // every section reads the same `sel`, so the tiles, both breakdowns and the
-  // item list can never disagree with each other.
-  const [payload, facetCat, facetLoc, facetSup] = await Promise.all([
-    query(`
-      WITH ${soldCte}
-      SELECT json_build_object(
-        'totals', (SELECT row_to_json(x) FROM (
-            SELECT COUNT(*)::int AS lines,
-                   COALESCE(SUM(stock_count),0)::int        AS units,
-                   COALESCE(SUM(stock_cost),0)::float       AS cost_value,
-                   COALESCE(SUM(stock_retail),0)::float     AS retail_value,
-                   COUNT(*) FILTER (WHERE is_dead)::int     AS dead_lines,
-                   COALESCE(SUM(stock_cost) FILTER (WHERE is_dead),0)::float AS dead_cost
-              FROM sel) x),
-        'by_category', (SELECT COALESCE(json_agg(x), '[]'::json) FROM (
-            SELECT category, COUNT(*)::int AS lines,
-                   COALESCE(SUM(stock_count),0)::int    AS units,
-                   COALESCE(SUM(stock_cost),0)::float   AS cost_value,
-                   COALESCE(SUM(stock_retail),0)::float AS retail_value
-              FROM sel GROUP BY category ORDER BY 4 DESC) x),
-        'by_location', (SELECT COALESCE(json_agg(x), '[]'::json) FROM (
-            SELECT location, COUNT(*)::int AS lines,
-                   COALESCE(SUM(stock_count),0)::int  AS units,
-                   COALESCE(SUM(stock_cost),0)::float AS cost_value
-              FROM sel GROUP BY location ORDER BY 4 DESC) x),
-        'dead_stock', (SELECT COALESCE(json_agg(x), '[]'::json) FROM (
-            SELECT sku, name, category, location, stock_count,
-                   stock_cost::float AS tied_up_cost
-              FROM sel WHERE is_dead ORDER BY stock_cost DESC LIMIT 100) x),
-        'items', (SELECT COALESCE(json_agg(x), '[]'::json) FROM (
-            SELECT sku, name, make_model, category, location, supplier, stock_count,
-                   cost_usd::float AS cost_usd, price_usd::float AS price_usd,
-                   stock_cost::float AS stock_cost, stock_retail::float AS stock_retail,
-                   is_dead
-              FROM sel ORDER BY stock_cost DESC LIMIT 300) x)
-      ) AS payload`, params),
-    query(`SELECT DISTINCT COALESCE(NULLIF(BTRIM(category),''),'-') AS c FROM products
-            WHERE is_active = true ORDER BY 1`),
-    query(`SELECT DISTINCT COALESCE(NULLIF(BTRIM(bin_location),''), NULLIF(BTRIM(location),''),'-') AS l
-             FROM products WHERE is_active = true ORDER BY 1`),
-    query(`SELECT s.id, s.name FROM suppliers s
-            WHERE EXISTS (SELECT 1 FROM products p WHERE p.supplier_id = s.id AND p.is_active = true)
-            ORDER BY s.name`),
+  const p = [from, to];
+  const [tenders, byMethod, byDay, byCashier, settlements, service, refunds] = await Promise.all([
+    query(`SELECT COUNT(*)::int AS n, COALESCE(SUM(sp.amount_usd),0)::float AS total
+             FROM sale_payments sp JOIN pos_sales s ON s.id = sp.sale_id
+            WHERE s.voided = false AND sp.method <> 'account'
+              AND sp.created_at::date BETWEEN $1::date AND $2::date`, p),
+    query(`SELECT sp.method, COUNT(*)::int AS n, COALESCE(SUM(sp.amount_usd),0)::float AS total
+             FROM sale_payments sp JOIN pos_sales s ON s.id = sp.sale_id
+            WHERE s.voided = false AND sp.method <> 'account'
+              AND sp.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY sp.method ORDER BY total DESC`, p),
+    query(`SELECT sp.created_at::date::text AS day, COUNT(*)::int AS n,
+                  COALESCE(SUM(sp.amount_usd),0)::float AS total
+             FROM sale_payments sp JOIN pos_sales s ON s.id = sp.sale_id
+            WHERE s.voided = false AND sp.method <> 'account'
+              AND sp.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY 1`, p),
+    query(`SELECT COALESCE(NULLIF(s.cashier_name,''),'-') AS cashier, COUNT(*)::int AS n,
+                  COALESCE(SUM(sp.amount_usd),0)::float AS total
+             FROM sale_payments sp JOIN pos_sales s ON s.id = sp.sale_id
+            WHERE s.voided = false AND sp.method <> 'account'
+              AND sp.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY total DESC`, p),
+    query(`SELECT COUNT(*)::int AS n, COALESCE(SUM(amount_usd),0)::float AS total
+             FROM account_payments WHERE created_at::date BETWEEN $1::date AND $2::date`, p),
+    query(`SELECT COUNT(*)::int AS n, COALESCE(SUM(amount_usd),0)::float AS total
+             FROM work_order_payments WHERE received_at::date BETWEEN $1::date AND $2::date`, p),
+    query(`SELECT COUNT(*)::int AS n, COALESCE(SUM(refund_total_usd),0)::float AS total
+             FROM pos_sale_returns WHERE created_at::date BETWEEN $1::date AND $2::date`, p),
   ]);
+  const t = tenders.rows[0], st = settlements.rows[0], sv = service.rows[0], rf = refunds.rows[0];
+  const gross = t.total + st.total + sv.total;
+  res.json({ from, to,
+    totals: { counter: t.total, counter_n: t.n, settlements: st.total, settlements_n: st.n,
+      service: sv.total, service_n: sv.n, refunds: rf.total, refunds_n: rf.n,
+      gross, net: Math.round((gross - rf.total) * 100) / 100 },
+    by_method: byMethod.rows, by_day: byDay.rows, by_cashier: byCashier.rows });
+});
 
-  const d = payload.rows[0].payload;
-  const t = d.totals || { lines: 0, units: 0, cost_value: 0, retail_value: 0 };
+// ---- A/R aging -------------------------------------------------------------
+app.get('/api/admin/reports/ar-aging', requireAdmin, async (_req, res) => {
+  const [byCustomer, buckets, oldest] = await Promise.all([
+    query(`SELECT customer_name, customer_id, COUNT(*)::int AS invoices,
+                  SUM(charged)::float AS charged, SUM(settled)::float AS settled,
+                  SUM(charged - settled)::float AS balance,
+                  MIN(created_at)::date::text AS oldest,
+                  MAX((CURRENT_DATE - created_at::date))::int AS oldest_days
+             FROM (${AR_OPEN_SQL}) o
+            WHERE charged - settled > 0.005
+            GROUP BY customer_name, customer_id ORDER BY balance DESC`),
+    query(`SELECT CASE WHEN CURRENT_DATE - created_at::date <= 30 THEN '0-30 days'
+                       WHEN CURRENT_DATE - created_at::date <= 60 THEN '31-60 days'
+                       WHEN CURRENT_DATE - created_at::date <= 90 THEN '61-90 days'
+                       ELSE 'over 90 days' END AS bucket,
+                  COUNT(*)::int AS invoices, SUM(charged - settled)::float AS balance,
+                  MIN(CURRENT_DATE - created_at::date)::int AS sort_key
+             FROM (${AR_OPEN_SQL}) o
+            WHERE charged - settled > 0.005
+            GROUP BY 1 ORDER BY sort_key`),
+    query(`SELECT receipt_number, customer_name, created_at::date::text AS day,
+                  (CURRENT_DATE - created_at::date)::int AS days,
+                  (charged - settled)::float AS balance
+             FROM (${AR_OPEN_SQL}) o
+            WHERE charged - settled > 0.005
+            ORDER BY created_at ASC LIMIT 200`),
+  ]);
+  const owed = byCustomer.rows.reduce((a, r) => a + r.balance, 0);
+  // Two honest readings of the same ledger, and they differ. The buckets below
+  // age INVOICES, so an over-settled invoice does not offset an under-settled one
+  // for the same customer -- right for chasing, but it overstates the shop's
+  // position. net_owed nets within each customer and floors at zero, which is the
+  // figure the Management Summary and Customer List report. Reporting only one of
+  // them is how two pages end up disagreeing about what the shop is owed.
+  const net = (await query(
+    `SELECT COALESCE(SUM(GREATEST(bal, 0)),0)::float AS owed FROM (
+       SELECT COALESCE((SELECT SUM(sp.amount_usd) FROM sale_payments sp
+                         JOIN pos_sales s ON s.id = sp.sale_id
+                        WHERE sp.method = 'account' AND s.customer_id = u.id AND s.voided = false),0)
+            - COALESCE((SELECT SUM(amount_usd) FROM account_payments ap WHERE ap.customer_id = u.id),0) AS bal
+         FROM users u WHERE u.is_staff = false AND u.is_admin = false) t`)).rows[0];
+  const netOwed = Math.round(net.owed * 100) / 100;
   res.json({
-    from, to, filter, value,
-    totals: Object.assign({}, t, { potential_gross: (t.retail_value || 0) - (t.cost_value || 0) }),
-    by_category: d.by_category,
-    by_location: d.by_location,
-    dead_stock: d.dead_stock,
-    items: d.items,
-    facets: {
-      categories: facetCat.rows.map((r) => r.c),
-      locations: facetLoc.rows.map((r) => r.l),
-      suppliers: facetSup.rows,
-    },
+    totals: { customers: byCustomer.rows.length, owed: Math.round(owed * 100) / 100,
+      net_owed: netOwed, invoices: oldest.rows.length },
+    advice: [{ kind: 'data', text: 'Two figures, both correct. The aged total (J$' +
+      Math.round(owed).toLocaleString() + ') adds up every invoice still short, which is what you chase. ' +
+      'The net position (J$' + Math.round(netOwed).toLocaleString() + ') nets each customer’s ' +
+      'overpayments against their own arrears, and is the figure the Management Summary and Customer ' +
+      'List report. The gap is customers who have over-settled some invoices and under-settled others.' }],
+    by_customer: byCustomer.rows, buckets: buckets.rows, oldest: oldest.rows });
+});
+
+// ---- payables (A/P) --------------------------------------------------------
+app.get('/api/admin/reports/payables', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const p = [from, to];
+  const [paid, byMethod, bySupplier, open] = await Promise.all([
+    query(`SELECT COUNT(*)::int AS n, COALESCE(SUM(amount_usd),0)::float AS total
+             FROM purchase_order_payments WHERE created_at::date BETWEEN $1::date AND $2::date`, p),
+    query(`SELECT method, COUNT(*)::int AS n, COALESCE(SUM(amount_usd),0)::float AS total
+             FROM purchase_order_payments WHERE created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY method ORDER BY total DESC`, p),
+    query(`SELECT COALESCE(s.name,'(no supplier)') AS supplier, COUNT(DISTINCT po.id)::int AS pos,
+                  COALESCE(SUM(po.total_usd),0)::float AS ordered,
+                  COALESCE((SELECT SUM(pp.amount_usd) FROM purchase_order_payments pp
+                             WHERE pp.po_id IN (SELECT id FROM purchase_orders WHERE supplier_id = s.id)),0)::float AS paid
+             FROM purchase_orders po LEFT JOIN suppliers s ON s.id = po.supplier_id
+            GROUP BY s.id, s.name ORDER BY ordered DESC`),
+    query(`SELECT po.po_number, COALESCE(s.name,'(no supplier)') AS supplier, po.status,
+                  po.created_at::date::text AS day, po.total_usd::float AS total,
+                  COALESCE((SELECT SUM(pp.amount_usd) FROM purchase_order_payments pp WHERE pp.po_id = po.id),0)::float AS paid
+             FROM purchase_orders po LEFT JOIN suppliers s ON s.id = po.supplier_id
+            ORDER BY po.created_at DESC LIMIT 200`),
+  ]);
+  for (const r of bySupplier.rows) r.outstanding = Math.round((r.ordered - r.paid) * 100) / 100;
+  for (const r of open.rows) r.outstanding = Math.round((r.total - r.paid) * 100) / 100;
+  const outstanding = bySupplier.rows.reduce((a, r) => a + r.outstanding, 0);
+
+  // "Outstanding" here is ordered minus recorded payments, and almost all of
+  // the purchase history was imported from INVREC, which carries no accounts-
+  // payable data at all -- SUB_TOTAL, TOTAL, TOTAL_PAID and PAY_DATE are empty
+  // on every one of its 206,956 rows. So those POs show their whole value as
+  // unpaid, not because the supplier is owed but because nothing was ever
+  // recorded against them. Quantify it rather than let the tile imply a debt:
+  // the legacy share is called out separately and the real A/P figure is what
+  // remains once it is set aside.
+  const legacy = await query(`
+    SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns
+                              WHERE table_name = 'purchase_orders' AND column_name = 'legacy_key')
+                THEN (SELECT COUNT(*) FROM purchase_orders WHERE legacy_key IS NOT NULL) ELSE 0 END::int AS n,
+           CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns
+                              WHERE table_name = 'purchase_orders' AND column_name = 'legacy_key')
+                THEN (SELECT COALESCE(SUM(total_usd), 0) FROM purchase_orders WHERE legacy_key IS NOT NULL) ELSE 0 END::float AS value`);
+  const lg = legacy.rows[0];
+  // Guard the sign: when the legacy share accounts for the whole figure, float
+  // subtraction lands on -0 and renders as "J$-0.00".
+  const trackedRaw = Math.round((outstanding - lg.value) * 100) / 100;
+  const tracked = Math.abs(trackedRaw) < 0.005 ? 0 : trackedRaw;
+
+  const advice = [];
+  if (lg.n) {
+    advice.push({ kind: 'data', text:
+      `${lg.n.toLocaleString('en-US')} of these purchase orders were imported from the legacy INVREC export, `
+      + `which records no payments at all. Their J$${lg.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} `
+      + 'shows as outstanding because nothing was ever logged against them, not because it is owed. '
+      + `Accounts payable actually tracked by this system: J$${tracked.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.` });
+  }
+
+  res.json({ from, to,
+    totals: { paid: paid.rows[0].total, paid_n: paid.rows[0].n,
+      outstanding: Math.round(outstanding * 100) / 100,
+      legacy_untracked: lg.value, legacy_pos: lg.n, outstanding_tracked: tracked },
+    advice,
+    by_method: byMethod.rows, by_supplier: bySupplier.rows, purchase_orders: open.rows });
+});
+
+// ---- daily sales journal (the bookkeeping hand-off) ------------------------
+app.get('/api/admin/reports/daily-journal', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const p = [from, to];
+  const [days, tenders, cogs, totals] = await Promise.all([
+    query(`SELECT created_at::date::text AS day, COUNT(*)::int AS tickets,
+                  COALESCE(SUM(subtotal_usd),0)::float AS gross,
+                  COALESCE(SUM(discount_usd),0)::float AS discount,
+                  COALESCE(SUM(tax_usd),0)::float AS tax,
+                  COALESCE(SUM(total_usd),0)::float AS net
+             FROM pos_sales WHERE voided = false AND created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY 1`, p),
+    query(`SELECT s.created_at::date::text AS day, sp.method,
+                  COALESCE(SUM(sp.amount_usd),0)::float AS total
+             FROM sale_payments sp JOIN pos_sales s ON s.id = sp.sale_id
+            WHERE s.voided = false AND s.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1, 2 ORDER BY 1`, p),
+    query(`SELECT s.created_at::date::text AS day,
+                  COALESCE(SUM(i.qty * COALESCE(pr.cost_usd,0)),0)::float AS cogs
+             FROM pos_sale_items i JOIN pos_sales s ON s.id = i.sale_id
+             LEFT JOIN products pr ON pr.img = i.product_img
+            WHERE s.voided = false AND s.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY 1`, p),
+    query(`SELECT COALESCE(SUM(subtotal_usd),0)::float AS gross,
+                  COALESCE(SUM(discount_usd),0)::float AS discount,
+                  COALESCE(SUM(tax_usd),0)::float AS tax,
+                  COALESCE(SUM(total_usd),0)::float AS net, COUNT(*)::int AS tickets
+             FROM pos_sales WHERE voided = false AND created_at::date BETWEEN $1::date AND $2::date`, p),
+  ]);
+  const cogsByDay = {};
+  for (const r of cogs.rows) cogsByDay[r.day] = r.cogs;
+  const methods = [...new Set(tenders.rows.map((r) => r.method))].sort();
+  const tenderByDay = {};
+  for (const r of tenders.rows) (tenderByDay[r.day] = tenderByDay[r.day] || {})[r.method] = r.total;
+  for (const d of days.rows) {
+    d.cogs = cogsByDay[d.day] || 0;
+    d.gross_profit = Math.round((d.net - d.tax - d.cogs) * 100) / 100;
+    Object.assign(d, tenderByDay[d.day] || {});
+  }
+  const t = totals.rows[0];
+  const totalCogs = cogs.rows.reduce((a, r) => a + r.cogs, 0);
+  res.json({ from, to, methods, days: days.rows,
+    totals: Object.assign({}, t, { cogs: Math.round(totalCogs * 100) / 100,
+      gross_profit: Math.round((t.net - t.tax - totalCogs) * 100) / 100 }) });
+});
+
+// ---- goods received --------------------------------------------------------
+// Two sources, deliberately kept apart rather than added together: receipts
+// logged against a purchase order, and warehouse 'receive' movements (which is
+// where a no-PO delivery and the imported 2014-2026 history both land).
+app.get('/api/admin/reports/receivals', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const p = [from, to];
+  const [totals, byDay, topParts, bySupplier, detail, poReceipts] = await Promise.all([
+    query(`SELECT COUNT(*)::int AS receipts, COALESCE(SUM(qty_delta),0)::int AS units
+             FROM warehouse_activity WHERE kind = 'receive'
+              AND created_at::date BETWEEN $1::date AND $2::date`, p),
+    query(`SELECT created_at::date::text AS day, COUNT(*)::int AS receipts,
+                  COALESCE(SUM(qty_delta),0)::int AS units
+             FROM warehouse_activity WHERE kind = 'receive'
+              AND created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY 1`, p),
+    query(`SELECT COALESCE(pr.name, wa.product_img) AS product, wa.product_img AS sku,
+                  COUNT(*)::int AS receipts, COALESCE(SUM(wa.qty_delta),0)::int AS units,
+                  COALESCE(SUM(wa.qty_delta * COALESCE(pr.cost_usd,0)),0)::float AS cost_value
+             FROM warehouse_activity wa LEFT JOIN products pr ON pr.img = wa.product_img
+            WHERE wa.kind = 'receive' AND wa.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1, 2 ORDER BY units DESC LIMIT 50`, p),
+    query(`SELECT COALESCE(s.name,'(not recorded)') AS supplier, COUNT(*)::int AS receipts,
+                  COALESCE(SUM(wa.qty_delta),0)::int AS units
+             FROM warehouse_activity wa
+             LEFT JOIN products pr ON pr.img = wa.product_img
+             LEFT JOIN suppliers s ON s.id = pr.supplier_id
+            WHERE wa.kind = 'receive' AND wa.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY units DESC LIMIT 40`, p),
+    query(`SELECT wa.created_at::date::text AS day, wa.product_img AS sku,
+                  COALESCE(pr.name, wa.product_img) AS product, wa.qty_delta AS qty,
+                  COALESCE(s.name,'-') AS supplier, wa.notes
+             FROM warehouse_activity wa
+             LEFT JOIN products pr ON pr.img = wa.product_img
+             LEFT JOIN suppliers s ON s.id = pr.supplier_id
+            WHERE wa.kind = 'receive' AND wa.created_at::date BETWEEN $1::date AND $2::date
+            ORDER BY wa.created_at DESC LIMIT 300`, p),
+    query(`SELECT po.po_number, COALESCE(s.name,'-') AS supplier,
+                  po.received_date::date::text AS received, po.total_usd::float AS total,
+                  (SELECT COALESCE(SUM(qty_received),0)::int FROM purchase_order_items WHERE po_id = po.id) AS units
+             FROM purchase_orders po LEFT JOIN suppliers s ON s.id = po.supplier_id
+            WHERE po.received_date IS NOT NULL
+              AND po.received_date::date BETWEEN $1::date AND $2::date
+            ORDER BY po.received_date DESC LIMIT 200`, p),
+  ]);
+  const costValue = topParts.rows.reduce((a, r) => a + r.cost_value, 0);
+  res.json({ from, to,
+    totals: Object.assign({}, totals.rows[0], {
+      po_receipts: poReceipts.rows.length,
+      top_parts_cost_value: Math.round(costValue * 100) / 100 }),
+    by_day: byDay.rows, top_parts: topParts.rows, by_supplier: bySupplier.rows,
+    detail: detail.rows, po_receipts: poReceipts.rows });
+});
+
+// ---- reorder / purchasing planner -----------------------------------------
+// Demand comes from the date range; everything else is a snapshot. The point of
+// the range is "how fast is this moving lately", not "what did we sell".
+//
+// What counts as needing a reorder matters more than it looks. The obvious test
+// -- stock at or below the reorder point -- flags 31,141 of this catalogue,
+// because low_threshold defaults to 0 and a third of the SKUs are sitting at
+// zero stock. A list that long is not a purchase plan, it is noise. So a line
+// qualifies only if somebody set a real reorder point for it, or it is out of
+// stock AND actually sold in the range. Everything else is a dormant SKU, not
+// a thing to buy.
+const REORDER_WHERE = `
+  pr.is_active = true AND (
+    (COALESCE(pr.reorder_point,0) > 0 AND pr.stock_count <= pr.reorder_point)
+    OR (pr.low_threshold > 0 AND pr.stock_count <= pr.low_threshold)
+    OR (pr.stock_count <= 0 AND EXISTS (
+          SELECT 1 FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+           WHERE i.product_img = pr.img AND ps.voided = false
+             AND ps.created_at::date BETWEEN $1::date AND $2::date)))`;
+app.get('/api/admin/reports/reorder', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const p = [from, to];
+  const [rows, totals] = await Promise.all([
+    query(`SELECT pr.img, pr.sku, pr.name, COALESCE(pr.category,'-') AS category,
+                  pr.stock_count AS stock,
+                  GREATEST(COALESCE(NULLIF(pr.reorder_point, 0), pr.low_threshold), 0) AS reorder_point,
+                  pr.reorder_qty, pr.cost_usd::float AS cost_usd,
+                  COALESCE(s.name,'-') AS supplier, s.lead_time_days,
+                  COALESCE((SELECT SUM(i.qty) FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+                             WHERE i.product_img = pr.img AND ps.voided = false
+                               AND ps.created_at::date BETWEEN $1::date AND $2::date),0)::int AS sold
+             FROM products pr LEFT JOIN suppliers s ON s.id = pr.supplier_id
+            WHERE ${REORDER_WHERE}
+            ORDER BY sold DESC, (GREATEST(COALESCE(NULLIF(pr.reorder_point,0), pr.low_threshold),0) - pr.stock_count) DESC,
+                     pr.name ASC LIMIT 400`, p),
+    query(`SELECT COUNT(*)::int AS flagged,
+                  COUNT(*) FILTER (WHERE pr.stock_count <= 0)::int AS out_of_stock
+             FROM products pr WHERE ${REORDER_WHERE}`, p),
+  ]);
+  let cost = 0;
+  for (const r of rows.rows) {
+    // Suggest the configured reorder quantity, else enough to clear the point
+    // plus what sold in the range -- never less than one.
+    const gap = Math.max(0, (r.reorder_point || 0) - r.stock);
+    r.suggest_qty = r.reorder_qty && r.reorder_qty > 0 ? r.reorder_qty : Math.max(1, gap + r.sold);
+    r.suggest_cost = Math.round(r.suggest_qty * Number(r.cost_usd || 0) * 100) / 100;
+    cost += r.suggest_cost;
+  }
+  res.json({ from, to,
+    totals: Object.assign({}, totals.rows[0], { suggest_cost: Math.round(cost * 100) / 100 }),
+    items: rows.rows });
+});
+
+// ---- customer list ---------------------------------------------------------
+// Pre-aggregated, not correlated. The original asked five per-row subqueries
+// per customer and then the whole balance calculation again for the totals --
+// around 17,000 index scans over 8,600 customers. Most of them are cheap, but
+// the shared walk-in account carries 899,386 of the 931,078 sales, so every
+// pass that touches it re-aggregates nine hundred thousand rows: the report
+// took 12,422ms. Aggregating pos_sales / sale_payments / account_payments by
+// customer once and joining is a single pass over each table, and the list and
+// the totals are both derived from the same joined set in one round trip, which
+// also means they cannot disagree. 12,422ms -> see the comment on the route's
+// test in the port notes.
+app.get('/api/admin/reports/customer-list', requireAdmin, async (_req, res) => {
+  const LIMIT = 2000;
+  const { rows } = await query(`
+    WITH cust AS (
+      SELECT u.id, u.name, u.email, u.phone, u.account_number,
+             COALESCE(u.customer_type,'retail') AS customer_type,
+             COALESCE(u.price_tier,'retail')    AS price_tier,
+             u.credit_type, u.payment_terms_days,
+             u.credit_limit_usd::float          AS credit_limit_usd,
+             u.created_at::date::text           AS joined
+        FROM users u WHERE u.is_staff = false AND u.is_admin = false
+    ),
+    sale_agg AS (
+      SELECT customer_id AS id, COUNT(*)::int AS sales,
+             SUM(total_usd) AS spend, MAX(created_at)::date::text AS last_sale
+        FROM pos_sales
+       WHERE voided = false AND customer_id IS NOT NULL
+       GROUP BY customer_id
+    ),
+    -- The debit side of a charge sale: an 'account' tender is not cash, it is
+    -- the customer owing. Cash/card/cheque rows are deliberately excluded.
+    acct_debit AS (
+      SELECT ps.customer_id AS id, SUM(sp.amount_usd) AS debit
+        FROM sale_payments sp JOIN pos_sales ps ON ps.id = sp.sale_id
+       WHERE sp.method = 'account' AND ps.voided = false AND ps.customer_id IS NOT NULL
+       GROUP BY ps.customer_id
+    ),
+    acct_credit AS (
+      SELECT customer_id AS id, SUM(amount_usd) AS credit
+        FROM account_payments WHERE customer_id IS NOT NULL GROUP BY customer_id
+    ),
+    j AS (
+      SELECT c.*, COALESCE(s.sales, 0) AS sales,
+             COALESCE(s.spend, 0)::float AS spend,
+             s.last_sale,
+             (COALESCE(d.debit, 0) - COALESCE(k.credit, 0))::float AS balance
+        FROM cust c
+        LEFT JOIN sale_agg   s USING (id)
+        LEFT JOIN acct_debit d USING (id)
+        LEFT JOIN acct_credit k USING (id)
+    )
+    SELECT json_build_object(
+      'customers', (SELECT COALESCE(json_agg(x), '[]'::json) FROM
+                     (SELECT * FROM j ORDER BY spend DESC, name ASC LIMIT ${LIMIT}) x),
+      'by_type',   (SELECT COALESCE(json_agg(x), '[]'::json) FROM
+                     (SELECT customer_type, COUNT(*)::int AS n FROM j
+                       GROUP BY customer_type ORDER BY n DESC) x),
+      -- Counted over every customer, never summed from the limited list. Doing
+      -- it in JS over the trimmed array reported J$38,037,734 against a true
+      -- J$38,401,336 and put this page J$363,602 out of step with the
+      -- Management Summary and A/R Aging.
+      --
+      -- GREATEST(balance, 0) per customer, then summed: receivables net within
+      -- one account (an overpayment cancels that customer's own arrears) but
+      -- never across accounts (one customer's credit cannot pay another's
+      -- debt). Flooring globally instead gives a different, smaller number.
+      'totals',    (SELECT row_to_json(x) FROM (
+                     SELECT COUNT(*)::int                                         AS customers,
+                            COUNT(*) FILTER (WHERE account_number IS NOT NULL)::int AS with_account,
+                            COUNT(*) FILTER (WHERE customer_type = 'trade')::int    AS trade,
+                            COALESCE(SUM(GREATEST(balance, 0)), 0)::float           AS owed
+                       FROM j) x)
+    ) AS payload`);
+
+  const d = rows[0].payload;
+  res.json({ totals: d.totals, by_type: d.by_type, customers: d.customers,
+    shown: d.customers.length, total: d.totals.customers });
+});
+
+// ---- vendor list -----------------------------------------------------------
+app.get('/api/admin/reports/vendor-list', requireAdmin, async (_req, res) => {
+  const [rows, totals] = await Promise.all([
+    query(`SELECT s.id, s.name, s.code, s.contact_name, s.phone, s.email,
+                  s.payment_terms, s.lead_time_days, s.account_number, s.is_active,
+                  (SELECT COUNT(*)::int FROM products pr WHERE pr.supplier_id = s.id) AS skus,
+                  COALESCE((SELECT SUM(pr.stock_count * COALESCE(pr.cost_usd,0)) FROM products pr
+                             WHERE pr.supplier_id = s.id AND pr.is_active = true),0)::float AS stock_cost,
+                  (SELECT COUNT(*)::int FROM purchase_orders po WHERE po.supplier_id = s.id) AS pos,
+                  (SELECT MAX(po.created_at)::date::text FROM purchase_orders po WHERE po.supplier_id = s.id) AS last_po
+             FROM suppliers s ORDER BY stock_cost DESC, s.name ASC`),
+    query(`SELECT COUNT(*)::int AS vendors, COUNT(*) FILTER (WHERE is_active)::int AS active
+             FROM suppliers`),
+  ]);
+  const stockCost = rows.rows.reduce((a, r) => a + r.stock_cost, 0);
+  res.json({ totals: Object.assign({}, totals.rows[0], { stock_cost: Math.round(stockCost * 100) / 100 }),
+    vendors: rows.rows });
+});
+
+// ---- users & staff ---------------------------------------------------------
+// The Cloudflare build fills a "last seen" column from admin_presence; this
+// schema has no such table, so that column comes back null rather than faked.
+app.get('/api/admin/reports/users-staff', requireAdmin, async (_req, res) => {
+  const [rows, byRole, tiles, roleDefs] = await Promise.all([
+    query(`SELECT u.id, u.name, u.email, u.employee_no, u.admin_role,
+                  CASE WHEN u.pin_hash IS NOT NULL THEN 'yes' ELSE 'no' END AS pin_set,
+                  CASE WHEN u.disabled THEN 'disabled'
+                       WHEN u.is_archived THEN 'archived' ELSE 'active' END AS state,
+                  u.created_at::date::text AS joined, NULL::text AS last_seen,
+                  m.specialty, m.role AS staff_role
+             FROM users u LEFT JOIN mechanics m ON m.user_id = u.id
+            WHERE u.is_staff = true OR u.is_admin = true
+            ORDER BY state ASC, u.name ASC`),
+    query(`SELECT COALESCE(admin_role,'-') AS role, COUNT(*)::int AS n
+             FROM users WHERE is_staff = true OR is_admin = true GROUP BY 1 ORDER BY n DESC`),
+    query(`SELECT COUNT(*)::int AS total,
+                  COUNT(*) FILTER (WHERE NOT disabled AND NOT is_archived)::int AS active,
+                  COUNT(*) FILTER (WHERE disabled)::int AS disabled,
+                  COUNT(*) FILTER (WHERE pin_hash IS NOT NULL)::int AS with_pin,
+                  COUNT(*) FILTER (WHERE must_change_password)::int AS must_change_password
+             FROM users WHERE is_staff = true OR is_admin = true`),
+    query(`SELECT code, label, rank, can_manage,
+                  COALESCE(jsonb_array_length(hidden_tabs), 0)::int AS hidden_tabs
+             FROM roles ORDER BY rank ASC`),
+  ]);
+  res.json({ staff: rows.rows, by_role: byRole.rows, tiles: tiles.rows[0], roles: roleDefs.rows });
+});
+
+// ---- custom inventory (caller picks the columns and filters) ---------------
+app.get('/api/admin/reports/inventory-custom', requireAdmin, async (req, res) => {
+  const ALL_COLS = ['sku', 'barcode', 'category', 'bin', 'supplier', 'stock', 'threshold',
+                    'cost', 'retail', 'margin', 'age'];
+  const want = String(req.query.cols || 'category,stock,retail')
+    .split(',').map((x) => x.trim()).filter((x) => ALL_COLS.includes(x));
+  const cols = want.length ? want : ['category', 'stock', 'retail'];
+
+  const where = ['1=1'];
+  const binds = [];
+  const active = String(req.query.active == null ? '1' : req.query.active);
+  if (active === '1') where.push('pr.is_active = true');
+  else if (active === '0') where.push('pr.is_active = false');
+  if (req.query.category) { binds.push(String(req.query.category)); where.push('pr.category = $' + binds.length); }
+  if (req.query.supplier_id) { binds.push(parseInt(req.query.supplier_id, 10) || 0); where.push('pr.supplier_id = $' + binds.length); }
+  const stock = String(req.query.stock || 'all');
+  if (stock === 'in') where.push('pr.stock_count > 0');
+  else if (stock === 'out') where.push('pr.stock_count <= 0');
+  else if (stock === 'low') where.push('pr.stock_count <= pr.low_threshold');
+
+  const [rows, cats, sups] = await Promise.all([
+    query(`SELECT pr.img, pr.name, pr.sku, pr.barcode, COALESCE(pr.category,'-') AS category,
+                  pr.bin_location AS bin, COALESCE(sp.name,'-') AS supplier,
+                  pr.stock_count AS stock, pr.low_threshold AS threshold,
+                  COALESCE(pr.cost_usd,0)::float AS cost, pr.price_usd::float AS retail,
+                  (COALESCE(pr.price_usd,0) - COALESCE(pr.cost_usd,0))::float AS margin,
+                  (CURRENT_DATE - pr.created_at::date)::int AS age
+             FROM products pr LEFT JOIN suppliers sp ON sp.id = pr.supplier_id
+            WHERE ${where.join(' AND ')} ORDER BY pr.name ASC LIMIT 2000`, binds),
+    query(`SELECT DISTINCT category FROM products
+            WHERE category IS NOT NULL AND category <> '' ORDER BY category`),
+    query('SELECT id, name FROM suppliers WHERE is_active = true ORDER BY name'),
+  ]);
+  const keep = ['name'].concat(cols);
+  const trimmed = rows.rows.map((r) => {
+    const o = {};
+    for (const k of keep) o[k] = r[k];
+    return o;
   });
+  const sum = (f) => Math.round(rows.rows.reduce((a, r) => a + f(r), 0) * 100) / 100;
+  const totals = {
+    name: rows.rows.length + ' SKUs',
+    stock: rows.rows.reduce((a, r) => a + Number(r.stock || 0), 0),
+    cost: sum((r) => Number(r.stock || 0) * Number(r.cost || 0)),
+    retail: sum((r) => Number(r.stock || 0) * Number(r.retail || 0)),
+  };
+  totals.margin = Math.round((totals.retail - totals.cost) * 100) / 100;
+  res.json({ cols, rows: trimmed, totals, all_cols: ALL_COLS,
+    facets: { categories: cats.rows.map((x) => x.category), suppliers: sups.rows } });
+});
+
+app.get('/api/admin/reports/staff-list', requireAdmin, async (_req, res) => {
+  const [rows, byRole, totals, roleDefs] = await Promise.all([
+    query(`SELECT u.id, u.name, u.email, u.employee_no, u.admin_role,
+                  CASE WHEN u.pin_hash IS NOT NULL THEN 'yes' ELSE 'no' END AS pin_set,
+                  CASE WHEN u.disabled THEN 'disabled'
+                       WHEN u.is_archived THEN 'archived' ELSE 'active' END AS state,
+                  u.must_change_password, u.created_at::date::text AS joined,
+                  m.specialty, m.role AS staff_role, m.is_active AS mech_active
+             FROM users u LEFT JOIN mechanics m ON m.user_id = u.id
+            WHERE u.is_staff = true OR u.is_admin = true
+            ORDER BY state ASC, u.name ASC`),
+    query(`SELECT COALESCE(admin_role,'-') AS role, COUNT(*)::int AS n
+             FROM users WHERE is_staff = true OR is_admin = true GROUP BY 1 ORDER BY n DESC`),
+    query(`SELECT COUNT(*)::int AS total,
+                  COUNT(*) FILTER (WHERE NOT disabled AND NOT is_archived)::int AS active,
+                  COUNT(*) FILTER (WHERE disabled)::int AS disabled,
+                  COUNT(*) FILTER (WHERE pin_hash IS NOT NULL)::int AS with_pin,
+                  COUNT(*) FILTER (WHERE must_change_password)::int AS must_change_password
+             FROM users WHERE is_staff = true OR is_admin = true`),
+    query(`SELECT code, label, rank FROM roles ORDER BY rank ASC`),
+  ]);
+  res.json({ totals: totals.rows[0], staff: rows.rows, by_role: byRole.rows, roles: roleDefs.rows });
+});
+
+// ---- stock movement (warehouse activity) ----------------------------------
+app.get('/api/admin/reports/warehouse', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const p = [from, to];
+  const [byKind, topMoved, byPerson, net, bins, unbinned, counts, byDay] = await Promise.all([
+    query(`SELECT kind, COUNT(*)::int AS n, COALESCE(SUM(ABS(qty_delta)),0)::int AS units
+             FROM warehouse_activity WHERE created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY kind ORDER BY n DESC`, p),
+    query(`SELECT COALESCE(pr.name, wa.product_img) AS product, wa.product_img AS sku,
+                  COUNT(*)::int AS moves,
+                  COALESCE(SUM(CASE WHEN wa.qty_delta > 0 THEN wa.qty_delta ELSE 0 END),0)::int AS in_units,
+                  COALESCE(SUM(CASE WHEN wa.qty_delta < 0 THEN -wa.qty_delta ELSE 0 END),0)::int AS out_units,
+                  COALESCE(SUM(wa.qty_delta),0)::int AS net_delta
+             FROM warehouse_activity wa LEFT JOIN products pr ON pr.img = wa.product_img
+            WHERE wa.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1, 2 ORDER BY moves DESC LIMIT 40`, p),
+    query(`SELECT COALESCE(m.name,'-') AS person, COUNT(*)::int AS moves,
+                  COALESCE(SUM(wa.qty_delta),0)::int AS net_delta
+             FROM warehouse_activity wa LEFT JOIN mechanics m ON m.id = wa.performed_by
+            WHERE wa.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY moves DESC`, p),
+    query(`SELECT COALESCE(SUM(qty_delta),0)::int AS net, COUNT(*)::int AS moves
+             FROM warehouse_activity WHERE created_at::date BETWEEN $1::date AND $2::date`, p),
+    query(`SELECT COALESCE(NULLIF(bin_location,''),'(unbinned)') AS bin, COUNT(*)::int AS skus,
+                  COALESCE(SUM(stock_count),0)::int AS units
+             FROM products WHERE is_active = true GROUP BY 1 ORDER BY units DESC LIMIT 50`),
+    query(`SELECT COUNT(*)::int AS n FROM products
+            WHERE is_active = true AND (bin_location IS NULL OR bin_location = '')`),
+    query(`SELECT count_number, scope, status, started_at::date::text AS started,
+                  total_items, total_variance FROM stock_counts ORDER BY started_at DESC LIMIT 15`),
+    query(`SELECT created_at::date::text AS day, COUNT(*)::int AS moves,
+                  COALESCE(SUM(CASE WHEN qty_delta > 0 THEN qty_delta ELSE 0 END),0)::int AS in_units,
+                  COALESCE(SUM(CASE WHEN qty_delta < 0 THEN -qty_delta ELSE 0 END),0)::int AS out_units
+             FROM warehouse_activity WHERE created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY 1`, p),
+  ]);
+  res.json({ from, to, by_kind: byKind.rows, top_moved: topMoved.rows, by_person: byPerson.rows,
+    by_day: byDay.rows, net_delta: net.rows[0].net, moves: net.rows[0].moves,
+    bins: bins.rows, unbinned: unbinned.rows[0].n, recent_counts: counts.rows });
+});
+
+// ---- sales by rep ----------------------------------------------------------
+app.get('/api/admin/reports/sales-reps', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const p = [from, to];
+  const [reps, byDay] = await Promise.all([
+    query(`SELECT COALESCE(NULLIF(ps.sales_rep_name,''), NULLIF(ps.cashier_name,''), '(no rep)') AS rep,
+                  COUNT(DISTINCT ps.id)::int AS tickets,
+                  COALESCE(SUM(i.qty),0)::int AS units,
+                  COALESCE(SUM(i.total_usd),0)::float AS revenue,
+                  COALESCE(SUM(i.discount_usd),0)::float AS discount,
+                  COALESCE(SUM(i.qty * COALESCE(pr.cost_usd,0)),0)::float AS cost
+             FROM pos_sales ps
+             JOIN pos_sale_items i ON i.sale_id = ps.id
+             LEFT JOIN products pr ON pr.img = i.product_img
+            WHERE ps.voided = false AND ps.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY revenue DESC`, p),
+    query(`SELECT ps.created_at::date::text AS day,
+                  COALESCE(NULLIF(ps.sales_rep_name,''), NULLIF(ps.cashier_name,''), '(no rep)') AS rep,
+                  COALESCE(SUM(ps.total_usd),0)::float AS revenue
+             FROM pos_sales ps
+            WHERE ps.voided = false AND ps.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1, 2 ORDER BY 1`, p),
+  ]);
+  for (const r of reps.rows) {
+    r.margin = Math.round((r.revenue - r.cost) * 100) / 100;
+    r.margin_pct = r.revenue > 0 ? Math.round((r.margin / r.revenue) * 1000) / 10 : null;
+    r.avg_ticket = r.tickets > 0 ? Math.round((r.revenue / r.tickets) * 100) / 100 : 0;
+  }
+  res.json({ from, to, reps: reps.rows, by_day: byDay.rows });
+});
+
+// ---- was it a good order? --------------------------------------------------
+// Judges buying decisions against what actually sold afterwards. A receival is
+// the decision; the sales that follow it are the verdict.
+//
+// Deliberately measured per part, not per receipt: a shop re-buys the same part
+// over and over, and "did this line move" is a question about the part, not
+// about one delivery note. `sold_after` counts only sales dated on or after the
+// first receipt in range, so stock that was already on the shelf is not
+// credited to this buy.
+app.get('/api/admin/reports/order-quality', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const p = [from, to];
+  const { rows } = await query(
+    `WITH recv AS (
+       SELECT wa.product_img, MIN(wa.created_at)::date AS first_recv,
+              SUM(wa.qty_delta)::int AS received
+         FROM warehouse_activity wa
+        WHERE wa.kind = 'receive' AND wa.created_at::date BETWEEN $1::date AND $2::date
+        GROUP BY wa.product_img HAVING SUM(wa.qty_delta) > 0)
+     SELECT r.product_img AS sku, COALESCE(pr.name, r.product_img) AS product,
+            COALESCE(pr.category,'-') AS category, COALESCE(s.name,'-') AS supplier,
+            r.received, r.first_recv::text AS first_received,
+            pr.stock_count AS stock_now, pr.cost_usd::float AS cost_usd,
+            (CURRENT_DATE - r.first_recv)::int AS days_since,
+            COALESCE((SELECT SUM(i.qty) FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+                       WHERE i.product_img = r.product_img AND ps.voided = false
+                         AND ps.created_at::date >= r.first_recv),0)::int AS sold_after
+       FROM recv r
+       LEFT JOIN products pr ON pr.img = r.product_img
+       LEFT JOIN suppliers s ON s.id = pr.supplier_id
+      ORDER BY r.received DESC LIMIT 400`, p);
+
+  const rnd = (n) => Math.round(n * 100) / 100;
+  const tally = { good: 0, over: 0, under: 0, slow: 0 };
+  let tiedUp = 0, wasted = 0;
+  for (const r of rows) {
+    const sellThrough = r.received > 0 ? r.sold_after / r.received : 0;
+    r.sell_through_pct = Math.round(sellThrough * 1000) / 10;
+    // Demand per day since the buy, used both for cover and for the better
+    // quantity. Guard the first day so a same-day receival is not infinite.
+    const days = Math.max(1, r.days_since);
+    const perDay = r.sold_after / days;
+    r.days_cover = perDay > 0 ? Math.round((r.stock_now / perDay) * 10) / 10 : null;
+    // What a buy sized to the demand that actually showed up would have been:
+    // 90 days of cover, rounded up, never zero if anything sold at all.
+    r.better_qty = perDay > 0 ? Math.max(1, Math.ceil(perDay * 90)) : 0;
+    r.over_by = Math.max(0, r.received - r.better_qty);
+    r.tied_up_usd = rnd(Math.max(0, r.stock_now) * Number(r.cost_usd || 0));
+
+    if (r.sold_after === 0) { r.verdict = 'never sold'; tally.slow++; wasted += r.tied_up_usd; }
+    else if (sellThrough >= 0.9 && r.stock_now <= 0) { r.verdict = 'under-bought'; tally.under++; }
+    else if (sellThrough >= 0.6) { r.verdict = 'good'; tally.good++; }
+    else if (sellThrough < 0.25) { r.verdict = 'over-bought'; tally.over++; tiedUp += r.tied_up_usd; }
+    else { r.verdict = 'slow'; tally.slow++; tiedUp += r.tied_up_usd; }
+    r.note = r.verdict === 'under-bought'
+      ? 'sold out — ' + r.better_qty + ' would have covered 90 days'
+      : r.verdict === 'over-bought' || r.verdict === 'slow'
+        ? 'ordered ' + r.received + ', ' + r.better_qty + ' would have done'
+        : r.verdict === 'never sold' ? 'no sales since it landed' : 'about right';
+  }
+  const scored = rows.length || 1;
+  res.json({ from, to,
+    totals: {
+      lines: rows.length, good: tally.good, over_bought: tally.over,
+      under_bought: tally.under, slow_or_dead: tally.slow,
+      good_pct: Math.round((tally.good / scored) * 1000) / 10,
+      tied_up: rnd(tiedUp), never_sold_value: rnd(wasted),
+    },
+    by_verdict: ['good', 'under-bought', 'slow', 'over-bought', 'never sold'].map((v) => ({
+      verdict: v, lines: rows.filter((r) => r.verdict === v).length,
+      received: rows.filter((r) => r.verdict === v).reduce((a, r) => a + r.received, 0),
+      tied_up: rnd(rows.filter((r) => r.verdict === v).reduce((a, r) => a + r.tied_up_usd, 0)),
+    })).filter((x) => x.lines > 0),
+    items: rows });
 });
 
 // =============================================================================
-//  BOOT
+//  REPORTS PORTED FROM THE CLOUDFLARE BUILD
 // =============================================================================
-// =============================================================================
-//  CATCH-ALL — serve index.html for SPA-style routes (only after static files)
+// These were listed in admin.html's report menu and served by
+// functions/_routes/reports.js, but never existed here -- clicking them on the
+// in-shop server returned 404. Same contracts, Postgres SQL.
 //
-//  MUST stay the last route registered in this file. Express matches in
-//  registration order, so anything declared below this point is unreachable:
-//  `app.get('*')` answers first and the /api/ branch turns it into a 404. This
-//  block used to sit above the REPORTS MODULE, which silently made every
-//  /api/admin/reports/* endpoint dead -- the whole Reports tab returned
-//  {"error":"Not found"} on the Postgres backend while the routes sat there
-//  looking correct. Add new routes ABOVE this banner, never after it.
+// Every one of them reads pos_sale_items, where a credit note now carries
+// negative qty and value, so returned stock nets out of revenue and margin
+// without these queries having to know what a "CN" invoice is.
+
+// ---- stock valuation + dead stock ------------------------------------------
+// Filterable, because "what is my stock worth" is almost never asked about the
+// whole catalogue -- it is asked about a category, a location, one supplier, or
+// the dead stock. Every filter narrows the tiles and all three breakdowns
+// together, so the totals always describe exactly what is listed.
+app.get('/api/admin/reports/valuation', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const q = req.query || {};
+  // Binds start empty, not with [from, to]: unfiltered, none of the predicates
+  // below reference a date, and Postgres rejects a bind list longer than the
+  // statement's placeholders ("supplies 2 parameters, but requires 0"). The
+  // date pair is appended only by the clauses that actually use it.
+  const where = ['pr.is_active = true', 'pr.stock_count > 0'];
+  const binds = [];
+  const add = (sql, val) => { binds.push(val); where.push(sql.replace('?', '$' + binds.length)); };
+  if (q.category) add('pr.category = ?', String(q.category));
+  if (q.location) {
+    // One control covers both columns: the shop uses `location` on some parts
+    // and `bin_location` on others, and a user picking "SHOP#1" means either.
+    binds.push(String(q.location));
+    where.push('(pr.location = $' + binds.length + ' OR pr.bin_location = $' + binds.length + ')');
+  }
+  if (q.supplier_id) add('pr.supplier_id = ?', parseInt(q.supplier_id, 10) || 0);
+  if (q.qty_lt) add('pr.stock_count < ?', parseInt(q.qty_lt, 10) || 0);
+  if (q.price_lt) add('COALESCE(pr.price_usd,0) < ?', Number(q.price_lt) || 0);
+  if (q.name) add('pr.name ILIKE ?', '%' + String(q.name).trim() + '%');
+  if (q.vehicle) add('pr.make_model ILIKE ?', '%' + String(q.vehicle).trim() + '%');
+  // "Nothing sold between these dates", reusable by the dead-stock filter and by
+  // the unfiltered line list. Takes the two bind positions it should read.
+  const noSaleSql = (a, b) => `NOT EXISTS (SELECT 1 FROM pos_sale_items i
+      JOIN pos_sales ps ON ps.id = i.sale_id
+     WHERE i.product_img = pr.img AND ps.voided = false
+       AND ps.created_at::date BETWEEN $${a}::date AND $${b}::date)`;
+  // Dead stock is a filter, not a separate report: nothing sold in the range.
+  if (q.dead === '1') {
+    binds.push(from, to);
+    where.push(noSaleSql(binds.length - 1, binds.length));
+  }
+  const W = where.join(' AND ');
+  const [filtered, facets] = await Promise.all([
+    query(`SELECT COUNT(*)::int AS lines, COALESCE(SUM(pr.stock_count),0)::int AS units,
+                  COALESCE(SUM(pr.stock_count * pr.price_usd),0)::float AS retail_value,
+                  COALESCE(SUM(pr.stock_count * COALESCE(pr.cost_usd,0)),0)::float AS cost_value
+             FROM products pr WHERE ${W}`, binds),
+    Promise.all([
+      query(`SELECT DISTINCT category AS v FROM products
+              WHERE is_active AND category IS NOT NULL AND category <> '' ORDER BY 1`),
+      query(`SELECT v FROM (
+               SELECT DISTINCT COALESCE(NULLIF(location,''), NULLIF(bin_location,'')) AS v
+                 FROM products WHERE is_active) t
+              WHERE v IS NOT NULL ORDER BY 1 LIMIT 500`),
+      query(`SELECT s.id, s.name FROM suppliers s
+              WHERE EXISTS (SELECT 1 FROM products pr WHERE pr.supplier_id = s.id AND pr.is_active)
+              ORDER BY s.name`),
+    ]).then(([c, l, s]) => ({ categories: c.rows.map((x) => x.v),
+      locations: l.rows.map((x) => x.v), suppliers: s.rows })),
+  ]);
+  // A filtered run answers about the selection and says so; an unfiltered one
+  // keeps the original whole-catalogue shape.
+  const active = Object.keys(q).filter((k) => ['category', 'location', 'supplier_id', 'qty_lt', 'price_lt', 'name', 'vehicle', 'dead'].includes(k) && q[k] !== '');
+  const [byCategory, byLocation, lines] = await Promise.all([
+    query(`SELECT COALESCE(pr.category,'-') AS category, COUNT(*)::int AS lines,
+                  COALESCE(SUM(pr.stock_count),0)::int AS units,
+                  COALESCE(SUM(pr.stock_count * COALESCE(pr.cost_usd,0)),0)::float AS cost_value,
+                  COALESCE(SUM(pr.stock_count * pr.price_usd),0)::float AS retail_value
+             FROM products pr WHERE ${W}
+            GROUP BY 1 ORDER BY cost_value DESC`, binds),
+    query(`SELECT COALESCE(NULLIF(pr.location,''), NULLIF(pr.bin_location,''), '-') AS location,
+                  COUNT(*)::int AS lines, COALESCE(SUM(pr.stock_count),0)::int AS units,
+                  COALESCE(SUM(pr.stock_count * COALESCE(pr.cost_usd,0)),0)::float AS cost_value
+             FROM products pr WHERE ${W}
+            GROUP BY 1 ORDER BY cost_value DESC LIMIT 60`, binds),
+    // The line list is the detail behind whatever is selected. Unfiltered it is
+    // the dead stock (what it has always shown); filtered it is the selection,
+    // because a filtered run is asking about those parts, not about what has
+    // not sold.
+    query(`SELECT pr.sku, pr.name, COALESCE(pr.category,'-') AS category,
+                  COALESCE(NULLIF(pr.location,''), NULLIF(pr.bin_location,''), '-') AS location,
+                  COALESCE(s.name,'-') AS supplier, pr.make_model AS vehicle,
+                  pr.stock_count, pr.price_usd::float AS price_usd,
+                  (pr.stock_count * COALESCE(pr.cost_usd,0))::float AS tied_up_cost,
+                  (pr.stock_count * COALESCE(pr.price_usd,0))::float AS retail_value
+             FROM products pr LEFT JOIN suppliers s ON s.id = pr.supplier_id
+            WHERE ${W}${active.length ? '' : ' AND ' + noSaleSql(binds.length + 1, binds.length + 2)}
+            ORDER BY tied_up_cost DESC LIMIT 300`,
+      active.length ? binds : binds.concat([from, to])),
+  ]);
+  const t = filtered.rows[0];
+  res.json({ from, to,
+    filters: { category: q.category || '', location: q.location || '', supplier_id: q.supplier_id || '',
+      qty_lt: q.qty_lt || '', price_lt: q.price_lt || '', name: q.name || '', vehicle: q.vehicle || '',
+      dead: q.dead === '1' },
+    facets, filtered: active.length > 0,
+    totals: Object.assign({}, t, { potential_gross: Math.round((t.retail_value - t.cost_value) * 100) / 100 }),
+    by_category: byCategory.rows, by_location: byLocation.rows,
+    dead_stock: lines.rows, lines_are_dead_stock: active.length === 0,
+    advice: [{ kind: 'data', text: active.length
+      ? 'Filtered: every figure on this page describes the ' + t.lines.toLocaleString() +
+        ' selected line(s) only, and the list below is the selection rather than the dead stock.'
+      : 'Unfiltered, so this is the whole active catalogue with stock on hand, and the list below is the dead stock — parts that did not sell in the chosen date range. Use the filters to value one category, location or supplier.' }] });
+});
+
+// ---- gross margin ----------------------------------------------------------
+app.get('/api/admin/reports/margin', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const p = [from, to];
+  const withMargin = (rows) => {
+    for (const r of rows) {
+      r.gross = Math.round((r.revenue - r.cost) * 100) / 100;
+      r.margin_pct = r.revenue > 0 ? Math.round((r.gross / r.revenue) * 1000) / 10 : null;
+    }
+    return rows;
+  };
+  const [byProduct, byCategory, totals] = await Promise.all([
+    query(`SELECT i.description AS name, COALESCE(SUM(i.qty),0)::int AS units,
+                  COALESCE(SUM(i.total_usd),0)::float AS revenue,
+                  COALESCE(SUM(i.qty * COALESCE(pr.cost_usd,0)),0)::float AS cost
+             FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+             LEFT JOIN products pr ON pr.img = i.product_img
+            WHERE ps.voided = false AND ps.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY i.description ORDER BY revenue DESC LIMIT 60`, p),
+    query(`SELECT COALESCE(pr.category,'-') AS category, COALESCE(SUM(i.qty),0)::int AS units,
+                  COALESCE(SUM(i.total_usd),0)::float AS revenue,
+                  COALESCE(SUM(i.qty * COALESCE(pr.cost_usd,0)),0)::float AS cost
+             FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+             LEFT JOIN products pr ON pr.img = i.product_img
+            WHERE ps.voided = false AND ps.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY revenue DESC`, p),
+    query(`SELECT COALESCE(SUM(i.total_usd),0)::float AS revenue,
+                  COALESCE(SUM(i.qty * COALESCE(pr.cost_usd,0)),0)::float AS cost
+             FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+             LEFT JOIN products pr ON pr.img = i.product_img
+            WHERE ps.voided = false AND ps.created_at::date BETWEEN $1::date AND $2::date`, p),
+  ]);
+  const t = totals.rows[0];
+  const gross = Math.round((t.revenue - t.cost) * 100) / 100;
+  res.json({ from, to,
+    totals: { revenue: t.revenue, cost: t.cost, gross,
+      margin_pct: t.revenue > 0 ? Math.round((gross / t.revenue) * 1000) / 10 : null },
+    by_product: withMargin(byProduct.rows), by_category: withMargin(byCategory.rows) });
+});
+
+// ---- suppliers -------------------------------------------------------------
+app.get('/api/admin/reports/supplier', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const p = [from, to];
+  const [rows, totals] = await Promise.all([
+    query(`SELECT s.id, s.name, s.contact_name, s.phone, s.is_active,
+                  (SELECT COUNT(*)::int FROM purchase_orders po
+                    WHERE po.supplier_id = s.id AND po.created_at::date BETWEEN $1::date AND $2::date) AS pos,
+                  COALESCE((SELECT SUM(po.total_usd) FROM purchase_orders po
+                             WHERE po.supplier_id = s.id AND po.created_at::date BETWEEN $1::date AND $2::date),0)::float AS po_value,
+                  COALESCE((SELECT SUM(po.total_usd) FROM purchase_orders po
+                             WHERE po.supplier_id = s.id AND po.received_date IS NOT NULL
+                               AND po.received_date::date BETWEEN $1::date AND $2::date),0)::float AS received_value,
+                  (SELECT COUNT(*)::int FROM products pr WHERE pr.supplier_id = s.id) AS skus,
+                  COALESCE((SELECT SUM(pr.stock_count * COALESCE(pr.cost_usd,0)) FROM products pr
+                             WHERE pr.supplier_id = s.id AND pr.is_active = true),0)::float AS stock_cost,
+                  (SELECT MAX(po.created_at)::date::text FROM purchase_orders po WHERE po.supplier_id = s.id) AS last_po
+             FROM suppliers s ORDER BY po_value DESC, s.name ASC`, p),
+    query(`SELECT COUNT(*)::int AS suppliers, COUNT(*) FILTER (WHERE is_active)::int AS active FROM suppliers`),
+  ]);
+  const poValue = rows.rows.reduce((a, r) => a + r.po_value, 0);
+  const stockCost = rows.rows.reduce((a, r) => a + r.stock_cost, 0);
+  res.json({ from, to, suppliers: rows.rows,
+    totals: Object.assign({}, totals.rows[0],
+      { po_value: Math.round(poValue * 100) / 100, stock_cost: Math.round(stockCost * 100) / 100 }) });
+});
+
+// ---- customer detail -------------------------------------------------------
+app.get('/api/admin/reports/customer-detail', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const p = [from, to];
+  const [rows, tiles, byTier] = await Promise.all([
+    query(`SELECT u.id, u.name, u.email, u.account_number,
+                  COALESCE(u.customer_type, u.price_tier, '-') AS tier,
+                  u.created_at::date::text AS joined,
+                  (SELECT COUNT(*)::int FROM orders o WHERE o.user_id = u.id) AS orders,
+                  COALESCE((SELECT SUM(o.total_usd) FROM orders o WHERE o.user_id = u.id),0)::float AS order_spend,
+                  COALESCE((SELECT SUM(ps.total_usd) FROM pos_sales ps
+                             WHERE ps.voided = false AND ps.customer_id = u.id),0)::float AS pos_spend,
+                  COALESCE((SELECT SUM(pt.delta) FROM points_transactions pt WHERE pt.user_id = u.id),0)::int AS points
+             FROM users u WHERE u.is_staff = false AND u.is_admin = false
+            ORDER BY pos_spend DESC LIMIT 100`),
+    query(`SELECT (SELECT COUNT(*)::int FROM users
+                    WHERE is_staff = false AND is_admin = false
+                      AND created_at::date BETWEEN $1::date AND $2::date) AS new_customers,
+                  (SELECT COUNT(DISTINCT customer_id)::int FROM pos_sales
+                    WHERE customer_id IS NOT NULL AND voided = false
+                      AND created_at::date BETWEEN $1::date AND $2::date) AS active_buyers,
+                  (SELECT COUNT(*)::int FROM newsletter_subscribers
+                    WHERE subscribed_at::date BETWEEN $1::date AND $2::date) AS newsletter`, p),
+    query(`SELECT COALESCE(customer_type, price_tier, '-') AS tier, COUNT(*)::int AS n
+             FROM users WHERE is_staff = false AND is_admin = false GROUP BY 1 ORDER BY n DESC`),
+  ]);
+  res.json({ from, to, customers: rows.rows, tiles: tiles.rows[0], by_tier: byTier.rows });
+});
+
+// ---- setup / configuration snapshot ---------------------------------------
+app.get('/api/admin/reports/setup-config', requireAdmin, async (_req, res) => {
+  const has = (v) => (v == null || v === '' ? 'no' : 'yes');
+  const [settings, counts, roles] = await Promise.all([
+    query('SELECT * FROM shop_settings ORDER BY id LIMIT 1'),
+    query(`SELECT (SELECT COUNT(*)::int FROM users WHERE is_staff = false AND is_admin = false) AS customers,
+                  (SELECT COUNT(*)::int FROM users WHERE is_staff = true OR is_admin = true) AS staff,
+                  (SELECT COUNT(*)::int FROM products WHERE is_active = true) AS products,
+                  (SELECT COUNT(*)::int FROM suppliers WHERE is_active = true) AS suppliers,
+                  (SELECT COUNT(*)::int FROM coupons WHERE is_active = true) AS coupons`),
+    query('SELECT code, label, rank FROM roles ORDER BY rank ASC'),
+  ]);
+  const s = settings.rows[0] || {};
+  res.json({
+    company: { name: s.company_name || null, address: s.address || null, phone: s.phone || null,
+      email: s.email || null, country: s.country || null },
+    storefront: {
+      public_pricing: !!s.storefront_prices,
+      pos_enforce_login: !!s.pos_enforce_login,
+      pos_enforce_customer: !!s.pos_enforce_customer,
+      pos_default_fulfilment: s.pos_default_fulfilment || '(ask each time)',
+    },
+    print: { logo_on_invoice: !!s.print_logo_on_invoice,
+      default_template: s.default_print_template || null, quote_valid_days: s.quote_valid_days || null },
+    shipping_origin: { name: s.ship_origin_name || null, city: s.ship_origin_city || null,
+      parish: s.ship_origin_parish || null, country: s.ship_origin_country || null },
+    carriers: {
+      dhl: { enabled: !!s.carrier_dhl_enabled, account: has(s.carrier_dhl_account), secret: has(process.env.DHL_API_KEY) },
+      fedex: { enabled: !!s.carrier_fedex_enabled, account: has(s.carrier_fedex_account), secret: has(process.env.FEDEX_CLIENT_ID) },
+      knutsford: { enabled: !!s.carrier_knutsford_enabled },
+      manual: { enabled: s.carrier_manual_enabled == null ? true : !!s.carrier_manual_enabled,
+        flat_fee: Number(s.ship_local_flat_usd) || 0 },
+    },
+    card_payment: { fygaro_enabled: !!s.fygaro_enabled, button_configured: has(s.fygaro_button_id),
+      secret: has(process.env.FYGARO_JWT_SECRET), currency: s.fygaro_currency || 'JMD' },
+    counts: counts.rows[0], roles: roles.rows,
+  });
+});
+
+// ---- audit log -------------------------------------------------------------
+// A merged feed rather than a table: this schema has no single audit trail, so
+// the activity is assembled from the places that do record who did what.
+app.get('/api/admin/reports/audit-log', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const lo = from + ' 00:00:00', hi = to + ' 23:59:59';
+  const p = [lo, hi];
+  const { rows: feed } = await query(
+    `SELECT * FROM (
+       SELECT wa.created_at AS at, 'Warehouse' AS area, 'Stock ' || wa.kind AS action,
+              COALESCE(pr.name, wa.product_img, '') || ' (' || COALESCE(wa.qty_delta, 0) || ')' AS detail,
+              COALESCE(m.name, '-') AS by, NULL::float AS amount
+         FROM warehouse_activity wa
+         LEFT JOIN products pr ON pr.img = wa.product_img
+         LEFT JOIN mechanics m ON m.id = wa.performed_by
+        WHERE wa.created_at BETWEEN $1::timestamptz AND $2::timestamptz
+       UNION ALL
+       SELECT pt.created_at AS at, 'Loyalty', 'Points ' || pt.reason,
+              'user #' || pt.user_id || ' ' || (CASE WHEN pt.delta >= 0 THEN '+' ELSE '' END) || pt.delta,
+              '-', NULL::float
+         FROM points_transactions pt WHERE pt.created_at BETWEEN $1::timestamptz AND $2::timestamptz
+       UNION ALL
+       SELECT gt.created_at AS at, 'Gift card', 'Gift card ' || gt.reason, gt.reference,
+              COALESCE(u.name, '-'), gt.delta_usd::float
+         FROM gift_card_transactions gt LEFT JOIN users u ON u.id = gt.performed_by
+        WHERE gt.created_at BETWEEN $1::timestamptz AND $2::timestamptz
+       UNION ALL
+       SELECT ps.created_at AS at, 'POS', 'Sale voided',
+              COALESCE(ps.receipt_number, '#' || ps.id), COALESCE(ps.cashier_name, '-'), ps.total_usd::float
+         FROM pos_sales ps
+        WHERE ps.voided = true AND ps.created_at BETWEEN $1::timestamptz AND $2::timestamptz
+       UNION ALL
+       SELECT r.created_at AS at, 'POS', 'Return / refund',
+              COALESCE(r.return_number, '#' || r.id) || ' (' || COALESCE(r.refund_method, '') || ')',
+              COALESCE(u.name, '-'), r.refund_total_usd::float
+         FROM pos_sale_returns r LEFT JOIN users u ON u.id = r.processed_by
+        WHERE r.created_at BETWEEN $1::timestamptz AND $2::timestamptz
+       UNION ALL
+       SELECT ps.created_at AS at, 'POS', 'Credit note',
+              ps.receipt_number || COALESCE(' → ' || ps.reference, ''),
+              COALESCE(ps.cashier_name, '-'), ps.total_usd::float
+         FROM pos_sales ps
+        WHERE ps.receipt_number LIKE 'CN%' AND ps.created_at BETWEEN $1::timestamptz AND $2::timestamptz
+       UNION ALL
+       SELECT o.created_at AS at, 'Orders', 'Order ' || o.status,
+              '#' || o.id, '-', o.total_usd::float
+         FROM orders o
+        WHERE o.status <> 'pending' AND o.created_at BETWEEN $1::timestamptz AND $2::timestamptz
+     ) f ORDER BY at DESC LIMIT 500`, p);
+  const byArea = {};
+  for (const r of feed) byArea[r.area] = (byArea[r.area] || 0) + 1;
+  res.json({ from, to, feed,
+    by_area: Object.keys(byArea).map((k) => ({ area: k, n: byArea[k] })).sort((a, b) => b.n - a.n) });
+});
+
 // =============================================================================
+//  DRILL-DOWN ANALYSIS — supplier, customer, bin
+// =============================================================================
+// The buying advice here is computed from this shop's own history, not sent to a
+// language model. That is deliberate: the admin panel runs on a counter PC that
+// is often offline, the numbers have to be reproducible when someone asks "why
+// does it say order 40", and the arithmetic below -- demand rate, lead-time
+// cover, safety stock, ABC class, trend -- is what actually decides a reorder.
+// Every figure a recommendation rests on is returned alongside it so the
+// reasoning can be checked rather than taken on faith.
+//
+// scoreItems() is shared by the supplier and bin views so a part cannot be
+// called overstocked on one screen and healthy on the next.
+//
+//   rate        units sold per day over the range
+//   lead_demand what sells while a reorder is in transit
+//   safety      half the lead-time demand -- cheap insurance, easy to explain
+//   reorder_at  lead_demand + safety: the level at which to place the order
+//   cover_days  how long the shelf lasts at the current rate
+//   order_qty   enough for 90 days plus safety, less what is already on hand
+//   order_by    the date the order has to be placed to avoid a stockout
+//   trend       second half of the range against the first
+//   abc         A = top 80% of revenue, B = next 15%, C = the tail
+function scoreItems(rows, days, defaultLead) {
+  const span = Math.max(1, days);
+  const ranked = rows.slice().sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
+  const totalRev = ranked.reduce((a, r) => a + (r.revenue || 0), 0);
+  let cum = 0;
+  for (const r of ranked) {
+    cum += r.revenue || 0;
+    const share = totalRev > 0 ? cum / totalRev : 1;
+    r.abc = r.revenue > 0 ? (share <= 0.8 ? 'A' : share <= 0.95 ? 'B' : 'C') : '-';
+  }
+  const today = new Date();
+  for (const r of rows) {
+    const lead = Number(r.lead_time_days) > 0 ? Number(r.lead_time_days) : defaultLead;
+    const rate = (r.sold || 0) / span;
+    r.rate = Math.round(rate * 1000) / 1000;
+    r.lead_demand = Math.ceil(rate * lead);
+    r.safety = Math.ceil(rate * lead * 0.5);
+    r.reorder_at = r.lead_demand + r.safety;
+    r.cover_days = rate > 0 ? Math.round((r.stock / rate) * 10) / 10 : null;
+    r.order_qty = rate > 0 ? Math.max(0, Math.ceil(rate * 90 + r.safety - r.stock)) : 0;
+    r.order_cost = Math.round(r.order_qty * Number(r.cost_usd || 0) * 100) / 100;
+    if (rate > 0) {
+      const slackDays = Math.max(0, Math.floor((r.stock / rate) - lead));
+      const d = new Date(today.getTime() + slackDays * 86400000);
+      r.order_by = d.toISOString().slice(0, 10);
+      r.order_now = slackDays <= 0;
+    } else { r.order_by = null; r.order_now = false; }
+    const a = r.sold_first || 0, b = r.sold_second || 0;
+    r.trend = (a + b) === 0 ? 'no sales'
+      : b > a * 1.25 ? 'rising' : b < a * 0.75 ? 'falling' : 'steady';
+    r.margin = Math.round(((r.revenue || 0) - (r.cogs || 0)) * 100) / 100;
+    r.margin_pct = r.revenue > 0 ? Math.round((r.margin / r.revenue) * 1000) / 10 : null;
+    // The weakness column. Ordered so the most actionable wins.
+    r.flag = (r.sold || 0) === 0 && r.stock > 0 ? 'dead — no sales, cash on the shelf'
+      : r.stock <= 0 && rate > 0 ? 'stocked out while still selling'
+      : r.order_now ? 'below reorder point — order now'
+      : r.cover_days != null && r.cover_days > 365 ? 'over a year of stock'
+      : r.cover_days != null && r.cover_days > 180 ? 'overstocked — 6 months+'
+      : r.margin_pct != null && r.margin_pct < 10 && r.revenue > 0 ? 'thin margin'
+      : r.trend === 'rising' ? 'demand rising — review quantity'
+      : 'healthy';
+  }
+  return rows;
+}
+
+// Per-part sales and receipts over a range, for an optional product filter.
+// `sold_first` / `sold_second` split the range in half so a trend can be read
+// without a second round trip.
+//
+// Written as pre-aggregated CTEs joined once, not as per-row correlated
+// subqueries. The correlated version needed seven lookups for every product it
+// returned and measured 4.5s for one supplier's 500 lines and 5.2s across the
+// catalogue; grouping the sales and receipts once first does the same work in a
+// couple of hash joins. The CTEs scan the range, not the whole history, so they
+// stay small whatever the range is.
+const ITEM_ANALYSIS_SQL = (extraWhere) => `
+  WITH mid AS (SELECT ($1::date + (($2::date - $1::date)/2)) AS d),
+  sales AS (
+    SELECT i.product_img,
+           SUM(i.qty)::int AS sold,
+           SUM(i.total_usd)::float AS revenue,
+           SUM(CASE WHEN ps.created_at::date <= (SELECT d FROM mid) THEN i.qty ELSE 0 END)::int AS sold_first,
+           SUM(CASE WHEN ps.created_at::date >  (SELECT d FROM mid) THEN i.qty ELSE 0 END)::int AS sold_second
+      FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+     WHERE ps.voided = false AND ps.created_at::date BETWEEN $1::date AND $2::date
+     GROUP BY i.product_img),
+  ever_sold AS (
+    SELECT i.product_img, MAX(ps.created_at)::date AS last_sold
+      FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+     WHERE ps.voided = false GROUP BY i.product_img),
+  recv AS (
+    SELECT wa.product_img, SUM(wa.qty_delta)::int AS received
+      FROM warehouse_activity wa
+     WHERE wa.kind = 'receive' AND wa.created_at::date BETWEEN $1::date AND $2::date
+     GROUP BY wa.product_img),
+  ever_recv AS (
+    SELECT wa.product_img, MAX(wa.created_at)::date AS last_received
+      FROM warehouse_activity wa WHERE wa.kind = 'receive' GROUP BY wa.product_img)
+  SELECT pr.img, pr.sku, pr.name, COALESCE(pr.category,'-') AS category,
+         COALESCE(NULLIF(pr.bin_location,''),'(unbinned)') AS bin,
+         pr.stock_count AS stock, pr.cost_usd::float AS cost_usd, pr.price_usd::float AS price_usd,
+         COALESCE(s.name,'-') AS supplier, s.lead_time_days,
+         COALESCE(sa.sold,0) AS sold,
+         COALESCE(sa.revenue,0)::float AS revenue,
+         (COALESCE(sa.sold,0) * COALESCE(pr.cost_usd,0))::float AS cogs,
+         COALESCE(sa.sold_first,0) AS sold_first,
+         COALESCE(sa.sold_second,0) AS sold_second,
+         COALESCE(rc.received,0) AS received,
+         er.last_received::text AS last_received,
+         es.last_sold::text AS last_sold
+    FROM products pr
+    LEFT JOIN suppliers s  ON s.id = pr.supplier_id
+    LEFT JOIN sales sa     ON sa.product_img = pr.img
+    LEFT JOIN ever_sold es ON es.product_img = pr.img
+    LEFT JOIN recv rc      ON rc.product_img = pr.img
+    LEFT JOIN ever_recv er ON er.product_img = pr.img
+   WHERE ${extraWhere}`;
+
+const dayCount = (from, to) =>
+  Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1);
+
+// ---- supplier drill-down ---------------------------------------------------
+app.get('/api/admin/reports/supplier-detail', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const id = parseInt(req.query.supplier_id, 10);
+  const { rows: list } = await query(
+    `SELECT s.id, s.name, (SELECT COUNT(*)::int FROM products pr WHERE pr.supplier_id = s.id) AS skus
+       FROM suppliers s WHERE s.is_active = true ORDER BY skus DESC, s.name ASC`);
+  if (!id) return res.json({ from, to, suppliers: list, supplier: null });
+
+  const sup = (await query('SELECT * FROM suppliers WHERE id = $1', [id])).rows[0];
+  if (!sup) return res.status(404).json({ error: 'That supplier no longer exists.' });
+
+  // No LIMIT: the tiles and the order total have to cover every part this
+  // supplier carries, not the top slice. Scoring a truncated list is how a
+  // supplier with 11,542 SKUs reported 500 of them as its whole book. Only the
+  // display lists are cut down, after the arithmetic.
+  const [items, recv, byDay, byType, unattributed] = await Promise.all([
+    query(ITEM_ANALYSIS_SQL('pr.supplier_id = $3') + ' ORDER BY revenue DESC', [from, to, id]),
+    query(`SELECT wa.created_at::date::text AS day, wa.product_img AS sku,
+                  COALESCE(pr.name, wa.product_img) AS product, wa.qty_delta AS qty, wa.kind AS type,
+                  (wa.meta_json->>'unit_cost_usd')::float AS unit_cost,
+                  COALESCE(NULLIF(wa.meta_json->>'reference',''),
+                           NULLIF(wa.meta_json->>'bill_no',''), '—') AS reference,
+                  (wa.qty_delta * COALESCE((wa.meta_json->>'unit_cost_usd')::float, 0))::float AS line_cost
+             FROM warehouse_activity wa JOIN products pr ON pr.img = wa.product_img
+            WHERE pr.supplier_id = $3 AND wa.created_at::date BETWEEN $1::date AND $2::date
+            ORDER BY wa.created_at DESC LIMIT 400`, [from, to, id]),
+    query(`SELECT wa.created_at::date::text AS day, COUNT(*)::int AS receipts,
+                  COALESCE(SUM(wa.qty_delta),0)::int AS units,
+                  COALESCE(SUM(wa.qty_delta * COALESCE((wa.meta_json->>'unit_cost_usd')::float,0)),0)::float AS cost
+             FROM warehouse_activity wa JOIN products pr ON pr.img = wa.product_img
+            WHERE pr.supplier_id = $3 AND wa.kind = 'receive'
+              AND wa.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY 1`, [from, to, id]),
+    query(`SELECT wa.kind AS type, COUNT(*)::int AS movements,
+                  COALESCE(SUM(wa.qty_delta),0)::int AS units
+             FROM warehouse_activity wa JOIN products pr ON pr.img = wa.product_img
+            WHERE pr.supplier_id = $3 AND wa.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY movements DESC`, [from, to, id]),
+    query(`SELECT COUNT(*)::int AS n FROM warehouse_activity wa
+             LEFT JOIN products pr ON pr.img = wa.product_img
+            WHERE wa.kind = 'receive' AND pr.supplier_id IS NULL`),
+  ]);
+
+  const days = dayCount(from, to);
+  const scored = scoreItems(items.rows, days, Number(sup.lead_time_days) || 7);
+  const sum = (f) => Math.round(scored.reduce((a, r) => a + (f(r) || 0), 0) * 100) / 100;
+  const buy = scored.filter((r) => r.order_qty > 0).sort((a, b) => (b.order_now - a.order_now) || (b.revenue - a.revenue));
+  const totals = {
+    skus: scored.length,
+    stock_units: scored.reduce((a, r) => a + r.stock, 0),
+    stock_cost: sum((r) => r.stock * Number(r.cost_usd || 0)),
+    received_units: scored.reduce((a, r) => a + r.received, 0),
+    sold_units: scored.reduce((a, r) => a + r.sold, 0),
+    revenue: sum((r) => r.revenue), cogs: sum((r) => r.cogs),
+    dead_lines: scored.filter((r) => r.sold === 0 && r.stock > 0).length,
+    dead_cost: sum((r) => (r.sold === 0 && r.stock > 0 ? r.stock * Number(r.cost_usd || 0) : 0)),
+    stockouts: scored.filter((r) => r.stock <= 0 && r.sold > 0).length,
+    order_lines: buy.length, order_cost: sum((r) => (r.order_qty > 0 ? r.order_cost : 0)),
+    order_now_lines: buy.filter((r) => r.order_now).length,
+  };
+  totals.margin = Math.round((totals.revenue - totals.cogs) * 100) / 100;
+  totals.margin_pct = totals.revenue > 0 ? Math.round((totals.margin / totals.revenue) * 1000) / 10 : null;
+  totals.sell_through_pct = totals.received_units > 0
+    ? Math.round((totals.sold_units / totals.received_units) * 1000) / 10 : null;
+
+  // What to say about this supplier, in plain words, from the figures above.
+  const advice = [];
+  if (totals.order_now_lines) advice.push({ kind: 'order', text: totals.order_now_lines + ' line(s) are at or below their reorder point and should go on the next order — ' + totals.order_lines + ' lines in total, about J$' + Math.round(totals.order_cost).toLocaleString() + ' at cost.' });
+  if (totals.stockouts) advice.push({ kind: 'risk', text: totals.stockouts + ' part(s) are out of stock but still selling. Those are lost sales now, not later.' });
+  if (totals.dead_lines) advice.push({ kind: 'cut', text: totals.dead_lines + ' part(s) from this supplier have not sold at all in this range, holding J$' + Math.round(totals.dead_cost).toLocaleString() + ' at cost. Stop reordering these before adding anything new.' });
+  const rising = scored.filter((r) => r.trend === 'rising' && r.sold > 0).length;
+  if (rising) advice.push({ kind: 'order', text: rising + ' part(s) are selling faster in the second half of this range than the first — raise their quantities rather than reordering the same amount.' });
+  const lead = Number(sup.lead_time_days) || 7;
+  advice.push({ kind: 'when', text: 'Lead time on file is ' + lead + ' day(s), so every reorder point below assumes ' + lead + ' days of cover plus half again as safety. Set a real lead time on the supplier record if that is wrong — it moves every date on this page.' });
+  if (totals.margin_pct != null) advice.push({ kind: 'margin', text: 'Parts from this supplier run at ' + totals.margin_pct + '% gross margin over the range. Compare against the Suppliers report before committing to a bigger order.' });
+  if (!recv.rows.length) advice.push({ kind: 'data', text: 'No receipts are recorded against this supplier in this range, so quantities here are inferred from sales alone.' });
+
+  res.json({ from, to, days, suppliers: list,
+    supplier: { id: sup.id, name: sup.name, contact_name: sup.contact_name, phone: sup.phone,
+      email: sup.email, payment_terms: sup.payment_terms, lead_time_days: sup.lead_time_days,
+      account_number: sup.account_number },
+    totals,
+    // Totals above are over all of them; these two lists are trimmed for the
+    // page, and say so.
+    items: scored.slice(0, 400), items_shown: Math.min(400, scored.length), items_total: scored.length,
+    buy_list: buy.slice(0, 200), buy_shown: Math.min(200, buy.length), buy_total: buy.length,
+    receivals: recv.rows, by_day: byDay.rows, by_type: byType.rows, advice,
+    unattributed_receivals: unattributed.rows[0].n });
+});
+
+// ---- customer drill-down: what they buy -----------------------------------
+app.get('/api/admin/reports/customer-items', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const id = parseInt(req.query.customer_id, 10);
+  const { rows: list } = await query(
+    `SELECT u.id, COALESCE(NULLIF(u.name,''), u.email) AS name,
+            COALESCE((SELECT SUM(ps.total_usd) FROM pos_sales ps
+                       WHERE ps.customer_id = u.id AND ps.voided = false),0)::float AS spend
+       FROM users u WHERE u.is_staff = false
+      ORDER BY spend DESC LIMIT 400`);
+  if (!id) return res.json({ from, to, customers: list, customer: null });
+
+  const cust = (await query('SELECT * FROM users WHERE id = $1', [id])).rows[0];
+  if (!cust) return res.status(404).json({ error: 'That customer no longer exists.' });
+  const p = [from, to, id];
+
+  const [items, byMonth, invoices, tiles] = await Promise.all([
+    query(`SELECT i.product_img AS sku, COALESCE(pr.name, i.description) AS product,
+                  COALESCE(pr.category,'-') AS category, COALESCE(s.name,'-') AS supplier,
+                  COUNT(DISTINCT ps.id)::int AS orders,
+                  COALESCE(SUM(i.qty),0)::int AS qty,
+                  COALESCE(SUM(i.total_usd),0)::float AS revenue,
+                  COALESCE(SUM(i.qty * COALESCE(pr.cost_usd,0)),0)::float AS cogs,
+                  MAX(ps.created_at)::date::text AS last_bought,
+                  MIN(ps.created_at)::date::text AS first_bought,
+                  pr.stock_count AS stock_now
+             FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+             LEFT JOIN products pr ON pr.img = i.product_img
+             LEFT JOIN suppliers s ON s.id = pr.supplier_id
+            WHERE ps.voided = false AND ps.customer_id = $3
+              AND ps.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY i.product_img, pr.name, i.description, pr.category, s.name, pr.stock_count
+            ORDER BY revenue DESC LIMIT 400`, p),
+    query(`SELECT to_char(ps.created_at,'YYYY-MM') AS month, COUNT(*)::int AS invoices,
+                  COALESCE(SUM(ps.total_usd),0)::float AS spend
+             FROM pos_sales ps
+            WHERE ps.voided = false AND ps.customer_id = $3
+              AND ps.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY 1`, p),
+    query(`SELECT ps.receipt_number, ps.created_at::date::text AS day, ps.payment_method,
+                  ps.total_usd::float AS total, ps.balance_due_usd::float AS balance
+             FROM pos_sales ps
+            WHERE ps.voided = false AND ps.customer_id = $3
+              AND ps.created_at::date BETWEEN $1::date AND $2::date
+            ORDER BY ps.created_at DESC LIMIT 200`, p),
+    query(`SELECT COUNT(*)::int AS invoices, COALESCE(SUM(total_usd),0)::float AS spend,
+                  MIN(created_at)::date::text AS first_seen, MAX(created_at)::date::text AS last_seen
+             FROM pos_sales WHERE voided = false AND customer_id = $1`, [id]),
+  ]);
+
+  const days = dayCount(from, to);
+  for (const r of items.rows) {
+    r.margin = Math.round((r.revenue - r.cogs) * 100) / 100;
+    r.margin_pct = r.revenue > 0 ? Math.round((r.margin / r.revenue) * 1000) / 10 : null;
+    // How often they come back for it, and therefore when they are next due.
+    const span = r.first_bought && r.last_bought
+      ? Math.max(1, Math.round((Date.parse(r.last_bought) - Date.parse(r.first_bought)) / 86400000)) : null;
+    r.every_days = r.orders > 1 && span ? Math.round(span / (r.orders - 1)) : null;
+    r.due_in_days = r.every_days
+      ? r.every_days - Math.round((Date.now() - Date.parse(r.last_bought)) / 86400000) : null;
+    r.note = r.due_in_days == null ? 'bought once — no pattern yet'
+      : r.due_in_days <= 0 ? 'overdue to reorder — follow up'
+      : r.due_in_days <= 14 ? 'due within ' + r.due_in_days + ' days'
+      : 'next due in about ' + r.due_in_days + ' days';
+    r.can_supply = r.stock_now == null ? 'not stocked' : r.stock_now >= (r.qty / Math.max(1, r.orders)) ? 'in stock' : 'short';
+  }
+  const bal = (await query(
+    `SELECT COALESCE((SELECT SUM(sp.amount_usd) FROM sale_payments sp JOIN pos_sales ps ON ps.id = sp.sale_id
+                       WHERE sp.method = 'account' AND ps.customer_id = $1 AND ps.voided = false),0)::float
+            - COALESCE((SELECT SUM(amount_usd) FROM account_payments WHERE customer_id = $1),0)::float AS balance`,
+    [id])).rows[0];
+
+  const t = tiles.rows[0];
+  const overdue = items.rows.filter((r) => r.due_in_days != null && r.due_in_days <= 0);
+  const soon = items.rows.filter((r) => r.due_in_days != null && r.due_in_days > 0 && r.due_in_days <= 14);
+  const short = items.rows.filter((r) => r.can_supply === 'short');
+  const advice = [];
+  if (overdue.length) advice.push({ kind: 'call', text: overdue.length + ' part(s) are past this customer’s usual reorder interval. Worth a call — the top one is ' + overdue[0].product + ', normally every ' + overdue[0].every_days + ' days.' });
+  if (soon.length) advice.push({ kind: 'when', text: soon.length + ' part(s) fall due within two weeks. Have them on the shelf before they ask.' });
+  if (short.length) advice.push({ kind: 'risk', text: short.length + ' part(s) this customer buys regularly are short or out of stock. They are the lines most likely to send them elsewhere.' });
+  if (bal.balance > 0.005) advice.push({ kind: 'money', text: 'This account owes J$' + Math.round(bal.balance).toLocaleString() + '. Settle or agree terms before taking a large order on credit.' });
+  const topCat = {};
+  for (const r of items.rows) topCat[r.category] = (topCat[r.category] || 0) + r.revenue;
+  const best = Object.entries(topCat).sort((a, b) => b[1] - a[1])[0];
+  if (best) advice.push({ kind: 'sell', text: 'Spend concentrates in ' + best[0] + ' (J$' + Math.round(best[1]).toLocaleString() + '). That is the category to quote first and stock deepest for them.' });
+
+  res.json({ from, to, days, customers: list,
+    customer: { id: cust.id, name: cust.name || cust.email, email: cust.email, phone: cust.phone,
+      account_number: cust.account_number, customer_type: cust.customer_type,
+      payment_terms_days: cust.payment_terms_days },
+    totals: Object.assign({}, t, { balance: Math.round(bal.balance * 100) / 100,
+      lines: items.rows.length,
+      margin: Math.round(items.rows.reduce((a, r) => a + r.margin, 0) * 100) / 100 }),
+    items: items.rows, by_month: byMonth.rows, invoices: invoices.rows, advice });
+});
+
+// ---- bin / location analysis ----------------------------------------------
+// Compares where stock sits against how fast it moves. A fast mover in a far
+// bin costs a walk on every sale; a dead line in a prime bin costs the space.
+app.get('/api/admin/reports/bin-analysis', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const p = [from, to];
+  const [bins, items, unbinned, spread] = await Promise.all([
+    // Same pre-aggregate-once shape as ITEM_ANALYSIS_SQL: the correlated
+            // version of this measured 7.8s because it ran one sales lookup for
+            // every one of 41k active products.
+    query(`WITH sales AS (
+             SELECT i.product_img, SUM(i.qty)::int AS sold
+               FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+              WHERE ps.voided = false AND ps.created_at::date BETWEEN $1::date AND $2::date
+              GROUP BY i.product_img)
+           SELECT COALESCE(NULLIF(pr.bin_location,''),'(unbinned)') AS bin,
+                  COUNT(*)::int AS skus, COALESCE(SUM(pr.stock_count),0)::int AS units,
+                  COALESCE(SUM(pr.stock_count * COALESCE(pr.cost_usd,0)),0)::float AS stock_cost,
+                  COALESCE(SUM(sa.sold),0)::int AS sold,
+                  COUNT(*) FILTER (WHERE pr.stock_count <= 0)::int AS empty_lines
+             FROM products pr LEFT JOIN sales sa ON sa.product_img = pr.img
+            WHERE pr.is_active = true
+            GROUP BY 1 ORDER BY stock_cost DESC LIMIT 80`, p),
+    query(ITEM_ANALYSIS_SQL('pr.is_active = true AND pr.stock_count > 0')
+      + ' ORDER BY revenue DESC LIMIT 300', p),
+    query(`SELECT COUNT(*)::int AS skus, COALESCE(SUM(stock_count),0)::int AS units,
+                  COALESCE(SUM(stock_count * COALESCE(cost_usd,0)),0)::float AS stock_cost,
+                  -- The true bin count, because the bins list below is capped at
+                  -- 80 and "bins in use: 80" would be a cap, not a fact.
+                  (SELECT COUNT(DISTINCT bin_location)::int FROM products
+                    WHERE is_active = true AND bin_location IS NOT NULL AND bin_location <> '') AS bins_total
+             FROM products WHERE is_active = true AND (bin_location IS NULL OR bin_location = '')`),
+    query(`SELECT pr.sku, pr.name, COUNT(DISTINCT pr.bin_location)::int AS bins
+             FROM products pr WHERE pr.is_active = true AND pr.bin_location IS NOT NULL
+            GROUP BY pr.sku, pr.name HAVING COUNT(DISTINCT pr.bin_location) > 1
+            ORDER BY bins DESC LIMIT 50`),
+  ]);
+  const days = dayCount(from, to);
+  const scored = scoreItems(items.rows, days, 7);
+  for (const b of bins.rows) {
+    b.turns = b.stock_cost > 0 && b.sold > 0 ? Math.round((b.sold / Math.max(1, b.units)) * 100) / 100 : 0;
+    b.dead = b.sold === 0;
+  }
+  const fastFar = scored.filter((r) => r.abc === 'A' && r.bin === '(unbinned)').slice(0, 50);
+  const deadPrime = bins.rows.filter((b) => b.dead && b.stock_cost > 0).slice(0, 50);
+  const advice = [];
+  if (unbinned.rows[0].skus) advice.push({ kind: 'risk', text: unbinned.rows[0].skus.toLocaleString() + ' stocked part(s) have no bin at all, holding J$' + Math.round(unbinned.rows[0].stock_cost).toLocaleString() + ' at cost. Nobody can pick what nobody can find — bin these first.' });
+  if (fastFar.length) advice.push({ kind: 'move', text: fastFar.length + ' of your A-class (top 80% of revenue) parts have no bin recorded. These are the ones picked most often, so they are the ones worth binning first.' });
+  if (deadPrime.length) advice.push({ kind: 'cut', text: deadPrime.length + ' bin(s) hold stock that did not sell at all in this range. That is shelf space earning nothing.' });
+  if (spread.rows.length) advice.push({ kind: 'tidy', text: spread.rows.length + ' part number(s) appear in more than one bin. Pickers will find one and assume that is all of it, so counts drift.' });
+  res.json({ from, to, days, bins: bins.rows, items: scored,
+    unbinned: unbinned.rows[0], split_across_bins: spread.rows,
+    fast_unbinned: fastFar, dead_bins: deadPrime, advice });
+});
+
+// =============================================================================
+//  RANKING, TURNOVER AND BATCH REPORTS
+// =============================================================================
+// "Best selling item" and "best selling item by customer / supplier / rep / bin"
+// are the same question asked down a different column, so they are one endpoint
+// with a dimension rather than five near-identical reports. Same for the
+// profitability pair. `by=overall` gives the plain item ranking; any other
+// dimension gives each group's own top sellers, which is what "by customer"
+// actually means in a shop -- not a filter, a per-customer answer.
+const RANK_DIMS = {
+  overall:  { sql: "'All sales'",                                              label: 'Overall' },
+  customer: { sql: "COALESCE(NULLIF(ps.customer_name,''),'Walk-in')",          label: 'Customer' },
+  supplier: { sql: "COALESCE(s.name,'(no supplier)')",                         label: 'Supplier' },
+  rep:      { sql: "COALESCE(NULLIF(ps.sales_rep_name,''), NULLIF(ps.cashier_name,''),'(no rep)')", label: 'Sales rep' },
+  bin:      { sql: "COALESCE(NULLIF(pr.bin_location,''),'(unbinned)')",        label: 'Bin' },
+  location: { sql: "COALESCE(NULLIF(pr.location,''),'(no location)')",         label: 'Location' },
+};
+// Credit notes carry negative qty and value, so they net out of every ranking
+// here on their own -- a part that was sold and returned does not rank.
+function rankingSql(dimSql, metric, perGroup) {
+  // The window's ORDER BY cannot name `profit`: it is an alias defined in the
+  // same SELECT list, and Postgres resolves window ordering before those exist.
+  // Rank on the expression instead.
+  const rankBy = metric === 'profit' ? '(revenue - cogs)' : metric;
+  return `
+    WITH base AS (
+      SELECT ${dimSql} AS dim, i.product_img AS sku,
+             COALESCE(pr.name, i.description) AS product,
+             COALESCE(pr.category,'-') AS category,
+             COALESCE(s.name,'(no supplier)') AS supplier,
+             COALESCE(NULLIF(pr.bin_location,''),'(unbinned)') AS bin,
+             SUM(i.qty)::int AS units,
+             SUM(i.total_usd)::float AS revenue,
+             (SUM(i.qty) * COALESCE(pr.cost_usd,0))::float AS cogs,
+             COUNT(DISTINCT ps.id)::int AS tickets,
+             MAX(ps.created_at)::date::text AS last_sold
+        FROM pos_sale_items i
+        JOIN pos_sales ps ON ps.id = i.sale_id
+        LEFT JOIN products pr ON pr.img = i.product_img
+        LEFT JOIN suppliers s ON s.id = pr.supplier_id
+       WHERE ps.voided = false AND ps.created_at::date BETWEEN $1::date AND $2::date
+       GROUP BY 1, 2, 3, 4, 5, 6, pr.cost_usd),
+    scored AS (
+      SELECT *, (revenue - cogs) AS profit,
+             CASE WHEN revenue > 0 THEN round(((revenue - cogs) / revenue * 100)::numeric, 1) END AS margin_pct,
+             -- 1,719 of this catalogue's 36,519 active parts carry no cost
+             -- price, which computes as 100% margin. Say so per line instead of
+             -- reporting a fiction. (The figure the reports show is counted
+             -- live by the exceptions report, not taken from this comment.)
+             (cogs > 0) AS cost_known,
+             ROW_NUMBER() OVER (PARTITION BY dim ORDER BY ${rankBy} DESC) AS rn,
+             -- Group totals, so the breakdown leads with the biggest groups
+             -- rather than sorting junk customer names to the top alphabetically.
+             SUM(units) OVER (PARTITION BY dim) AS dim_units,
+             SUM(revenue - cogs) OVER (PARTITION BY dim) AS dim_profit
+        FROM base WHERE units > 0)
+    SELECT * FROM scored WHERE rn <= ${perGroup}
+     ORDER BY ${metric === 'profit' ? 'dim_profit' : 'dim_units'} DESC, dim ASC, rn ASC LIMIT 1200`;
+}
+
+async function rankingReport(req, res, metric) {
+  const { from, to } = reportRange(req);
+  const key = RANK_DIMS[req.query.by] ? req.query.by : 'overall';
+  const dim = RANK_DIMS[key];
+  const perGroup = key === 'overall' ? 200 : 3;
+  const [rows, groups, recv] = await Promise.all([
+    query(rankingSql(dim.sql, metric, perGroup), [from, to]),
+    query(`SELECT ${dim.sql} AS dim, COUNT(DISTINCT ps.id)::int AS tickets,
+                  SUM(i.qty)::int AS units, SUM(i.total_usd)::float AS revenue,
+                  SUM(i.qty * COALESCE(pr.cost_usd,0))::float AS cogs
+             FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+             LEFT JOIN products pr ON pr.img = i.product_img
+             LEFT JOIN suppliers s ON s.id = pr.supplier_id
+            WHERE ps.voided = false AND ps.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY ${metric === 'profit' ? '(SUM(i.total_usd) - SUM(i.qty * COALESCE(pr.cost_usd,0)))' : metric} DESC
+            LIMIT 300`, [from, to]),
+    // What each part cost to bring in over the range -- the "based on order from
+    // receival" side, so a profitable line can be read against what was bought.
+    query(`SELECT wa.product_img AS sku, SUM(wa.qty_delta)::int AS received,
+                  SUM(wa.qty_delta * COALESCE((wa.meta_json->>'unit_cost_usd')::float,0))::float AS received_cost
+             FROM warehouse_activity wa
+            WHERE wa.kind = 'receive' AND wa.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1`, [from, to]),
+  ]);
+  const recvBy = new Map(recv.rows.map((r) => [r.sku, r]));
+  for (const r of rows.rows) {
+    const rc = recvBy.get(r.sku);
+    r.received = rc ? rc.received : 0;
+    r.received_cost = rc ? Math.round(rc.received_cost * 100) / 100 : 0;
+    r.profit = Math.round(r.profit * 100) / 100;
+    r.sell_through_pct = r.received > 0 ? Math.round((r.units / r.received) * 1000) / 10 : null;
+    r.profit_per_unit = r.units > 0 ? Math.round((r.profit / r.units) * 100) / 100 : null;
+  }
+  for (const g of groups.rows) {
+    g.profit = Math.round((g.revenue - g.cogs) * 100) / 100;
+    g.margin_pct = g.revenue > 0 ? Math.round((g.profit / g.revenue) * 1000) / 10 : null;
+  }
+  const totals = {
+    units: groups.rows.reduce((a, g) => a + g.units, 0),
+    revenue: Math.round(groups.rows.reduce((a, g) => a + g.revenue, 0) * 100) / 100,
+    profit: Math.round(groups.rows.reduce((a, g) => a + g.profit, 0) * 100) / 100,
+    groups: groups.rows.length, lines: rows.rows.length,
+  };
+  totals.margin_pct = totals.revenue > 0 ? Math.round((totals.profit / totals.revenue) * 1000) / 10 : null;
+  totals.lines_no_cost = rows.rows.filter((r) => !r.cost_known).length;
+  // Margin is only as good as the cost prices behind it, and this catalogue is
+  // missing a lot of them. Quantify it rather than let a 100% margin stand.
+  const cov = (await query(
+    `SELECT COUNT(*) FILTER (WHERE COALESCE(pr.cost_usd,0) = 0)::int AS no_cost,
+            COUNT(*)::int AS total
+       FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+       LEFT JOIN products pr ON pr.img = i.product_img
+      WHERE ps.voided = false AND ps.created_at::date BETWEEN $1::date AND $2::date`,
+    [from, to])).rows[0];
+  const advice = [];
+  if (cov.no_cost) {
+    advice.push({ kind: 'data', text: cov.no_cost.toLocaleString() + ' of ' + cov.total.toLocaleString() +
+      ' sold lines in this range have no cost price on the part, so their cost counts as zero and they show a 100% margin. ' +
+      'Profit rankings favour them unfairly until those costs are filled in — the Margin % column reads “no cost” where that applies.' });
+  }
+  advice.push({ kind: 'margin', text: metric === 'profit'
+    ? 'Ranked on gross profit (revenue less quantity × the part’s current cost), not revenue. A part can top revenue and still rank low here.'
+    : 'Ranked on units sold. Revenue and profit are shown alongside so a high-volume, low-margin line is visible as such.' });
+  res.json({ from, to, by: key, by_label: dim.label, per_group: perGroup, metric,
+    dims: Object.keys(RANK_DIMS).map((k) => ({ key: k, label: RANK_DIMS[k].label })),
+    totals, rows: rows.rows, groups: groups.rows, advice });
+}
+
+app.get('/api/admin/reports/best-sellers', requireAdmin, (req, res) => rankingReport(req, res, 'units'));
+app.get('/api/admin/reports/most-profitable', requireAdmin, (req, res) => rankingReport(req, res, 'profit'));
+
+// ---- inventory turnover ----------------------------------------------------
+// turns = cost of goods sold in the range / inventory held at cost, annualised
+// to the range so a 30-day window and a 12-month one are comparable. DSI is the
+// days of sales the shelf represents.
+//
+// The honest limit: this schema keeps no historical stock snapshots, so the
+// denominator is inventory as it stands TODAY, not the average over the range.
+// On a shop whose stock level is roughly stable that is close; right after a big
+// delivery or a clear-out it will read low or high, and the report says so
+// rather than implying a precision it does not have.
+app.get('/api/admin/reports/inventory-turnover', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const p = [from, to];
+  const days = dayCount(from, to);
+  const annualise = 365 / days;
+  const shape = (rows) => {
+    for (const r of rows) {
+      r.turns = r.stock_cost > 0 ? Math.round((r.cogs / r.stock_cost) * annualise * 100) / 100 : null;
+      r.dsi = r.turns > 0 ? Math.round(365 / r.turns) : null;
+      r.verdict = r.cogs <= 0 ? 'not selling'
+        : r.turns == null ? 'no stock held'
+        : r.turns >= 6 ? 'fast — keep stocked'
+        : r.turns >= 2 ? 'healthy'
+        : r.turns >= 0.5 ? 'slow — order less'
+        : 'very slow — stop reordering';
+    }
+    return rows;
+  };
+  const COGS_CTE = `WITH cogs AS (
+      SELECT i.product_img, SUM(i.qty * COALESCE(pr.cost_usd,0))::float AS cogs,
+             SUM(i.total_usd)::float AS revenue, SUM(i.qty)::int AS units
+        FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+        LEFT JOIN products pr ON pr.img = i.product_img
+       WHERE ps.voided = false AND ps.created_at::date BETWEEN $1::date AND $2::date
+       GROUP BY i.product_img)`;
+  const [overall, byCategory, bySupplier, byBin, items] = await Promise.all([
+    query(`${COGS_CTE}
+           SELECT COALESCE(SUM(c.cogs),0)::float AS cogs, COALESCE(SUM(c.revenue),0)::float AS revenue,
+                  (SELECT COALESCE(SUM(stock_count * COALESCE(cost_usd,0)),0)::float
+                     FROM products WHERE is_active = true) AS stock_cost
+             FROM cogs c`, p),
+    query(`${COGS_CTE}
+           SELECT COALESCE(pr.category,'-') AS category,
+                  COALESCE(SUM(c.cogs),0)::float AS cogs,
+                  COALESCE(SUM(c.revenue),0)::float AS revenue,
+                  COALESCE(SUM(pr.stock_count * COALESCE(pr.cost_usd,0)),0)::float AS stock_cost
+             FROM products pr LEFT JOIN cogs c ON c.product_img = pr.img
+            WHERE pr.is_active = true GROUP BY 1 ORDER BY cogs DESC`, p),
+    query(`${COGS_CTE}
+           SELECT COALESCE(s.name,'(no supplier)') AS supplier,
+                  COALESCE(SUM(c.cogs),0)::float AS cogs,
+                  COALESCE(SUM(c.revenue),0)::float AS revenue,
+                  COALESCE(SUM(pr.stock_count * COALESCE(pr.cost_usd,0)),0)::float AS stock_cost
+             FROM products pr LEFT JOIN suppliers s ON s.id = pr.supplier_id
+             LEFT JOIN cogs c ON c.product_img = pr.img
+            WHERE pr.is_active = true GROUP BY 1 ORDER BY cogs DESC LIMIT 60`, p),
+    query(`${COGS_CTE}
+           SELECT COALESCE(NULLIF(pr.bin_location,''),'(unbinned)') AS bin,
+                  COALESCE(SUM(c.cogs),0)::float AS cogs,
+                  COALESCE(SUM(c.revenue),0)::float AS revenue,
+                  COALESCE(SUM(pr.stock_count * COALESCE(pr.cost_usd,0)),0)::float AS stock_cost
+             FROM products pr LEFT JOIN cogs c ON c.product_img = pr.img
+            WHERE pr.is_active = true GROUP BY 1 ORDER BY stock_cost DESC LIMIT 60`, p),
+    query(`${COGS_CTE}
+           SELECT pr.sku, pr.name, COALESCE(pr.category,'-') AS category,
+                  COALESCE(NULLIF(pr.bin_location,''),'(unbinned)') AS bin,
+                  pr.stock_count AS stock,
+                  COALESCE(c.units,0) AS units, COALESCE(c.cogs,0)::float AS cogs,
+                  COALESCE(c.revenue,0)::float AS revenue,
+                  (pr.stock_count * COALESCE(pr.cost_usd,0))::float AS stock_cost
+             FROM products pr LEFT JOIN cogs c ON c.product_img = pr.img
+            WHERE pr.is_active = true AND pr.stock_count > 0
+            ORDER BY stock_cost DESC LIMIT 300`, p),
+  ]);
+  const o = shape(overall.rows)[0];
+  const slow = shape(items.rows).filter((r) => r.turns != null && r.turns < 0.5).length;
+  const cov = (await query(
+    `SELECT COUNT(*) FILTER (WHERE COALESCE(cost_usd,0) = 0)::int AS no_cost, COUNT(*)::int AS total
+       FROM products WHERE is_active = true`)).rows[0];
+  const advice = [];
+  advice.push({ kind: 'data', text: 'Turns are annualised from a ' + days + '-day range, against inventory as it stands today — this schema keeps no historical stock snapshots, so read it as an indication rather than an audited figure.' });
+  if (cov.no_cost) {
+    advice.push({ kind: 'data', text: cov.no_cost.toLocaleString() + ' of ' + cov.total.toLocaleString() +
+      ' active parts have no cost price. Those contribute nothing to COGS but their stock still counts in the denominator, so every turns figure below is understated — the gap, not the trading, is what makes the shop-wide number look stalled.' });
+  }
+  if (o.turns != null) advice.push({ kind: 'margin', text: 'The shop as a whole turns its stock ' + o.turns + ' times a year, which is about ' + (o.dsi || '—') + ' days of inventory. Under 2 is slow for fast-moving parts.' });
+  if (slow) advice.push({ kind: 'cut', text: slow + ' of the ' + items.rows.length + ' highest-value lines turn less than half a time a year. Those are the first candidates to stop reordering.' });
+  res.json({ from, to, days, totals: o, by_category: shape(byCategory.rows),
+    by_supplier: shape(bySupplier.rows), by_bin: shape(byBin.rows), items: items.rows, advice });
+});
+
+// ---- best receival batch ---------------------------------------------------
+// A "batch" is a day's receiving from one supplier. The source export carried no
+// bill or order number (every reference field is blank), so the day is the only
+// grouping the data actually supports -- naming it a batch rather than a PO is
+// the honest description of what is being measured.
+//
+// Scored on what happened in the 90 days after it landed: how much of it sold,
+// what it earned, and how long it took. profit_per_day is the one that ranks
+// them, because a batch that earns the same money in a third of the time tied up
+// a third of the cash.
+app.get('/api/admin/reports/receival-batches', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const p = [from, to];
+  const { rows } = await query(
+    `WITH recv AS (
+       SELECT wa.created_at::date AS day, wa.product_img,
+              COALESCE(s.name,'(no supplier)') AS supplier,
+              SUM(wa.qty_delta)::int AS qty,
+              SUM(wa.qty_delta * COALESCE((wa.meta_json->>'unit_cost_usd')::float,0))::float AS cost
+         FROM warehouse_activity wa
+         LEFT JOIN products pr ON pr.img = wa.product_img
+         LEFT JOIN suppliers s ON s.id = pr.supplier_id
+        WHERE wa.kind = 'receive' AND wa.created_at::date BETWEEN $1::date AND $2::date
+        GROUP BY 1, 2, 3 HAVING SUM(wa.qty_delta) > 0),
+     -- Bound the sale lines once, to the only window any batch can draw on
+     -- (the earliest receipt through 90 days past the latest). Without this the
+     -- planner re-walks pos_sale_items for every batch and the query took 3.8s.
+     win AS (
+       SELECT i.product_img, i.qty, i.total_usd, ps.created_at::date AS d
+         FROM pos_sale_items i JOIN pos_sales ps ON ps.id = i.sale_id
+        WHERE ps.voided = false
+          AND ps.created_at::date BETWEEN $1::date AND ($2::date + 90)),
+     sold AS (
+       SELECT r.day, r.supplier, SUM(w.qty)::int AS sold,
+              SUM(w.total_usd)::float AS revenue,
+              SUM(w.qty * COALESCE(pr.cost_usd,0))::float AS cogs,
+              MIN((w.d - r.day))::int AS first_sale_days,
+              MAX((w.d - r.day))::int AS last_sale_days
+         FROM recv r
+         JOIN win w ON w.product_img = r.product_img
+          AND w.d >= r.day AND w.d <= r.day + 90
+         LEFT JOIN products pr ON pr.img = r.product_img
+        GROUP BY 1, 2)
+     SELECT b.day::text AS day, b.supplier, b.lines, b.units_in, b.cost_in,
+            COALESCE(sd.sold,0) AS sold, COALESCE(sd.revenue,0)::float AS revenue,
+            COALESCE(sd.cogs,0)::float AS cogs,
+            sd.first_sale_days, sd.last_sale_days
+       FROM (SELECT day, supplier, COUNT(*)::int AS lines,
+                    SUM(qty)::int AS units_in, SUM(cost)::float AS cost_in
+               FROM recv GROUP BY day, supplier) b
+       LEFT JOIN sold sd ON sd.day = b.day AND sd.supplier = b.supplier
+      ORDER BY b.day DESC LIMIT 400`, p);
+
+  const rnd = (n) => Math.round(n * 100) / 100;
+  for (const r of rows) {
+    r.profit = rnd(r.revenue - r.cogs);
+    r.margin_pct = r.revenue > 0 ? Math.round((r.profit / r.revenue) * 1000) / 10 : null;
+    r.sell_through_pct = r.units_in > 0 ? Math.round((r.sold / r.units_in) * 1000) / 10 : null;
+    // Days of shelf time actually used: how long it took to shift what shifted.
+    r.days_to_sell = r.sold > 0 ? (r.last_sale_days || 0) + 1 : null;
+    // Pace: at the rate it sold, how long the whole batch would take to clear.
+    r.est_clear_days = r.sold > 0 && r.days_to_sell
+      ? Math.round((r.units_in / (r.sold / r.days_to_sell)) * 10) / 10 : null;
+    r.profit_per_day = r.days_to_sell ? rnd(r.profit / r.days_to_sell) : null;
+    r.verdict = r.sold === 0 ? 'never sold — dead buy'
+      : r.sell_through_pct >= 90 ? 'cleared — buy more next time'
+      : r.sell_through_pct >= 50 ? 'good'
+      : r.sell_through_pct >= 20 ? 'slow — order less'
+      : 'mostly unsold — stop';
+  }
+  const scored = rows.filter((r) => r.sold > 0);
+  const best = scored.slice().sort((a, b) => (b.profit_per_day || 0) - (a.profit_per_day || 0));
+  const worst = rows.slice().sort((a, b) => (a.sell_through_pct || 0) - (b.sell_through_pct || 0));
+  const totals = {
+    batches: rows.length, units_in: rows.reduce((a, r) => a + r.units_in, 0),
+    cost_in: rnd(rows.reduce((a, r) => a + r.cost_in, 0)),
+    sold: rows.reduce((a, r) => a + r.sold, 0),
+    revenue: rnd(rows.reduce((a, r) => a + r.revenue, 0)),
+    profit: rnd(rows.reduce((a, r) => a + r.profit, 0)),
+    dead_batches: rows.filter((r) => r.sold === 0).length,
+    avg_days_to_sell: scored.length
+      ? Math.round(scored.reduce((a, r) => a + (r.days_to_sell || 0), 0) / scored.length) : null,
+  };
+  totals.sell_through_pct = totals.units_in > 0
+    ? Math.round((totals.sold / totals.units_in) * 1000) / 10 : null;
+  // The imported receival cost is a placeholder on almost every row (LCOST was
+  // 1.00 in the source export), which makes "cost in" and anything derived from
+  // it arithmetic on a constant. Measure how bad it is and say so, rather than
+  // presenting J$13,797 of cost that is really just 13,797 units.
+  const ph = (await query(
+    `SELECT COUNT(*) FILTER (WHERE (meta_json->>'unit_cost_usd')::float = 1)::int AS placeholder,
+            COUNT(*)::int AS total
+       FROM warehouse_activity
+      WHERE kind = 'receive' AND created_at::date BETWEEN $1::date AND $2::date`, p)).rows[0];
+  const advice = [];
+  advice.push({ kind: 'data', text: 'A batch here is one day’s receiving from one supplier — the export carried no bill or order number, so that is the finest grouping the data supports. Each is measured over the 90 days after it landed.' });
+  if (ph.placeholder) {
+    const pct = Math.round((ph.placeholder / Math.max(1, ph.total)) * 100);
+    advice.push({ kind: 'data', text: 'Unit cost reads exactly 1.00 on ' + pct + '% of receipts in this range (' +
+      ph.placeholder.toLocaleString() + ' of ' + ph.total.toLocaleString() + ') — a placeholder in the imported history, not a real price. ' +
+      'Treat “Cost in” and “Profit / day” as rankings, not money, until purchase costs are recorded.' });
+  }
+  if (totals.sell_through_pct != null && totals.sell_through_pct > 100) {
+    advice.push({ kind: 'data', text: 'Sell-through above 100% is expected here: sales in the 90-day window include stock that was already on the shelf when the delivery landed, not only the units it brought. Read it as “this part moved faster than this delivery supplied”.' });
+  }
+  if (best.length) advice.push({ kind: 'order', text: 'Best batch by profit per day on the shelf: ' + best[0].supplier + ' on ' + best[0].day + ' — J$' + Math.round(best[0].profit).toLocaleString() + ' profit in ' + best[0].days_to_sell + ' days. Repeat that shape of order.' });
+  if (totals.dead_batches) advice.push({ kind: 'cut', text: totals.dead_batches + ' batch(es) sold nothing at all in their first 90 days. Those suppliers and dates are worth reviewing before the next order.' });
+  if (totals.avg_days_to_sell) advice.push({ kind: 'when', text: 'Typical batch takes about ' + totals.avg_days_to_sell + ' days to shift what it shifts. Order cycles shorter than that will stack stock faster than it leaves.' });
+  res.json({ from, to, totals, batches: rows, best: best.slice(0, 40), worst: worst.slice(0, 40), advice });
+});
+
+// =============================================================================
+//  MANAGEMENT REPORTS — summary and detail
+// =============================================================================
+// The reports above answer specific operational questions. These are the ones a
+// manager reads to decide something: how the period went against the last one,
+// what it earned after costs, where the cash moved, what is sitting too long,
+// and what needs fixing before any of the other numbers can be trusted.
+//
+// Two notes that apply throughout. cash_payouts and petty_cash_movements store
+// *_cents on this schema while everything else stores *_usd NUMERIC, so they are
+// divided here rather than silently mixed. And credit notes carry negative
+// quantities and values, so returns net out of every figure below without
+// needing to be subtracted again.
+
+// The period of equal length immediately before [from, to], for comparisons.
+function priorPeriod(from, to) {
+  const days = dayCount(from, to);
+  const end = new Date(Date.parse(from) - 86400000);
+  const start = new Date(end.getTime() - (days - 1) * 86400000);
+  return { from: start.toISOString().slice(0, 10), to: end.toISOString().slice(0, 10) };
+}
+// Same calendar window a year earlier.
+function yearAgo(from, to) {
+  const shift = (d) => { const x = new Date(Date.parse(d)); x.setFullYear(x.getFullYear() - 1); return x.toISOString().slice(0, 10); };
+  return { from: shift(from), to: shift(to) };
+}
+const PERIOD_SQL = `
+  SELECT COUNT(*)::int AS tickets,
+         COALESCE(SUM(s.total_usd),0)::float AS revenue,
+         COALESCE(SUM(s.subtotal_usd),0)::float AS subtotal,
+         COALESCE(SUM(s.tax_usd),0)::float AS tax,
+         COALESCE(SUM(s.discount_usd),0)::float AS discount,
+         COALESCE((SELECT SUM(i.qty) FROM pos_sale_items i JOIN pos_sales p2 ON p2.id = i.sale_id
+                    WHERE p2.voided = false AND p2.created_at::date BETWEEN $1::date AND $2::date),0)::int AS units,
+         COALESCE((SELECT SUM(i.qty * COALESCE(pr.cost_usd,0)) FROM pos_sale_items i
+                    JOIN pos_sales p3 ON p3.id = i.sale_id LEFT JOIN products pr ON pr.img = i.product_img
+                   WHERE p3.voided = false AND p3.created_at::date BETWEEN $1::date AND $2::date),0)::float AS cogs
+    FROM pos_sales s
+   WHERE s.voided = false AND s.created_at::date BETWEEN $1::date AND $2::date`;
+function finishPeriod(p) {
+  p.gross_profit = Math.round((p.revenue - p.tax - p.cogs) * 100) / 100;
+  p.margin_pct = (p.revenue - p.tax) > 0
+    ? Math.round((p.gross_profit / (p.revenue - p.tax)) * 1000) / 10 : null;
+  p.avg_ticket = p.tickets > 0 ? Math.round((p.revenue / p.tickets) * 100) / 100 : 0;
+  return p;
+}
+const delta = (now, was) => {
+  const d = Math.round((now - was) * 100) / 100;
+  return { change: d, pct: was ? Math.round((d / Math.abs(was)) * 1000) / 10 : null };
+};
+
+// ---- management summary ----------------------------------------------------
+app.get('/api/admin/reports/exec-summary', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const prev = priorPeriod(from, to);
+  const ya = yearAgo(from, to);
+  const [cur, pre, lastYear, ar, ap, stock, byCat, byCust, byRep] = await Promise.all([
+    query(PERIOD_SQL, [from, to]),
+    query(PERIOD_SQL, [prev.from, prev.to]),
+    query(PERIOD_SQL, [ya.from, ya.to]),
+    // Receivables are netted PER CUSTOMER and floored at zero, which is the only
+    // defensible reading: one customer's credit does not cancel another's debt,
+    // but an over-payment does cancel their own arrears. Netting globally
+    // instead reported J$37.7m against J$38.4m here, and the Customer List and
+    // A/R Aging would have disagreed with this page on the shop's own position.
+    query(`SELECT COALESCE(SUM(GREATEST(bal, 0)),0)::float AS owed FROM (
+             SELECT COALESCE((SELECT SUM(sp.amount_usd) FROM sale_payments sp
+                               JOIN pos_sales s ON s.id = sp.sale_id
+                              WHERE sp.method = 'account' AND s.customer_id = u.id AND s.voided = false),0)
+                  - COALESCE((SELECT SUM(amount_usd) FROM account_payments ap WHERE ap.customer_id = u.id),0) AS bal
+               FROM users u WHERE u.is_staff = false AND u.is_admin = false) t`),
+    query(`SELECT COALESCE(SUM(po.total_usd),0)::float
+                - COALESCE((SELECT SUM(amount_usd) FROM purchase_order_payments),0)::float AS outstanding
+             FROM purchase_orders po`),
+    query(`SELECT COALESCE(SUM(stock_count * COALESCE(cost_usd,0)),0)::float AS at_cost,
+                  COALESCE(SUM(stock_count * price_usd),0)::float AS at_retail,
+                  COUNT(*) FILTER (WHERE stock_count <= 0)::int AS out_of_stock
+             FROM products WHERE is_active = true`),
+    query(`SELECT COALESCE(pr.category,'-') AS category, SUM(i.qty)::int AS units,
+                  SUM(i.total_usd)::float AS revenue,
+                  SUM(i.qty * COALESCE(pr.cost_usd,0))::float AS cogs
+             FROM pos_sale_items i JOIN pos_sales s ON s.id = i.sale_id
+             LEFT JOIN products pr ON pr.img = i.product_img
+            WHERE s.voided = false AND s.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY revenue DESC LIMIT 12`, [from, to]),
+    query(`SELECT COALESCE(NULLIF(customer_name,''),'Walk-in') AS customer, COUNT(*)::int AS tickets,
+                  SUM(total_usd)::float AS revenue
+             FROM pos_sales WHERE voided = false AND created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY revenue DESC LIMIT 12`, [from, to]),
+    query(`SELECT COALESCE(NULLIF(sales_rep_name,''), NULLIF(cashier_name,''),'(no rep)') AS rep,
+                  COUNT(*)::int AS tickets, SUM(total_usd)::float AS revenue
+             FROM pos_sales WHERE voided = false AND created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY revenue DESC LIMIT 12`, [from, to]),
+  ]);
+  const c = finishPeriod(cur.rows[0]), p = finishPeriod(pre.rows[0]), y = finishPeriod(lastYear.rows[0]);
+  for (const r of byCat.rows) {
+    r.gross = Math.round((r.revenue - r.cogs) * 100) / 100;
+    r.margin_pct = r.revenue > 0 ? Math.round((r.gross / r.revenue) * 1000) / 10 : null;
+  }
+  const inv = stock.rows[0];
+  const turns = inv.at_cost > 0
+    ? Math.round((c.cogs / inv.at_cost) * (365 / dayCount(from, to)) * 100) / 100 : null;
+  // A margin computed against incomplete costs flatters the whole page, and this
+  // is the most-read page in the set. Say so before the numbers are believed.
+  const cov = (await query(
+    `SELECT COUNT(*) FILTER (WHERE COALESCE(pr.cost_usd,0) = 0)::int AS no_cost, COUNT(*)::int AS total
+       FROM pos_sale_items i JOIN pos_sales s ON s.id = i.sale_id
+       LEFT JOIN products pr ON pr.img = i.product_img
+      WHERE s.voided = false AND s.created_at::date BETWEEN $1::date AND $2::date`, [from, to])).rows[0];
+  const advice = [];
+  if (cov.no_cost) advice.push({ kind: 'risk', text: cov.no_cost.toLocaleString() + ' of ' +
+    cov.total.toLocaleString() + ' sold lines have no cost price, so cost of sales is understated and the ' +
+    (c.margin_pct == null ? 'margin' : c.margin_pct + '% margin') +
+    ' above is higher than reality. Fix the costs (Exception Report lists them) before using this to price or plan.' });
+  const rev = delta(c.revenue, p.revenue);
+  advice.push({ kind: rev.change >= 0 ? 'margin' : 'risk',
+    text: 'Revenue ' + (rev.change >= 0 ? 'up' : 'down') + ' J$' + Math.abs(Math.round(rev.change)).toLocaleString() +
+      (rev.pct != null ? ' (' + (rev.pct >= 0 ? '+' : '') + rev.pct + '%)' : '') +
+      ' against the previous ' + dayCount(from, to) + ' days.' });
+  if (c.margin_pct != null && p.margin_pct != null) {
+    const md = Math.round((c.margin_pct - p.margin_pct) * 10) / 10;
+    advice.push({ kind: md >= 0 ? 'margin' : 'risk',
+      text: 'Gross margin ' + c.margin_pct + '%, ' + (md >= 0 ? 'up' : 'down') + ' ' + Math.abs(md) +
+        ' points on the previous period. Margin moving the opposite way to revenue is the one to watch.' });
+  }
+  if (ar.rows[0].owed > 0) advice.push({ kind: 'money', text: 'J$' + Math.round(ar.rows[0].owed).toLocaleString() + ' is owed to the shop on account. See A/R Aging for how old it is.' });
+  if (turns != null && turns < 2) advice.push({ kind: 'cut', text: 'Stock turns ' + turns + ' times a year on J$' + Math.round(inv.at_cost).toLocaleString() + ' at cost. Anything under 2 means cash is sitting on shelves.' });
+  if (inv.out_of_stock) advice.push({ kind: 'risk', text: inv.out_of_stock.toLocaleString() + ' active lines are at zero stock. Reorder / Purchasing lists the ones that are actually selling.' });
+  res.json({ from, to, prior: prev, year_ago: ya,
+    current: c, previous: p, last_year: y,
+    vs_prior: { revenue: delta(c.revenue, p.revenue), gross_profit: delta(c.gross_profit, p.gross_profit),
+      tickets: delta(c.tickets, p.tickets), units: delta(c.units, p.units),
+      avg_ticket: delta(c.avg_ticket, p.avg_ticket) },
+    vs_year: { revenue: delta(c.revenue, y.revenue), gross_profit: delta(c.gross_profit, y.gross_profit),
+      tickets: delta(c.tickets, y.tickets) },
+    position: { receivables: Math.round(ar.rows[0].owed * 100) / 100,
+      payables: Math.round(ap.rows[0].outstanding * 100) / 100,
+      stock_at_cost: inv.at_cost, stock_at_retail: inv.at_retail,
+      out_of_stock: inv.out_of_stock, turns },
+    by_category: byCat.rows, by_customer: byCust.rows, by_rep: byRep.rows, advice });
+});
+
+// ---- profit & loss --------------------------------------------------------
+app.get('/api/admin/reports/pnl', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const p = [from, to];
+  const [sales, service, byMonth, byCat, payouts, petty, refunds] = await Promise.all([
+    query(PERIOD_SQL, p),
+    query(`SELECT COALESCE(SUM(amount_usd),0)::float AS revenue, COUNT(*)::int AS n
+             FROM work_order_payments WHERE received_at::date BETWEEN $1::date AND $2::date`, p),
+    query(`SELECT to_char(s.created_at,'YYYY-MM') AS month,
+                  COUNT(*)::int AS tickets,
+                  SUM(s.subtotal_usd)::float AS net_sales,
+                  SUM(s.tax_usd)::float AS tax,
+                  SUM(s.total_usd)::float AS gross,
+                  COALESCE(SUM((SELECT SUM(i.qty * COALESCE(pr.cost_usd,0)) FROM pos_sale_items i
+                                 LEFT JOIN products pr ON pr.img = i.product_img WHERE i.sale_id = s.id)),0)::float AS cogs
+             FROM pos_sales s
+            WHERE s.voided = false AND s.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY 1`, p),
+    query(`SELECT COALESCE(pr.category,'-') AS category,
+                  SUM(i.total_usd)::float AS revenue,
+                  SUM(i.qty * COALESCE(pr.cost_usd,0))::float AS cogs
+             FROM pos_sale_items i JOIN pos_sales s ON s.id = i.sale_id
+             LEFT JOIN products pr ON pr.img = i.product_img
+            WHERE s.voided = false AND s.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1 ORDER BY revenue DESC`, p),
+    query(`SELECT COALESCE(SUM(amount_cents),0)/100.0 AS total, COUNT(*)::int AS n
+             FROM cash_payouts WHERE COALESCE(voided,false) = false
+              AND created_at::date BETWEEN $1::date AND $2::date`, p),
+    query(`SELECT COALESCE(SUM(CASE WHEN delta_cents < 0 THEN -delta_cents ELSE 0 END),0)/100.0 AS spent
+             FROM petty_cash_movements WHERE created_at::date BETWEEN $1::date AND $2::date`, p),
+    query(`SELECT COALESCE(SUM(refund_total_usd),0)::float AS total, COUNT(*)::int AS n
+             FROM pos_sale_returns WHERE created_at::date BETWEEN $1::date AND $2::date`, p),
+  ]);
+  const s = finishPeriod(sales.rows[0]);
+  for (const r of byMonth.rows) {
+    r.gross_profit = Math.round((r.net_sales - r.cogs) * 100) / 100;
+    r.margin_pct = r.net_sales > 0 ? Math.round((r.gross_profit / r.net_sales) * 1000) / 10 : null;
+  }
+  for (const r of byCat.rows) {
+    r.gross_profit = Math.round((r.revenue - r.cogs) * 100) / 100;
+    r.margin_pct = r.revenue > 0 ? Math.round((r.gross_profit / r.revenue) * 1000) / 10 : null;
+  }
+  const expenses = Math.round((payouts.rows[0].total + Number(petty.rows[0].spent)) * 100) / 100;
+  const netSales = Math.round((s.revenue - s.tax) * 100) / 100;
+  const operating = Math.round((s.gross_profit + service.rows[0].revenue - expenses) * 100) / 100;
+  const advice = [];
+  advice.push({ kind: 'data', text: 'Revenue is net of tax; tax collected is a liability, not income. Expenses here are only what the system records — cash payouts and petty cash. Rent, wages, utilities and anything else paid outside this app are not in it, so “operating result” is gross profit less recorded outgoings, not a statutory P&L.' });
+  if (s.cogs === 0 && s.revenue > 0) advice.push({ kind: 'risk', text: 'COGS came out at zero, which means no sold part had a cost price. Gross profit below is therefore the same as net sales and is not a real margin.' });
+  res.json({ from, to,
+    revenue: { gross: s.revenue, tax: s.tax, net_sales: netSales, discount: s.discount,
+      service: service.rows[0].revenue, refunds: refunds.rows[0].total },
+    cost_of_sales: s.cogs,
+    gross_profit: s.gross_profit, margin_pct: s.margin_pct,
+    expenses: { cash_payouts: payouts.rows[0].total, petty_cash: Number(petty.rows[0].spent), total: expenses },
+    operating_result: operating,
+    by_month: byMonth.rows, by_category: byCat.rows, advice });
+});
+
+// ---- cash flow ------------------------------------------------------------
+app.get('/api/admin/reports/cash-flow', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const p = [from, to];
+  const [inCounter, inSettle, inService, outSupplier, outPayout, outPetty, outRefund, byMonth] = await Promise.all([
+    query(`SELECT COALESCE(SUM(sp.amount_usd),0)::float AS total, COUNT(*)::int AS n
+             FROM sale_payments sp JOIN pos_sales s ON s.id = sp.sale_id
+            WHERE s.voided = false AND sp.method <> 'account'
+              AND sp.created_at::date BETWEEN $1::date AND $2::date`, p),
+    query(`SELECT COALESCE(SUM(amount_usd),0)::float AS total, COUNT(*)::int AS n
+             FROM account_payments WHERE created_at::date BETWEEN $1::date AND $2::date`, p),
+    query(`SELECT COALESCE(SUM(amount_usd),0)::float AS total, COUNT(*)::int AS n
+             FROM work_order_payments WHERE received_at::date BETWEEN $1::date AND $2::date`, p),
+    query(`SELECT COALESCE(SUM(amount_usd),0)::float AS total, COUNT(*)::int AS n
+             FROM purchase_order_payments WHERE created_at::date BETWEEN $1::date AND $2::date`, p),
+    query(`SELECT COALESCE(SUM(amount_cents),0)/100.0 AS total, COUNT(*)::int AS n
+             FROM cash_payouts WHERE COALESCE(voided,false) = false
+              AND created_at::date BETWEEN $1::date AND $2::date`, p),
+    query(`SELECT COALESCE(SUM(CASE WHEN delta_cents < 0 THEN -delta_cents ELSE 0 END),0)/100.0 AS total
+             FROM petty_cash_movements WHERE created_at::date BETWEEN $1::date AND $2::date`, p),
+    query(`SELECT COALESCE(SUM(refund_total_usd),0)::float AS total, COUNT(*)::int AS n
+             FROM pos_sale_returns WHERE created_at::date BETWEEN $1::date AND $2::date`, p),
+    query(`SELECT m AS month,
+                  COALESCE((SELECT SUM(sp.amount_usd) FROM sale_payments sp JOIN pos_sales s ON s.id = sp.sale_id
+                             WHERE s.voided = false AND sp.method <> 'account'
+                               AND to_char(sp.created_at,'YYYY-MM') = m),0)::float AS counter,
+                  COALESCE((SELECT SUM(amount_usd) FROM account_payments
+                             WHERE to_char(created_at,'YYYY-MM') = m),0)::float AS settlements,
+                  COALESCE((SELECT SUM(amount_usd) FROM purchase_order_payments
+                             WHERE to_char(created_at,'YYYY-MM') = m),0)::float AS suppliers,
+                  COALESCE((SELECT SUM(amount_cents)/100.0 FROM cash_payouts
+                             WHERE COALESCE(voided,false) = false AND to_char(created_at,'YYYY-MM') = m),0)::float AS payouts,
+                  COALESCE((SELECT SUM(refund_total_usd) FROM pos_sale_returns
+                             WHERE to_char(created_at,'YYYY-MM') = m),0)::float AS refunds
+             FROM (SELECT DISTINCT to_char(created_at,'YYYY-MM') AS m FROM pos_sales
+                    WHERE voided = false AND created_at::date BETWEEN $1::date AND $2::date) months
+            ORDER BY 1`, p),
+  ]);
+  const money = (r) => Number(r.rows[0].total) || 0;
+  const cashIn = money(inCounter) + money(inSettle) + money(inService);
+  const cashOut = money(outSupplier) + money(outPayout) + money(outPetty) + money(outRefund);
+  for (const r of byMonth.rows) {
+    r.in_total = Math.round((r.counter + r.settlements) * 100) / 100;
+    r.out_total = Math.round((r.suppliers + r.payouts + r.refunds) * 100) / 100;
+    r.net = Math.round((r.in_total - r.out_total) * 100) / 100;
+  }
+  let running = 0;
+  for (const r of byMonth.rows) { running = Math.round((running + r.net) * 100) / 100; r.running = running; }
+  const advice = [];
+  advice.push({ kind: 'data', text: 'This tracks money the system saw move. An account-tender sale is not cash in — it becomes cash when the customer settles, which is the Settlements column. Anything paid outside the app (bank fees, wages, rent) is not here.' });
+  if (cashOut === 0 && cashIn > 0) advice.push({ kind: 'data', text: 'Nothing is recorded going out: no supplier payments, payouts, petty cash or refunds exist in this range. The net figure is therefore money in, not a true net position.' });
+  res.json({ from, to,
+    money_in: { counter: money(inCounter), settlements: money(inSettle), service: money(inService), total: Math.round(cashIn * 100) / 100 },
+    money_out: { suppliers: money(outSupplier), payouts: money(outPayout), petty_cash: money(outPetty), refunds: money(outRefund), total: Math.round(cashOut * 100) / 100 },
+    net: Math.round((cashIn - cashOut) * 100) / 100,
+    by_month: byMonth.rows, advice });
+});
+
+// ---- period comparison ----------------------------------------------------
+app.get('/api/admin/reports/period-compare', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const prev = priorPeriod(from, to);
+  const ya = yearAgo(from, to);
+  const catSql = `SELECT COALESCE(pr.category,'-') AS category, SUM(i.qty)::int AS units,
+                         SUM(i.total_usd)::float AS revenue,
+                         SUM(i.qty * COALESCE(pr.cost_usd,0))::float AS cogs
+                    FROM pos_sale_items i JOIN pos_sales s ON s.id = i.sale_id
+                    LEFT JOIN products pr ON pr.img = i.product_img
+                   WHERE s.voided = false AND s.created_at::date BETWEEN $1::date AND $2::date
+                   GROUP BY 1`;
+  const [c, p1, y1, cc, pc, yc] = await Promise.all([
+    query(PERIOD_SQL, [from, to]), query(PERIOD_SQL, [prev.from, prev.to]), query(PERIOD_SQL, [ya.from, ya.to]),
+    query(catSql, [from, to]), query(catSql, [prev.from, prev.to]), query(catSql, [ya.from, ya.to]),
+  ]);
+  const idx = (rows) => { const m = {}; for (const r of rows) m[r.category] = r; return m; };
+  const P = idx(pc.rows), Y = idx(yc.rows);
+  const cats = cc.rows.map((r) => {
+    const prior = P[r.category] || { revenue: 0, units: 0 };
+    const last = Y[r.category] || { revenue: 0, units: 0 };
+    return { category: r.category, units: r.units, revenue: Math.round(r.revenue * 100) / 100,
+      prior_revenue: Math.round(prior.revenue * 100) / 100,
+      year_revenue: Math.round(last.revenue * 100) / 100,
+      vs_prior: delta(r.revenue, prior.revenue).change,
+      vs_prior_pct: delta(r.revenue, prior.revenue).pct,
+      vs_year: delta(r.revenue, last.revenue).change,
+      vs_year_pct: delta(r.revenue, last.revenue).pct };
+  }).sort((a, b) => b.revenue - a.revenue);
+  const C = finishPeriod(c.rows[0]), PP = finishPeriod(p1.rows[0]), YY = finishPeriod(y1.rows[0]);
+  const lines = [
+    ['Tickets', C.tickets, PP.tickets, YY.tickets, 'num'],
+    ['Units', C.units, PP.units, YY.units, 'num'],
+    ['Revenue', C.revenue, PP.revenue, YY.revenue, 'money'],
+    ['Tax', C.tax, PP.tax, YY.tax, 'money'],
+    ['Cost of sales', C.cogs, PP.cogs, YY.cogs, 'money'],
+    ['Gross profit', C.gross_profit, PP.gross_profit, YY.gross_profit, 'money'],
+    ['Average ticket', C.avg_ticket, PP.avg_ticket, YY.avg_ticket, 'money'],
+  ].map(function (l) {
+    return { measure: l[0], current: l[1], prior: l[2], year_ago: l[3], kind: l[4],
+      vs_prior: delta(l[1], l[2]).change, vs_prior_pct: delta(l[1], l[2]).pct,
+      vs_year: delta(l[1], l[3]).change, vs_year_pct: delta(l[1], l[3]).pct };
+  });
+  const grew = cats.filter((x) => x.vs_prior > 0).length;
+  const advice = [{ kind: 'data', text: 'Prior period is the ' + dayCount(from, to) + ' days immediately before this one (' + prev.from + ' to ' + prev.to + '). Year ago is the same calendar window twelve months back (' + ya.from + ' to ' + ya.to + ').' }];
+  if (cats.length) advice.push({ kind: grew >= cats.length / 2 ? 'margin' : 'risk',
+    text: grew + ' of ' + cats.length + ' categories grew on the prior period. ' +
+      (cats[0] ? 'Biggest mover by value: ' + cats.slice().sort((a, b) => Math.abs(b.vs_prior) - Math.abs(a.vs_prior))[0].category + '.' : '') });
+  res.json({ from, to, prior: prev, year_ago: ya, lines, by_category: cats, advice });
+});
+
+// ---- exception report -----------------------------------------------------
+// The things that make every other report less trustworthy, counted, with the
+// worst offenders listed. Deliberately blunt: these are jobs, not statistics.
+app.get('/api/admin/reports/exceptions', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const p = [from, to];
+  const [counts, noCost, noBin, stockout, overstock, oldUnpaid, splitBins, noSupplier] = await Promise.all([
+    query(`SELECT
+      (SELECT COUNT(*)::int FROM products WHERE is_active AND COALESCE(cost_usd,0) = 0) AS no_cost,
+      (SELECT COUNT(*)::int FROM products WHERE is_active AND COALESCE(price_usd,0) = 0) AS no_price,
+      (SELECT COUNT(*)::int FROM products WHERE is_active AND (bin_location IS NULL OR bin_location = '')) AS no_bin,
+      (SELECT COUNT(*)::int FROM products WHERE is_active AND supplier_id IS NULL) AS no_supplier,
+      (SELECT COUNT(*)::int FROM products WHERE is_active AND stock_count < 0) AS negative_stock,
+      (SELECT COUNT(*)::int FROM products WHERE is_active AND stock_count <= 0) AS out_of_stock,
+      (SELECT COUNT(*)::int FROM pos_sales WHERE voided = false AND balance_due_usd > 0.005) AS unpaid_invoices,
+      (SELECT COUNT(*)::int FROM users WHERE is_staff AND must_change_password) AS staff_default_pw,
+      (SELECT COUNT(*)::int FROM users WHERE is_staff AND pin_hash IS NULL) AS staff_no_pin,
+      (SELECT COUNT(*)::int FROM suppliers WHERE is_active AND (phone IS NULL OR phone = '') AND (email IS NULL OR email = '')) AS supplier_no_contact`),
+    query(`SELECT sku, name, stock_count, price_usd::float AS price_usd,
+                  (stock_count * COALESCE(price_usd,0))::float AS retail_value
+             FROM products WHERE is_active AND COALESCE(cost_usd,0) = 0 AND stock_count > 0
+            ORDER BY retail_value DESC LIMIT 100`),
+    query(`SELECT sku, name, stock_count, (stock_count * COALESCE(cost_usd,0))::float AS at_cost
+             FROM products WHERE is_active AND (bin_location IS NULL OR bin_location = '') AND stock_count > 0
+            ORDER BY at_cost DESC LIMIT 100`),
+    query(`SELECT pr.sku, pr.name, pr.stock_count,
+                  COALESCE(SUM(i.qty),0)::int AS sold
+             FROM products pr JOIN pos_sale_items i ON i.product_img = pr.img
+             JOIN pos_sales s ON s.id = i.sale_id
+            WHERE pr.is_active AND pr.stock_count <= 0 AND s.voided = false
+              AND s.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY 1,2,3 HAVING SUM(i.qty) > 0 ORDER BY sold DESC LIMIT 100`, p),
+    query(`SELECT pr.sku, pr.name, pr.stock_count,
+                  (pr.stock_count * COALESCE(pr.cost_usd,0))::float AS at_cost
+             FROM products pr
+            WHERE pr.is_active AND pr.stock_count > 0 AND COALESCE(pr.cost_usd,0) > 0
+              AND NOT EXISTS (SELECT 1 FROM pos_sale_items i JOIN pos_sales s ON s.id = i.sale_id
+                               WHERE i.product_img = pr.img AND s.voided = false
+                                 AND s.created_at >= NOW() - INTERVAL '365 days')
+            ORDER BY at_cost DESC LIMIT 100`),
+    query(`SELECT receipt_number, created_at::date::text AS day,
+                  COALESCE(NULLIF(customer_name,''),'Walk-in') AS customer,
+                  total_usd::float AS total, balance_due_usd::float AS balance,
+                  (CURRENT_DATE - created_at::date)::int AS days_old
+             FROM pos_sales WHERE voided = false AND balance_due_usd > 0.005
+            ORDER BY created_at ASC LIMIT 100`),
+    query(`SELECT sku, name, COUNT(DISTINCT bin_location)::int AS bins
+             FROM products WHERE is_active AND bin_location IS NOT NULL AND bin_location <> ''
+            GROUP BY sku, name HAVING COUNT(DISTINCT bin_location) > 1 ORDER BY bins DESC LIMIT 100`),
+    query(`SELECT sku, name, stock_count, (stock_count * COALESCE(cost_usd,0))::float AS at_cost
+             FROM products WHERE is_active AND supplier_id IS NULL AND stock_count > 0
+            ORDER BY at_cost DESC LIMIT 100`),
+  ]);
+  const k = counts.rows[0];
+  const issues = [
+    { issue: 'Parts with no cost price', n: k.no_cost, impact: 'every margin, COGS and turnover figure is understated', fix: 'Set cost on the highest-value lines first' },
+    { issue: 'Parts with no selling price', n: k.no_price, impact: 'cannot be sold at the counter without a manual price', fix: 'Price them or deactivate them' },
+    { issue: 'Stocked parts with no bin', n: k.no_bin, impact: 'pickers cannot find them; counts drift', fix: 'Bin the fast movers first' },
+    { issue: 'Parts with no supplier', n: k.no_supplier, impact: 'excluded from every supplier report and reorder suggestion', fix: 'Assign a default supplier' },
+    { issue: 'Negative stock', n: k.negative_stock, impact: 'a count or a sale is wrong', fix: 'Stock count on those lines' },
+    { issue: 'Out of stock', n: k.out_of_stock, impact: 'lost sales if they are still selling', fix: 'See Reorder / Purchasing' },
+    { issue: 'Invoices with a balance owing', n: k.unpaid_invoices, impact: 'cash not collected', fix: 'See A/R Aging' },
+    { issue: 'Part numbers split across bins', n: splitBins.rows.length, impact: 'pickers find one bin and assume that is all of it', fix: 'Consolidate or record both properly' },
+    { issue: 'Staff still on a forced password change', n: k.staff_default_pw, impact: 'those accounts cannot be used until set up', fix: 'Set passwords in Users & Staff' },
+    { issue: 'Staff with no till PIN', n: k.staff_no_pin, impact: 'cannot sign in at the keypad', fix: 'Set a PIN in Users & Staff' },
+    { issue: 'Suppliers with no phone or email', n: k.supplier_no_contact, impact: 'cannot be chased on an order', fix: 'Fill in contact details' },
+  ].filter((x) => x.n > 0).sort((a, b) => b.n - a.n);
+  const advice = [{ kind: 'data', text: 'Nothing here is a system error — it is missing or inconsistent data, and each line says what it distorts. The first two are the ones worth doing first: without cost prices, no margin or turnover figure anywhere in Reports can be trusted.' }];
+  res.json({ from, to, counts: k, issues,
+    no_cost: noCost.rows, no_bin: noBin.rows, stocked_out_selling: stockout.rows,
+    no_sale_12m: overstock.rows, oldest_unpaid: oldUnpaid.rows,
+    split_bins: splitBins.rows, no_supplier: noSupplier.rows, advice });
+});
+
+// ---- stock ageing ---------------------------------------------------------
+app.get('/api/admin/reports/stock-ageing', requireAdmin, async (_req, res) => {
+  const AGE = `CASE
+      WHEN lr.last_received IS NULL THEN 'never received'
+      WHEN CURRENT_DATE - lr.last_received <= 30 THEN '0-30 days'
+      WHEN CURRENT_DATE - lr.last_received <= 90 THEN '31-90 days'
+      WHEN CURRENT_DATE - lr.last_received <= 180 THEN '91-180 days'
+      WHEN CURRENT_DATE - lr.last_received <= 365 THEN '181-365 days'
+      ELSE 'over a year' END`;
+  const BASE = `FROM products pr
+    LEFT JOIN (SELECT product_img, MAX(created_at)::date AS last_received
+                 FROM warehouse_activity WHERE kind = 'receive' GROUP BY 1) lr ON lr.product_img = pr.img
+    LEFT JOIN (SELECT i.product_img, MAX(s.created_at)::date AS last_sold
+                 FROM pos_sale_items i JOIN pos_sales s ON s.id = i.sale_id
+                WHERE s.voided = false GROUP BY 1) ls ON ls.product_img = pr.img
+   WHERE pr.is_active = true AND pr.stock_count > 0`;
+  const [buckets, items, byCat] = await Promise.all([
+    query(`SELECT ${AGE} AS bucket, COUNT(*)::int AS lines,
+                  SUM(pr.stock_count)::int AS units,
+                  SUM(pr.stock_count * COALESCE(pr.cost_usd,0))::float AS at_cost,
+                  MIN(CASE WHEN lr.last_received IS NULL THEN 99999
+                           ELSE CURRENT_DATE - lr.last_received END)::int AS sort_key
+             ${BASE} GROUP BY 1 ORDER BY sort_key`),
+    query(`SELECT pr.sku, pr.name, COALESCE(pr.category,'-') AS category,
+                  COALESCE(NULLIF(pr.bin_location,''),'(unbinned)') AS bin,
+                  pr.stock_count AS stock,
+                  (pr.stock_count * COALESCE(pr.cost_usd,0))::float AS at_cost,
+                  lr.last_received::text AS last_received, ls.last_sold::text AS last_sold,
+                  (CURRENT_DATE - lr.last_received)::int AS days_since_received,
+                  (CURRENT_DATE - ls.last_sold)::int AS days_since_sold,
+                  ${AGE} AS bucket
+             ${BASE} ORDER BY at_cost DESC LIMIT 400`),
+    query(`SELECT COALESCE(pr.category,'-') AS category, COUNT(*)::int AS lines,
+                  SUM(pr.stock_count * COALESCE(pr.cost_usd,0))::float AS at_cost,
+                  SUM(CASE WHEN lr.last_received IS NULL OR CURRENT_DATE - lr.last_received > 365
+                           THEN pr.stock_count * COALESCE(pr.cost_usd,0) ELSE 0 END)::float AS over_year_cost
+             ${BASE} GROUP BY 1 ORDER BY at_cost DESC`),
+  ]);
+  const total = buckets.rows.reduce((a, r) => a + r.at_cost, 0);
+  const stale = buckets.rows.filter((r) => r.bucket === 'over a year' || r.bucket === 'never received')
+    .reduce((a, r) => a + r.at_cost, 0);
+  for (const r of buckets.rows) r.share_pct = total > 0 ? Math.round((r.at_cost / total) * 1000) / 10 : null;
+  const advice = [
+    { kind: 'data', text: 'Age is measured from the last time a part was received, because that is the only date this data records for stock arriving. A part received recently but never sold still reads as new — Stock Valuation’s dead-stock list and “no sale in 12 months” in the Exception report catch those.' },
+  ];
+  if (total > 0) advice.push({ kind: stale / total > 0.5 ? 'cut' : 'margin',
+    text: 'J$' + Math.round(stale).toLocaleString() + ' of J$' + Math.round(total).toLocaleString() +
+      ' at cost (' + Math.round((stale / total) * 100) + '%) has not been restocked in over a year. That is the capital least likely to come back.' });
+  res.json({ buckets: buckets.rows, items: items.rows, by_category: byCat.rows,
+    totals: { at_cost: Math.round(total * 100) / 100, stale_at_cost: Math.round(stale * 100) / 100 }, advice });
+});
+
+// ---- sales detail register -------------------------------------------------
+app.get('/api/admin/reports/sales-detail', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const [rows, totals] = await Promise.all([
+    query(`SELECT s.receipt_number AS invoice, s.created_at::date::text AS day,
+                  COALESCE(NULLIF(s.customer_name,''),'Walk-in') AS customer,
+                  COALESCE(NULLIF(s.sales_rep_name,''), NULLIF(s.cashier_name,''),'-') AS rep,
+                  s.payment_method, i.product_img AS sku,
+                  COALESCE(pr.name, i.description) AS product,
+                  COALESCE(pr.category,'-') AS category,
+                  i.qty, i.unit_price_usd::float AS unit_price,
+                  i.total_usd::float AS line_total,
+                  COALESCE(pr.cost_usd,0)::float AS unit_cost,
+                  (i.qty * COALESCE(pr.cost_usd,0))::float AS line_cost,
+                  (i.total_usd - i.qty * COALESCE(pr.cost_usd,0))::float AS line_margin
+             FROM pos_sale_items i JOIN pos_sales s ON s.id = i.sale_id
+             LEFT JOIN products pr ON pr.img = i.product_img
+            WHERE s.voided = false AND s.created_at::date BETWEEN $1::date AND $2::date
+            ORDER BY s.created_at DESC, i.id ASC LIMIT 2000`, [from, to]),
+    query(`SELECT COUNT(*)::int AS lines, COUNT(DISTINCT s.id)::int AS invoices,
+                  COALESCE(SUM(i.qty),0)::int AS units,
+                  COALESCE(SUM(i.total_usd),0)::float AS revenue,
+                  COALESCE(SUM(i.qty * COALESCE(pr.cost_usd,0)),0)::float AS cost
+             FROM pos_sale_items i JOIN pos_sales s ON s.id = i.sale_id
+             LEFT JOIN products pr ON pr.img = i.product_img
+            WHERE s.voided = false AND s.created_at::date BETWEEN $1::date AND $2::date`, [from, to]),
+  ]);
+  const t = totals.rows[0];
+  t.margin = Math.round((t.revenue - t.cost) * 100) / 100;
+  t.margin_pct = t.revenue > 0 ? Math.round((t.margin / t.revenue) * 1000) / 10 : null;
+  res.json({ from, to, totals: t, rows: rows.rows,
+    shown: rows.rows.length, truncated: rows.rows.length >= 2000,
+    advice: [{ kind: 'data', text: 'One row per sold line, newest first, capped at 2,000. The totals above cover the whole range, not just the rows shown. Credit-note lines carry negative quantities, so they subtract here as they do everywhere else.' }] });
+});
+
+// ---- customer statement ---------------------------------------------------
+app.get('/api/admin/reports/customer-statement', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const id = parseInt(req.query.customer_id, 10);
+  const { rows: list } = await query(
+    `SELECT u.id, COALESCE(NULLIF(u.name,''), u.email) AS name,
+            COALESCE((SELECT SUM(sp.amount_usd) FROM sale_payments sp JOIN pos_sales s ON s.id = sp.sale_id
+                       WHERE sp.method = 'account' AND s.customer_id = u.id AND s.voided = false),0)::float
+          - COALESCE((SELECT SUM(amount_usd) FROM account_payments WHERE customer_id = u.id),0)::float AS balance
+       FROM users u WHERE u.is_staff = false AND u.is_admin = false
+      ORDER BY balance DESC LIMIT 400`);
+  if (!id) return res.json({ from, to, customers: list, customer: null });
+  const cust = (await query('SELECT * FROM users WHERE id = $1', [id])).rows[0];
+  if (!cust) return res.status(404).json({ error: 'That customer no longer exists.' });
+
+  const [opening, lines, closing] = await Promise.all([
+    // Everything before the window, netted, is the opening balance.
+    query(`SELECT COALESCE((SELECT SUM(sp.amount_usd) FROM sale_payments sp JOIN pos_sales s ON s.id = sp.sale_id
+                             WHERE sp.method = 'account' AND s.customer_id = $1 AND s.voided = false
+                               AND s.created_at::date < $2::date),0)::float
+                - COALESCE((SELECT SUM(amount_usd) FROM account_payments
+                             WHERE customer_id = $1 AND created_at::date < $2::date),0)::float AS opening`,
+      [id, from]),
+    query(`SELECT * FROM (
+             SELECT s.created_at AS at, s.created_at::date::text AS day, 'Invoice' AS kind,
+                    s.receipt_number AS reference, s.total_usd::float AS charge, 0::float AS credit,
+                    COALESCE(s.payment_method,'') AS detail
+               FROM pos_sales s
+              WHERE s.customer_id = $1 AND s.voided = false
+                AND s.created_at::date BETWEEN $2::date AND $3::date
+             UNION ALL
+             SELECT ap.created_at AS at, ap.created_at::date::text AS day, 'Payment' AS kind,
+                    COALESCE(ap.reference,'') AS reference, 0::float AS charge, ap.amount_usd::float AS credit,
+                    COALESCE(ap.method,'') AS detail
+               FROM account_payments ap
+              WHERE ap.customer_id = $1 AND ap.created_at::date BETWEEN $2::date AND $3::date
+           ) t ORDER BY at ASC LIMIT 1000`, [id, from, to]),
+    query(`SELECT COALESCE((SELECT SUM(sp.amount_usd) FROM sale_payments sp JOIN pos_sales s ON s.id = sp.sale_id
+                             WHERE sp.method = 'account' AND s.customer_id = $1 AND s.voided = false
+                               AND s.created_at::date <= $2::date),0)::float
+                - COALESCE((SELECT SUM(amount_usd) FROM account_payments
+                             WHERE customer_id = $1 AND created_at::date <= $2::date),0)::float AS closing`,
+      [id, to]),
+  ]);
+  // A running balance only makes sense on the account side, so the charge column
+  // shows the invoice total while the balance moves by what went on account.
+  let bal = Number(opening.rows[0].opening) || 0;
+  const charged = (await query(
+    `SELECT s.receipt_number, COALESCE(SUM(sp.amount_usd),0)::float AS on_account
+       FROM pos_sales s JOIN sale_payments sp ON sp.sale_id = s.id AND sp.method = 'account'
+      WHERE s.customer_id = $1 AND s.voided = false
+        AND s.created_at::date BETWEEN $2::date AND $3::date
+      GROUP BY 1`, [id, from, to])).rows;
+  const onAcct = new Map(charged.map((r) => [r.receipt_number, r.on_account]));
+  for (const l of lines.rows) {
+    l.on_account = l.kind === 'Invoice' ? (onAcct.get(l.reference) || 0) : 0;
+    bal = Math.round((bal + l.on_account - l.credit) * 100) / 100;
+    l.balance = bal;
+  }
+  const t = { opening: Math.round((Number(opening.rows[0].opening) || 0) * 100) / 100,
+    closing: Math.round((Number(closing.rows[0].closing) || 0) * 100) / 100,
+    invoices: lines.rows.filter((l) => l.kind === 'Invoice').length,
+    payments: lines.rows.filter((l) => l.kind === 'Payment').length,
+    charged: Math.round(lines.rows.reduce((a, l) => a + l.on_account, 0) * 100) / 100,
+    paid: Math.round(lines.rows.reduce((a, l) => a + l.credit, 0) * 100) / 100 };
+  res.json({ from, to, customers: list,
+    customer: { id: cust.id, name: cust.name || cust.email, email: cust.email, phone: cust.phone,
+      account_number: cust.account_number, customer_type: cust.customer_type,
+      payment_terms_days: cust.payment_terms_days, credit_limit_usd: cust.credit_limit_usd },
+    totals: t, lines: lines.rows,
+    advice: [{ kind: 'data', text: 'The balance column tracks the account only: a cash sale appears as an invoice but does not move it. Opening is everything on account before ' + from + ', netted against payments; closing is the same test at ' + to + '.' }] });
+});
+
+// =============================================================================
+//  LAST ROUTES — nothing routable may be registered below this point
+// =============================================================================
+// Express matches in registration order, so these two have to come after every
+// route in the file. They were originally in the middle of it, which silently
+// shadowed everything declared later -- the entire Reports section included.
+// If you add a route, add it ABOVE this block.
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// =============================================================================
-//  ERROR HANDLER — must be registered after every other app.use/route. Catches
-//  whatever the app.<method> auto-wrap above forwards via next(err), so a bug
-//  in any single request returns a 500 to that one client instead of crashing
-//  the whole server for everyone else.
-// =============================================================================
+// Catches whatever the app.<method> auto-wrap forwards via next(err), so a bug
+// in any single request returns a 500 to that one client instead of crashing the
+// whole server for everyone else. Must be the very last app.use.
 app.use((err, req, res, _next) => {
   console.error(`[error] ${req.method} ${req.url} —`, err && err.stack || err);
   if (res.headersSent) return;
   res.status(500).json({ error: 'Internal server error' });
 });
 
+
+// =============================================================================
+//  BOOT
+// =============================================================================
 async function start() {
   try {
     // Only the machine holding the database owns the schema.

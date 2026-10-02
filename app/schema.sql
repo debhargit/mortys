@@ -2042,3 +2042,195 @@ CREATE INDEX IF NOT EXISTS idx_backup_log_at ON backup_log (created_at DESC);
 -- ---------------------------------------------------------------------------
 CREATE INDEX IF NOT EXISTS pos_sale_items_sale_idx     ON pos_sale_items (sale_id);
 CREATE INDEX IF NOT EXISTS purchase_order_items_po_idx ON purchase_order_items (po_id);
+
+
+-- =============================================================================
+--  PETTY CASH  (ported from the D1 backend: functions/_routes/ops.js +
+--  functions/_lib/petty_cash.js, D1 migrations 0049 + 0058.)
+--
+--  server.js never had any of this -- the admin "Petty Cash" tab and the Cash
+--  Report tab's payout form both 404'd against the Postgres backend. Money is
+--  stored in integer cents here, exactly as the D1 tables do, so the ledger /
+--  balance cross-check arithmetic ports across verbatim; every endpoint divides
+--  by 100 to honour the *_usd float contract the admin UI speaks.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS petty_cash_categories (
+  id         SERIAL PRIMARY KEY,
+  name       TEXT NOT NULL UNIQUE,
+  is_active  BOOLEAN NOT NULL DEFAULT true,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+INSERT INTO petty_cash_categories (name, sort_order) VALUES
+ ('Fuel', 1), ('Office supplies', 2), ('Cleaning', 3), ('Refreshments / staff welfare', 4),
+ ('Postage / courier', 5), ('Repairs & maintenance', 6), ('Transport / taxi', 7),
+ ('Bank charges', 8), ('Sundry / misc', 9)
+ON CONFLICT (name) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS petty_cash_funds (
+  id                      SERIAL PRIMARY KEY,
+  name                    TEXT NOT NULL,
+  balance_cents           BIGINT NOT NULL DEFAULT 0,
+  custodian_id            INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  is_active               BOOLEAN NOT NULL DEFAULT true,
+  float_cents             BIGINT NOT NULL DEFAULT 0,
+  receipt_threshold_cents BIGINT NOT NULL DEFAULT 0,
+  location                TEXT,
+  notes                   TEXT,
+  closed_at               TIMESTAMPTZ,
+  last_reconciled_at      TIMESTAMPTZ,
+  created_at              TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- "cash physically disbursed" -- straight from an open till (source_type
+-- 'drawer', netted off that session's expected cash at close) or from a
+-- standing fund (source_type 'fund', which the fund balance absorbs directly).
+CREATE TABLE IF NOT EXISTS cash_payouts (
+  id                 SERIAL PRIMARY KEY,
+  amount_cents       BIGINT NOT NULL,
+  reason             TEXT NOT NULL,
+  paid_to            TEXT,
+  notes              TEXT,
+  source_type        TEXT NOT NULL CHECK (source_type IN ('drawer', 'fund')),
+  drawer_session_id  INTEGER REFERENCES cash_drawer_sessions(id),
+  fund_id            INTEGER REFERENCES petty_cash_funds(id),
+  authorized_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  category_id        INTEGER REFERENCES petty_cash_categories(id),
+  receipt_ref        TEXT,
+  receipt_url        TEXT,
+  is_advance         BOOLEAN NOT NULL DEFAULT false,
+  advance_to         TEXT,
+  advance_status     TEXT,              -- NULL | open | repaid | expensed
+  advance_settled_at TIMESTAMPTZ,
+  voided             BOOLEAN NOT NULL DEFAULT false,
+  voided_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  voided_at          TIMESTAMPTZ,
+  created_at         TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_cash_payouts_drawer ON cash_payouts (drawer_session_id);
+CREATE INDEX IF NOT EXISTS idx_cash_payouts_fund   ON cash_payouts (fund_id);
+
+-- Every non-disbursement fund movement, signed: + adds to the fund.
+CREATE TABLE IF NOT EXISTS petty_cash_movements (
+  id                SERIAL PRIMARY KEY,
+  fund_id           INTEGER NOT NULL REFERENCES petty_cash_funds(id) ON DELETE CASCADE,
+  kind              TEXT NOT NULL CHECK (kind IN
+    ('opening','replenishment','reconcile_adjust','transfer_in','transfer_out','void_reversal','advance_repay')),
+  delta_cents       BIGINT NOT NULL,
+  source            TEXT,              -- 'bank' | 'drawer' | 'fund' | NULL
+  drawer_session_id INTEGER REFERENCES cash_drawer_sessions(id),
+  ref               TEXT,
+  notes             TEXT,
+  related_payout_id INTEGER REFERENCES cash_payouts(id),
+  related_fund_id   INTEGER REFERENCES petty_cash_funds(id),
+  created_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at        TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pc_movements_fund ON petty_cash_movements (fund_id, created_at);
+
+CREATE TABLE IF NOT EXISTS petty_cash_counts (
+  id             SERIAL PRIMARY KEY,
+  fund_id        INTEGER NOT NULL REFERENCES petty_cash_funds(id) ON DELETE CASCADE,
+  counted_cents  BIGINT NOT NULL,
+  expected_cents BIGINT NOT NULL,
+  variance_cents BIGINT NOT NULL,
+  notes          TEXT,
+  counted_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pc_counts_fund ON petty_cash_counts (fund_id, created_at);
+
+
+-- =============================================================================
+--  SUPPLIER PAYMENTS (accounts payable) -- logs money paid out against a
+--  purchase order. Scoped to one PO, not a running per-supplier ledger: the
+--  customer side settles a whole account at once (account_payments) because
+--  a charge sale has no per-invoice balance to track, but a PO already is the
+--  natural unit of "what's owed" here, so a payment applies against one.
+-- =============================================================================
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS amount_paid_usd NUMERIC(10,2) NOT NULL DEFAULT 0;
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS balance_due_usd NUMERIC(10,2) NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS purchase_order_payments (
+  id           SERIAL PRIMARY KEY,
+  po_id        INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+  amount_usd   NUMERIC(10,2) NOT NULL CHECK (amount_usd > 0),
+  method       TEXT,
+  reference    TEXT,
+  notes        TEXT,
+  received_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_po_payments_po ON purchase_order_payments (po_id);
+
+-- Existing POs start owing their full total -- nothing paid yet.
+--
+-- Except the ones imported from the legacy INVREC export (app/tools/
+-- load-invrec.mjs stamps those with legacy_key). Those are 25,235 historical
+-- goods-receipt batches going back to 2009, and INVREC carries no accounts-
+-- payable data whatsoever: SUB_TOTAL, TOTAL, TOTAL_PAID and PAY_DATE are empty
+-- on all 206,956 rows. Defaulting them to "owes the full total" asserted
+-- J$1,566,709,559 of outstanding supplier debt on stock that was received and
+-- sold years ago, which then flowed into payables, cash-flow and the executive
+-- summary. Nothing is known about what was paid, so nothing is claimed: the
+-- balance stays 0 and the payables report simply has no AP history before the
+-- first PO raised in this system.
+--
+-- Guarded, because legacy_key is added by app/tools/lib/legacy-schema.sql when
+-- the seeder runs, not by this file -- on a database that has never imported,
+-- the column does not exist and the plain form is correct.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_name = 'purchase_orders' AND column_name = 'legacy_key') THEN
+    UPDATE purchase_orders SET balance_due_usd = total_usd
+     WHERE amount_paid_usd = 0 AND legacy_key IS NULL;
+    UPDATE purchase_orders SET balance_due_usd = 0
+     WHERE amount_paid_usd = 0 AND legacy_key IS NOT NULL AND balance_due_usd <> 0;
+  ELSE
+    UPDATE purchase_orders SET balance_due_usd = total_usd WHERE amount_paid_usd = 0;
+  END IF;
+END $$;
+
+
+-- =============================================================================
+--  REPORT INDEXES — the lookups the reporting module cannot work without.
+--
+--  Postgres does not index the referencing side of a foreign key, and these
+--  were all absent. The cost is not academic: the Orders list spent 26,915ms
+--  without pos_sale_items(sale_id) and 49ms with it, the order-quality report
+--  10,696ms without pos_sale_items(product_img) and 349ms with it, and the
+--  supplier report 4,640ms without the two supplier_id indexes and 26ms with
+--  them. Everything here is a plain btree on the column a report filters by.
+-- =============================================================================
+CREATE INDEX IF NOT EXISTS idx_pos_sale_items_product_img ON pos_sale_items (product_img);
+CREATE INDEX IF NOT EXISTS idx_products_supplier          ON products (supplier_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_supplier   ON purchase_orders (supplier_id);
+CREATE INDEX IF NOT EXISTS idx_account_payments_reference ON account_payments (reference);
+CREATE INDEX IF NOT EXISTS idx_warehouse_activity_kind    ON warehouse_activity (kind, created_at);
+-- sku is not the primary key (img is), but both the receival and sales
+-- importers match existing stock with "img IN (...) OR sku IN (...)"; an
+-- unindexed sku forces a full scan for that half of the OR. Partial, because
+-- most rows may carry no sku.
+CREATE INDEX IF NOT EXISTS idx_products_sku ON products (sku) WHERE sku IS NOT NULL;
+
+-- =============================================================================
+--  COLUMNS THE REPORTING MODULE READS
+--
+--  Three columns the ported reports reference that this schema never declared.
+--  Without them `reorder` fails on "column pr.reorder_point does not exist" and
+--  both `exceptions` and `users-staff` on "column must_change_password does not
+--  exist" -- a 500 on the report rather than a missing figure, because the
+--  column is named in the SELECT list.
+-- =============================================================================
+
+-- Set while an account is still on a seeded/reset default password. The guards
+-- refuse to authorise anything except changing it, so a default credential
+-- grants a session and nothing else. Cleared when the password is changed.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT false;
+
+-- Optional manual overrides of the computed reorder point / order quantity.
+-- scoreItems() derives both from demand when these are NULL, which is the
+-- normal case; a buyer sets them to pin a part to their own numbers.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS reorder_point INTEGER;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS reorder_qty   INTEGER;
