@@ -8186,25 +8186,6 @@ app.post('/api/admin/inspections/:id/photos', requireAdmin, upload.single('photo
   res.json({ ok: true, photo_path: photoPath });
 });
 
-// =============================================================================
-//  CATCH-ALL — serve index.html for SPA-style routes (only after static files)
-// =============================================================================
-app.get('*', (req, res) => {
-  if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
-  res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-// =============================================================================
-//  ERROR HANDLER — must be registered after every other app.use/route. Catches
-//  whatever the app.<method> auto-wrap above forwards via next(err), so a bug
-//  in any single request returns a 500 to that one client instead of crashing
-//  the whole server for everyone else.
-// =============================================================================
-app.use((err, req, res, _next) => {
-  console.error(`[error] ${req.method} ${req.url} —`, err && err.stack || err);
-  if (res.headersSent) return;
-  res.status(500).json({ error: 'Internal server error' });
-});
 
 // =============================================================================
 //  waitForDatabase — block until Postgres will actually answer a query.
@@ -8947,9 +8928,198 @@ app.get('/api/admin/reports/customers', requireAdmin, async (req, res) => {
   res.json({ from, to, new_customers: newUsers.rows[0].n, top_customers: topPos.rows,
     loyalty: loyalty.rows[0], newsletter_signups: newsletter.rows[0].n });
 });
+
+// ---- stock valuation + dead stock -------------------------------------------
+// GET /api/admin/reports/valuation?from&to&filter=<field>&value=<v>
+//
+// `filter` narrows every figure in the report -- the tiles, both breakdowns and
+// the item list all describe the same filtered slice, so the totals always add
+// up to what is on screen. Supported fields:
+//   (none)      every active part with stock on hand
+//   category    category = value
+//   location    bin/shelf = value
+//   dead        only parts with no sale in the date range
+//   supplier    supplier_id = value
+//   qty_lt      stock_count < value
+//   price_lt    price_usd   < value
+//   name_eq     name        = value   (case-insensitive, exact)
+//   vehicle_eq  make_model  = value   (case-insensitive, exact)
+//
+// Money comes back as floats to match the rest of this module. `facets` feeds
+// the UI's dropdowns so the client never has to guess the valid values.
+const VALUATION_FILTERS = ['', 'category', 'location', 'dead', 'supplier', 'qty_lt', 'price_lt', 'name_eq', 'vehicle_eq'];
+
+app.get('/api/admin/reports/valuation', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const filter = VALUATION_FILTERS.includes(String(req.query.filter || '')) ? String(req.query.filter || '') : '';
+  const value = req.query.value == null ? '' : String(req.query.value).trim();
+
+  // products.location is unused by the admin UI (it writes the shelf into
+  // bin_location), so the "location" dimension reads bin_location first and
+  // only falls back to location for rows written before that split.
+  const LOC = `COALESCE(NULLIF(BTRIM(p.bin_location), ''), NULLIF(BTRIM(p.location), ''), '-')`;
+
+  // $1/$2 are always the range (the dead-stock flag needs them even when the
+  // report is unfiltered); a filter value becomes $3.
+  const params = [from, to];
+  let where = `p.is_active = true AND p.stock_count > 0`;
+  let deadOnly = false;
+  let needsValue = true;
+  switch (filter) {
+    case 'category':   where += ` AND LOWER(COALESCE(p.category,'')) = LOWER($3)`; break;
+    case 'location':   where += ` AND LOWER(${LOC}) = LOWER($3)`; break;
+    case 'supplier':   where += ` AND p.supplier_id = ($3)::int`; break;
+    case 'qty_lt':     where += ` AND p.stock_count < ($3)::numeric`; break;
+    case 'price_lt':   where += ` AND COALESCE(p.price_usd,0) < ($3)::numeric`; break;
+    case 'name_eq':    where += ` AND LOWER(BTRIM(COALESCE(p.name,''))) = LOWER(BTRIM($3))`; break;
+    case 'vehicle_eq': where += ` AND LOWER(BTRIM(COALESCE(p.make_model,''))) = LOWER(BTRIM($3))`; break;
+    case 'dead':       deadOnly = true; needsValue = false; break;
+    default:           needsValue = false;
+  }
+  if (needsValue) {
+    if (value === '') return res.status(400).json({ error: 'This filter needs a value.' });
+    if ((filter === 'qty_lt' || filter === 'price_lt') && !Number.isFinite(Number(value))) {
+      return res.status(400).json({ error: 'Enter a number for this filter.' });
+    }
+    if (filter === 'supplier' && !Number.isInteger(Number(value))) {
+      return res.status(400).json({ error: 'Pick a supplier.' });
+    }
+    params.push(value);
+  }
+
+  // "Sold in range" is collected once into two sets and then anti-joined,
+  // rather than asked per product as
+  //   NOT EXISTS (... WHERE i.product_id = p.id OR i.product_img = p.img ...)
+  // -- that OR cannot use either index, so it degenerates into 36.5k products x
+  // 1.05M sale lines and the request never returns. Two separate sets let the
+  // planner hash-anti-join both, which is a second or so.
+  //
+  // Both keys are needed: the POS writes product_img on every line, but a line
+  // whose SKU no longer exists in the catalogue (23% of the imported history)
+  // has product_id NULL, and a line edited in the app may carry only the id.
+  const soldCte = `
+    sold_ids AS (
+      SELECT DISTINCT i.product_id AS id
+        FROM pos_sale_items i JOIN pos_sales s ON s.id = i.sale_id
+       WHERE s.voided = false AND s.created_at::date BETWEEN $1::date AND $2::date
+         AND i.product_id IS NOT NULL
+    ),
+    sold_imgs AS (
+      SELECT DISTINCT i.product_img AS img
+        FROM pos_sale_items i JOIN pos_sales s ON s.id = i.sale_id
+       WHERE s.voided = false AND s.created_at::date BETWEEN $1::date AND $2::date
+         AND i.product_img IS NOT NULL
+    ),
+    stock AS (
+      SELECT p.id, p.img, p.sku, p.name, COALESCE(p.make_model,'') AS make_model,
+             COALESCE(NULLIF(BTRIM(p.category),''),'-') AS category,
+             ${LOC} AS location, p.stock_count,
+             COALESCE(p.cost_usd,0)  AS cost_usd,
+             COALESCE(p.price_usd,0) AS price_usd,
+             p.stock_count * COALESCE(p.cost_usd,0)  AS stock_cost,
+             p.stock_count * COALESCE(p.price_usd,0) AS stock_retail,
+             COALESCE(sup.name,'-') AS supplier,
+             (NOT EXISTS (SELECT 1 FROM sold_ids d  WHERE d.id  = p.id)
+              AND NOT EXISTS (SELECT 1 FROM sold_imgs d WHERE d.img = p.img)) AS is_dead
+        FROM products p LEFT JOIN suppliers sup ON sup.id = p.supplier_id
+       WHERE ${where}
+    ),
+    sel AS (SELECT * FROM stock${deadOnly ? ' WHERE is_dead' : ''})`;
+
+  // One round trip: the sold sets and the stock scan are evaluated once and
+  // every section reads the same `sel`, so the tiles, both breakdowns and the
+  // item list can never disagree with each other.
+  const [payload, facetCat, facetLoc, facetSup] = await Promise.all([
+    query(`
+      WITH ${soldCte}
+      SELECT json_build_object(
+        'totals', (SELECT row_to_json(x) FROM (
+            SELECT COUNT(*)::int AS lines,
+                   COALESCE(SUM(stock_count),0)::int        AS units,
+                   COALESCE(SUM(stock_cost),0)::float       AS cost_value,
+                   COALESCE(SUM(stock_retail),0)::float     AS retail_value,
+                   COUNT(*) FILTER (WHERE is_dead)::int     AS dead_lines,
+                   COALESCE(SUM(stock_cost) FILTER (WHERE is_dead),0)::float AS dead_cost
+              FROM sel) x),
+        'by_category', (SELECT COALESCE(json_agg(x), '[]'::json) FROM (
+            SELECT category, COUNT(*)::int AS lines,
+                   COALESCE(SUM(stock_count),0)::int    AS units,
+                   COALESCE(SUM(stock_cost),0)::float   AS cost_value,
+                   COALESCE(SUM(stock_retail),0)::float AS retail_value
+              FROM sel GROUP BY category ORDER BY 4 DESC) x),
+        'by_location', (SELECT COALESCE(json_agg(x), '[]'::json) FROM (
+            SELECT location, COUNT(*)::int AS lines,
+                   COALESCE(SUM(stock_count),0)::int  AS units,
+                   COALESCE(SUM(stock_cost),0)::float AS cost_value
+              FROM sel GROUP BY location ORDER BY 4 DESC) x),
+        'dead_stock', (SELECT COALESCE(json_agg(x), '[]'::json) FROM (
+            SELECT sku, name, category, location, stock_count,
+                   stock_cost::float AS tied_up_cost
+              FROM sel WHERE is_dead ORDER BY stock_cost DESC LIMIT 100) x),
+        'items', (SELECT COALESCE(json_agg(x), '[]'::json) FROM (
+            SELECT sku, name, make_model, category, location, supplier, stock_count,
+                   cost_usd::float AS cost_usd, price_usd::float AS price_usd,
+                   stock_cost::float AS stock_cost, stock_retail::float AS stock_retail,
+                   is_dead
+              FROM sel ORDER BY stock_cost DESC LIMIT 300) x)
+      ) AS payload`, params),
+    query(`SELECT DISTINCT COALESCE(NULLIF(BTRIM(category),''),'-') AS c FROM products
+            WHERE is_active = true ORDER BY 1`),
+    query(`SELECT DISTINCT COALESCE(NULLIF(BTRIM(bin_location),''), NULLIF(BTRIM(location),''),'-') AS l
+             FROM products WHERE is_active = true ORDER BY 1`),
+    query(`SELECT s.id, s.name FROM suppliers s
+            WHERE EXISTS (SELECT 1 FROM products p WHERE p.supplier_id = s.id AND p.is_active = true)
+            ORDER BY s.name`),
+  ]);
+
+  const d = payload.rows[0].payload;
+  const t = d.totals || { lines: 0, units: 0, cost_value: 0, retail_value: 0 };
+  res.json({
+    from, to, filter, value,
+    totals: Object.assign({}, t, { potential_gross: (t.retail_value || 0) - (t.cost_value || 0) }),
+    by_category: d.by_category,
+    by_location: d.by_location,
+    dead_stock: d.dead_stock,
+    items: d.items,
+    facets: {
+      categories: facetCat.rows.map((r) => r.c),
+      locations: facetLoc.rows.map((r) => r.l),
+      suppliers: facetSup.rows,
+    },
+  });
+});
+
 // =============================================================================
 //  BOOT
 // =============================================================================
+// =============================================================================
+//  CATCH-ALL — serve index.html for SPA-style routes (only after static files)
+//
+//  MUST stay the last route registered in this file. Express matches in
+//  registration order, so anything declared below this point is unreachable:
+//  `app.get('*')` answers first and the /api/ branch turns it into a 404. This
+//  block used to sit above the REPORTS MODULE, which silently made every
+//  /api/admin/reports/* endpoint dead -- the whole Reports tab returned
+//  {"error":"Not found"} on the Postgres backend while the routes sat there
+//  looking correct. Add new routes ABOVE this banner, never after it.
+// =============================================================================
+app.get('*', (req, res) => {
+  if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// =============================================================================
+//  ERROR HANDLER — must be registered after every other app.use/route. Catches
+//  whatever the app.<method> auto-wrap above forwards via next(err), so a bug
+//  in any single request returns a 500 to that one client instead of crashing
+//  the whole server for everyone else.
+// =============================================================================
+app.use((err, req, res, _next) => {
+  console.error(`[error] ${req.method} ${req.url} —`, err && err.stack || err);
+  if (res.headersSent) return;
+  res.status(500).json({ error: 'Internal server error' });
+});
+
 async function start() {
   try {
     // Only the machine holding the database owns the schema.
