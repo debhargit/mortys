@@ -2029,3 +2029,16 @@ CREATE TABLE IF NOT EXISTS backup_log (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_backup_log_at ON backup_log (created_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- Missing foreign-key indexes on the two biggest child tables.
+--
+-- Postgres does not index the referencing side of a FK automatically. These
+-- went unnoticed while the tables were small, but every receipt/invoice view
+-- filters pos_sale_items by sale_id and every purchase-order view filters
+-- purchase_order_items by po_id, so without them each lookup is a full
+-- sequential scan. The legacy import (app/tools/seed-legacy.mjs) takes those
+-- tables to ~1.05M and ~178k rows, which makes the difference stark.
+-- ---------------------------------------------------------------------------
+CREATE INDEX IF NOT EXISTS pos_sale_items_sale_idx     ON pos_sale_items (sale_id);
+CREATE INDEX IF NOT EXISTS purchase_order_items_po_idx ON purchase_order_items (po_id);
