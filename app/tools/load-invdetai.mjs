@@ -119,6 +119,14 @@ try {
                 WHEN pn.first_id IS NOT NULL THEN 'ambiguous-first'
                 ELSE 'orphan' END                                      AS match_kind,
            -- qty is an integer column; keep a money-bearing line visible at 1
+           -- A line on a 'CN' invoice is returned stock: the quantity came back
+           -- and the money went out, but the legacy file stores both positive
+           -- (92,599 lines, J$182,364,547.98, 142,116 units). Signed negative
+           -- so returns net out of revenue, units sold and demand everywhere
+           -- downstream -- the reorder and best-seller reports would otherwise
+           -- read a return as a sale and buy more of it.
+           -- load-invoices.mjs signs the matching header the same way.
+           CASE WHEN b.inv_no LIKE 'CN%' THEN -1 ELSE 1 END             AS sign,
            CASE WHEN round(b.qty_raw) = 0 AND b.amount <> 0 THEN 1
                 ELSE greatest(round(b.qty_raw), 0) END::int             AS qty
       FROM base b
@@ -182,9 +190,12 @@ try {
            l.sku,
            p.id,
            coalesce(l.part_name, l.sku, 'Item')                  AS description,
-           l.qty,
+           l.sign * l.qty                                        AS qty,
+           -- unit_price stays positive: it is a rate, not a direction.
            l.unit_price,
-           l.amount,
+           l.sign * l.amount                                     AS total_usd,
+           -- The discount is a reduction either way, so it keeps its own sign
+           -- rather than following the line's.
            greatest(round(l.qty_raw * l.unit_price - l.amount, 2), 0) AS discount_usd,
            CASE WHEN l.disc_pct > 0 THEN l.disc_pct::text || '% (legacy DISC)' END
       FROM _line l

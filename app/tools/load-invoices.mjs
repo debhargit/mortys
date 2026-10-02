@@ -128,7 +128,9 @@ try {
              -- blank INV_NUMBER (39 rows) still gets a stable receipt number
              coalesce(b.inv_no, 'LEGACY-' || b.src_line) AS base_no,
              row_number() OVER (PARTITION BY coalesce(b.inv_no, 'LEGACY-' || b.src_line)
-                                ORDER BY b.src_line) AS dup_n
+                                ORDER BY b.src_line) AS dup_n,
+             -- -1 for a credit note, 1 for a sale. See the money columns below.
+             CASE WHEN b.inv_no LIKE 'CN%' THEN -1 ELSE 1 END AS sign
         FROM base b
     )
     SELECT
@@ -145,7 +147,17 @@ try {
       k.phone                                          AS customer_phone,
       rp.id                                            AS sales_rep_id,
       k.rep_name                                       AS sales_rep_name,
-      k.subtotal, k.tax, k.total, k.paid,
+      -- A 'CN' invoice number is a credit note: goods came back and money went
+      -- out. The legacy file stores them with everything POSITIVE, exactly like
+      -- a sale -- 112,044 of them, J$320,091,292.96 -- so loading them verbatim
+      -- counts a return as revenue and overstates sales by twice their value.
+      -- Signed negative here instead, which is what makes them net out of every
+      -- aggregate downstream without a single report having to know what a "CN"
+      -- invoice is. load-invdetai.mjs signs their lines and quantities to match.
+      k.sign * k.subtotal AS subtotal,
+      k.sign * k.tax      AS tax,
+      k.sign * k.total    AS total,
+      k.sign * k.paid     AS paid,
       k.tend, k.change_due,
       greatest(k.total - k.paid, 0)                    AS balance_due,
       CASE WHEN k.paid >= k.total - 0.005 THEN 'paid'
@@ -157,7 +169,10 @@ try {
       CASE WHEN k.terms ~ '^N[0-9]{1,3}$' AND k.inv_day IS NOT NULL
            THEN k.inv_day + (substring(k.terms from 2))::int END AS due_date,
       nullif(concat_ws('; ',
-        CASE WHEN k.status = 'C' THEN 'Legacy credit note (INVOICE.STATUS=C)'
+        -- The CN prefix is the credit-note marker, not STATUS: 112,044 invoices
+        -- are numbered CN* while only 3 carry STATUS='C'.
+        CASE WHEN k.sign = -1 THEN 'Credit note (CN invoice number); money and quantities signed negative' END,
+        CASE WHEN k.status = 'C' THEN 'Legacy STATUS=C'
              WHEN k.status <> 'A' AND k.status <> '' THEN 'Legacy STATUS=' || k.status END,
         CASE WHEN k.reason IS NOT NULL THEN 'Reason: ' || k.reason END,
         CASE WHEN k.terms <> '' THEN 'Terms: ' || k.terms END,
