@@ -452,9 +452,21 @@ function ownsSchema() {
 // a database hiccup must not brick every till in the shop, and an instance that
 // cannot reach the database is already useless without any help from us.
 let TERMINAL = { id: null, status: 'unknown', is_db_host: isLoopbackDbHost(), checked_at: null, error: null };
-// Bumped when the server terminates this instance; sessions carry the epoch
-// they were signed in under, so bumping it signs everyone here out at once.
-let SESSION_EPOCH = Date.now();
+// Sessions carry the epoch they were signed in under, and the epoch middleware
+// drops any session whose stamp no longer matches -- that is how "terminate
+// this terminal" signs everyone here out, cookie-session having no server-side
+// store to delete from.
+//
+// It is the timestamp of the last terminate recorded for THIS terminal, in ms,
+// and 0 when there has never been one. Deliberately NOT Date.now(): seeded from
+// the clock it changed on every boot, so an ordinary restart -- a crash, an
+// update, the shop PC waking up -- invalidated every live cookie and the next
+// click in the admin panel answered "Sign in required" and cleared the cookie.
+// Read from `terminals.terminate_requested_at` instead, so a restart recomputes
+// the same value and only a real terminate moves it. registerTerminal() loads
+// it, and terminalHeartbeat() awaits that before app.listen(), so it is always
+// settled before the first request is served.
+let SESSION_EPOCH = 0;
 let LAST_TERMINATE_HANDLED = null;
 
 async function getAccessMode() {
@@ -516,12 +528,22 @@ async function registerTerminal() {
 
   TERMINAL = { id: row.id, status: row.status, is_db_host: !!row.is_db_host, checked_at: new Date().toISOString(), error: null };
 
-  // A terminate raised since we last acted on one signs this instance out.
+  // The epoch IS the recorded terminate time, so this both loads it at boot and
+  // moves it when a new terminate lands. No `t > BOOT_AT` test: that is what
+  // made the value depend on when this process happened to start, and it is also
+  // wrong on its own terms -- a terminate means "sign everyone out here", and a
+  // restart should not quietly hand those sessions back. Sessions opened after
+  // the terminate carry the new epoch and survive restarts normally.
   const t = row.terminate_requested_at ? new Date(row.terminate_requested_at) : null;
-  if (t && t > BOOT_AT && (!LAST_TERMINATE_HANDLED || t > LAST_TERMINATE_HANDLED)) {
-    LAST_TERMINATE_HANDLED = t;
-    SESSION_EPOCH = Date.now();
-    console.warn('[terminal] terminate requested by the server -- all sessions on this machine signed out');
+  const epoch = t ? t.getTime() : 0;
+  if (epoch !== SESSION_EPOCH) {
+    SESSION_EPOCH = epoch;
+    // Only announce a terminate we have not already acted on, so a restart that
+    // merely re-reads the same row stays quiet.
+    if (t && (!LAST_TERMINATE_HANDLED || t > LAST_TERMINATE_HANDLED)) {
+      LAST_TERMINATE_HANDLED = t;
+      if (t > BOOT_AT) console.warn('[terminal] terminate requested by the server -- all sessions on this machine signed out');
+    }
   }
   return row;
 }
@@ -1420,8 +1442,16 @@ app.post('/api/admin/terminals/:id/terminate', requireManager, async (req, res) 
   try {
     const cur = await query('SELECT * FROM terminals WHERE id = $1', [id]);
     if (!cur.rows.length) return res.status(404).json({ ok: false, error: 'No such terminal.' });
-    await query('UPDATE terminals SET terminate_requested_at = NOW() WHERE id = $1', [id]);
-    if (cur.rows[0].id === TERMINAL.id) { SESSION_EPOCH = Date.now(); LAST_TERMINATE_HANDLED = new Date(); }
+    // Take the stamp back from the UPDATE rather than reading the clock again:
+    // SESSION_EPOCH has to equal what is stored, or the next restart would
+    // recompute a different epoch and sign out the sessions opened in between.
+    const upd = await query(
+      'UPDATE terminals SET terminate_requested_at = NOW() WHERE id = $1 RETURNING terminate_requested_at', [id]);
+    if (cur.rows[0].id === TERMINAL.id) {
+      const t = new Date(upd.rows[0].terminate_requested_at);
+      SESSION_EPOCH = t.getTime();
+      LAST_TERMINATE_HANDLED = t;
+    }
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
