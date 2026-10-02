@@ -213,6 +213,61 @@
   td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
   tr:hover td{background:var(--card-soft)}
   td.actions{white-space:nowrap}
+
+  /* ---- report tables: scroll, sort, resize ------------------------------
+     Report tables run to fourteen columns, which no screen fits. The wrapper
+     scrolls sideways on its own rather than pushing the whole page wide, and
+     width:max-content stops the browser squeezing columns to nothing instead. */
+  .rpt-scroll{overflow-x:auto;max-width:100%}
+  .rpt-scroll>table{width:max-content;min-width:100%}
+
+  /* ---- report menu: collapsible groups, own scrollbar ------------------- */
+  /* The menu scrolls independently of the report beside it. Without this a
+     40-entry menu drags the whole page down before the report has even
+     started. */
+  .rpt-menu{position:sticky;top:12px;max-height:calc(100vh - 28px);overflow-y:auto}
+  .rpt-menu::-webkit-scrollbar{width:7px}
+  .rpt-menu::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+  .rgrp-title{padding:8px 12px;font-size:10px;text-transform:uppercase;letter-spacing:1.2px;
+    color:var(--muted);font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;
+    user-select:none;border-top:1px solid var(--line)}
+  .rgrp-title:hover{background:var(--hover,#eef2f7);color:var(--heading)}
+  .rgrp-title .chev{font-size:9px;opacity:.6;transition:transform .15s;width:9px}
+  .rgrp.collapsed .chev{transform:rotate(-90deg)}
+  .rgrp.collapsed .rgrp-items{display:none}
+  .rgrp-title .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .rgrp-title .cnt{opacity:.55;font-weight:600}
+  /* The star is a button inside a clickable row, so it has to stop the click
+     reaching the row or favouriting would also toggle the group. */
+  .rgrp-fav{background:none;border:0;cursor:pointer;font-size:12px;line-height:1;padding:1px 2px;
+    opacity:.3;color:var(--muted);font-family:inherit}
+  .rgrp-fav:hover{opacity:.8}
+  .rgrp.fav .rgrp-fav{opacity:1;color:var(--warn,#f59e0b)}
+  .rgrp.fav .name{color:var(--heading)}
+
+  /* ---- optional sticky: table headings and overview tiles --------------- */
+  /* Off by default. A header can only stick to a scrolling ancestor, and
+     .rpt-scroll only scrolls sideways, so sticky mode also gives it a height --
+     the table then scrolls inside its own panel with the headings pinned. */
+  body.rpt-sticky .rpt-scroll{max-height:68vh;overflow-y:auto}
+  body.rpt-sticky .rpt-scroll thead th{position:sticky;top:0;z-index:3}
+  /* Tiles pin against the page, which is the right scroller for them -- nothing
+     between them and <body> clips. They need their own background or the table
+     shows through as it passes underneath. */
+  body.rpt-sticky #rptBody .tiles{position:sticky;top:0;z-index:6;background:var(--bg);
+    padding:10px 0 6px;margin-bottom:8px}
+  th.rpt-sort{cursor:pointer;user-select:none;position:relative;padding-right:20px}
+  th.rpt-sort:hover{background:var(--hover,#eef2f7);color:var(--heading)}
+  th.rpt-sort .rpt-ar{position:absolute;right:9px;opacity:.3;font-size:9px;top:50%;transform:translateY(-50%)}
+  th.rpt-sort.asc .rpt-ar,th.rpt-sort.desc .rpt-ar{opacity:1;color:var(--sky,#0ea5e9)}
+  /* The grab strip sits inside the header cell's right edge. 7px is wide enough
+     to hit without stealing clicks from the sort. */
+  th .rpt-rs{position:absolute;top:0;right:0;width:7px;height:100%;cursor:col-resize;z-index:3}
+  th .rpt-rs:hover{background:var(--sky,#0ea5e9);opacity:.35}
+  body.rpt-resizing{cursor:col-resize;user-select:none}
+  /* Auto-built overview tiles sit above the first table on reports that do not
+     already carry their own. */
+  .rpt-autotiles{padding:16px 18px 0}
   .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700}
   .badge.new{background:#fef3c7;color:#92400e}
   .badge.pending{background:#dbeafe;color:#1e40af}
@@ -15008,14 +15063,27 @@ function rptTable(title, cols, rows, emptyMsg, opts){
       } else if (first) { totalRow[c.k] = 'Total (' + rows.length + ')'; first = false; }
     }
   }
-  RPT_TABLES.push({ title: title, cols: cols, rows: (rows || []).concat(totalRow ? [totalRow] : []) });
+  // The totals row is appended for CSV and print, which should carry it. Flagged
+  // so the auto-tile summer can leave it out -- adding a total to its own
+  // components is how a tile ends up reading double.
+  RPT_TABLES.push({ title: title, cols: cols, has_total: !!totalRow,
+    rows: (rows || []).concat(totalRow ? [totalRow] : []) });
   var head = '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">' + title + '</div>';
   if (!rows || !rows.length) {
     return '<div class="panel">' + head + '<div class="empty">' + esc(emptyMsg || 'Nothing in this range.') + '</div></div>';
   }
   var chart = RPT_CHART === 'off' ? '' : rptChartSvg(cols, rows, RPT_CHART);
+  // Headers carry the column's type so the sort comparator knows whether it is
+  // looking at money, a count or text, rather than guessing from the rendered
+  // string. The resize grip is a child of the header, not a separate overlay,
+  // so it moves with the column.
   var th = cols.map(function(c){
-    return '<th style="text-align:' + (c.right || c.money || c.num || c.hours ? 'right' : 'left') + '">' + esc(c.label) + '</th>';
+    var right = c.right || c.money || c.num || c.hours;
+    var type = c.money ? 'money' : c.hours ? 'num' : c.num ? 'num' : 'text';
+    return '<th class="rpt-sort" data-sort-type="' + type + '"' +
+      ' title="Click to sort · drag the right edge to resize"' +
+      ' style="text-align:' + (right ? 'right' : 'left') + '">' +
+      esc(c.label) + '<span class="rpt-ar">▲▼</span><span class="rpt-rs"></span></th>';
   }).join('');
   var body = rows.map(function(r){
     return '<tr>' + cols.map(function(c){
@@ -15034,7 +15102,114 @@ function rptTable(title, cols, rows, emptyMsg, opts){
     }).join('') + '</tr></tfoot>';
   }
   return '<div class="panel">' + head + chart +
-    '<table><thead><tr>' + th + '</tr></thead><tbody>' + body + '</tbody>' + foot + '</table></div>';
+    '<div class="rpt-scroll"><table><thead><tr>' + th + '</tr></thead><tbody>' + body + '</tbody>' +
+    foot + '</table></div></div>';
+}
+
+// ---- sorting, resizing and auto tiles for every report table --------------
+// All three are delegated from the document and work on the rendered DOM, not on
+// the data behind it. That is deliberate: report bodies are built as HTML strings
+// and replaced wholesale on each run, so anything attached per-table would have
+// to be re-attached on every render -- the same trap that left the summary tiles
+// unclickable for so long.
+
+// Turn a rendered cell back into something comparable. "J$1,234.56" and "1,234"
+// have to sort as numbers, "—" and "no cost" have to sort last rather than as 0,
+// and an ISO date sorts correctly as text already.
+function rptCellValue(td, type){
+  var raw = (td.textContent || '').trim();
+  if (!raw || raw === '—') return { empty: true, n: 0, s: '' };
+  if (type === 'money' || type === 'num') {
+    var n = parseFloat(raw.replace(/[^0-9.\-]/g, ''));
+    if (isNaN(n)) return { empty: true, n: 0, s: raw.toLowerCase() };   // "no cost"
+    return { empty: false, n: n, s: raw.toLowerCase() };
+  }
+  return { empty: false, n: 0, s: raw.toLowerCase() };
+}
+function rptSortTable(th){
+  var table = th.closest('table');
+  var tbody = table.tBodies[0];
+  if (!tbody || tbody.rows.length < 2) return;
+  var idx = Array.prototype.indexOf.call(th.parentNode.children, th);
+  var type = th.getAttribute('data-sort-type') || 'text';
+  var desc = !th.classList.contains('desc');       // first click: descending
+  Array.prototype.forEach.call(th.parentNode.children, function(o){
+    o.classList.remove('asc', 'desc');
+  });
+  th.classList.add(desc ? 'desc' : 'asc');
+  var rows = Array.prototype.slice.call(tbody.rows);
+  rows.forEach(function(r, i){ r._i = i; });       // keeps equal rows stable
+  rows.sort(function(a, b){
+    var x = rptCellValue(a.cells[idx], type), y = rptCellValue(b.cells[idx], type);
+    // Blanks always sink, whichever way the column is pointing.
+    if (x.empty !== y.empty) return x.empty ? 1 : -1;
+    var cmp = (type === 'money' || type === 'num')
+      ? (x.n - y.n)
+      : x.s.localeCompare(y.s, undefined, { numeric: true });
+    if (cmp === 0) return a._i - b._i;
+    return desc ? -cmp : cmp;
+  });
+  rows.forEach(function(r){ tbody.appendChild(r); });
+}
+document.addEventListener('click', function(e){
+  if (e.target.classList && e.target.classList.contains('rpt-rs')) return;   // resizing
+  var th = e.target.closest && e.target.closest('th.rpt-sort');
+  if (th) rptSortTable(th);
+});
+
+// Column resize. Widths are set on the header cell; the wrapper's width:max-content
+// means the table grows and the wrapper scrolls, instead of other columns shrinking
+// to pay for this one.
+(function(){
+  var dragging = null;
+  document.addEventListener('mousedown', function(e){
+    if (!e.target.classList || !e.target.classList.contains('rpt-rs')) return;
+    var th = e.target.closest('th');
+    dragging = { th: th, startX: e.clientX, startW: th.getBoundingClientRect().width };
+    document.body.classList.add('rpt-resizing');
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', function(e){
+    if (!dragging) return;
+    var w = Math.max(44, dragging.startW + (e.clientX - dragging.startX));
+    dragging.th.style.width = w + 'px';
+    dragging.th.style.minWidth = w + 'px';
+    dragging.th.style.maxWidth = w + 'px';
+  });
+  document.addEventListener('mouseup', function(){
+    if (!dragging) return;
+    dragging = null;
+    document.body.classList.remove('rpt-resizing');
+  });
+  // Double-clicking the grip releases the column back to its natural width.
+  document.addEventListener('dblclick', function(e){
+    if (!e.target.classList || !e.target.classList.contains('rpt-rs')) return;
+    var th = e.target.closest('th');
+    th.style.width = th.style.minWidth = th.style.maxWidth = '';
+  });
+})();
+
+// Overview tiles for reports that do not build their own. Summed from the first
+// table's numeric columns, which is the same arithmetic its footer does -- so the
+// tiles and the footer cannot disagree.
+function rptAutoTiles(box){
+  if (!box || box.querySelector('.tiles')) return;        // report has its own
+  var table = RPT_TABLES.filter(function(t){ return t.rows && t.rows.length; })[0];
+  if (!table) return;
+  var nums = table.cols.filter(function(c){ return c.money || c.num || c.hours; }).slice(0, 5);
+  if (!nums.length) return;
+  var body = table.has_total ? table.rows.slice(0, -1) : table.rows;
+  if (!body.length) return;
+  var tiles = '<div class="tiles" style="grid-template-columns:repeat(' + (nums.length + 1) + ',1fr)">' +
+    tile('rows', rNum(body.length)) +
+    nums.map(function(c){
+      var sum = body.reduce(function(a, r){ return a + (Number(r[c.k]) || 0); }, 0);
+      return tile(esc(c.label), c.money ? rMoney(sum) : c.hours ? rHours(sum) : rNum(sum));
+    }).join('') + '</div>';
+  var wrap = document.createElement('div');
+  wrap.className = 'rpt-autotiles';
+  wrap.innerHTML = tiles;
+  box.insertBefore(wrap, box.firstChild);
 }
 
 // A <select> drawn at the top of a drill-down report. The options come down with
@@ -15081,6 +15256,45 @@ function rptAdvice(list){
 // dimension is each group's own top three, which is what "best seller by
 // customer" means at a counter -- per customer, not filtered to one.
 var RPT_RANK_BY = 'overall';
+
+// ---- report menu state ----------------------------------------------------
+// Which group is open, which is the favourite, and whether sticky is on. All
+// three persist: a menu that forgets its shape every visit is worse than one
+// that never collapsed in the first place.
+var RPT_FAV_GROUP = null, RPT_OPEN_GROUP = null, RPT_STICKY = false;
+try {
+  RPT_FAV_GROUP = localStorage.getItem('mh_rpt_fav') || null;
+  RPT_OPEN_GROUP = localStorage.getItem('mh_rpt_group') || null;
+  RPT_STICKY = localStorage.getItem('mh_rpt_sticky') === '1';
+} catch (e) {}
+function rptSaveMenu(){
+  try {
+    if (RPT_FAV_GROUP) localStorage.setItem('mh_rpt_fav', RPT_FAV_GROUP);
+    else localStorage.removeItem('mh_rpt_fav');
+    if (RPT_OPEN_GROUP) localStorage.setItem('mh_rpt_group', RPT_OPEN_GROUP);
+    else localStorage.removeItem('mh_rpt_group');
+    localStorage.setItem('mh_rpt_sticky', RPT_STICKY ? '1' : '0');
+  } catch (e) {}
+}
+// The favourite floats to the top; everything else keeps its declared order so
+// the menu does not reshuffle under the reader.
+function rptGroupOrder(names){
+  if (!RPT_FAV_GROUP || names.indexOf(RPT_FAV_GROUP) === -1) return names;
+  return [RPT_FAV_GROUP].concat(names.filter(function(n){ return n !== RPT_FAV_GROUP; }));
+}
+// Which group to show open: the one holding the current report wins, because
+// landing on a report whose group is shut looks like the menu lost it. Then the
+// remembered choice, then the favourite, then the first.
+function rptOpenGroup(names){
+  var cur = REPORT_DEFS.filter(function(d){ return d.key === RPT_CURRENT; })[0];
+  if (cur && cur.group && names.indexOf(cur.group) !== -1) return cur.group;
+  if (RPT_OPEN_GROUP && names.indexOf(RPT_OPEN_GROUP) !== -1) return RPT_OPEN_GROUP;
+  if (RPT_FAV_GROUP && names.indexOf(RPT_FAV_GROUP) !== -1) return RPT_FAV_GROUP;
+  return names[0];
+}
+function rptApplySticky(){
+  document.body.classList.toggle('rpt-sticky', !!RPT_STICKY);
+}
 function rptRanking(r, metric){
   var profitFirst = metric === 'profit';
   var head = '<div style="padding:14px 18px 0;display:flex;gap:9px;align-items:center;flex-wrap:wrap">' +
@@ -15185,14 +15399,28 @@ async function renderReports(panel){
       '<small style="color:var(--muted)">Seed past sales (date, part, qty, price) so reports and reorder analysis have history to work from. You get a preview before anything is written.</small>' +
     '</div>' +
     '<div style="display:grid;grid-template-columns:210px 1fr;gap:0;align-items:start">' +
-      '<div class="panel" style="margin:16px 0 18px 18px">' +
+      '<div class="panel rpt-menu" style="margin:16px 0 18px 18px">' +
         '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">📑 Reports</div>' +
-        '<button class="rptPick" data-key="__overview" style="display:block;width:100%;text-align:left;padding:9px 14px;font-size:12.5px;font-weight:700;background:none;border:0;border-left:3px solid transparent;border-bottom:1px solid var(--line);cursor:pointer;font-family:inherit;color:inherit">▦ Overview</button>' +
-        Object.keys(groups).map(function(g){
-          return '<div style="padding:8px 14px 2px;font-size:10px;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);font-weight:700">' + esc(g) + '</div>' +
-            groups[g].map(function(d){
-              return '<button class="rptPick" data-key="' + d.key + '" style="display:block;width:100%;text-align:left;padding:7px 14px;font-size:12.5px;background:none;border:0;border-left:3px solid transparent;cursor:pointer;font-family:inherit;color:inherit">' + d.label + '</button>';
-            }).join('');
+        '<button class="rptPick" data-key="__overview" style="display:block;width:100%;text-align:left;padding:9px 14px;font-size:12.5px;font-weight:700;background:none;border:0;border-left:3px solid transparent;cursor:pointer;font-family:inherit;color:inherit">▦ Overview</button>' +
+        // Favourite group first, then the rest in their declared order. One open
+        // at a time, so a 44-entry menu shows one group's worth instead of all
+        // of it.
+        rptGroupOrder(Object.keys(groups)).map(function(g){
+          var open = g === rptOpenGroup(Object.keys(groups));
+          return '<div class="rgrp' + (open ? '' : ' collapsed') + (g === RPT_FAV_GROUP ? ' fav' : '') +
+                 '" data-group="' + esc(g) + '">' +
+            '<div class="rgrp-title">' +
+              '<span class="chev">▼</span>' +
+              '<span class="name">' + esc(g) + '</span>' +
+              '<span class="cnt">' + groups[g].length + '</span>' +
+              '<button type="button" class="rgrp-fav" title="Keep this group open by default">★</button>' +
+            '</div>' +
+            '<div class="rgrp-items">' +
+              groups[g].map(function(d){
+                return '<button class="rptPick" data-key="' + d.key + '" style="display:block;width:100%;text-align:left;padding:7px 14px 7px 20px;font-size:12.5px;background:none;border:0;border-left:3px solid transparent;cursor:pointer;font-family:inherit;color:inherit">' + d.label + '</button>';
+              }).join('') +
+            '</div>' +
+          '</div>';
         }).join('') +
       '</div>' +
       '<div>' +
@@ -15205,6 +15433,9 @@ async function renderReports(panel){
           '<button class="btn ok" id="rptRun">Run</button>' +
           '<button class="btn" id="rptCsvBtn">⬇ CSV</button>' +
           '<button class="btn" id="rptPrintBtn">🖨 Print</button>' +
+          '<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);margin-left:4px" title="Pin the column headings and the overview tiles while you scroll">' +
+            '<input type="checkbox" id="rptSticky"' + (RPT_STICKY ? ' checked' : '') + '/> Sticky' +
+          '</label>' +
           '<label class="lbl" style="margin:0 0 0 6px">Graph</label>' +
           '<select id="rptChartMode" class="fld" style="width:auto" title="Draw a chart above every table in the report">' +
             ['off:Off', 'auto:Auto', 'bar:Bar', 'line:Line', 'donut:Donut'].map(function(o){
@@ -15216,6 +15447,72 @@ async function renderReports(panel){
         '<div id="rptBody"><div class="empty">Loading…</div></div>' +
       '</div>' +
     '</div>';
+
+  // Group headers, the favourite star, and the sticky switch. Attached here
+  // because renderReports() rebuilds the menu, and re-attached by rebuildMenu()
+  // whenever the favourite reorders it.
+  function wireMenu(){
+    Array.prototype.forEach.call(panel.querySelectorAll('.rgrp'), function(grp){
+      var name = grp.getAttribute('data-group');
+      var title = grp.querySelector('.rgrp-title');
+      title.onclick = function(e){
+        if (e.target.closest('.rgrp-fav')) return;        // star handled below
+        var wasOpen = !grp.classList.contains('collapsed');
+        // Accordion: shut everything, then open this one unless it was already.
+        Array.prototype.forEach.call(panel.querySelectorAll('.rgrp'), function(o){
+          o.classList.add('collapsed');
+        });
+        if (!wasOpen) { grp.classList.remove('collapsed'); RPT_OPEN_GROUP = name; }
+        else RPT_OPEN_GROUP = null;
+        rptSaveMenu();
+      };
+      var star = grp.querySelector('.rgrp-fav');
+      star.onclick = function(e){
+        e.stopPropagation();
+        RPT_FAV_GROUP = (RPT_FAV_GROUP === name) ? null : name;
+        RPT_OPEN_GROUP = RPT_FAV_GROUP || name;
+        rptSaveMenu();
+        rebuildMenu();
+      };
+    });
+  }
+  // The favourite changes the order, so the menu is re-rendered rather than
+  // reshuffled in place.
+  function rebuildMenu(){
+    var host = panel.querySelector('.rpt-menu');
+    if (!host) return;
+    var names = rptGroupOrder(Object.keys(groups));
+    var openName = rptOpenGroup(Object.keys(groups));
+    var frag = names.map(function(g){
+      var open = g === openName;
+      return '<div class="rgrp' + (open ? '' : ' collapsed') + (g === RPT_FAV_GROUP ? ' fav' : '') +
+             '" data-group="' + esc(g) + '">' +
+        '<div class="rgrp-title"><span class="chev">▼</span><span class="name">' + esc(g) + '</span>' +
+          '<span class="cnt">' + groups[g].length + '</span>' +
+          '<button type="button" class="rgrp-fav" title="Keep this group open by default">★</button>' +
+        '</div><div class="rgrp-items">' +
+          groups[g].map(function(d){
+            return '<button class="rptPick" data-key="' + d.key + '" style="display:block;width:100%;text-align:left;padding:7px 14px 7px 20px;font-size:12.5px;background:none;border:0;border-left:3px solid transparent;cursor:pointer;font-family:inherit;color:inherit">' + d.label + '</button>';
+          }).join('') +
+        '</div></div>';
+    }).join('');
+    // Replace only the group blocks, leaving the header and Overview button.
+    Array.prototype.forEach.call(panel.querySelectorAll('.rgrp'), function(o){ o.remove(); });
+    host.insertAdjacentHTML('beforeend', frag);
+    wirePicks();
+    wireMenu();
+    markActive();
+  }
+  function wirePicks(){
+    Array.prototype.forEach.call(panel.querySelectorAll('.rptPick'), function(b){
+      b.onclick = function(){
+        RPT_CURRENT = b.getAttribute('data-key');
+        RPT_SESSION_ID = null; // a pinned session shouldn't follow you to another report
+        markActive();
+        run();
+      };
+    });
+  }
 
   function markActive(){
     Array.prototype.forEach.call(panel.querySelectorAll('.rptPick'), function(b){
@@ -15296,14 +15593,15 @@ async function renderReports(panel){
     if (file) startSalesImport(file, function(){ if (RPT_CURRENT) run(); });
   });
 
-  Array.prototype.forEach.call(panel.querySelectorAll('.rptPick'), function(b){
-    b.onclick = function(){
-      RPT_CURRENT = b.getAttribute('data-key');
-      RPT_SESSION_ID = null; // a pinned session shouldn't follow you to another report
-      markActive();
-      run();
-    };
-  });
+  wirePicks();
+  wireMenu();
+  rptApplySticky();
+  var stickyBox = document.getElementById('rptSticky');
+  if (stickyBox) stickyBox.onchange = function(){
+    RPT_STICKY = stickyBox.checked;
+    rptApplySticky();
+    rptSaveMenu();
+  };
   Array.prototype.forEach.call(panel.querySelectorAll('[data-preset]'), function(b){
     b.onclick = function(){
       var p = b.getAttribute('data-preset');
@@ -15393,6 +15691,8 @@ async function renderReports(panel){
       '</div>';
     }
     box.innerHTML = head + RPT_RENDERERS[RPT_CURRENT](r);
+    // Reports that build their own tiles keep them; the rest get a summed set.
+    rptAutoTiles(box);
 
     var selEl = document.getElementById('rptSession');
     if (selEl) selEl.onchange = function(){ RPT_SESSION_ID = selEl.value || null; run(); };
