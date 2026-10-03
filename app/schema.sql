@@ -2234,3 +2234,50 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL
 -- normal case; a buyer sets them to pin a part to their own numbers.
 ALTER TABLE products ADD COLUMN IF NOT EXISTS reorder_point INTEGER;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS reorder_qty   INTEGER;
+
+-- =============================================================================
+--  SALES COMMISSION
+--
+--  A line's commission is resolved per line, never stored on the sale, so that
+--  changing a rate recalculates history the same way the margin report already
+--  recalculates off products.cost_usd. Resolution order:
+--
+--    products.commission_type = 'none'     -> nothing on this part, ever
+--                             = 'amount'   -> commission_value per unit sold
+--                             = 'percent'  -> commission_value % of the line
+--    no override on the part               -> mechanics.commission_pct, the
+--                                             crediting rep's default rate
+--
+--  The rep is pos_sales.sales_rep_id (a mechanics row -- see syncStaffProfile,
+--  which mirrors any staff user in the 'sales_rep' category into mechanics).
+--  A sale with no rep earns nobody anything and is left out of the report.
+-- =============================================================================
+
+-- The rep's default rate, applied to any line whose part carries no override.
+-- NULL means "no default", which earns nothing rather than zero-by-accident.
+ALTER TABLE mechanics ADD COLUMN IF NOT EXISTS commission_pct NUMERIC(5,2);
+
+-- Per-part override. NULL type = fall through to the rep's default.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_type  TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_value NUMERIC(10,2);
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'products_commission_type_chk') THEN
+    ALTER TABLE products ADD CONSTRAINT products_commission_type_chk
+      CHECK (commission_type IS NULL OR commission_type IN ('percent', 'amount', 'none'));
+  END IF;
+END $$;
+
+-- What has actually been handed over. Commission earned is computed from the
+-- sale lines; this is the other side of the ledger, so "owed" is earned minus
+-- paid. Money is *_usd to match the rest of the Postgres side (the D1 port
+-- stores amount_cents and divides by 100).
+CREATE TABLE IF NOT EXISTS commission_payouts (
+  id           SERIAL PRIMARY KEY,
+  mechanic_id  INTEGER NOT NULL REFERENCES mechanics(id) ON DELETE CASCADE,
+  amount_usd   NUMERIC(10,2) NOT NULL CHECK (amount_usd > 0),
+  notes        TEXT,
+  paid_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_commission_payouts_mech ON commission_payouts (mechanic_id, created_at);

@@ -171,27 +171,35 @@
     opacity:1; transform:translateY(-50%) scale(1);
   }
 
-  .tiles{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:24px}
-  /* !important because every report renderer sets grid-template-columns inline,
-     and an inline style outranks a media query -- so these breakpoints never
-     fired on a report and the tiles just got squeezed. auto-fit rather than a
-     fixed count, because the inline count is not knowable from here: it packs as
-     many >=168px tiles as fit and drops a column when they no longer do. */
-  @media(max-width:1180px){.tiles{grid-template-columns:repeat(auto-fit,minmax(168px,1fr))!important}}
-  @media(max-width:540px){.tiles{grid-template-columns:repeat(2,1fr)!important}}
-  .tile{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
-  .tile .lbl{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700}
-  /* A stock valuation reads J$494,120,980.09 -- sixteen characters, which at
-     28px/900 needs about 280px and does not fit a quarter-width tile. It used to
-     overflow, and on the last tile of a row that means running off the edge of
-     the panel: the figure was rendered but not visible. The size steps down with
-     the length of the value instead, which holds at any panel width. */
-  .tile .val{font-size:28px;font-weight:900;color:var(--heading);line-height:1.05;margin-top:6px;
+  /* Laid out exactly like the dashboard's KPI row (.dash-kpis): auto-fit at
+     EVERY width, so however many tiles a report has they fill the row evenly.
+     This used to be a fixed 6 columns with auto-fit only below 1180px, which on
+     an ordinary desktop put a 3-tile report into the first three tracks of a
+     six-track grid -- three half-width tiles against an empty right half, which
+     is why reports did not look like the dashboard.
+
+     !important because 44 renderers still pass grid-template-columns inline and
+     an inline style outranks a stylesheet rule. The inline count is the wrong
+     thing to honour anyway: it is written per report and cannot know the panel
+     width. minmax(190px,1fr) matches .dash-kpis. */
+  .tiles{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(190px,1fr))!important;
+         gap:12px;margin-bottom:18px}
+  @media(max-width:540px){.tiles{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))!important}}
+  /* Card, label, figure and caption all match .dash-kpi / -l / -v / -s. */
+  .tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px 18px;min-width:0}
+  .tile .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);font-weight:700}
+  /* 26px/800 is .dash-kpi-v. The step-down below it is the one place these go
+     further than the dashboard, and it is needed: a stock valuation reads
+     J$494,120,980.09 -- sixteen characters, which at full size needs about
+     260px and does not fit a tile in a packed row. It used to overflow, and on
+     the last tile of a row that means running off the panel edge, so the figure
+     was rendered but not visible. */
+  .tile .val{font-size:26px;font-weight:800;color:var(--heading);line-height:1.1;margin-top:6px;
              overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
-  .tile .val.v-long{font-size:21px}
-  .tile .val.v-xlong{font-size:17px;letter-spacing:-.2px}
+  .tile .val.v-long{font-size:20px}
+  .tile .val.v-xlong{font-size:16px;letter-spacing:-.2px}
   /* The dashboard KPI third line: the context that makes a figure mean something. */
-  .tile .sub{font-size:11.5px;color:var(--muted);margin-top:5px;line-height:1.35}
+  .tile .sub{font-size:12px;color:var(--muted);margin-top:4px;line-height:1.35}
   /* A tile that has details behind it says so, and acts like it. A plain .tile
      is still inert -- only ones given a target become clickable. */
   .tile-link{cursor:pointer;transition:border-color .15s,box-shadow .15s}
@@ -14923,12 +14931,23 @@ var RPT_RENDERERS = {
   // ---- operations --------------------------------------------------------
   receivals: function(r){
     var t = r.totals;
-    return '<div style="padding:16px 18px 4px"><div class="tiles" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">' +
-        tile('receipts', rNum(t.receipts), '', 'rptRecvDetail') +
-        tile('units in', rNum(t.units)) +
-        tile('top parts at cost', rMoney(t.top_parts_cost_value)) +
-        tile('PO receipts', rNum(t.po_receipts), '', 'rptRecvPo') +
+    // Value first -- "what did we take in this period" is the question this
+    // report is opened to answer, and it had no answer before: the only money
+    // on it was a top-50 subtotal.
+    return '<div style="padding:16px 18px 4px"><div class="tiles">' +
+        tile('received value', rMoney(t.received_value), '', 'rptRecvPo',
+          'at cost, every receipt in this range') +
+        tile('receipts', rNum(t.po_receipts), '', 'rptRecvPo',
+          t.suppliers ? 'from ' + rNum(t.suppliers) + ' suppliers' : '') +
+        tile('units in', rNum(t.po_units), '', '', rNum(t.po_lines) + ' order lines') +
+        tile('average per receipt', rMoney(t.po_receipts > 0 ? t.received_value / t.po_receipts : 0)) +
+        // Only worth a tile when the movement log actually has something in it.
+        (t.movement_log_used
+          ? tile('logged movements', rNum(t.receipts), '', 'rptRecvDetail',
+              rNum(t.units) + ' units via the counter')
+          : '') +
       '</div></div>' +
+      (r.advice ? rptAdvice(r.advice) : '') +
       rptGrid(
         rptTable('📅 By day', [{ k:'day', label:'Day' }, { k:'receipts', label:'Receipts', num:true }, { k:'units', label:'Units', num:true }], r.by_day) +
         rptTable('🏭 By supplier', [{ k:'supplier', label:'Supplier' }, { k:'receipts', label:'Receipts', num:true }, { k:'units', label:'Units', num:true }], r.by_supplier)
@@ -15666,10 +15685,21 @@ var RPT_RENDERERS = {
 
   commission: function(r){
     var byRep = r.by_rep || [];
-    return '<div style="padding:16px 18px 4px"><div class="tiles" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px">' +
-        tile('commissionable lines', rNum(r.totals.lines)) + tile('revenue (range)', rMoney(r.totals.revenue)) +
-        tile('commission earned (range)', rMoney(r.totals.commission)) +
+    var owed = byRep.reduce(function(a, x){ return a + Number(x.owed || 0); }, 0);
+    var rated = (r.reps || []).filter(function(m){ return Number(m.commission_pct) > 0; }).length;
+    return '<div style="padding:16px 18px 4px"><div class="tiles">' +
+        tile('commission earned (range)', rMoney(r.totals.commission), '',
+          'rptCommDetail', 'at each rep’s rate, or the part’s own') +
+        tile('owed now', rMoney(owed), owed > 0 ? 'warn' : '', '', 'earned all-time, less paid') +
+        tile('revenue (range)', rMoney(r.totals.revenue)) +
+        tile('commissionable lines', rNum(r.totals.lines)) +
+        tile('reps with a rate', rNum(rated), rated === 0 ? 'alert' : '',
+          '', 'of ' + rNum((r.reps || []).length) + ' active') +
       '</div></div>' +
+      // Why a rep earned nothing is the first question this report raises, and
+      // the endpoint already works it out -- so say it here rather than leaving
+      // a column of zeros to interpret.
+      (r.advice ? rptAdvice(r.advice) : '') +
       '<div style="padding:0 18px 22px">' +
         rptTable('🧑‍💼 By rep', [
           { k:'rep', label:'Rep' }, { k:'lines', label:'Lines', num:true }, { k:'skipped_lines', label:'No commission', num:true },
@@ -15692,7 +15722,7 @@ var RPT_RENDERERS = {
           '</div>' +
         '</div>' +
       '</div>' +
-      '<div style="padding:0 18px 22px">' +
+      '<div style="padding:0 18px 22px" id="rptCommDetail">' +
         rptTable('📋 Line detail (range, newest 300)', [
           { k:'receipt_number', label:'Receipt' }, { k:'rep', label:'Rep' }, { k:'description', label:'Item' },
           { k:'qty', label:'Qty', num:true }, { k:'line_total', label:'Line total', money:true },

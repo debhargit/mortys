@@ -3996,7 +3996,10 @@ app.get('/api/admin/products/:img', requireAdmin, async (req, res) => {
     `SELECT p.img, p.name, p.make_model, p.category, p.condition,
             p.price_usd::float AS price_usd, p.cost_usd::float AS cost_usd,
             p.stock_count, p.low_threshold, p.is_active, p.sku, p.barcode,
-            p.location, p.bin_location, p.supplier_id, s.name AS supplier_name
+            p.location, p.bin_location, p.supplier_id, s.name AS supplier_name,
+            -- So the editor's Commission fields open showing what is stored
+            -- rather than blank, which reads as "no override" on every part.
+            p.commission_type, p.commission_value::float AS commission_value
        FROM products p LEFT JOIN suppliers s ON s.id = p.supplier_id
       WHERE p.img = $1`, [req.params.img]);
   if (!rows.length) return res.status(404).json({ error: 'Not found' });
@@ -4024,6 +4027,17 @@ app.patch('/api/admin/products/:img', requireAdmin, async (req, res) => {
   if (b.condition != null){ params.push(String(b.condition)); sets.push(`condition = $${params.length}`); }
   if (b.location != null){ params.push(String(b.location)); sets.push(`location = $${params.length}`); }
   if (b.bin_location != null){ params.push(String(b.bin_location)); sets.push(`bin_location = $${params.length}`); }
+  // Per-part commission override. `!== undefined`, not `!= null`, because the
+  // editor sends null to mean "no override, use the rep's rate" -- with the
+  // usual != null test an override could be set but never cleared.
+  if (b.commission_type !== undefined) {
+    const t = ['percent', 'amount', 'none'].includes(b.commission_type) ? b.commission_type : null;
+    params.push(t); sets.push(`commission_type = $${params.length}`);
+  }
+  if (b.commission_value !== undefined) {
+    const v = (b.commission_value === '' || b.commission_value == null) ? null : Number(b.commission_value);
+    params.push(Number.isFinite(v) ? v : null); sets.push(`commission_value = $${params.length}`);
+  }
   if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
   params.push(req.params.img);
   try {
@@ -4906,7 +4920,11 @@ app.get('/api/admin/mechanics', requireAdmin, async (req, res) => {
   const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
   const { rows } = await query(
     `SELECT id, user_id, name, phone, email, specialty, certifications,
-            hourly_rate_usd::float AS hourly_rate_usd, hire_date, is_active, notes, role, created_at
+            hourly_rate_usd::float AS hourly_rate_usd, hire_date, is_active, notes, role, created_at,
+            -- The sales-rep default rate. Without it the Mechanics screen's
+            -- Commission % box renders empty on every row regardless of what is
+            -- stored, and saving one silently wipes the others' context.
+            commission_pct::float AS commission_pct
        FROM mechanics ${where} ORDER BY is_active DESC, name ASC`
   );
   res.json({ mechanics: rows });
@@ -4918,13 +4936,16 @@ app.post('/api/admin/mechanics', requireManager, async (req, res) => {
   const role = ['mechanic','advisor','both'].includes(b.role) ? b.role : 'mechanic';
   try {
     const { rows } = await query(
-      `INSERT INTO mechanics (user_id, name, phone, email, specialty, certifications, hourly_rate_usd, hire_date, is_active, notes, role)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+      `INSERT INTO mechanics (user_id, name, phone, email, specialty, certifications, hourly_rate_usd, hire_date, is_active, notes, role, commission_pct)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
       [
         b.user_id || null, b.name, b.phone || null, b.email || null,
         b.specialty || null, b.certifications || null,
         b.hourly_rate_usd != null ? Number(b.hourly_rate_usd) : 25.00,
         b.hire_date || null, b.is_active !== false, b.notes || null, role,
+        // Left NULL rather than defaulted to 0 -- "no rate set" is a state the
+        // commission report calls out, where 0% would read as a decision.
+        b.commission_pct != null && b.commission_pct !== '' ? Number(b.commission_pct) : null,
       ]
     );
     res.json({ ok: true, id: rows[0].id });
@@ -4932,7 +4953,9 @@ app.post('/api/admin/mechanics', requireManager, async (req, res) => {
 });
 
 app.patch('/api/admin/mechanics/:id', requireManager, async (req, res) => {
-  const fields = ['name','phone','email','specialty','certifications','hourly_rate_usd','hire_date','is_active','notes','user_id','role'];
+  // commission_pct is the rep's default rate on a sale line, used by the
+  // commission report for any part with no override of its own.
+  const fields = ['name','phone','email','specialty','certifications','hourly_rate_usd','hire_date','is_active','notes','user_id','role','commission_pct'];
   const sets = []; const vals = [];
   for (const f of fields) if (req.body && req.body[f] !== undefined) {
     sets.push(`${f} = $${sets.length + 1}`); vals.push(req.body[f]);
@@ -6282,9 +6305,20 @@ app.delete('/api/admin/suppliers/:id', requireManager, async (req, res) => {
 app.patch('/api/admin/products-ext/:img', requireAdmin, async (req, res) => {
   const fields = ['name','make_model','category','condition','price_usd','stock_count','low_threshold','is_active',
     'sku','barcode','supplier_id','cost_usd','core_charge_usd','env_fee_usd','warranty_days','serial_required',
-    'weight_kg','dim_cm','bin_location','min_stock','markup_pct'];
+    'weight_kg','dim_cm','bin_location','min_stock','markup_pct',
+    // Per-part commission override; NULL type falls through to the rep's rate.
+    'commission_type','commission_value'];
   const sets = []; const vals = [];
-  for (const f of fields) if (req.body && req.body[f] !== undefined) { sets.push(`${f} = $${sets.length+1}`); vals.push(req.body[f]); }
+  for (const f of fields) if (req.body && req.body[f] !== undefined) {
+    let v = req.body[f];
+    if (f === 'commission_type') {
+      // '' from a cleared <select> means "no override", which is NULL, not a
+      // value the CHECK constraint would reject.
+      v = ['percent', 'amount', 'none'].includes(v) ? v : null;
+    }
+    if (f === 'commission_value') v = (v === '' || v == null) ? null : Number(v);
+    sets.push(`${f} = $${sets.length + 1}`); vals.push(v);
+  }
   if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
   vals.push(req.params.img);
   await query(`UPDATE products SET ${sets.join(', ')} WHERE img = $${vals.length}`, vals);
@@ -6312,6 +6346,7 @@ app.get('/api/admin/products-ext', requireAdmin, async (req, res) => {
             p.sku, p.barcode, p.core_charge_usd::float AS core_charge_usd,
             p.env_fee_usd::float AS env_fee_usd, p.warranty_days, p.serial_required,
             p.weight_kg::float AS weight_kg, p.dim_cm, p.bin_location, p.markup_pct::float AS markup_pct,
+            p.commission_type, p.commission_value::float AS commission_value,
             p.supplier_id, s.name AS supplier_name
        FROM products p LEFT JOIN suppliers s ON s.id = p.supplier_id
        ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
@@ -6712,7 +6747,9 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
       return { gross, disc, net: Math.round((gross - disc) * 100) / 100 };
     });
     let subtotal = Math.round(lineCalc.reduce((s, l) => s + l.net, 0) * 100) / 100;
-    const manualDiscount = Math.max(0, Number(b.discount_usd || 0));
+    // `let`, not const: when the ticket carries no operator discount and the
+    // attached account has a standing rate, the rate fills this in below.
+    let manualDiscount = Math.max(0, Number(b.discount_usd || 0));
 
     // ----- 2. Loyalty redemption (server-validated) --------------------------
     // The POS ticket bar defaults every new ticket to the shared "Cash
@@ -6745,18 +6782,43 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
     // not just enforced in the UI, so a sale can't slip past these by going
     // straight to the API.
     let customerLimits = null;
+    let customerDiscount = 0;          // the account's standing rate, applied below
     if (b.customer_id && !isWalkinCustomer) {
       const { rows: cl } = await client.query(
-        `SELECT credit_limit_usd, discount_limit_pct, payment_terms_days, tax_exempt FROM users WHERE id = $1`,
+        `SELECT credit_limit_usd, discount_limit_pct, payment_terms_days, tax_exempt,
+                discount_pct::float AS discount_pct, name
+           FROM users WHERE id = $1`,
         [b.customer_id]
       );
       customerLimits = cl[0] || null;
+
+      // The account's own discount rate, finally applied. users.discount_pct
+      // has been editable in the CRM and returned to the POS for a long time,
+      // but nothing ever used it: only discount_limit_pct was read, and that is
+      // a CAP on what an operator may give, not a rate to give. A trade account
+      // set to 10% was quoted full retail unless the cashier remembered to type
+      // the discount in by hand.
+      //
+      // It fills in rather than overrides: an operator who has already entered a
+      // whole-ticket discount has made a decision for this ticket, and silently
+      // replacing it would be worse than not applying the rate at all.
+      const rate = Number(customerLimits && customerLimits.discount_pct) || 0;
+      if (rate > 0 && subtotal > 0 && manualDiscount === 0) {
+        customerDiscount = Math.round(subtotal * (rate / 100) * 100) / 100;
+        manualDiscount = customerDiscount;
+      }
+
       if (customerLimits && customerLimits.discount_limit_pct != null && subtotal > 0) {
         const discountPct = (manualDiscount / subtotal) * 100;
         if (discountPct > Number(customerLimits.discount_limit_pct) + 0.01) {
           await client.query('ROLLBACK');
+          // An account whose standing rate exceeds its own cap is a data
+          // problem, not an operator mistake, so say which it is.
           return res.status(400).json({
-            error: `Discount of ${discountPct.toFixed(1)}% exceeds this customer's limit of ${Number(customerLimits.discount_limit_pct)}%`,
+            error: customerDiscount > 0
+              ? `This account's discount rate of ${rate}% exceeds its own discount limit of `
+                + `${Number(customerLimits.discount_limit_pct)}%. Fix one of the two on the customer record.`
+              : `Discount of ${discountPct.toFixed(1)}% exceeds this customer's limit of ${Number(customerLimits.discount_limit_pct)}%`,
           });
         }
       }
@@ -7019,6 +7081,12 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
       invoice_number: invoiceNumber,
       subtotal_usd: subtotal,
       discount_usd: totalDiscount,
+      // Non-zero only when the account's own rate filled the discount in, so
+      // the POS can say where it came from instead of the operator wondering
+      // who applied it.
+      customer_discount_usd: customerDiscount,
+      customer_discount_pct: customerDiscount > 0 && customerLimits
+        ? Number(customerLimits.discount_pct) : 0,
       loyalty_discount_usd: loyaltyDiscount,
       tax_usd: tax,
       tax_exempt: taxExempt,
@@ -9237,13 +9305,189 @@ app.get('/api/admin/reports/receivals', requireAdmin, async (req, res) => {
               AND po.received_date::date BETWEEN $1::date AND $2::date
             ORDER BY po.received_date DESC LIMIT 200`, p),
   ]);
-  const costValue = topParts.rows.reduce((a, r) => a + r.cost_value, 0);
+  // The money, and the real counts, for the WHOLE range.
+  //
+  // Two things were wrong here. There was no value at all: the only money on the
+  // report was top_parts_cost_value, summed in JS over a LIMIT 50 array, so it
+  // described the fifty busiest parts rather than the period. And po_receipts
+  // was `poReceipts.rows.length` -- the LIMIT 200, not the count. For 2021 it
+  // reported 200 against an actual 924.
+  //
+  // Both now come from SQL over every row in range. purchase_order_items is the
+  // source for the value because the imported receipt history lives there (one
+  // order line per part received, with its unit cost), and summing the lines
+  // also gives the unit count, which purchase_orders alone cannot.
+  const [poTotals, waTotals] = await Promise.all([
+    query(`SELECT COUNT(DISTINCT po.id)::int                                   AS po_receipts,
+                  COUNT(i.id)::int                                             AS lines,
+                  COALESCE(SUM(i.qty_received), 0)::int                        AS units,
+                  COALESCE(SUM(i.qty_received * COALESCE(i.unit_cost_usd, 0)), 0)::float AS value,
+                  COUNT(DISTINCT po.supplier_id)::int                          AS suppliers
+             FROM purchase_orders po
+             LEFT JOIN purchase_order_items i ON i.po_id = po.id
+            WHERE po.received_date IS NOT NULL
+              AND po.received_date::date BETWEEN $1::date AND $2::date`, p),
+    // Is the app's own movement log in play at all? On an installation seeded
+    // from the legacy export it is empty, and saying so is better than showing
+    // a row of zeros as though nothing was received.
+    query(`SELECT COUNT(*)::int AS rows FROM warehouse_activity WHERE kind = 'receive'`),
+  ]);
+  const pt = poTotals.rows[0];
+  const waUsed = waTotals.rows[0].rows > 0;
+
+  const advice = [];
+  if (!waUsed) {
+    advice.push({ kind: 'data', text:
+      'Receipts here are counted from purchase orders, not from the stock-movement log: '
+      + 'warehouse_activity has no "receive" rows, because this history was imported from the '
+      + 'legacy INVREC export rather than received through the counter. The by-day, by-supplier, '
+      + 'most-received and every-receipt tables below read that log and will stay empty until '
+      + 'stock is received in the app.' });
+  }
+  if (pt.po_receipts > poReceipts.rows.length) {
+    advice.push({ kind: 'data', text:
+      `Showing the ${poReceipts.rows.length} most recent of ${pt.po_receipts.toLocaleString('en-US')} `
+      + 'receipts in this range. The tiles count all of them.' });
+  }
+
   res.json({ from, to,
     totals: Object.assign({}, totals.rows[0], {
-      po_receipts: poReceipts.rows.length,
-      top_parts_cost_value: Math.round(costValue * 100) / 100 }),
+      po_receipts: pt.po_receipts,
+      po_lines: pt.lines,
+      po_units: pt.units,
+      received_value: Math.round(pt.value * 100) / 100,
+      suppliers: pt.suppliers,
+      movement_log_used: waUsed,
+      // Kept for anything still reading it, but it is the top-50 figure, not
+      // the period's -- received_value is the period's.
+      top_parts_cost_value: Math.round(topParts.rows.reduce((a, r) => a + r.cost_value, 0) * 100) / 100 }),
+    advice,
+    shown_po_receipts: poReceipts.rows.length,
     by_day: byDay.rows, top_parts: topParts.rows, by_supplier: bySupplier.rows,
     detail: detail.rows, po_receipts: poReceipts.rows });
+});
+
+// ---- sales commission ------------------------------------------------------
+// Computed at report time, never stored per sale: a line's commission comes
+// from the part's own override if it has one, else the crediting rep's default
+// percent. Changing a rate recalculates every past sale, the same way the
+// margin report recalculates off products.cost_usd.
+//
+// Only sales with a rep attached count. pos_sales.sales_rep_id is a mechanics
+// row, and syncStaffProfile() mirrors any staff user in the 'sales_rep'
+// category into mechanics, so "make this user a sales rep" on the Staff screen
+// is what puts someone in here.
+//
+// A credit note (CN invoice) carries negative qty and negative line totals, so
+// commission on a return comes out negative and nets off what the rep earned on
+// the original sale without this query knowing what a return is.
+const COMMISSION_SQL = `CASE
+    WHEN pr.commission_type = 'none'    THEN 0
+    WHEN pr.commission_type = 'amount'  THEN COALESCE(pr.commission_value, 0) * i.qty
+    WHEN pr.commission_type = 'percent' THEN COALESCE(i.total_usd, 0) * (COALESCE(pr.commission_value, 0) / 100.0)
+    ELSE COALESCE(i.total_usd, 0) * (COALESCE(m.commission_pct, 0) / 100.0)
+  END`;
+const COMMISSION_FROM = `FROM pos_sale_items i
+       JOIN pos_sales ps ON ps.id = i.sale_id
+       LEFT JOIN mechanics m ON m.id = ps.sales_rep_id
+       LEFT JOIN products pr ON pr.img = i.product_img`;
+
+app.get('/api/admin/reports/commission', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const p = [from, to];
+  const C = COMMISSION_SQL;
+  const [byRep, totals, detail, allTime, paid, reps] = await Promise.all([
+    query(`SELECT ps.sales_rep_id AS mechanic_id,
+                  COALESCE(m.name, ps.sales_rep_name, '(no rep)') AS rep,
+                  COUNT(*)::int AS lines,
+                  COALESCE(SUM(i.total_usd), 0)::float AS revenue,
+                  COALESCE(SUM(${C}), 0)::float AS commission,
+                  COUNT(*) FILTER (WHERE (${C}) = 0)::int AS skipped_lines
+             ${COMMISSION_FROM}
+            WHERE ps.voided = false AND ps.sales_rep_id IS NOT NULL
+              AND ps.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY ps.sales_rep_id, COALESCE(m.name, ps.sales_rep_name, '(no rep)')
+            ORDER BY commission DESC`, p),
+    query(`SELECT COUNT(*)::int AS lines,
+                  COALESCE(SUM(i.total_usd), 0)::float AS revenue,
+                  COALESCE(SUM(${C}), 0)::float AS commission
+             ${COMMISSION_FROM}
+            WHERE ps.voided = false AND ps.sales_rep_id IS NOT NULL
+              AND ps.created_at::date BETWEEN $1::date AND $2::date`, p),
+    query(`SELECT ps.receipt_number, ps.created_at,
+                  COALESCE(m.name, ps.sales_rep_name, '(no rep)') AS rep,
+                  i.description, i.qty, COALESCE(i.total_usd, 0)::float AS line_total,
+                  -- What the figure was worked out from, so a zero is explainable
+                  CASE WHEN pr.commission_type IS NOT NULL THEN pr.commission_type
+                       WHEN COALESCE(m.commission_pct, 0) > 0 THEN 'rep default ' || m.commission_pct || '%'
+                       ELSE 'no rate set' END AS commission_type,
+                  (${C})::float AS commission
+             ${COMMISSION_FROM}
+            WHERE ps.voided = false AND ps.sales_rep_id IS NOT NULL
+              AND ps.created_at::date BETWEEN $1::date AND $2::date
+            ORDER BY ps.created_at DESC LIMIT 300`, p),
+    // All-time earned and paid, so "owed now" is a real balance rather than
+    // whatever happens to fall inside the chosen range.
+    query(`SELECT ps.sales_rep_id AS mechanic_id, COALESCE(SUM(${C}), 0)::float AS earned
+             ${COMMISSION_FROM}
+            WHERE ps.voided = false AND ps.sales_rep_id IS NOT NULL
+            GROUP BY ps.sales_rep_id`),
+    query(`SELECT mechanic_id, COALESCE(SUM(amount_usd), 0)::float AS paid
+             FROM commission_payouts GROUP BY mechanic_id`),
+    query(`SELECT id, name, commission_pct::float AS commission_pct
+             FROM mechanics WHERE is_active = true ORDER BY name`),
+  ]);
+
+  const earned = new Map(allTime.rows.map((r) => [r.mechanic_id, r.earned]));
+  const paidBy = new Map(paid.rows.map((r) => [r.mechanic_id, r.paid]));
+  const round2 = (n) => Math.round(n * 100) / 100;
+  for (const r of byRep.rows) {
+    r.earned_all_time = round2(earned.get(r.mechanic_id) || 0);
+    r.paid_all_time = round2(paidBy.get(r.mechanic_id) || 0);
+    r.owed = round2(r.earned_all_time - r.paid_all_time);
+  }
+
+  const noRate = reps.rows.filter((m) => !(Number(m.commission_pct) > 0)).length;
+  const advice = [];
+  if (noRate) {
+    advice.push({ kind: 'data', text:
+      `${noRate} of ${reps.rows.length} active reps have no commission rate set, so their lines earn `
+      + 'nothing unless the part itself carries an override. Set a rate on the Mechanics screen '
+      + '(or per part under a product\'s Commission field).' });
+  }
+  if (totals.rows[0].lines === 0) {
+    advice.push({ kind: 'data', text:
+      'No sale in this range has a sales rep attached. Commission is credited from '
+      + 'pos_sales.sales_rep_id -- tick "Sales rep" on a staff member, then pick them on the ticket.' });
+  }
+
+  res.json({ from, to,
+    totals: totals.rows[0],
+    by_rep: byRep.rows,
+    detail: detail.rows,
+    advice,
+    reps: reps.rows.map((m) => ({
+      id: m.id, name: m.name, commission_pct: m.commission_pct,
+      owed: round2((earned.get(m.id) || 0) - (paidBy.get(m.id) || 0)),
+    })) });
+});
+
+// Record money actually handed to a rep. requireManager, not requireAdmin: this
+// is a payout, which a counter cashier should not be able to book.
+app.post('/api/admin/mechanics/:id/commission-payouts', requireManager, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Bad rep id.' });
+  const amount = Number((req.body && req.body.amount_usd) || 0);
+  if (!(amount > 0)) return res.status(400).json({ error: 'Enter an amount greater than zero.' });
+  const { rows: m } = await query('SELECT id, name FROM mechanics WHERE id = $1', [id]);
+  if (!m.length) return res.status(404).json({ error: 'No such sales rep.' });
+  const { rows } = await query(
+    `INSERT INTO commission_payouts (mechanic_id, amount_usd, notes, paid_by)
+     VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
+    [id, Math.round(amount * 100) / 100,
+     (req.body && req.body.notes) ? String(req.body.notes).slice(0, 500) : null,
+     req.session.userId]);
+  res.json({ ok: true, id: rows[0].id, rep: m[0].name, amount_usd: Math.round(amount * 100) / 100 });
 });
 
 // ---- reorder / purchasing planner -----------------------------------------
