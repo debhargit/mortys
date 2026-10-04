@@ -29,6 +29,93 @@ const OUT = path.resolve(APP, opt('--out', 'dist/d1-data'));
 const ROW_LIMIT = parseInt(opt('--limit', '0'), 10) || 0;
 const BATCH = 100;
 
+// ---------------------------------------------------------------- date scope
+//   --year 2026                 one calendar year
+//   --from 2026-01-01 --to ...  an explicit window
+//
+// Without either, every row of every table goes (the original behaviour).
+//
+// Scoping matters here because the history is seventeen years deep: a full
+// export is 791k sales and 1.57M sale lines, where a shop putting the current
+// year online wants this year's trading and the reference data behind it.
+//
+// Only TRANSACTIONAL tables are scoped, and a child is scoped by its parent
+// rather than by a date of its own -- a sale line has no date, and filtering it
+// independently would strand lines whose sale did not come across. Reference
+// tables (products, users, suppliers, mechanics, settings, roles...) are never
+// scoped: this year's invoices are unreadable without the parts and customers
+// they name. Anything absent from this map exports whole, which is the safe
+// default -- too much reference data is harmless, a missing parent is not.
+const YEAR = opt('--year', '');
+const FROM = YEAR ? `${YEAR}-01-01` : opt('--from', '');
+const TO = YEAR ? `${YEAR}-12-31` : opt('--to', '');
+const SCOPED = !!(FROM && TO);
+
+// A parent's own date column, and how each child reaches it.
+const sale = `sale_id IN (SELECT id FROM pos_sales WHERE created_at::date BETWEEN $F AND $T)`;
+const po = `po_id IN (SELECT id FROM purchase_orders WHERE created_at::date BETWEEN $F AND $T)`;
+const ord = `order_id IN (SELECT id FROM orders WHERE created_at::date BETWEEN $F AND $T)`;
+const wo = `work_order_id IN (SELECT id FROM work_orders WHERE created_at::date BETWEEN $F AND $T)`;
+const own = (col) => `${col}::date BETWEEN $F AND $T`;
+
+const DATE_SCOPE = {
+  pos_sales: own('created_at'),
+  pos_sale_items: sale,
+  sale_payments: sale,
+  pos_returns: sale,
+  pos_return_items: `return_id IN (SELECT id FROM pos_returns WHERE ${sale})`,
+  pos_quotes: own('created_at'),
+  pos_holds: own('created_at'),
+  purchase_orders: own('created_at'),
+  purchase_order_items: po,
+  orders: own('created_at'),
+  order_items: ord,
+  order_photos: ord,
+  work_orders: own('created_at'),
+  work_order_labor: wo,
+  work_order_parts: wo,
+  work_order_payments: wo,
+  account_payments: own('created_at'),
+  commission_payouts: own('created_at'),
+  points_transactions: own('created_at'),
+  coupon_redemptions: own('created_at'),
+  cash_drawer_sessions: own('opened_at'),
+  cash_payouts: own('created_at'),
+  petty_cash_movements: own('created_at'),
+  petty_cash_counts: own('created_at'),
+  time_entries: own('created_at'),
+  time_punches: own('created_at'),
+  stock_counts: own('started_at'),
+  stock_count_items: `count_id IN (SELECT id FROM stock_counts WHERE ${own('started_at')})`,
+  inspections: own('created_at'),
+  inspection_items: `inspection_id IN (SELECT id FROM inspections WHERE ${own('created_at')})`,
+  inspection_photos: `inspection_id IN (SELECT id FROM inspections WHERE ${own('created_at')})`,
+  parts_requisitions: own('created_at'),
+  parts_requisition_items: `requisition_id IN (SELECT id FROM parts_requisitions WHERE ${own('created_at')})`,
+  deliveries: own('created_at'),
+  customer_messages: own('created_at'),
+  customer_notifications: own('created_at'),
+  customer_reminders: own('created_at'),
+  gift_card_transactions: own('created_at'),
+  service_appointments: own('created_at'),
+  parts_inquiries: own('created_at'),
+  trade_in_offers: own('created_at'),
+  reviews: own('created_at'),
+  recurring_plan_runs: own('created_at'),
+  warranty_claims: own('created_at'),
+  core_returns: own('created_at'),
+};
+
+// Build the WHERE for one table, or '' to take it whole. Columns that do not
+// exist on this build are detected by the caller and the table falls back to a
+// full export rather than failing.
+function scopeFor(table) {
+  if (!SCOPED) return '';
+  const p = DATE_SCOPE[table];
+  if (!p) return '';
+  return p.replace(/\$F/g, `'${FROM}'`).replace(/\$T/g, `'${TO}'`);
+}
+
 // Tables that live only in D1 (config/logs/seeds) or only make sense fresh.
 const SKIP = new Set(['d1_migrations', 'sqlite_sequence', 'app_config', 'job_runs']);
 
@@ -192,8 +279,22 @@ for (const [table, { cols }] of ordered) {
   if (!plans.length) { summary.push([table, '0', 'no mappable columns, skipped']); continue; }
 
   const selectList = plans.map((p) => `"${p.src}"`).join(', ');
-  const q = `SELECT ${selectList} FROM "${table}"` + (ROW_LIMIT ? ` LIMIT ${ROW_LIMIT}` : '');
-  const rows = (await client.query(q)).rows;
+  const where = scopeFor(table);
+  const build = (w) => `SELECT ${selectList} FROM "${table}"` + (w ? ` WHERE ${w}` : '')
+    + (ROW_LIMIT ? ` LIMIT ${ROW_LIMIT}` : '');
+  let rows;
+  let scopeNote = '';
+  try {
+    rows = (await client.query(build(where))).rows;
+    if (where) scopeNote = `${FROM}..${TO}`;
+  } catch (e) {
+    // The scope names a column this build does not have (the schemas differ
+    // between the Postgres and D1 ports). Take the table whole and say so,
+    // rather than dropping it or failing the whole export.
+    if (!where || (e.code !== '42703' && e.code !== '42P01')) throw e;
+    rows = (await client.query(build(''))).rows;
+    scopeNote = 'UNSCOPED (no such date column on this build)';
+  }
 
   fileNo++;
   const fname = `${String(fileNo).padStart(2, '0')}_${table}.sql`;
@@ -216,7 +317,9 @@ for (const [table, { cols }] of ordered) {
   parts.push('');
   fs.writeFileSync(path.join(OUT, fname), parts.join('\n'));
   written.push(fname);
-  summary.push([table, String(rows.length), dropped.length ? `dropped: ${dropped.join(', ')}` : 'ok']);
+  summary.push([table, String(rows.length),
+    [scopeNote, dropped.length ? `dropped: ${dropped.join(', ')}` : ''].filter(Boolean).join(' · ')
+      || (SCOPED ? 'whole table (reference data)' : 'ok')]);
 }
 
 const sh = ['#!/usr/bin/env bash', 'set -euo pipefail',
