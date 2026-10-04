@@ -1044,6 +1044,37 @@ async function nextAccountNumber() {
   return `C-${String(Number(rows[0].n) + 1).padStart(6, '0')}`;
 }
 
+// A charge sale's unpaid remainder, per sale, as a reusable fragment: account
+// debits on the sale minus everything the customer has since paid against it.
+// account_payments.reference carries the receipt number it settled.
+// Every invoice with money still outstanding, however it came to be owed.
+//
+// This used to require an 'account' tender row on the sale -- a charge sale
+// posted through the POS. That is one way an invoice ends up unpaid and not the
+// only one, and on this installation it is none of them: the imported history
+// has zero 'account' rows (charge sales came across as 'charge', because the
+// source marks all 3,087 of them TOTAL_PAID = TOTAL), so A/R Aging reported
+// nothing owed by nobody while 1,390 invoices carried J$9,870,437.41 of unpaid
+// balance on pos_sales.balance_due_usd.
+//
+// So the open-item test is the invoice's own arithmetic: billed, less what has
+// been settled against it. `charged` is the invoice total rather than the
+// account-tendered portion, and `settled` counts both the tenders taken at the
+// till and any later account payment referencing the receipt. A fully cash
+// invoice nets to zero and drops out on the HAVING, which is why this can be
+// based on all sales without flooding the report with paid ones.
+const AR_OPEN_SQL = `
+  SELECT s.id, s.receipt_number, s.created_at, s.customer_id,
+         COALESCE(NULLIF(s.customer_name,''),'Walk-in') AS customer_name,
+         s.due_date, s.payment_status,
+         s.total_usd::float AS charged,
+         (COALESCE(s.amount_paid_usd, 0)
+          + COALESCE((SELECT SUM(ap.amount_usd) FROM account_payments ap
+                       WHERE ap.reference = s.receipt_number), 0))::float AS settled
+    FROM pos_sales s
+   WHERE s.voided = false
+     AND s.total_usd - COALESCE(s.amount_paid_usd, 0) > 0.005`;
+
 // Cached after the first lookup -- this row's id never changes once seeded,
 // so there's no reason to hit the DB for it on every single sale.
 let walkinCustomerIdCache = null;
@@ -2655,7 +2686,214 @@ app.patch('/api/admin/users/:id', requireAdmin, requireCap('pos.edit_customer'),
   if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
   vals.push(req.params.id);
   await query(`UPDATE users SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
-  res.json({ ok: true });
+  // Renaming a customer has to reach the records that carry their name, or the
+  // correction only shows on the profile while every invoice, quote and work
+  // order still reads the old spelling. See syncCustomerName().
+  const synced = req.body && req.body.name !== undefined
+    ? await syncCustomerName(parseInt(req.params.id, 10), String(req.body.name))
+    : null;
+  res.json({ ok: true, synced });
+});
+
+// Push a customer's current name out to the tables that store a copy of it.
+//
+// Those copies are deliberate: a sale has to keep reading the way it was
+// printed even if the customer record is later deleted, so pos_sales carries
+// customer_name alongside customer_id. The cost is that correcting a spelling
+// on the profile left every historic document showing the old one -- 18 rows
+// across 5 customers on this database were already out of step before this
+// existed.
+//
+// Walk-in sales are deliberately NOT touched. 900,714 of them read "CASH"
+// against a walk-in account named "Cash Customer - Walk-in"; that is the label
+// the counter printed, not drift, and rewriting it would relabel seventeen
+// years of cash receipts with an account name no customer ever saw.
+async function syncCustomerName(userId, name) {
+  if (!Number.isFinite(userId)) return null;
+  const nm = String(name == null ? '' : name).trim();
+  if (!nm) return null;
+  const walkin = await getWalkinCustomerId();
+  if (userId === walkin) return { skipped: 'walk-in account; its sales keep the label they were printed with' };
+
+  // Only tables that exist on this installation: the schema differs between
+  // the Postgres and D1 builds, and a missing table should not fail a rename.
+  const TARGETS = [
+    ['pos_sales', 'customer_name', 'customer_id'],
+    ['pos_quotes', 'customer_name', 'customer_id'],
+    ['pos_holds', 'customer_name', 'customer_id'],
+    ['work_orders', 'customer_name', 'customer_id'],
+    ['service_requisitions', 'customer_name', 'customer_id'],
+    ['inspections', 'customer_name', 'customer_id'],
+  ];
+  const out = {};
+  for (const [table, col, fk] of TARGETS) {
+    try {
+      const r = await query(
+        `UPDATE ${table} SET ${col} = $1 WHERE ${fk} = $2 AND COALESCE(${col}, '') <> $1`, [nm, userId]);
+      if (r.rowCount) out[table] = r.rowCount;
+    } catch (e) {
+      // A table this build does not have, or one without the column: nothing to
+      // sync there, and a rename should not fail because of it.
+      if (e.code !== '42P01' && e.code !== '42703') throw e;
+    }
+  }
+  return { name: nm, updated: out,
+    rows: Object.values(out).reduce((a, n) => a + n, 0) };
+}
+
+// ---- find and merge duplicate customers -------------------------------------
+//
+// The same person gets entered more than once at a counter: "D & H GARAGE" and
+// "D&H GARAGE", "ANDRE's" and "ANDRE'S", a second record because the phone was
+// typed instead of the name. Each copy then carries part of the history, so no
+// screen shows what the customer actually owes or has spent.
+//
+// GET  /api/admin/users/:id/similar   who looks like this customer
+// POST /api/admin/users/:id/merge     fold another record into this one
+//
+// Matching is the same normal form used for suppliers: upper-cased, '&' spelt
+// out, punctuation and spacing dropped. Exact normalised equality, plus a
+// shared phone number, plus a shared account number -- all three are evidence
+// two records are one person. Deliberately NOT fuzzy: merging is destructive
+// and a near-miss between two real businesses is worse than a duplicate left
+// standing.
+const CUST_NORM = `upper(regexp_replace(regexp_replace(COALESCE($COL$, ''), '&', ' AND ', 'g'),
+                                         '[^A-Za-z0-9]', '', 'g'))`;
+
+app.get('/api/admin/users/:id/similar', requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { rows: me } = await query(
+    'SELECT id, name, phone, account_number, email FROM users WHERE id = $1', [id]);
+  if (!me.length) return res.status(404).json({ error: 'No such customer.' });
+  const u = me[0];
+  const norm = (s) => String(s || '').toUpperCase().replace(/&/g, ' AND ').replace(/[^A-Z0-9]/g, '');
+  const key = norm(u.name);
+  const phone = String(u.phone || '').replace(/[^0-9]/g, '');
+
+  const { rows } = await query(
+    `SELECT u.id, u.name, u.email, u.phone, u.account_number, u.customer_type, u.created_at,
+            COALESCE(s.n, 0)::int AS sales,
+            COALESCE(s.spend, 0)::float AS spend,
+            COALESCE(o.bal, 0)::float AS owed,
+            CASE
+              WHEN $2 <> '' AND ${CUST_NORM.replace(/\$COL\$/g, 'u.name')} = $2 THEN 'same name'
+              WHEN $3 <> '' AND regexp_replace(COALESCE(u.phone,''), '[^0-9]', '', 'g') = $3 THEN 'same phone'
+              ELSE 'same account number' END AS why
+       FROM users u
+       LEFT JOIN (SELECT customer_id AS id, COUNT(*) AS n, SUM(total_usd) AS spend
+                    FROM pos_sales WHERE voided = false GROUP BY customer_id) s ON s.id = u.id
+       LEFT JOIN (SELECT customer_id AS id, SUM(GREATEST(charged - settled, 0)) AS bal
+                    FROM (${AR_OPEN_SQL}) x GROUP BY customer_id) o ON o.id = u.id
+      WHERE u.id <> $1 AND u.is_staff = false AND u.is_admin = false
+        AND (($2 <> '' AND ${CUST_NORM.replace(/\$COL\$/g, 'u.name')} = $2)
+          OR ($3 <> '' AND regexp_replace(COALESCE(u.phone,''), '[^0-9]', '', 'g') = $3)
+          OR ($4 <> '' AND COALESCE(u.account_number,'') = $4))
+      ORDER BY sales DESC, u.id ASC LIMIT 50`,
+    [id, key, phone, u.account_number || '']);
+
+  res.json({ customer: u, matches: rows });
+});
+
+// Customer-side references only. A merge moves the duplicate's history onto the
+// surviving record; it must not touch staff-side columns -- cashier_id,
+// voided_by, created_by and the like record who DID something, and a customer
+// record being merged says nothing about that.
+const CUSTOMER_REFS = [
+  ['pos_sales', 'customer_id'],
+  ['pos_quotes', 'customer_id'],
+  ['pos_holds', 'customer_id'],
+  ['account_payments', 'customer_id'],
+  ['orders', 'user_id'],
+  ['customer_addresses', 'user_id'],
+  ['customer_contacts', 'user_id'],
+  ['customer_messages', 'user_id'],
+  ['customer_notifications', 'user_id'],
+  ['customer_reminders', 'user_id'],
+  ['points_transactions', 'user_id'],
+  ['saved_vehicles', 'user_id'],
+  ['service_appointments', 'user_id'],
+  ['wishlist', 'user_id'],
+  ['cart_items', 'user_id'],
+  ['reviews', 'user_id'],
+  ['parts_inquiries', 'user_id'],
+  ['trade_in_offers', 'user_id'],
+  ['coupon_redemptions', 'user_id'],
+  ['work_orders', 'customer_user_id'],
+  ['service_requisitions', 'customer_id'],
+  ['service_requisitions', 'customer_user_id'],
+];
+
+app.post('/api/admin/users/:id/merge', requireManager, async (req, res) => {
+  const keepId = parseInt(req.params.id, 10);
+  const dropId = parseInt((req.body && req.body.merge_id), 10);
+  if (!Number.isFinite(keepId) || !Number.isFinite(dropId)) {
+    return res.status(400).json({ error: 'Need the customer to keep and the one to merge in.' });
+  }
+  if (keepId === dropId) return res.status(400).json({ error: 'That is the same customer.' });
+
+  const walkin = await getWalkinCustomerId();
+  if (keepId === walkin || dropId === walkin) {
+    return res.status(400).json({ error: 'The walk-in account cannot be merged -- every cash sale points at it.' });
+  }
+  const { rows: both } = await query(
+    'SELECT id, name, is_staff, is_admin FROM users WHERE id = ANY($1::int[])', [[keepId, dropId]]);
+  if (both.length !== 2) return res.status(404).json({ error: 'One of those customers no longer exists.' });
+  if (both.some((r) => r.is_staff || r.is_admin)) {
+    return res.status(400).json({ error: 'Staff and admin accounts are not merged here -- use the Staff screen.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const moved = {};
+    for (const [table, col] of CUSTOMER_REFS) {
+      try {
+        const r = await client.query(`UPDATE ${table} SET ${col} = $1 WHERE ${col} = $2`, [keepId, dropId]);
+        if (r.rowCount) moved[`${table}.${col}`] = r.rowCount;
+      } catch (e) {
+        // user_category_members has a composite key that would collide; it and
+        // any table this build lacks are simply skipped.
+        if (e.code !== '42P01' && e.code !== '42703' && e.code !== '23505') throw e;
+      }
+    }
+    // Anything the surviving record has no value for, take from the duplicate:
+    // a merge should not lose the one copy that had the phone number.
+    await client.query(
+      `UPDATE users k SET
+         phone               = COALESCE(k.phone, d.phone),
+         company_name        = COALESCE(k.company_name, d.company_name),
+         customer_type       = COALESCE(k.customer_type, d.customer_type),
+         tax_id              = COALESCE(k.tax_id, d.tax_id),
+         price_tier          = COALESCE(k.price_tier, d.price_tier),
+         credit_limit_usd    = COALESCE(k.credit_limit_usd, d.credit_limit_usd),
+         discount_pct        = COALESCE(k.discount_pct, d.discount_pct),
+         payment_terms_days  = COALESCE(k.payment_terms_days, d.payment_terms_days),
+         how_heard           = COALESCE(k.how_heard, d.how_heard),
+         internal_notes      = NULLIF(concat_ws(E'\\n', NULLIF(k.internal_notes,''), NULLIF(d.internal_notes,'')), '')
+       FROM users d WHERE k.id = $1 AND d.id = $2`, [keepId, dropId]);
+
+    // The duplicate is archived, not deleted. users.email is UNIQUE, so the
+    // address is retired to free the original for re-use, and the row stays as
+    // a record that the merge happened.
+    const drop = both.find((r) => r.id === dropId);
+    await client.query(
+      `UPDATE users SET is_archived = true, disabled = true,
+              email = 'merged-' || id || '-' || email,
+              internal_notes = NULLIF(concat_ws(E'\\n', NULLIF(internal_notes,''),
+                'Merged into customer #' || $2 || ' on ' || CURRENT_DATE), '')
+        WHERE id = $1`, [dropId, keepId]);
+
+    await client.query('COMMIT');
+    // The surviving name is now on records that arrived from the duplicate.
+    const keep = both.find((r) => r.id === keepId);
+    const synced = await syncCustomerName(keepId, keep.name);
+    res.json({ ok: true, kept: keepId, merged: dropId, merged_name: drop.name,
+      moved, rows: Object.values(moved).reduce((a, n) => a + n, 0), synced });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('[customer merge]', e);
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
 });
 
 // Addresses
@@ -6395,14 +6633,122 @@ app.post('/api/admin/purchase-orders', requireManager, async (req, res) => {
   } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
 });
 
+// due_date is derived, not typed: terms are "net N days from the invoice date",
+// so it is recomputed whenever either of those two moves. Stored rather than
+// computed per query so ageing can sort and filter on it.
+async function recalcPoDueDate(poId, exec) {
+  const run = exec || query;
+  await run(
+    `UPDATE purchase_orders
+        SET due_date = CASE
+              WHEN invoice_date IS NOT NULL AND payment_terms_days IS NOT NULL
+                THEN invoice_date + payment_terms_days
+              -- No invoice date yet but terms are known: fall back to the date
+              -- the stock was entered, which is the only other date we have.
+              WHEN payment_terms_days IS NOT NULL AND received_date IS NOT NULL
+                THEN received_date::date + payment_terms_days
+              ELSE NULL END
+      WHERE id = $1`, [poId]);
+}
+
+// What is still owed on a PO, from the payments actually recorded against it.
+// amount_paid_usd/balance_due_usd are a cached roll-up of
+// purchase_order_payments, refreshed on every write to that table so the
+// payables report and the PO screen can read one column instead of summing.
+async function recalcPoPaid(poId, exec) {
+  const run = exec || query;
+  await run(
+    `UPDATE purchase_orders po
+        SET amount_paid_usd = pd.paid,
+            -- Owed is measured against what the supplier billed when we know
+            -- it, and against our own computed total when we do not.
+            balance_due_usd = GREATEST(COALESCE(po.invoice_total_usd, po.total_usd, 0) - pd.paid, 0)
+       FROM (SELECT COALESCE(SUM(amount_usd), 0) AS paid
+               FROM purchase_order_payments WHERE po_id = $1) pd
+      WHERE po.id = $1`, [poId]);
+}
+
 app.patch('/api/admin/purchase-orders/:id', requireManager, async (req, res) => {
-  const fields = ['status','expected_date','received_date','shipping_usd','tax_usd','invoice_number','notes'];
+  const fields = ['status','expected_date','received_date','shipping_usd','tax_usd','invoice_number','notes',
+    // Supplier invoice detail: the paperwork's own date, its own total, and the
+    // terms that date starts the clock on.
+    'invoice_date','invoice_total_usd','payment_terms_days'];
   const sets = []; const vals = [];
-  for (const f of fields) if (req.body && req.body[f] !== undefined) { sets.push(`${f} = $${sets.length+1}`); vals.push(req.body[f]); }
+  for (const f of fields) if (req.body && req.body[f] !== undefined) {
+    let v = req.body[f];
+    // Blank from a cleared date or number input means "not recorded", which is
+    // NULL -- '' would fail the date/numeric cast.
+    if (v === '') v = null;
+    sets.push(`${f} = $${sets.length + 1}`); vals.push(v);
+  }
   if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
   vals.push(req.params.id);
   await query(`UPDATE purchase_orders SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
+  await recalcPoDueDate(req.params.id);
+  // invoice_total_usd is what "owed" is measured against, so a change to it
+  // moves the balance even when no payment was touched.
+  await recalcPoPaid(req.params.id);
   res.json({ ok: true });
+});
+
+// ---- supplier payments against a purchase order ----------------------------
+app.get('/api/admin/purchase-orders/:id/payments', requireAdmin, async (req, res) => {
+  const { rows } = await query(
+    `SELECT pp.*, COALESCE(u.name, u.email) AS received_by_name
+       FROM purchase_order_payments pp LEFT JOIN users u ON u.id = pp.received_by
+      WHERE pp.po_id = $1 ORDER BY COALESCE(pp.paid_on, pp.created_at::date) DESC, pp.id DESC`,
+    [req.params.id]);
+  const { rows: po } = await query(
+    `SELECT COALESCE(invoice_total_usd, total_usd, 0)::float AS billed,
+            amount_paid_usd::float AS paid, balance_due_usd::float AS owed,
+            invoice_number, invoice_date, due_date, payment_terms_days
+       FROM purchase_orders WHERE id = $1`, [req.params.id]);
+  if (!po.length) return res.status(404).json({ error: 'PO not found' });
+  res.json({ payments: rows, summary: po[0] });
+});
+
+app.post('/api/admin/purchase-orders/:id/payments', requireManager, async (req, res) => {
+  const b = req.body || {};
+  const amount = Number(b.amount_usd);
+  if (!(amount > 0)) return res.status(400).json({ error: 'Enter an amount greater than zero.' });
+  const { rows: po } = await query('SELECT id FROM purchase_orders WHERE id = $1', [req.params.id]);
+  if (!po.length) return res.status(404).json({ error: 'PO not found' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `INSERT INTO purchase_order_payments (po_id, amount_usd, method, reference, notes, received_by, paid_on)
+         VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7::date, CURRENT_DATE)) RETURNING id`,
+      [req.params.id, Math.round(amount * 100) / 100,
+       b.method || null, b.reference || null, b.notes || null, req.session.userId,
+       b.paid_on || null]);
+    await recalcPoPaid(req.params.id, client.query.bind(client));
+    await client.query('COMMIT');
+    const { rows: after } = await query(
+      'SELECT amount_paid_usd::float AS paid, balance_due_usd::float AS owed FROM purchase_orders WHERE id = $1',
+      [req.params.id]);
+    res.json({ ok: true, id: rows[0].id, paid: after[0].paid, owed: after[0].owed });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('[po payment]', e);
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+app.delete('/api/admin/purchase-orders/:poId/payments/:id', requireManager, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rowCount } = await client.query(
+      'DELETE FROM purchase_order_payments WHERE id = $1 AND po_id = $2', [req.params.id, req.params.poId]);
+    if (!rowCount) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Payment not found' }); }
+    await recalcPoPaid(req.params.poId, client.query.bind(client));
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
 });
 
 async function recalcPoTotals(poId) {
@@ -6460,9 +6806,62 @@ app.post('/api/admin/purchase-orders/:id/receive', requireManager, async (req, r
     // Also check items not in this batch but still outstanding
     const { rows: rem } = await client.query('SELECT SUM(qty_ordered - qty_received)::int AS r FROM purchase_order_items WHERE po_id = $1', [req.params.id]);
     const newStatus = (rem[0].r || 0) > 0 ? (anyOutstanding ? 'partial' : 'partial') : 'received';
-    await client.query(`UPDATE purchase_orders SET status = $1, received_date = COALESCE(received_date, NOW()) WHERE id = $2`, [newStatus, req.params.id]);
+
+    // The supplier's paperwork, captured in the same action as the goods -- it
+    // arrives in the same box, and asking the clerk to go back and edit the PO
+    // afterwards is how it ends up never recorded.
+    //
+    // entry_date is the inventory entry date and defaults to now, but is
+    // settable: stock received on Friday and keyed in on Monday should read
+    // Friday. It only fills a blank received_date, so re-receiving the rest of
+    // a partial delivery does not rewrite when the first half arrived.
+    const b = req.body || {};
+    const inv = [];
+    const ivals = [];
+    const put = (col, val) => { ivals.push(val === '' ? null : val); inv.push(`${col} = $${ivals.length}`); };
+    if (b.invoice_number !== undefined) put('invoice_number', b.invoice_number);
+    if (b.invoice_date !== undefined) put('invoice_date', b.invoice_date);
+    if (b.invoice_total_usd !== undefined) put('invoice_total_usd', b.invoice_total_usd);
+    if (b.tax_usd !== undefined) put('tax_usd', b.tax_usd);
+    if (b.shipping_usd !== undefined) put('shipping_usd', b.shipping_usd);
+    if (b.payment_terms_days !== undefined) put('payment_terms_days', b.payment_terms_days);
+
+    ivals.push(newStatus); const statusPos = ivals.length;
+    ivals.push(b.entry_date || null); const entryPos = ivals.length;
+    ivals.push(req.params.id);
+    await client.query(
+      `UPDATE purchase_orders
+          SET ${inv.length ? inv.join(', ') + ',' : ''}
+              status = $${statusPos},
+              received_date = COALESCE(received_date, $${entryPos}::timestamptz, NOW())
+        WHERE id = $${ivals.length}`, ivals);
+
+    // tax/shipping feed the computed total, and the invoice total and terms feed
+    // what is owed and when, so both roll-ups are refreshed before replying.
+    if (b.tax_usd !== undefined || b.shipping_usd !== undefined) {
+      const { rows: it } = await client.query(
+        'SELECT COALESCE(SUM(total_usd),0)::float AS s FROM purchase_order_items WHERE po_id = $1', [req.params.id]);
+      const { rows: p2 } = await client.query(
+        'SELECT shipping_usd::float AS sh, tax_usd::float AS tx FROM purchase_orders WHERE id = $1', [req.params.id]);
+      await client.query('UPDATE purchase_orders SET subtotal_usd = $1, total_usd = $2 WHERE id = $3',
+        [it[0].s, it[0].s + (p2[0].sh || 0) + (p2[0].tx || 0), req.params.id]);
+    }
+    await recalcPoDueDate(req.params.id, client.query.bind(client));
+    await recalcPoPaid(req.params.id, client.query.bind(client));
+
     await client.query('COMMIT');
-    res.json({ ok: true, status: newStatus });
+    const { rows: fin } = await query(
+      `SELECT invoice_number, invoice_date, invoice_total_usd::float AS invoice_total_usd,
+              total_usd::float AS total_usd, tax_usd::float AS tax_usd,
+              payment_terms_days, due_date, received_date,
+              balance_due_usd::float AS balance_due_usd
+         FROM purchase_orders WHERE id = $1`, [req.params.id]);
+    // A supplier total that disagrees with the lines is worth saying out loud
+    // rather than leaving two numbers to be noticed side by side.
+    const f = fin[0] || {};
+    const variance = (f.invoice_total_usd != null && f.total_usd != null)
+      ? Math.round((f.invoice_total_usd - f.total_usd) * 100) / 100 : null;
+    res.json({ ok: true, status: newStatus, purchase_order: f, invoice_variance_usd: variance });
   } catch (e) {
     await client.query('ROLLBACK');
     console.error('[po receive]', e);
@@ -7208,6 +7607,103 @@ app.post('/api/admin/pos/customer', requireAdmin, requireCap('pos.add_customer')
 // share -- their email -- and then to an unambiguous name match, so this works
 // on the roster the shop actually has rather than one it would have to go back
 // and re-link by hand.
+// ---- sales reps (Settings → Sales reps) -------------------------------------
+//
+// A "sales rep" is a `mechanics` row. Not a new table: pos_sales.sales_rep_id
+// and twenty sibling foreign keys already point there, and syncStaffProfile()
+// mirrors any staff user in the 'sales_rep' category into it. Adding a second
+// roster would mean two answers to "who sold this".
+//
+// ?include_inactive=1 returns retired reps too; by default they are hidden,
+// which is what the Settings screen's "Hide inactive" box asks for.
+app.get('/api/admin/sales-reps', requireAdmin, async (req, res) => {
+  const all = req.query.include_inactive === '1' || req.query.include_inactive === 'true';
+  const { rows } = await query(
+    `SELECT m.id, m.user_id, m.name, m.email, m.phone, m.role, m.is_active,
+            m.commission_pct::float AS commission_pct, m.notes,
+            COALESCE(u.name, u.email) AS linked_user,
+            -- What points at this rep, so the UI can say whether removing them
+            -- would blank history rather than finding out afterwards.
+            (SELECT COUNT(*) FROM pos_sales s WHERE s.sales_rep_id = m.id)::int        AS sales,
+            (SELECT COUNT(*) FROM pos_quotes q WHERE q.sales_rep_id = m.id)::int       AS quotes,
+            (SELECT COUNT(*) FROM commission_payouts c WHERE c.mechanic_id = m.id)::int AS payouts,
+            (SELECT COUNT(*) FROM work_orders w
+              WHERE w.assigned_mechanic_id = m.id OR w.service_advisor_id = m.id)::int AS work_orders
+       FROM mechanics m LEFT JOIN users u ON u.id = m.user_id
+      ${all ? '' : 'WHERE m.is_active = true'}
+      ORDER BY m.is_active DESC, m.name ASC`);
+  res.json({ reps: rows, include_inactive: all,
+    hidden: all ? 0 : Number((await query('SELECT COUNT(*)::int AS n FROM mechanics WHERE is_active = false')).rows[0].n) });
+});
+
+app.post('/api/admin/sales-reps', requireManager, async (req, res) => {
+  const b = req.body || {};
+  const name = String(b.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'A name is required.' });
+  // 'advisor' is the counter role -- what mechanicsRoleFor() assigns to a staff
+  // member in the sales_rep category, and what the POS rep picker looks for.
+  const role = ['mechanic', 'advisor', 'both'].includes(b.role) ? b.role : 'advisor';
+  const { rows } = await query(
+    `INSERT INTO mechanics (user_id, name, email, phone, role, hourly_rate_usd, is_active, commission_pct, notes)
+       VALUES ($1,$2,$3,$4,$5,0,true,$6,$7) RETURNING id`,
+    [b.user_id ? parseInt(b.user_id, 10) : null, name,
+     b.email || null, b.phone || null, role,
+     b.commission_pct != null && b.commission_pct !== '' ? Number(b.commission_pct) : null,
+     b.notes || null]);
+  res.json({ ok: true, id: rows[0].id });
+});
+
+app.patch('/api/admin/sales-reps/:id', requireManager, async (req, res) => {
+  const fields = ['name', 'email', 'phone', 'role', 'is_active', 'commission_pct', 'notes', 'user_id'];
+  const sets = []; const vals = [];
+  for (const f of fields) if (req.body && req.body[f] !== undefined) {
+    let v = req.body[f];
+    if (v === '') v = null;
+    if (f === 'role' && !['mechanic', 'advisor', 'both'].includes(v)) continue;
+    sets.push(`${f} = $${sets.length + 1}`); vals.push(v);
+  }
+  if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
+  vals.push(parseInt(req.params.id, 10));
+  const r = await query(`UPDATE mechanics SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
+  if (!r.rowCount) return res.status(404).json({ error: 'No such sales rep.' });
+  res.json({ ok: true });
+});
+
+// Removing a rep. Retiring (is_active = false) is the normal path and is what
+// the UI offers: the rep leaves the till's picker while every sale, quote and
+// commission payout they are named on keeps pointing at them.
+//
+// A hard delete is only allowed when NOTHING references them -- a mis-typed
+// row added minutes ago. Otherwise it would silently blank sales_rep_id on
+// historic sales (ON DELETE SET NULL) and cascade-delete their commission
+// payouts, losing both who sold it and what they were paid.
+app.delete('/api/admin/sales-reps/:id', requireManager, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Bad id.' });
+  const { rows } = await query(
+    `SELECT m.name,
+            (SELECT COUNT(*) FROM pos_sales s WHERE s.sales_rep_id = m.id)::int        AS sales,
+            (SELECT COUNT(*) FROM pos_quotes q WHERE q.sales_rep_id = m.id)::int       AS quotes,
+            (SELECT COUNT(*) FROM commission_payouts c WHERE c.mechanic_id = m.id)::int AS payouts,
+            (SELECT COUNT(*) FROM work_orders w
+              WHERE w.assigned_mechanic_id = m.id OR w.service_advisor_id = m.id)::int AS work_orders,
+            (SELECT COUNT(*) FROM time_entries t WHERE t.mechanic_id = m.id)::int      AS time_entries
+       FROM mechanics m WHERE m.id = $1`, [id]);
+  if (!rows.length) return res.status(404).json({ error: 'No such sales rep.' });
+  const r = rows[0];
+  const refs = r.sales + r.quotes + r.payouts + r.work_orders + r.time_entries;
+  if (refs > 0 && req.query.force !== '1') {
+    await query('UPDATE mechanics SET is_active = false WHERE id = $1', [id]);
+    return res.json({ ok: true, retired: true, name: r.name,
+      references: { sales: r.sales, quotes: r.quotes, payouts: r.payouts,
+        work_orders: r.work_orders, time_entries: r.time_entries },
+      message: `${r.name} has ${refs.toLocaleString('en-US')} record(s) attached, so they were retired `
+        + 'rather than deleted -- their name stays on everything they sold.' });
+  }
+  await query('DELETE FROM mechanics WHERE id = $1', [id]);
+  res.json({ ok: true, deleted: true, name: r.name });
+});
+
 app.get('/api/admin/pos/reps', requireAdmin, async (req, res) => {
   // Categories decide who is a sales rep now. The row returned is still the
   // mechanics one, because pos_sales.sales_rep_id and its seventeen sibling
@@ -7289,18 +7785,66 @@ app.get('/api/admin/pos/walkin-customer', requireAdmin, async (req, res) => {
   res.json({ customer: rows[0] });
 });
 
+// Invoice recall. Two modes:
+//
+//   no ?q      the day's sales, as before -- the till's own list
+//   ?q=...     look an invoice up across ALL time, because recalling one is
+//              never "which of today's did I mean". Matches the receipt or
+//              invoice number, the customer name or phone, the cashier or rep,
+//              or an exact total, so any of the things actually written on a
+//              piece of paper in a customer's hand will find it.
+//
+// Used by the Cashier screen's recall box, which previously could only list
+// orders still awaiting payment and so could not bring back a finished sale at
+// all.
 app.get('/api/admin/pos/sales', requireAdmin, async (req, res) => {
-  const from = req.query.from || new Date().toISOString().slice(0,10);
-  const to = req.query.to || from;
+  const q = String(req.query.q || '').trim();
   const includeVoided = req.query.include_voided === '1' || req.query.include_voided === 'true';
+  const voidClause = includeVoided ? '' : 'AND s.voided = false';
+  const limit = Math.min(parseInt(req.query.limit, 10) || 200, 500);
+
+  if (q) {
+    const lower = q.toLowerCase();
+    const like = '%' + lower + '%';
+    const exact = Number(q.replace(/[$,]/g, ''));
+    const params = [like, Number.isFinite(exact) ? exact : null, limit, lower];
+    const { rows } = await query(
+      `SELECT s.*, COALESCE(u.name, u.email) AS cashier_name,
+              (SELECT COALESCE(SUM(qty), 0)::int FROM pos_sale_items i WHERE i.sale_id = s.id) AS unit_count
+         FROM pos_sales s LEFT JOIN users u ON u.id = s.cashier_id
+        WHERE (LOWER(COALESCE(s.receipt_number, '')) LIKE $1
+            OR LOWER(COALESCE(s.invoice_number, '')) LIKE $1
+            OR LOWER(COALESCE(s.customer_name, ''))  LIKE $1
+            OR LOWER(COALESCE(s.customer_phone, '')) LIKE $1
+            OR LOWER(COALESCE(s.cashier_name, ''))   LIKE $1
+            OR LOWER(COALESCE(s.sales_rep_name, '')) LIKE $1
+            OR LOWER(COALESCE(s.reference, ''))      LIKE $1
+            OR ($2::numeric IS NOT NULL AND s.total_usd = $2::numeric))
+          ${voidClause}
+        -- Exact number first, then newest. Without this, typing a short
+        -- receipt number like "0807" buried the invoice it names: the LIKE
+        -- also matches A0080712 and a thousand others, and ordering purely by
+        -- date pushed the 2012 original past the 200-row limit. The invoice
+        -- someone typed the number of has to be the first row.
+        ORDER BY (LOWER(COALESCE(s.receipt_number, '')) = $4
+               OR LOWER(COALESCE(s.invoice_number, '')) = $4) DESC,
+                 s.created_at DESC
+        LIMIT $3`, params);
+    return res.json({ sales: rows, mode: 'search', q, shown: rows.length });
+  }
+
+  const from = req.query.from || new Date().toISOString().slice(0, 10);
+  const to = req.query.to || from;
   const { rows } = await query(
-    `SELECT s.*, COALESCE(u.name, u.email) AS cashier_name FROM pos_sales s
+    `SELECT s.*, COALESCE(u.name, u.email) AS cashier_name,
+            (SELECT COALESCE(SUM(qty), 0)::int FROM pos_sale_items i WHERE i.sale_id = s.id) AS unit_count
+       FROM pos_sales s
        LEFT JOIN users u ON u.id = s.cashier_id
-       WHERE s.created_at::date BETWEEN $1::date AND $2::date ${includeVoided ? '' : 'AND s.voided = false'}
-       ORDER BY s.created_at DESC LIMIT 200`,
-    [from, to]
+       WHERE s.created_at::date BETWEEN $1::date AND $2::date ${voidClause}
+       ORDER BY s.created_at DESC LIMIT $3`,
+    [from, to, limit]
   );
-  res.json({ sales: rows });
+  res.json({ sales: rows, mode: 'range', from, to, shown: rows.length });
 });
 
 app.get('/api/admin/pos/sales/:id', requireAdmin, async (req, res) => {
@@ -9041,19 +9585,6 @@ app.get('/api/admin/reports/customers', requireAdmin, async (req, res) => {
 // "receivables" is built from it. Getting that backwards double-counts every
 // credit sale, once as income and again as a debt.
 
-// A charge sale's unpaid remainder, per sale, as a reusable fragment: account
-// debits on the sale minus everything the customer has since paid against it.
-// account_payments.reference carries the receipt number it settled.
-const AR_OPEN_SQL = `
-  SELECT s.id, s.receipt_number, s.created_at, s.customer_id,
-         COALESCE(NULLIF(s.customer_name,''),'Walk-in') AS customer_name,
-         SUM(sp.amount_usd)::float AS charged,
-         COALESCE((SELECT SUM(ap.amount_usd) FROM account_payments ap
-                    WHERE ap.reference = s.receipt_number), 0)::float AS settled
-    FROM pos_sales s
-    JOIN sale_payments sp ON sp.sale_id = s.id AND sp.method = 'account'
-   WHERE s.voided = false
-   GROUP BY s.id, s.receipt_number, s.created_at, s.customer_id, s.customer_name`;
 
 // ---- payments received -----------------------------------------------------
 app.get('/api/admin/reports/payments', requireAdmin, async (req, res) => {
@@ -9131,17 +9662,24 @@ app.get('/api/admin/reports/ar-aging', requireAdmin, async (_req, res) => {
   // position. net_owed nets within each customer and floors at zero, which is the
   // figure the Management Summary and Customer List report. Reporting only one of
   // them is how two pages end up disagreeing about what the shop is owed.
+  // Netted per customer off the same open-item basis as the buckets above, so
+  // the two readings describe one ledger. The previous version measured
+  // 'account' tenders instead and so reported zero on an installation whose
+  // unpaid invoices do not carry that tender.
   const net = (await query(
     `SELECT COALESCE(SUM(GREATEST(bal, 0)),0)::float AS owed FROM (
-       SELECT COALESCE((SELECT SUM(sp.amount_usd) FROM sale_payments sp
-                         JOIN pos_sales s ON s.id = sp.sale_id
-                        WHERE sp.method = 'account' AND s.customer_id = u.id AND s.voided = false),0)
-            - COALESCE((SELECT SUM(amount_usd) FROM account_payments ap WHERE ap.customer_id = u.id),0) AS bal
-         FROM users u WHERE u.is_staff = false AND u.is_admin = false) t`)).rows[0];
+       SELECT o.customer_id, SUM(o.charged - o.settled) AS bal
+         FROM (${AR_OPEN_SQL}) o
+        GROUP BY o.customer_id) t`)).rows[0];
   const netOwed = Math.round(net.owed * 100) / 100;
   res.json({
+    // `invoices` counted from the buckets, which cover every open item, not
+    // from `oldest` -- that list is LIMIT 200 and reported its own cap (200
+    // against a true 905).
     totals: { customers: byCustomer.rows.length, owed: Math.round(owed * 100) / 100,
-      net_owed: netOwed, invoices: oldest.rows.length },
+      net_owed: netOwed,
+      invoices: buckets.rows.reduce((a, b) => a + b.invoices, 0),
+      oldest_shown: oldest.rows.length },
     advice: [{ kind: 'data', text: 'Two figures, both correct. The aged total (J$' +
       Math.round(owed).toLocaleString() + ') adds up every invoice still short, which is what you chase. ' +
       'The net position (J$' + Math.round(netOwed).toLocaleString() + ') nets each customer’s ' +
@@ -9154,11 +9692,17 @@ app.get('/api/admin/reports/ar-aging', requireAdmin, async (_req, res) => {
 app.get('/api/admin/reports/payables', requireAdmin, async (req, res) => {
   const { from, to } = reportRange(req);
   const p = [from, to];
+  // Payments are dated by when the money moved (paid_on), not by when the row
+  // was keyed in (created_at) -- the same distinction as a supplier's invoice
+  // date versus the inventory entry date. A cheque written on the 20th and
+  // entered on the 2nd of the next month belongs in the month it was written,
+  // or a month-end payables figure is wrong by whatever was keyed in late.
+  // created_at is the fallback for rows that predate the paid_on column.
   const [paid, byMethod, bySupplier, open] = await Promise.all([
     query(`SELECT COUNT(*)::int AS n, COALESCE(SUM(amount_usd),0)::float AS total
-             FROM purchase_order_payments WHERE created_at::date BETWEEN $1::date AND $2::date`, p),
+             FROM purchase_order_payments WHERE COALESCE(paid_on, created_at::date) BETWEEN $1::date AND $2::date`, p),
     query(`SELECT method, COUNT(*)::int AS n, COALESCE(SUM(amount_usd),0)::float AS total
-             FROM purchase_order_payments WHERE created_at::date BETWEEN $1::date AND $2::date
+             FROM purchase_order_payments WHERE COALESCE(paid_on, created_at::date) BETWEEN $1::date AND $2::date
             GROUP BY method ORDER BY total DESC`, p),
     query(`SELECT COALESCE(s.name,'(no supplier)') AS supplier, COUNT(DISTINCT po.id)::int AS pos,
                   COALESCE(SUM(po.total_usd),0)::float AS ordered,
@@ -9573,27 +10117,25 @@ app.get('/api/admin/reports/customer-list', requireAdmin, async (_req, res) => {
        WHERE voided = false AND customer_id IS NOT NULL
        GROUP BY customer_id
     ),
-    -- The debit side of a charge sale: an 'account' tender is not cash, it is
-    -- the customer owing. Cash/card/cheque rows are deliberately excluded.
-    acct_debit AS (
-      SELECT ps.customer_id AS id, SUM(sp.amount_usd) AS debit
-        FROM sale_payments sp JOIN pos_sales ps ON ps.id = sp.sale_id
-       WHERE sp.method = 'account' AND ps.voided = false AND ps.customer_id IS NOT NULL
-       GROUP BY ps.customer_id
-    ),
-    acct_credit AS (
-      SELECT customer_id AS id, SUM(amount_usd) AS credit
-        FROM account_payments WHERE customer_id IS NOT NULL GROUP BY customer_id
+    -- What each customer still owes: the same open-item test as A/R Aging and
+    -- the customer statement (AR_OPEN_SQL), floored per invoice.
+    --
+    -- This measured 'account' tenders minus account_payments before, which read
+    -- zero on this installation -- the imported charge sales carry no 'account'
+    -- tender -- so this page reported nothing owed by anyone while A/R Aging
+    -- reported J$7m. The three pages have to answer the question the same way.
+    owing AS (
+      SELECT customer_id AS id, SUM(GREATEST(charged - settled, 0)) AS bal
+        FROM (${AR_OPEN_SQL}) o WHERE customer_id IS NOT NULL GROUP BY customer_id
     ),
     j AS (
       SELECT c.*, COALESCE(s.sales, 0) AS sales,
              COALESCE(s.spend, 0)::float AS spend,
              s.last_sale,
-             (COALESCE(d.debit, 0) - COALESCE(k.credit, 0))::float AS balance
+             COALESCE(o.bal, 0)::float AS balance
         FROM cust c
-        LEFT JOIN sale_agg   s USING (id)
-        LEFT JOIN acct_debit d USING (id)
-        LEFT JOIN acct_credit k USING (id)
+        LEFT JOIN sale_agg s USING (id)
+        LEFT JOIN owing    o USING (id)
     )
     SELECT json_build_object(
       'customers', (SELECT COALESCE(json_agg(x), '[]'::json) FROM
@@ -11110,7 +11652,7 @@ app.get('/api/admin/reports/cash-flow', requireAdmin, async (req, res) => {
     query(`SELECT COALESCE(SUM(amount_usd),0)::float AS total, COUNT(*)::int AS n
              FROM work_order_payments WHERE received_at::date BETWEEN $1::date AND $2::date`, p),
     query(`SELECT COALESCE(SUM(amount_usd),0)::float AS total, COUNT(*)::int AS n
-             FROM purchase_order_payments WHERE created_at::date BETWEEN $1::date AND $2::date`, p),
+             FROM purchase_order_payments WHERE COALESCE(paid_on, created_at::date) BETWEEN $1::date AND $2::date`, p),
     query(`SELECT COALESCE(SUM(amount_cents),0)/100.0 AS total, COUNT(*)::int AS n
              FROM cash_payouts WHERE COALESCE(voided,false) = false
               AND created_at::date BETWEEN $1::date AND $2::date`, p),
@@ -11370,73 +11912,189 @@ app.get('/api/admin/reports/sales-detail', requireAdmin, async (req, res) => {
 app.get('/api/admin/reports/customer-statement', requireAdmin, async (req, res) => {
   const { from, to } = reportRange(req);
   const id = parseInt(req.query.customer_id, 10);
+
+  // The picker lists customers by what they owe, measured the same way as the
+  // statement and A/R Aging -- open invoices, not 'account' tenders.
   const { rows: list } = await query(
-    `SELECT u.id, COALESCE(NULLIF(u.name,''), u.email) AS name,
-            COALESCE((SELECT SUM(sp.amount_usd) FROM sale_payments sp JOIN pos_sales s ON s.id = sp.sale_id
-                       WHERE sp.method = 'account' AND s.customer_id = u.id AND s.voided = false),0)::float
-          - COALESCE((SELECT SUM(amount_usd) FROM account_payments WHERE customer_id = u.id),0)::float AS balance
-       FROM users u WHERE u.is_staff = false AND u.is_admin = false
-      ORDER BY balance DESC LIMIT 400`);
+    `SELECT u.id, COALESCE(NULLIF(u.name,''), u.email) AS name, u.account_number,
+            COALESCE(o.bal, 0)::float AS balance
+       FROM users u
+       LEFT JOIN (SELECT customer_id, SUM(charged - settled) AS bal
+                    FROM (${AR_OPEN_SQL}) x GROUP BY customer_id) o ON o.customer_id = u.id
+      WHERE u.is_staff = false AND u.is_admin = false
+      ORDER BY balance DESC, name ASC LIMIT 400`);
   if (!id) return res.json({ from, to, customers: list, customer: null });
+
   const cust = (await query('SELECT * FROM users WHERE id = $1', [id])).rows[0];
   if (!cust) return res.status(404).json({ error: 'That customer no longer exists.' });
 
-  const [opening, lines, closing] = await Promise.all([
-    // Everything before the window, netted, is the opening balance.
-    query(`SELECT COALESCE((SELECT SUM(sp.amount_usd) FROM sale_payments sp JOIN pos_sales s ON s.id = sp.sale_id
-                             WHERE sp.method = 'account' AND s.customer_id = $1 AND s.voided = false
-                               AND s.created_at::date < $2::date),0)::float
-                - COALESCE((SELECT SUM(amount_usd) FROM account_payments
-                             WHERE customer_id = $1 AND created_at::date < $2::date),0)::float AS opening`,
-      [id, from]),
+  const [opening, lines, open, movement] = await Promise.all([
+    // Opening balance: every invoice raised before the window, less everything
+    // settled against it. Not "charges minus payments in a date range" -- a
+    // payment made inside the window against an older invoice has to reduce
+    // that invoice, not the opening figure.
+    query(`SELECT COALESCE(SUM(GREATEST(o.charged - o.settled, 0)), 0)::float AS opening
+             FROM (${AR_OPEN_SQL}) o
+            WHERE o.customer_id = $1 AND o.created_at::date < $2::date`, [id, from]),
+
+    // Every movement in the window: invoices raised, tenders taken at the till,
+    // and account settlements posted later.
     query(`SELECT * FROM (
              SELECT s.created_at AS at, s.created_at::date::text AS day, 'Invoice' AS kind,
                     s.receipt_number AS reference, s.total_usd::float AS charge, 0::float AS credit,
-                    COALESCE(s.payment_method,'') AS detail
+                    COALESCE(NULLIF(s.payment_method,''), s.payment_status) AS detail,
+                    s.due_date, s.payment_status,
+                    (s.total_usd - COALESCE(s.amount_paid_usd,0))::float AS still_due
                FROM pos_sales s
               WHERE s.customer_id = $1 AND s.voided = false
                 AND s.created_at::date BETWEEN $2::date AND $3::date
              UNION ALL
              SELECT ap.created_at AS at, ap.created_at::date::text AS day, 'Payment' AS kind,
                     COALESCE(ap.reference,'') AS reference, 0::float AS charge, ap.amount_usd::float AS credit,
-                    COALESCE(ap.method,'') AS detail
+                    COALESCE(ap.method,'') AS detail,
+                    NULL::date AS due_date, NULL::text AS payment_status, 0::float AS still_due
                FROM account_payments ap
               WHERE ap.customer_id = $1 AND ap.created_at::date BETWEEN $2::date AND $3::date
            ) t ORDER BY at ASC LIMIT 1000`, [id, from, to]),
-    query(`SELECT COALESCE((SELECT SUM(sp.amount_usd) FROM sale_payments sp JOIN pos_sales s ON s.id = sp.sale_id
-                             WHERE sp.method = 'account' AND s.customer_id = $1 AND s.voided = false
-                               AND s.created_at::date <= $2::date),0)::float
-                - COALESCE((SELECT SUM(amount_usd) FROM account_payments
-                             WHERE customer_id = $1 AND created_at::date <= $2::date),0)::float AS closing`,
-      [id, to]),
+
+    // The open items themselves, aged. This is what a statement is for: not
+    // "what happened this month" but "what is still outstanding, and how late".
+    // Aged from the due date when the invoice has terms, and from the invoice
+    // date when it does not -- an invoice with no agreed terms is due on issue.
+    query(`SELECT o.receipt_number, o.created_at::date::text AS day, o.due_date,
+                  (o.charged - o.settled)::float AS balance,
+                  o.charged, o.settled,
+                  GREATEST(CURRENT_DATE - COALESCE(o.due_date, o.created_at::date), 0)::int AS days_overdue,
+                  (CURRENT_DATE - o.created_at::date)::int AS age_days,
+                  CASE
+                    WHEN CURRENT_DATE - COALESCE(o.due_date, o.created_at::date) <= 0  THEN 'current'
+                    WHEN CURRENT_DATE - COALESCE(o.due_date, o.created_at::date) <= 30 THEN '1-30 days'
+                    WHEN CURRENT_DATE - COALESCE(o.due_date, o.created_at::date) <= 60 THEN '31-60 days'
+                    WHEN CURRENT_DATE - COALESCE(o.due_date, o.created_at::date) <= 90 THEN '61-90 days'
+                    ELSE 'over 90 days' END AS bucket
+             FROM (${AR_OPEN_SQL}) o
+            WHERE o.customer_id = $1
+            ORDER BY o.created_at ASC`, [id]),
+
+    // The window's movement, and the count of it, in SQL over EVERY row.
+    // The activity list below is LIMIT 1000 for display; deriving the closing
+    // balance by walking that array made a busy account close short by
+    // whatever fell past the cap -- 1,507 invoices on one trade account
+    // reported J$446,134.63 against a true J$1,003,409.62.
+    query(`SELECT
+             (SELECT COUNT(*) FROM pos_sales s
+               WHERE s.customer_id = $1 AND s.voided = false
+                 AND s.created_at::date BETWEEN $2::date AND $3::date)::int AS invoices,
+             (SELECT COALESCE(SUM(GREATEST(s.total_usd - COALESCE(s.amount_paid_usd,0), 0)), 0)
+                FROM pos_sales s
+               WHERE s.customer_id = $1 AND s.voided = false
+                 AND s.created_at::date BETWEEN $2::date AND $3::date)::float AS left_owing,
+             (SELECT COALESCE(SUM(s.total_usd), 0) FROM pos_sales s
+               WHERE s.customer_id = $1 AND s.voided = false
+                 AND s.created_at::date BETWEEN $2::date AND $3::date)::float AS billed,
+             (SELECT COUNT(*) FROM account_payments ap
+               WHERE ap.customer_id = $1
+                 AND ap.created_at::date BETWEEN $2::date AND $3::date)::int AS payments,
+             (SELECT COALESCE(SUM(ap.amount_usd), 0) FROM account_payments ap
+               WHERE ap.customer_id = $1
+                 AND ap.created_at::date BETWEEN $2::date AND $3::date)::float AS settled`,
+      [id, from, to]),
   ]);
-  // A running balance only makes sense on the account side, so the charge column
-  // shows the invoice total while the balance moves by what went on account.
-  let bal = Number(opening.rows[0].opening) || 0;
-  const charged = (await query(
-    `SELECT s.receipt_number, COALESCE(SUM(sp.amount_usd),0)::float AS on_account
-       FROM pos_sales s JOIN sale_payments sp ON sp.sale_id = s.id AND sp.method = 'account'
-      WHERE s.customer_id = $1 AND s.voided = false
-        AND s.created_at::date BETWEEN $2::date AND $3::date
-      GROUP BY 1`, [id, from, to])).rows;
-  const onAcct = new Map(charged.map((r) => [r.receipt_number, r.on_account]));
+
+  // Running balance across the window, opening forward. The displayed figures
+  // walk the (capped) activity list; the authoritative opening and closing come
+  // from SQL over every row, below.
+  const mv = movement.rows[0];
+  const openingBal = Math.round((Number(opening.rows[0].opening) || 0) * 100) / 100;
+  let bal = openingBal;
   for (const l of lines.rows) {
-    l.on_account = l.kind === 'Invoice' ? (onAcct.get(l.reference) || 0) : 0;
-    bal = Math.round((bal + l.on_account - l.credit) * 100) / 100;
+    // An invoice moves the balance by what is still owed on it, not by its
+    // total: a cash sale is an event on the statement but settles immediately
+    // and leaves nothing behind.
+    //
+    // Floored at zero per invoice. amount_paid_usd exceeds the total on a
+    // number of imported invoices (the legacy export records a cash sale and
+    // its refund both as money in), which made still_due negative -- summed
+    // across this account that was -J$374,215.15, so the running balance
+    // credited the customer for overpayments on unrelated settled invoices and
+    // closed J$713,391.93 below the J$1,003,409.62 actually outstanding. An
+    // over-settled invoice owes nothing; it does not pay off another one.
+    l.outstanding = l.kind === 'Invoice' ? Math.max(0, Number(l.still_due) || 0) : 0;
+    bal = Math.round((bal + l.outstanding - Number(l.credit || 0)) * 100) / 100;
     l.balance = bal;
   }
-  const t = { opening: Math.round((Number(opening.rows[0].opening) || 0) * 100) / 100,
-    closing: Math.round((Number(closing.rows[0].closing) || 0) * 100) / 100,
-    invoices: lines.rows.filter((l) => l.kind === 'Invoice').length,
-    payments: lines.rows.filter((l) => l.kind === 'Payment').length,
-    charged: Math.round(lines.rows.reduce((a, l) => a + l.on_account, 0) * 100) / 100,
-    paid: Math.round(lines.rows.reduce((a, l) => a + l.credit, 0) * 100) / 100 };
+
+  // Ageing buckets, in a fixed order so the statement always reads the same way
+  // rather than reordering as invoices move between buckets.
+  const ORDER = ['current', '1-30 days', '31-60 days', '61-90 days', 'over 90 days'];
+  const byBucket = new Map(ORDER.map((b) => [b, { bucket: b, invoices: 0, balance: 0 }]));
+  for (const o of open.rows) {
+    const b = byBucket.get(o.bucket);
+    b.invoices++;
+    b.balance = Math.round((b.balance + o.balance) * 100) / 100;
+  }
+  const ageing = ORDER.map((b) => byBucket.get(b)).filter((b) => b.invoices > 0);
+  const owed = Math.round(open.rows.reduce((a, o) => a + o.balance, 0) * 100) / 100;
+  const overdue = Math.round(open.rows.filter((o) => o.days_overdue > 0)
+    .reduce((a, o) => a + o.balance, 0) * 100) / 100;
+  const oldest = open.rows.reduce((m, o) => Math.max(m, o.days_overdue), 0);
+
+  const terms = cust.payment_terms_days;
+  const limit = cust.credit_limit_usd != null ? Number(cust.credit_limit_usd) : null;
+
+  const advice = [];
+  if (!open.rows.length) {
+    advice.push({ kind: 'data', text: 'Nothing outstanding -- every invoice on this account is settled.' });
+  } else {
+    if (terms == null) {
+      advice.push({ kind: 'risk', text:
+        'This account has no payment terms set, so every open invoice is aged from its invoice date '
+        + '(due on issue). Set terms on the customer record to age it against an agreed due date instead.' });
+    }
+    if (overdue > 0.005) {
+      advice.push({ kind: 'money', text:
+        `J$${overdue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} `
+        + `is past due, the oldest by ${oldest} day${oldest === 1 ? '' : 's'}.` });
+    }
+    if (limit != null && limit > 0 && owed > limit) {
+      advice.push({ kind: 'risk', text:
+        `Outstanding balance exceeds this account's credit limit of `
+        + `J$${limit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.` });
+    }
+  }
+  advice.push({ kind: 'data', text:
+    'The balance column tracks what is still owed: a fully paid invoice appears as an activity line but '
+    + `does not move it. Opening is everything unsettled before ${from}; the ageing below is as at today, `
+    + 'not as at the end of the range.' });
+
   res.json({ from, to, customers: list,
     customer: { id: cust.id, name: cust.name || cust.email, email: cust.email, phone: cust.phone,
       account_number: cust.account_number, customer_type: cust.customer_type,
-      payment_terms_days: cust.payment_terms_days, credit_limit_usd: cust.credit_limit_usd },
-    totals: t, lines: lines.rows,
-    advice: [{ kind: 'data', text: 'The balance column tracks the account only: a cash sale appears as an invoice but does not move it. Opening is everything on account before ' + from + ', netted against payments; closing is the same test at ' + to + '.' }] });
+      payment_terms_days: terms, credit_limit_usd: limit,
+      discount_pct: cust.discount_pct != null ? Number(cust.discount_pct) : null,
+      price_tier: cust.price_tier, credit_type: cust.credit_type },
+    totals: {
+      opening: openingBal,
+      // Opening, plus what the window left owing, less what was settled in it.
+      // Counted in SQL over every row, not walked from the capped list.
+      closing: Math.round((openingBal + mv.left_owing - mv.settled) * 100) / 100,
+      owed: owed,
+      overdue: overdue,
+      current: Math.round((owed - overdue) * 100) / 100,
+      oldest_days: oldest,
+      open_invoices: open.rows.length,
+      invoices: mv.invoices,
+      payments: mv.payments,
+      charged: Math.round(mv.billed * 100) / 100,
+      paid: Math.round(mv.settled * 100) / 100,
+      credit_limit_usd: limit,
+      credit_available: limit != null ? Math.round((limit - owed) * 100) / 100 : null,
+      // So the UI can say "showing the newest 1,000 of 1,507" rather than
+      // quietly presenting a partial list as the whole account.
+      activity_shown: lines.rows.length,
+      activity_total: mv.invoices + mv.payments,
+    },
+    ageing, open_items: open.rows, lines: lines.rows, advice });
 });
 
 // =============================================================================

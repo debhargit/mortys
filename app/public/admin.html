@@ -7117,16 +7117,30 @@ var CASHIER_VIEW_ID = null;
 async function renderCashier(panel){
   if (CASHIER_VIEW_ID) return renderCashierOrder(panel, CASHIER_VIEW_ID);
   panel.innerHTML = '<div class="empty">Loading orders…</div>';
-  var r;
-  try { r = await api('/api/admin/pos/orders?status=pending'); }
-  catch (e) { panel.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return; }
-  var rows = r.orders || [];
+  // The order queue (order first at the counter, pay at the till) needs the
+  // pos_orders table, which this backend does not have -- the endpoint 404s
+  // here. That used to kill the whole screen on the way in, so a cashier could
+  // not reach anything on it. Invoice recall only needs pos_sales, so the queue
+  // degrades to a note and the rest of the screen still works.
+  var rows = [];
+  var queueErr = null;
+  try { rows = (await api('/api/admin/pos/orders?status=pending')).orders || []; }
+  catch (e) { queueErr = e.message; }
   panel.innerHTML =
-    '<div style="padding:12px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line)">' +
+    '<div style="padding:12px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line);flex-wrap:wrap">' +
       '<h3 style="margin:0;font-size:16px">💵 Cashier — orders awaiting payment</h3>' +
       '<span style="color:var(--muted);font-size:12.5px">' + rows.length + ' pending</span>' +
-      '<button class="btn" id="cashRefresh" style="margin-left:auto;font-size:12px">↻ Refresh</button>' +
+      // Recalling an invoice is never "which of today's did I mean" -- the
+      // customer is standing there with a printed copy from any date. This
+      // searches every sale on file, not just the orders still unpaid, which
+      // was all this screen could show before.
+      '<div style="margin-left:auto;display:flex;gap:6px;align-items:center">' +
+        '<input id="cashRecall" class="fld" style="width:230px" placeholder="Recall invoice: no., name, phone, amount"/>' +
+        '<button class="btn" id="cashRecallGo" style="font-size:12px">🔎 Find</button>' +
+        '<button class="btn" id="cashRefresh" style="font-size:12px">↻ Refresh</button>' +
+      '</div>' +
     '</div>' +
+    '<div id="cashRecallBox"></div>' +
     (rows.length
       ? '<table><thead><tr><th>Order</th><th>Taken</th><th>By</th><th>Customer</th><th>Leaves</th><th class="r">Units</th><th class="r">Total</th><th></th></tr></thead><tbody>' +
         rows.map(function(o){
@@ -7141,9 +7155,69 @@ async function renderCashier(panel){
             '<td class="r"><button class="btn ok" data-take="' + o.id + '" style="font-size:11.5px">Take payment ›</button></td>' +
           '</tr>';
         }).join('') + '</tbody></table>'
-      : '<div class="empty" style="padding:32px">No orders waiting. When a counter operator saves an order it shows up here.</div>');
+      : (queueErr
+          ? '<div class="empty" style="padding:26px 32px;line-height:1.55">' +
+              '<b>The order queue is not available on this server.</b><br/>' +
+              '<span style="font-size:12.5px">Order-first checkout (take the order at the counter, pay at the till) ' +
+              'needs tables this installation does not have, so there is nothing to queue. ' +
+              'Invoice recall above works on every sale on file.</span></div>'
+          : '<div class="empty" style="padding:32px">No orders waiting. When a counter operator saves an order it shows up here.</div>'));
   var rf = document.getElementById('cashRefresh');
   if (rf) rf.addEventListener('click', function(){ renderCashier(panel); });
+
+  // ---- invoice recall ----------------------------------------------------
+  var recallBox = document.getElementById('cashRecallBox');
+  var recallIn = document.getElementById('cashRecall');
+  async function doRecall(){
+    var q = recallIn.value.trim();
+    if (!q) { recallBox.innerHTML = ''; return; }
+    recallBox.innerHTML = '<div style="padding:12px 16px;color:var(--muted);font-size:12.5px">Searching every invoice on file…</div>';
+    var r;
+    try { r = await api('/api/admin/pos/sales?q=' + encodeURIComponent(q) + '&include_voided=1'); }
+    catch (e) { recallBox.innerHTML = '<div style="padding:12px 16px;color:var(--red)">' + esc(e.message) + '</div>'; return; }
+    var found = r.sales || [];
+    if (!found.length) {
+      recallBox.innerHTML = '<div style="padding:14px 16px;border-bottom:1px solid var(--line);font-size:12.5px">' +
+        'No invoice matches <b>' + esc(q) + '</b>. Try the receipt number, the customer name or phone, or the exact total.</div>';
+      return;
+    }
+    recallBox.innerHTML =
+      '<div style="padding:10px 16px;border-bottom:1px solid var(--line);background:var(--card-soft);display:flex;align-items:center;gap:10px">' +
+        '<b style="font-size:12.5px">' + found.length + ' invoice' + (found.length === 1 ? '' : 's') + ' matching “' + esc(q) + '”</b>' +
+        '<button class="btn" id="cashRecallClear" style="margin-left:auto;font-size:11.5px">✕ Clear</button>' +
+      '</div>' +
+      '<table><thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Cashier</th><th class="r">Units</th><th class="r">Total</th><th class="r">Paid</th><th></th></tr></thead><tbody>' +
+      found.map(function(s){
+        var outstanding = Number(s.balance_due_usd || 0);
+        return '<tr' + (s.voided ? ' style="opacity:.55"' : '') + '>' +
+          '<td><b>' + esc(s.receipt_number || ('#' + s.id)) + '</b>' +
+            (s.voided ? ' ' + badge('voided', 'bad') : '') +
+            (s.invoice_number && s.invoice_number !== s.receipt_number ? '<br/><small>' + esc(s.invoice_number) + '</small>' : '') + '</td>' +
+          '<td>' + esc(fmtDate(s.created_at)) + '</td>' +
+          '<td>' + esc(s.customer_name || 'Walk-in') + (s.customer_phone ? '<br/><small>' + esc(s.customer_phone) + '</small>' : '') + '</td>' +
+          '<td>' + esc(s.cashier_name || s.sales_rep_name || '—') + '</td>' +
+          '<td class="r">' + (s.unit_count || 0) + '</td>' +
+          '<td class="r"><b>' + fmtMoney(s.total_usd) + '</b></td>' +
+          '<td class="r">' + fmtMoney(s.amount_paid_usd) +
+            (outstanding > 0.005 ? '<br/><small style="color:#b45309">' + fmtMoney(outstanding) + ' due</small>' : '') + '</td>' +
+          '<td class="r"><button class="btn" data-recall-open="' + s.id + '" style="font-size:11.5px">Open ›</button></td>' +
+        '</tr>';
+      }).join('') + '</tbody></table>';
+    var clr = document.getElementById('cashRecallClear');
+    if (clr) clr.addEventListener('click', function(){ recallIn.value = ''; recallBox.innerHTML = ''; });
+    // posSaleDetail already knows how to show a finished sale -- its lines,
+    // tenders, returns, and the reprint and refund actions -- so a recalled
+    // invoice opens in exactly the same view as one reached from the sales
+    // list, rather than a second half-built one.
+    recallBox.querySelectorAll('[data-recall-open]').forEach(function(b){
+      b.addEventListener('click', function(){
+        posSaleDetail(parseInt(b.getAttribute('data-recall-open'), 10), function(){ doRecall(); });
+      });
+    });
+  }
+  var rgo = document.getElementById('cashRecallGo');
+  if (rgo) rgo.addEventListener('click', doRecall);
+  if (recallIn) recallIn.addEventListener('keydown', function(e){ if (e.key === 'Enter') doRecall(); });
   panel.querySelectorAll('.cashRow, [data-take]').forEach(function(el){
     el.addEventListener('click', function(e){
       e.stopPropagation();
@@ -10709,6 +10783,61 @@ async function submitPo(){
     msg.style.background = '#fee2e2'; msg.style.color = '#b91c1c'; msg.textContent = e.message;
   }
 }
+// The LOCAL calendar date, not the UTC one. toISOString() converts to UTC
+// first, and Jamaica is UTC-5/-4 -- so from about 19:00 or 20:00 onwards it
+// returns tomorrow. That put tomorrow's date in "Paid on" and "Entry date" for
+// the last few hours of every working day, against a server whose CURRENT_DATE
+// is local, and backdated a statement's default range by a day.
+function todayStr(d){
+  var t = d || new Date();
+  return String(t.getFullYear()) + '-'
+    + String(t.getMonth() + 1).padStart(2, '0') + '-'
+    + String(t.getDate()).padStart(2, '0');
+}
+
+// Supplier payments against one purchase order: what was billed, what has been
+// paid, what is still owed, and the ledger behind it. Rendered on the PO itself
+// rather than only in the payables report, because paying a supplier is a thing
+// you do while looking at their invoice.
+function poPaymentsPanel(po){
+  var billed = Number(po.invoice_total_usd != null ? po.invoice_total_usd : (po.total_usd || 0));
+  var paid = Number(po.amount_paid_usd || 0);
+  var owed = Number(po.balance_due_usd || 0);
+  // A supplier total that disagrees with our own line maths is a discrepancy to
+  // look at, not something to reconcile away silently.
+  var variance = (po.invoice_total_usd != null && po.total_usd != null)
+    ? Math.round((Number(po.invoice_total_usd) - Number(po.total_usd)) * 100) / 100 : 0;
+  return '<div class="panel" style="margin:0 16px 16px">' +
+    '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">' +
+      '💵 Supplier payments' +
+      (owed > 0.005 ? '<span style="margin-left:8px;font-weight:600;color:#b45309">' + fmtMoney(owed) + ' owed</span>'
+                    : (billed > 0 ? '<span style="margin-left:8px;font-weight:600;color:var(--ok,#15803d)">settled</span>' : '')) +
+      (po.due_date ? '<span style="margin-left:8px;font-weight:600;color:var(--muted)">due ' + esc(String(po.due_date).slice(0, 10)) + '</span>' : '') +
+    '</div>' +
+    '<div style="padding:12px 14px">' +
+      '<div class="tiles" style="margin-bottom:12px">' +
+        tile('billed', fmtMoney(billed), '', '',
+          po.invoice_total_usd != null ? 'supplier invoice' : 'from our own lines') +
+        tile('paid', fmtMoney(paid)) +
+        tile('owed', fmtMoney(owed), owed > 0.005 ? 'warn' : '') +
+        (Math.abs(variance) > 0.005
+          ? tile('invoice vs lines', fmtMoney(variance), 'alert', '', 'their total less ours')
+          : '') +
+      '</div>' +
+      '<div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap">' +
+        '<div><label class="lbl">Amount</label><input id="poPayAmt" type="number" min="0.01" step="0.01" class="fld" style="width:120px" placeholder="' + (owed > 0.005 ? Number(owed).toFixed(2) : '0.00') + '"/></div>' +
+        '<div><label class="lbl">Method</label><select id="poPayMethod" class="fld" style="width:120px">' +
+          ['cash', 'cheque', 'bank', 'card', 'other'].map(function(m){ return '<option value="' + m + '">' + m + '</option>'; }).join('') +
+        '</select></div>' +
+        '<div><label class="lbl">Paid on</label><input id="poPayOn" type="date" class="fld" value="' + todayStr() + '"/></div>' +
+        '<div><label class="lbl">Reference</label><input id="poPayRef" class="fld" style="width:150px" placeholder="cheque no."/></div>' +
+        '<button class="btn ok" id="poPayGo">Record payment</button>' +
+      '</div>' +
+      '<div id="poPayList" style="margin-top:12px"><small style="color:var(--muted)">Loading payments…</small></div>' +
+    '</div>' +
+  '</div>';
+}
+
 async function renderPoDetail(panel, id){
   panel.innerHTML = '<div class="empty">Loading…</div>';
   var d;
@@ -10748,8 +10877,36 @@ async function renderPoDetail(panel, id){
           '</tr>';
         }).join('') +
       '</tbody></table>' +
+      // The supplier's paperwork goes in with the goods, not as a second trip
+      // back to this screen afterwards -- that is how it ends up never entered.
+      // Shown whether or not there is still stock to receive. Gating it on
+      // canReceive hid it the moment a delivery was fully received -- which is
+      // exactly when the invoice is in your hand and the terms need entering.
+      // With nothing left to receive, "Save invoice details" PATCHes the PO
+      // instead of going through the receive action.
+      ('<div class="panel" style="margin-top:14px">' +
+            '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">' +
+              '🧾 Supplier invoice <span style="font-weight:600;color:var(--muted)">' +
+              (canReceive ? '— optional, saved with the receipt' : '— edit and save on its own') + '</span>' +
+            '</div>' +
+            '<div style="padding:12px 14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">' +
+              '<div><label class="lbl">Invoice no.</label><input id="poInvNo" class="fld" value="' + esc(po.invoice_number || '') + '" placeholder="theirs"/></div>' +
+              '<div><label class="lbl">Invoice date</label><input id="poInvDate" type="date" class="fld" value="' + esc(po.invoice_date ? String(po.invoice_date).slice(0, 10) : '') + '"/>' +
+                '<small style="color:var(--muted)">terms run from here</small></div>' +
+              '<div><label class="lbl">Entry date</label><input id="poEntryDate" type="date" class="fld" value="' + esc(po.received_date ? String(po.received_date).slice(0, 10) : todayStr()) + '"/>' +
+                '<small style="color:var(--muted)">when keyed in here</small></div>' +
+              '<div><label class="lbl">Invoice total</label><input id="poInvTotal" type="number" min="0" step="0.01" class="fld" value="' + esc(po.invoice_total_usd == null ? '' : po.invoice_total_usd) + '" placeholder="as billed"/></div>' +
+              '<div><label class="lbl">Tax</label><input id="poInvTax" type="number" min="0" step="0.01" class="fld" value="' + esc(po.tax_usd == null ? '' : po.tax_usd) + '"/></div>' +
+              '<div><label class="lbl">Freight</label><input id="poInvShip" type="number" min="0" step="0.01" class="fld" value="' + esc(po.shipping_usd == null ? '' : po.shipping_usd) + '"/></div>' +
+              '<div><label class="lbl">Terms (net days)</label><input id="poInvTerms" type="number" min="0" step="1" class="fld" value="' + esc(po.payment_terms_days == null ? '' : po.payment_terms_days) + '" placeholder="e.g. 30"/>' +
+                (po.due_date ? '<small style="color:var(--muted)">due ' + esc(String(po.due_date).slice(0, 10)) + '</small>' : '') + '</div>' +
+            '</div>' +
+            (canReceive ? '' :
+              '<div style="padding:0 14px 12px"><button class="btn ok" id="poInvSave">Save invoice details</button></div>') +
+          '</div>') +
       (canReceive ? '<button class="btn ok" id="poReceiveGo" style="margin-top:10px">Receive entered quantities</button>' : '') +
     '</div>' +
+    poPaymentsPanel(po) +
     '<details style="border-top:1px solid var(--line);background:var(--card-soft)">' +
       '<summary style="padding:12px 16px;cursor:pointer;font-weight:700;color:var(--heading)">+ Add line item</summary>' +
       '<form id="poItemForm" style="padding:14px 18px;display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:10px;max-width:760px" onsubmit="event.preventDefault();submitPoItem(' + id + ');">' +
@@ -10782,8 +10939,97 @@ async function renderPoDetail(panel, id){
     });
     if (!items.length) { posToast('Enter a quantity to receive on at least one line.', true); return; }
     recvBtn.disabled = true;
-    try { await api('/api/admin/purchase-orders/' + id + '/receive', { method:'POST', body: { items: items } }); posToast('Received'); renderPurchaseOrders(panel); }
+    // The invoice panel rides along with the receipt. A blank field is sent as
+    // '' and the endpoint stores NULL, so leaving the panel untouched records
+    // nothing rather than zeroing what is already there.
+    var g = function(elId){ var el = document.getElementById(elId); return el ? el.value.trim() : undefined; };
+    try {
+      var res = await api('/api/admin/purchase-orders/' + id + '/receive', { method:'POST', body: {
+        items: items,
+        invoice_number: g('poInvNo'),
+        invoice_date: g('poInvDate'),
+        entry_date: g('poEntryDate'),
+        invoice_total_usd: g('poInvTotal'),
+        tax_usd: g('poInvTax'),
+        shipping_usd: g('poInvShip'),
+        payment_terms_days: g('poInvTerms'),
+      }});
+      // A supplier billing something other than the lines add up to is worth
+      // saying at the moment of receipt, while the paperwork is still in hand.
+      if (res.invoice_variance_usd != null && Math.abs(res.invoice_variance_usd) > 0.005) {
+        posToast('Received — note: their invoice is ' + fmtMoney(Math.abs(res.invoice_variance_usd)) +
+                 (res.invoice_variance_usd > 0 ? ' more' : ' less') + ' than the lines total.', true);
+      } else {
+        posToast('Received');
+      }
+      PO_VIEW_ID = id; renderPoDetail(panel, id);
+    }
     catch (e) { posToast('Receive failed: ' + e.message, true); recvBtn.disabled = false; }
+  });
+
+  // Saving the invoice panel on a PO with nothing left to receive: the same
+  // fields, straight onto the PO.
+  var invSave = document.getElementById('poInvSave');
+  if (invSave) invSave.addEventListener('click', async function(){
+    var g = function(elId){ var el = document.getElementById(elId); return el ? el.value.trim() : undefined; };
+    invSave.disabled = true;
+    try {
+      await api('/api/admin/purchase-orders/' + id, { method:'PATCH', body: {
+        invoice_number: g('poInvNo'),
+        invoice_date: g('poInvDate'),
+        received_date: g('poEntryDate') || undefined,
+        invoice_total_usd: g('poInvTotal'),
+        tax_usd: g('poInvTax'),
+        shipping_usd: g('poInvShip'),
+        payment_terms_days: g('poInvTerms'),
+      }});
+      posToast('Invoice details saved');
+      renderPoDetail(panel, id);
+    } catch (e) { posToast(e.message, true); invSave.disabled = false; }
+  });
+
+  // ---- supplier payments -------------------------------------------------
+  async function paintPayments(){
+    var box = document.getElementById('poPayList');
+    if (!box) return;
+    var r;
+    try { r = await api('/api/admin/purchase-orders/' + id + '/payments'); }
+    catch (e) { box.innerHTML = '<small style="color:var(--red)">' + esc(e.message) + '</small>'; return; }
+    if (!r.payments.length) { box.innerHTML = '<small style="color:var(--muted)">No payments recorded against this order yet.</small>'; return; }
+    box.innerHTML = '<table><thead><tr><th>Paid on</th><th>Method</th><th>Reference</th><th>Taken by</th><th class="r">Amount</th><th></th></tr></thead><tbody>' +
+      r.payments.map(function(p){
+        return '<tr><td>' + esc(String(p.paid_on || p.created_at).slice(0, 10)) + '</td>' +
+          '<td>' + esc(p.method || '—') + '</td><td>' + esc(p.reference || '—') + '</td>' +
+          '<td>' + esc(p.received_by_name || '—') + '</td>' +
+          '<td class="r"><b>' + fmtMoney(p.amount_usd) + '</b></td>' +
+          '<td class="r"><button class="btn" data-unpay="' + p.id + '" style="font-size:11px;background:#fee2e2;color:#b91c1c">Remove</button></td></tr>';
+      }).join('') + '</tbody></table>';
+    box.querySelectorAll('[data-unpay]').forEach(function(b){
+      b.addEventListener('click', async function(){
+        if (!confirm('Remove this payment? The balance owed goes back up.')) return;
+        try { await api('/api/admin/purchase-orders/' + id + '/payments/' + b.getAttribute('data-unpay'), { method:'DELETE' });
+              posToast('Payment removed'); renderPoDetail(panel, id); }
+        catch (e) { posToast(e.message, true); }
+      });
+    });
+  }
+  paintPayments();
+
+  var payGo = document.getElementById('poPayGo');
+  if (payGo) payGo.addEventListener('click', async function(){
+    var amt = document.getElementById('poPayAmt').value.trim();
+    if (!(Number(amt) > 0)) { posToast('Enter an amount.', true); return; }
+    payGo.disabled = true;
+    try {
+      await api('/api/admin/purchase-orders/' + id + '/payments', { method:'POST', body: {
+        amount_usd: Number(amt),
+        method: document.getElementById('poPayMethod').value,
+        paid_on: document.getElementById('poPayOn').value || null,
+        reference: document.getElementById('poPayRef').value.trim() || null,
+      }});
+      posToast('Payment recorded');
+      renderPoDetail(panel, id);
+    } catch (e) { posToast(e.message, true); payGo.disabled = false; }
   });
 }
 async function submitPoItem(id){
@@ -11379,6 +11625,195 @@ var CREDIT_TYPE_OPTS = [
   ['revolving', 'Revolving'],
   ['cod',       'COD'],
 ];
+// A statement defaults to the last twelve months: long enough that an account
+// with slow-moving arrears shows how they built up, short enough not to render
+// a decade of a busy trade account by default.
+function stmtDefaultFrom(){
+  var d = new Date(); d.setFullYear(d.getFullYear() - 1);
+  return todayStr(d);          // local date, for the reason given on todayStr
+}
+
+// Ageing bucket colours: current is fine, everything else gets warmer the
+// later it is. Used by both the on-screen statement and the printed one.
+var STMT_BUCKET_COLOUR = {
+  'current': '#15803d', '1-30 days': '#b45309', '31-60 days': '#c2410c',
+  '61-90 days': '#b91c1c', 'over 90 days': '#7f1d1d',
+};
+
+// The statement body: terms, the ageing summary, the open items that make it
+// up, then the period's activity. Deliberately in that order -- "what is owed
+// and how late" is the question a statement answers; the transaction list is
+// the supporting detail.
+function stmtHtml(s){
+  var t = s.totals, c = s.customer;
+  var termsLabel = c.payment_terms_days != null
+    ? 'net ' + c.payment_terms_days + ' days'
+    : '<span style="color:#b45309">not set — invoices due on issue</span>';
+
+  var head =
+    '<div class="tiles" style="margin-bottom:12px">' +
+      tile('outstanding', fmtMoney(t.owed), t.owed > 0.005 ? 'warn' : '', '',
+        t.open_invoices + ' open invoice' + (t.open_invoices === 1 ? '' : 's')) +
+      tile('past due', fmtMoney(t.overdue), t.overdue > 0.005 ? 'alert' : '', '',
+        t.oldest_days > 0 ? 'oldest ' + t.oldest_days + ' days' : 'nothing overdue') +
+      tile('not yet due', fmtMoney(t.current)) +
+      tile('terms', c.payment_terms_days != null ? 'net ' + c.payment_terms_days : '—', '', '',
+        c.payment_terms_days != null ? 'from the invoice date' : 'due on issue') +
+      (t.credit_limit_usd != null
+        ? tile('credit available', fmtMoney(t.credit_available),
+            t.credit_available < 0 ? 'alert' : '', '',
+            'of ' + fmtMoney(t.credit_limit_usd) + ' limit')
+        : '') +
+    '</div>';
+
+  // Ageing summary, as a labelled bar plus the figures.
+  var ageing = '';
+  if ((s.ageing || []).length) {
+    ageing =
+      '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);font-weight:700;margin:4px 0 6px">Ageing — as at today</div>' +
+      '<div style="display:flex;height:10px;border-radius:999px;overflow:hidden;margin-bottom:8px;background:var(--card-soft2)">' +
+        s.ageing.map(function(a){
+          var pct = t.owed > 0 ? (a.balance / t.owed * 100) : 0;
+          return '<div style="width:' + pct.toFixed(2) + '%;background:' + (STMT_BUCKET_COLOUR[a.bucket] || '#64748b') + '" title="' + esc(a.bucket) + '"></div>';
+        }).join('') +
+      '</div>' +
+      '<table style="width:100%;font-size:12.5px;margin-bottom:14px"><thead><tr>' +
+        '<th align="left">Bucket</th><th align="right">Invoices</th><th align="right">Balance</th><th align="right">Share</th>' +
+      '</tr></thead><tbody>' +
+        s.ageing.map(function(a){
+          var pct = t.owed > 0 ? (a.balance / t.owed * 100) : 0;
+          return '<tr><td><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:' +
+              (STMT_BUCKET_COLOUR[a.bucket] || '#64748b') + ';margin-right:6px"></span><b>' + esc(a.bucket) + '</b></td>' +
+            '<td align="right">' + a.invoices + '</td>' +
+            '<td align="right"><b>' + fmtMoney(a.balance) + '</b></td>' +
+            '<td align="right">' + pct.toFixed(1) + '%</td></tr>';
+        }).join('') +
+        '<tr style="border-top:2px solid var(--line)"><td><b>Total owed</b></td><td align="right"><b>' + t.open_invoices + '</b></td>' +
+          '<td align="right"><b>' + fmtMoney(t.owed) + '</b></td><td></td></tr>' +
+      '</tbody></table>';
+  } else {
+    ageing = '<div class="empty" style="padding:12px 0">Nothing outstanding on this account.</div>';
+  }
+
+  // The open items behind the ageing. Capped on screen; the full list prints.
+  var SHOW = 40;
+  var items = (s.open_items || []);
+  var openTbl = items.length
+    ? '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);font-weight:700;margin:4px 0 6px">' +
+        'Open items' + (items.length > SHOW ? ' — showing the ' + SHOW + ' oldest of ' + items.length : '') + '</div>' +
+      '<table style="width:100%;font-size:12.5px;margin-bottom:14px"><thead><tr>' +
+        '<th align="left">Invoice</th><th align="left">Date</th><th align="left">Due</th>' +
+        '<th align="right">Billed</th><th align="right">Settled</th><th align="right">Still due</th><th align="right">Overdue</th>' +
+      '</tr></thead><tbody>' +
+        items.slice(0, SHOW).map(function(o){
+          return '<tr><td><b>' + esc(o.receipt_number || '—') + '</b></td>' +
+            '<td>' + esc(o.day) + '</td>' +
+            '<td>' + esc(o.due_date ? String(o.due_date).slice(0, 10) : '—') + '</td>' +
+            '<td align="right">' + fmtMoney(o.charged) + '</td>' +
+            '<td align="right">' + fmtMoney(o.settled) + '</td>' +
+            '<td align="right"><b>' + fmtMoney(o.balance) + '</b></td>' +
+            '<td align="right" style="color:' + (o.days_overdue > 0 ? '#b91c1c' : 'var(--muted)') + '">' +
+              (o.days_overdue > 0 ? o.days_overdue + 'd' : '—') + '</td></tr>';
+        }).join('') + '</tbody></table>'
+    : '';
+
+  // The period's movements, with the running balance.
+  var act = (s.lines || []).length
+    ? '<details><summary style="cursor:pointer;font-size:12px;color:var(--sky-dark);font-weight:700">' +
+        'Activity ' + esc(s.from) + ' to ' + esc(s.to) + ' — ' + t.invoices + ' invoices, ' + t.payments + ' payments' +
+        // The list is capped for display; the balances above are not. Say so,
+        // rather than letting a partial list read as the whole account.
+        (t.activity_total > t.activity_shown
+          ? ' <span style="font-weight:400;color:var(--muted)">(listing the earliest ' +
+            rNum(t.activity_shown) + ' of ' + rNum(t.activity_total) + ' — the figures above cover all of them)</span>'
+          : '') +
+      '</summary>' +
+      '<table style="width:100%;font-size:12.5px;margin-top:8px"><thead><tr>' +
+        '<th align="left">Date</th><th align="left">Type</th><th align="left">Reference</th>' +
+        '<th align="right">Charge</th><th align="right">Credit</th><th align="right">Balance</th>' +
+      '</tr></thead><tbody>' +
+        '<tr style="color:var(--muted)"><td colspan="5">Opening balance at ' + esc(s.from) + '</td>' +
+          '<td align="right"><b>' + fmtMoney(t.opening) + '</b></td></tr>' +
+        s.lines.map(function(l){
+          return '<tr><td>' + esc(l.day) + '</td><td>' + esc(l.kind) + '</td>' +
+            '<td>' + esc(l.reference || '—') + '</td>' +
+            '<td align="right">' + (l.charge ? fmtMoney(l.charge) : '—') + '</td>' +
+            '<td align="right">' + (l.credit ? fmtMoney(l.credit) : '—') + '</td>' +
+            '<td align="right">' + fmtMoney(l.balance) + '</td></tr>';
+        }).join('') +
+        // On a truncated list the walked running balance stops wherever the cap
+        // fell, so the closing row shows the SQL figure and says the column
+        // above it is partial. Otherwise the two would disagree on screen.
+        '<tr style="border-top:2px solid var(--line)"><td colspan="5"><b>Closing balance at ' + esc(s.to) + '</b>' +
+          (t.activity_total > t.activity_shown
+            ? '<br/><small style="color:var(--muted)">computed over all ' + rNum(t.activity_total) +
+              ' movements; the running column above covers only those listed</small>' : '') + '</td>' +
+          '<td align="right"><b>' + fmtMoney(t.closing) + '</b></td></tr>' +
+      '</tbody></table></details>'
+    : '<div class="empty" style="padding:12px 0">No activity between ' + esc(s.from) + ' and ' + esc(s.to) + '.</div>';
+
+  return head + ageing + openTbl + act +
+    ((s.advice || []).length ? rptAdvice(s.advice) : '');
+}
+
+// A statement the customer can be handed or emailed. Uses the same print
+// pipeline as the other documents so it picks up the shop's letterhead.
+function stmtPrint(s){
+  var t = s.totals, c = s.customer;
+  var shop = POS_SHOP || {};
+  var rows = (s.open_items || []).map(function(o){
+    return '<tr><td>' + esc(o.receipt_number || '') + '</td><td>' + esc(o.day) + '</td>' +
+      '<td>' + esc(o.due_date ? String(o.due_date).slice(0, 10) : '—') + '</td>' +
+      '<td class="r">' + fmtMoney(o.charged) + '</td><td class="r">' + fmtMoney(o.settled) + '</td>' +
+      '<td class="r">' + fmtMoney(o.balance) + '</td>' +
+      '<td class="r">' + (o.days_overdue > 0 ? o.days_overdue + ' days' : 'current') + '</td></tr>';
+  }).join('');
+  var html =
+    '<style>body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;font-size:12px;padding:18px;color:#111}' +
+    'h1{font-size:17px;margin:0 0 2px}h2{font-size:13px;margin:16px 0 6px}' +
+    'table{width:100%;border-collapse:collapse;margin-bottom:10px}' +
+    'th,td{padding:5px 7px;border-bottom:1px solid #ddd;text-align:left}' +
+    'th{background:#f3f4f6;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px}' +
+    '.r{text-align:right}.tot td{font-weight:700;border-top:2px solid #333;border-bottom:0}' +
+    '.meta{display:flex;gap:28px;margin:10px 0 14px;font-size:11.5px}' +
+    '.due{color:#b91c1c;font-weight:700}</style>' +
+    '<h1>' + esc(shop.name || 'Statement of Account') + '</h1>' +
+    '<div style="font-size:11px;color:#555">' + esc(shop.address || '') +
+      (shop.phone ? ' · ' + esc(shop.phone) : '') + '</div>' +
+    '<h2>Statement of Account</h2>' +
+    '<div class="meta">' +
+      '<div><b>' + esc(c.name || '') + '</b>' +
+        (c.account_number ? '<br/>Account ' + esc(c.account_number) : '') +
+        (c.phone ? '<br/>' + esc(c.phone) : '') + '</div>' +
+      '<div>Period<br/><b>' + esc(s.from) + ' to ' + esc(s.to) + '</b></div>' +
+      '<div>Terms<br/><b>' + (c.payment_terms_days != null ? 'net ' + c.payment_terms_days + ' days' : 'due on issue') + '</b></div>' +
+      '<div>Statement date<br/><b>' + esc(todayStr()) + '</b></div>' +
+    '</div>' +
+    '<h2>Ageing</h2>' +
+    '<table><thead><tr><th>Bucket</th><th class="r">Invoices</th><th class="r">Balance</th></tr></thead><tbody>' +
+      (s.ageing || []).map(function(a){
+        return '<tr><td>' + esc(a.bucket) + '</td><td class="r">' + a.invoices + '</td>' +
+          '<td class="r">' + fmtMoney(a.balance) + '</td></tr>';
+      }).join('') +
+      '<tr class="tot"><td>Total outstanding</td><td class="r">' + t.open_invoices + '</td>' +
+        '<td class="r">' + fmtMoney(t.owed) + '</td></tr>' +
+    '</tbody></table>' +
+    (t.overdue > 0.005
+      ? '<div class="due">' + fmtMoney(t.overdue) + ' of this is past due' +
+        (t.oldest_days > 0 ? ', the oldest by ' + t.oldest_days + ' days' : '') + '.</div>'
+      : '') +
+    (rows ? '<h2>Open items</h2><table><thead><tr><th>Invoice</th><th>Date</th><th>Due</th>' +
+      '<th class="r">Billed</th><th class="r">Settled</th><th class="r">Still due</th><th class="r">Age</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table>' : '') +
+    (shop.statement_notice ? '<div style="margin-top:14px;font-size:11px;color:#555">' + esc(shop.statement_notice) + '</div>' : '');
+  var w = window.open('', '_blank');
+  if (!w) { posToast('Allow pop-ups to print the statement.', true); return; }
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(function(){ try { w.print(); } catch (_) {} }, 250);
+}
+
 async function renderCustomerDetail(panel, id){
   panel.innerHTML = '<div class="empty">Loading…</div>';
   var d, addr, contacts, reminders, msgs, notices, acctPayments;
@@ -11609,9 +12044,108 @@ async function renderCustomerDetail(panel, id){
             : '') +
         '</div>' +
       '</div>' +
+    '</div>' +
+    // Statement of account, on the customer record itself. It was only
+    // reachable from Reports, where you had to know the customer's name and
+    // pick them out of a list of 400 -- while standing on their record.
+    '<div style="padding:0 16px 16px">' +
+      '<div class="panel">' +
+        '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+          '<span>📄 Statement of Account</span>' +
+          '<span style="margin-left:auto;display:flex;gap:6px;align-items:center">' +
+            '<label class="lbl" style="margin:0">From</label>' +
+            '<input type="date" id="stFrom" class="fld" style="width:140px" value="' + esc(stmtDefaultFrom()) + '"/>' +
+            '<label class="lbl" style="margin:0">To</label>' +
+            '<input type="date" id="stTo" class="fld" style="width:140px" value="' + esc(todayStr()) + '"/>' +
+            '<button class="btn" id="stRun" style="font-size:12px">Run</button>' +
+            '<button class="btn" id="stPrint" style="font-size:12px">🖨 Print</button>' +
+          '</span>' +
+        '</div>' +
+        '<div id="stBody" style="padding:12px 14px"><small style="color:var(--muted)">Loading statement…</small></div>' +
+      '</div>' +
+    '</div>' +
+    // Duplicate records: the same business entered twice at a counter ends up
+    // with half its history on each copy, so no screen shows what it really
+    // owes or has spent.
+    '<div style="padding:0 16px 16px">' +
+      '<div class="panel">' +
+        '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">' +
+          '🔗 Possible duplicates' +
+          '<span style="font-weight:600;color:var(--muted);margin-left:8px">— same name, phone or account number</span>' +
+        '</div>' +
+        '<div id="dupBody" style="padding:12px 14px"><small style="color:var(--muted)">Checking…</small></div>' +
+      '</div>' +
     '</div>';
 
   document.getElementById('custBack').addEventListener('click', function(){ CUST_VIEW_ID = null; renderCustomers(panel); });
+
+  // ---- statement of account ----
+  var LAST_STMT = null;
+  async function paintStatement(){
+    var box = document.getElementById('stBody');
+    if (!box) return;
+    box.innerHTML = '<small style="color:var(--muted)">Loading statement…</small>';
+    var f = document.getElementById('stFrom').value, t = document.getElementById('stTo').value;
+    var s;
+    try { s = await api('/api/admin/reports/customer-statement?from=' + f + '&to=' + t + '&customer_id=' + id); }
+    catch (e) { box.innerHTML = '<small style="color:var(--red)">' + esc(e.message) + '</small>'; return; }
+    LAST_STMT = s;
+    box.innerHTML = stmtHtml(s);
+  }
+  paintStatement();
+  document.getElementById('stRun').addEventListener('click', paintStatement);
+  document.getElementById('stPrint').addEventListener('click', function(){
+    if (!LAST_STMT) return;
+    stmtPrint(LAST_STMT);
+  });
+
+  // ---- possible duplicates ----
+  async function paintDupes(){
+    var box = document.getElementById('dupBody');
+    if (!box) return;
+    var r;
+    try { r = await api('/api/admin/users/' + id + '/similar'); }
+    catch (e) { box.innerHTML = '<small style="color:var(--red)">' + esc(e.message) + '</small>'; return; }
+    var m = r.matches || [];
+    if (!m.length) {
+      box.innerHTML = '<small style="color:var(--muted)">No other customer shares this name, phone or account number.</small>';
+      return;
+    }
+    box.innerHTML =
+      '<table style="width:100%;font-size:12.5px"><thead><tr>' +
+        '<th align="left">Customer</th><th align="left">Matched on</th><th align="left">Added</th>' +
+        '<th align="right">Sales</th><th align="right">Spend</th><th align="right">Owes</th><th></th>' +
+      '</tr></thead><tbody>' +
+      m.map(function(x){
+        return '<tr><td><b>' + esc(x.name || '—') + '</b>' +
+            (x.account_number ? '<br/><small style="color:var(--muted)">' + esc(x.account_number) + '</small>' : '') + '</td>' +
+          '<td>' + esc(x.why) + '</td>' +
+          '<td>' + esc(x.created_at ? String(x.created_at).slice(0, 10) : '—') + '</td>' +
+          '<td align="right">' + rNum(x.sales) + '</td>' +
+          '<td align="right">' + fmtMoney(x.spend) + '</td>' +
+          '<td align="right">' + fmtMoney(x.owed) + '</td>' +
+          '<td align="right"><button class="btn" data-merge="' + x.id + '" data-mname="' + esc(x.name || '') + '" ' +
+            'style="font-size:11px">Merge into this one ›</button></td></tr>';
+      }).join('') + '</tbody></table>' +
+      '<small style="color:var(--muted);display:block;margin-top:8px">Merging moves the other record\'s sales, ' +
+      'quotes, payments, addresses and contacts onto <b>' + esc(u.name || u.email) + '</b>, then archives it. ' +
+      'Nothing is deleted and the merge is noted on the archived record.</small>';
+
+    box.querySelectorAll('[data-merge]').forEach(function(b){
+      b.addEventListener('click', async function(){
+        var other = b.getAttribute('data-mname');
+        if (!confirm('Merge "' + other + '" into "' + (u.name || u.email) + '"?\n\n' +
+                     'All of its history moves across and the duplicate is archived.')) return;
+        b.disabled = true;
+        try {
+          var res = await api('/api/admin/users/' + id + '/merge', { method:'POST', body: { merge_id: Number(b.getAttribute('data-merge')) } });
+          posToast('Merged ' + res.merged_name + ' — ' + rNum(res.rows) + ' record(s) moved');
+          renderCustomerDetail(panel, id);
+        } catch (e) { posToast(e.message, true); b.disabled = false; }
+      });
+    });
+  }
+  paintDupes();
 
   // ---- address edit / delete ----
   panel.querySelectorAll('[data-aedit]').forEach(function(b){
@@ -16922,6 +17456,20 @@ async function renderSettings(panel){
         '</div>' +
       '</div>' +
 
+      // Sales reps live here because this is where the shop is configured, and
+      // a rep is a setting as much as a person: who the till offers on a
+      // ticket. The roster itself is `mechanics` rows -- see the note on
+      // POST /api/admin/sales-reps for why that table and not a new one.
+      '<div class="panel" style="margin-bottom:16px" id="setRepsPanel">' +
+        '<div style="padding:12px 16px;border-bottom:1px solid var(--line);font-weight:700;font-size:13px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+          '<span>🧑‍💼 Sales reps</span>' +
+          '<label style="margin-left:auto;display:flex;gap:6px;align-items:center;font-size:12.5px;font-weight:400;cursor:pointer">' +
+            '<input type="checkbox" id="setRepsHideInactive" checked style="width:15px;height:15px"/> Hide inactive' +
+          '</label>' +
+        '</div>' +
+        '<div id="setRepsBody" style="padding:12px 16px"><small style="color:var(--muted)">Loading reps…</small></div>' +
+      '</div>' +
+
       '<div class="panel" style="margin-bottom:16px">' +
         '<div style="padding:12px 16px;border-bottom:1px solid var(--line);font-weight:700;font-size:13px">🖥 POS terminal rules</div>' +
         '<div style="padding:14px 16px;display:grid;gap:14px">' +
@@ -17347,6 +17895,131 @@ async function renderSettings(panel){
 
   var dbRefreshBtn = document.getElementById('dbRefreshBtn');
   if (dbRefreshBtn) dbRefreshBtn.addEventListener('click', function(){ renderSettings(panel); });
+
+  // ---- sales reps ---------------------------------------------------------
+  async function paintReps(){
+    var box = document.getElementById('setRepsBody');
+    if (!box) return;
+    var hide = document.getElementById('setRepsHideInactive').checked;
+    box.innerHTML = '<small style="color:var(--muted)">Loading reps…</small>';
+    var r;
+    try { r = await api('/api/admin/sales-reps' + (hide ? '' : '?include_inactive=1')); }
+    catch (e) { box.innerHTML = '<small style="color:var(--red)">' + esc(e.message) + '</small>'; return; }
+    var reps = r.reps || [];
+    box.innerHTML =
+      (reps.length
+        ? '<table style="width:100%;font-size:12.5px"><thead><tr>' +
+            '<th align="left">Name</th><th align="left">Role</th><th align="left">Contact</th>' +
+            '<th align="right">Comm. %</th><th align="right">Sales</th><th align="left">Status</th><th></th>' +
+          '</tr></thead><tbody>' +
+          reps.map(function(m){
+            var refs = (m.sales||0)+(m.quotes||0)+(m.payouts||0)+(m.work_orders||0);
+            return '<tr' + (m.is_active ? '' : ' style="opacity:.55"') + ' data-rep="' + m.id + '">' +
+              '<td><b>' + esc(m.name) + '</b>' +
+                (m.linked_user ? '<br/><small style="color:var(--muted)">staff: ' + esc(m.linked_user) + '</small>' : '') + '</td>' +
+              '<td>' + esc(m.role || '—') + '</td>' +
+              '<td>' + esc(m.phone || m.email || '—') + '</td>' +
+              '<td align="right">' + (m.commission_pct != null ? m.commission_pct + '%' : '<span style="color:#b45309">not set</span>') + '</td>' +
+              '<td align="right">' + rNum(m.sales || 0) + '</td>' +
+              '<td>' + badge(m.is_active ? 'active' : 'inactive', m.is_active ? 'ok' : 'bad') + '</td>' +
+              '<td align="right" style="white-space:nowrap">' +
+                '<button class="btn" data-repedit="' + m.id + '" style="font-size:11px">Edit</button> ' +
+                '<button class="btn" data-reptoggle="' + m.id + '" data-active="' + m.is_active + '" style="font-size:11px">' +
+                  (m.is_active ? 'Retire' : 'Reactivate') + '</button> ' +
+                // Only offered where nothing points at them: anywhere else a
+                // delete would blank history, so the button is not shown.
+                (refs === 0
+                  ? '<button class="btn" data-repdel="' + m.id + '" style="font-size:11px;background:#fee2e2;color:#b91c1c">Delete</button>'
+                  : '') +
+              '</td></tr>' +
+              '<tr data-repform="' + m.id + '" style="display:none"><td colspan="7" style="background:var(--card-soft)">' +
+                '<div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;padding:8px 0">' +
+                  '<div><label class="lbl">Name</label><input class="fld re-name" style="width:180px" value="' + esc(m.name) + '"/></div>' +
+                  '<div><label class="lbl">Role</label><select class="fld re-role" style="width:120px">' +
+                    ['advisor', 'mechanic', 'both'].map(function(x){ return '<option value="' + x + '"' + (m.role === x ? ' selected' : '') + '>' + x + '</option>'; }).join('') +
+                  '</select></div>' +
+                  '<div><label class="lbl">Phone</label><input class="fld re-phone" style="width:130px" value="' + esc(m.phone || '') + '"/></div>' +
+                  '<div><label class="lbl">Email</label><input class="fld re-email" style="width:180px" value="' + esc(m.email || '') + '"/></div>' +
+                  '<div><label class="lbl">Commission %</label><input type="number" min="0" step="0.1" class="fld re-comm" style="width:100px" value="' + (m.commission_pct != null ? m.commission_pct : '') + '" placeholder="none"/></div>' +
+                  '<button class="btn ok" data-repsave="' + m.id + '">Save</button>' +
+                '</div></td></tr>';
+          }).join('') + '</tbody></table>'
+        : '<div class="empty" style="padding:14px 0">No sales reps' + (document.getElementById('setRepsHideInactive').checked ? ' active' : '') + ' yet.</div>') +
+      (r.hidden ? '<small style="color:var(--muted);display:block;margin-top:8px">' + rNum(r.hidden) + ' inactive rep' + (r.hidden === 1 ? '' : 's') + ' hidden.</small>' : '') +
+      '<details style="margin-top:10px"><summary style="cursor:pointer;font-size:12px;color:var(--sky-dark);font-weight:700">+ Add a sales rep</summary>' +
+        '<div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;padding:10px 0">' +
+          '<div><label class="lbl">Name *</label><input id="repNewName" class="fld" style="width:180px"/></div>' +
+          '<div><label class="lbl">Role</label><select id="repNewRole" class="fld" style="width:120px">' +
+            '<option value="advisor">advisor</option><option value="mechanic">mechanic</option><option value="both">both</option></select></div>' +
+          '<div><label class="lbl">Phone</label><input id="repNewPhone" class="fld" style="width:130px"/></div>' +
+          '<div><label class="lbl">Commission %</label><input id="repNewComm" type="number" min="0" step="0.1" class="fld" style="width:100px" placeholder="none"/></div>' +
+          '<button class="btn ok" id="repNewGo">Add rep</button>' +
+        '</div>' +
+        '<small style="color:var(--muted)">A rep added here appears on the till\'s ticket. Someone who is also a staff ' +
+        'member is better added under <b>Staff</b> with the “Sales rep” box ticked — that links the two records.</small>' +
+      '</details>';
+
+    box.querySelectorAll('[data-repedit]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var row = box.querySelector('[data-repform="' + b.getAttribute('data-repedit') + '"]');
+        row.style.display = row.style.display === 'none' ? '' : 'none';
+      });
+    });
+    box.querySelectorAll('[data-repsave]').forEach(function(b){
+      b.addEventListener('click', async function(){
+        var id = b.getAttribute('data-repsave');
+        var row = box.querySelector('[data-repform="' + id + '"]');
+        var comm = row.querySelector('.re-comm').value.trim();
+        try {
+          await api('/api/admin/sales-reps/' + id, { method:'PATCH', body: {
+            name: row.querySelector('.re-name').value.trim(),
+            role: row.querySelector('.re-role').value,
+            phone: row.querySelector('.re-phone').value.trim(),
+            email: row.querySelector('.re-email').value.trim(),
+            commission_pct: comm === '' ? null : Number(comm),
+          }});
+          posToast('Saved'); paintReps();
+        } catch (e) { posToast(e.message, true); }
+      });
+    });
+    box.querySelectorAll('[data-reptoggle]').forEach(function(b){
+      b.addEventListener('click', async function(){
+        var active = b.getAttribute('data-active') === 'true';
+        try {
+          await api('/api/admin/sales-reps/' + b.getAttribute('data-reptoggle'), { method:'PATCH', body: { is_active: !active } });
+          posToast(active ? 'Retired — they no longer appear on the till' : 'Reactivated'); paintReps();
+        } catch (e) { posToast(e.message, true); }
+      });
+    });
+    box.querySelectorAll('[data-repdel]').forEach(function(b){
+      b.addEventListener('click', async function(){
+        if (!confirm('Delete this sales rep? Only possible because nothing references them.')) return;
+        try {
+          var res = await api('/api/admin/sales-reps/' + b.getAttribute('data-repdel'), { method:'DELETE' });
+          posToast(res.retired ? res.message : 'Deleted', !!res.retired);
+          paintReps();
+        } catch (e) { posToast(e.message, true); }
+      });
+    });
+    var go = document.getElementById('repNewGo');
+    if (go) go.addEventListener('click', async function(){
+      var nm = document.getElementById('repNewName').value.trim();
+      if (!nm) { posToast('Enter a name.', true); return; }
+      var comm = document.getElementById('repNewComm').value.trim();
+      try {
+        await api('/api/admin/sales-reps', { method:'POST', body: {
+          name: nm,
+          role: document.getElementById('repNewRole').value,
+          phone: document.getElementById('repNewPhone').value.trim() || null,
+          commission_pct: comm === '' ? null : Number(comm),
+        }});
+        posToast('Rep added'); paintReps();
+      } catch (e) { posToast(e.message, true); }
+    });
+  }
+  var hideBox = document.getElementById('setRepsHideInactive');
+  if (hideBox) hideBox.addEventListener('change', paintReps);
+  paintReps();
 
   var dbCreateBtn = document.getElementById('dbCreateBtn');
   if (dbCreateBtn) dbCreateBtn.addEventListener('click', async function(){

@@ -2281,3 +2281,42 @@ CREATE TABLE IF NOT EXISTS commission_payouts (
   created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_commission_payouts_mech ON commission_payouts (mechanic_id, created_at);
+
+-- =============================================================================
+--  SUPPLIER INVOICE DETAIL ON A RECEIPT
+--
+--  Receiving stock and being billed for it are two different events on two
+--  different dates, and the paperwork that arrives with the goods carries
+--  figures of its own. Before this the only dates a PO had were expected_date
+--  and received_date, and the only totals were the ones this system computed
+--  from the lines -- so a supplier invoice dated the 3rd, entered on the 11th,
+--  on 30-day terms, billing a total that disagreed with the lines by a freight
+--  rounding, had nowhere to be recorded.
+--
+--    invoice_date       what the supplier's invoice is dated. The clock for
+--                       payment terms starts here, NOT at received_date.
+--    received_date      when the stock was entered here (already existed)
+--    invoice_total_usd  what the supplier actually billed. Deliberately
+--                       separate from total_usd, which recalcPoTotals() derives
+--                       from the lines plus shipping and tax: when the two
+--                       disagree that is a discrepancy to look at, and
+--                       overwriting one with the other would hide it.
+--    payment_terms_days net days from invoice_date
+--    due_date           invoice_date + payment_terms_days, stored so ageing can
+--                       sort and filter on it without recomputing per row
+-- =============================================================================
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS invoice_date        DATE;
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS invoice_total_usd   NUMERIC(10,2);
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS payment_terms_days  INTEGER;
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS due_date            DATE;
+
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_invoice_date ON purchase_orders (invoice_date);
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_due_date     ON purchase_orders (due_date) WHERE due_date IS NOT NULL;
+
+-- Supplier payments already have a home (purchase_order_payments, added with
+-- the reports module) but nothing could write to it: the payables report read
+-- a table no endpoint ever inserted into, so "paid" was always zero. A method
+-- vocabulary matching the POS side keeps the two reconcilable.
+ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS paid_on DATE;
+UPDATE purchase_order_payments SET paid_on = created_at::date WHERE paid_on IS NULL;
+CREATE INDEX IF NOT EXISTS idx_po_payments_paid_on ON purchase_order_payments (paid_on);
