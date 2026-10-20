@@ -1953,14 +1953,43 @@ async function dropTerminalRole(role) {
 // Brute force against 100 bits is not a threat; this exists so a broken script
 // pointed at the endpoint cannot fill the logs or hammer the database.
 const ENROL_ATTEMPTS = new Map();
+const ENROL_LIMIT = 20;          // attempts allowed per key per 60s window
+const ENROL_MAX_KEYS = 500;      // distinct keys held before eviction kicks in
 function enrolRateLimited(ip) {
   const now = Date.now();
   const rec = ENROL_ATTEMPTS.get(ip) || { n: 0, reset: now + 60000 };
   if (now > rec.reset) { rec.n = 0; rec.reset = now + 60000; }
   rec.n += 1;
   ENROL_ATTEMPTS.set(ip, rec);
-  if (ENROL_ATTEMPTS.size > 500) ENROL_ATTEMPTS.clear();   // crude, bounded
-  return rec.n > 20;
+  // Keep the map bounded, but never at the cost of a counter that is doing its
+  // job. The old form called ENROL_ATTEMPTS.clear() once it passed 500
+  // entries, which reset every caller's counter at once -- so anything able to
+  // add entries could also flush the throttle it was sitting behind (audit
+  // H2). Expiring windows are dropped first, which costs nothing. If that is
+  // not enough, entries are evicted lowest-attempt-count first and anything
+  // already at the limit is kept, so a flood of fresh keys cannot push a
+  // caller that is being throttled back out of the map. Oldest-first eviction
+  // was tried and rejected: it discards exactly the long-lived counter an
+  // attacker wants gone.
+  if (ENROL_ATTEMPTS.size > ENROL_MAX_KEYS) {
+    for (const [key, r] of ENROL_ATTEMPTS) if (now > r.reset) ENROL_ATTEMPTS.delete(key);
+    if (ENROL_ATTEMPTS.size > ENROL_MAX_KEYS) {
+      const spare = [];
+      for (const [key, r] of ENROL_ATTEMPTS) if (r.n <= ENROL_LIMIT && key !== ip) spare.push([key, r.n]);
+      spare.sort((a, b) => a[1] - b[1]);
+      for (const [key] of spare) {
+        if (ENROL_ATTEMPTS.size <= ENROL_MAX_KEYS) break;
+        ENROL_ATTEMPTS.delete(key);
+      }
+      // Everything left is at the limit. Let the map carry them rather than
+      // forgive them; the size is bounded by real distinct clients now that
+      // the key is req.ip, and this is worth knowing about.
+      if (ENROL_ATTEMPTS.size > ENROL_MAX_KEYS) {
+        console.warn('[enrol] ' + ENROL_ATTEMPTS.size + ' throttled clients in one window');
+      }
+    }
+  }
+  return rec.n > ENROL_LIMIT;
 }
 
 app.post('/api/admin/terminals/enrol-link', requireManager, async (req, res) => {
@@ -2025,7 +2054,13 @@ app.delete('/api/admin/terminals/enrol-links/:id', requireManager, async (req, r
 // that safe is below: single use, short expiry, hashed at rest, rate limited,
 // and it only ever discloses this server's own database settings.
 app.post('/api/enrol/redeem', async (req, res) => {
-  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').toString().split(',')[0].trim();
+  // req.ip, not a raw x-forwarded-for read: Express resolves it against the
+  // configured trust proxy, so the value is the one hop we actually trust
+  // rather than whatever the caller chose to put at the front of the header.
+  // The old form let a caller mint a fresh key per request and walk straight
+  // through the limit below (audit H2). Same value feeds used_from_ip, so the
+  // enrolment audit trail records the real client too.
+  const ip = req.ip || '';
   if (enrolRateLimited(ip)) return res.status(429).json({ ok: false, error: 'Too many attempts. Wait a minute and try again.' });
   if (!TERMINAL.is_db_host) return res.status(400).json({ ok: false, error: 'This machine does not hold the database.' });
 
@@ -2641,7 +2676,12 @@ app.post('/api/auth/reset-default-admin', async (req, res) => {
 //  never says whether it was the address or the password that was wrong.
 // =============================================================================
 app.post('/api/terminal/auth/verify', async (req, res) => {
-  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').toString().split(',')[0].trim();
+  // This route is a password oracle by design, so the throttle in front of it
+  // has to be keyed on something the caller cannot choose. req.ip is resolved
+  // through trust proxy; the raw x-forwarded-for read this replaces could be
+  // set to a new random value per request, which made the limit decorative
+  // against exactly the brute force it exists to stop (audit H2).
+  const ip = req.ip || '';
   if (enrolRateLimited('verify:' + ip)) return res.status(429).json({ error: 'Too many attempts.' });
   const token = String(req.headers['x-terminal-token'] || '').trim();
   const { email, password } = req.body || {};
