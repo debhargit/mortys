@@ -2947,6 +2947,119 @@ INSERT INTO warehouse_settings (key, value) VALUES
 ON CONFLICT (key) DO NOTHING;
 
 -- =============================================================================
+--  Phase 5: lost sales and planning
+--  lost_sales holds sales staff could not make (recorded at the counter, on the
+--  phone or in the warehouse). Short picks and expired / cancelled POS orders
+--  are not copied here: the planning report reads them where they live.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS lost_sales (
+  id              SERIAL PRIMARY KEY,
+  product_img     TEXT REFERENCES products(img) ON DELETE SET NULL ON UPDATE CASCADE,
+  description     TEXT NOT NULL,                     -- the part asked for, as the customer put it
+  vehicle         TEXT,
+  qty             INTEGER NOT NULL DEFAULT 1 CHECK (qty > 0),
+  unit_price      NUMERIC(14,2),                     -- J$ quoted or list price, when known
+  reason          TEXT NOT NULL DEFAULT 'out_of_stock', -- out_of_stock | not_stocked | price | lead_time | quality | other
+  channel         TEXT NOT NULL DEFAULT 'counter',   -- counter | phone | online | warehouse
+  competitor      TEXT,
+  customer_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  customer_name   TEXT,
+  customer_phone  TEXT,
+  follow_up       BOOLEAN NOT NULL DEFAULT false,    -- call the customer when it comes in
+  followed_up_at  TIMESTAMPTZ,
+  note            TEXT,
+  recorded_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_lost_sales_created ON lost_sales (created_at);
+CREATE INDEX IF NOT EXISTS idx_lost_sales_product ON lost_sales (product_img);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('plan_dead_days', '365'),        -- no sale in this many days = dead stock
+  ('plan_slow_days', '180'),        -- no sale in this many days = slow
+  ('plan_target_days_cover', '90'), -- inventory days the business aims for
+  ('plan_target_fill_rate', '95')   -- % of units asked for that were supplied
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 6: customer notifications, pickup by someone else, delivery report
+--  notify_templates: one message per event and channel, editable by staff.
+--  notifications: every message the system tried to send (sent, stubbed when
+--  SMS/email are not set up, skipped with the reason, failed and retried).
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS notify_templates (
+  event       TEXT NOT NULL,                 -- order_received | ready_pickup | ready_delivery | out_for_delivery | shipped | delivered | collected | part_in_stock
+  channel     TEXT NOT NULL,                 -- sms | email | whatsapp
+  enabled     BOOLEAN NOT NULL DEFAULT true,
+  subject     TEXT,                          -- email only
+  body        TEXT NOT NULL,                 -- {shop} {name} {number} {code} {link} {carrier} {tracking} {part} {received_by} {phone}
+  updated_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at  TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (event, channel)
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id            BIGSERIAL PRIMARY KEY,
+  event         TEXT NOT NULL,
+  channel       TEXT NOT NULL,
+  to_addr       TEXT,
+  subject       TEXT,
+  body          TEXT,
+  status        TEXT NOT NULL DEFAULT 'queued', -- queued | sent | stubbed | link | skipped | failed
+  reason        TEXT,                           -- why skipped / the error
+  attempts      INTEGER NOT NULL DEFAULT 0,
+  send_after    TIMESTAMPTZ DEFAULT NOW(),      -- quiet hours push SMS to the morning
+  related_kind  TEXT,                           -- fulfilment | lost_sale
+  related_id    INTEGER,
+  customer_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  by_user       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  sent_at       TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_due ON notifications (send_after) WHERE status IN ('queued', 'failed');
+CREATE INDEX IF NOT EXISTS idx_notifications_related ON notifications (related_kind, related_id);
+
+-- Pickup by someone other than the customer, and the ID shown at the counter.
+ALTER TABLE fulfilments ADD COLUMN IF NOT EXISTS authorised_collector TEXT;   -- named by the customer in advance
+ALTER TABLE fulfilments ADD COLUMN IF NOT EXISTS collected_by_other   BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE fulfilments ADD COLUMN IF NOT EXISTS id_checked           TEXT;   -- e.g. "Driver's licence ...1234"
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('notify_enabled', 'on'),
+  ('notify_quiet_from', '21:00'),   -- SMS / WhatsApp held overnight; email goes any time
+  ('notify_quiet_to', '07:30'),
+  ('notify_shop_phone', '876-728-4735'),
+  ('pickup_uncollected_days', '7')
+ON CONFLICT (key) DO NOTHING;
+
+-- The shop's phone number changed in Oct 2026 (the WhatsApp line is separate
+-- now). The INSERT above only seeds a fresh till, so move a till that still
+-- holds the previous number. An operator-edited value is left alone.
+UPDATE warehouse_settings SET value = '876-728-4735'
+  WHERE key = 'notify_shop_phone' AND value IN ('876-758-5590', '(876) 758-5590');
+
+INSERT INTO notify_templates (event, channel, enabled, subject, body) VALUES
+  ('order_received',   'sms',      false, NULL, '{shop}: we have your order {number}. We will text you when it is ready.{link}'),
+  ('order_received',   'email',    true,  'We have your order {number}', E'Hi {name},\n\nThanks for your order {number}. We are getting it ready and will let you know as soon as it is.{link}\n\n{shop} · {phone}'),
+  ('ready_pickup',     'sms',      true,  NULL, '{shop}: order {number} is ready. Pickup code {code}. Anyone collecting for you needs this code and ID.{link}'),
+  ('ready_pickup',     'email',    true,  'Order {number} is ready for pickup', E'Hi {name},\n\nYour order {number} is ready for pickup.\n\nPickup code: {code}\n\nBring this code with you. If someone else is collecting, give them the code; they will need ID.{link}\n\n{shop} · {phone}'),
+  ('ready_pickup',     'whatsapp', true,  NULL, '{shop}: order {number} is ready for pickup. Pickup code {code}.'),
+  ('ready_delivery',   'sms',      false, NULL, '{shop}: order {number} is packed and will go out soon.{link}'),
+  ('ready_delivery',   'email',    true,  'Order {number} is packed', E'Hi {name},\n\nYour order {number} is packed and will be sent out soon.{link}\n\n{shop} · {phone}'),
+  ('out_for_delivery', 'sms',      true,  NULL, '{shop}: order {number} is out for delivery today.{link}'),
+  ('out_for_delivery', 'email',    true,  'Order {number} is on the way', E'Hi {name},\n\nYour order {number} is out for delivery.{link}\n\n{shop} · {phone}'),
+  ('shipped',          'sms',      true,  NULL, '{shop}: order {number} was handed to {carrier}. Tracking {tracking}.{link}'),
+  ('shipped',          'email',    true,  'Order {number} has shipped', E'Hi {name},\n\nYour order {number} was handed to {carrier}. Tracking number: {tracking}.{link}\n\n{shop} · {phone}'),
+  ('delivered',        'sms',      false, NULL, '{shop}: order {number} was delivered and signed for by {received_by}. Thank you!'),
+  ('delivered',        'email',    true,  'Order {number} was delivered', E'Hi {name},\n\nYour order {number} was delivered and received by {received_by}. Thank you for your business.\n\n{shop} · {phone}'),
+  ('collected',        'sms',      false, NULL, '{shop}: order {number} was collected by {received_by}. Thank you!'),
+  ('collected',        'email',    true,  'Order {number} was collected', E'Hi {name},\n\nYour order {number} was collected by {received_by}. If that was not you or someone you sent, call us on {phone}.\n\n{shop}'),
+  ('part_in_stock',    'sms',      true,  NULL, '{shop}: good news, {part} is in stock now. Call {phone} or come in and we will put it aside.'),
+  ('part_in_stock',    'whatsapp', true,  NULL, 'Hi {name}, {shop} here: {part} is in stock now. Shall we put it aside for you?')
+ON CONFLICT (event, channel) DO NOTHING;
+
+-- =============================================================================
 --  Phase 8.2: departments and the terminal journal (terminal.js)
 --  A department is a set of product categories. Staff and cashier stations
 --  are given departments; a counter agent can only sell their departments'

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Your offers · Vision Auto Solutions</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:14px 16px;font-weight:700}
+  main{max-width:520px;margin:0 auto;padding:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px}
+  button{font:inherit;width:100%;padding:13px;border:0;border-radius:10px;font-weight:700;color:#fff;background:var(--red);cursor:pointer;margin-top:10px}
+  button.alt{background:var(--muted)} .sub{color:var(--muted);font-size:14px}
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header>Vision Auto Solutions</header>
+<main><div class="card" id="m">Loading…</div></main>
+<script>
+(function () {
+  'use strict';
+  var m = document.getElementById('m');
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var t = new URLSearchParams(location.search).get('t') || '';
+  var what = function (ch) { return ch === 'email' ? 'offer emails' : 'offer text messages'; };
+  function set(on, ch) {
+    fetch('/api/unsubscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ t: t, subscribe: on }) })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error); return j; }); })
+      .then(function (j) { draw({ channel: ch, subscribed: j.subscribed, done: true }); })
+      .catch(function (e) { m.textContent = e.message; });
+  }
+  function draw(d) {
+    m.innerHTML = d.subscribed
+      ? '<h2 style="margin-top:0">' + (d.done ? 'You are back on the list' : 'Stop ' + what(d.channel) + '?') + '</h2><p>' + (d.first_name ? esc(d.first_name) + ', y' : 'Y') + 'ou get ' + what(d.channel) + ' from us.</p><button id="b">Stop ' + what(d.channel) + '</button>'
+      : '<h2 style="margin-top:0">Done</h2><p>You will not get ' + what(d.channel) + ' from us any more. Messages about your own orders still come.</p><p class="sub">Changed your mind?</p><button class="alt" id="b">Send me offers again</button>';
+    document.getElementById('b').onclick = function () { set(!d.subscribed, d.channel); };
+  }
+  fetch('/api/unsubscribe?t=' + encodeURIComponent(t)).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error); return j; }); })
+    .then(draw).catch(function (e) { m.textContent = e.message || 'This link is not valid.'; });
+})();
+</script>
+</body>
+</html>
