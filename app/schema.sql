@@ -4622,6 +4622,597 @@ INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
 ON CONFLICT (code) DO NOTHING;
 
 -- =============================================================================
+--  System management (sysops.js): audit, security and tech support
+--
+--  A console of its own, separate from running the business, with its own
+--  capabilities: sys.audit, sys.security, sys.support (manager-only unless
+--  granted) and support.raise (every staff member can ask IT for help).
+--
+--  Audit chain: every audit_log row written from now on carries a sha256 of
+--  its own fields and the previous row's hash, set by a trigger under an
+--  advisory lock, so deleting or editing any row breaks the chain and the
+--  verify check says where. Rows from before the chain started have no hash.
+-- =============================================================================
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at         TIMESTAMPTZ;   -- last request (updated at most every few minutes)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_ip         TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS sessions_revoked_at  TIMESTAMPTZ;   -- sessions signed in before this are ended
+
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS prev_hash TEXT;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS hash      TEXT;
+
+CREATE OR REPLACE FUNCTION audit_log_chain() RETURNS trigger AS $$
+DECLARE prev TEXT;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('audit_log_chain'));
+  SELECT hash INTO prev FROM audit_log WHERE hash IS NOT NULL ORDER BY id DESC LIMIT 1;
+  NEW.prev_hash := COALESCE(prev, 'genesis');
+  NEW.hash := encode(sha256(convert_to(
+      NEW.prev_hash || '|' || NEW.id::text || '|' || to_char(NEW.at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') || '|' ||
+      COALESCE(NEW.user_id::text, '') || '|' || COALESCE(NEW.action, '') || '|' || COALESCE(NEW.target, '') || '|' ||
+      COALESCE(NEW.status::text, '') || '|' || COALESCE(NEW.ip, '') || '|' || COALESCE(NEW.detail::text, ''), 'UTF8')), 'hex');
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_audit_log_chain ON audit_log;
+CREATE TRIGGER trg_audit_log_chain BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION audit_log_chain();
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('sys_signout_at', '0'),              -- ms epoch: every session signed in before this is ended
+  ('sys_business_open', '07:00'),       -- sign-ins outside these hours are an audit exception
+  ('sys_business_close', '19:00'),
+  ('sys_dormant_days', '60'),           -- an enabled staff login unused this long is flagged
+  ('sys_sla_urgent_hours', '4'),
+  ('sys_sla_high_hours', '24'),
+  ('sys_sla_normal_hours', '72'),
+  ('sys_sla_low_hours', '168')
+ON CONFLICT (key) DO NOTHING;
+
+-- Security incidents (lost laptop, suspected fraud, phishing, data leak, outage...)
+CREATE TABLE IF NOT EXISTS sys_incidents (
+  id            SERIAL PRIMARY KEY,
+  number        TEXT UNIQUE,                       -- INC-0001
+  title         TEXT NOT NULL,
+  kind          TEXT NOT NULL DEFAULT 'security' CHECK (kind IN ('security', 'fraud', 'privacy', 'outage', 'data', 'physical', 'other')),
+  severity      TEXT NOT NULL DEFAULT 'medium' CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+  status        TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'investigating', 'contained', 'resolved', 'closed')),
+  description   TEXT,
+  impact        TEXT,
+  root_cause    TEXT,
+  occurred_at   TIMESTAMPTZ,
+  reported_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  assigned_to   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  timeline      JSONB NOT NULL DEFAULT '[]',       -- [{at, by, status?, note}]
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  resolved_at   TIMESTAMPTZ,
+  closed_at     TIMESTAMPTZ
+);
+
+-- Equipment register.
+CREATE TABLE IF NOT EXISTS sys_assets (
+  id              SERIAL PRIMARY KEY,
+  tag             TEXT UNIQUE,                      -- asset tag on the device (IT-0001)
+  name            TEXT NOT NULL,
+  kind            TEXT NOT NULL DEFAULT 'pc',       -- pc, till, server, printer, receipt_printer, label_printer, scanner, cash_drawer, phone, tablet, router, switch, ups, camera, other
+  make            TEXT,
+  model           TEXT,
+  serial          TEXT,
+  location        TEXT,
+  assigned_to     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  terminal_id     INTEGER REFERENCES terminals(id) ON DELETE SET NULL,
+  ip              TEXT,
+  mac             TEXT,
+  purchase_date   DATE,
+  cost            NUMERIC(14,2),
+  supplier        TEXT,
+  warranty_until  DATE,
+  status          TEXT NOT NULL DEFAULT 'in_use' CHECK (status IN ('in_use', 'spare', 'repair', 'retired', 'lost')),
+  notes           TEXT,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Help desk.
+CREATE TABLE IF NOT EXISTS sys_tickets (
+  id                 SERIAL PRIMARY KEY,
+  number             TEXT UNIQUE,                    -- TCK-0001
+  title              TEXT NOT NULL,
+  description        TEXT,
+  category           TEXT NOT NULL DEFAULT 'other',  -- hardware, software, till, printer, network, account, website, email, other
+  priority           TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+  status             TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'assigned', 'in_progress', 'waiting', 'resolved', 'closed')),
+  requester_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  assignee_id        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  asset_id           INTEGER REFERENCES sys_assets(id) ON DELETE SET NULL,
+  location           TEXT,
+  due_at             TIMESTAMPTZ,                    -- SLA by priority
+  first_response_at  TIMESTAMPTZ,
+  resolved_at        TIMESTAMPTZ,
+  closed_at          TIMESTAMPTZ,
+  resolution         TEXT,
+  satisfaction       SMALLINT CHECK (satisfaction BETWEEN 1 AND 5),
+  created_at         TIMESTAMPTZ DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_sys_tickets_status ON sys_tickets (status, due_at);
+CREATE TABLE IF NOT EXISTS sys_ticket_notes (
+  id          SERIAL PRIMARY KEY,
+  ticket_id   INTEGER NOT NULL REFERENCES sys_tickets(id) ON DELETE CASCADE,
+  user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  body        TEXT NOT NULL,
+  internal    BOOLEAN NOT NULL DEFAULT false,      -- IT-only note, hidden from the requester
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Repairs, services, upgrades on a device.
+CREATE TABLE IF NOT EXISTS sys_maintenance (
+  id          SERIAL PRIMARY KEY,
+  asset_id    INTEGER REFERENCES sys_assets(id) ON DELETE CASCADE,
+  ticket_id   INTEGER REFERENCES sys_tickets(id) ON DELETE SET NULL,
+  kind        TEXT NOT NULL DEFAULT 'repair',      -- repair, service, upgrade, replacement, check
+  done_at     DATE NOT NULL DEFAULT CURRENT_DATE,
+  done_by     TEXT,
+  cost        NUMERIC(14,2),
+  notes       TEXT,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Change log (software updates, config changes, new hardware, access changes).
+CREATE TABLE IF NOT EXISTS sys_changes (
+  id             SERIAL PRIMARY KEY,
+  number         TEXT UNIQUE,                      -- CHG-0001
+  title          TEXT NOT NULL,
+  description    TEXT,
+  kind           TEXT NOT NULL DEFAULT 'software', -- software, config, hardware, access, data, network
+  risk           TEXT NOT NULL DEFAULT 'low' CHECK (risk IN ('low', 'medium', 'high')),
+  status         TEXT NOT NULL DEFAULT 'planned' CHECK (status IN ('planned', 'approved', 'done', 'rolled_back', 'cancelled')),
+  planned_at     TIMESTAMPTZ,
+  done_at        TIMESTAMPTZ,
+  rollback_plan  TEXT,
+  result         TEXT,
+  requested_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  approved_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Signed-off audit reviews: a period looked at, with the exception counts frozen.
+CREATE TABLE IF NOT EXISTS sys_audit_reviews (
+  id           SERIAL PRIMARY KEY,
+  from_date    DATE NOT NULL,
+  to_date      DATE NOT NULL,
+  exceptions   JSONB NOT NULL,
+  chain        JSONB,
+  notes        TEXT,
+  reviewed_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reviewed_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Access reviews: who can do what, decided person by person.
+CREATE TABLE IF NOT EXISTS sys_access_reviews (
+  id           SERIAL PRIMARY KEY,
+  title        TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'finished')),
+  started_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  started_at   TIMESTAMPTZ DEFAULT NOW(),
+  finished_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  finished_at  TIMESTAMPTZ
+);
+CREATE TABLE IF NOT EXISTS sys_access_review_items (
+  id          SERIAL PRIMARY KEY,
+  review_id   INTEGER NOT NULL REFERENCES sys_access_reviews(id) ON DELETE CASCADE,
+  user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  snapshot    JSONB NOT NULL,                      -- name, role, supervisory powers, 2-step, last sign-in, disabled
+  decision    TEXT CHECK (decision IN ('keep', 'change', 'disable')),
+  note        TEXT,
+  decided_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  decided_at  TIMESTAMPTZ,
+  UNIQUE (review_id, user_id)
+);
+
+-- =============================================================================
+--  System management (cont.): cyber security, threats and mitigation, network
+--  management (cyber.js)
+--
+--  sys_threats      what the detectors found; one open row per kind + source,
+--                   counting repeats; worked to mitigated / false positive
+--  sys_ip_blocks    addresses refused at the door (manual or automatic, with
+--                   an expiry); local and shop-network addresses are never
+--                   blocked automatically
+--  sys_risks        risk register: likelihood x impact, owner, mitigation
+--  sys_net_*        monitored devices and services, their check history, and
+--                   the register of the shop's networks (Wi-Fi, VLANs)
+-- =============================================================================
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('sys_autoblock', 'on'),             -- block internet addresses that attack the site
+  ('sys_autoblock_hits', '10'),        -- attack signatures from one address before it is blocked
+  ('sys_autoblock_minutes', '60'),
+  ('sys_scan_404', '40'),              -- missing pages asked for in 10 minutes = someone scanning
+  ('sys_secure_headers', 'on'),        -- nosniff, frame and referrer headers on every response
+  ('sys_threat_last_audit_id', '0')    -- the detector's place in the audit log
+ON CONFLICT (key) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS sys_threats (
+  id           SERIAL PRIMARY KEY,
+  kind         TEXT NOT NULL,                     -- web_attack, scanning, brute_force, credential_stuffing, new_location, mass_delete, privilege_change, data_export, fraud_pattern, audit_tamper, network_down, unknown_device, after_hours
+  severity     TEXT NOT NULL DEFAULT 'medium' CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+  status       TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'acknowledged', 'mitigated', 'false_positive')),
+  title        TEXT NOT NULL,
+  source_ip    TEXT,
+  user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  dedup        TEXT,                              -- extra key (a device MAC, a monitored target)
+  samples      JSONB NOT NULL DEFAULT '[]',       -- the last few occurrences
+  count        INTEGER NOT NULL DEFAULT 1,
+  first_seen   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  actions      JSONB NOT NULL DEFAULT '[]',       -- [{at, by, action, note}]
+  auto_action  TEXT,                              -- what the system did by itself
+  incident_id  INTEGER REFERENCES sys_incidents(id) ON DELETE SET NULL,
+  handled_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  handled_at   TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sys_threats_open ON sys_threats (kind, COALESCE(source_ip, ''), COALESCE(user_id, 0), COALESCE(dedup, ''))
+  WHERE status IN ('new', 'acknowledged');
+CREATE INDEX IF NOT EXISTS idx_sys_threats_status ON sys_threats (status, last_seen DESC);
+
+CREATE TABLE IF NOT EXISTS sys_ip_blocks (
+  id           SERIAL PRIMARY KEY,
+  cidr         TEXT NOT NULL,                     -- 203.0.113.7 or 203.0.113.0/24
+  reason       TEXT NOT NULL,
+  auto         BOOLEAN NOT NULL DEFAULT false,
+  expires_at   TIMESTAMPTZ,                       -- blank: until removed
+  hits         INTEGER NOT NULL DEFAULT 0,        -- requests refused
+  last_hit_at  TIMESTAMPTZ,
+  threat_id    INTEGER REFERENCES sys_threats(id) ON DELETE SET NULL,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  removed_at   TIMESTAMPTZ,
+  removed_by   INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS sys_risks (
+  id                   SERIAL PRIMARY KEY,
+  number               TEXT UNIQUE,               -- RSK-0001
+  title                TEXT NOT NULL,
+  category             TEXT NOT NULL DEFAULT 'cyber' CHECK (category IN ('cyber', 'network', 'people', 'process', 'physical', 'third_party', 'compliance', 'data')),
+  description          TEXT,
+  likelihood           SMALLINT NOT NULL DEFAULT 3 CHECK (likelihood BETWEEN 1 AND 5),
+  impact               SMALLINT NOT NULL DEFAULT 3 CHECK (impact BETWEEN 1 AND 5),
+  residual_likelihood  SMALLINT CHECK (residual_likelihood BETWEEN 1 AND 5),
+  residual_impact      SMALLINT CHECK (residual_impact BETWEEN 1 AND 5),
+  mitigation           TEXT,
+  owner_id             INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  status               TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'mitigating', 'accepted', 'closed')),
+  review_date          DATE,
+  created_by           INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at           TIMESTAMPTZ DEFAULT NOW(),
+  updated_at           TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS sys_net_targets (
+  id            SERIAL PRIMARY KEY,
+  name          TEXT NOT NULL,
+  kind          TEXT NOT NULL DEFAULT 'ping' CHECK (kind IN ('ping', 'tcp', 'http')),
+  host          TEXT,                             -- ping / tcp
+  port          INTEGER,                          -- tcp
+  url           TEXT,                             -- http
+  interval_s    INTEGER NOT NULL DEFAULT 60,
+  critical      BOOLEAN NOT NULL DEFAULT false,   -- a failure is a high-severity alert
+  asset_id      INTEGER REFERENCES sys_assets(id) ON DELETE SET NULL,
+  enabled       BOOLEAN NOT NULL DEFAULT true,
+  last_ok       BOOLEAN,
+  last_ms       INTEGER,
+  last_error    TEXT,
+  last_checked  TIMESTAMPTZ,
+  down_since    TIMESTAMPTZ,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS sys_net_checks (
+  id         BIGSERIAL PRIMARY KEY,
+  target_id  INTEGER NOT NULL REFERENCES sys_net_targets(id) ON DELETE CASCADE,
+  at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  ok         BOOLEAN NOT NULL,
+  ms         INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_sys_net_checks ON sys_net_checks (target_id, at DESC);
+
+CREATE TABLE IF NOT EXISTS sys_networks (
+  id                   SERIAL PRIMARY KEY,
+  name                 TEXT NOT NULL,
+  purpose              TEXT NOT NULL DEFAULT 'staff' CHECK (purpose IN ('staff', 'pos', 'guest', 'cameras', 'management', 'other')),
+  ssid                 TEXT,
+  subnet               TEXT,
+  vlan                 TEXT,
+  security             TEXT NOT NULL DEFAULT 'wpa2' CHECK (security IN ('wpa3', 'wpa2', 'wpa', 'wep', 'open', 'wired')),
+  isolated_from_pos    BOOLEAN NOT NULL DEFAULT false,
+  password_changed_at  DATE,
+  notes                TEXT,
+  created_at           TIMESTAMPTZ DEFAULT NOW(),
+  updated_at           TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- =============================================================================
+--  Document and communication centre (docs.js)
+--
+--  documents          every filed document: number, category, folder, tags,
+--                     confidentiality, dates (issued / expires / keep until),
+--                     legal hold, status (forms go draft -> submitted ->
+--                     approved / rejected), file + checksum, extracted text
+--  document_versions  every file ever uploaded for a document
+--  document_links     what a document belongs to: a supplier, a bill, a staff
+--                     member, a customer, a product, an asset, an applicant...
+--  document_access    who opened / downloaded / changed what, and when
+--  doc_folders        the filing structure (seeded, editable)
+--  comm_log           every email and SMS the system sends (captured where
+--                     they leave), plus calls, letters and visits logged by hand
+--
+--  Files live in data/documents (outside the website folder, never served
+--  directly). Templates are documents with category 'template' and a body.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS doc_folders (
+  id          SERIAL PRIMARY KEY,
+  parent_id   INTEGER REFERENCES doc_folders(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  category    TEXT,                               -- default category for files put here
+  sort        INTEGER NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_folders_name ON doc_folders (COALESCE(parent_id, 0), lower(name));
+
+CREATE TABLE IF NOT EXISTS documents (
+  id               SERIAL PRIMARY KEY,
+  number           TEXT UNIQUE,                   -- DOC-000001
+  title            TEXT NOT NULL,
+  description      TEXT,
+  category         TEXT NOT NULL DEFAULT 'general',
+  folder_id        INTEGER REFERENCES doc_folders(id) ON DELETE SET NULL,
+  tags             TEXT[] NOT NULL DEFAULT '{}',
+  confidentiality  TEXT NOT NULL DEFAULT 'internal' CHECK (confidentiality IN ('public', 'internal', 'confidential', 'restricted')),
+  status           TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('draft', 'active', 'submitted', 'approved', 'rejected', 'archived')),
+  version          INTEGER NOT NULL DEFAULT 1,
+  file_name        TEXT,                          -- original name
+  mime             TEXT,
+  size             BIGINT,
+  sha256           TEXT,
+  storage          TEXT,                          -- path under data/documents
+  text_content     TEXT,                          -- searchable text (text files, generated forms, templates)
+  template_body    TEXT,                          -- templates: HTML with {{fields}}
+  template_fields  JSONB,                         -- templates: [{key,label,type,required}]
+  needs_approval   BOOLEAN NOT NULL DEFAULT false,-- templates: forms made from it go to approval
+  template_id      INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  form_data        JSONB,
+  reference        TEXT,                          -- the paper's own number (ID no., invoice no., policy no.)
+  issuer           TEXT,                          -- who issued it (TAJ, insurer, supplier...)
+  issue_date       DATE,
+  expiry_date      DATE,
+  remind_days      INTEGER NOT NULL DEFAULT 30,
+  keep_until       DATE,                          -- retention: may be destroyed after this
+  legal_hold       BOOLEAN NOT NULL DEFAULT false,
+  owner_id         INTEGER REFERENCES users(id) ON DELETE SET NULL,   -- the person it is about / who owns it
+  uploaded_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  source           TEXT NOT NULL DEFAULT 'upload',-- upload | template | scan | import | module
+  decided_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  decided_at       TIMESTAMPTZ,
+  decision_note    TEXT,
+  deleted_at       TIMESTAMPTZ,                   -- recycle bin
+  deleted_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ DEFAULT NOW(),
+  search           tsvector                       -- kept current by trg_documents_search
+);
+CREATE OR REPLACE FUNCTION documents_search_tsv() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.search :=
+    setweight(to_tsvector('simple', coalesce(NEW.number, '') || ' ' || coalesce(NEW.title, '') || ' ' || coalesce(NEW.reference, '')), 'A') ||
+    setweight(to_tsvector('english', coalesce(NEW.description, '') || ' ' || array_to_string(NEW.tags, ' ') || ' ' || coalesce(NEW.file_name, '') || ' ' || coalesce(NEW.issuer, '')), 'B') ||
+    setweight(to_tsvector('english', left(coalesce(NEW.text_content, ''), 200000)), 'C');
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS trg_documents_search ON documents;
+CREATE TRIGGER trg_documents_search BEFORE INSERT OR UPDATE ON documents FOR EACH ROW EXECUTE FUNCTION documents_search_tsv();
+CREATE INDEX IF NOT EXISTS idx_documents_search ON documents USING GIN (search);
+CREATE INDEX IF NOT EXISTS idx_documents_cat ON documents (category, created_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_documents_folder ON documents (folder_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_documents_expiry ON documents (expiry_date) WHERE deleted_at IS NULL AND expiry_date IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_documents_sha ON documents (sha256);
+CREATE INDEX IF NOT EXISTS idx_documents_tags ON documents USING GIN (tags);
+CREATE SEQUENCE IF NOT EXISTS doc_number_seq;
+-- Carry on after the highest number already issued (never reuse a number).
+SELECT setval('doc_number_seq', (SELECT MAX(substring(number from 5)::int) FROM documents WHERE number ~ '^DOC-[0-9]+$'), true)
+ WHERE COALESCE((SELECT MAX(substring(number from 5)::int) FROM documents WHERE number ~ '^DOC-[0-9]+$'), 0) > (SELECT last_value FROM doc_number_seq);
+
+CREATE TABLE IF NOT EXISTS document_versions (
+  id           SERIAL PRIMARY KEY,
+  document_id  INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  version      INTEGER NOT NULL,
+  file_name    TEXT,
+  mime         TEXT,
+  size         BIGINT,
+  sha256       TEXT,
+  storage      TEXT,
+  note         TEXT,
+  uploaded_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (document_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS document_links (
+  id           SERIAL PRIMARY KEY,
+  document_id  INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  entity_type  TEXT NOT NULL,                     -- supplier, bill, po, staff, employee, customer, product, asset, applicant, inquiry, order, incident, ticket, risk, journal
+  entity_id    TEXT NOT NULL,
+  label        TEXT,                              -- how it read when linked ("Bill 4411 - Toyota Tsusho")
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (document_id, entity_type, entity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_document_links_entity ON document_links (entity_type, entity_id);
+
+CREATE TABLE IF NOT EXISTS document_access (
+  id           BIGSERIAL PRIMARY KEY,
+  document_id  INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+  user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  action       TEXT NOT NULL,                     -- view, download, upload, new_version, edit, link, unlink, submit, approve, reject, delete, restore, purge, hold
+  detail       TEXT,
+  ip           TEXT,
+  at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_document_access_doc ON document_access (document_id, at DESC);
+CREATE INDEX IF NOT EXISTS idx_document_access_at ON document_access (at DESC);
+
+CREATE TABLE IF NOT EXISTS comm_log (
+  id            BIGSERIAL PRIMARY KEY,
+  channel       TEXT NOT NULL,                    -- email | sms | whatsapp | call | letter | visit | other
+  direction     TEXT NOT NULL DEFAULT 'out' CHECK (direction IN ('in', 'out')),
+  to_addr       TEXT,
+  from_addr     TEXT,
+  subject       TEXT,
+  body          TEXT,
+  status        TEXT NOT NULL DEFAULT 'sent',     -- sent | stubbed | failed | logged
+  error         TEXT,
+  source        TEXT,                             -- which part of the system sent it (payroll, notify, cyber...) or 'manual'
+  entity_type   TEXT,
+  entity_id     TEXT,
+  customer_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  staff_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  document_id   INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_comm_log_at ON comm_log (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_comm_log_to ON comm_log (lower(to_addr));
+CREATE INDEX IF NOT EXISTS idx_comm_log_entity ON comm_log (entity_type, entity_id);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('docs_last_expiry_mail', ''),
+  ('docs_max_mb', '25')
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Dispatch, driver app and vehicle tracking (fleet.js)
+--
+--  dispatch_jobs      everything a driver does: customer deliveries (one per
+--                     row in deliveries, created automatically), parts
+--                     pick-ups, bank drops, documents / letters / cheques,
+--                     collections, errands. Address + map position, who it is
+--                     assigned to, its place in that driver's route, status,
+--                     and proof (recipient, signature, photo, where it was
+--                     completed).
+--  driver_shifts      a driver is tracked only while on shift
+--  driver_positions   GPS pings from the driver app (kept 90 days)
+--  fleet_alerts       SOS, phone gone quiet, stopped too long, speeding
+--  fleet_screens      read-only links for the security monitor
+--  geocode_cache      addresses already looked up
+-- =============================================================================
+CREATE SEQUENCE IF NOT EXISTS dispatch_job_seq;
+
+CREATE TABLE IF NOT EXISTS dispatch_jobs (
+  id                 SERIAL PRIMARY KEY,
+  number             TEXT UNIQUE,                  -- JOB-000123
+  kind               TEXT NOT NULL DEFAULT 'delivery' CHECK (kind IN ('delivery', 'parts_pickup', 'bank_drop', 'document', 'cheque', 'collection', 'errand', 'other')),
+  title              TEXT NOT NULL,
+  details            TEXT,
+  delivery_id        INTEGER UNIQUE REFERENCES deliveries(id) ON DELETE SET NULL,
+  contact_name       TEXT,
+  contact_phone      TEXT,
+  address            TEXT,
+  lat                DOUBLE PRECISION,
+  lng                DOUBLE PRECISION,
+  geo_source         TEXT,                         -- geocoded | map | driver | none
+  priority           SMALLINT NOT NULL DEFAULT 2 CHECK (priority BETWEEN 1 AND 3),   -- 1 urgent, 2 normal, 3 when convenient
+  due_date           DATE,
+  window_from        TIME,
+  window_to          TIME,
+  amount             NUMERIC(14,2),                -- cash to bank, cheque value, money to collect
+  needs_signature    BOOLEAN NOT NULL DEFAULT true,
+  needs_photo        BOOLEAN NOT NULL DEFAULT false,
+  driver_id          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  seq                INTEGER,                      -- order in the driver's route
+  status             TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'assigned', 'en_route', 'arrived', 'done', 'failed', 'cancelled')),
+  assigned_at        TIMESTAMPTZ,
+  started_at         TIMESTAMPTZ,
+  arrived_at         TIMESTAMPTZ,
+  done_at            TIMESTAMPTZ,
+  fail_reason        TEXT,
+  recipient_name     TEXT,
+  signature_file     TEXT,                         -- under data/fleet-proof
+  photo_file         TEXT,
+  done_lat           DOUBLE PRECISION,
+  done_lng           DOUBLE PRECISION,
+  done_note          TEXT,
+  created_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at         TIMESTAMPTZ DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_dispatch_jobs_open ON dispatch_jobs (status, driver_id, seq) WHERE status NOT IN ('done', 'failed', 'cancelled');
+CREATE INDEX IF NOT EXISTS idx_dispatch_jobs_done ON dispatch_jobs (done_at DESC);
+
+CREATE TABLE IF NOT EXISTS driver_shifts (
+  id               SERIAL PRIMARY KEY,
+  user_id          INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  vehicle          TEXT,
+  start_odometer   INTEGER,
+  end_odometer     INTEGER,
+  started_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  ended_at         TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_driver_shift_open ON driver_shifts (user_id) WHERE ended_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS driver_positions (
+  id         BIGSERIAL PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  shift_id   INTEGER REFERENCES driver_shifts(id) ON DELETE SET NULL,
+  lat        DOUBLE PRECISION NOT NULL,
+  lng        DOUBLE PRECISION NOT NULL,
+  accuracy   REAL,
+  speed      REAL,                                 -- metres per second, from the phone
+  heading    REAL,
+  battery    REAL,
+  at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_driver_positions ON driver_positions (user_id, at DESC);
+
+CREATE TABLE IF NOT EXISTS fleet_alerts (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  kind        TEXT NOT NULL,                       -- sos | quiet | stopped | speeding
+  message     TEXT NOT NULL,
+  lat         DOUBLE PRECISION,
+  lng         DOUBLE PRECISION,
+  job_id      INTEGER REFERENCES dispatch_jobs(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  cleared_at  TIMESTAMPTZ,
+  cleared_by  INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fleet_alert_open ON fleet_alerts (user_id, kind) WHERE cleared_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS fleet_screens (
+  id            SERIAL PRIMARY KEY,
+  name          TEXT NOT NULL,
+  token_hash    TEXT NOT NULL UNIQUE,
+  created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  last_seen_at  TIMESTAMPTZ,
+  last_ip       TEXT,
+  revoked_at    TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS geocode_cache (
+  q        TEXT PRIMARY KEY,
+  lat      DOUBLE PRECISION,
+  lng      DOUBLE PRECISION,
+  label    TEXT,
+  at       TIMESTAMPTZ DEFAULT NOW()
+);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('fleet_shop_lat', '18.0089'),          -- 112C Waltham Park Road (move the pin in Dispatch > Settings)
+  ('fleet_shop_lng', '-76.8207'),
+  ('fleet_ping_seconds', '20'),
+  ('fleet_quiet_minutes', '5'),           -- on shift but no position for this long
+  ('fleet_stop_minutes', '25'),           -- not moving, away from the shop and any stop
+  ('fleet_speed_kmh', '100'),
+  ('fleet_arrive_metres', '120')          -- inside this distance the job is marked arrived by itself
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
 --  Login help: password reset by email, and customer passkeys / Google sign-in
 --  (auth-extra.js). The passkeys table already exists (shared with the time
 --  clock); this only adds the reset-token table.
@@ -4641,6 +5232,162 @@ CREATE INDEX IF NOT EXISTS idx_password_resets_exp ON password_resets (expires_a
 -- Passkeys belong to a user; a customer may have several (phone + laptop). The
 -- shared table was staff-only before, so make sure the extra column exists.
 ALTER TABLE passkeys ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ;
+
+-- =============================================================================
+--  Supplier portal (supplierportal.js)
+--
+--  supplier_users      portal logins for a supplier's own staff, with roles
+--  supplier_items      the supplier's catalogue: what they can supply / consign
+--                      / retail through our portal, with their price, stock and
+--                      warehouse location; links to our products when matched
+--  supplier_catalog_uploads  each price-list upload, and what the compare found
+--  consignment_ledger  what we owe a supplier when their consigned stock sells
+--  supplier_orders     orders between us and the supplier (restock, consignment
+--                      replenish, and retail orders a supplier sends a customer
+--                      through our portal), with a pick/pack/ship queue
+--  supplier_order_lines
+--  supplier_training   training notes / links shown in the portal
+-- =============================================================================
+
+-- Terms with each supplier. The credit limit is what THEY extend to US (how
+-- much we may owe them); the supplier sets it in the portal, an admin may also.
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS portal_enabled      BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS credit_limit        NUMERIC(14,2);
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS credit_set_by       TEXT;           -- 'supplier' | 'admin'
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS credit_updated_at   TIMESTAMPTZ;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS web_retail_enabled  BOOLEAN NOT NULL DEFAULT false;
+
+CREATE TABLE IF NOT EXISTS supplier_users (
+  id             SERIAL PRIMARY KEY,
+  supplier_id    INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+  email          TEXT UNIQUE NOT NULL,
+  password_hash  TEXT,
+  name           TEXT,
+  phone          TEXT,
+  role           TEXT NOT NULL DEFAULT 'staff' CHECK (role IN ('owner', 'manager', 'staff')),
+  perms          JSONB NOT NULL DEFAULT '{}',    -- overrides on top of the role
+  is_active      BOOLEAN NOT NULL DEFAULT true,
+  failed_logins  INTEGER NOT NULL DEFAULT 0,
+  locked_until   TIMESTAMPTZ,
+  last_login_at  TIMESTAMPTZ,
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,   -- the shop admin who invited them
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_users_sup ON supplier_users (supplier_id);
+
+CREATE TABLE IF NOT EXISTS supplier_items (
+  id                SERIAL PRIMARY KEY,
+  supplier_id       INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+  supplier_sku      TEXT,                          -- the supplier's own part number
+  name              TEXT NOT NULL,
+  brand             TEXT,
+  category          TEXT,
+  description       TEXT,
+  barcode           TEXT,
+  supply_price      NUMERIC(14,2),                 -- what they charge us (J$)
+  retail_price      NUMERIC(14,2),                 -- price to a customer buying it through our portal (J$)
+  qty_available     INTEGER NOT NULL DEFAULT 0,    -- their own stock they can supply
+  warehouse_location TEXT,                         -- their bin/aisle, printed on pick slips
+  product_img       TEXT REFERENCES products(img) ON DELETE SET NULL ON UPDATE CASCADE,  -- our product, when matched
+  is_consignment    BOOLEAN NOT NULL DEFAULT false,
+  consigned_qty     INTEGER NOT NULL DEFAULT 0,    -- units physically in our shop on consignment
+  web_retail        BOOLEAN NOT NULL DEFAULT false,-- offered to customers through our portal
+  status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+  created_by        INTEGER REFERENCES supplier_users(id) ON DELETE SET NULL,
+  created_at        TIMESTAMPTZ DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (supplier_id, supplier_sku)
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_items_sup ON supplier_items (supplier_id);
+CREATE INDEX IF NOT EXISTS idx_supplier_items_product ON supplier_items (product_img);
+CREATE INDEX IF NOT EXISTS idx_supplier_items_barcode ON supplier_items (barcode);
+
+CREATE TABLE IF NOT EXISTS supplier_catalog_uploads (
+  id              SERIAL PRIMARY KEY,
+  supplier_id     INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+  filename        TEXT,
+  rows_total      INTEGER NOT NULL DEFAULT 0,
+  rows_added      INTEGER NOT NULL DEFAULT 0,
+  rows_updated    INTEGER NOT NULL DEFAULT 0,
+  lost_sales_hits INTEGER NOT NULL DEFAULT 0,       -- items we had lost sales for
+  cheaper_hits    INTEGER NOT NULL DEFAULT 0,       -- items they can supply below our current cost
+  result          JSONB,                            -- the full comparison, for the report
+  uploaded_by     INTEGER REFERENCES supplier_users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS consignment_ledger (
+  id               SERIAL PRIMARY KEY,
+  supplier_id      INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+  supplier_item_id INTEGER REFERENCES supplier_items(id) ON DELETE SET NULL,
+  product_img      TEXT,
+  kind             TEXT NOT NULL DEFAULT 'sale' CHECK (kind IN ('intake', 'sale', 'return', 'settlement', 'adjustment')),
+  qty              INTEGER NOT NULL DEFAULT 0,
+  unit_cost        NUMERIC(14,2) NOT NULL DEFAULT 0, -- what we owe the supplier per unit
+  amount           NUMERIC(14,2) NOT NULL DEFAULT 0, -- + owed to supplier, - settled/returned
+  sale_ref         TEXT,                             -- pos_sale / order reference
+  settled          BOOLEAN NOT NULL DEFAULT false,
+  settled_at       TIMESTAMPTZ,
+  note             TEXT,
+  created_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_consignment_ledger_sup ON consignment_ledger (supplier_id, created_at DESC);
+
+CREATE SEQUENCE IF NOT EXISTS supplier_order_seq;
+CREATE TABLE IF NOT EXISTS supplier_orders (
+  id              SERIAL PRIMARY KEY,
+  number          TEXT UNIQUE,                      -- SPO-000001
+  supplier_id     INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL DEFAULT 'purchase' CHECK (kind IN ('purchase', 'consignment_replenish', 'retail')),
+  status          TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'acknowledged', 'preparing', 'shipped', 'received', 'cancelled')),
+  po_id           INTEGER REFERENCES purchase_orders(id) ON DELETE SET NULL,  -- when it mirrors one of our POs
+  customer_name   TEXT,                             -- retail: who it is for
+  customer_phone  TEXT,
+  ship_address    TEXT,
+  tracking        TEXT,
+  notes           TEXT,
+  total           NUMERIC(14,2) NOT NULL DEFAULT 0,
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,            -- shop side
+  created_by_supplier INTEGER REFERENCES supplier_users(id) ON DELETE SET NULL, -- supplier side (retail)
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  acknowledged_at TIMESTAMPTZ,
+  shipped_at      TIMESTAMPTZ,
+  received_at     TIMESTAMPTZ,
+  updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_orders_sup ON supplier_orders (supplier_id, status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS supplier_order_lines (
+  id               SERIAL PRIMARY KEY,
+  order_id         INTEGER NOT NULL REFERENCES supplier_orders(id) ON DELETE CASCADE,
+  supplier_item_id INTEGER REFERENCES supplier_items(id) ON DELETE SET NULL,
+  product_img      TEXT,
+  supplier_sku     TEXT,
+  description      TEXT NOT NULL,
+  warehouse_location TEXT,
+  qty              INTEGER NOT NULL DEFAULT 1,
+  qty_shipped      INTEGER NOT NULL DEFAULT 0,
+  unit_price       NUMERIC(14,2) NOT NULL DEFAULT 0,
+  line_total       NUMERIC(14,2) NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_order_lines ON supplier_order_lines (order_id);
+
+CREATE TABLE IF NOT EXISTS supplier_training (
+  id           SERIAL PRIMARY KEY,
+  supplier_id  INTEGER REFERENCES suppliers(id) ON DELETE CASCADE,  -- NULL = shown to all suppliers
+  title        TEXT NOT NULL,
+  body         TEXT,
+  url          TEXT,
+  sort         INTEGER NOT NULL DEFAULT 0,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('supplier_portal_enabled', 'on'),
+  ('cost_stale_days', '365')               -- a product's cost/price older than this is "old"
+ON CONFLICT (key) DO NOTHING;
 
 -- =============================================================================
 --  DEPARTMENT STORE (Phase 3, 2026-10): store locations containing departments.

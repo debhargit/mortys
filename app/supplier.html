@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Supplier Portal · Vision Auto Solutions</title>
+<link rel="stylesheet" href="/assets/books.css">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<style>
+  header{background:#0f172a}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px 12px}
+  .grid label{display:block;font-size:12px;color:var(--muted);margin-bottom:2px} .grid input,.grid select,.grid textarea{width:100%}
+  .signin{max-width:380px;margin:60px auto}
+  .flash{animation:flash 1.1s infinite} @keyframes flash{50%{opacity:.55}}
+  .cmp{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px}
+  .cmp h3{margin:0 0 6px;font-size:14px} .save{color:#16a34a;font-weight:700} .warn2{color:#b45309}
+  .loc{font-family:ui-monospace,monospace;font-weight:700}
+  .modal .card{max-width:760px}
+</style>
+</head>
+<body>
+<header><h1>🏭 Supplier Portal</h1><nav><span id="whoami" style="color:#cbd5e1;font-size:13px"></span> <a href="#" id="logout" style="display:none">Sign out</a></nav></header>
+<main>
+  <div id="loginView" class="signin" style="display:none">
+    <div class="card"><h2>Supplier sign in</h2><p class="sub">For companies that supply Vision Auto Solutions.</p>
+      <div class="grid" style="grid-template-columns:1fr"><div><label>Email</label><input id="li_email" type="email" autocomplete="username"></div>
+      <div><label>Password</label><input id="li_pass" type="password" autocomplete="current-password"></div></div>
+      <div class="err" id="li_err" style="margin-top:8px"></div>
+      <button class="primary" id="li_go" style="margin-top:10px;width:100%">Sign in</button>
+      <p class="sub" style="margin-top:12px">No login yet? Ask your Vision Auto buyer to invite you. Need a password reset? Ask them too.</p>
+    </div>
+  </div>
+  <div id="appView" style="display:none">
+    <div class="tabs" id="tabs"></div>
+    <div id="out"><div class="empty">Loading…</div></div>
+  </div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s) { return document.querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
+  var toast = function (t) { var el = $("#toast"); el.textContent = t; el.style.display = "block"; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = "none"; }, 3500); };
+  var modal = function (h) { $("#modal").innerHTML = '<div class="modal"><div class="card">' + h + '</div></div>'; };
+  var close = function () { $("#modal").innerHTML = ""; };
+  var dt = function (t) { return t ? new Date(t).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" }) : ""; };
+  var me = null, tab = 'dash';
+  var val = function (id) { var el = $('#' + id); return el ? (el.type === 'checkbox' ? el.checked : el.value) : undefined; };
+  var fail = function (e) { toast(e.message || String(e)); };
+  var J = function (v) { return v == null ? '—' : 'J$' + Number(v).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+  var day = function (d) { return d ? new Date(d).toLocaleDateString('en-GB') : ''; };
+  function field(id, label, value, type, extra) { return '<div><label for="' + id + '">' + label + '</label><input id="' + id + '" type="' + (type || 'text') + '" value="' + esc(value == null ? '' : value) + '" ' + (extra || '') + '></div>'; }
+  function check(id, label, on) { return '<label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="' + id + '"' + (on ? ' checked' : '') + '> ' + label + '</label>'; }
+
+  // supplier portal uses its own session, so override Books.api 401 (which bounces to /admin.html)
+  function sapi(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) { var e = new Error(j.error || ('Error ' + r.status)); e.status = r.status; throw e; } return j; }); });
+  }
+
+  $('#li_go').onclick = function () {
+    sapi('/api/supplier/login', 'POST', { email: val('li_email'), password: val('li_pass') }).then(start).catch(function (e) { $('#li_err').textContent = e.message; });
+  };
+  $('#li_pass').onkeydown = function (e) { if (e.key === 'Enter') $('#li_go').click(); };
+  $('#logout').onclick = function (e) { e.preventDefault(); sapi('/api/supplier/logout', 'POST', {}).then(function () { location.reload(); }); };
+
+  function start() {
+    sapi('/api/supplier/me').then(function (m) {
+      me = m; $('#loginView').style.display = 'none'; $('#appView').style.display = 'block';
+      $('#whoami').textContent = m.supplier.name + ' · ' + m.user.name + ' (' + m.user.role + ')';
+      $('#logout').style.display = 'inline';
+      var t = [['dash', 'Dashboard'], ['items', 'My items'], ['compare', 'Price check'], ['orders', 'Orders' + (m.new_orders ? ' 🔴' + m.new_orders : '')]];
+      if (m.perms.retail && m.supplier.web_retail) t.push(['retail', 'Retail sale']);
+      if (m.perms.financials) t.push(['reports', 'Reports']);
+      t.push(['training', 'Training']);
+      if (m.perms.staff) t.push(['staff', 'Staff']);
+      t.push(['settings', 'Password']);
+      $('#tabs').innerHTML = t.map(function (x) { return '<button data-t="' + x[0] + '"' + (x[0] === tab ? ' class="on"' : '') + '>' + esc(x[1]) + '</button>'; }).join('');
+      all('[data-t]').forEach(function (b) { b.onclick = function () { tab = b.dataset.t; all('[data-t]').forEach(function (x) { x.classList.toggle('on', x === b); }); show(); }; });
+      show(); poll();
+    }).catch(function () { $('#appView').style.display = 'none'; $('#loginView').style.display = 'block'; setTimeout(function () { var e = $('#li_email'); if (e) e.focus(); }, 60); });
+  }
+  var pollH = null;
+  function poll() { clearInterval(pollH); pollH = setInterval(function () { sapi('/api/supplier/me').then(function (m) { var o = me.new_orders; me.new_orders = m.new_orders; if (m.new_orders !== o) { var b = $('[data-t="orders"]'); if (b) b.innerHTML = 'Orders' + (m.new_orders ? ' 🔴' + m.new_orders : ''); if (m.new_orders > o) toast('New order received'); } }).catch(function () {}); }, 20000); }
+  function show() { ({ dash: dash, items: items, compare: compare, orders: orders, retail: retail, reports: reports, training: training, staff: staff, settings: settings }[tab] || dash)(); }
+
+  // -------------------------------------------------------------- dashboard --
+  function dash() {
+    var acctPromise = me.perms.financials ? sapi('/api/supplier/account') : Promise.resolve(null);
+    Promise.all([acctPromise, sapi('/api/supplier/orders?status=open'), sapi('/api/supplier/items')]).then(function (r) {
+      var a = r[0], ord = r[1].orders, its = r[2].items;
+      var cards = '';
+      if (a) cards = '<div class="tiles"><div class="tile"><span>We owe you</span><b>' + J(a.balance) + '</b></div>' +
+        '<div class="tile' + (a.overdue ? ' bad' : '') + '"><span>Overdue</span><b>' + J(a.overdue) + '</b></div>' +
+        '<div class="tile"><span>Your credit limit to us</span><b>' + J(a.credit_limit) + '</b></div>' +
+        '<div class="tile"><span>Still available</span><b>' + J(a.available) + '</b></div></div>';
+      $('#out').innerHTML = cards +
+        '<div class="card"><h2>Open orders ' + (me.new_orders ? '<span class="pill bad flash">' + me.new_orders + ' new</span>' : '') + '</h2>' +
+        (ord.length ? '<table><tbody>' + ord.map(function (o) { return '<tr class="doc-row" data-o="' + o.id + '" style="cursor:pointer"><td>' + (o.status === 'new' ? '🔴 ' : '') + esc(o.number) + '</td><td>' + esc(o.kind) + '</td><td>' + o.line_count + ' lines</td><td>' + J(o.total) + '</td><td>' + esc(o.status) + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="empty">No open orders.</div>') + '</div>' +
+        '<div class="card"><h2>Your items</h2><p class="sub">' + its.filter(function (i) { return i.status === 'active'; }).length + ' active items' + (its.filter(function (i) { return i.is_consignment; }).length ? ' · ' + its.filter(function (i) { return i.is_consignment; }).length + ' on consignment' : '') + '. <a href="#" id="toItems">Manage items</a></p></div>';
+      all('[data-o]').forEach(function (x) { x.onclick = function () { openOrder(Number(x.dataset.o)); }; });
+      if ($('#toItems')) $('#toItems').onclick = function (e) { e.preventDefault(); $('[data-t="items"]').click(); };
+    }).catch(fail);
+  }
+
+  // ----------------------------------------------------------------- items --
+  function items() {
+    sapi('/api/supplier/items').then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>My items</h2><div class="controls"><input id="iq" placeholder="Search name / SKU / barcode"><button id="isearch">Search</button>' +
+        (me.perms.items ? '<button class="primary" id="inew">＋ New item</button><label class="btn" style="border:1px solid var(--line);border-radius:999px;padding:6px 13px;cursor:pointer">⬆ Upload price list<input type="file" id="iup" accept=".csv" hidden></label>' : '') + '</div>' +
+        '<div class="scroll"><table><thead><tr><th>SKU</th><th>Item</th><th>Your price</th><th>Qty</th><th>Location</th><th>Matched to us (our cost)</th><th>Flags</th><th></th></tr></thead><tbody>' +
+        (d.items.length ? d.items.map(function (i) {
+          var cheaper = i.our_cost != null && i.supply_price != null && Number(i.supply_price) < Number(i.our_cost);
+          return '<tr><td>' + esc(i.supplier_sku || '') + '</td><td><b>' + esc(i.name) + '</b>' + (i.status === 'inactive' ? ' <span class="pill">off</span>' : '') + (i.brand ? '<div class="sub" style="margin:0">' + esc(i.brand) + '</div>' : '') + '</td>' +
+            '<td>' + J(i.supply_price) + (i.retail_price ? '<div class="sub" style="margin:0">retail ' + J(i.retail_price) + '</div>' : '') + '</td><td>' + i.qty_available + (i.is_consignment ? ' <span class="pill">consign ' + i.consigned_qty + '</span>' : '') + '</td>' +
+            '<td class="loc">' + esc(i.warehouse_location || '') + '</td><td>' + (i.our_name ? esc(i.our_name) + ' <span class="' + (cheaper ? 'save' : 'sub') + '">(' + J(i.our_cost) + ')</span>' : '<span class="sub">not matched</span>') + '</td>' +
+            '<td>' + (cheaper ? '<span class="pill ok">cheaper</span>' : '') + (i.web_retail ? '<span class="pill">retail</span>' : '') + '</td>' +
+            '<td>' + (me.perms.items ? '<button data-edit="' + i.id + '">Edit</button>' : '') + '</td></tr>';
+        }).join('') : '<tr><td colspan="8" class="empty">No items yet. Add one or upload a price list.</td></tr>') + '</tbody></table></div></div>';
+      var go = function () { sapi('/api/supplier/items?q=' + encodeURIComponent(val('iq'))).then(renderItemRows).catch(fail); };
+      $('#isearch').onclick = go; $('#iq').onkeydown = function (e) { if (e.key === 'Enter') go(); };
+      if ($('#inew')) $('#inew').onclick = function () { itemForm(null); };
+      all('[data-edit]').forEach(function (b) { b.onclick = function () { sapi('/api/supplier/items?q=').then(function (d) { itemForm(d.items.find(function (x) { return x.id === Number(b.dataset.edit); })); }); }; });
+      if ($('#iup')) $('#iup').onchange = function () { var f = this.files[0]; if (!f) return; var fd = new FormData(); fd.append('file', f);
+        fetch('/api/supplier/items/upload', { method: 'POST', body: fd, credentials: 'same-origin' }).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error); return j; }); })
+          .then(function (j) { uploadResult(j); }).catch(fail); };
+    }).catch(fail);
+    function renderItemRows() { items(); }
+  }
+  function itemForm(i) {
+    modal('<h2>' + (i ? 'Edit item' : 'New item') + '</h2><div class="grid">' +
+      field('f_name', 'Name', i ? i.name : '') + field('f_sku', 'Your SKU / part no.', i ? i.supplier_sku : '') + field('f_brand', 'Brand', i ? i.brand : '') +
+      field('f_barcode', 'Barcode', i ? i.barcode : '') + field('f_supply', 'Price to us (J$)', i ? i.supply_price : '', 'number', 'step="0.01"') + field('f_retail', 'Retail price (J$)', i ? i.retail_price : '', 'number', 'step="0.01"') +
+      field('f_qty', 'Qty you can supply', i ? i.qty_available : '0', 'number') + field('f_loc', 'Your warehouse location', i ? i.warehouse_location : '') +
+      '<div style="grid-column:1/-1;display:flex;gap:18px;flex-wrap:wrap">' + check('f_consign', 'On consignment (your stock in our shop)', i && i.is_consignment) + check('f_retailon', 'Offer to customers through the portal', i && i.web_retail) + '</div>' +
+      '<div style="grid-column:1/-1"><label>Description</label><textarea id="f_desc" rows="2">' + esc(i ? i.description || '' : '') + '</textarea></div></div>' +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="f_save">' + (i ? 'Save' : 'Add') + '</button>' + (i ? '<button id="f_del">Remove</button>' : '') + '<button id="f_x">Cancel</button></div>');
+    $('#f_x').onclick = close;
+    $('#f_save').onclick = function () {
+      var body = { name: val('f_name'), supplier_sku: val('f_sku'), brand: val('f_brand'), barcode: val('f_barcode'), supply_price: val('f_supply'), retail_price: val('f_retail'), qty_available: val('f_qty'), warehouse_location: val('f_loc'), is_consignment: val('f_consign'), web_retail: val('f_retailon'), description: val('f_desc') };
+      (i ? sapi('/api/supplier/items/' + i.id, 'PATCH', body) : sapi('/api/supplier/items', 'POST', body)).then(function () { close(); toast('Saved'); items(); }).catch(fail);
+    };
+    if ($('#f_del')) $('#f_del').onclick = function () { sapi('/api/supplier/items/' + i.id, 'DELETE').then(function () { close(); toast('Removed'); items(); }).catch(fail); };
+  }
+  function uploadResult(j) {
+    var c = j.compare || {};
+    modal('<h2>Price list uploaded</h2><p class="sub">' + j.rows + ' rows · ' + j.added + ' added · ' + j.updated + ' updated.</p>' + compareHtml(c) + '<div class="controls" style="margin-top:10px"><button class="primary" id="u_x">Done</button></div>');
+    $('#u_x').onclick = function () { close(); items(); };
+  }
+
+  // --------------------------------------------------------------- compare --
+  function compare() {
+    sapi('/api/supplier/compare').then(function (c) { $('#out').innerHTML = '<div class="card"><h2>Price check against our shop</h2><p class="sub">We compare your items to our records. Keep your prices sharp and we buy more from you.</p>' + compareHtml(c) + '</div>'; }).catch(fail);
+  }
+  function compareHtml(c) {
+    var h = '';
+    h += '<div class="cmp"><h3>🎯 You supply things we lost sales on (' + (c.lost_sales || []).length + ')</h3>' + ((c.lost_sales || []).length ? '<table><tbody>' + c.lost_sales.slice(0, 20).map(function (l) { return '<tr><td>' + esc(l.supplier_item) + '</td><td class="sub">customer wanted: ' + esc(l.lost) + (l.vehicle ? ' (' + esc(l.vehicle) + ')' : '') + '</td><td>' + (l.quoted ? J(l.quoted) : '') + '</td></tr>'; }).join('') + '</tbody></table>' : '<p class="sub">Nothing matched. Match your items to our products (SKU/barcode) to catch more.</p>') + '</div>';
+    h += '<div class="cmp"><h3>💰 You beat our current cost (' + (c.cheaper || []).length + ')</h3>' + ((c.cheaper || []).length ? '<table><thead><tr><th>Item</th><th>Our cost</th><th>Your price</th><th>We save</th></tr></thead><tbody>' + c.cheaper.map(function (x) { return '<tr><td>' + esc(x.our_name || x.name) + '</td><td>' + J(x.our_cost) + '</td><td>' + J(x.their_price) + '</td><td class="save">' + J(x.saving) + '</td></tr>'; }).join('') + '</tbody></table>' : '<p class="sub">None below our current cost.</p>') + '</div>';
+    if ((c.we_win || []).length) h += '<div class="cmp"><h3>ℹ️ We already buy these cheaper elsewhere (' + c.we_win.length + ')</h3><table><thead><tr><th>Item</th><th>Our cost</th><th>Your price</th></tr></thead><tbody>' + c.we_win.slice(0, 20).map(function (x) { return '<tr><td>' + esc(x.our_name || x.name) + '</td><td>' + J(x.our_cost) + '</td><td class="warn2">' + J(x.their_price) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+    if ((c.stale || []).length) h += '<div class="cmp"><h3>🕔 Our prices on your items are old (' + c.stale.length + ', over ' + c.days + ' days)</h3><p class="sub">We may be selling these at an out-of-date cost. Send us a current quote.</p><table><tbody>' + c.stale.slice(0, 20).map(function (x) { return '<tr><td>' + esc(x.name) + '</td><td>cost ' + J(x.cost) + '</td><td class="sub">last ' + day(x.last) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+    return h;
+  }
+
+  // ---------------------------------------------------------------- orders --
+  function orders() {
+    sapi('/api/supplier/orders').then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>Orders</h2><p class="sub">Orders from us to you, and retail orders you make for customers. New ones flash — acknowledge, prepare, ship.</p>' +
+        '<div class="scroll"><table><thead><tr><th>Order</th><th>Kind</th><th>For</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>' +
+        (d.orders.length ? d.orders.map(function (o) { return '<tr class="doc-row" data-o="' + o.id + '" style="cursor:pointer"><td>' + (o.status === 'new' ? '<span class="flash">🔴 </span>' : '') + esc(o.number) + '<div class="sub" style="margin:0">' + dt(o.created_at) + '</div></td><td>' + esc(o.kind) + '</td><td>' + esc(o.customer_name || 'Vision Auto') + '</td><td>' + J(o.total) + '</td><td><span class="pill ' + (o.status === 'new' ? 'warn' : o.status === 'received' ? 'ok' : o.status === 'cancelled' ? 'bad' : '') + '">' + esc(o.status) + '</span></td><td>' + o.line_count + ' lines</td></tr>'; }).join('') : '<tr><td colspan="6" class="empty">No orders yet.</td></tr>') + '</tbody></table></div></div>';
+      all('[data-o]').forEach(function (x) { x.onclick = function () { openOrder(Number(x.dataset.o)); }; });
+    }).catch(fail);
+  }
+  function openOrder(id) {
+    sapi('/api/supplier/orders/' + id).then(function (d) {
+      var o = d.order, lines = o.lines || [];
+      var next = { new: [['acknowledged', 'Acknowledge']], acknowledged: [['preparing', 'Start preparing']], preparing: [['shipped', 'Mark shipped']], shipped: [] }[o.status] || [];
+      modal('<h2>' + esc(o.number) + ' <span class="pill">' + esc(o.status) + '</span></h2><p class="sub">' + esc(o.kind) + ' · ' + dt(o.created_at) + (o.customer_name ? ' · for ' + esc(o.customer_name) + ' ' + esc(o.customer_phone || '') : '') + (o.ship_address ? '<br>Ship to: ' + esc(o.ship_address) : '') + (o.tracking ? '<br>Tracking: ' + esc(o.tracking) : '') + '</p>' +
+        '<div class="scroll"><table><thead><tr><th>Location</th><th>SKU</th><th>Item</th><th>Qty</th><th>Each</th><th>Total</th></tr></thead><tbody>' + lines.map(function (l) { return '<tr><td class="loc">' + esc(l.warehouse_location || '—') + '</td><td>' + esc(l.supplier_sku || '') + '</td><td>' + esc(l.description) + '</td><td>' + l.qty + '</td><td>' + J(l.unit_price) + '</td><td>' + J(l.line_total) + '</td></tr>'; }).join('') + '</tbody></table></div>' +
+        '<div class="controls" style="margin-top:10px">' +
+        '<a class="btn" style="border:1px solid var(--line);border-radius:999px;padding:6px 13px;text-decoration:none;color:inherit" href="/api/supplier/orders/' + o.id + '/slip?doc=pick" target="_blank">🖨 Pick list</a>' +
+        '<a class="btn" style="border:1px solid var(--line);border-radius:999px;padding:6px 13px;text-decoration:none;color:inherit" href="/api/supplier/orders/' + o.id + '/slip?doc=pack" target="_blank">🖨 Packing slip</a>' +
+        (o.customer_name ? '<a class="btn" style="border:1px solid var(--line);border-radius:999px;padding:6px 13px;text-decoration:none;color:inherit" href="/api/supplier/orders/' + o.id + '/slip?doc=ship" target="_blank">🖨 Shipping label</a>' : '') +
+        (me.perms.orders ? next.map(function (n) { return '<button class="primary" data-to="' + n[0] + '">' + n[1] + '</button>'; }).join('') : '') +
+        '<button id="o_x">Close</button></div>' + (o.status === 'preparing' && me.perms.orders ? '<div style="margin-top:8px"><input id="o_trk" placeholder="Tracking number (optional)"></div>' : ''));
+      $('#o_x').onclick = close;
+      all('[data-to]').forEach(function (b) { b.onclick = function () { sapi('/api/supplier/orders/' + o.id + '/status', 'PATCH', { status: b.dataset.to, tracking: val('o_trk') }).then(function () { close(); toast('Updated'); show(); }).catch(fail); }; });
+    }).catch(fail);
+  }
+
+  // ---------------------------------------------------------------- retail --
+  function retail() {
+    var cart = [];
+    sapi('/api/supplier/items').then(function (d) {
+      var sell = d.items.filter(function (i) { return i.web_retail && i.status === 'active'; });
+      draw(sell);
+    }).catch(fail);
+    function draw(sell) {
+      $('#out').innerHTML = '<div class="card"><h2>Retail sale to a customer</h2><p class="sub">Sell one of your retail items to a customer through our portal. We print the pick list, packing slip and shipping label.</p>' +
+        '<div class="grid">' + field('r_name', 'Customer name', '') + field('r_phone', 'Customer phone', '') + '<div style="grid-column:1/-1"><label>Ship / deliver to</label><textarea id="r_addr" rows="2"></textarea></div></div>' +
+        '<h3 style="margin-top:10px">Items</h3><div class="controls"><select id="r_item">' + sell.map(function (i) { return '<option value="' + i.id + '" data-price="' + (i.retail_price || 0) + '">' + esc(i.name) + ' — ' + J(i.retail_price) + '</option>'; }).join('') + '</select><input id="r_qty" type="number" value="1" style="width:80px"><button id="r_add">Add</button></div>' +
+        '<table id="r_cart"><tbody></tbody></table><div class="controls" style="margin-top:10px"><button class="primary" id="r_go">Create order</button></div></div>';
+      if (!sell.length) { $('#out').innerHTML = '<div class="card"><h2>Retail sale</h2><div class="empty">You have no items marked "offer to customers". Tick that on an item first.</div></div>'; return; }
+      $('#r_add').onclick = function () { var sel = $('#r_item'), opt = sel.options[sel.selectedIndex]; cart.push({ supplier_item_id: Number(sel.value), name: opt.textContent.split(' — ')[0], qty: Math.max(1, Number(val('r_qty')) || 1), price: Number(opt.dataset.price) }); paint(); };
+      $('#r_go').onclick = function () {
+        if (!cart.length) return toast('Add an item');
+        sapi('/api/supplier/orders/retail', 'POST', { customer_name: val('r_name'), customer_phone: val('r_phone'), ship_address: val('r_addr'), lines: cart.map(function (c) { return { supplier_item_id: c.supplier_item_id, qty: c.qty }; }) })
+          .then(function (j) { toast(j.number + ' created'); cart = []; tab = 'orders'; all('[data-t]').forEach(function (x) { x.classList.toggle('on', x.dataset.t === 'orders'); }); orders(); }).catch(fail);
+      };
+      paint();
+    }
+    function paint() { var tb = $('#r_cart').querySelector('tbody'); tb.innerHTML = cart.map(function (c, i) { return '<tr><td>' + esc(c.name) + '</td><td>' + c.qty + ' × ' + J(c.price) + '</td><td>' + J(c.qty * c.price) + '</td><td><button data-rm="' + i + '">✕</button></td></tr>'; }).join('') + (cart.length ? '<tr><td colspan="2" style="text-align:right"><b>Total</b></td><td><b>' + J(cart.reduce(function (s, c) { return s + c.qty * c.price; }, 0)) + '</b></td><td></td></tr>' : ''); all('[data-rm]').forEach(function (b) { b.onclick = function () { cart.splice(Number(b.dataset.rm), 1); paint(); }; }); }
+  }
+
+  // --------------------------------------------------------------- reports --
+  function reports() {
+    sapi('/api/supplier/reports').then(function (d) {
+      var tbl = function (title, rows, col) { return '<div class="card"><h2>' + title + '</h2>' + (rows.length ? '<table><tbody>' + rows.map(function (r) { return '<tr><td>' + esc(r.name) + '</td><td style="text-align:right">' + col(r) + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="empty">No sales yet.</div>') + '</div>'; };
+      $('#out').innerHTML = '<div class="tiles"><div class="tile"><span>Units sold (through us)</span><b>' + d.total_units + '</b></div><div class="tile"><span>Value</span><b>' + J(d.total_value) + '</b></div></div>' +
+        tbl('🏆 Best sellers (units)', d.best_selling, function (r) { return r.units + ' units'; }) +
+        tbl('⚡ Fastest moving (per week)', d.fastest_moving, function (r) { return r.per_week + '/wk'; }) +
+        tbl('💵 Most value', d.most_value, function (r) { return J(r.value); });
+    }).catch(fail);
+  }
+
+  // --------------------------------------------------------------- training --
+  function training() {
+    sapi('/api/supplier/training').then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>Supplier training</h2>' + (d.items.length ? d.items.map(function (t) { return '<div class="cmp"><h3>' + esc(t.title) + '</h3>' + (t.body ? '<div style="white-space:pre-wrap;font-size:14px">' + esc(t.body) + '</div>' : '') + (t.url ? '<p><a href="' + esc(t.url) + '" target="_blank" rel="noopener">Open ↗</a></p>' : '') + '</div>'; }).join('') : '<div class="empty">No training posted yet.</div>') + '</div>';
+    }).catch(fail);
+  }
+
+  // --------------------------------------------------------------- staff --
+  function staff() {
+    sapi('/api/supplier/staff').then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>Your staff logins</h2><div class="controls"><button class="primary" id="s_new">＋ Add staff</button></div>' +
+        '<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Active</th><th>Last in</th><th></th></tr></thead><tbody>' + d.staff.map(function (u) { return '<tr><td>' + esc(u.name || '') + '</td><td>' + esc(u.email) + '</td><td>' + esc(u.role) + '</td><td>' + (u.is_active ? '✓' : '✕') + '</td><td>' + (u.last_login_at ? dt(u.last_login_at) : '—') + '</td><td>' + (u.role !== 'owner' ? '<button data-edit=\'' + JSON.stringify(u).replace(/'/g, '&#39;') + '\'>Edit</button>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div>';
+      $('#s_new').onclick = function () { staffForm(null); };
+      all('[data-edit]').forEach(function (b) { b.onclick = function () { staffForm(JSON.parse(b.getAttribute('data-edit'))); }; });
+    }).catch(fail);
+  }
+  function staffForm(u) {
+    modal('<h2>' + (u ? 'Edit staff' : 'Add staff') + '</h2><div class="grid">' + field('s_name', 'Name', u ? u.name : '') + field('s_email', 'Email', u ? u.email : '', 'email', u ? 'disabled' : '') + field('s_phone', 'Phone', u ? u.phone : '') +
+      '<div><label>Role</label><select id="s_role"><option value="staff"' + (u && u.role === 'staff' ? ' selected' : '') + '>Staff (items, orders)</option><option value="manager"' + (u && u.role === 'manager' ? ' selected' : '') + '>Manager (+ retail, financials)</option></select></div>' +
+      field('s_pass', u ? 'New password (optional)' : 'Password', '', 'password') + (u ? '<div>' + check('s_active', 'Active', u.is_active) + '</div>' : '') + '</div><div class="controls" style="margin-top:10px"><button class="primary" id="s_save">Save</button><button id="s_x">Cancel</button></div>');
+    $('#s_x').onclick = close;
+    $('#s_save').onclick = function () {
+      var body = { name: val('s_name'), phone: val('s_phone'), role: val('s_role') };
+      if (val('s_pass')) body.password = val('s_pass');
+      if (u) { body.is_active = val('s_active'); sapi('/api/supplier/staff/' + u.id, 'PATCH', body).then(function () { close(); staff(); }).catch(fail); }
+      else { body.email = val('s_email'); if (!body.password) return toast('Set a password'); sapi('/api/supplier/staff', 'POST', body).then(function () { close(); staff(); }).catch(fail); }
+    };
+  }
+
+  // --------------------------------------------------------------- settings --
+  function settings() {
+    $('#out').innerHTML = '<div class="card"><h2>Change your password</h2><div class="grid" style="grid-template-columns:1fr;max-width:380px">' + field('p_cur', 'Current password', '', 'password') + field('p_new', 'New password', '', 'password') + '</div><div class="controls" style="margin-top:10px"><button class="primary" id="p_go">Change password</button></div></div>' +
+      (me.perms.financials ? '<div class="card"><h2>Credit limit you extend to us</h2><p class="sub">How much we may owe you at once. You can change it here; your buyer sees it.</p><div class="controls">' + field('c_lim', 'Credit limit (J$)', '', 'number', 'step="0.01"') + '<button class="primary" id="c_go">Save limit</button></div><div id="c_now" class="sub"></div></div>' : '');
+    $('#p_go').onclick = function () { sapi('/api/supplier/change-password', 'POST', { current: val('p_cur'), password: val('p_new') }).then(function () { toast('Password changed'); $('#p_cur').value = ''; $('#p_new').value = ''; }).catch(fail); };
+    if ($('#c_go')) { sapi('/api/supplier/account').then(function (a) { $('#c_lim').value = a.credit_limit != null ? a.credit_limit : ''; $('#c_now').textContent = 'We owe you ' + J(a.balance) + ' now.'; });
+      $('#c_go').onclick = function () { sapi('/api/supplier/credit', 'PUT', { credit_limit: val('c_lim') }).then(function (a) { toast('Saved'); $('#c_now').textContent = 'We owe you ' + J(a.balance) + ' now · available ' + J(a.available); }).catch(fail); }; }
+  }
+
+  start();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Fleet monitor · Vision Auto</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  *{box-sizing:border-box} html,body{margin:0;height:100%;background:#05070b;color:#e5e7eb;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
+  .wrap{display:grid;grid-template-columns:minmax(0,1fr) 380px;grid-template-rows:56px minmax(0,1fr);height:100vh}
+  .top{grid-column:1/-1;display:flex;align-items:center;gap:18px;padding:0 16px;background:#0b1220;border-bottom:1px solid #1f2937}
+  .top b{font-size:18px;letter-spacing:.04em} .top .clock{font:700 22px ui-monospace,Consolas,monospace;margin-left:auto}
+  .stat{font-size:13px;color:#9ca3af} .stat b{font-size:20px;color:#fff;margin-right:4px}
+  .top button{background:#1f2937;color:#e5e7eb;border:1px solid #374151;border-radius:8px;padding:6px 10px;cursor:pointer}
+  #map{height:100%;background:#0b0f17}
+  /* OpenStreetMap tiles turned into a dark night map (no map key needed). */
+  #map .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.9) saturate(.6)}
+  .side{overflow:auto;padding:12px;background:#0b1220;border-left:1px solid #1f2937}
+  .al{border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:14px}
+  .al.sos{background:#dc2626;color:#fff;font-weight:800;font-size:16px;animation:flash .8s infinite} .al.other{background:#78350f;color:#fef3c7}
+  @keyframes flash{50%{background:#7f1d1d}}
+  .drv{background:#111827;border:1px solid #1f2937;border-left:6px solid #2563eb;border-radius:12px;padding:10px 12px;margin-bottom:10px}
+  .drv h3{margin:0;font-size:16px;display:flex;gap:8px;align-items:center} .drv .m{font-size:13px;color:#9ca3af;margin-top:4px} .drv .now{font-size:14px;color:#fff;margin-top:6px}
+  .tag{font-size:11px;padding:2px 8px;border-radius:999px;background:#1f2937} .tag.ok{background:#14532d;color:#bbf7d0} .tag.bad{background:#7f1d1d;color:#fecaca} .tag.cash{background:#713f12;color:#fde68a}
+  .empty{color:#6b7280;padding:20px;text-align:center}
+  .gate{display:grid;place-items:center;height:100vh;text-align:center;padding:20px}
+  .caricon{border-radius:50%;border:3px solid #fff;display:grid;place-items:center;font-size:15px;box-shadow:0 0 0 3px rgba(0,0,0,.4)}
+  .lbl{background:rgba(5,7,11,.85);color:#fff;border:0;border-radius:6px;font:700 12px system-ui;box-shadow:none;padding:2px 6px}
+  .leaflet-tooltip-left.lbl::before,.leaflet-tooltip-right.lbl::before{display:none}
+  .pin{width:14px;height:14px;border-radius:50%;border:2px solid #fff}
+</style>
+</head>
+<body>
+<div id="app"><div class="gate">Loading…</div></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s) { return document.querySelector(s); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var COLORS = ['#3b82f6', '#22c55e', '#a855f7', '#f97316', '#06b6d4', '#ec4899', '#84cc16', '#eab308'];
+  // The screen key lives in the #fragment, which is never sent to the server or logged; it is sent as a header.
+  var m = /key=([0-9a-f]{48})/.exec(location.hash || ''); var key = m ? m[1] : '';
+  var map = null, group = null, fitted = false, seenSos = {}, data = null;
+  var J = function (v) { return 'J$' + Math.round(Number(v || 0)).toLocaleString('en-JM'); };
+  var ago = function (t) { if (!t) return 'no position'; var s = Math.round((Date.now() - new Date(t)) / 1000); return s < 60 ? s + 's ago' : s < 3600 ? Math.round(s / 60) + ' min ago' : Math.round(s / 3600) + ' h ago'; };
+
+  function load() {
+    fetch('/api/fleet/wall', { credentials: 'same-origin', headers: key ? { 'X-Screen-Key': key } : {} })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) { var e = new Error(j.error || r.status); e.status = r.status; throw e; } return j; }); })
+      .then(function (d) { data = d; paint(); })
+      .catch(function (e) {
+        if (!map) $('#app').innerHTML = '<div class="gate"><div><h2>Fleet monitor</h2><p>' + esc(e.status === 401 ? 'Open this screen with the link made in Dispatch › Settings › Security screens, or sign in to the admin first.' : e.message) + '</p></div></div>';
+        else { var t = $('#conn'); if (t) t.textContent = '⚠ connection lost ' + new Date().toLocaleTimeString(); }
+      });
+  }
+  function shell() {
+    $('#app').innerHTML = '<div class="wrap"><div class="top"><b>🚚 FLEET MONITOR</b><span class="stat" id="s1"></span><span class="stat" id="s2"></span><span class="stat" id="s3"></span><span class="stat" id="s4"></span><span class="stat" id="conn" style="color:#f87171"></span>' +
+      '<span class="clock" id="clock"></span><button id="fs">⛶</button></div><div id="map"></div><div class="side" id="side"></div></div>';
+    map = L.map('map', { zoomControl: false, attributionControl: false });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+    group = L.layerGroup().addTo(map);
+    $('#fs').onclick = function () { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().catch(function () {}); };
+    setInterval(function () { $('#clock').textContent = new Date().toLocaleTimeString('en-JM', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }, 1000);
+  }
+  function beep() {
+    try {
+      var a = new (window.AudioContext || window.webkitAudioContext)();
+      [0, 0.35, 0.7].forEach(function (t) { var o = a.createOscillator(), g = a.createGain(); o.frequency.value = 880; o.connect(g); g.connect(a.destination); g.gain.value = 0.25; o.start(a.currentTime + t); o.stop(a.currentTime + t + 0.22); });
+    } catch (_) {}
+  }
+  function paint() {
+    if (!map) shell();
+    var d = data; $('#conn').textContent = '';
+    var cash = d.drivers.reduce(function (t, x) { return t + x.cash; }, 0);
+    $('#s1').innerHTML = '<b>' + d.drivers.length + '</b>on the road';
+    $('#s2').innerHTML = '<b>' + d.jobs.length + '</b>open jobs (' + d.queued + ' unassigned)';
+    $('#s3').innerHTML = '<b>' + ((d.today && d.today.done) || 0) + '</b>done today';
+    $('#s4').innerHTML = cash ? '<b style="color:#fde68a">' + J(cash) + '</b>cash / cheques out' : '';
+    d.alerts.forEach(function (a) { if (a.kind === 'sos' && !seenSos[a.id]) { seenSos[a.id] = 1; beep(); } });
+    $('#side').innerHTML = d.alerts.map(function (a) { return '<div class="al ' + (a.kind === 'sos' ? 'sos' : 'other') + '">' + (a.kind === 'sos' ? '🚨 ' : '⚠ ') + esc(a.message) + '<div style="font-size:12px;opacity:.85;margin-top:3px">' + new Date(a.created_at).toLocaleTimeString() + '</div></div>'; }).join('') +
+      (d.drivers.length ? d.drivers.map(function (x, i) {
+        var c = COLORS[i % COLORS.length], p = x.position;
+        return '<div class="drv" style="border-left-color:' + c + '"><h3>' + esc(x.name) + ' <span class="tag ' + (x.stale ? 'bad' : 'ok') + '">' + (x.stale ? 'NO SIGNAL' : 'LIVE') + '</span>' + (x.cash ? ' <span class="tag cash">' + J(x.cash) + '</span>' : '') + '</h3>' +
+          '<div class="m">' + esc(x.vehicle || '') + ' · seen ' + ago(p && p.at) + (p && p.speed != null ? ' · ' + Math.round(p.speed * 3.6) + ' km/h' : '') + (p && p.battery != null ? ' · 🔋' + Math.round(p.battery * 100) + '%' : '') + '</div>' +
+          '<div class="now">' + (x.current ? (x.current.status === 'arrived' ? '📍 At: ' : '➡ To: ') + esc(x.current.title) + '<div class="m">' + esc(x.current.address || '') + '</div>' : (x.next.length ? 'Next: ' + esc(x.next[0].title) : 'No jobs')) + '</div>' +
+          '<div class="m">' + x.open + ' open job' + (x.open === 1 ? '' : 's') + '</div></div>';
+      }).join('') : '<div class="empty">No drivers on shift.</div>') + (d.screen ? '<div class="empty" style="font-size:11px">' + esc(d.screen) + ' · updated ' + new Date(d.at).toLocaleTimeString() + '</div>' : '');
+    group.clearLayers();
+    var pts = [[d.shop.lat, d.shop.lng]];
+    L.marker([d.shop.lat, d.shop.lng], { icon: L.divIcon({ className: 'caricon', html: '🏪', iconSize: [30, 30] }) }).addTo(group).bindTooltip('SHOP', { permanent: true, direction: 'right', className: 'lbl', offset: [14, 0] });
+    d.drivers.forEach(function (x, i) {
+      var c = COLORS[i % COLORS.length];
+      if (x.trail.length > 1) L.polyline(x.trail, { color: c, weight: 4, opacity: .55 }).addTo(group);
+      var mine = d.jobs.filter(function (j) { return j.driver_id === x.id && j.lat != null; });
+      if (x.position) {
+        var line = [[x.position.lat, x.position.lng]].concat(mine.map(function (j) { return [j.lat, j.lng]; }));
+        if (line.length > 1) L.polyline(line, { color: c, weight: 2, opacity: .8, dashArray: '6 8' }).addTo(group);
+        L.marker([x.position.lat, x.position.lng], { icon: L.divIcon({ className: 'caricon', html: '<span style="background:' + c + ';width:100%;height:100%;border-radius:50%;display:grid;place-items:center">🚚</span>', iconSize: [32, 32] }), zIndexOffset: 1000 })
+          .addTo(group).bindTooltip(esc(x.name) + (x.stale ? ' ⚠' : ''), { permanent: true, direction: 'right', className: 'lbl', offset: [16, 0] });
+        if (x.stale) L.circleMarker([x.position.lat, x.position.lng], { radius: 24, color: '#ef4444', weight: 3, fill: false }).addTo(group);
+        pts.push([x.position.lat, x.position.lng]);
+      }
+      mine.forEach(function (j) { L.marker([j.lat, j.lng], { icon: L.divIcon({ className: '', html: '<div class="pin" style="background:' + c + '"></div>', iconSize: [14, 14] }) }).addTo(group).bindTooltip(esc(j.title)); });
+    });
+    d.jobs.filter(function (j) { return !j.driver_id && j.lat != null; }).forEach(function (j) { L.marker([j.lat, j.lng], { icon: L.divIcon({ className: '', html: '<div class="pin" style="background:#6b7280"></div>', iconSize: [14, 14] }) }).addTo(group).bindTooltip('Unassigned: ' + esc(j.title)); });
+    d.alerts.forEach(function (a) { if (a.lat != null) { L.circleMarker([a.lat, a.lng], { radius: 30, color: a.kind === 'sos' ? '#ef4444' : '#f59e0b', weight: 4, fill: true, fillOpacity: .15 }).addTo(group); pts.push([a.lat, a.lng]); } });
+    var sos = d.alerts.find(function (a) { return a.kind === 'sos' && a.lat != null; });
+    if (sos) map.setView([sos.lat, sos.lng], 15);
+    else if (!fitted || d.drivers.length) { if (pts.length > 1) map.fitBounds(pts, { padding: [60, 60], maxZoom: 14 }); else map.setView(pts[0], 13); fitted = true; }
+  }
+  load(); setInterval(load, 10000);
+})();
+</script>
+</body>
+</html>

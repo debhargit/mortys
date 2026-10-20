@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Customer messages · Vision Auto Solutions</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0}
+  header nav{margin-left:auto;display:flex;gap:14px;font-size:13px}
+  header a{color:#fff;opacity:.85}
+  main{max-width:1180px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  input,select,button,textarea{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  textarea{width:100%;min-height:84px;resize:vertical}
+  button{cursor:pointer;background:var(--card)}
+  button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600}
+  button.sm{padding:3px 9px;font-size:12.5px}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 12px}
+  .tabs button{border-radius:999px;padding:6px 13px;font-size:13px}
+  .tabs button.on{background:var(--navy);border-color:var(--navy);color:#fff}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600}
+  .scroll{overflow-x:auto}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip);white-space:nowrap}
+  .st-sent{background:#16a34a22;color:var(--ok)} .st-failed{background:#d6282822;color:var(--red)} .st-stubbed,.st-queued{background:#f59e0b22;color:var(--warn)} .st-link{background:#25d36622;color:#128c4a}
+  .body{white-space:pre-wrap;max-width:440px;font-size:13px}
+  .kpis{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+  .kpi{background:var(--chip);border-radius:10px;padding:8px 12px;font-size:12.5px}
+  .kpi b{font-size:17px;display:block}
+  .note{padding:8px 10px;border-radius:8px;background:#f59e0b18;border-left:3px solid var(--warn);font-size:13px;margin-bottom:10px}
+  .tpl h3{font-size:14px;margin:0 0 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .tplgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+  .preview{background:var(--chip);border-radius:8px;padding:8px 10px;font-size:13px;white-space:pre-wrap;margin-top:6px}
+  .count{font-size:11.5px;color:var(--muted)}
+  label.f{display:block;font-size:12px;color:var(--muted);margin:6px 0 3px}
+  .empty{color:var(--muted);text-align:center;padding:24px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:50}
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Customer messages</h1><nav><a href="/report-planning.html">Planning</a><a href="/warehouse.html">Warehouse</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"><button data-t="log" class="on">Message log</button><button data-t="tpl">Templates</button><button data-t="set">Settings</button></div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var STATUS = { sent: 'Sent', stubbed: 'Logged only', queued: 'Waiting', link: 'WhatsApp: send by hand', skipped: 'Not sent', failed: 'Failed', sending: 'Sending' };
+  var CH = { sms: 'SMS', email: 'Email', whatsapp: 'WhatsApp' };
+  var tab = 'log', filters = { status: '', event: '', channel: '', q: '' }, events = {};
+  try { tab = localStorage.getItem('vision.msgTab') || 'log'; } catch (_) {}
+
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 2600); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); }
+        return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; });
+      });
+  }
+  var when = function (t) { return t ? new Date(t).toLocaleString('en-JM', { dateStyle: 'short', timeStyle: 'short' }) : ''; };
+  var smsParts = function (s) { var n = String(s || '').length; return n <= 160 ? 1 : Math.ceil(n / 153); };
+
+  // ----------------------------------------------------------------- log --
+  function loadLog() {
+    var qs = Object.keys(filters).filter(function (k) { return filters[k]; }).map(function (k) { return k + '=' + encodeURIComponent(filters[k]); }).join('&');
+    return Promise.all([api('/api/notify/log' + (qs ? '?' + qs : '')), Object.keys(events).length ? null : api('/api/notify/templates')]).then(function (r) {
+      if (r[1]) events = r[1].events;
+      var d = r[0], l7 = d.last7 || {};
+      var h = '';
+      if (!d.channels.sms || !d.channels.email) h += '<div class="note">' + (!d.channels.sms ? 'SMS is not set up (Twilio)' : '') + (!d.channels.sms && !d.channels.email ? ' and ' : '') + (!d.channels.email ? 'email is not set up (SMTP)' : '') +
+        ': those messages are written to this log as <b>Logged only</b> and do not reach the customer.</div>';
+      h += '<div class="card"><div class="kpis">' + ['sent', 'stubbed', 'link', 'failed', 'skipped', 'queued'].map(function (k) { return '<div class="kpi"><b>' + (l7[k] || 0) + '</b>' + STATUS[k] + '</div>'; }).join('') + '<div class="kpi" style="background:none">last 7 days</div></div>' +
+        '<div class="controls">' +
+        '<select data-f="status"><option value="">Any status</option>' + Object.keys(STATUS).map(function (k) { return '<option value="' + k + '"' + (filters.status === k ? ' selected' : '') + '>' + STATUS[k] + '</option>'; }).join('') + '</select>' +
+        '<select data-f="event"><option value="">Any message</option>' + Object.keys(events).map(function (k) { return '<option value="' + k + '"' + (filters.event === k ? ' selected' : '') + '>' + esc(events[k]) + '</option>'; }).join('') + '</select>' +
+        '<select data-f="channel"><option value="">Any channel</option>' + Object.keys(CH).map(function (k) { return '<option value="' + k + '"' + (filters.channel === k ? ' selected' : '') + '>' + CH[k] + '</option>'; }).join('') + '</select>' +
+        '<input data-f="q" placeholder="Phone, email or text" value="' + esc(filters.q) + '"><button id="go">Search</button></div>' +
+        '<div class="scroll"><table><thead><tr><th>When</th><th>Message</th><th>To</th><th>Text</th><th>Status</th><th></th></tr></thead><tbody>' +
+        (d.rows.length ? d.rows.map(function (n) {
+          return '<tr><td>' + esc(when(n.created_at)) + (n.order_number ? '<br><small>' + esc(n.order_number) + '</small>' : '') + '</td>' +
+            '<td>' + esc(events[n.event] || n.event) + '<br><small>' + (CH[n.channel] || n.channel) + '</small></td>' +
+            '<td>' + esc(n.to_addr || '–') + '</td>' +
+            '<td><div class="body">' + (n.subject ? '<b>' + esc(n.subject) + '</b>\n' : '') + esc(n.body || '') + '</div></td>' +
+            '<td><span class="pill st-' + esc(n.status) + '">' + esc(STATUS[n.status] || n.status) + '</span>' + (n.reason ? '<br><small>' + esc(n.reason) + '</small>' : '') +
+              (n.sent_at ? '<br><small>' + esc(when(n.sent_at)) + '</small>' : n.status === 'queued' ? '<br><small>due ' + esc(when(n.send_after)) + '</small>' : '') + (n.by_name ? '<br><small>by ' + esc(n.by_name) + '</small>' : '') + '</td>' +
+            '<td>' + (n.wa_link && n.status === 'link' ? '<a class="pill st-link" href="' + esc(n.wa_link) + '" target="_blank" rel="noopener" data-wa="' + n.id + '">Open WhatsApp</a>'
+              : n.to_addr && n.body && n.channel !== 'whatsapp' && n.related_kind !== 'test' ? '<button class="sm" data-resend="' + n.id + '">Resend</button>' : '') + '</td></tr>';
+        }).join('') : '<tr><td colspan="6" class="empty">No messages.</td></tr>') + '</tbody></table></div></div>';
+      $('#out').innerHTML = h;
+      all('[data-f]').forEach(function (el) { el.onchange = function () { filters[el.getAttribute('data-f')] = el.value; if (el.tagName === 'SELECT') loadLog(); }; });
+      $('#go').onclick = function () { filters.q = $('[data-f="q"]').value.trim(); loadLog(); };
+      all('[data-resend]').forEach(function (b) {
+        b.onclick = function () {
+          b.disabled = true;
+          api('/api/notify/log/' + b.getAttribute('data-resend') + '/resend', 'POST').then(function (r) { toast(STATUS[r.row.status] || r.row.status); loadLog(); }).catch(function (e) { b.disabled = false; toast(e.message); });
+        };
+      });
+      all('[data-wa]').forEach(function (a) {
+        a.addEventListener('click', function () { setTimeout(function () { api('/api/notify/log/' + a.getAttribute('data-wa') + '/whatsapp-sent', 'POST').then(loadLog).catch(function () {}); }, 600); });
+      });
+    });
+  }
+
+  // ----------------------------------------------------------- templates --
+  function loadTpl() {
+    return api('/api/notify/templates').then(function (d) {
+      events = d.events;
+      var fields = Object.keys(d.sample).map(function (k) { return '{' + k + '}'; }).join(' ');
+      var h = '<div class="card"><h2>Message templates</h2><p class="sub">One message per step and channel. Fields filled in for each order: ' + esc(fields) + '. {link} adds the tracking link only when the till is reachable from the internet. Untick a channel to stop that message.</p></div>';
+      Object.keys(d.events).forEach(function (ev) {
+        h += '<div class="card tpl"><h3>' + esc(d.events[ev]) + ' <small class="count">' + ev + '</small></h3><div class="tplgrid">';
+        d.templates.filter(function (t) { return t.event === ev; }).forEach(function (t) {
+          var k = t.event + '/' + t.channel;
+          h += '<div data-k="' + k + '"><label class="f"><input type="checkbox" data-en' + (t.enabled ? ' checked' : '') + '> ' + CH[t.channel] + (t.channel === 'whatsapp' ? ' (staff send by hand)' : '') + '</label>' +
+            (t.channel === 'email' ? '<input data-subj placeholder="Subject" value="' + esc(t.subject || '') + '" style="width:100%;margin-bottom:6px">' : '') +
+            '<textarea data-body placeholder="' + (t.exists ? '' : 'Not set up yet') + '">' + esc(t.body || '') + '</textarea>' +
+            '<div class="count" data-cnt></div><div class="preview" data-pv></div>' +
+            '<div style="margin-top:6px"><button class="sm primary" data-save>Save</button>' + (t.updated_by_name ? ' <small class="count">changed by ' + esc(t.updated_by_name) + ', ' + esc(when(t.updated_at)) + '</small>' : '') + '</div></div>';
+        });
+        h += '</div></div>';
+      });
+      $('#out').innerHTML = h;
+      var render = function (s) { return String(s || '').replace(/\{(\w+)\}/g, function (m, k) { return k === 'link' ? ' Track: ' + d.sample.link : (d.sample[k] != null ? d.sample[k] : m); }); };
+      all('[data-k]').forEach(function (box) {
+        var ch = box.getAttribute('data-k').split('/')[1];
+        var upd = function () {
+          var txt = render($('[data-body]', box).value);
+          $('[data-pv]', box).textContent = (ch === 'email' ? render($('[data-subj]', box).value) + '\n\n' : '') + txt;
+          $('[data-cnt]', box).textContent = ch === 'sms' ? txt.length + ' characters · ' + smsParts(txt) + ' SMS' : txt.length + ' characters';
+        };
+        all('textarea,input[data-subj]', box).forEach(function (el) { el.oninput = upd; });
+        upd();
+        $('[data-save]', box).onclick = function () {
+          var body = { enabled: $('[data-en]', box).checked, body: $('[data-body]', box).value };
+          if ($('[data-subj]', box)) body.subject = $('[data-subj]', box).value;
+          api('/api/notify/templates/' + box.getAttribute('data-k'), 'PUT', body).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); });
+        };
+      });
+    });
+  }
+
+  // ------------------------------------------------------------ settings --
+  function loadSet() {
+    return api('/api/notify/settings').then(function (s) {
+      $('#out').innerHTML = '<div class="card"><h2>Settings</h2>' +
+        '<label class="f"><input type="checkbox" id="sEn"' + (s.enabled ? ' checked' : '') + '> Send customer messages (off stops everything; each message is logged as not sent)</label>' +
+        '<label class="f">Quiet hours for SMS (held until the morning; email goes any time)</label><input id="sQf" value="' + esc(s.quiet_from) + '" style="width:90px"> to <input id="sQt" value="' + esc(s.quiet_to) + '" style="width:90px">' +
+        '<label class="f">Shop phone in messages, {phone}</label><input id="sPh" value="' + esc(s.shop_phone) + '">' +
+        '<div style="margin-top:10px"><button class="primary" id="sSave">Save settings</button></div>' +
+        '<p class="sub" style="margin-top:12px">Tracking links use the tracking page address in Warehouse → Orders → Settings' + (s.track_base_url ? ' (now ' + esc(s.track_base_url) + ')' : ' (not set, so messages go without a link)') + '.</p></div>' +
+        '<div class="card"><h2>Send a test</h2><p class="sub">Sends the "ready for pickup" message with a sample order to your own phone or email.</p>' +
+        '<div class="controls"><select id="tCh"><option value="sms">SMS</option><option value="email">Email</option></select><input id="tTo" placeholder="Your phone or email"><button id="tGo">Send test</button></div></div>';
+      $('#sSave').onclick = function () {
+        api('/api/notify/settings', 'PUT', { enabled: $('#sEn').checked, quiet_from: $('#sQf').value.trim(), quiet_to: $('#sQt').value.trim(), shop_phone: $('#sPh').value })
+          .then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); });
+      };
+      $('#tGo').onclick = function () {
+        api('/api/notify/test', 'POST', { channel: $('#tCh').value, to: $('#tTo').value.trim() })
+          .then(function (r) { toast((STATUS[r.row.status] || r.row.status) + (r.row.reason ? ': ' + r.row.reason : '')); }).catch(function (e) { toast(e.message); });
+      };
+    });
+  }
+
+  function show() {
+    all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); });
+    try { localStorage.setItem('vision.msgTab', tab); } catch (_) {}
+    (tab === 'tpl' ? loadTpl() : tab === 'set' ? loadSet() : loadLog()).catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
+  show();
+})();
+</script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+</body>
+</html>
