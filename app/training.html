@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Training · Vision Auto Solutions</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0} header nav{margin-left:auto;font-size:13px} header a{color:#fff;opacity:.85}
+  main{max-width:1100px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}
+  .card h2{font-size:16px;margin:0 0 8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 10px}
+  input,select,button,textarea{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  button{cursor:pointer;background:var(--card)} button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600} button.sm{padding:3px 9px;font-size:13px}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 12px} .tabs button{border-radius:999px;padding:6px 14px;font-size:14px} .tabs button.on{background:var(--navy);border-color:var(--navy);color:#fff}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
+  .mod{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;cursor:pointer;display:flex;flex-direction:column;gap:6px}
+  .mod b{font-size:15.5px} .mod small{color:var(--muted)}
+  .pill{display:inline-block;font-size:12px;padding:1px 9px;border-radius:999px;background:var(--chip);white-space:nowrap}
+  .pill.ok{background:#16a34a22;color:var(--ok)} .pill.bad{background:#d6282822;color:var(--red)} .pill.warn{background:#f59e0b22;color:var(--warn)}
+  .lesson{white-space:pre-wrap;line-height:1.6}
+  .q{border-top:1px solid var(--line);padding:12px 0} .q b{display:block;margin-bottom:6px}
+  .q label{display:flex;gap:8px;align-items:flex-start;padding:5px 8px;border-radius:8px;cursor:pointer} .q label:hover{background:var(--chip)}
+  table{width:100%;border-collapse:collapse} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600} td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+  .scroll{overflow-x:auto}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px} .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  .note{padding:10px 12px;border-radius:9px;font-size:14px;margin-bottom:10px} .note.ok{background:#16a34a18;border-left:3px solid var(--ok)} .note.bad{background:#d6282818;border-left:3px solid var(--red)} .note.info{background:var(--chip)}
+  .till{display:grid;grid-template-columns:1.2fr 1fr;gap:12px} @media (max-width:800px){.till{grid-template-columns:1fr}}
+  .results div{padding:6px 8px;border-bottom:1px solid var(--line);cursor:pointer} .results div:hover{background:var(--chip)}
+  .empty{color:var(--muted);text-align:center;padding:20px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60}
+  .toc{columns:2 260px;margin:0;padding-left:20px} .toc li{margin:2px 0;break-inside:avoid} .toc a{color:inherit}
+  .man h2{font-size:18px;margin:0 0 4px} .man .lesson{margin-top:8px}
+  @media print{
+    header,.tabs,.no-print,.vsa,.vsa-btn,.toast{display:none!important}
+    html,body{background:#fff;color:#000;font-size:11pt} main{max-width:none;padding:0}
+    .card{border:0;padding:0;margin:0 0 14pt;break-inside:auto} .man{break-before:page} .man:first-of-type{break-before:auto}
+    .toc a{text-decoration:none} .pill{border:1px solid #999;background:none}
+  }
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Training</h1><nav><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"><button data-t="mine" class="on">My training</button><button data-t="manual">Manual</button><button data-t="till">Practice till</button></div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var J = function (v) { return 'J$' + Number(v || 0).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+  var d10 = function (t) { return t ? new Date(t).toLocaleDateString('en-JM', { timeZone: 'America/Jamaica' }) : ''; };
+  var tab = 'mine', canManage = false, ST = { passed: 'ok', expired: 'warn', 'not passed': 'bad', 'not started': '', reference: '' };
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 3200); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) { if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); } return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; }); });
+  }
+  function statusPill(m) {
+    if (!m.quiz) return '<span class="pill">reference</span>';
+    var t = m.status === 'passed' ? 'passed ' + Math.round(m.best) + '%' + (m.expires ? ' · until ' + d10(m.expires) : '') : m.status === 'not passed' ? 'not passed (' + Math.round(m.last.score) + '%)' : m.status;
+    return '<span class="pill ' + (ST[m.status] || '') + '">' + esc(t) + '</span>' + (m.required && m.status !== 'passed' ? ' <span class="pill warn">required</span>' : '');
+  }
+
+  // ------------------------------------------------------------ my training --
+  function mine() {
+    return api('/api/training/me').then(function (d) {
+      canManage = d.can_manage;
+      if (canManage && !$('[data-t="team"]')) { $('#tabs').insertAdjacentHTML('beforeend', '<button data-t="team">Team</button><button data-t="edit">Lessons and questions</button>'); wire(); }
+      var req = d.modules.filter(function (m) { return m.required; }), done = req.filter(function (m) { return m.status === 'passed'; }).length;
+      $('#out').innerHTML = '<div class="card"><h2>' + esc(d.name) + ': ' + done + ' of ' + req.length + ' required modules passed</h2><p class="sub">Read the lesson, then take the quiz. A pass lasts a year; you can retake a quiz any time.</p><div class="grid">' +
+        d.modules.map(function (m) { return '<div class="mod" data-k="' + esc(m.key) + '"><b>' + esc(m.title) + '</b><small>' + esc(m.summary || '') + '</small><div>' + statusPill(m) + '</div></div>'; }).join('') + '</div></div>';
+      all('[data-k]').forEach(function (x) { x.onclick = function () { lesson(x.getAttribute('data-k')); }; });
+    });
+  }
+  function lesson(key) {
+    api('/api/training/modules/' + encodeURIComponent(key)).then(function (m) {
+      $('#out').innerHTML = '<div class="card"><h2>' + esc(m.title) + '</h2><p class="sub">' + esc(m.summary || '') + '</p><div class="lesson">' + esc(m.body) + '</div></div>' +
+        '<div class="controls"><button id="bk">Back</button>' + (m.quiz && m.questions ? '<button class="primary" id="qz">Take the quiz (' + Math.min(12, m.questions) + ' questions, pass ' + m.pass_pct + '%)</button>' : '') + (m.practice ? '<button id="pt">Practise on the till</button>' : '') + '</div>';
+      $('#bk').onclick = show;
+      if ($('#qz')) $('#qz').onclick = function () { quiz(key); };
+      if ($('#pt')) $('#pt').onclick = function () { tab = 'till'; show(); };
+    }).catch(function (e) { toast(e.message); });
+  }
+  function quiz(key) {
+    api('/api/training/modules/' + encodeURIComponent(key) + '/quiz', 'POST').then(function (q) {
+      $('#out').innerHTML = '<div class="card"><h2>Quiz: ' + esc(q.title) + '</h2><p class="sub">Pass mark ' + q.pass_pct + '%. Choose one answer for each question.</p>' +
+        q.questions.map(function (x, i) { return '<div class="q"><b>' + (i + 1) + '. ' + esc(x.question) + '</b>' + x.choices.map(function (c, j) { return '<label><input type="radio" name="q' + x.id + '" value="' + j + '"> ' + esc(c) + '</label>'; }).join('') + '</div>'; }).join('') +
+        '<div class="controls"><button class="primary" id="sb">Hand in</button><button id="cx">Cancel</button></div></div>';
+      $('#cx').onclick = function () { lesson(key); };
+      $('#sb').onclick = function () {
+        var answers = {}, missing = 0;
+        q.questions.forEach(function (x) { var c = $('input[name="q' + x.id + '"]:checked'); if (c) answers[x.id] = +c.value; else missing++; });
+        if (missing && !confirm(missing + ' question(s) not answered. Hand in anyway?')) return;
+        api('/api/training/attempts/' + q.attempt, 'POST', { answers: answers }).then(function (r) {
+          $('#out').innerHTML = '<div class="card"><div class="note ' + (r.passed ? 'ok' : 'bad') + '"><b>' + (r.passed ? 'Passed' : 'Not passed yet') + ': ' + r.score + '%</b> (' + r.right + ' of ' + r.total + ' right; pass mark ' + r.pass_pct + '%)</div>' +
+            (r.review.length ? '<h2>To go over</h2>' + r.review.map(function (w) { return '<div class="q"><b>' + esc(w.question) + '</b>' + esc(w.explain || '') + '</div>'; }).join('') : '<p>Every answer right.</p>') +
+            '<div class="controls"><button id="bk">Back to my training</button>' + (r.passed ? '' : '<button class="primary" id="rl">Read the lesson again</button>') + '</div></div>';
+          $('#bk').onclick = show; if ($('#rl')) $('#rl').onclick = function () { lesson(key); };
+        }).catch(function (e) { toast(e.message); });
+      };
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // ------------------------------------------------------------ practice till --
+  var task = null, cart = [];
+  function till() {
+    $('#out').innerHTML = '<div class="note info">The practice till prices orders exactly like the real one, but nothing is saved, no stock moves and no money is taken. A "customer" asks for parts: find them, ring them up, take the payment and work out the change.</div><div class="card" id="tk"><button class="primary" id="nw">New customer</button></div>';
+    $('#nw').onclick = newTask;
+  }
+  function newTask() {
+    api('/api/training/practice/new', 'POST').then(function (t) {
+      task = t; cart = [];
+      $('#tk').innerHTML = '<h2>Customer</h2><p>' + esc(t.customer) + '</p><div class="till"><div><div class="controls"><div style="flex:1"><label>Find a part (number or name)</label><input id="ps" style="width:100%" autocomplete="off"></div></div><div class="results" id="pr"></div>' +
+        '<table><thead><tr><th>Part</th><th class="n">Qty</th><th class="n">Price</th><th></th></tr></thead><tbody id="ct"></tbody></table></div>' +
+        '<div><h2>Payment</h2><div class="controls"><div><label>Cash received (J$)</label><input id="pc" type="number" step="0.01" style="width:140px"></div>' + (t.pay.mode === 'split' ? '<div><label>Card (J$)</label><input id="pk" type="number" step="0.01" style="width:140px"></div>' : '') + '</div>' +
+        '<div class="controls"><div><label>Change you give (J$)</label><input id="pg" type="number" step="0.01" style="width:140px"></div></div><p class="sub">The total includes GCT, as on the real till. Work the change out yourself - the till here does not show it.</p>' +
+        '<button class="primary" id="ck">Finish sale</button></div></div>';
+      var timer = null;
+      $('#ps').oninput = function () { var q = this.value.trim(); clearTimeout(timer); timer = setTimeout(function () { if (q.length < 2) { $('#pr').innerHTML = ''; return; } api('/api/training/practice/parts?q=' + encodeURIComponent(q)).then(function (d) { $('#pr').innerHTML = d.parts.map(function (p, i) { return '<div data-i="' + i + '"><b>' + esc(p.img) + '</b> ' + esc(p.name) + ' <small>' + esc(p.make_model || '') + '</small> · ' + J(p.price) + '</div>'; }).join('') || '<div class="sub">Nothing found</div>'; all('[data-i]', $('#pr')).forEach(function (el) { el.onclick = function () { add(d.parts[+el.getAttribute('data-i')]); $('#pr').innerHTML = ''; $('#ps').value = ''; $('#ps').focus(); }; }); }); }, 250); };
+      $('#ck').onclick = finish;
+      draw();
+    }).catch(function (e) { toast(e.message); });
+  }
+  function add(p) { var x = cart.find(function (c) { return c.img === p.img; }); if (x) x.qty++; else cart.push({ img: p.img, name: p.name, price: p.price, qty: 1 }); draw(); }
+  function draw() {
+    $('#ct').innerHTML = cart.length ? cart.map(function (c, i) { return '<tr><td><b>' + esc(c.img) + '</b> ' + esc(c.name) + '</td><td class="n"><input type="number" min="1" value="' + c.qty + '" data-q="' + i + '" style="width:60px"></td><td class="n">' + J(c.price * c.qty) + '</td><td><button class="sm" data-x="' + i + '">✕</button></td></tr>'; }).join('') + '<tr><td colspan="2"><b>Before GCT</b></td><td class="n"><b>' + J(cart.reduce(function (s, c) { return s + c.price * c.qty; }, 0)) + '</b></td><td></td></tr>' : '<tr><td colspan="4" class="empty">Nothing rung up yet</td></tr>';
+    all('[data-q]').forEach(function (el) { el.onchange = function () { cart[+el.getAttribute('data-q')].qty = Math.max(1, parseInt(el.value, 10) || 1); draw(); }; });
+    all('[data-x]').forEach(function (el) { el.onclick = function () { cart.splice(+el.getAttribute('data-x'), 1); draw(); }; });
+  }
+  function finish() {
+    var pays = [{ method: 'cash', amount: +$('#pc').value || 0 }];
+    if ($('#pk')) pays.push({ method: 'card', amount: +$('#pk').value || 0 });
+    api('/api/training/practice/' + task.id, 'POST', { items: cart.map(function (c) { return { img: c.img, qty: c.qty }; }), payments: pays, change: +$('#pg').value || 0 }).then(function (r) {
+      $('#tk').innerHTML = '<div class="note ' + (r.passed ? 'ok' : 'bad') + '"><b>' + (r.passed ? 'Well done - that sale was right.' : 'Not quite.') + '</b> Total with GCT ' + J(r.total) + ', change ' + J(r.change) + '.</div>' +
+        (r.notes.length ? '<ul>' + r.notes.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul>' : '') + '<button class="primary" id="nw">Next customer</button>';
+      $('#nw').onclick = newTask;
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // ------------------------------------------------------------- team --
+  function team() {
+    return api('/api/training/team').then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>Team training</h2><p class="sub">Green: passed and current. Amber: expired. Red: tried, not passed. Blank: not started. Grey cells are not required for that person\'s role.</p><div class="scroll"><table><thead><tr><th>Name</th>' +
+        d.modules.map(function (m) { return '<th>' + esc(m.title) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+        d.staff.map(function (s) {
+          return '<tr><td><b>' + esc(s.name) + '</b><br><small>' + esc(s.role) + '</small></td>' + d.modules.map(function (m) {
+            var x = s.modules.find(function (y) { return y.key === m.key; }) || {};
+            return '<td style="' + (x.required ? '' : 'opacity:.45') + '">' + (x.status === 'passed' ? '<span class="pill ok">' + Math.round(x.best) + '%</span>' : x.status === 'expired' ? '<span class="pill warn">expired</span>' : x.status === 'not passed' ? '<span class="pill bad">not passed</span>' : '') + '</td>';
+          }).join('') + '</tr>';
+        }).join('') + '</tbody></table></div></div>';
+    });
+  }
+
+  // ------------------------------------------------------------- edit --
+  var mods = [];
+  function edit() {
+    return api('/api/training/admin/modules').then(function (d) {
+      mods = d.modules;
+      $('#out').innerHTML = '<div class="card"><h2>Lessons and questions</h2><p class="sub">The lessons are also what the staff assistant answers "how do I" questions from - keep them accurate.</p><table><tbody>' +
+        mods.map(function (m, i) { return '<tr><td><b>' + esc(m.title) + '</b><br><small>' + esc(m.key) + (m.active ? '' : ' · hidden') + (m.quiz ? ' · ' + m.qs.filter(function (q) { return q.active; }).length + ' questions' : ' · reference') + '</small></td><td><button class="sm" data-e="' + i + '">Edit</button></td></tr>'; }).join('') +
+        '</tbody></table><div class="controls" style="margin-top:10px"><div><label>New module key</label><input id="nk" placeholder="e.g. delivery"></div><div><label>Title</label><input id="nt"></div><button id="na">Add module</button></div></div>';
+      all('[data-e]').forEach(function (b) { b.onclick = function () { editModule(mods[+b.getAttribute('data-e')]); }; });
+      $('#na').onclick = function () { api('/api/training/admin/modules', 'POST', { key: $('#nk').value, title: $('#nt').value }).then(function () { toast('Added'); edit(); }).catch(function (e) { toast(e.message); }); };
+    });
+  }
+  function editModule(m) {
+    $('#out').innerHTML = '<div class="card"><h2>' + esc(m.title) + '</h2><div class="controls"><div style="flex:1"><label>Title</label><input id="et" value="' + esc(m.title) + '" style="width:100%"></div><div><label>Pass mark %</label><input id="ep" type="number" value="' + m.pass_pct + '" style="width:80px"></div><div><label>Valid (months)</label><input id="ev" type="number" value="' + m.valid_months + '" style="width:80px"></div>' +
+      '<div><label>For roles (blank = everyone)</label><input id="er" value="' + esc((m.roles || []).join(',')) + '" style="width:160px"></div><label style="display:flex;gap:5px;align-items:center;color:inherit"><input type="checkbox" id="ea"' + (m.active ? ' checked' : '') + '> shown</label></div>' +
+      '<label class="sub">Summary</label><input id="es" value="' + esc(m.summary || '') + '" style="width:100%;margin-bottom:8px"><label class="sub">Lesson</label><textarea id="eb" rows="14" style="width:100%">' + esc(m.body) + '</textarea>' +
+      '<div class="controls" style="margin-top:8px"><button class="primary" id="esv">Save lesson</button><button id="ebk">Back</button></div></div>' +
+      (m.quiz ? '<div class="card"><h2>Questions</h2>' + m.qs.map(function (q, i) { return '<div class="q" style="' + (q.active ? '' : 'opacity:.5') + '"><b>' + esc(q.question) + '</b>' + q.choices.map(function (c, j) { return '<div>' + (j === q.answer ? '✔ ' : '· ') + esc(c) + '</div>'; }).join('') + '<small class="sub">' + esc(q.explain || '') + '</small><div>' + (q.active ? '<button class="sm" data-dq="' + q.id + '">Remove</button>' : 'removed') + '</div></div>'; }).join('') +
+        '<h2 style="margin-top:12px">Add a question</h2><input id="qq" placeholder="Question" style="width:100%;margin-bottom:6px">' + [0, 1, 2, 3].map(function (i) { return '<div class="controls" style="margin-bottom:4px"><label style="display:flex;gap:5px;align-items:center;color:inherit"><input type="radio" name="qa" value="' + i + '"' + (i === 0 ? ' checked' : '') + '> right</label><input data-qc="' + i + '" placeholder="Answer ' + (i + 1) + (i > 1 ? ' (optional)' : '') + '" style="flex:1"></div>'; }).join('') +
+        '<input id="qe" placeholder="Why (shown when someone gets it wrong)" style="width:100%;margin:6px 0"><button class="primary" id="qadd">Add question</button></div>' : '');
+    $('#ebk').onclick = edit;
+    $('#esv').onclick = function () { api('/api/training/admin/modules/' + m.id, 'PUT', { title: $('#et').value, summary: $('#es').value, body: $('#eb').value, pass_pct: $('#ep').value, valid_months: $('#ev').value, active: $('#ea').checked, roles: $('#er').value.split(',').map(function (x) { return x.trim(); }).filter(Boolean) }).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); }); };
+    all('[data-dq]').forEach(function (b) { b.onclick = function () { api('/api/training/admin/questions/' + b.getAttribute('data-dq'), 'DELETE').then(function () { return api('/api/training/admin/modules'); }).then(function (d) { editModule(d.modules.find(function (x) { return x.id === m.id; })); }); }; });
+    if ($('#qadd')) $('#qadd').onclick = function () {
+      var choices = all('[data-qc]').map(function (x) { return x.value.trim(); }), ans = +($('input[name="qa"]:checked') || { value: 0 }).value;
+      var kept = [], newAns = -1; choices.forEach(function (c, i) { if (c) { if (i === ans) newAns = kept.length; kept.push(c); } });
+      api('/api/training/admin/modules/' + m.id + '/questions', 'POST', { question: $('#qq').value, choices: kept, answer: newAns, explain: $('#qe').value })
+        .then(function () { toast('Question added'); return api('/api/training/admin/modules'); }).then(function (d) { editModule(d.modules.find(function (x) { return x.id === m.id; })); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  function wire() { all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; }); }
+  // ---------------------------------------------------------------- manual --
+  // Every lesson for this person's role, one after another, with contents,
+  // to read through or print (Print, then "Save as PDF" for a file).
+  function manual() {
+    return api('/api/training/manual').then(function (d) {
+      var roleNote = function (m) { return m.roles && m.roles.length ? ' <span class="pill">' + esc(m.roles.join(', ')) + '</span>' : ''; };
+      $('#out').innerHTML = '<div class="card"><h2>Vision Auto Solutions: staff manual</h2>' +
+        '<p class="sub">Every lesson for your role, in order. The Help button answers from the same text. Printed ' + esc(new Date().toLocaleDateString('en-JM', { timeZone: 'America/Jamaica', day: 'numeric', month: 'long', year: 'numeric' })) + ' for ' + esc(d.name || '') + '.</p>' +
+        '<div class="controls no-print"><button class="primary" id="pm">Print / save as PDF</button></div>' +
+        '<ol class="toc">' + d.lessons.map(function (m) { return '<li><a href="#m-' + esc(m.key) + '">' + esc(m.title) + '</a></li>'; }).join('') + '</ol></div>' +
+        d.lessons.map(function (m) { return '<div class="card man" id="m-' + esc(m.key) + '"><h2>' + esc(m.title) + roleNote(m) + '</h2><p class="sub">' + esc(m.summary || '') + '</p><div class="lesson">' + esc(m.body) + '</div></div>'; }).join('');
+      $('#pm').onclick = function () { window.print(); };
+      all('.toc a').forEach(function (a) { a.onclick = function (e) { e.preventDefault(); var t = document.getElementById(a.getAttribute('href').slice(1)); if (t) t.scrollIntoView({ behavior: 'smooth' }); }; });
+    });
+  }
+  function show() {
+    all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); });
+    var f = { mine: mine, manual: manual, till: function () { till(); return Promise.resolve(); }, team: team, edit: edit }[tab] || mine;
+    f().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  wire();
+  if (location.hash === '#manual') tab = 'manual';
+  if (tab !== 'mine') show(); else mine().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+})();
+</script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+</body>
+</html>

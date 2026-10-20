@@ -3693,6 +3693,275 @@ CREATE TABLE IF NOT EXISTS clock_request_links (
 CREATE INDEX IF NOT EXISTS idx_clock_request_links_req ON clock_request_links (request_id);
 
 -- =============================================================================
+--  Phase 9 -- inventory to marketing (stock-to-cash)
+--
+--  Stock classes (overstock, aged, dead, damaged / open box, returned,
+--  discontinued / superseded) are worked out live from sales history; these
+--  tables hold only what people decide about them:
+--    * the clearance price ladder on the product (the regular price is kept
+--      so ending clearance puts it back);
+--    * discontinued / superseded flags (reorder suggestions skip them);
+--    * open-box and damaged copies of a part (variant_of), so they sell at
+--      their own price through the normal till and website;
+--    * dispositions: units moved to open box / damaged, written off or claimed
+--      from the supplier -- each with the stock ledger reason the GL posts;
+--    * return grading (A back to stock, B open box, C write-off or claim);
+--    * liquidation lots, the marketing worklist and campaign recipients.
+-- =============================================================================
+ALTER TABLE products ADD COLUMN IF NOT EXISTS clearance_step       SMALLINT NOT NULL DEFAULT 0;   -- 0 = not on clearance
+ALTER TABLE products ADD COLUMN IF NOT EXISTS clearance_pct        NUMERIC(5,2);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS clearance_base_price NUMERIC(10,2);                 -- the regular price, restored at the end
+ALTER TABLE products ADD COLUMN IF NOT EXISTS clearance_since      TIMESTAMPTZ;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS clearance_stepped_at TIMESTAMPTZ;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS discontinued         BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS superseded_by        TEXT;                          -- img of the newer part
+ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_class_override TEXT;                          -- 'dead' (model years no longer common) | 'keep'
+ALTER TABLE products ADD COLUMN IF NOT EXISTS variant_of           TEXT;                          -- img of the part this is an open-box / damaged copy of
+ALTER TABLE products ADD COLUMN IF NOT EXISTS variant_kind         TEXT;                          -- open_box | damaged
+ALTER TABLE products ADD COLUMN IF NOT EXISTS comm_boost_prev      JSONB;                         -- commission before a sell-through boost
+CREATE INDEX IF NOT EXISTS idx_products_clearance ON products (clearance_step) WHERE clearance_step > 0;
+CREATE INDEX IF NOT EXISTS idx_products_variant   ON products (variant_of) WHERE variant_of IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS stock_dispositions (
+  id            SERIAL PRIMARY KEY,
+  product_img   TEXT NOT NULL,
+  qty           INTEGER NOT NULL CHECK (qty > 0),
+  kind          TEXT NOT NULL,          -- open_box | damaged | writeoff | vendor_claim
+  source        TEXT NOT NULL,          -- return | receiving | count | manual
+  source_ref    TEXT,                   -- e.g. the return item id
+  to_img        TEXT,                   -- open_box / damaged: the copy the units went to
+  unit_cost     NUMERIC(12,2),
+  supplier_id   INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+  claim_status  TEXT,                   -- vendor_claim: open | credited | rejected
+  claim_amount  NUMERIC(12,2),
+  note          TEXT,
+  created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  resolved_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  resolved_at   TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_dispositions_claims ON stock_dispositions (claim_status) WHERE kind = 'vendor_claim';
+
+ALTER TABLE pos_sale_return_items ADD COLUMN IF NOT EXISTS grade          CHAR(1);   -- A | B | C (NULL = not inspected)
+ALTER TABLE pos_sale_return_items ADD COLUMN IF NOT EXISTS graded_by      INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE pos_sale_return_items ADD COLUMN IF NOT EXISTS graded_at      TIMESTAMPTZ;
+ALTER TABLE pos_sale_return_items ADD COLUMN IF NOT EXISTS disposition_id INTEGER REFERENCES stock_dispositions(id) ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS clearance_lots (
+  id           SERIAL PRIMARY KEY,
+  name         TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'open',   -- open | at_till | sold | cancelled
+  buyer_name   TEXT,
+  buyer_phone  TEXT,
+  note         TEXT,
+  pos_order_id INTEGER,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  closed_at    TIMESTAMPTZ
+);
+CREATE TABLE IF NOT EXISTS clearance_lot_items (
+  lot_id      INTEGER NOT NULL REFERENCES clearance_lots(id) ON DELETE CASCADE,
+  product_img TEXT NOT NULL,
+  qty         INTEGER NOT NULL CHECK (qty > 0),
+  unit_price  NUMERIC(12,2) NOT NULL CHECK (unit_price >= 0),
+  PRIMARY KEY (lot_id, product_img)
+);
+
+CREATE TABLE IF NOT EXISTS marketing_tasks (
+  id          SERIAL PRIMARY KEY,
+  product_img TEXT,
+  kind        TEXT NOT NULL,     -- step_price | list_marketplace | return_vendor | photograph | bundle | boost_commission | inspect_return | chase_claim | other
+  title       TEXT NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'open',   -- open | done | skipped
+  assigned_to INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  due_on      DATE,
+  note        TEXT,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  done_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  done_at     TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_marketing_tasks_open ON marketing_tasks (product_img, kind) WHERE status = 'open';
+
+-- Campaigns: what was offered, to whom, and the result.
+ALTER TABLE marketing_campaigns ADD COLUMN IF NOT EXISTS coupon_code TEXT;
+ALTER TABLE marketing_campaigns ADD COLUMN IF NOT EXISTS audience    JSONB;
+ALTER TABLE marketing_campaigns ADD COLUMN IF NOT EXISTS items       JSONB;   -- product imgs featured
+ALTER TABLE marketing_campaigns ADD COLUMN IF NOT EXISTS views       INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS marketing_campaign_recipients (
+  campaign_id INTEGER NOT NULL REFERENCES marketing_campaigns(id) ON DELETE CASCADE,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  channel     TEXT NOT NULL,
+  status      TEXT NOT NULL,     -- sent | failed | skipped | share (WhatsApp: sent by hand)
+  detail      TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (campaign_id, user_id, channel)
+);
+-- When and how a customer's marketing choice was last changed (consent record).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS marketing_changed_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS marketing_changed_by TEXT;    -- 'unsubscribe link' | staff name | 'customer'
+
+-- Coupons that only discount clearance items.
+ALTER TABLE coupons ADD COLUMN IF NOT EXISTS scope TEXT;                 -- NULL = whole order | 'clearance'
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('mkt_overstock_months', '6'), ('mkt_slow_days', '180'), ('mkt_dead_days', '365'),
+  ('mkt_ladder', '10,20,30'), ('mkt_ladder_days', '30'),
+  ('mkt_open_box_pct', '25'), ('mkt_damaged_pct', '40'), ('mkt_boost_pct', '5')
+ON CONFLICT (key) DO NOTHING;
+
+-- GL: where the new stock ledger reasons post.
+INSERT INTO gl_map (kind, key, account_id)
+SELECT m.kind, m.key, a.id FROM (VALUES
+  ('stock_reason', 'regrade', 'inv_adjust'), ('stock_reason', 'writeoff', 'inv_adjust'), ('stock_reason', 'vendor_claim', 'supplier_claims')
+) m(kind, key, sk) JOIN gl_accounts a ON a.system_key = m.sk
+ON CONFLICT (kind, key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 10a -- AI counter sales agent (website chat and counter kiosk)
+--
+--  The agent runs on the Claude API with tools that work on this database:
+--  find parts, explain a part, save the customer (with consent), put an order in
+--  the cashier queue at catalogue prices, record a lost sale, call a person.
+--  Every conversation is kept (append-only, exactly as sent to the model) and
+--  every action the agent takes is written to the till journal (pos_events).
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS ai_conversations (
+  id            SERIAL PRIMARY KEY,
+  token_hash    TEXT NOT NULL UNIQUE,           -- the visitor's chat key (only its hash is kept)
+  channel       TEXT NOT NULL,                  -- web | kiosk | phone | staff
+  status        TEXT NOT NULL DEFAULT 'open',   -- open | handoff | closed
+  customer_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  customer_name TEXT,
+  customer_phone TEXT,
+  vehicle       TEXT,
+  order_ids     INTEGER[] NOT NULL DEFAULT '{}',
+  handoff_reason TEXT,
+  handoff_at    TIMESTAMPTZ,
+  claimed_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  claimed_at    TIMESTAMPTZ,
+  summary       TEXT,
+  turns         INTEGER NOT NULL DEFAULT 0,
+  input_tokens  BIGINT NOT NULL DEFAULT 0,
+  output_tokens BIGINT NOT NULL DEFAULT 0,
+  cache_read_tokens BIGINT NOT NULL DEFAULT 0,
+  ip_hash       TEXT,
+  station_id    INTEGER,
+  started_at    TIMESTAMPTZ DEFAULT NOW(),
+  last_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ai_conv_status ON ai_conversations (status, last_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_conv_customer ON ai_conversations (customer_id);
+
+-- Messages exactly as sent to / received from the model (content blocks), so a
+-- conversation is replayed unchanged on the next turn.
+CREATE TABLE IF NOT EXISTS ai_messages (
+  id          BIGSERIAL PRIMARY KEY,
+  conv_id     INTEGER NOT NULL REFERENCES ai_conversations(id) ON DELETE CASCADE,
+  role        TEXT NOT NULL,                   -- user | assistant
+  content     JSONB NOT NULL,
+  shown_text  TEXT,                            -- what the person saw / typed (card numbers removed)
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ai_messages_conv ON ai_messages (conv_id, id);
+
+-- Daily spend guard (tokens), so a busy or abused chat cannot run up a bill.
+CREATE TABLE IF NOT EXISTS ai_usage_days (
+  day           DATE PRIMARY KEY,
+  requests      INTEGER NOT NULL DEFAULT 0,
+  input_tokens  BIGINT NOT NULL DEFAULT 0,
+  output_tokens BIGINT NOT NULL DEFAULT 0,
+  cache_read_tokens BIGINT NOT NULL DEFAULT 0
+);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('ai_enabled', 'off'), ('ai_channels', 'web,kiosk'), ('ai_model', 'claude-opus-5-5'), ('ai_effort', 'medium'),
+  ('ai_handoff_value', '150000'),        -- J$: orders above this go to a person
+  ('ai_max_order_lines', '15'),
+  ('ai_daily_token_cap', '3000000'),     -- input + output tokens per day across all chats
+  ('ai_max_turns', '40')                 -- customer messages per conversation
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 10b -- AI phone agent (Twilio Voice) and WhatsApp / text replies
+--
+--  Calls and messages use the same assistant and tools as the website chat.
+--  caller_id is the number the call or message came from (caller ID), kept
+--  apart from customer_phone, which is only set when the customer agrees to
+--  be saved. Each call gets a transcript (ai_messages) and a summary.
+-- =============================================================================
+ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS caller_id TEXT;
+ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS call_sid  TEXT;
+ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS ended_at  TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_ai_conv_caller ON ai_conversations (caller_id, last_at DESC) WHERE caller_id IS NOT NULL;
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('ai_phone_handoff_number', '')       -- where "talk to a person" calls are put through (E.164, e.g. +18765551234)
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 10c -- staff assistant and training
+--
+--  Training modules (a lesson, a quiz, a pass mark, how long a pass is valid),
+--  their questions, quiz attempts (graded on the server; the right answers
+--  never reach the browser) and practice orders on a sandbox till that prices
+--  through the real till code without saving anything.
+--  The lessons are also what the staff assistant answers "how do I..." from.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS training_modules (
+  id           SERIAL PRIMARY KEY,
+  key          TEXT NOT NULL UNIQUE,
+  title        TEXT NOT NULL,
+  summary      TEXT,
+  body         TEXT NOT NULL DEFAULT '',          -- the lesson (plain text, short paragraphs)
+  sort         INTEGER NOT NULL DEFAULT 100,
+  pass_pct     INTEGER NOT NULL DEFAULT 80,
+  valid_months INTEGER NOT NULL DEFAULT 12,       -- a pass must be renewed after this
+  quiz         BOOLEAN NOT NULL DEFAULT true,     -- false: reference only (e.g. management SOPs)
+  practice     BOOLEAN NOT NULL DEFAULT false,    -- has practice orders on the sandbox till
+  roles        TEXT[],                            -- who must take it (NULL = everyone)
+  active       BOOLEAN NOT NULL DEFAULT true,
+  updated_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS training_questions (
+  id         SERIAL PRIMARY KEY,
+  module_id  INTEGER NOT NULL REFERENCES training_modules(id) ON DELETE CASCADE,
+  question   TEXT NOT NULL,
+  choices    JSONB NOT NULL,                      -- ["...", "...", ...]
+  answer     INTEGER NOT NULL,                    -- index into choices
+  explain    TEXT,
+  sort       INTEGER NOT NULL DEFAULT 100,
+  active     BOOLEAN NOT NULL DEFAULT true
+);
+CREATE INDEX IF NOT EXISTS idx_training_q_module ON training_questions (module_id);
+
+CREATE TABLE IF NOT EXISTS training_attempts (
+  id           BIGSERIAL PRIMARY KEY,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  module_id    INTEGER NOT NULL REFERENCES training_modules(id) ON DELETE CASCADE,
+  key_map      JSONB NOT NULL,                    -- question id -> right choice as shown (server only)
+  score_pct    NUMERIC(5,1),
+  passed       BOOLEAN,
+  answers      JSONB,
+  started_at   TIMESTAMPTZ DEFAULT NOW(),
+  finished_at  TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_training_attempts_user ON training_attempts (user_id, module_id, finished_at DESC);
+
+CREATE TABLE IF NOT EXISTS training_practice (
+  id          BIGSERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  task        JSONB NOT NULL,                     -- what the "customer" wants and how they pay
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  done_at     TIMESTAMPTZ,
+  passed      BOOLEAN,
+  result      JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_training_practice_user ON training_practice (user_id, created_at DESC);
+
+-- =============================================================================
 --  Receivables, payables and banking (QuickBooks-style)
 --
 --  Receivables: a payment is applied to the invoices it pays (ar_applications);

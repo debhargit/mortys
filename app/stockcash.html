@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stock to cash · Vision Auto Solutions</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0} header nav{margin-left:auto;display:flex;gap:14px;font-size:13px} header a{color:#fff;opacity:.85}
+  main{max-width:1300px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  input,select,button,textarea{font:inherit;padding:6px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  button{cursor:pointer;background:var(--card)} button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600} button.sm{padding:3px 9px;font-size:12.5px}
+  button:disabled{opacity:.5;cursor:default}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 12px} .tabs button{border-radius:999px;padding:6px 13px;font-size:13px} .tabs button.on{background:var(--navy);border-color:var(--navy);color:#fff}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px} .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  table{width:100%;border-collapse:collapse} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .scroll{overflow-x:auto}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip);white-space:nowrap}
+  .pill.ok{background:#16a34a22;color:var(--ok)} .pill.bad{background:#d6282822;color:var(--red)} .pill.warn{background:#f59e0b22;color:var(--warn)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}
+  .tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;cursor:pointer}
+  .tile b{font-size:20px;display:block} .tile .k{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+  .note{padding:8px 10px;border-radius:8px;font-size:13px;margin-bottom:8px} .note.warn{background:#f59e0b18;border-left:3px solid var(--warn)} .note.info{background:var(--chip)}
+  .bar{position:sticky;top:0;z-index:5;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+  .modal{position:fixed;inset:0;background:rgba(10,15,25,.55);display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow:auto;z-index:40} .modal .card{max-width:760px;width:100%}
+  .empty{color:var(--muted);text-align:center;padding:20px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60;max-width:90vw}
+  s{color:var(--muted)}
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Stock to cash</h1><nav><a href="/clearance.html" target="_blank" rel="noopener">Clearance page ↗</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"><button data-t="over" class="on">Overview</button><button data-t="list">Stock lists</button><button data-t="ret">Returns to grade</button><button data-t="disp">Damaged &amp; claims</button><button data-t="lots">Lots</button><button data-t="camp">Campaigns</button><button data-t="tasks">Worklist</button><button data-t="set">Settings</button></div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var J = function (v) { return v == null ? '–' : 'J$' + Number(v).toLocaleString('en-JM', { maximumFractionDigits: 0 }); };
+  var d10 = function (t) { return t ? new Date(t).toLocaleDateString('en-JM', { timeZone: 'America/Jamaica' }) : ''; };
+  var CLS = { overstock: 'Overstock', aged: 'Aged / slow', dead: 'Dead stock', discontinued: 'Discontinued / superseded', open_box: 'Open box', damaged: 'Damaged', active: 'Selling normally' };
+  var CLS_NOTE = { overstock: 'More than the set months of last year\'s sales on hand. Bundle it or raise the commission.', aged: 'No sale for 6 to 12 months. Step down the clearance price.',
+    dead: 'No sale for a year or more, or marked dead (model years no longer common). Lot, marketplace or back to the supplier.', discontinued: 'Not reordered. Sell what is left.',
+    open_box: 'Copies of a part at a lower price: returns graded B, or units marked open box.', damaged: 'Copies of a part at a lower price: damaged units still worth selling.' };
+  var tab = 'over', listState = { cls: 'aged', q: '', sort: 'value', due: false, offset: 0 }, sel = {};
+  try { tab = localStorage.getItem('vision.scTab') || 'over'; } catch (_) {}
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 3500); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); }
+        return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; });
+      });
+  }
+  function modal(h) { $('#modal').innerHTML = '<div class="modal"><div class="card">' + h + '</div></div>'; $('.modal').addEventListener('mousedown', function (e) { if (e.target.classList.contains('modal')) close(); }); }
+  function close() { $('#modal').innerHTML = ''; }
+  function go(t, extra) { tab = t; if (extra) Object.assign(listState, extra); show(); }
+
+  // -------------------------------------------------------------- overview --
+  function over(refresh) {
+    return api('/api/stockcash/summary' + (refresh ? '?refresh=1' : '')).then(function (d) {
+      var order = ['overstock', 'aged', 'dead', 'discontinued', 'open_box', 'damaged'];
+      var tot = order.reduce(function (s, k) { return s + (d.classes[k] ? d.classes[k].value : 0); }, 0);
+      $('#out').innerHTML = (d.reliable_from ? '<div class="note warn">Sales before ' + esc(d.reliable_from) + ' were imported without their lines, so for parts with no sale since then the "no sale for" time is a minimum. A part is never classed older than the data can show.</div>' : '') +
+        '<div class="card"><h2>Stock that is not selling: ' + J(tot) + ' at cost <button class="sm" id="rf">Refresh</button></h2><p class="sub">Worked out from sales at ' + esc(new Date(d.at).toLocaleTimeString('en-JM', { timeZone: 'America/Jamaica', hour: '2-digit', minute: '2-digit' })) + '. Click a box to work its list.</p><div class="grid">' +
+        order.map(function (k) { var c = d.classes[k] || { skus: 0, units: 0, value: 0, retail: 0, due: 0, on_clearance: 0 };
+          return '<div class="tile" data-c="' + k + '"><span class="k">' + esc(CLS[k]) + '</span><b>' + J(c.value) + '</b>' + c.skus + ' parts, ' + c.units + ' units' + (c.on_clearance ? '<br><span class="pill">' + c.on_clearance + ' on clearance</span>' : '') + (c.due ? ' <span class="pill warn">' + c.due + ' price steps due</span>' : '') + '</div>'; }).join('') +
+        '</div></div><div class="grid"><div class="tile" data-go="ret"><span class="k">Returns to grade</span><b>' + d.returns_to_grade + '</b>last 90 days</div><div class="tile" data-go="disp"><span class="k">Open supplier claims</span><b>' + J(d.open_claims.value) + '</b>' + d.open_claims.n + ' claims</div>' +
+        '<div class="tile" data-go="lots"><span class="k">Open lots</span><b>' + d.open_lots + '</b>liquidation</div><div class="tile" data-go="tasks"><span class="k">Worklist</span><b>' + d.open_tasks + '</b>open tasks</div></div>';
+      $('#rf').onclick = function () { over(true); };
+      all('[data-c]').forEach(function (t) { t.onclick = function () { go('list', { cls: t.getAttribute('data-c'), offset: 0, due: false }); }; });
+      all('[data-go]').forEach(function (t) { t.onclick = function () { go(t.getAttribute('data-go')); }; });
+    });
+  }
+
+  // ----------------------------------------------------------------- lists --
+  function list() {
+    var p = listState;
+    return api('/api/stockcash/items?class=' + p.cls + '&q=' + encodeURIComponent(p.q) + '&sort=' + p.sort + (p.due ? '&due=1' : '') + '&limit=100&offset=' + p.offset).then(function (d) {
+      var nSel = function () { return Object.keys(sel).length; };
+      $('#out').innerHTML = '<div class="card"><div class="controls"><div><label>List</label><select id="lc">' + Object.keys(CLS).map(function (k) { return '<option value="' + k + '"' + (k === p.cls ? ' selected' : '') + '>' + esc(CLS[k]) + '</option>'; }).join('') + '</select></div>' +
+        '<div><label>Search</label><input id="lq" value="' + esc(p.q) + '" placeholder="part, name, vehicle"></div><div><label>Sort</label><select id="ls"><option value="value">Stock value</option><option value="idle">Longest without a sale</option><option value="cover">Months of stock</option><option value="name">Name</option></select></div>' +
+        '<label style="display:flex;gap:5px;align-items:center;color:inherit"><input type="checkbox" id="ld"' + (p.due ? ' checked' : '') + '> price step due</label>' +
+        '<a href="/api/stockcash/items.csv?class=' + p.cls + '&q=' + encodeURIComponent(p.q) + '" class="sm">Download CSV</a></div><p class="sub">' + esc(CLS_NOTE[p.cls] || '') + ' ' + d.total + ' parts, ' + J(d.value) + ' at cost.</p>' +
+        '<div class="bar"><b id="ns">0</b> chosen: <button class="sm primary" data-a="step">Next clearance step</button><button class="sm" data-a="set">Set % off</button><button class="sm" data-a="end">End clearance</button>' +
+        '<button class="sm" data-a="boost">Boost commission</button><button class="sm" data-a="unboost">Remove boost</button><button class="sm" data-a="disc">Discontinue</button><button class="sm" data-a="dead">Mark dead</button><button class="sm" data-a="keep">Keep (not clearance)</button><button class="sm" data-a="lot">Make a lot</button><button class="sm" data-a="campaign">Campaign</button><button class="sm" data-a="clear">Clear</button></div>' +
+        '<div class="scroll"><table><thead><tr><th><input type="checkbox" id="sa"></th><th>Part</th><th class="n">On hand</th><th class="n">Cost</th><th class="n">Price</th><th class="n">Value</th><th class="n">Sold 12m</th><th>No sale for</th><th>Suggested</th><th></th></tr></thead><tbody>' +
+        (d.items.length ? d.items.map(function (r) {
+          return '<tr><td><input type="checkbox" data-i="' + esc(r.img) + '"' + (sel[r.img] ? ' checked' : '') + '></td><td><b>' + esc(r.img) + '</b> ' + esc(r.name) + '<br><small>' + esc(r.make_model || '') + ' · ' + esc(r.category || '') + (r.supplier ? ' · ' + esc(r.supplier) : '') + '</small></td>' +
+            '<td class="n">' + r.stock + '</td><td class="n">' + J(r.cost) + '</td><td class="n">' + (r.clearance_step ? '<s>' + J(r.regular) + '</s><br><b>' + J(r.price) + '</b> <span class="pill">-' + r.clearance_pct + '%</span>' : J(r.price)) + (r.below_cost ? '<br><span class="pill bad">below cost</span>' : '') + '</td>' +
+            '<td class="n">' + J(r.value) + '</td><td class="n">' + r.q365 + (r.cover ? '<br><small>' + r.cover + ' mo</small>' : '') + '</td><td>' + (r.idle_days == null ? '–' : (r.idle_minimum ? 'over ' : '') + Math.round(r.idle_days / 30.4) + ' months') + '</td>' +
+            '<td>' + (r.step_due ? '<span class="pill warn">due</span> ' : '') + esc(r.suggestion) + (r.boosted ? ' <span class="pill ok">boosted ' + esc(r.commission) + '</span>' : '') + '</td>' +
+            '<td style="white-space:nowrap">' + (r.variant_of ? '' : '<button class="sm" data-dmg="' + esc(r.img) + '">Damaged / claim…</button>') + '</td></tr>';
+        }).join('') : '<tr><td colspan="10" class="empty">Nothing in this list.</td></tr>') + '</tbody></table></div>' +
+        '<div class="controls" style="margin-top:8px">' + (p.offset > 0 ? '<button id="pv">◀ Previous</button>' : '') + (p.offset + 100 < d.total ? '<button id="nx">Next ▶</button>' : '') + '<span class="sub">' + (d.total ? (p.offset + 1) + '–' + Math.min(d.total, p.offset + 100) + ' of ' + d.total : '') + '</span></div></div>';
+      $('#ls').value = p.sort;
+      var upd = function () { $('#ns').textContent = nSel(); };
+      upd();
+      $('#lc').onchange = function () { p.cls = this.value; p.offset = 0; sel = {}; list(); };
+      $('#ls').onchange = function () { p.sort = this.value; p.offset = 0; list(); };
+      $('#ld').onchange = function () { p.due = this.checked; p.offset = 0; list(); };
+      $('#lq').onkeydown = function (e) { if (e.key === 'Enter') { p.q = this.value; p.offset = 0; list(); } };
+      if ($('#pv')) $('#pv').onclick = function () { p.offset = Math.max(0, p.offset - 100); list(); };
+      if ($('#nx')) $('#nx').onclick = function () { p.offset += 100; list(); };
+      all('[data-i]').forEach(function (c) { c.onchange = function () { var k = c.getAttribute('data-i'); if (c.checked) sel[k] = d.items.find(function (x) { return x.img === k; }); else delete sel[k]; upd(); }; });
+      $('#sa').onchange = function () { var on = this.checked; all('[data-i]').forEach(function (c) { c.checked = on; c.onchange(); }); };
+      all('[data-dmg]').forEach(function (b) { b.onclick = function () { disposeDialog(d.items.find(function (x) { return x.img === b.getAttribute('data-dmg'); })); }; });
+      all('.bar [data-a]').forEach(function (b) { b.onclick = function () { bulk(b.getAttribute('data-a')); }; });
+    });
+  }
+  function bulk(a) {
+    var imgs = Object.keys(sel);
+    if (a === 'clear') { sel = {}; return list(); }
+    if (!imgs.length) return toast('Tick some parts first');
+    var done = function (r) {
+      var msg = (r.done ? r.done.length + ' changed' : (r.changed != null ? r.changed + ' changed' : 'Done'));
+      if (r.skipped && r.skipped.length) msg += '; ' + r.skipped.length + ' skipped (' + r.skipped.slice(0, 3).map(function (x) { return x.img + ': ' + x.why; }).join('; ') + ')';
+      toast(msg); sel = {}; list();
+      if (r.skipped && r.skipped.some(function (x) { return x.below_cost; }) && confirm('Some parts would go below cost. Do it anyway (dead stock)?')) {
+        api('/api/stockcash/clearance', 'POST', { imgs: r.skipped.filter(function (x) { return x.below_cost; }).map(function (x) { return x.img; }), action: lastAction.action, pct: lastAction.pct, allow_below_cost: true }).then(function (r2) { toast(r2.done.length + ' set below cost'); list(); }).catch(function (e) { toast(e.message); });
+      }
+    };
+    var err = function (e) { toast(e.message); };
+    var lastAction = {};
+    if (a === 'step' || a === 'end') { lastAction = { action: a }; return api('/api/stockcash/clearance', 'POST', { imgs: imgs, action: a }).then(done).catch(err); }
+    if (a === 'set') { var pct = prompt('Percent off the regular price', '25'); if (!pct) return; lastAction = { action: 'set', pct: pct }; return api('/api/stockcash/clearance', 'POST', { imgs: imgs, action: 'set', pct: pct }).then(done).catch(err); }
+    if (a === 'boost') { var bp = prompt('Commission on these parts, % of the sale (blank = the default)', ''); if (bp === null) return; return api('/api/stockcash/boost', 'POST', { imgs: imgs, pct: bp }).then(done).catch(err); }
+    if (a === 'unboost') return api('/api/stockcash/boost', 'POST', { imgs: imgs, remove: true }).then(done).catch(err);
+    if (a === 'disc') {
+      var by = prompt('Discontinue these parts (never reordered). Replaced by which part number? (leave blank if none)', ''); if (by === null) return;
+      return api('/api/stockcash/flags', 'POST', by ? { imgs: imgs, discontinued: true, superseded_by: by.trim() } : { imgs: imgs, discontinued: true }).then(done).catch(err);
+    }
+    if (a === 'dead') return api('/api/stockcash/flags', 'POST', { imgs: imgs, override: 'dead' }).then(done).catch(err);
+    if (a === 'keep') return api('/api/stockcash/flags', 'POST', { imgs: imgs, override: 'keep', discontinued: false, superseded_by: null }).then(done).catch(err);
+    if (a === 'lot') return lotDialog(imgs.map(function (k) { return sel[k]; }).filter(Boolean));
+    if (a === 'campaign') { tab = 'camp'; campItems = imgs.slice(); return show(); }
+  }
+  function disposeDialog(r) {
+    modal('<h2>' + esc(r.img) + ' ' + esc(r.name) + '</h2><p class="sub">' + r.stock + ' on hand at ' + J(r.cost) + ' each. Moving units here takes them out of normal stock.</p>' +
+      '<div class="controls"><div><label>Units</label><input id="dq" type="number" min="1" max="' + r.stock + '" value="1" style="width:80px"></div><div><label>What</label><select id="dk"><option value="open_box">Open box (sell cheaper)</option><option value="damaged">Damaged (sell cheaper)</option><option value="vendor_claim">Claim from the supplier</option><option value="writeoff">Write off (scrap)</option></select></div>' +
+      '<div><label>% off (open box / damaged)</label><input id="dp" type="number" placeholder="default" style="width:90px"></div><div><label>Found at</label><select id="ds"><option value="manual">Shelf</option><option value="receiving">Receiving</option><option value="count">Stock count</option></select></div></div>' +
+      '<input id="dn" placeholder="What is wrong with it" style="width:100%"><div class="controls" style="margin-top:10px"><button class="primary" id="dgo">Save</button><button id="dx">Cancel</button></div>');
+    $('#dx').onclick = close;
+    $('#dgo').onclick = function () {
+      var k = $('#dk').value;
+      if (k === 'writeoff' && !confirm('Write off ' + $('#dq').value + ' unit(s)? The cost goes to stock losses.')) return;
+      api('/api/stockcash/dispose', 'POST', { img: r.img, qty: $('#dq').value, kind: k, pct: $('#dp').value, source: $('#ds').value, note: $('#dn').value })
+        .then(function (x) { close(); toast(x.disposition.to_img ? 'Moved to ' + x.disposition.to_img : 'Saved'); list(); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  // --------------------------------------------------------------- returns --
+  function ret() {
+    return api('/api/stockcash/returns' + (ret.all ? '?all=1' : '')).then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>Returns to grade <label style="font-weight:400;font-size:13px;display:flex;gap:5px;align-items:center"><input type="checkbox" id="ra"' + (ret.all ? ' checked' : '') + '> show graded</label></h2>' +
+        '<p class="sub">Returned parts went back into stock at the refund. Check each one: <b>A</b> as new (stays), <b>B</b> opened or marked (moves to an open-box copy at a lower price), <b>C</b> not sellable (write off, or claim from the supplier if it is faulty).</p>' +
+        '<div class="scroll"><table><thead><tr><th>Returned</th><th>Part</th><th class="n">Qty</th><th>Reason</th><th>Grade</th></tr></thead><tbody>' +
+        (d.returns.length ? d.returns.map(function (r) {
+          return '<tr><td>' + esc(d10(r.created_at)) + '<br><small>' + esc(r.return_number || '') + ' · ' + esc(r.receipt_number) + '</small></td><td><b>' + esc(r.product_img || '') + '</b> ' + esc(r.name) + '</td><td class="n">' + r.qty + '</td><td>' + esc(r.reason || '') + '</td>' +
+            '<td style="white-space:nowrap">' + (r.grade ? '<span class="pill ' + (r.grade === 'A' ? 'ok' : r.grade === 'B' ? 'warn' : 'bad') + '">' + r.grade + '</span> ' + esc(r.outcome ? ({ open_box: '→ ' + (r.to_img || 'open box'), writeoff: 'written off', vendor_claim: 'claimed' })[r.outcome] : 'back in stock') + '<br><small>' + esc(r.graded_by_name || '') + '</small>'
+              : r.product_img ? '<button class="sm" data-g="A" data-r="' + r.id + '">A</button> <button class="sm" data-g="B" data-r="' + r.id + '">B</button> <button class="sm" data-g="C" data-r="' + r.id + '" data-s="' + (r.has_supplier ? 1 : 0) + '">C</button>' : '<small>not a stocked part</small>') + '</td></tr>';
+        }).join('') : '<tr><td colspan="5" class="empty">Nothing to grade.</td></tr>') + '</tbody></table></div></div>';
+      $('#ra').onchange = function () { ret.all = this.checked; ret(); };
+      all('[data-g]').forEach(function (b) {
+        b.onclick = function () {
+          var g = b.getAttribute('data-g'), body = { grade: g };
+          if (g === 'C') { var claim = b.getAttribute('data-s') === '1' && confirm('Faulty from the supplier? OK = claim it from them; Cancel = write it off.'); body.outcome = claim ? 'vendor_claim' : 'writeoff'; body.note = prompt('What is wrong with it?', '') || ''; }
+          api('/api/stockcash/returns/' + b.getAttribute('data-r') + '/grade', 'POST', body).then(function () { toast('Graded ' + g); ret(); }).catch(function (e) { toast(e.message); });
+        };
+      });
+    });
+  }
+
+  // ---------------------------------------------------- damaged and claims --
+  function disp() {
+    return api('/api/stockcash/dispositions').then(function (d) {
+      var K = { open_box: 'Open box', damaged: 'Damaged', writeoff: 'Written off', vendor_claim: 'Supplier claim' };
+      $('#out').innerHTML = '<div class="card"><h2>Damaged, open box, write-offs and supplier claims</h2><p class="sub">Mark units from any stock list ("Damaged / claim…"). When the supplier\'s credit note comes, mark the claim credited here; do not also enter the credit as a bill.</p><div class="scroll"><table><thead><tr><th>When</th><th>Part</th><th class="n">Qty</th><th>What</th><th>From</th><th class="n">Cost</th><th>Claim</th><th></th></tr></thead><tbody>' +
+        (d.dispositions.length ? d.dispositions.map(function (x) {
+          return '<tr><td>' + esc(d10(x.created_at)) + '<br><small>' + esc(x.by_name || '') + '</small></td><td><b>' + esc(x.product_img) + '</b> ' + esc(x.name || '') + (x.note ? '<br><small>' + esc(x.note) + '</small>' : '') + '</td><td class="n">' + x.qty + '</td><td>' + esc(K[x.kind]) + (x.to_img ? '<br><small>→ ' + esc(x.to_img) + '</small>' : '') + '</td><td>' + esc(x.source) + '</td><td class="n">' + J(x.qty * x.unit_cost) + '</td>' +
+            '<td>' + (x.kind === 'vendor_claim' ? esc(x.supplier || 'no supplier') + '<br><span class="pill ' + (x.claim_status === 'credited' ? 'ok' : x.claim_status === 'open' ? 'warn' : 'bad') + '">' + esc(x.claim_status) + (x.claim_status === 'credited' ? ' ' + J(x.claim_amount) : '') + '</span>' : '') + '</td>' +
+            '<td style="white-space:nowrap">' + (x.kind === 'vendor_claim' && x.claim_status === 'open' ? '<button class="sm primary" data-cr="' + x.id + '" data-v="' + (x.qty * x.unit_cost) + '">Credited</button> <button class="sm" data-rj="' + x.id + '">Rejected</button>' : '') + '</td></tr>';
+        }).join('') : '<tr><td colspan="8" class="empty">None yet.</td></tr>') + '</tbody></table></div></div>';
+      all('[data-cr]').forEach(function (b) { b.onclick = function () { var a = prompt('Credit amount from the supplier (J$)', Math.round(+b.getAttribute('data-v'))); if (!a) return; api('/api/stockcash/claims/' + b.getAttribute('data-cr'), 'POST', { status: 'credited', amount: a }).then(function () { toast('Credited'); disp(); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-rj]').forEach(function (b) { b.onclick = function () { if (!confirm('The supplier refused? The cost becomes a stock loss.')) return; api('/api/stockcash/claims/' + b.getAttribute('data-rj'), 'POST', { status: 'rejected' }).then(function () { toast('Rejected'); disp(); }).catch(function (e) { toast(e.message); }); }; });
+    });
+  }
+
+  // ------------------------------------------------------------------ lots --
+  function lotDialog(items) {
+    modal('<h2>New liquidation lot</h2><p class="sub">A lot is sold to one buyer at one price per part, through the till. Set the price per unit.</p><div class="controls"><div style="flex:1"><label>Lot name</label><input id="ln" style="width:100%" placeholder="e.g. Honda body parts, Oct"></div><div><label>% of cost for all</label><input id="lpc" type="number" value="60" style="width:80px"></div><button class="sm" id="lap">Apply</button></div>' +
+      '<div class="controls"><div><label>Buyer</label><input id="lb"></div><div><label>Buyer phone</label><input id="lph"></div></div><table><thead><tr><th>Part</th><th class="n">Qty</th><th class="n">Cost</th><th class="n">Lot price each</th></tr></thead><tbody>' +
+      items.map(function (r, i) { return '<tr><td>' + esc(r.img) + ' ' + esc(r.name) + '</td><td class="n"><input type="number" data-q="' + i + '" min="1" max="' + r.stock + '" value="' + r.stock + '" style="width:70px"></td><td class="n">' + J(r.cost) + '</td><td class="n"><input type="number" data-p="' + i + '" value="' + Math.round(r.cost * 0.6) + '" style="width:100px"></td></tr>'; }).join('') +
+      '</tbody></table><p id="lt" class="sub"></p><div class="controls"><button class="primary" id="lgo">Create lot</button><button id="lx">Cancel</button></div>');
+    var tot = function () { var t = 0, c = 0; items.forEach(function (r, i) { var q = +$('[data-q="' + i + '"]').value || 0; t += q * (+$('[data-p="' + i + '"]').value || 0); c += q * r.cost; }); $('#lt').textContent = 'Lot total ' + J(t) + ' against ' + J(c) + ' at cost (' + (c ? Math.round(t / c * 100) : 0) + '%).'; };
+    all('[data-q],[data-p]').forEach(function (x) { x.oninput = tot; }); tot();
+    $('#lap').onclick = function () { var f = (+$('#lpc').value || 0) / 100; items.forEach(function (r, i) { $('[data-p="' + i + '"]').value = Math.round(r.cost * f); }); tot(); };
+    $('#lx').onclick = close;
+    $('#lgo').onclick = function () {
+      api('/api/stockcash/lots', 'POST', { name: $('#ln').value, buyer_name: $('#lb').value, buyer_phone: $('#lph').value, items: items.map(function (r, i) { return { img: r.img, qty: $('[data-q="' + i + '"]').value, unit_price: $('[data-p="' + i + '"]').value }; }) })
+        .then(function () { close(); sel = {}; toast('Lot created'); go('lots'); }).catch(function (e) { toast(e.message); });
+    };
+  }
+  function lots() {
+    return api('/api/stockcash/lots').then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>Liquidation lots</h2><p class="sub">Make a lot from a stock list (tick parts, then "Make a lot"). Send it to the till when the buyer is ready to pay; it is sold once the cashier takes payment.</p><div class="scroll"><table><thead><tr><th>Lot</th><th>Buyer</th><th class="n">Lines</th><th class="n">Price</th><th class="n">Cost</th><th>Status</th><th></th></tr></thead><tbody>' +
+        (d.lots.length ? d.lots.map(function (l) {
+          return '<tr><td><b>#' + l.id + ' ' + esc(l.name) + '</b><br><small>' + esc(d10(l.created_at)) + ' · ' + esc(l.by_name || '') + '</small></td><td>' + esc(l.buyer_name || '') + '<br><small>' + esc(l.buyer_phone || '') + '</small></td><td class="n">' + l.lines + '</td><td class="n">' + J(l.total) + '</td><td class="n">' + J(l.cost) + '</td>' +
+            '<td><span class="pill ' + (l.status === 'sold' ? 'ok' : l.status === 'cancelled' ? 'bad' : 'warn') + '">' + esc(l.status === 'at_till' ? 'at the till (order ' + l.pos_order_id + ')' : l.status) + '</span></td>' +
+            '<td style="white-space:nowrap"><a class="sm" href="/api/stockcash/lots/' + l.id + '/csv">CSV</a> ' + (l.status === 'open' ? '<button class="sm primary" data-till="' + l.id + '">Send to till</button> <button class="sm" data-cx="' + l.id + '">Cancel</button>' : '') + '</td></tr>';
+        }).join('') : '<tr><td colspan="7" class="empty">No lots.</td></tr>') + '</tbody></table></div></div>';
+      all('[data-till]').forEach(function (b) { b.onclick = function () { api('/api/stockcash/lots/' + b.getAttribute('data-till') + '/till', 'POST').then(function (r) { toast('Order ' + r.order_id + ' waiting at the cashier: ' + J(r.total)); lots(); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-cx]').forEach(function (b) { b.onclick = function () { if (!confirm('Cancel this lot?')) return; api('/api/stockcash/lots/' + b.getAttribute('data-cx') + '/cancel', 'POST').then(lots).catch(function (e) { toast(e.message); }); }; });
+    });
+  }
+
+  // ------------------------------------------------------------- campaigns --
+  var campItems = [];
+  function camp() {
+    return api('/api/stockcash/campaigns').then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>New offer campaign</h2><p class="sub">Goes only to customers who agreed to offers on that channel. Every email and text carries an unsubscribe link. In the message, {name} is their first name, {link} opens the clearance page, {code} is the coupon.</p>' +
+        (campItems.length ? '<div class="note info">' + campItems.length + ' parts from your list are featured.</div>' : '') +
+        '<div class="controls"><div style="flex:1"><label>Name</label><input id="cn" style="width:100%" placeholder="e.g. October clearance"></div><div><label>Channel</label><select id="cc"><option value="email">Email</option><option value="sms">Text (SMS)</option><option value="whatsapp">WhatsApp (sent by hand)</option></select></div></div>' +
+        '<div class="controls"><div><label>Who</label><select id="ca"><option value="all">All customers who said yes</option><option value="tier">A price tier</option><option value="bought">Bought these before</option></select></div><div id="cax"></div></div>' +
+        '<div class="controls"><div style="flex:1"><label>Subject (email)</label><input id="cs" style="width:100%" placeholder="Clearance: up to 30% off"></div></div>' +
+        '<textarea id="cb" rows="4" style="width:100%">Hi {name}, our clearance is on: parts up to 30% off while stock lasts. Use code {code} for extra off clearance items online. See them here: {link}</textarea>' +
+        '<div class="controls" style="margin-top:8px"><div><label>Coupon % off clearance items</label><input id="cp" type="number" value="5" style="width:80px"></div><div><label>Valid days</label><input id="cd" type="number" value="14" style="width:70px"></div><div><label>Max uses</label><input id="cm" type="number" placeholder="no limit" style="width:90px"></div>' +
+        '<button id="cpv">Count recipients</button><span id="cpo" class="sub"></span></div><button class="primary" id="cgo">Create campaign</button></div>' +
+        '<div class="card"><h2>Campaigns</h2><div class="scroll"><table><thead><tr><th>Campaign</th><th>Channel</th><th class="n">Sent</th><th class="n">Page views</th><th>Coupon</th><th>Status</th><th></th></tr></thead><tbody>' +
+        (d.campaigns.length ? d.campaigns.map(function (c) {
+          return '<tr><td><b>' + esc(c.name) + '</b><br><small>' + esc(d10(c.created_at)) + ' · ' + esc((c.audience && c.audience.type) || 'all') + '</small></td><td>' + esc(c.kind) + '</td><td class="n">' + (c.status === 'sent' ? c.sent_count + ' / ' + c.recipients_count + (c.failed_count ? ' <span class="pill bad">' + c.failed_count + ' failed</span>' : '') : '–') + '</td>' +
+            '<td class="n">' + c.views + '</td><td>' + (c.coupon_code ? esc(c.coupon_code) + ' <small>(' + (c.redeemed_count || 0) + ' used)</small>' : '') + '</td><td><span class="pill ' + (c.status === 'sent' ? 'ok' : 'warn') + '">' + esc(c.status) + '</span></td>' +
+            '<td style="white-space:nowrap">' + (c.status === 'draft' ? '<button class="sm primary" data-send="' + c.id + '">Send</button>' : '') + (c.kind === 'whatsapp' && c.status === 'sent' ? '<button class="sm" data-share="' + c.id + '">WhatsApp list</button>' : '') + '</td></tr>';
+        }).join('') : '<tr><td colspan="7" class="empty">No campaigns yet.</td></tr>') + '</tbody></table></div></div>';
+      var aud = function () {
+        var t = $('#ca').value;
+        $('#cax').innerHTML = t === 'tier' ? '<label>Tier</label><select id="ct"><option>retail</option><option>trade</option><option>fleet</option><option>dealer</option></select>'
+          : t === 'bought' ? '<label>Categories (comma)</label><input id="ccat" placeholder="Brakes, Suspension"> <label>Vehicles (comma)</label><input id="cmk" placeholder="Corolla, Civic">' : '';
+      };
+      $('#ca').onchange = aud; aud();
+      var audience = function () { var t = $('#ca').value, split = function (v) { return String(v || '').split(',').map(function (x) { return x.trim(); }).filter(Boolean); };
+        return t === 'tier' ? { type: 'tier', tier: $('#ct').value } : t === 'bought' ? { type: 'bought', categories: split($('#ccat').value), makes: split($('#cmk').value) } : { type: 'all' }; };
+      $('#cpv').onclick = function () { api('/api/stockcash/campaigns/preview', 'POST', { channel: $('#cc').value, audience: audience() }).then(function (r) { $('#cpo').textContent = r.recipients + ' of ' + r.customers + ' customers can get this' + (r.sample.length ? ' (e.g. ' + r.sample.join(', ') + ')' : ''); }).catch(function (e) { toast(e.message); }); };
+      $('#cgo').onclick = function () {
+        api('/api/stockcash/campaigns', 'POST', { name: $('#cn').value, channel: $('#cc').value, subject: $('#cs').value, body: $('#cb').value, audience: audience(), imgs: campItems,
+          coupon: +$('#cp').value > 0 ? { pct: $('#cp').value, days: $('#cd').value, max: $('#cm').value } : null })
+          .then(function (r) { toast('Campaign saved' + (r.coupon_code ? ', coupon ' + r.coupon_code : '') + '. Press Send when ready.'); campItems = []; camp(); }).catch(function (e) { toast(e.message); });
+      };
+      all('[data-send]').forEach(function (b) {
+        b.onclick = function () {
+          if (!confirm('Send this campaign now?')) return;
+          b.disabled = true;
+          api('/api/stockcash/campaigns/' + b.getAttribute('data-send') + '/send', 'POST').then(function (r) { toast('Sent ' + r.sent + ' of ' + r.recipients + (r.failed ? ', ' + r.failed + ' failed' : '')); if (r.share && r.share.length) shareList(r.share); camp(); }).catch(function (e) { toast(e.message); camp(); });
+        };
+      });
+      all('[data-share]').forEach(function (b) { b.onclick = function () { api('/api/stockcash/campaigns/' + b.getAttribute('data-share') + '/share').then(function (r) { shareList(r.share); }).catch(function (e) { toast(e.message); }); }; });
+    });
+  }
+  function shareList(list) {
+    modal('<h2>Send on WhatsApp</h2><p class="sub">Each opens a WhatsApp chat with the message filled in. Tick as you go.</p><table><tbody>' + list.map(function (s) { return '<tr><td><input type="checkbox"></td><td>' + esc(s.name) + '</td><td>' + esc(s.phone) + '</td><td><a href="' + esc(s.url) + '" target="_blank" rel="noopener">Open chat</a></td></tr>'; }).join('') + '</tbody></table><button id="sx">Close</button>');
+    $('#sx').onclick = close;
+  }
+
+  // -------------------------------------------------------------- worklist --
+  function tasks() {
+    return api('/api/stockcash/tasks' + (tasks.all ? '?all=1' : '')).then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>Worklist <button class="sm primary" id="tb">Add suggested tasks</button><label style="font-weight:400;font-size:13px;display:flex;gap:5px;align-items:center"><input type="checkbox" id="ta"' + (tasks.all ? ' checked' : '') + '> show done</label></h2>' +
+        '<p class="sub">"Add suggested tasks" adds price steps that are due, dead stock to list or return, big overstock to push and supplier claims to chase. Each part gets one open task of each kind.</p><div class="scroll"><table><thead><tr><th>Task</th><th>Part</th><th>Who</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>' +
+        (d.tasks.length ? d.tasks.map(function (t) {
+          return '<tr><td>' + esc(t.title) + (t.note ? '<br><small>' + esc(t.note) + '</small>' : '') + '</td><td>' + esc(t.product_img || '') + (t.stock_count != null ? ' <small>(' + t.stock_count + ' left)</small>' : '') + '</td>' +
+            '<td><select data-as="' + t.id + '"><option value="">–</option>' + d.staff.map(function (s) { return '<option value="' + s.id + '"' + (t.assigned_to === s.id ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join('') + '</select></td>' +
+            '<td><input type="date" data-du="' + t.id + '" value="' + esc(t.due_on ? String(t.due_on).slice(0, 10) : '') + '"></td><td><span class="pill ' + (t.status === 'done' ? 'ok' : t.status === 'open' ? 'warn' : '') + '">' + esc(t.status) + '</span>' + (t.done_name ? '<br><small>' + esc(t.done_name) + '</small>' : '') + '</td>' +
+            '<td style="white-space:nowrap">' + (t.status === 'open' ? '<button class="sm primary" data-dn="' + t.id + '">Done</button> <button class="sm" data-sk="' + t.id + '">Skip</button>' : '<button class="sm" data-ro="' + t.id + '">Reopen</button>') + '</td></tr>';
+        }).join('') : '<tr><td colspan="6" class="empty">Nothing on the list.</td></tr>') + '</tbody></table></div></div>';
+      var upd = function (id, body) { return api('/api/stockcash/tasks/' + id, 'POST', body).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); }); };
+      $('#tb').onclick = function () { api('/api/stockcash/tasks/build', 'POST').then(function (r) { toast(r.made + ' tasks added'); tasks(); }).catch(function (e) { toast(e.message); }); };
+      $('#ta').onchange = function () { tasks.all = this.checked; tasks(); };
+      all('[data-as]').forEach(function (s) { s.onchange = function () { upd(s.getAttribute('data-as'), { assigned_to: s.value }); }; });
+      all('[data-du]').forEach(function (s) { s.onchange = function () { upd(s.getAttribute('data-du'), { due_on: s.value }); }; });
+      all('[data-dn]').forEach(function (b) { b.onclick = function () { upd(b.getAttribute('data-dn'), { status: 'done' }).then(tasks); }; });
+      all('[data-sk]').forEach(function (b) { b.onclick = function () { upd(b.getAttribute('data-sk'), { status: 'skipped' }).then(tasks); }; });
+      all('[data-ro]').forEach(function (b) { b.onclick = function () { upd(b.getAttribute('data-ro'), { status: 'open' }).then(tasks); }; });
+    });
+  }
+
+  // -------------------------------------------------------------- settings --
+  function setTab() {
+    return api('/api/stockcash/summary').then(function (d) {
+      var s = d.settings;
+      $('#out').innerHTML = '<div class="card"><h2>Rules</h2><div class="controls"><div><label>Overstock: more than (months of sales)</label><input id="s1" type="number" value="' + s.months + '" style="width:90px"></div>' +
+        '<div><label>Aged: no sale in (days)</label><input id="s2" type="number" value="' + s.slow + '" style="width:90px"></div><div><label>Dead: no sale in (days)</label><input id="s3" type="number" value="' + s.dead + '" style="width:90px"></div></div>' +
+        '<div class="controls"><div><label>Clearance ladder (% off, each step)</label><input id="s4" value="' + esc(s.ladder.join(',')) + '" style="width:120px"></div><div><label>Days between steps</label><input id="s5" type="number" value="' + s.ladderDays + '" style="width:90px"></div>' +
+        '<div><label>Open box % off</label><input id="s6" type="number" value="' + s.openBox + '" style="width:80px"></div><div><label>Damaged % off</label><input id="s7" type="number" value="' + s.damaged + '" style="width:80px"></div><div><label>Boosted commission %</label><input id="s8" type="number" step="0.5" value="' + s.boost + '" style="width:80px"></div></div>' +
+        '<p class="sub">Clearance prices are rounded to whole dollars and never go below cost unless you confirm it. Ending clearance puts the regular price back.</p><button class="primary" id="ss">Save</button></div>';
+      $('#ss').onclick = function () {
+        api('/api/stockcash/settings', 'PUT', { months: $('#s1').value, slow: $('#s2').value, dead: $('#s3').value, ladder: $('#s4').value, ladder_days: $('#s5').value, open_box_pct: $('#s6').value, damaged_pct: $('#s7').value, boost_pct: $('#s8').value })
+          .then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); });
+      };
+    });
+  }
+
+  function show() {
+    all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); });
+    try { localStorage.setItem('vision.scTab', tab); } catch (_) {}
+    ({ over: over, list: list, ret: ret, disp: disp, lots: lots, camp: camp, tasks: tasks, set: setTab }[tab] || over)().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
+  show();
+})();
+</script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+</body>
+</html>
