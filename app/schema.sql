@@ -2324,3 +2324,150 @@ CREATE INDEX IF NOT EXISTS idx_purchase_orders_due_date     ON purchase_orders (
 ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS paid_on DATE;
 UPDATE purchase_order_payments SET paid_on = created_at::date WHERE paid_on IS NULL;
 CREATE INDEX IF NOT EXISTS idx_po_payments_paid_on ON purchase_order_payments (paid_on);
+-- =============================================================================
+--  WAREHOUSE FOUNDATION (Phase 1, 2026-10): bins, stock per bin, scan log
+--
+--  products.stock_count stays the single total every existing screen reads and
+--  writes (POS sales, returns, PO receiving, manual adjust). stock_by_bin says
+--  WHERE that total sits. The trigger below keeps the two equal without
+--  touching any of those code paths: a total that drops is taken out of the
+--  item's bins (primary bin first), a total that rises lands in the primary bin
+--  (or UNASSIGNED). Bin-aware code (moves, putaway, bin counts) maintains
+--  stock_by_bin itself and switches the trigger off for its own transaction
+--  with  SELECT set_config('vision.bin_sync_off','on',true).
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS warehouse_settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT
+);
+
+CREATE TABLE IF NOT EXISTS bins (
+  id            SERIAL PRIMARY KEY,
+  code          TEXT NOT NULL,
+  kind          TEXT NOT NULL DEFAULT 'storage', -- storage | display | receiving | staging | damaged | returns | unassigned
+  zone          TEXT,
+  aisle         TEXT,
+  rack          TEXT,
+  shelf         TEXT,
+  pick_sequence INTEGER,                         -- walk order for route-sorted pick lists (Phase 3)
+  is_active     BOOLEAN NOT NULL DEFAULT true,
+  notes         TEXT,
+  created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_bins_code ON bins (upper(code));
+
+CREATE TABLE IF NOT EXISTS stock_by_bin (
+  product_img TEXT    NOT NULL REFERENCES products(img) ON DELETE CASCADE ON UPDATE CASCADE,
+  bin_id      INTEGER NOT NULL REFERENCES bins(id) ON DELETE RESTRICT,
+  qty         INTEGER NOT NULL DEFAULT 0 CHECK (qty >= 0),
+  updated_at  TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (product_img, bin_id)
+);
+CREATE INDEX IF NOT EXISTS idx_stock_by_bin_bin ON stock_by_bin (bin_id);
+
+ALTER TABLE warehouse_activity ADD COLUMN IF NOT EXISTS bin_id    INTEGER;
+ALTER TABLE warehouse_activity ADD COLUMN IF NOT EXISTS to_bin_id INTEGER;
+ALTER TABLE warehouse_activity ADD COLUMN IF NOT EXISTS terminal  TEXT;
+ALTER TABLE warehouse_activity ADD COLUMN IF NOT EXISTS photo     TEXT;
+CREATE INDEX IF NOT EXISTS idx_warehouse_activity_created ON warehouse_activity (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_warehouse_activity_product ON warehouse_activity (product_img, created_at DESC);
+
+-- Legacy DOS locations carry a trailing marker after '*' ("J14*C", "OIL ROOM*",
+-- "OIL ROOM*CC"); the shelf itself is the part before it. The original text is
+-- left untouched in products.bin_location.
+CREATE OR REPLACE FUNCTION wh_norm_bin(t TEXT) RETURNS TEXT
+  LANGUAGE sql IMMUTABLE AS
+$$ SELECT NULLIF(upper(btrim(regexp_replace(COALESCE(t, ''), '\*[A-Za-z]*\s*$', ''))), '') $$;
+
+CREATE OR REPLACE FUNCTION wh_unassigned_bin() RETURNS INTEGER
+  LANGUAGE plpgsql AS
+$$
+DECLARE bid INTEGER;
+BEGIN
+  SELECT id INTO bid FROM bins WHERE upper(code) = 'UNASSIGNED';
+  IF bid IS NULL THEN
+    INSERT INTO bins (code, kind, notes)
+      VALUES ('UNASSIGNED', 'unassigned', 'Stock whose shelf is not known yet. Put it away to a real bin.')
+      RETURNING id INTO bid;
+  END IF;
+  RETURN bid;
+END $$;
+
+CREATE OR REPLACE FUNCTION products_sync_bins() RETURNS trigger
+  LANGUAGE plpgsql AS
+$$
+DECLARE
+  delta   INTEGER;
+  need    INTEGER;
+  take    INTEGER;
+  primary_id INTEGER;
+  r       RECORD;
+BEGIN
+  IF COALESCE(current_setting('vision.bin_sync_off', true), '') = 'on' THEN RETURN NEW; END IF;
+  IF NOT EXISTS (SELECT 1 FROM warehouse_settings WHERE key = 'bins_enabled' AND value = 'on') THEN RETURN NEW; END IF;
+
+  delta := COALESCE(NEW.stock_count, 0) - (CASE WHEN TG_OP = 'INSERT' THEN 0 ELSE COALESCE(OLD.stock_count, 0) END);
+  IF delta = 0 THEN RETURN NEW; END IF;
+
+  SELECT id INTO primary_id FROM bins WHERE upper(code) = wh_norm_bin(NEW.bin_location);
+
+  IF delta > 0 THEN
+    INSERT INTO stock_by_bin (product_img, bin_id, qty, updated_at)
+      VALUES (NEW.img, COALESCE(primary_id, wh_unassigned_bin()), delta, NOW())
+    ON CONFLICT (product_img, bin_id) DO UPDATE
+      SET qty = stock_by_bin.qty + EXCLUDED.qty, updated_at = NOW();
+  ELSE
+    need := -delta;
+    FOR r IN
+      SELECT s.bin_id, s.qty FROM stock_by_bin s JOIN bins b ON b.id = s.bin_id
+       WHERE s.product_img = NEW.img AND s.qty > 0
+       ORDER BY (s.bin_id = primary_id) DESC NULLS LAST,
+                (b.kind = 'unassigned') DESC,
+                b.pick_sequence NULLS LAST, s.qty
+       FOR UPDATE OF s
+    LOOP
+      EXIT WHEN need <= 0;
+      take := LEAST(r.qty, need);
+      UPDATE stock_by_bin SET qty = qty - take, updated_at = NOW()
+       WHERE product_img = NEW.img AND bin_id = r.bin_id;
+      need := need - take;
+    END LOOP;
+    -- Keep the primary bin's row (a known home, even at zero); drop other empties.
+    DELETE FROM stock_by_bin
+     WHERE product_img = NEW.img AND qty = 0 AND bin_id IS DISTINCT FROM primary_id;
+  END IF;
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS trg_products_sync_bins ON products;
+CREATE TRIGGER trg_products_sync_bins
+  AFTER INSERT OR UPDATE OF stock_count ON products
+  FOR EACH ROW EXECUTE FUNCTION products_sync_bins();
+
+-- One-time load from the legacy bin_location text. Guarded by a settings row so
+-- it never runs twice; bins_enabled switches the trigger on only after it.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM warehouse_settings WHERE key = 'bins_loaded') THEN
+    PERFORM wh_unassigned_bin();
+    INSERT INTO bins (code, kind, notes)
+    SELECT n.code,
+           CASE WHEN n.code LIKE 'DISPLAY%' THEN 'display' ELSE 'storage' END,
+           'Imported from legacy locations'
+      FROM (SELECT DISTINCT wh_norm_bin(bin_location) AS code FROM products) n
+     WHERE n.code IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM bins b WHERE upper(b.code) = n.code);
+
+    INSERT INTO stock_by_bin (product_img, bin_id, qty)
+    SELECT p.img, COALESCE(b.id, wh_unassigned_bin()), p.stock_count
+      FROM products p
+      LEFT JOIN bins b ON upper(b.code) = wh_norm_bin(p.bin_location)
+     WHERE p.stock_count > 0 AND p.img IS NOT NULL
+    ON CONFLICT (product_img, bin_id) DO NOTHING;
+
+    INSERT INTO warehouse_settings (key, value) VALUES ('bins_loaded', NOW()::text), ('bins_enabled', 'on')
+    ON CONFLICT (key) DO NOTHING;
+  END IF;
+END $$;
+
