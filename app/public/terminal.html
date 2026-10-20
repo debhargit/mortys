@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terminal journal · Vision Auto Solutions</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0} header nav{margin-left:auto;display:flex;gap:14px;font-size:13px} header a{color:#fff;opacity:.85}
+  main{max-width:1200px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  input,select,button{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  button{cursor:pointer;background:var(--card)} button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600} button.sm{padding:3px 9px;font-size:12.5px}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 12px} .tabs button{border-radius:999px;padding:6px 13px;font-size:13px} .tabs button.on{background:var(--navy);border-color:var(--navy);color:#fff}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px} .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  table{width:100%;border-collapse:collapse} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .scroll{overflow-x:auto}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip);white-space:nowrap}
+  .pill.bad{background:#d6282822;color:var(--red)} .pill.warn{background:#f59e0b22;color:var(--warn)} .pill.ok{background:#16a34a22;color:var(--ok)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px} @media (max-width:860px){ .grid{grid-template-columns:1fr} }
+  .chips{display:flex;flex-wrap:wrap;gap:6px} .chips label{display:flex;gap:5px;align-items:center;background:var(--chip);padding:3px 9px;border-radius:999px;font-size:12.5px;color:inherit;margin:0}
+  .empty{color:var(--muted);text-align:center;padding:20px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60;max-width:90vw}
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Terminal journal</h1><nav><a href="/security.html">Security</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"><button data-t="feed" class="on">Live feed</button><button data-t="exc">Exceptions</button><button data-t="dept">Departments</button></div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var J = function (v) { return v == null ? '' : 'J$' + Number(v).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+  var when = function (t) { return t ? new Date(t).toLocaleString('en-JM', { dateStyle: 'short', timeStyle: 'medium' }) : ''; };
+  var ymd = function (d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  var KIND = { item_added: ['Item added', ''], item_removed: ['Item taken off', 'warn'], qty_changed: ['Quantity changed', ''], price_changed: ['Price changed', 'warn'], discount_changed: ['Discount', 'warn'],
+    cart_cleared: ['Cart emptied', 'warn'], hold_recalled: ['Hold recalled', ''], dept_override: ['Department override', 'warn'], dept_blocked: ['Refused: other department', 'bad'],
+    sale: ['Sale', 'ok'], credit_note: ['Credit note', 'warn'], void: ['Void', 'bad'], refund: ['Refund', 'bad'], hold: ['Held', ''],
+    drawer_open: ['Drawer opened', ''], drawer_close: ['Drawer closed', ''], drawer_drop: ['Cash drop', ''], drawer_payout: ['Paid out', 'warn'], drawer_float_in: ['Float added', ''], drawer_no_sale: ['No sale (drawer opened)', 'warn'] };
+  var tab = 'feed', p = { from: ymd(new Date()), to: ymd(new Date()), user: '', kind: '' }, timer = null, staff = [];
+  try { tab = localStorage.getItem('vision.tjTab') || 'feed'; } catch (_) {}
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 3000); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); }
+        return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; });
+      });
+  }
+  function controls(extra) {
+    return '<div class="controls"><div><label>From</label><input type="date" id="pf" value="' + p.from + '"></div><div><label>To</label><input type="date" id="pt" value="' + p.to + '"></div>' + (extra || '') + '<button class="primary" id="pgo">Show</button></div>';
+  }
+
+  function feed(quiet) {
+    var qs = 'from=' + p.from + '&to=' + p.to + (p.user ? '&user=' + p.user : '') + (p.kind ? '&kind=' + p.kind : '');
+    return Promise.all([api('/api/tj/feed?' + qs), staff.length ? null : api('/api/dept').catch(function () { return { staff: [] }; })]).then(function (r) {
+      if (r[1]) staff = r[1].staff || [];
+      var groups = { '': 'Everything', 'void,refund,credit_note,price_changed,discount_changed,item_removed,cart_cleared,dept_override,dept_blocked,drawer_no_sale,drawer_payout': 'Things to watch', 'sale': 'Sales only', 'drawer_open,drawer_close,drawer_drop,drawer_payout,drawer_float_in,drawer_no_sale': 'Drawer' };
+      var keepScroll = window.scrollY;
+      $('#out').innerHTML = '<div class="card">' + controls('<div><label>Person</label><select id="pu"><option value="">Everyone</option>' + staff.map(function (s) { return '<option value="' + s.id + '"' + (String(p.user) === String(s.id) ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join('') + '</select></div>' +
+        '<div><label>Show</label><select id="pk">' + Object.keys(groups).map(function (k) { return '<option value="' + k + '"' + (p.kind === k ? ' selected' : '') + '>' + groups[k] + '</option>'; }).join('') + '</select></div>') +
+        '<p class="sub">Refreshes every 15 seconds. Screen events (items, prices, discounts) come from the tills; sales, voids, refunds and drawer events from their records.</p>' +
+        '<div class="scroll"><table><thead><tr><th>When</th><th>Who</th><th>What</th><th>Item / customer</th><th class="n">Before</th><th class="n">After</th><th class="n">Amount</th><th>Ticket / ref</th><th>Note</th></tr></thead><tbody>' +
+        (r[0].rows.length ? r[0].rows.map(function (x) {
+          var k = KIND[x.kind] || [x.kind, ''];
+          return '<tr><td style="white-space:nowrap">' + esc(when(x.at)) + '</td><td>' + esc(x.user_name || '') + (x.station ? '<br><small>' + esc(x.station) + '</small>' : '') + '</td><td><span class="pill ' + k[1] + '">' + esc(k[0]) + '</span></td>' +
+            '<td>' + esc(x.item || '') + (x.qty != null ? ' <small>× ' + Number(x.qty) + '</small>' : '') + '</td><td class="n">' + (x.value_before != null ? Number(x.value_before).toLocaleString() : '') + '</td><td class="n">' + (x.value_after != null ? Number(x.value_after).toLocaleString() : '') + '</td>' +
+            '<td class="n">' + J(x.amount) + '</td><td><small>' + esc(x.ref || '') + '</small></td><td><small>' + esc(x.note || '') + '</small></td></tr>';
+        }).join('') : '<tr><td colspan="9" class="empty">Nothing in these dates.</td></tr>') + '</tbody></table></div></div>';
+      $('#pgo').onclick = function () { p.from = $('#pf').value; p.to = $('#pt').value; p.user = $('#pu').value; p.kind = $('#pk').value; feed(); };
+      if (quiet) window.scrollTo(0, keepScroll);
+    });
+  }
+
+  function exc() {
+    return api('/api/tj/exceptions?from=' + p.from + '&to=' + p.to).then(function (d) {
+      var t = d.thresholds;
+      var table = function (title, sub, rows, cols) {
+        return '<div class="card"><h2>' + title + ' <span class="pill ' + (rows.length ? 'bad' : 'ok') + '">' + rows.length + '</span></h2><p class="sub">' + sub + '</p>' + (rows.length ? '<div class="scroll"><table><thead><tr>' + cols.map(function (c) { return '<th' + (c[2] ? ' class="n"' : '') + '>' + c[0] + '</th>'; }).join('') + '</tr></thead><tbody>' +
+          rows.map(function (r) { return '<tr>' + cols.map(function (c) { var v = typeof c[1] === 'function' ? c[1](r) : r[c[1]]; return '<td' + (c[2] ? ' class="n"' : '') + '>' + (c[3] ? v : esc(v == null ? '' : v)) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>' : '') + '</div>';
+      };
+      var flag = function (r) { return (r.own_sale ? '<span class="pill bad">own sale</span> ' : '') + (r.same_day ? '<span class="pill warn">same day</span>' : ''); };
+      $('#out').innerHTML = '<div class="card">' + controls('') + '</div>' +
+        '<div class="card"><h2>By person</h2><p class="sub">How many exceptions each person has in these dates. One is normal; a pattern is worth a conversation.</p>' + (d.by_person.length ? '<div class="scroll"><table><thead><tr><th>Person</th><th class="n">Voids</th><th class="n">Refunds</th><th class="n">Discounts</th><th class="n">Below cost</th><th class="n">Price cuts</th><th class="n">Overrides</th><th class="n">No-sales</th><th class="n">Removals</th><th class="n">Total</th></tr></thead><tbody>' +
+          d.by_person.map(function (x) { return '<tr><td>' + esc(x.name) + '</td><td class="n">' + x.voids + '</td><td class="n">' + x.refunds + '</td><td class="n">' + x.discounts + '</td><td class="n">' + x.below_cost + '</td><td class="n">' + x.price_cuts + '</td><td class="n">' + x.overrides + '</td><td class="n">' + x.no_sales + '</td><td class="n">' + x.removals + '</td><td class="n"><b>' + x.total + '</b></td></tr>'; }).join('') + '</tbody></table></div>' : '<div class="empty">Nothing to look at.</div>') + '</div>' +
+        table('Voids', 'Voids of ' + J(t.big) + ' or more, and anyone voiding their own sale.', d.voids, [['When', function (r) { return when(r.at); }], ['Voided by', 'by_name'], ['Sale', 'ref'], ['Sold by', 'cashier_name'], ['Customer', 'customer_name'], ['Amount', function (r) { return J(r.amount); }, 1], ['', flag, 0, 1]]) +
+        table('Refunds', 'Refunds of ' + J(t.big) + ' or more, and cash refunds by the person who made the sale.', d.refunds, [['When', function (r) { return when(r.at); }], ['By', 'by_name'], ['Return', 'ref'], ['Sale', 'receipt_number'], ['How', 'refund_method'], ['Reason', 'reason'], ['Amount', function (r) { return J(r.amount); }, 1], ['', flag, 0, 1]]) +
+        table('Big discounts', 'Sales with ' + t.discPct + '% or more off.', d.discounts, [['When', function (r) { return when(r.at); }], ['By', 'by_name'], ['Sale', 'ref'], ['Customer', 'customer_name'], ['Discount', function (r) { return J(r.discount); }, 1], ['%', 'pct', 1]]) +
+        table('Sold below cost', 'Lines sold for less than they cost.', d.below_cost, [['When', function (r) { return when(r.at); }], ['By', 'by_name'], ['Sale', 'ref'], ['Item', 'item'], ['Qty', 'qty', 1], ['Price', function (r) { return J(r.price); }, 1], ['Cost', function (r) { return J(r.cost); }, 1], ['Loss', function (r) { return J(r.amount); }, 1]]) +
+        table('Price cuts on the till', 'Prices typed lower than the system price.', d.price_cuts, [['When', function (r) { return when(r.at); }], ['By', 'by_name'], ['Item', 'item'], ['From', function (r) { return J(r.before); }, 1], ['To', function (r) { return J(r.after); }, 1], ['Given away', function (r) { return J(r.amount); }, 1]]) +
+        table('Department overrides', 'Parts sold outside someone\'s department (with the manager who approved), and refused attempts.', d.overrides, [['When', function (r) { return when(r.at); }], ['By', 'by_name'], ['', function (r) { return KIND[r.kind] ? KIND[r.kind][0] : r.kind; }], ['Item', 'item'], ['Approved by', 'approved_by'], ['Note', 'note']]) +
+        table('No-sale drawer opens', 'More than ' + t.nosale + ' in a day by one person.', d.no_sales, [['Day', 'day'], ['Person', 'by_name'], ['Times', 'n', 1], ['Reasons', 'reasons']]) +
+        table('Items taken off carts', 'More than ' + t.removed + ' items removed in a day, or more than 3 carts emptied.', d.removals, [['Day', 'day'], ['Person', 'by_name'], ['Removed', 'removed', 1], ['Carts emptied', 'cleared', 1], ['Value', function (r) { return J(r.amount); }, 1]]);
+      $('#pgo').onclick = function () { p.from = $('#pf').value; p.to = $('#pt').value; exc(); };
+    });
+  }
+
+  function dept() {
+    return api('/api/dept').then(function (d) {
+      var s = d.settings;
+      var h = '<div class="card"><h2>Rules</h2>' +
+        '<label style="display:flex;gap:8px;align-items:center;font-size:14px;margin-bottom:10px"><input type="checkbox" id="enf"' + (s.dept_enforce === 'on' ? ' checked' : '') + '> Staff with departments can only sell their departments\' parts (others need a manager PIN)</label>' +
+        '<p class="sub">Staff without a department follow the department of the cashier station they use; with neither, they can sell anything. Owners and managers are never limited.</p>' +
+        '<div class="controls"><div><label>Void / refund alert (J$)</label><input id="s1" type="number" value="' + esc(s.tj_void_alert) + '" style="width:120px"></div><div><label>Discount alert (%)</label><input id="s2" type="number" value="' + esc(s.tj_discount_pct_alert) + '" style="width:100px"></div>' +
+        '<div><label>No-sales per day</label><input id="s3" type="number" value="' + esc(s.tj_nosale_per_day) + '" style="width:100px"></div><div><label>Items removed per day</label><input id="s4" type="number" value="' + esc(s.tj_removed_per_day) + '" style="width:100px"></div>' +
+        '<button class="primary" id="saveRules">Save rules</button></div></div>';
+      h += '<div class="card"><h2>Departments</h2><p class="sub">Each department is a set of product categories. Tick who works in it and which stations it covers.</p>' +
+        '<div class="controls"><div><label>New department</label><input id="nName" placeholder="e.g. Batteries and electrical"></div><button id="nAdd">Add</button></div></div>';
+      h += d.departments.map(function (dp) {
+        var uids = (dp.users || []).map(function (u) { return u.id; }), sids = (dp.stations || []).map(function (x) { return x.id; });
+        return '<div class="card" data-d="' + dp.id + '"><h2><input data-f="name" value="' + esc(dp.name) + '" style="font-weight:700"> <label style="display:flex;gap:5px;align-items:center;font-size:13px"><input type="checkbox" data-f="is_active"' + (dp.is_active ? ' checked' : '') + '> active</label></h2>' +
+          '<div class="grid"><div><p class="sub">Categories</p><div class="chips">' + d.categories.map(function (c) { return '<label><input type="checkbox" data-cat="' + esc(c.category) + '"' + (dp.categories.indexOf(c.category) >= 0 ? ' checked' : '') + '> ' + esc(c.category) + ' <small>(' + c.parts + ')</small></label>'; }).join('') + '</div></div>' +
+          '<div><p class="sub">Staff</p><div class="chips">' + d.staff.map(function (u) { return '<label><input type="checkbox" data-u="' + u.id + '"' + (uids.indexOf(u.id) >= 0 ? ' checked' : '') + '> ' + esc(u.name) + '</label>'; }).join('') + '</div>' +
+          '<p class="sub" style="margin-top:10px">Cashier stations</p><div class="chips">' + (d.stations.length ? d.stations.map(function (x) { return '<label><input type="checkbox" data-s="' + x.id + '"' + (sids.indexOf(x.id) >= 0 ? ' checked' : '') + '> ' + esc(x.name) + '</label>'; }).join('') : '<small>No stations set up (Cashier module).</small>') + '</div></div></div>' +
+          '<div style="margin-top:10px"><button class="primary sm" data-save="' + dp.id + '">Save</button></div></div>';
+      }).join('');
+      $('#out').innerHTML = h;
+      $('#saveRules').onclick = function () {
+        api('/api/dept/settings', 'PUT', { dept_enforce: $('#enf').checked ? 'on' : 'off', tj_void_alert: $('#s1').value, tj_discount_pct_alert: $('#s2').value, tj_nosale_per_day: $('#s3').value, tj_removed_per_day: $('#s4').value })
+          .then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); });
+      };
+      $('#nAdd').onclick = function () { api('/api/dept', 'POST', { name: $('#nName').value }).then(function () { toast('Added'); dept(); }).catch(function (e) { toast(e.message); }); };
+      all('[data-save]').forEach(function (b) {
+        b.onclick = function () {
+          var box = b.closest('[data-d]'), id = box.getAttribute('data-d');
+          Promise.all([
+            api('/api/dept/' + id, 'PATCH', { name: $('[data-f="name"]', box).value, is_active: $('[data-f="is_active"]', box).checked, categories: all('[data-cat]:checked', box).map(function (x) { return x.getAttribute('data-cat'); }) }),
+            api('/api/dept/' + id + '/users', 'PUT', { user_ids: all('[data-u]:checked', box).map(function (x) { return x.getAttribute('data-u'); }) }),
+            api('/api/dept/' + id + '/stations', 'PUT', { station_ids: all('[data-s]:checked', box).map(function (x) { return x.getAttribute('data-s'); }) }),
+          ]).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); });
+        };
+      });
+    });
+  }
+
+  function show() {
+    clearInterval(timer);
+    all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); });
+    try { localStorage.setItem('vision.tjTab', tab); } catch (_) {}
+    ({ feed: feed, exc: exc, dept: dept }[tab] || feed)().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+    if (tab === 'feed') timer = setInterval(function () { if (!document.hidden && !document.activeElement.matches('select,input')) feed(true).catch(function () {}); }, 15000);
+  }
+  all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
+  show();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Department store · Vision Auto Solutions</title>
+<link rel="stylesheet" href="/assets/books.css">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<style>
+  header{background:#0f172a}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px 12px}
+  .grid label{display:block;font-size:12px;color:var(--muted);margin-bottom:2px} .grid input,.grid select{width:100%}
+  .modal .card{max-width:760px}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:8px 0}
+  .tile{background:var(--panel,#111827);border:1px solid var(--line,#1f2937);border-radius:10px;padding:10px 12px}
+  .tile span{display:block;font-size:12px;color:var(--muted)} .tile b{font-size:18px}
+  .pill{display:inline-block;padding:1px 7px;border-radius:999px;border:1px solid var(--line,#334155);font-size:11px}
+  .pill.ok{background:#064e3b;border-color:#065f46} .pill.def{background:#1e3a8a;border-color:#1d4ed8}
+  .right{text-align:right} .mut{color:var(--muted)}
+  .bar{display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:8px}
+  .bar label{font-size:12px;color:var(--muted);display:block}
+</style>
+</head>
+<body>
+<header><h1>🏬 Department store</h1><nav>
+  <a href="/terminal.html" target="_blank">Departments &amp; staff ↗</a>
+  <a href="/admin.html">Admin</a>
+</nav></header>
+<main>
+  <div class="tabs" id="tabs">
+    <button data-t="stores" class="on">Stores</button>
+    <button data-t="inventory">Inventory by department</button>
+    <button data-t="sales">Sales by department</button>
+    <button data-t="transfers">Stock transfers</button>
+  </div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<script src="/assets/books-common.js?v=20261019"></script>
+<script>
+(function () {
+  'use strict';
+  var B = window.Books, $ = B.$, all = B.all, esc = B.esc, api = B.api, toast = B.toast, modal = B.modal, close = B.close, J = B.J;
+  var val = function (id) { var el = $('#' + id); return el ? (el.type === 'checkbox' ? el.checked : el.value) : undefined; };
+  var fail = function (e) { toast((e && e.message) || String(e)); };
+  var money = function (n) { try { return J(n || 0); } catch (_) { return '$' + Math.round(n || 0); } };
+  var KINDS = ['store', 'supermarket', 'wholesale', 'warehouse', 'branch'];
+  var locCache = [];
+  var tab = 'stores';
+
+  all('[data-t]').forEach(function (b) { b.onclick = function () { tab = b.dataset.t; all('[data-t]').forEach(function (x) { x.classList.toggle('on', x === b); }); show(); }; });
+  function show() { ({ stores: stores, inventory: inventory, sales: sales, transfers: transfers })[tab](); }
+
+  function loadLocations() { return api('/api/deptstore/locations').then(function (d) { locCache = d.locations || []; return locCache; }); }
+  function locOptions(sel) { return locCache.map(function (l) { return '<option value="' + l.id + '"' + (sel == l.id ? ' selected' : '') + '>' + esc(l.name) + '</option>'; }).join(''); }
+
+  // ------------------------------------------------------------------ stores
+  function stores() {
+    loadLocations().then(function (list) {
+      var totUnits = 0, totCost = 0, totRetail = 0;
+      list.forEach(function (l) { totUnits += +l.units; totCost += +l.cost_value; totRetail += +l.retail_value; });
+      $('#out').innerHTML = '<div class="card"><h2>Stores &amp; branches</h2>' +
+        '<p class="sub">Each store holds its own stock and contains departments. One store is the default — existing stock and tills live there. New stores start empty; move stock in with a transfer.</p>' +
+        '<div class="tiles"><div class="tile"><span>Stores</span><b>' + list.length + '</b></div>' +
+        '<div class="tile"><span>Units on hand</span><b>' + (+totUnits).toLocaleString() + '</b></div>' +
+        '<div class="tile"><span>Stock at cost</span><b>' + money(totCost) + '</b></div>' +
+        '<div class="tile"><span>Stock at retail</span><b>' + money(totRetail) + '</b></div></div>' +
+        '<div class="scroll"><table><thead><tr><th>Store</th><th>Type</th><th class="right">Depts</th><th class="right">Tills</th><th class="right">Units</th><th class="right">At cost</th><th class="right">At retail</th><th></th></tr></thead><tbody id="lrows"></tbody></table></div>' +
+        '<div class="controls" style="margin-top:10px"><button class="primary" id="addStore">+ Add store</button></div></div>';
+      $('#lrows').innerHTML = list.map(function (l) {
+        return '<tr><td><b>' + esc(l.name) + '</b> <span class="mut">' + esc(l.code) + '</span>' + (l.is_default ? ' <span class="pill def">default</span>' : '') + (l.is_active ? '' : ' <span class="pill">off</span>') + '</td>' +
+          '<td>' + esc(l.kind) + '</td><td class="right">' + l.departments + '</td><td class="right">' + l.tills + '</td>' +
+          '<td class="right">' + (+l.units).toLocaleString() + '</td><td class="right">' + money(l.cost_value) + '</td><td class="right">' + money(l.retail_value) + '</td>' +
+          '<td><button data-m="' + l.id + '">Manage</button></td></tr>';
+      }).join('') || '<tr><td colspan="8" class="empty">No stores.</td></tr>';
+      $('#addStore').onclick = addStore;
+      all('[data-m]').forEach(function (b) { b.onclick = function () { manageStore(+b.dataset.m); }; });
+    }).catch(fail);
+  }
+  function kindSel(id, sel) { return '<select id="' + id + '">' + KINDS.map(function (k) { return '<option' + (k === sel ? ' selected' : '') + '>' + k + '</option>'; }).join('') + '</select>'; }
+  function addStore() {
+    modal('<h2>Add store</h2><div class="grid">' +
+      '<div><label>Code</label><input id="s_code" placeholder="BRANCH2" maxlength="20"></div>' +
+      '<div><label>Name</label><input id="s_name" placeholder="Portmore Branch"></div>' +
+      '<div><label>Type</label>' + kindSel('s_kind', 'store') + '</div>' +
+      '<div style="grid-column:1/-1"><label>Address</label><input id="s_addr"></div>' +
+      '<div><label>Phone</label><input id="s_phone"></div></div>' +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="s_go">Create</button><button id="s_x">Cancel</button></div>');
+    $('#s_x').onclick = close;
+    $('#s_go').onclick = function () {
+      api('/api/deptstore/locations', { method: 'POST', body: { code: val('s_code'), name: val('s_name'), kind: val('s_kind'), address: val('s_addr'), phone: val('s_phone') } })
+        .then(function () { toast('Store added'); close(); stores(); }).catch(fail);
+    };
+  }
+  function manageStore(id) {
+    var l = locCache.filter(function (x) { return x.id === id; })[0]; if (!l) return;
+    modal('<h2>' + esc(l.name) + '</h2>' +
+      '<div class="grid"><div><label>Name</label><input id="m_name" value="' + esc(l.name) + '"></div>' +
+      '<div><label>Type</label>' + kindSel('m_kind', l.kind) + '</div>' +
+      '<div><label>Phone</label><input id="m_phone" value="' + esc(l.phone || '') + '"></div>' +
+      '<div style="grid-column:1/-1"><label>Address</label><input id="m_addr" value="' + esc(l.address || '') + '"></div>' +
+      '<div><label><input type="checkbox" id="m_active"' + (l.is_active ? ' checked' : '') + '> Active</label></div>' +
+      '<div><label><input type="checkbox" id="m_default"' + (l.is_default ? ' checked disabled' : '') + '> Default store</label></div></div>' +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="m_save">Save</button>' +
+      (l.is_default ? '' : '<button id="m_del" class="danger">Delete</button>') + '<button id="m_x">Close</button></div>');
+    $('#m_x').onclick = close;
+    $('#m_save').onclick = function () {
+      var body = { name: val('m_name'), kind: val('m_kind'), phone: val('m_phone'), address: val('m_addr'), is_active: val('m_active') };
+      if (val('m_default') && !l.is_default) body.is_default = true;
+      api('/api/deptstore/locations/' + id, { method: 'PATCH', body: body }).then(function () { toast('Saved'); close(); stores(); }).catch(fail);
+    };
+    if ($('#m_del')) $('#m_del').onclick = function () {
+      if (!confirm('Delete ' + l.name + '? Only possible when it holds no stock.')) return;
+      api('/api/deptstore/locations/' + id, { method: 'DELETE' }).then(function () { toast('Deleted'); close(); stores(); }).catch(fail);
+    };
+  }
+
+  // --------------------------------------------------------------- inventory
+  function inventory() {
+    loadLocations().then(function () {
+      $('#out').innerHTML = '<div class="card"><h2>Inventory by department</h2>' +
+        '<div class="bar"><div><label>Store</label><select id="iv_loc">' + locOptions() + '</select></div>' +
+        '<p class="sub" style="margin:0 0 0 auto">Categories not in any department show as <b>Unassigned</b> — map them on the Departments screen.</p></div>' +
+        '<div id="iv_body"><div class="empty">Loading…</div></div></div>';
+      $('#iv_loc').onchange = loadInv; loadInv();
+    }).catch(fail);
+  }
+  function loadInv() {
+    api('/api/deptstore/inventory?location=' + val('iv_loc')).then(function (d) {
+      var rows = d.departments || [], u = 0, c = 0, r = 0;
+      rows.forEach(function (x) { u += +x.units; c += +x.cost_value; r += +x.retail_value; });
+      $('#iv_body').innerHTML = '<div class="scroll"><table><thead><tr><th>Department</th><th class="right">SKUs</th><th class="right">Units</th><th class="right">At cost</th><th class="right">At retail</th></tr></thead><tbody>' +
+        rows.map(function (x) {
+          return '<tr><td>' + (x.id ? '<a href="#" data-d="' + x.id + '"><b>' + esc(x.name) + '</b></a>' : '<b class="mut">' + esc(x.name) + '</b>') +
+            (x.kind && x.kind !== 'parts' && x.kind !== 'unassigned' ? ' <span class="pill">' + esc(x.kind) + '</span>' : '') +
+            (x.categories && x.categories.length ? '<div class="sub" style="margin:0">' + x.categories.map(esc).join(', ') + '</div>' : '') + '</td>' +
+            '<td class="right">' + (+x.skus).toLocaleString() + '</td><td class="right">' + (+x.units).toLocaleString() + '</td>' +
+            '<td class="right">' + money(x.cost_value) + '</td><td class="right">' + money(x.retail_value) + '</td></tr>';
+        }).join('') +
+        '<tr style="font-weight:700;border-top:2px solid var(--line,#334155)"><td>Total</td><td class="right"></td><td class="right">' + u.toLocaleString() + '</td><td class="right">' + money(c) + '</td><td class="right">' + money(r) + '</td></tr>' +
+        '</tbody></table></div>';
+      all('[data-d]').forEach(function (a) { a.onclick = function (e) { e.preventDefault(); deptItems(a.dataset.d); }; });
+    }).catch(fail);
+  }
+  function deptItems(deptId) {
+    api('/api/deptstore/inventory/items?location=' + val('iv_loc') + '&department=' + deptId).then(function (d) {
+      var items = d.items || [];
+      modal('<h2>Items</h2><div class="scroll" style="max-height:60vh"><table><thead><tr><th>Part</th><th>SKU</th><th>Category</th><th class="right">On hand</th><th class="right">Cost</th><th class="right">Price</th></tr></thead><tbody>' +
+        items.map(function (p) { return '<tr><td>' + esc(p.name || p.img) + '</td><td>' + esc(p.sku || '') + '</td><td>' + esc(p.category || '') + '</td><td class="right">' + (+p.qty).toLocaleString() + '</td><td class="right">' + money(p.cost_usd) + '</td><td class="right">' + money(p.price_usd) + '</td></tr>'; }).join('') +
+        '</tbody></table></div><p class="sub">' + items.length + ' item(s)' + (items.length >= 500 ? ', showing first 500' : '') + '</p><div class="controls"><button id="i_x">Close</button></div>');
+      $('#i_x').onclick = close;
+    }).catch(fail);
+  }
+
+  // ------------------------------------------------------------------- sales
+  function sales() {
+    loadLocations().then(function () {
+      var to = new Date(), from = new Date(); from.setDate(from.getDate() - 30);
+      var iso = function (d) { return d.toISOString().slice(0, 10); };
+      $('#out').innerHTML = '<div class="card"><h2>Sales by department</h2>' +
+        '<div class="bar"><div><label>Store</label><select id="sl_loc">' + locOptions() + '</select></div>' +
+        '<div><label>From</label><input type="date" id="sl_from" value="' + iso(from) + '"></div>' +
+        '<div><label>To</label><input type="date" id="sl_to" value="' + iso(to) + '"></div>' +
+        '<div><button class="primary" id="sl_go">Show</button></div></div>' +
+        '<div id="sl_body"><div class="empty">Pick a range and press Show.</div></div></div>';
+      $('#sl_go').onclick = loadSales; loadSales();
+    }).catch(fail);
+  }
+  function loadSales() {
+    api('/api/deptstore/sales?location=' + val('sl_loc') + '&from=' + val('sl_from') + '&to=' + val('sl_to')).then(function (d) {
+      var rows = (d.departments || []).slice().sort(function (a, b) { return b.revenue - a.revenue; });
+      var u = 0, rev = 0, m = 0; rows.forEach(function (x) { u += +x.units; rev += +x.revenue; m += +x.margin; });
+      $('#sl_body').innerHTML = '<div class="scroll"><table><thead><tr><th>Department</th><th class="right">Units</th><th class="right">Revenue</th><th class="right">Margin</th><th class="right">Margin %</th></tr></thead><tbody>' +
+        rows.map(function (x) {
+          var pct = x.revenue ? (100 * x.margin / x.revenue) : 0;
+          return '<tr><td>' + (x.id ? '<b>' + esc(x.name) + '</b>' : '<b class="mut">' + esc(x.name) + '</b>') + '</td>' +
+            '<td class="right">' + (+x.units).toLocaleString() + '</td><td class="right">' + money(x.revenue) + '</td>' +
+            '<td class="right">' + money(x.margin) + '</td><td class="right">' + pct.toFixed(1) + '%</td></tr>';
+        }).join('') +
+        '<tr style="font-weight:700;border-top:2px solid var(--line,#334155)"><td>Total</td><td class="right">' + u.toLocaleString() + '</td><td class="right">' + money(rev) + '</td><td class="right">' + money(m) + '</td><td class="right">' + (rev ? (100 * m / rev).toFixed(1) : '0.0') + '%</td></tr>' +
+        '</tbody></table></div>';
+    }).catch(fail);
+  }
+
+  // --------------------------------------------------------------- transfers
+  function transfers() {
+    loadLocations().then(function () {
+      $('#out').innerHTML = '<div class="card"><h2>Stock transfers</h2>' +
+        '<p class="sub">Move stock from one store to another. Create a draft, then post it to actually move the on-hand quantities.</p>' +
+        '<div class="controls"><button class="primary" id="t_new">+ New transfer</button></div>' +
+        '<div class="scroll" style="margin-top:8px"><table><thead><tr><th>Number</th><th>From → To</th><th class="right">Lines</th><th class="right">Units</th><th>Status</th><th>When</th><th></th></tr></thead><tbody id="trows"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody></table></div></div>';
+      $('#t_new').onclick = newTransfer; listTransfers();
+    }).catch(fail);
+  }
+  function listTransfers() {
+    api('/api/deptstore/transfers').then(function (d) {
+      $('#trows').innerHTML = (d.transfers || []).map(function (t) {
+        return '<tr><td>' + esc(t.number) + '</td><td>' + esc(t.from_name) + ' → ' + esc(t.to_name) + '</td>' +
+          '<td class="right">' + t.lines + '</td><td class="right">' + (+t.units).toLocaleString() + '</td>' +
+          '<td><span class="pill ' + (t.status === 'posted' ? 'ok' : '') + '">' + esc(t.status) + '</span></td>' +
+          '<td class="mut">' + (t.created_at ? new Date(t.created_at).toLocaleDateString() : '') + '</td>' +
+          '<td><button data-v="' + t.id + '">Open</button></td></tr>';
+      }).join('') || '<tr><td colspan="7" class="empty">No transfers yet.</td></tr>';
+      all('[data-v]').forEach(function (b) { b.onclick = function () { openTransfer(+b.dataset.v); }; });
+    }).catch(fail);
+  }
+  var draftLines = [];
+  function newTransfer() {
+    draftLines = [];
+    modal('<h2>New stock transfer</h2>' +
+      '<div class="grid"><div><label>From store</label><select id="t_from">' + locOptions() + '</select></div>' +
+      '<div><label>To store</label><select id="t_to">' + locOptions() + '</select></div>' +
+      '<div style="grid-column:1/-1"><label>Note</label><input id="t_note"></div></div>' +
+      '<div class="bar" style="margin-top:8px"><div style="flex:1"><label>Find a part (name, SKU or barcode)</label><input id="t_q" placeholder="type at least 2 letters"></div></div>' +
+      '<div id="t_results"></div>' +
+      '<h3 style="margin-top:10px">Lines</h3><div class="scroll" style="max-height:34vh"><table><thead><tr><th>Part</th><th class="right">At source</th><th class="right">Qty</th><th></th></tr></thead><tbody id="t_lines"><tr><td colspan="4" class="empty">No items yet.</td></tr></tbody></table></div>' +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="t_create">Create draft</button><button id="t_x">Cancel</button></div>');
+    $('#t_x').onclick = close;
+    if ($('#t_to').options.length > 1) $('#t_to').selectedIndex = 1;
+    var qTimer;
+    $('#t_q').oninput = function () { clearTimeout(qTimer); qTimer = setTimeout(searchParts, 250); };
+    $('#t_create').onclick = function () {
+      if (!draftLines.length) return toast('Add at least one item');
+      api('/api/deptstore/transfers', { method: 'POST', body: { from_location_id: +val('t_from'), to_location_id: +val('t_to'), note: val('t_note'), lines: draftLines } })
+        .then(function (r) { toast('Draft created'); close(); transfers(); openTransfer(r.transfer.id); }).catch(fail);
+    };
+    paintLines();
+  }
+  function searchParts() {
+    var q = val('t_q'); if (!q || q.length < 2) { $('#t_results').innerHTML = ''; return; }
+    api('/api/deptstore/products?location=' + val('t_from') + '&q=' + encodeURIComponent(q)).then(function (d) {
+      $('#t_results').innerHTML = '<div class="scroll" style="max-height:24vh"><table><tbody>' + (d.products || []).map(function (p) {
+        return '<tr><td>' + esc(p.name || p.img) + '<div class="sub" style="margin:0">' + esc(p.sku || '') + ' · ' + (+p.at_location) + ' at source</div></td>' +
+          '<td class="right"><button data-add="' + esc(p.img) + '" data-nm="' + esc(p.name || p.img) + '">Add</button></td></tr>';
+      }).join('') + '</tbody></table></div>';
+      all('[data-add]').forEach(function (b) { b.onclick = function () { addLine(b.dataset.add, b.dataset.nm); }; });
+    }).catch(fail);
+  }
+  function addLine(img, nm) { if (draftLines.some(function (l) { return l.product_img === img; })) return toast('Already added'); draftLines.push({ product_img: img, description: nm, qty: 1 }); paintLines(); }
+  function paintLines() {
+    var tb = $('#t_lines'); if (!tb) return;
+    tb.innerHTML = draftLines.map(function (l, i) {
+      return '<tr><td>' + esc(l.description) + '</td><td class="right mut">—</td><td class="right"><input type="number" min="1" value="' + l.qty + '" data-q="' + i + '" style="width:80px"></td><td><button data-rm="' + i + '">✕</button></td></tr>';
+    }).join('') || '<tr><td colspan="4" class="empty">No items yet.</td></tr>';
+    all('[data-q]').forEach(function (inp) { inp.onchange = function () { draftLines[+inp.dataset.q].qty = Math.max(1, parseInt(inp.value, 10) || 1); }; });
+    all('[data-rm]').forEach(function (b) { b.onclick = function () { draftLines.splice(+b.dataset.rm, 1); paintLines(); }; });
+  }
+  function openTransfer(id) {
+    api('/api/deptstore/transfers/' + id).then(function (d) {
+      var t = d.transfer, lines = d.lines || [];
+      modal('<h2>' + esc(t.number) + ' <span class="pill ' + (t.status === 'posted' ? 'ok' : '') + '">' + esc(t.status) + '</span></h2>' +
+        '<p class="sub">' + esc(t.from_name) + ' → ' + esc(t.to_name) + (t.note ? ' · ' + esc(t.note) : '') + '</p>' +
+        '<div class="scroll" style="max-height:50vh"><table><thead><tr><th>Part</th><th class="right">At source</th><th class="right">Qty</th></tr></thead><tbody>' +
+        lines.map(function (l) { return '<tr><td>' + esc(l.description || l.product_img) + '</td><td class="right">' + (+l.from_on_hand).toLocaleString() + '</td><td class="right">' + l.qty + '</td></tr>'; }).join('') +
+        '</tbody></table></div>' +
+        '<div class="controls" style="margin-top:10px">' +
+        (t.status === 'draft' ? '<button class="primary" id="t_post">Post (move stock)</button><button id="t_cancel" class="danger">Cancel transfer</button>' : '') +
+        '<button id="t_close">Close</button></div>');
+      $('#t_close').onclick = close;
+      if ($('#t_post')) $('#t_post').onclick = function () { api('/api/deptstore/transfers/' + id + '/post', { method: 'POST', body: {} }).then(function () { toast('Posted — stock moved'); close(); transfers(); }).catch(fail); };
+      if ($('#t_cancel')) $('#t_cancel').onclick = function () { api('/api/deptstore/transfers/' + id + '/cancel', { method: 'POST', body: {} }).then(function () { toast('Cancelled'); close(); transfers(); }).catch(fail); };
+    }).catch(fail);
+  }
+
+  show();
+})();
+</script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+</body>
+</html>

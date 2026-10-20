@@ -2787,6 +2787,388 @@ INSERT INTO warehouse_settings (key, value) VALUES ('stock_ledger_started', NOW(
 ON CONFLICT (key) DO NOTHING;
 
 -- =============================================================================
+--  CASHIER MODULE (2026-10): stations, POS orders awaiting payment, drawer
+--  (till) sessions.
+--
+--  pos_stations   a counter position, bound to one device by a key. Kinds:
+--                 order       builds carts; checkout sends them to a cashier
+--                 cashier     takes payment for the order stations it serves
+--                 integrated  single-user: rings and takes payment itself
+--  pos_orders     a cart saved without payment ('Save as order' in the POS),
+--                 routed to the order station's cashier (or its backup, or
+--                 any cashier). Paying it replays the cart through the normal
+--                 sale code (posSaleHandler), so stock and the invoice are
+--                 made exactly as for a counter sale.
+--  till_sessions  one cash drawer shift: one station, one cashier, opening
+--                 float by denomination, blind close, expected vs counted.
+--  till_sales     which sales belong to which shift (cash expected).
+--  The older single cash_drawer_sessions table is left as it is.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS pos_stations (
+  id                 SERIAL PRIMARY KEY,
+  name               TEXT NOT NULL,
+  kind               TEXT NOT NULL DEFAULT 'order',   -- order | cashier | integrated
+  cashier_station_id INTEGER REFERENCES pos_stations(id) ON DELETE SET NULL,  -- order stations: who takes their payments
+  backup_station_id  INTEGER REFERENCES pos_stations(id) ON DELETE SET NULL,  -- cashier stations: who covers when closed
+  device_key_hash    TEXT,
+  bound_at           TIMESTAMPTZ,
+  bound_by           INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  is_active          BOOLEAN NOT NULL DEFAULT true,
+  created_at         TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pos_stations_name ON pos_stations (lower(name));
+
+CREATE TABLE IF NOT EXISTS pos_orders (
+  id                 SERIAL PRIMARY KEY,
+  status             TEXT NOT NULL DEFAULT 'pending', -- pending | invoicing | completed | cancelled | expired
+  payload            JSONB NOT NULL,                  -- the POS sale body, without payments
+  total_usd          NUMERIC(14,2),                   -- exact, from a dry run of the sale code (J$)
+  preview            JSONB,
+  customer_id        INTEGER,
+  customer_name      TEXT,
+  customer_phone     TEXT,
+  sales_rep_id       INTEGER,
+  sales_rep_name     TEXT,
+  ship_instructions  TEXT,
+  taken_by           INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  order_station_id   INTEGER REFERENCES pos_stations(id) ON DELETE SET NULL,
+  cashier_station_id INTEGER REFERENCES pos_stations(id) ON DELETE SET NULL,
+  claimed_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  claimed_at         TIMESTAMPTZ,
+  converted_sale_id  INTEGER,
+  till_session_id    INTEGER,
+  cancel_reason      TEXT,
+  cancelled_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at         TIMESTAMPTZ DEFAULT NOW(),
+  completed_at       TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_pos_orders_status ON pos_orders (status, created_at);
+
+CREATE TABLE IF NOT EXISTS till_sessions (
+  id              SERIAL PRIMARY KEY,
+  station_id      INTEGER NOT NULL REFERENCES pos_stations(id),
+  user_id         INTEGER NOT NULL REFERENCES users(id),
+  status          TEXT NOT NULL DEFAULT 'open',       -- open | closed
+  opening_float   NUMERIC(14,2) NOT NULL DEFAULT 0,
+  opening_count   JSONB,                              -- {"5000": 2, "1000": 5, ...}
+  opened_at       TIMESTAMPTZ DEFAULT NOW(),
+  counted_cash    NUMERIC(14,2),
+  closing_count   JSONB,
+  expected_cash   NUMERIC(14,2),
+  variance        NUMERIC(14,2),
+  closed_at       TIMESTAMPTZ,
+  closed_by       INTEGER REFERENCES users(id),
+  close_notes     TEXT,
+  reviewed_by     INTEGER REFERENCES users(id),
+  reviewed_at     TIMESTAMPTZ,
+  review_note     TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_till_sessions_open ON till_sessions (station_id) WHERE status = 'open';
+
+CREATE TABLE IF NOT EXISTS till_movements (
+  id          SERIAL PRIMARY KEY,
+  session_id  INTEGER NOT NULL REFERENCES till_sessions(id) ON DELETE CASCADE,
+  kind        TEXT NOT NULL,                          -- drop (to safe) | payout (petty) | float_in | no_sale
+  amount      NUMERIC(14,2) NOT NULL DEFAULT 0,
+  reason      TEXT,
+  by_user     INTEGER REFERENCES users(id),
+  approved_by INTEGER REFERENCES users(id),
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS till_sales (
+  session_id  INTEGER NOT NULL REFERENCES till_sessions(id) ON DELETE CASCADE,
+  sale_id     INTEGER NOT NULL,
+  PRIMARY KEY (session_id, sale_id)
+);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('cash_order_expiry_min', '240'),   -- unpaid POS orders expire after this many minutes
+  ('cash_payout_limit', '5000')       -- payouts above this need a manager PIN
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 8.2: departments and the terminal journal (terminal.js)
+--  A department is a set of product categories. Staff and cashier stations
+--  are given departments; a counter agent can only sell their departments'
+--  parts unless a manager approves with a PIN (logged). pos_events records
+--  what happens on the till screen (items added / removed, price, quantity
+--  and discount changes, carts emptied, holds recalled, overrides); sales,
+--  voids, refunds and drawer events are read from their own tables.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS departments (
+  id          SERIAL PRIMARY KEY,
+  code        TEXT NOT NULL UNIQUE,
+  name        TEXT NOT NULL,
+  categories  TEXT[] NOT NULL DEFAULT '{}',   -- lower-case product categories in this department
+  is_active   BOOLEAN NOT NULL DEFAULT true,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS user_departments (
+  user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  department_id  INTEGER NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
+  PRIMARY KEY (user_id, department_id)
+);
+CREATE TABLE IF NOT EXISTS station_departments (
+  station_id     INTEGER NOT NULL REFERENCES pos_stations(id) ON DELETE CASCADE,
+  department_id  INTEGER NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
+  PRIMARY KEY (station_id, department_id)
+);
+
+CREATE TABLE IF NOT EXISTS pos_events (
+  id            BIGSERIAL PRIMARY KEY,
+  at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),   -- when the server received it
+  client_at     TIMESTAMPTZ,                          -- when it happened on the till
+  user_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  user_name     TEXT,
+  station_id    INTEGER,
+  terminal      TEXT,
+  ticket        TEXT,                                 -- the till's id for this cart, ties events together
+  kind          TEXT NOT NULL,                        -- item_added | item_removed | qty_changed | price_changed | discount_changed | cart_cleared | hold_recalled | dept_override | dept_blocked
+  product_img   TEXT,
+  sku           TEXT,
+  name          TEXT,
+  qty           NUMERIC(12,3),
+  value_before  NUMERIC(14,2),
+  value_after   NUMERIC(14,2),
+  amount        NUMERIC(14,2),                        -- J$ at stake (line value, removed value, price drop x qty ...)
+  note          TEXT,
+  approved_by   INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pos_events_at ON pos_events (at DESC);
+CREATE INDEX IF NOT EXISTS idx_pos_events_user ON pos_events (user_id, at DESC);
+CREATE INDEX IF NOT EXISTS idx_pos_events_kind ON pos_events (kind, at DESC);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('dept_enforce', 'off'),            -- on: staff with departments can only sell those parts without a manager PIN
+  ('tj_void_alert', '20000'),         -- J$: voids and refunds at or above this are exceptions
+  ('tj_discount_pct_alert', '20'),    -- % off a sale at or above this is an exception
+  ('tj_nosale_per_day', '5'),         -- no-sale drawer opens per person per day above this
+  ('tj_removed_per_day', '15')        -- items taken back off carts per person per day above this
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  DEPARTMENT STORE (Phase 3, 2026-10): store locations containing departments.
+--
+--  The business already has DEPARTMENTS (terminal.js): a department is a set of
+--  product categories, with staff (user_departments) and tills
+--  (station_departments) assigned, and an optional "sell only your department"
+--  rule. This migration adds the layer ABOVE departments -- physical STORE
+--  LOCATIONS (branches) -- plus Supermarket and Wholesale departments, per
+--  location stock on hand, and stock transfers between locations.
+--
+--  Everything is additive and defaults to one "Main Store" so the existing
+--  single-till setup is unchanged: existing departments and tills move under
+--  Main, and Main's stock mirrors products.stock_count. New locations start
+--  empty and receive stock by transfer.
+-- =============================================================================
+
+-- --- Store locations (branches) ---------------------------------------------
+CREATE TABLE IF NOT EXISTS store_locations (
+  id          SERIAL PRIMARY KEY,
+  code        TEXT NOT NULL UNIQUE,
+  name        TEXT NOT NULL,
+  kind        TEXT NOT NULL DEFAULT 'store'
+                CHECK (kind IN ('store','supermarket','wholesale','warehouse','branch')),
+  address     TEXT,
+  phone       TEXT,
+  is_active   BOOLEAN NOT NULL DEFAULT true,
+  is_default  BOOLEAN NOT NULL DEFAULT false,
+  sort        INTEGER NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Seed the Main Store as the default location (only when none exist yet).
+INSERT INTO store_locations (code, name, kind, is_default, sort)
+  SELECT 'MAIN', 'Main Store', 'store', true, 0
+  WHERE NOT EXISTS (SELECT 1 FROM store_locations);
+
+-- Guarantee exactly one default location.
+UPDATE store_locations SET is_default = true
+  WHERE id = (SELECT id FROM store_locations ORDER BY sort, id LIMIT 1)
+  AND NOT EXISTS (SELECT 1 FROM store_locations WHERE is_default);
+
+-- --- Departments: place each under a location, add kind + sort --------------
+ALTER TABLE departments ADD COLUMN IF NOT EXISTS location_id INTEGER REFERENCES store_locations(id) ON DELETE CASCADE;
+ALTER TABLE departments ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'parts';
+ALTER TABLE departments ADD COLUMN IF NOT EXISTS sort INTEGER NOT NULL DEFAULT 0;
+
+UPDATE departments SET location_id = (SELECT id FROM store_locations WHERE is_default LIMIT 1)
+  WHERE location_id IS NULL;
+
+-- Department codes were globally unique; make them unique per location instead,
+-- so two branches can each have a "Supermarket" department.
+DO $$
+DECLARE c text;
+BEGIN
+  SELECT conname INTO c FROM pg_constraint
+    WHERE conrelid = 'departments'::regclass AND contype = 'u'
+      AND pg_get_constraintdef(oid) ILIKE '%(code)%';
+  IF c IS NOT NULL THEN EXECUTE 'ALTER TABLE departments DROP CONSTRAINT ' || quote_ident(c); END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_departments_loc_code ON departments (location_id, code);
+
+-- Supermarket and Wholesale departments under the default store (once).
+INSERT INTO departments (code, name, categories, kind, location_id, sort)
+  SELECT v.code, v.name, '{}'::text[], v.kind,
+         (SELECT id FROM store_locations WHERE is_default LIMIT 1), v.sort
+    FROM (VALUES ('SUPERMARKET', 'Supermarket', 'supermarket', 90),
+                 ('WHOLESALE',   'Wholesale',   'wholesale',   91)) AS v(code, name, kind, sort)
+   WHERE NOT EXISTS (SELECT 1 FROM departments d WHERE d.code = v.code);
+
+-- --- Tills belong to a location ---------------------------------------------
+ALTER TABLE pos_stations ADD COLUMN IF NOT EXISTS location_id INTEGER REFERENCES store_locations(id) ON DELETE SET NULL;
+UPDATE pos_stations SET location_id = (SELECT id FROM store_locations WHERE is_default LIMIT 1)
+  WHERE location_id IS NULL;
+
+-- --- Per-location stock on hand ---------------------------------------------
+CREATE TABLE IF NOT EXISTS location_stock (
+  product_img TEXT    NOT NULL REFERENCES products(img) ON DELETE CASCADE ON UPDATE CASCADE,
+  location_id INTEGER NOT NULL REFERENCES store_locations(id) ON DELETE CASCADE,
+  qty         INTEGER NOT NULL DEFAULT 0 CHECK (qty >= 0),
+  updated_at  TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (product_img, location_id)
+);
+CREATE INDEX IF NOT EXISTS idx_location_stock_loc ON location_stock (location_id);
+
+-- (The default store's stock is derived -- see Phase 3b below; it is not seeded.)
+
+-- --- Sales location attribution (set by the POS later; NULL = default store) -
+ALTER TABLE pos_sales ADD COLUMN IF NOT EXISTS location_id INTEGER REFERENCES store_locations(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_pos_sales_location ON pos_sales (location_id, created_at);
+
+-- --- Stock transfers between locations --------------------------------------
+CREATE SEQUENCE IF NOT EXISTS stock_transfer_seq START 1;
+CREATE TABLE IF NOT EXISTS stock_transfers (
+  id               SERIAL PRIMARY KEY,
+  number           TEXT UNIQUE,                       -- TRF-000012
+  from_location_id INTEGER NOT NULL REFERENCES store_locations(id),
+  to_location_id   INTEGER NOT NULL REFERENCES store_locations(id),
+  status           TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','posted','cancelled')),
+  note             TEXT,
+  created_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  posted_at        TIMESTAMPTZ,
+  posted_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  CHECK (from_location_id <> to_location_id)
+);
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_status ON stock_transfers (status, created_at DESC);
+CREATE TABLE IF NOT EXISTS stock_transfer_lines (
+  id          SERIAL PRIMARY KEY,
+  transfer_id INTEGER NOT NULL REFERENCES stock_transfers(id) ON DELETE CASCADE,
+  product_img TEXT NOT NULL,
+  description TEXT,
+  qty         INTEGER NOT NULL CHECK (qty > 0)
+);
+CREATE INDEX IF NOT EXISTS idx_stock_transfer_lines_t ON stock_transfer_lines (transfer_id);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('deptstore_enabled', 'on')          -- show the department-store hub
+ON CONFLICT (key) DO NOTHING;
+
+-- Refresh planner statistics for products after migrations. Newly added filter
+-- columns (discontinued, superseded_by, variant_of) otherwise have NO stats, which
+-- made the reorder query (inbound.js) mis-plan into a ~49-minute nested loop.
+ANALYZE products;
+
+-- =============================================================================
+--  DEPARTMENT STORE (Phase 3b, 2026-10): location-aware POS stock.
+--
+--  Residual model: each BRANCH keeps an explicit quantity in location_stock;
+--  the DEFAULT store's quantity is derived as products.stock_count minus all
+--  branch quantities. Receiving, counts and adjustments keep moving the total,
+--  so the main store stays right without changes to those paths.
+--
+--  The POS tags a sale / void / return transaction with its store via
+--  set_config('vision.location_id', <id>, true). When products.stock_count moves
+--  inside such a transaction and the store is a branch, the trigger applies the
+--  same delta to that branch's row. Untagged moves (or main-store moves) touch
+--  only the total, i.e. the main store.
+-- =============================================================================
+
+-- The default store's rows are now derived, never stored.
+DELETE FROM location_stock
+ WHERE location_id IN (SELECT id FROM store_locations WHERE is_default);
+
+-- Effective on-hand per (product, store): explicit branch rows + derived main.
+CREATE OR REPLACE VIEW location_stock_v AS
+  SELECT ls.product_img, ls.location_id, ls.qty
+    FROM location_stock ls
+    JOIN store_locations l ON l.id = ls.location_id AND NOT l.is_default
+  UNION ALL
+  SELECT p.img AS product_img, d.id AS location_id,
+         GREATEST(0, COALESCE(p.stock_count, 0) - COALESCE(b.q, 0))::int AS qty
+    FROM products p
+   CROSS JOIN (SELECT id FROM store_locations WHERE is_default ORDER BY sort, id LIMIT 1) d
+    LEFT JOIN (SELECT x.product_img, SUM(x.qty) AS q
+                 FROM location_stock x
+                 JOIN store_locations xl ON xl.id = x.location_id AND NOT xl.is_default
+                GROUP BY x.product_img) b ON b.product_img = p.img;
+
+CREATE OR REPLACE FUNCTION products_location_delta() RETURNS trigger AS $$
+DECLARE
+  loc INTEGER;
+  d   INTEGER;
+BEGIN
+  IF NEW.stock_count IS NOT DISTINCT FROM OLD.stock_count THEN RETURN NEW; END IF;
+  loc := NULLIF(current_setting('vision.location_id', true), '')::int;
+  IF loc IS NULL THEN RETURN NEW; END IF;
+  IF EXISTS (SELECT 1 FROM store_locations WHERE id = loc AND is_default) THEN RETURN NEW; END IF;
+  d := COALESCE(NEW.stock_count, 0) - COALESCE(OLD.stock_count, 0);
+  INSERT INTO location_stock (product_img, location_id, qty)
+       VALUES (NEW.img, loc, GREATEST(0, d))
+  ON CONFLICT (product_img, location_id)
+       DO UPDATE SET qty = GREATEST(0, location_stock.qty + d), updated_at = NOW();
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_products_location_delta ON products;
+CREATE TRIGGER trg_products_location_delta
+  AFTER UPDATE OF stock_count ON products
+  FOR EACH ROW EXECUTE FUNCTION products_location_delta();
+
+-- =============================================================================
+--  DEPARTMENT STORE (Phase 3c, 2026-10): GENERAL department + default till.
+--
+--  GENERAL is a mode, not a category set: owners and managers working in it
+--  sell from every department as one stock and choose which cashier collects
+--  (terminal.js deptChoice, cashier.js /api/admin/pos/order collect_station_id).
+--  It has no categories and is left out of the department roll-ups.
+--
+--  cash_auto_open: the POS opens its till's shift as soon as it loads.
+--  cash_default_float: J$ float that auto-opened shift starts with.
+--  (cash_default_station_id is written on first use by cashier.js.)
+-- =============================================================================
+INSERT INTO departments (code, name, categories, kind, location_id, sort)
+  SELECT 'GENERAL', 'General', '{}'::text[], 'general',
+         (SELECT id FROM store_locations WHERE is_default ORDER BY sort, id LIMIT 1), 0
+   WHERE NOT EXISTS (SELECT 1 FROM departments WHERE code = 'GENERAL');
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('cash_auto_open', 'on'),
+  ('cash_default_float', '0')
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  DEPARTMENT STORE (Phase 3e, 2026-10): the Auto Parts department.
+--
+--  The shop's whole catalogue is auto parts, but no department held it, so
+--  every part fell into "Unassigned" and the POS department list had no Auto
+--  Parts. Created once, owning every product category not already claimed by
+--  another department (Supermarket / Wholesale start empty). Categories added
+--  later are assigned on the Departments screen.
+-- =============================================================================
+INSERT INTO departments (code, name, categories, kind, location_id, sort)
+  SELECT 'AUTOPARTS', 'Auto Parts',
+         COALESCE((SELECT array_agg(c ORDER BY c) FROM (
+                     SELECT DISTINCT lower(trim(p.category)) AS c FROM products p
+                      WHERE COALESCE(trim(p.category), '') <> ''
+                        AND lower(trim(p.category)) NOT IN (
+                              SELECT unnest(d.categories) FROM departments d WHERE d.kind <> 'general')) t), '{}'::text[]),
+         'parts', (SELECT id FROM store_locations WHERE is_default ORDER BY sort, id LIMIT 1), 10
+   WHERE NOT EXISTS (SELECT 1 FROM departments WHERE code = 'AUTOPARTS');
+
+-- =============================================================================
 --  RECEIVE STOCK WITH THE SUPPLIER'S BILL (server.js /api/admin/receive-stock, 2026-10)
 --
 --  One screen receives a delivery (against a PO or without one) and, when the
@@ -2821,3 +3203,84 @@ BEGIN
 END $$;
 
 
+-- =============================================================================
+--  POS ADD-ONS ON THE TILL: warranty claims, redeemable instruments, terminal
+--  presence, and the ledger accounts petty cash and redeemables post to.
+--  (Ported from the D1 backend: functions/_routes/warranty.js, redemptions.js,
+--  admin_misc.js presence; migrations 0056, 0057. Routes in posaddons.js; the
+--  petty cash tables themselves are further up, under PETTY CASH.)
+--
+--  Warranty   the register is a read model over pos_sale_items.warranty_until
+--             (the till has no product_serials table: a line's serial_number
+--             is the unit). Claims are their own small workflow; a refund or a
+--             replacement still goes through the ordinary return / sale, which
+--             post to the ledger, so a claim posts nothing itself.
+--  Redeemables lottery / scratch cards sold as agent for the operator (the
+--             owner's decision, 2026-10-20): the sale line is money held for
+--             the operator (2160), not our income, and carries no cost of
+--             sales; a winning card paid out of the drawer reduces that
+--             liability. Our commission arrives when the operator settles.
+--  Presence   one heartbeat row per admin browser (terminal_id from its
+--             localStorage); a row counts as online for ~2.5 min.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS warranty_claims (
+  id                  SERIAL PRIMARY KEY,
+  product_img         TEXT,
+  serial              TEXT,
+  serial_id           INTEGER,                       -- D1 product_serials id; unused on the till
+  sale_id             INTEGER REFERENCES pos_sales(id) ON DELETE SET NULL,
+  sale_item_id        INTEGER REFERENCES pos_sale_items(id) ON DELETE SET NULL,
+  customer_name       TEXT,
+  customer_phone      TEXT,
+  fault               TEXT,
+  status              TEXT NOT NULL DEFAULT 'open'
+                        CHECK (status IN ('open', 'repair', 'replace', 'refund', 'denied', 'closed')),
+  resolution_note     TEXT,
+  return_id           INTEGER,
+  replacement_sale_id INTEGER,
+  opened_by           INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  opened_at           TIMESTAMPTZ DEFAULT NOW(),
+  resolved_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  resolved_at         TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_warranty_claims_item ON warranty_claims (sale_item_id);
+CREATE INDEX IF NOT EXISTS idx_warranty_claims_status ON warranty_claims (status, opened_at);
+CREATE INDEX IF NOT EXISTS idx_pos_sale_items_warranty ON pos_sale_items (warranty_until) WHERE warranty_until IS NOT NULL;
+
+ALTER TABLE products ADD COLUMN IF NOT EXISTS is_redeemable BOOLEAN NOT NULL DEFAULT false;
+CREATE TABLE IF NOT EXISTS redemption_instruments (
+  id               SERIAL PRIMARY KEY,
+  code             TEXT NOT NULL UNIQUE,
+  product_img      TEXT NOT NULL,
+  sale_id          INTEGER REFERENCES pos_sales(id) ON DELETE SET NULL,
+  sale_item_id     INTEGER REFERENCES pos_sale_items(id) ON DELETE SET NULL,
+  status           TEXT NOT NULL DEFAULT 'sold' CHECK (status IN ('in_stock', 'sold', 'redeemed', 'void')),
+  face_value_cents BIGINT NOT NULL DEFAULT 0,
+  payout_cents     BIGINT,
+  sold_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  redeemed_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  redeemed_at      TIMESTAMPTZ,
+  notes            TEXT,
+  received_at      TIMESTAMPTZ,                      -- set when pre-loaded; NULL when minted at sale
+  received_note    TEXT,
+  created_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_redemption_product ON redemption_instruments (product_img, status);
+CREATE INDEX IF NOT EXISTS idx_redemption_sale ON redemption_instruments (sale_id);
+
+CREATE TABLE IF NOT EXISTS admin_presence (
+  terminal_id TEXT PRIMARY KEY,
+  label       TEXT,
+  user_id     INTEGER,
+  user_name   TEXT,
+  ip          TEXT,
+  user_agent  TEXT,
+  first_seen  TIMESTAMPTZ DEFAULT NOW(),
+  last_seen   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_admin_presence_seen ON admin_presence (last_seen);
+
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('1015', 'Petty Cash',                          'asset',     'Petty Cash',                          'BANK',   'petty_cash'),
+  ('2160', 'Redeemables Held for Operator',       'liability', 'Redeemables Held for Operator',       'OCLIAB', 'redeemables_payable')
+ON CONFLICT DO NOTHING;

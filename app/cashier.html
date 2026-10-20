@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cashier · Vision Auto Solutions</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:10px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0}
+  header .st{font-size:13px;background:#ffffff22;padding:3px 10px;border-radius:999px}
+  header a{color:#fff;opacity:.85;margin-left:auto;font-size:13px}
+  nav{display:flex;gap:4px;max-width:1100px;margin:12px auto 0;padding:0 16px;flex-wrap:wrap}
+  nav button{border:none;background:transparent;padding:8px 12px;border-radius:8px;color:var(--muted);font-weight:600;cursor:pointer;font:inherit}
+  nav button.on{background:var(--chip);color:var(--ink)}
+  main{max-width:1100px;margin:0 auto;padding:12px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:16px;margin:0 0 8px}
+  .muted{color:var(--muted)} .small{font-size:13px}
+  input,select,button,textarea{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  button{cursor:pointer;background:var(--card)}
+  button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+  tr.click{cursor:pointer} tr.click:hover{background:var(--chip)}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media (max-width:760px){ .grid2{grid-template-columns:1fr} }
+  .big{font-size:30px;font-weight:800;color:var(--red);font-variant-numeric:tabular-nums}
+  .tag{display:inline-block;font-size:11px;padding:1px 8px;border-radius:999px;background:var(--chip);margin-left:4px}
+  .tag.ok{background:#16a34a22;color:var(--ok);font-weight:700}
+  .tag.bad{background:#d6282822;color:var(--red);font-weight:700}
+  .denoms{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
+  .denoms label{display:flex;align-items:center;gap:6px;font-size:13px}
+  .denoms input{width:70px;text-align:center}
+  .empty{color:var(--muted);text-align:center;padding:24px}
+  .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 16px;border-radius:10px;font-weight:600;display:none;z-index:9;max-width:92vw}
+  .toast.err{background:var(--red)} .toast.on{display:block}
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Cashier</h1><span class="st" id="stName">…</span><span class="small" id="who"></span><a href="/admin.html">Admin</a></header>
+<nav id="tabs">
+  <button data-t="queue" class="on">Payment queue</button>
+  <button data-t="drawer">Drawer</button>
+  <button data-t="shifts" data-mgr>Shifts</button>
+  <button data-t="stations" data-mgr>Stations</button>
+</nav>
+<main id="main"><div class="empty">Loading…</div></main>
+<div class="toast" id="toast"></div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s) { return document.querySelector(s); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var J = function (v) { return 'J$' + Number(v || 0).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+  var KEY = 'vision.stationKey';
+  function stKey() { try { return localStorage.getItem(KEY); } catch (_) { return null; } }
+  function api(url, opts) {
+    opts = opts || {};
+    var h = { 'Content-Type': 'application/json', Accept: 'application/json' }; var k = stKey(); if (k) h['X-Station-Key'] = k;
+    return fetch(url, { method: opts.method || 'GET', headers: h, credentials: 'same-origin', body: opts.body ? JSON.stringify(opts.body) : undefined })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { if (r.status === 401) { location.href = '/admin.html'; } if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status); return d; }); });
+  }
+  var tt; function toast(m, err) { var t = $('#toast'); t.textContent = m; t.className = 'toast on' + (err ? ' err' : ''); clearTimeout(tt); tt = setTimeout(function () { t.className = 'toast'; }, err ? 5000 : 2500); }
+
+  var S = { tab: 'queue', me: null, orders: [], order: null, tenders: [], drawer: null, shifts: null, stations: null };
+
+  function denomInputs(prefix) {
+    return '<div class="denoms">' + S.me.denominations.map(function (d) { return '<label>J$' + d.toLocaleString() + ' × <input type="number" min="0" data-' + prefix + '="' + d + '" inputmode="numeric"></label>'; }).join('') + '</div>' +
+      '<p class="small">Total: <b id="' + prefix + 'Total">J$0.00</b></p>';
+  }
+  function readDenoms(prefix) {
+    var c = {}, t = 0; document.querySelectorAll('[data-' + prefix + ']').forEach(function (i) { var q = parseInt(i.value, 10); if (q > 0) { c[i.getAttribute('data-' + prefix)] = q; t += q * Number(i.getAttribute('data-' + prefix)); } });
+    return { count: c, total: t };
+  }
+
+  // ------------------------------------------------------------- queue --
+  function loadQueue() { return api('/api/admin/pos/orders?status=pending').then(function (d) { S.orders = d.orders; render(); }).catch(function (e) { toast(e.message, true); }); }
+  function openOrder(id) {
+    api('/api/admin/pos/orders/' + id).then(function (d) { S.order = d; S.tenders = [{ method: 'cash', amount: '', tendered: '', reference: '' }]; render(); }).catch(function (e) { toast(e.message, true); });
+  }
+  function tenderSum() {
+    var total = Number(S.order.order.total_usd), alloc = 0, cashIn = 0;
+    S.tenders.forEach(function (t) { if (t.amount !== '') alloc += Number(t.amount); });
+    var blank = S.tenders.findIndex(function (t) { return t.amount === ''; });
+    var rows = S.tenders.map(function (t, i) { var a = t.amount === '' ? (i === blank ? Math.max(0, total - alloc) : 0) : Number(t.amount); return Object.assign({}, t, { applied: Math.round(a * 100) / 100 }); });
+    rows.forEach(function (t) { cashIn += t.method === 'cash' && t.tendered !== '' ? Number(t.tendered) : t.applied; });
+    var paid = rows.reduce(function (s, t) { return s + t.applied; }, 0);
+    return { rows: rows, total: total, paid: Math.round(paid * 100) / 100, change: Math.max(0, Math.round((cashIn - total) * 100) / 100), short: Math.round((total - paid) * 100) / 100 };
+  }
+  function renderQueue() {
+    if (!S.me.station) return '<div class="card"><b>This device is not a station yet.</b><p class="muted small">A manager sets it up under Stations. Until then payments are not linked to a drawer.</p></div>' + (S.order ? renderPay() : queueTable());
+    if (S.me.station.kind === 'order') return '<div class="card">This device is an <b>order station</b> (' + esc(S.me.station.name) + '). Its orders are paid at its cashier station.</div>';
+    if (!S.me.session) return '<div class="card"><b>The drawer is closed.</b> Open it on the Drawer tab before taking payment.</div>' + queueTable();
+    if (!S.me.session.mine) return '<div class="card">The drawer here is open under another cashier.</div>';
+    return S.order ? renderPay() : queueTable();
+  }
+  function queueTable() {
+    return '<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Waiting for payment (' + S.orders.length + ')</h2><button data-a="refresh">↻ Refresh</button></div>' +
+      (S.orders.length ? '<table><thead><tr><th>Order</th><th>From</th><th>Customer</th><th class="n">Items</th><th class="n">Waiting</th><th class="n">Total</th></tr></thead><tbody>' + S.orders.map(function (o) {
+        return '<tr class="click" data-open="' + o.id + '"><td><b>#' + o.id + '</b></td><td>' + esc(o.order_station || '—') + '<div class="small muted">' + esc(o.taken_by_name || '') + '</div></td><td>' + esc(o.customer_name || 'Walk-in') + '</td><td class="n">' + o.unit_count + '</td><td class="n">' + o.age_min + ' min</td><td class="n"><b>' + J(o.total_usd) + '</b></td></tr>';
+      }).join('') + '</tbody></table>' : '<div class="empty">Nothing waiting.</div>') + '</div>';
+  }
+  function renderPay() {
+    var d = S.order, o = d.order, t = tenderSum();
+    return '<div class="grid2"><div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Order #' + o.id + '</h2><button data-a="back">← Queue</button></div>' +
+      '<p class="small muted">' + esc(o.customer_name || 'Walk-in') + ' · from ' + esc(o.order_station || '—') + ' · ' + esc(o.taken_by_name || '') + (o.sales_rep_name ? ' · rep ' + esc(o.sales_rep_name) : '') + '</p>' +
+      '<table><thead><tr><th>Part</th><th class="n">Qty</th><th class="n">Price</th></tr></thead><tbody>' + d.items.map(function (i) {
+        return '<tr><td><b>' + esc(i.sku || '') + '</b><div class="small muted">' + esc(i.name || '') + '</div></td><td class="n">' + i.qty + '</td><td class="n">' + J(i.unit_price_usd) + (i.discount_usd ? '<div class="small muted">−' + J(i.discount_usd) + '</div>' : '') + '</td></tr>';
+      }).join('') + '</tbody></table>' +
+      (o.preview ? '<table style="margin-top:8px"><tbody><tr><td>Subtotal</td><td class="n">' + J(o.preview.subtotal_usd) + '</td></tr>' + (o.preview.discount_usd ? '<tr><td>Discount</td><td class="n">−' + J(o.preview.discount_usd) + '</td></tr>' : '') +
+        '<tr><td>GCT</td><td class="n">' + J(o.preview.tax_usd) + '</td></tr>' + (o.preview.ship_fee_usd ? '<tr><td>Delivery</td><td class="n">' + J(o.preview.ship_fee_usd) + '</td></tr>' : '') + '</tbody></table>' : '') +
+      '<div class="row" style="margin-top:10px"><button data-a="cancelOrder">Cancel order</button></div></div>' +
+      '<div class="card"><div class="small muted">Amount to collect</div><div class="big">' + J(t.total) + '</div>' +
+      t.rows.map(function (r, i) {
+        return '<div class="row" style="margin-top:8px"><select data-tm="' + i + '">' + ['cash', 'card', 'cheque', 'bank', 'gift_card', 'account'].map(function (m) { return '<option value="' + m + '"' + (r.method === m ? ' selected' : '') + '>' + m.replace('_', ' ') + '</option>'; }).join('') + '</select>' +
+          '<input data-ta="' + i + '" type="number" step="0.01" placeholder="rest: ' + r.applied.toFixed(2) + '" value="' + esc(S.tenders[i].amount) + '" style="width:120px">' +
+          (r.method === 'cash' ? '<input data-tt="' + i + '" type="number" step="0.01" placeholder="handed over" value="' + esc(S.tenders[i].tendered) + '" style="width:130px">' : '<input data-tr="' + i + '" placeholder="' + (r.method === 'gift_card' ? 'card code' : 'reference / auth') + '" value="' + esc(S.tenders[i].reference) + '" style="width:150px">') +
+          (S.tenders.length > 1 ? '<button data-tx="' + i + '">✕</button>' : '') + '</div>';
+      }).join('') +
+      '<div class="row" style="margin-top:8px"><button data-a="addTender">+ Split payment</button></div>' +
+      '<table style="margin-top:10px"><tbody><tr><td>Paid</td><td class="n">' + J(t.paid) + '</td></tr>' + (t.change ? '<tr><td><b>Change</b></td><td class="n"><b>' + J(t.change) + '</b></td></tr>' : '') +
+      (t.short > 0.009 ? '<tr><td style="color:var(--red)">Still to pay</td><td class="n" style="color:var(--red)">' + J(t.short) + '</td></tr>' : '') + '</tbody></table>' +
+      '<button class="primary" data-a="pay" style="width:100%;margin-top:10px;padding:12px"' + (t.short > 0.009 ? ' disabled' : '') + '>Take payment</button></div></div>';
+  }
+
+  // ------------------------------------------------------------ drawer --
+  function loadDrawer() { return api('/api/cash/till/current').then(function (d) { S.drawer = d; render(); }).catch(function (e) { S.drawer = { error: e.message }; render(); }); }
+  function renderDrawer() {
+    var d = S.drawer;
+    if (!d) return '<div class="empty">Loading…</div>';
+    if (d.error) return '<div class="card">' + esc(d.error) + '</div>';
+    if (!d.session) return '<div class="card"><h2>Open the drawer at ' + esc(d.station.name) + '</h2><p class="small muted">Count the float by note and coin.</p>' + denomInputs('o') +
+      '<button class="primary" data-a="openDrawer">Open drawer</button></div>';
+    var c = d.cash;
+    return '<div class="grid2"><div class="card"><h2>X report: shift so far</h2><p class="small muted">' + esc(d.session.cashier) + ' since ' + esc(new Date(d.session.opened_at).toLocaleTimeString()) + '</p>' +
+      '<table><tbody><tr><td>Sales</td><td class="n">' + d.sales.n + '</td></tr><tr><td>Sales total</td><td class="n">' + J(d.sales.total) + '</td></tr><tr><td>GCT</td><td class="n">' + J(d.sales.tax) + '</td></tr>' +
+      d.tenders.map(function (x) { return '<tr><td>' + esc(x.method) + ' (' + x.n + ')</td><td class="n">' + J(x.amount) + '</td></tr>'; }).join('') +
+      '<tr><td>Opening float</td><td class="n">' + J(c.opening_float) + '</td></tr><tr><td>Drops to safe</td><td class="n">' + J(c.drops) + '</td></tr><tr><td>Payouts</td><td class="n">' + J(c.payouts) + '</td></tr>' +
+      (c.expected != null ? '<tr><td><b>Cash expected</b> (manager view)</td><td class="n"><b>' + J(c.expected) + '</b></td></tr>' : '') + '</tbody></table>' +
+      (d.movements.length ? '<h2 style="margin-top:12px">Drawer movements</h2><table><tbody>' + d.movements.map(function (m) { return '<tr><td>' + esc(m.kind.replace('_', ' ')) + '<div class="small muted">' + esc(m.reason || '') + (m.approved_by_name ? ' · approved ' + esc(m.approved_by_name) : '') + '</div></td><td class="n">' + (m.amount ? J(m.amount) : '') + '</td></tr>'; }).join('') + '</tbody></table>' : '') + '</div>' +
+      '<div class="card"><h2>Drawer actions</h2><div class="row"><select id="mvKind"><option value="drop">Drop to safe</option><option value="payout">Payout</option><option value="float_in">Add float</option><option value="no_sale">Open drawer (no sale)</option></select>' +
+      '<input id="mvAmt" type="number" step="0.01" placeholder="Amount" style="width:120px"></div><input id="mvWhy" placeholder="Reason" style="width:100%;margin-top:6px"><input id="mvPin" type="password" inputmode="numeric" placeholder="Manager PIN (large payouts)" style="width:100%;margin-top:6px">' +
+      '<div class="row" style="margin-top:8px"><button data-a="movement">Record</button></div>' +
+      '<h2 style="margin-top:16px">Close the drawer</h2><p class="small muted">Count everything in the drawer. You will not see what was expected; a manager reviews the difference.</p>' + denomInputs('c') +
+      '<textarea id="closeNotes" rows="2" placeholder="Notes" style="width:100%"></textarea><div class="row" style="margin-top:8px"><button class="primary" data-a="closeDrawer">Close drawer</button></div></div></div>';
+  }
+
+  // ------------------------------------------------------------ shifts --
+  function renderShifts() {
+    var s = S.shifts;
+    if (!s) return '<div class="empty">Loading…</div>';
+    return '<div class="card"><h2>Drawer shifts</h2><table><thead><tr><th>Station</th><th>Cashier</th><th>Opened</th><th class="n">Sales</th><th class="n">Expected</th><th class="n">Counted</th><th class="n">Over / short</th><th></th></tr></thead><tbody>' +
+      (s.length ? s.map(function (x) {
+        var v = x.variance;
+        return '<tr><td>' + esc(x.station) + '</td><td>' + esc(x.cashier) + '</td><td class="small">' + esc(new Date(x.opened_at).toLocaleString()) + (x.status === 'open' ? ' <span class="tag ok">open</span>' : '') + '</td><td class="n">' + x.sales + '</td>' +
+          '<td class="n">' + (x.expected_cash == null ? '' : J(x.expected_cash)) + '</td><td class="n">' + (x.counted_cash == null ? '' : J(x.counted_cash)) + '</td>' +
+          '<td class="n">' + (v == null ? '' : '<span class="tag ' + (Math.abs(v) < 0.01 ? 'ok' : 'bad') + '">' + (v > 0 ? '+' : '') + J(v) + '</span>') + '</td>' +
+          '<td class="n">' + (x.status === 'closed' && !x.reviewed_at ? '<button data-review="' + x.id + '">Reviewed</button>' : x.reviewed_by_name ? '<span class="small muted">✓ ' + esc(x.reviewed_by_name) + '</span>' : '') +
+          (x.status === 'open' ? '<button data-force="' + x.id + '">Force close</button>' : '') + '</td></tr>';
+      }).join('') : '<tr><td colspan="8" class="empty">No shifts yet.</td></tr>') + '</tbody></table></div>';
+  }
+
+  // ---------------------------------------------------------- stations --
+  function renderStations() {
+    var s = S.stations;
+    if (!s) return '<div class="empty">Loading…</div>';
+    var cashiers = s.filter(function (x) { return x.kind === 'cashier' && x.is_active; });
+    var opt = function (sel) { return '<option value="">—</option>' + cashiers.map(function (c) { return '<option value="' + c.id + '"' + (String(sel) === String(c.id) ? ' selected' : '') + '>' + esc(c.name) + '</option>'; }).join(''); };
+    return '<div class="card"><h2>Stations</h2><p class="small muted"><b>Order</b> stations build carts and send them to their cashier. <b>Cashier</b> stations take payment (and cover another cashier as backup). <b>Integrated</b> is a single-user till that rings and takes payment itself. Every station that takes money needs its drawer open.</p>' +
+      '<table><thead><tr><th>Station</th><th>Kind</th><th>Paid at / backup</th><th>Drawer</th><th></th></tr></thead><tbody>' + s.map(function (x) {
+        return '<tr data-st="' + x.id + '"><td><b>' + esc(x.name) + '</b>' + (x.bound ? '' : ' <span class="tag bad">no device</span>') + (S.me.station && S.me.station.id === x.id ? ' <span class="tag ok">this device</span>' : '') + '</td>' +
+          '<td><select data-sk="kind">' + ['order', 'cashier', 'integrated'].map(function (k) { return '<option' + (x.kind === k ? ' selected' : '') + '>' + k + '</option>'; }).join('') + '</select></td>' +
+          '<td>' + (x.kind === 'order' ? '<select data-sk="cashier_station_id">' + opt(x.cashier_station_id) + '</select>' : x.kind === 'cashier' ? 'backup <select data-sk="backup_station_id">' + opt(x.backup_station_id) + '</select>' : '—') + '</td>' +
+          '<td class="small">' + (x.session_id ? 'open · ' + esc(x.session_user) : x.kind === 'order' ? '' : 'closed') + '</td>' +
+          '<td class="n"><button data-bind="' + x.id + '">Use this device</button></td></tr>';
+      }).join('') + '</tbody></table>' +
+      '<div class="row" style="margin-top:12px"><input id="newSt" placeholder="New station name, e.g. Counter 2"><select id="newKind"><option>order</option><option>cashier</option><option>integrated</option></select><button data-a="addStation">Add</button></div>' +
+      (stKey() ? '<p class="small muted" style="margin-top:10px">This device is set up as a station. <button data-a="unbindLocal">Forget it on this device</button></p>' : '') + '</div>';
+  }
+
+  // ------------------------------------------------------------ render --
+  function render() {
+    $('#stName').textContent = S.me.station ? S.me.station.name + ' · ' + S.me.station.kind : 'Not a station';
+    var m = $('#main');
+    if (S.tab === 'queue') m.innerHTML = renderQueue();
+    else if (S.tab === 'drawer') m.innerHTML = S.me.station ? renderDrawer() : '<div class="card">Set this device up as a cashier or integrated station first (Stations tab).</div>';
+    else if (S.tab === 'shifts') m.innerHTML = renderShifts();
+    else if (S.tab === 'stations') m.innerHTML = renderStations();
+    document.querySelectorAll('[data-o],[data-c]').forEach(function (i) { i.addEventListener('input', function () { ['o', 'c'].forEach(function (p) { var el = $('#' + p + 'Total'); if (el) el.textContent = J(readDenoms(p).total); }); }); });
+  }
+  function setTab(t) {
+    S.tab = t; [].forEach.call(document.querySelectorAll('#tabs button'), function (b) { b.classList.toggle('on', b.getAttribute('data-t') === t); });
+    if (t === 'queue') loadQueue();
+    if (t === 'drawer') loadDrawer();
+    if (t === 'shifts') api('/api/cash/till/sessions').then(function (d) { S.shifts = d.sessions; render(); }).catch(function (e) { toast(e.message, true); });
+    if (t === 'stations') api('/api/cash/stations').then(function (d) { S.stations = d.stations; render(); }).catch(function (e) { toast(e.message, true); });
+    render();
+  }
+  function refreshMe() { return api('/api/cash/me').then(function (d) { S.me = d; if (!d.can.manage) document.querySelectorAll('[data-mgr]').forEach(function (b) { b.style.display = 'none'; }); }); }
+
+  $('#tabs').addEventListener('click', function (e) { var b = e.target.closest('[data-t]'); if (b) setTab(b.getAttribute('data-t')); });
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest('[data-a],[data-open],[data-tx],[data-bind],[data-review],[data-force]'); if (!t) return;
+    if (t.hasAttribute('data-open')) return openOrder(t.getAttribute('data-open'));
+    if (t.hasAttribute('data-tx')) { S.tenders.splice(+t.getAttribute('data-tx'), 1); return render(); }
+    if (t.hasAttribute('data-bind')) {
+      if (!confirm('Make THIS device that station? Any other device using it stops being it.')) return;
+      return api('/api/cash/stations/' + t.getAttribute('data-bind') + '/bind', { method: 'POST', body: {} }).then(function (d) {
+        try { localStorage.setItem(KEY, d.key); } catch (_) {}
+        toast('This device is now that station'); refreshMe().then(function () { setTab('stations'); });
+      }).catch(function (er) { toast(er.message, true); });
+    }
+    if (t.hasAttribute('data-review')) return api('/api/cash/till/sessions/' + t.getAttribute('data-review') + '/review', { method: 'POST', body: { note: prompt('Note (optional)') || '' } }).then(function () { setTab('shifts'); }).catch(function (er) { toast(er.message, true); });
+    if (t.hasAttribute('data-force')) {
+      var amt = prompt('Cash counted in that drawer (J$)'); if (amt == null) return;
+      return api('/api/cash/till/sessions/' + t.getAttribute('data-force') + '/force-close', { method: 'POST', body: { count: { 1: Math.round(Number(amt) || 0) }, notes: prompt('Why is a manager closing it?') || '' } })
+        .then(function (d) { toast('Closed: ' + (d.variance >= 0 ? 'over ' : 'short ') + J(Math.abs(d.variance))); setTab('shifts'); }).catch(function (er) { toast(er.message, true); });
+    }
+    var a = t.getAttribute('data-a');
+    if (a === 'refresh') loadQueue();
+    if (a === 'back') { S.order = null; loadQueue(); }
+    if (a === 'addTender') { S.tenders.push({ method: 'card', amount: '', tendered: '', reference: '' }); render(); }
+    if (a === 'cancelOrder') {
+      var why = prompt('Cancel order #' + S.order.order.id + '? Reason:'); if (!why) return;
+      api('/api/admin/pos/orders/' + S.order.order.id + '/cancel', { method: 'POST', body: { reason: why } }).then(function () { S.order = null; toast('Cancelled'); loadQueue(); }).catch(function (er) { toast(er.message, true); });
+    }
+    if (a === 'pay') {
+      var ts = tenderSum();
+      var payments = ts.rows.map(function (r) { return { method: r.method, amount_usd: r.applied, amount_tendered: r.method === 'cash' ? (r.tendered !== '' ? Number(r.tendered) : r.applied) : null, reference: r.method === 'cash' ? null : (r.reference || null) }; });
+      t.disabled = true;
+      api('/api/admin/pos/orders/' + S.order.order.id + '/invoice', { method: 'POST', body: { payments: payments } }).then(function (d) {
+        toast('Paid: ' + (d.sale.receipt_number || '') + (d.sale.change_due ? '. Change ' + J(d.sale.change_due) : ''));
+        S.order = null; loadQueue();
+      }).catch(function (er) { t.disabled = false; toast(er.message, true); });
+    }
+    if (a === 'openDrawer') { var o = readDenoms('o'); api('/api/cash/till/open', { method: 'POST', body: { count: o.count } }).then(function () { toast('Drawer open with ' + J(o.total)); refreshMe().then(loadDrawer); }).catch(function (er) { toast(er.message, true); }); }
+    if (a === 'movement') {
+      api('/api/cash/till/movement', { method: 'POST', body: { kind: $('#mvKind').value, amount: $('#mvAmt').value, reason: $('#mvWhy').value, manager_pin: $('#mvPin').value } })
+        .then(function () { toast('Recorded'); loadDrawer(); }).catch(function (er) { toast(er.message, true); });
+    }
+    if (a === 'closeDrawer') {
+      var c = readDenoms('c');
+      if (!confirm('Close the drawer with ' + J(c.total) + ' counted?')) return;
+      api('/api/cash/till/close', { method: 'POST', body: { count: c.count, notes: $('#closeNotes').value } }).then(function (d) {
+        toast(d.variance != null ? 'Closed. ' + (d.variance === 0 ? 'Balanced.' : (d.variance > 0 ? 'Over ' : 'Short ') + J(Math.abs(d.variance))) : d.message);
+        refreshMe().then(loadDrawer);
+      }).catch(function (er) { toast(er.message, true); });
+    }
+    if (a === 'addStation') {
+      api('/api/cash/stations', { method: 'POST', body: { name: $('#newSt').value, kind: $('#newKind').value } }).then(function () { toast('Added'); setTab('stations'); }).catch(function (er) { toast(er.message, true); });
+    }
+    if (a === 'unbindLocal') { try { localStorage.removeItem(KEY); } catch (_) {} refreshMe().then(function () { setTab('stations'); }); }
+  });
+  document.addEventListener('change', function (e) {
+    var t = e.target;
+    if (t.hasAttribute('data-tm')) { S.tenders[+t.getAttribute('data-tm')].method = t.value; return render(); }
+    if (t.hasAttribute('data-ta')) { S.tenders[+t.getAttribute('data-ta')].amount = t.value; return render(); }
+    if (t.hasAttribute('data-tt')) { S.tenders[+t.getAttribute('data-tt')].tendered = t.value; return render(); }
+    if (t.hasAttribute('data-tr')) { S.tenders[+t.getAttribute('data-tr')].reference = t.value; return; }
+    if (t.hasAttribute('data-sk')) {
+      var b = {}; b[t.getAttribute('data-sk')] = t.value || null;
+      api('/api/cash/stations/' + t.closest('tr').getAttribute('data-st'), { method: 'PATCH', body: b }).then(function () { toast('Saved'); setTab('stations'); }).catch(function (er) { toast(er.message, true); setTab('stations'); });
+    }
+  });
+
+  fetch('/api/me', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (d) {
+    if (!d.user) { location.href = '/admin.html'; return; }
+    $('#who').textContent = d.user.name || d.user.email;
+    return refreshMe().then(function () { setTab('queue'); setInterval(function () { if (S.tab === 'queue' && !S.order) loadQueue(); }, 10000); });
+  }).catch(function (e) { $('#main').innerHTML = '<div class="card">' + esc(e.message) + '</div>'; });
+})();
+</script>
+<script src="/assets/clock-banner.js" defer></script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+</body>
+</html>
