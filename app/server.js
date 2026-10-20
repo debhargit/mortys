@@ -809,9 +809,39 @@ app.use(
     maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     httpOnly: true,
     sameSite: 'lax',
+    // Baseline only. COOKIE_SECURE=true forces the flag on for every request;
+    // the middleware below turns it on per-request for anything that actually
+    // arrived over TLS, which is what closes the hole without stranding the
+    // tills. Left as the env read so an operator who wants it unconditionally
+    // on still has that switch.
     secure: process.env.COOKIE_SECURE === 'true',
   })
 );
+
+// ---- Secure flag on the session cookie, decided per request -----------------
+// mh_session is a 30-day admin session and it was going out with no Secure
+// flag, because the only thing that could set one was COOKIE_SECURE, and
+// app/.env has it false. Meanwhile the same server is published over HTTPS at
+// visionautosolutions.com through the tunnel -- so the session cookie would
+// ride along on any plain-HTTP request to that hostname, where anyone on the
+// path could read it.
+//
+// Setting it true globally is not an option: the tills reach this box as
+// http://<shop-pc>:3040 on the shop LAN, and a browser will not send a Secure
+// cookie over plain HTTP, so staff would simply stop being able to sign in at
+// the counter. So the flag is decided per request instead. cookie-session
+// exposes req.sessionOptions as Object.create(opts) specifically so a later
+// middleware can override, and the cookie is only written at header-flush
+// time, so this takes effect for this request's Set-Cookie.
+//
+// req.secure is trustworthy here because trust proxy is set above, so it
+// reflects the tunnel's X-Forwarded-Proto. Net effect: requests over HTTPS
+// (the public site, or a till using the local TLS cert) get Secure; plain-HTTP
+// LAN tills behave exactly as they do today.
+app.use((req, _res, next) => {
+  if (req.secure) req.sessionOptions.secure = true;
+  next();
+});
 
 // -----------------------------------------------------------------------------
 //  Cloudflare gateway: history reads on behalf of a website admin.
