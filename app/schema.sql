@@ -5621,6 +5621,193 @@ ALTER TABLE gl_accounts ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES gl
 CREATE INDEX IF NOT EXISTS idx_gl_accounts_parent ON gl_accounts (parent_id);
 
 -- =============================================================================
+--  LOANS, RECURRING BILLING, REMINDERS AND LATE FEES (billing.js, 2026-10)
+--
+--  Loans      the company as borrower. A loan's repayment schedule is worked
+--             out once (loan_instalments) and each instalment becomes an
+--             ordinary A/P bill on its due date: principal to Loans Payable,
+--             interest to Interest Expense. The ap_bill poster in gl.js does
+--             the ledger; nothing loan-specific is posted.
+--  Invoices   receivables raised on the books rather than at the till (rent,
+--             recharges, late fees). They sit in A/R beside POS sales: the
+--             open-item SQL (AR_OPEN_SQL in server.js) unions them in, and
+--             Receive Payment applies money to either (ar_applications gets
+--             invoice_id beside sale_id, exactly one of the two set).
+--  Plans      one table for both sides: an 'ar' plan raises an invoice for a
+--             customer each period, an 'ap' plan a bill from a supplier
+--             (standing orders, fixed monthly costs). billing_runs is keyed by
+--             (plan, period) so a period is billed once however many times the
+--             worker runs or the server restarts.
+--  Reminders  per-customer settings; ar_reminder_log keyed by (document,
+--             stage) so a reminder is sent once.
+--  Late fees  a rule on the plan, or a customer-wide rule; the fee is its own
+--             invoice, unique per (late invoice, period) -- a waived (voided)
+--             fee still holds its key, so waiving is never undone by the next run.
+-- =============================================================================
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('2500', 'Loans Payable',    'liability',     'Loans Payable',    'LTLIAB', 'loans_payable'),
+  ('7100', 'Rental Income',    'other_income',  'Rental Income',    'EXINC',  'rental_income'),
+  ('7200', 'Interest Income',  'other_income',  'Interest Income',  'EXINC',  'interest_income'),
+  ('7300', 'Late Fee Income',  'other_income',  'Late Fee Income',  'EXINC',  'late_fee_income'),
+  ('8100', 'Interest Expense', 'other_expense', 'Interest Expense', 'EXEXP',  'interest_expense')
+ON CONFLICT DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS billing_plans (
+  id                  SERIAL PRIMARY KEY,
+  side                TEXT NOT NULL CHECK (side IN ('ar', 'ap')),
+  name                TEXT NOT NULL,                       -- "Unit 2 rent", "Internet"
+  customer_id         INTEGER REFERENCES users(id),        -- side 'ar'
+  supplier_id         INTEGER REFERENCES suppliers(id),    -- side 'ap'
+  frequency           TEXT NOT NULL CHECK (frequency IN ('weekly', 'fortnightly', 'monthly', 'quarterly', 'yearly')),
+  start_date          DATE NOT NULL,                       -- the first period's document date; monthly runs keep its day
+  end_date            DATE,                                -- no period dated after this
+  max_runs            INTEGER CHECK (max_runs IS NULL OR max_runs > 0),
+  next_run            DATE,                                -- the next period to bill; NULL once ended
+  due_days            INTEGER NOT NULL DEFAULT 0 CHECK (due_days BETWEEN 0 AND 365),
+  lines               JSONB NOT NULL,                      -- [{account_id, description, amount}]
+  gct_amount          NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (gct_amount >= 0),
+  memo                TEXT,
+  pay_mode            TEXT NOT NULL DEFAULT 'manual' CHECK (pay_mode IN ('manual', 'standing_order')),
+  status              TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'ended')),
+  status_reason       TEXT,
+  -- Late fee for this agreement (side 'ar'). NULL type: the customer's rule applies; 'none': no fee.
+  late_fee_type       TEXT CHECK (late_fee_type IN ('flat', 'percent', 'none')),
+  late_fee_amount     NUMERIC(14,2),                       -- J$ (flat) or % of the open balance
+  late_fee_grace_days INTEGER NOT NULL DEFAULT 0,
+  late_fee_repeat     TEXT NOT NULL DEFAULT 'once' CHECK (late_fee_repeat IN ('once', 'monthly')),
+  late_fee_min        NUMERIC(14,2),
+  late_fee_max        NUMERIC(14,2),
+  created_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at          TIMESTAMPTZ DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ DEFAULT NOW(),
+  CHECK ((side = 'ar' AND customer_id IS NOT NULL) OR (side = 'ap' AND supplier_id IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_billing_plans_next ON billing_plans (next_run) WHERE status = 'active';
+
+CREATE TABLE IF NOT EXISTS ar_invoices (
+  id                SERIAL PRIMARY KEY,
+  number            TEXT UNIQUE,                           -- INV-000001
+  kind              TEXT NOT NULL DEFAULT 'invoice' CHECK (kind IN ('invoice', 'late_fee')),
+  customer_id       INTEGER NOT NULL REFERENCES users(id),
+  invoice_date      DATE NOT NULL,
+  due_date          DATE,
+  memo              TEXT,
+  gct_amount        NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (gct_amount >= 0),
+  total             NUMERIC(14,2) NOT NULL CHECK (total > 0),
+  plan_id           INTEGER REFERENCES billing_plans(id),
+  source_invoice_id INTEGER REFERENCES ar_invoices(id),    -- late fee: the invoice that was late
+  fee_period        TEXT,                                  -- late fee: 'once', or 1, 2, 3 ... per month it stays unpaid
+  created_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at        TIMESTAMPTZ DEFAULT NOW(),
+  voided_at         TIMESTAMPTZ,
+  voided_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  void_reason       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ar_invoices_customer ON ar_invoices (customer_id, invoice_date);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ar_invoices_fee ON ar_invoices (source_invoice_id, fee_period) WHERE kind = 'late_fee';
+CREATE TABLE IF NOT EXISTS ar_invoice_lines (
+  id          SERIAL PRIMARY KEY,
+  invoice_id  INTEGER NOT NULL REFERENCES ar_invoices(id) ON DELETE CASCADE,
+  account_id  INTEGER NOT NULL REFERENCES gl_accounts(id),
+  description TEXT,
+  amount      NUMERIC(14,2) NOT NULL CHECK (amount > 0)
+);
+
+ALTER TABLE ar_applications ALTER COLUMN sale_id DROP NOT NULL;
+ALTER TABLE ar_applications ADD COLUMN IF NOT EXISTS invoice_id INTEGER REFERENCES ar_invoices(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_ar_app_invoice ON ar_applications (invoice_id) WHERE invoice_id IS NOT NULL;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ar_applications_one_doc') THEN
+    ALTER TABLE ar_applications ADD CONSTRAINT ar_applications_one_doc CHECK ((sale_id IS NULL) <> (invoice_id IS NULL));
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS billing_runs (
+  plan_id       INTEGER NOT NULL REFERENCES billing_plans(id) ON DELETE CASCADE,
+  period_date   DATE NOT NULL,
+  ar_invoice_id INTEGER REFERENCES ar_invoices(id),
+  ap_bill_id    INTEGER REFERENCES ap_bills(id),
+  created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,   -- NULL: the worker
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (plan_id, period_date)
+);
+
+CREATE TABLE IF NOT EXISTS loans (
+  id                   SERIAL PRIMARY KEY,
+  name                 TEXT NOT NULL,                      -- "NCB business loan"
+  supplier_id          INTEGER NOT NULL REFERENCES suppliers(id),   -- the lender, billed through Payables
+  reference            TEXT,                               -- the lender's loan / account number
+  principal            NUMERIC(14,2) NOT NULL CHECK (principal > 0),
+  annual_rate          NUMERIC(8,4) NOT NULL CHECK (annual_rate >= 0 AND annual_rate < 100),
+  instalments          INTEGER NOT NULL CHECK (instalments BETWEEN 1 AND 600),
+  frequency            TEXT NOT NULL CHECK (frequency IN ('weekly', 'fortnightly', 'monthly', 'quarterly', 'yearly')),
+  method               TEXT NOT NULL DEFAULT 'annuity' CHECK (method IN ('annuity', 'equal_principal', 'interest_only')),
+  start_date           DATE NOT NULL,                      -- the day the money was received
+  first_due            DATE NOT NULL,
+  pay_mode             TEXT NOT NULL DEFAULT 'manual' CHECK (pay_mode IN ('manual', 'standing_order')),
+  liability_account_id INTEGER NOT NULL REFERENCES gl_accounts(id),
+  interest_account_id  INTEGER NOT NULL REFERENCES gl_accounts(id),
+  received             TEXT NOT NULL DEFAULT 'deposit' CHECK (received IN ('deposit', 'existing')),
+  deposit_txn_id       INTEGER REFERENCES bank_txns(id),
+  status               TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paid', 'cancelled')),
+  notes                TEXT,
+  created_by           INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at           TIMESTAMPTZ DEFAULT NOW(),
+  cancelled_at         TIMESTAMPTZ,
+  cancel_reason        TEXT
+);
+CREATE TABLE IF NOT EXISTS loan_instalments (
+  id         SERIAL PRIMARY KEY,
+  loan_id    INTEGER NOT NULL REFERENCES loans(id) ON DELETE CASCADE,
+  n          INTEGER NOT NULL,
+  kind       TEXT NOT NULL DEFAULT 'regular' CHECK (kind IN ('regular', 'extra')),   -- extra: a lump sum off the principal
+  due_date   DATE NOT NULL,
+  opening    NUMERIC(14,2) NOT NULL,
+  principal  NUMERIC(14,2) NOT NULL CHECK (principal >= 0),
+  interest   NUMERIC(14,2) NOT NULL CHECK (interest >= 0),
+  payment    NUMERIC(14,2) NOT NULL,
+  closing    NUMERIC(14,2) NOT NULL,
+  status     TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'billed')),
+  ap_bill_id INTEGER UNIQUE REFERENCES ap_bills(id),
+  UNIQUE (loan_id, n)
+);
+CREATE INDEX IF NOT EXISTS idx_loan_inst_due ON loan_instalments (due_date) WHERE status = 'scheduled';
+
+CREATE TABLE IF NOT EXISTS ar_billing_settings (
+  customer_id         INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  reminders           BOOLEAN NOT NULL DEFAULT false,
+  days_before         INTEGER CHECK (days_before IS NULL OR days_before BETWEEN 1 AND 30),
+  on_due              BOOLEAN NOT NULL DEFAULT true,
+  days_after          INTEGER[] NOT NULL DEFAULT '{1,7,14}',   -- never past day 14: from day 15 it is a phone call (SOP-09)
+  late_fee_type       TEXT CHECK (late_fee_type IN ('flat', 'percent')),   -- NULL: no customer-wide fee
+  late_fee_amount     NUMERIC(14,2),
+  late_fee_grace_days INTEGER NOT NULL DEFAULT 0,
+  late_fee_repeat     TEXT NOT NULL DEFAULT 'once' CHECK (late_fee_repeat IN ('once', 'monthly')),
+  late_fee_min        NUMERIC(14,2),
+  late_fee_max        NUMERIC(14,2),
+  late_fee_from       DATE,                                -- only invoices dated on or after this
+  updated_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS ar_reminder_log (
+  doc         TEXT NOT NULL,                               -- sale | invoice
+  doc_id      INTEGER NOT NULL,
+  stage       TEXT NOT NULL,                               -- before | due | after:7
+  customer_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  status      TEXT NOT NULL DEFAULT 'sending',             -- sending | sent | failed | no_email | held
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (doc, doc_id, stage)
+);
+-- Loan instalments and recurring bills paid by hand (not standing orders): the accounts
+-- email is told once, a few days before the due date. Key: 'loan:<instalment id>' or 'plan:<id>:<period>'.
+CREATE TABLE IF NOT EXISTS billing_notices (
+  key        TEXT PRIMARY KEY,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- =============================================================================
 --  CATEGORIES AND CLASSES, QuickBooks style (gl.js, books.js, billing.js, 2026-10)
 --
 --  A "category" is an account in the chart (sub-accounts for detail), as in

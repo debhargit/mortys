@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loans &amp; Rent · Vision Auto Solutions</title>
+<link rel="stylesheet" href="/assets/books.css">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Loans, rent &amp; recurring billing</h1><nav><a href="/receivables.html">Receivables</a><a href="/payables.html">Payables</a><a href="/banking.html">Banking</a><a href="/accounting.html">Ledger</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"><button data-t="reg" class="on">Register</button><button data-t="docs">Documents</button></div>
+  <div class="card"><div class="controls">
+    <div style="flex:1;min-width:180px"><label>Search (name, number, customer, lender)</label><input id="q" style="width:100%"></div>
+    <div><label>Type</label><select id="ft"></select></div>
+    <div><label>Status</label><select id="fs"></select></div>
+    <div><label>From</label><input id="ff" type="date"></div><div><label>To</label><input id="fto" type="date"></div>
+    <label><input type="checkbox" id="fo"> Overdue only</label>
+    <span style="margin-left:auto"></span><button id="pr">Print / PDF</button><button id="cv">Excel / CSV</button>
+  </div><p class="sub" id="sum"></p></div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<script src="/assets/books-common.js?v=20261019"></script>
+<script>
+// The Loans & Rent module: one register of everything billing.js manages
+// (loans, rental agreements, recurring bills) and of the documents they raised,
+// with search and filters, print / PDF, CSV for Excel, and per-agreement
+// outputs -- tenant statements, loan schedules, invoices and receipts --
+// printed or sent by email, SMS or WhatsApp to the address on file.
+(function () {
+  'use strict';
+  var B = window.Books, $ = B.$, all = B.all, esc = B.esc, J = B.J, api = B.api, toast = B.toast, modal = B.modal, close = B.close;
+  var tab = 'reg', data = { reg: null, docs: null }, shown = [];
+  var TYPES = { reg: { '': 'Everything', loan: 'Loans', rent: 'Rent / recurring invoices', bill: 'Recurring bills' },
+    docs: { '': 'Everything', invoice: 'Invoices', late_fee: 'Late fees', payment: 'Payments received', loan_bill: 'Loan instalment bills', bill: 'Recurring bills', reminder: 'Reminders sent' } };
+  var STATUSES = { reg: ['', 'active', 'overdue', 'paused', 'paid', 'ended', 'cancelled'], docs: ['', 'open', 'overdue', 'paid', 'void', 'sent', 'failed', 'no_email'] };
+  var LABEL = { loan: 'Loan', rent: 'Rent', bill: 'Recurring bill', invoice: 'Invoice', late_fee: 'Late fee', payment: 'Payment', loan_bill: 'Loan bill', reminder: 'Reminder' };
+  var PILL = { overdue: 'bad', active: 'ok', open: 'warn', paid: 'ok', paused: 'warn', void: '', ended: '', cancelled: '', sent: 'ok', failed: 'bad', no_email: 'warn' };
+  var FREQ = { weekly: 'Weekly', fortnightly: 'Fortnightly', monthly: 'Monthly', quarterly: 'Quarterly', yearly: 'Yearly' };
+  var COLS = {
+    reg: [['type', 'Type'], ['name', 'Agreement'], ['party', 'Customer / lender / supplier'], ['frequency', 'How often'], ['amount', 'Per period', 1], ['next_due', 'Next due'], ['balance', 'Balance', 1], ['overdue', 'Overdue', 1], ['status', 'Status']],
+    docs: [['day', 'Date'], ['type', 'Type'], ['number', 'Number'], ['party', 'Customer / supplier'], ['agreement', 'Agreement'], ['amount', 'Amount', 1], ['open', 'Open', 1], ['due', 'Due'], ['status', 'Status']] };
+
+  function fillFilters() {
+    $('#ft').innerHTML = Object.keys(TYPES[tab]).map(function (k) { return '<option value="' + k + '">' + TYPES[tab][k] + '</option>'; }).join('');
+    $('#fs').innerHTML = STATUSES[tab].map(function (k) { return '<option value="' + k + '">' + (k ? k.replace('_', ' ') : 'Any status') + '</option>'; }).join('');
+  }
+  // Date range: documents by their date; agreements by their next due date.
+  function filtered() {
+    var q = $('#q').value.trim().toLowerCase(), t = $('#ft').value, s = $('#fs').value, f = $('#ff').value, to = $('#fto').value, od = $('#fo').checked;
+    return (data[tab] || []).filter(function (r) {
+      var d = tab === 'reg' ? r.next_due : r.day;
+      if (t && r.type !== t) return false;
+      if (s && r.status !== s) return false;
+      if (od && !(tab === 'reg' ? r.overdue > 0.005 : r.status === 'overdue')) return false;
+      if (f && (!d || d < f)) return false;
+      if (to && (!d || d > to)) return false;
+      if (q && [r.name, r.reference, r.party, r.number, r.agreement].join(' ').toLowerCase().indexOf(q) < 0) return false;
+      return true;
+    });
+  }
+  function cell(r, c) {
+    var v = r[c[0]];
+    if (c[0] === 'type') return LABEL[v] || v;
+    if (c[0] === 'frequency') return FREQ[v] || v || '';
+    if (c[0] === 'status') return v ? '<span class="pill ' + (PILL[v] || '') + '">' + esc(String(v).replace('_', ' ')) + '</span>' : '';
+    if (c[2]) return v == null ? '' : J(v);
+    if (c[0] === 'name') return '<b>' + esc(v) + '</b>' + (r.reference ? '<br><small>' + esc(r.reference) + '</small>' : '') + (r.status_reason ? '<br><small>' + esc(r.status_reason) + '</small>' : '');
+    return esc(v == null ? '' : v);
+  }
+  function actions(r, i) {
+    var b = [];
+    if (r.type === 'loan') b.push(['sched', 'Schedule']);
+    if (r.type === 'rent' || ((r.type === 'invoice' || r.type === 'late_fee' || r.type === 'payment' || r.type === 'reminder') && r.party_id)) b.push(['stmt', 'Statement']);
+    if (r.type === 'invoice' || r.type === 'late_fee') b.push(['inv', 'Invoice']);
+    if (r.type === 'payment') b.push(['rcpt', 'Receipt']);
+    return b.map(function (x) { return '<button class="sm" data-a="' + x[0] + '" data-i="' + i + '">' + x[1] + '</button>'; }).join(' ');
+  }
+  function render() {
+    shown = filtered();
+    var cols = COLS[tab], tot = function (k) { return shown.reduce(function (t, r) { return t + (+r[k] || 0); }, 0); };
+    $('#sum').innerHTML = shown.length + ' of ' + (data[tab] || []).length + ' shown' + (tab === 'reg' ? ' · balance ' + J(tot('balance')) + ' · overdue <b>' + J(tot('overdue')) + '</b>' : ' · amount ' + J(tot('amount')) + ' · open <b>' + J(tot('open')) + '</b>');
+    $('#out').innerHTML = '<div class="card"><div class="scroll"><table><thead><tr>' + cols.map(function (c) { return '<th' + (c[2] ? ' class="n"' : '') + '>' + c[1] + '</th>'; }).join('') + '<th></th></tr></thead><tbody>' +
+      (shown.length ? shown.map(function (r, i) { return '<tr>' + cols.map(function (c) { return '<td' + (c[2] ? ' class="n"' : '') + '>' + cell(r, c) + '</td>'; }).join('') + '<td style="white-space:nowrap">' + actions(r, i) + '</td></tr>'; }).join('') : '<tr><td colspan="' + (cols.length + 1) + '" class="empty">Nothing matches.</td></tr>') +
+      '</tbody></table></div></div>';
+    all('[data-a]').forEach(function (b) { b.onclick = function () { var r = shown[+b.getAttribute('data-i')]; ({ sched: schedule, stmt: statement, inv: invoice, rcpt: receipt })[b.getAttribute('data-a')](r); }; });
+  }
+  function load() {
+    if (data[tab]) { render(); return Promise.resolve(); }
+    return api(tab === 'reg' ? '/api/billing/register' : '/api/billing/documents').then(function (d) { data[tab] = d.rows; render(); });
+  }
+
+  // ------------------------------------------------------------- outputs --
+  var CSS = 'body{font:13px system-ui,Segoe UI,Arial,sans-serif;margin:28px;color:#111}table{width:100%;border-collapse:collapse;margin:10px 0}th,td{border:1px solid #bbb;padding:5px 7px;text-align:left;vertical-align:top}th{background:#eee}.n{text-align:right}h1{font-size:20px;margin:0}h2{font-size:16px;margin:14px 0 4px}.sub{color:#555}@media print{.noprint{display:none}}';
+  function printDoc(title, html) {
+    var w = window.open('', '_blank');
+    if (!w) return toast('Allow pop-ups to print');
+    var sh = B.shop();
+    w.document.write('<!doctype html><title>' + esc(title) + '</title><style>' + CSS + '</style><body><h1>' + esc(B.shopName()) + '</h1><p class="sub">' + esc([sh.address, sh.phone, sh.email].filter(Boolean).join(' · ')) + '</p>' + html +
+      '<p class="sub noprint"><button onclick="print()">Print / save as PDF</button></p><script>setTimeout(function(){print()},300)<\/script></body>');
+    w.document.close();
+  }
+  function filterNote() {
+    var f = [];
+    if ($('#q').value) f.push('search "' + $('#q').value + '"');
+    if ($('#ft').value) f.push(TYPES[tab][$('#ft').value]);
+    if ($('#fs').value) f.push($('#fs').value);
+    if ($('#ff').value || $('#fto').value) f.push(($('#ff').value || '…') + ' to ' + ($('#fto').value || '…'));
+    if ($('#fo').checked) f.push('overdue only');
+    return f.length ? ' · filtered: ' + f.join(', ') : '';
+  }
+  $('#pr').onclick = function () {
+    var cols = COLS[tab];
+    printDoc((tab === 'reg' ? 'Register ' : 'Documents ') + B.today(), '<h2>' + (tab === 'reg' ? 'Loans, rent and recurring bills' : 'Documents') + ' · ' + B.today() + '</h2><p class="sub">' + esc($('#sum').textContent + filterNote()) + '</p><table><tr>' + cols.map(function (c) { return '<th' + (c[2] ? ' class="n"' : '') + '>' + c[1] + '</th>'; }).join('') + '</tr>' +
+      shown.map(function (r) { return '<tr>' + cols.map(function (c) { return '<td' + (c[2] ? ' class="n"' : '') + '>' + cell(r, c).replace(/<span class="pill[^"]*">|<\/span>/g, '') + '</td>'; }).join('') + '</tr>'; }).join('') + '</table>');
+  };
+  $('#cv').onclick = function () {
+    var cols = COLS[tab];
+    B.csv((tab === 'reg' ? 'loans-rent-register-' : 'loans-rent-documents-') + B.today() + '.csv', [cols.map(function (c) { return c[1]; })].concat(shown.map(function (r) { return cols.map(function (c) { var v = r[c[0]]; return c[0] === 'type' ? LABEL[v] || v : v == null ? '' : v; }); })));
+  };
+
+  // A document on screen with Print / PDF, Email, SMS and WhatsApp. doc: { title, html, text, sms, to: {customer_id|supplier_id}, kind, ref }.
+  function showDoc(doc) {
+    modal('<h2>' + esc(doc.title) + '</h2><div class="scroll" style="max-height:55vh;border:1px solid #ddd;padding:8px">' + doc.html + '</div>' +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="dp">Print / PDF</button><button id="de">Email</button><button id="ds">SMS</button><button id="dw">WhatsApp</button><button id="dx">Close</button></div>' +
+      '<p class="sub">Email sends the full document; SMS and WhatsApp send a short summary. They go to the address on the ' + (doc.to.supplier_id ? 'supplier' : 'customer') + '\'s record and are kept in the notifications log' + (doc.to.customer_id ? ' and the collections notes' : '') + '.</p>');
+    $('#dx').onclick = close;
+    $('#dp').onclick = function () { printDoc(doc.title, doc.html); };
+    var send = function (channel) {
+      api('/api/billing/send', 'POST', Object.assign({ channel: channel, text: channel === 'email' ? doc.text : doc.sms, subject: doc.title, what: doc.title, kind: doc.kind, ref: doc.ref }, doc.to)).then(function (r) {
+        if (r.wa_link) { window.open(r.wa_link, '_blank'); toast('WhatsApp opened for ' + r.to + ': press send there'); }
+        else toast(r.ok ? (r.status === 'stubbed' ? 'Logged only (' + r.reason + ')' : r.status === 'queued' ? 'Queued for ' + r.to + ' (quiet hours)' : 'Sent to ' + r.to) : 'Not sent: ' + (r.reason || r.status));
+      }).catch(function (e) { toast(e.message); });
+    };
+    $('#de').onclick = function () { send('email'); };
+    $('#ds').onclick = function () { send('sms'); };
+    $('#dw').onclick = function () { send('whatsapp'); };
+  }
+  var T = function (rows, head, nCols) { return '<table><tr>' + head.map(function (h, i) { return '<th' + (nCols.indexOf(i) >= 0 ? ' class="n"' : '') + '>' + h + '</th>'; }).join('') + '</tr>' + rows.map(function (r) { return '<tr>' + r.map(function (v, i) { return '<td' + (nCols.indexOf(i) >= 0 ? ' class="n"' : '') + '>' + v + '</td>'; }).join('') + '</tr>'; }).join('') + '</table>'; };
+  var pad = function (s, n) { s = String(s); return s.length >= n ? s + ' ' : s + Array(n - s.length + 1).join(' '); };
+
+  // Tenant / customer statement: the whole account (the same figures as Receivables).
+  function statement(r) {
+    var from = $('#ff').value || (function () { var d = new Date(Date.now() - 5 * 3600000); d.setUTCMonth(d.getUTCMonth() - 3); return d.toISOString().slice(0, 8) + '01'; })(), to = $('#fto').value || B.today();
+    api('/api/admin/reports/customer-statement?customer_id=' + r.party_id + '&from=' + from + '&to=' + to).then(function (d) {
+      var c = d.customer, t = d.totals;
+      var html = '<h2>Statement of account · ' + esc(c.name) + '</h2><p class="sub">' + esc(c.account_number || '') + ' · ' + esc(from) + ' to ' + esc(to) + '</p>' +
+        T([['', 'Opening balance', '', '', J(t.opening)]].concat(d.lines.map(function (l) { return [esc(l.day), esc(l.kind) + ' ' + esc(l.reference || ''), l.charge ? J(l.charge) : '', l.credit ? J(l.credit) : '', J(l.balance)]; })), ['Date', 'Item', 'Charge', 'Payment', 'Balance'], [2, 3, 4]) +
+        '<h2>Still open</h2>' + T(d.open_items.map(function (o) { return [esc(o.receipt_number), esc(o.day), esc(o.due_date ? String(o.due_date).slice(0, 10) : ''), J(o.balance), o.days_overdue ? o.days_overdue + ' days' : '']; }), ['Invoice', 'Date', 'Due', 'Open', 'Overdue'], [3]) +
+        '<p><b>Amount due: ' + J(t.owed) + '</b>' + (t.overdue ? ' · past due ' + J(t.overdue) : '') + '</p>';
+      var text = 'Statement of account: ' + c.name + (c.account_number ? ' (' + c.account_number + ')' : '') + '\n' + from + ' to ' + to + '\n\nOpening balance: ' + J(t.opening) + '\n\n' +
+        d.lines.map(function (l) { return pad(l.day, 11) + pad(l.kind + ' ' + (l.reference || ''), 28) + pad(l.charge ? J(l.charge) : '', 16) + pad(l.credit ? '-' + J(l.credit) : '', 16) + J(l.balance); }).join('\n') +
+        '\n\nStill open:\n' + d.open_items.map(function (o) { return o.receipt_number + '  due ' + String(o.due_date || o.day).slice(0, 10) + '  ' + J(o.balance) + (o.days_overdue ? '  (' + o.days_overdue + ' days overdue)' : ''); }).join('\n') +
+        '\n\nAmount due: ' + J(t.owed) + (t.overdue ? ' (past due ' + J(t.overdue) + ')' : '') + '\n\nPlease call us on ' + (B.shop().phone || 'the shop number') + ' with any questions.\n' + B.shopName();
+      var sms = B.shopName() + ': statement for ' + c.name + ' to ' + to + '. Amount due ' + J(t.owed) + (t.overdue ? ', of which ' + J(t.overdue) + ' is past due' : '') + '. Questions: ' + (B.shop().phone || 'call the shop') + '.';
+      showDoc({ title: 'Statement · ' + c.name, html: html, text: text, sms: sms, to: { customer_id: c.id }, kind: 'statement', ref: c.id });
+    }).catch(function (e) { toast(e.message); });
+  }
+  // Loan schedule: principal / interest split, billed and paid so far, interest per year.
+  function schedule(r) {
+    api('/api/loans/' + r.id).then(function (d) {
+      var l = d.loan, years = {};
+      d.instalments.forEach(function (x) { var y = x.due_date.slice(0, 4); years[y] = (years[y] || 0) + x.interest; });
+      var html = '<h2>Loan schedule · ' + esc(l.name) + '</h2><p class="sub">' + esc(l.lender) + (l.reference ? ' · ' + esc(l.reference) : '') + ' · ' + J(l.principal) + ' at ' + l.annual_rate + '% a year · ' + esc(FREQ[l.frequency]) + ' · received ' + esc(l.start_date) + '</p>' +
+        T(d.instalments.map(function (x) { return [x.kind === 'extra' ? 'extra' : x.n, esc(x.due_date), J(x.payment), J(x.principal), J(x.interest), J(x.closing), esc(x.state)]; }), ['#', 'Due', 'Payment', 'Principal', 'Interest', 'Balance after', 'Status'], [2, 3, 4, 5]) +
+        '<p><b>Balance owed: ' + J(l.balance) + '</b> · principal billed ' + J(l.principal_billed) + ' · interest billed ' + J(l.interest_billed) + '</p>' +
+        '<h2>Interest by year</h2>' + T(Object.keys(years).sort().map(function (y) { return [y, J(Math.round(years[y] * 100) / 100)]; }), ['Year', 'Interest'], [1]);
+      var text = 'Loan schedule: ' + l.name + (l.reference ? ' (' + l.reference + ')' : '') + '\n' + J(l.principal) + ' at ' + l.annual_rate + '%, ' + FREQ[l.frequency] + '\n\n' +
+        d.instalments.map(function (x) { return pad(x.kind === 'extra' ? 'extra' : x.n, 6) + pad(x.due_date, 12) + pad(J(x.payment), 16) + pad('principal ' + J(x.principal), 26) + pad('interest ' + J(x.interest), 24) + 'balance ' + J(x.closing) + '  ' + x.state; }).join('\n') +
+        '\n\nBalance owed: ' + J(l.balance) + '\n' + B.shopName();
+      var nx = d.instalments.find(function (x) { return x.state === 'upcoming'; });
+      var sms = B.shopName() + ': loan ' + (l.reference || l.name) + ' balance ' + J(l.balance) + (nx ? ', next instalment ' + J(nx.payment) + ' due ' + nx.due_date : '') + '.';
+      showDoc({ title: 'Loan schedule · ' + l.name, html: html, text: text, sms: sms, to: { supplier_id: l.supplier_id }, kind: 'loan', ref: l.id });
+    }).catch(function (e) { toast(e.message); });
+  }
+  function invoice(r) {
+    api('/api/ar/invoices/' + r.id).then(function (d) {
+      var i = d.invoice, title = (i.kind === 'late_fee' ? 'Late fee ' : 'Invoice ') + i.number;
+      var html = '<h2>' + esc(title) + (i.voided_at ? ' (VOID)' : '') + '</h2><p>Bill to: <b>' + esc(i.customer) + '</b> ' + esc(i.account_number || '') + '<br>Date ' + esc(i.day) + ' · due ' + esc(i.due) + (i.fee_on ? ' · late fee on ' + esc(i.fee_on) : '') + '</p>' +
+        T(d.lines.map(function (l) { return [esc(l.description || l.account), J(l.amount)]; }).concat(i.gct_amount ? [['GCT', J(i.gct_amount)]] : []).concat([['<b>Total</b>', '<b>' + J(i.total) + '</b>'], ['Paid', J(d.paid)], ['<b>Amount due</b>', '<b>' + J(d.open) + '</b>']]), ['Description', 'Amount'], [1]) +
+        (i.memo ? '<p class="sub">' + esc(i.memo) + '</p>' : '');
+      var text = title + '\nBill to: ' + i.customer + (i.account_number ? ' (' + i.account_number + ')' : '') + '\nDate ' + i.day + ', due ' + i.due + '\n\n' +
+        d.lines.map(function (l) { return pad(l.description || l.account, 44) + J(l.amount); }).join('\n') + (i.gct_amount ? '\n' + pad('GCT', 44) + J(i.gct_amount) : '') +
+        '\n\n' + pad('Total', 44) + J(i.total) + '\n' + pad('Paid', 44) + J(d.paid) + '\n' + pad('Amount due', 44) + J(d.open) + '\n\n' + B.shopName();
+      var sms = B.shopName() + ': ' + title + ' for ' + J(i.total) + ', due ' + i.due + '. Amount due ' + J(d.open) + '.';
+      showDoc({ title: title, html: html, text: text, sms: sms, to: { customer_id: i.customer_id }, kind: 'invoice', ref: i.id });
+    }).catch(function (e) { toast(e.message); });
+  }
+  function receipt(r) {
+    api('/api/billing/receipts/' + r.id).then(function (d) {
+      var p = d.receipt, title = 'Receipt · ' + (p.reference || 'payment ' + p.id);
+      var html = '<h2>Payment received</h2><p>From <b>' + esc(p.customer) + '</b> ' + esc(p.account_number || '') + '<br>' + esc(p.day) + ' · ' + esc(p.method) + (p.reference ? ' · ref ' + esc(p.reference) : '') + '</p>' +
+        T(d.applied.map(function (a) { return [esc(a.number), J(a.amount)]; }).concat([['<b>Total received</b>', '<b>' + J(p.amount) + '</b>']]), ['Applied to', 'Amount'], [1]) +
+        '<p>Balance still owed on the account: <b>' + J(d.balance_after) + '</b></p><p class="sub">Thank you.</p>';
+      var text = 'Receipt: payment received from ' + p.customer + (p.account_number ? ' (' + p.account_number + ')' : '') + '\n' + p.day + ', ' + p.method + (p.reference ? ', ref ' + p.reference : '') + '\n\n' +
+        d.applied.map(function (a) { return pad(a.number, 20) + J(a.amount); }).join('\n') + '\n\n' + pad('Total received', 20) + J(p.amount) + '\nBalance still owed: ' + J(d.balance_after) + '\n\nThank you.\n' + B.shopName();
+      var sms = B.shopName() + ': thank you, we received ' + J(p.amount) + ' on ' + p.day + (d.applied.length ? ' for ' + d.applied.map(function (a) { return a.number; }).join(', ') : '') + '. Balance ' + J(d.balance_after) + '.';
+      showDoc({ title: title, html: html, text: text, sms: sms, to: { customer_id: p.customer_id }, kind: 'receipt', ref: p.id });
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  function show() {
+    all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); });
+    fillFilters();
+    load().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
+  ['#q', '#ff', '#fto'].forEach(function (s) { $(s).oninput = render; });
+  ['#ft', '#fs', '#fo'].forEach(function (s) { $(s).onchange = render; });
+  show();
+})();
+</script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+</body>
+</html>
