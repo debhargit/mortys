@@ -6327,15 +6327,31 @@ app.post('/api/admin/stock-counts', requireAdmin, async (req, res) => {
     const params = [];
     if (scope === 'bin') { params.push(b.scope_value || ''); where += ` AND bin_location = $${params.length}`; }
     else if (scope === 'category') { params.push(b.scope_value || ''); where += ` AND category = $${params.length}`; }
-    const { rows: prods } = await query(`SELECT id, img, bin_location, stock_count FROM products WHERE ${where} ORDER BY bin_location NULLS LAST, name`, params);
-    for (const p of prods) {
-      await query(
-        `INSERT INTO stock_count_items (count_id, product_img, product_id, bin_location, system_qty) VALUES ($1,$2,$3,$4,$5)`,
-        [countId, p.img, p.id, p.bin_location, p.stock_count]
-      );
-    }
-    await query(`UPDATE stock_counts SET total_items = $1 WHERE id = $2`, [prods.length, countId]);
-    res.json({ ok: true, id: countId, count_number: num, total_items: prods.length });
+    // Seed every matching product in one statement. This used to SELECT the
+    // products and then fire one INSERT per row: on a full-scope count that is
+    // one round trip per product -- at the ~23,000 this shop carries, tens of
+    // thousands of sequential queries, minutes of wall time with a pool
+    // connection held throughout, and the HTTP request timing out long before
+    // the count was ready (audit M4). INSERT ... SELECT does the same work
+    // inside the server with one round trip.
+    //
+    // The ORDER BY is kept so the generated ids still run in bin/name order.
+    // Nothing depends on that -- the route that reads these items sorts them
+    // itself -- but it costs nothing and keeps the rows laid out the way they
+    // are read.
+    //
+    // $1 is the count id; the scope parameters keep the placeholder numbers
+    // they were built with, so `where` is interpolated unchanged.
+    const seeded = await query(
+      `INSERT INTO stock_count_items (count_id, product_img, product_id, bin_location, system_qty)
+         SELECT $${params.length + 1}, img, id, bin_location, stock_count
+           FROM products WHERE ${where}
+          ORDER BY bin_location NULLS LAST, name`,
+      [...params, countId]
+    );
+    const totalItems = seeded.rowCount;
+    await query(`UPDATE stock_counts SET total_items = $1 WHERE id = $2`, [totalItems, countId]);
+    res.json({ ok: true, id: countId, count_number: num, total_items: totalItems });
   } catch (e) { console.error('[stock count create]', e); res.status(500).json({ error: e.message }); }
 });
 
@@ -6970,24 +6986,60 @@ app.post('/api/admin/import/services', requireManager, uploadData.single('csv'),
     const text = fs.readFileSync(req.file.path, 'utf8');
     fs.unlink(req.file.path, () => {});
     const rows = csvToObjects(text);
-    let inserted = 0, skipped = 0;
+    // Build the row set first, then write it in chunks. This was one INSERT
+    // per CSV line, each its own implicit transaction and so its own disk
+    // flush (audit M4). The inventory importer above already does it this
+    // way; this is the same shape at lower volume.
+    const items = [];
+    let skipped = 0;
     for (const r of rows) {
       const name = (r.name || r.service || r.description || '').trim();
       if (!name) { skipped++; continue; }
-      await query(
-        `INSERT INTO services (code, name, category, description, default_hours, default_price_usd, default_labor_usd, default_parts_usd)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (code) DO NOTHING`,
-        [
-          r.code || null, name, r.category || null, r.description || null,
-          parseFloat(r.default_hours || r.hours) || 1.0,
-          parseFloat(r.default_price_usd || r.price) || null,
-          parseFloat(r.default_labor_usd || r.labor) || null,
-          parseFloat(r.default_parts_usd || r.parts) || null,
-        ]
-      );
-      inserted++;
+      items.push([
+        r.code || null, name, r.category || null, r.description || null,
+        parseFloat(r.default_hours || r.hours) || 1.0,
+        parseFloat(r.default_price_usd || r.price) || null,
+        parseFloat(r.default_labor_usd || r.labor) || null,
+        parseFloat(r.default_parts_usd || r.parts) || null,
+      ]);
     }
-    res.json({ ok: true, total: rows.length, inserted, skipped });
+
+    // One transaction, so a bad row leaves the services table as it was rather
+    // than half-imported. That is a deliberate change from the old per-row
+    // behaviour and matches what the inventory importer promises.
+    //
+    // ON CONFLICT (code) DO NOTHING is carried over unchanged, and is safe
+    // against duplicate codes inside one VALUES list -- DO NOTHING tolerates
+    // that, where DO UPDATE would raise "cannot affect row a second time".
+    const CHUNK = 400;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (let start = 0; start < items.length; start += CHUNK) {
+        const slice = items.slice(start, start + CHUNK);
+        const params = [];
+        const tuples = slice.map((vals) => {
+          const ph = vals.map((v) => { params.push(v); return '$' + params.length; });
+          return '(' + ph.join(',') + ')';
+        });
+        await client.query(
+          `INSERT INTO services (code, name, category, description, default_hours, default_price_usd, default_labor_usd, default_parts_usd)
+             VALUES ` + tuples.join(',') + ' ON CONFLICT (code) DO NOTHING',
+          params
+        );
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    // Reported exactly as before: every row that carried a usable name. Rows
+    // dropped by ON CONFLICT were counted here previously too, so the numbers
+    // staff see on an import do not move.
+    res.json({ ok: true, total: rows.length, inserted: items.length, skipped });
   } catch (e) { console.error('[import services]', e); res.status(500).json({ error: e.message }); }
 });
 
