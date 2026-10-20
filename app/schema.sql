@@ -1441,6 +1441,11 @@ UPDATE shop_settings SET phone = '(876) 728-4735'
 -- holding the previous number is moved, so an operator-edited phone stays.
 UPDATE shop_settings SET phone = '(876) 728-4735'
   WHERE phone IN ('(876) 758-5590', '876-758-5590');
+-- The seeded admin account carries the shop's own number as its contact
+-- (migrations/0002_seed_data.sql), so it moves with it. A real staff member's
+-- mobile never matches these, and migration 0065 does the same on D1.
+UPDATE users SET phone = '(876) 728-4735'
+  WHERE phone IN ('(876) 758-5590', '876-758-5590', '+18767585590', '8767585590');
 
 -- Rebrand (2026): the synthetic walk-in / no-email customer domain moved from
 -- @walkin.melthahonda.local to @walkin.visionautosolutions.local. Rename the
