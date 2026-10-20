@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hiring · Vision Auto Solutions</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0} header nav{margin-left:auto;display:flex;gap:14px;font-size:13px} header a{color:#fff;opacity:.85}
+  main{max-width:1250px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  input,select,button,textarea{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  textarea{width:100%} button{cursor:pointer;background:var(--card)} button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600} button.sm{padding:3px 9px;font-size:12.5px}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px} .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  table{width:100%;border-collapse:collapse} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip)} .pill.ok{background:#16a34a22;color:var(--ok)} .pill.warn{background:#f59e0b22;color:var(--warn)}
+  .board{display:grid;grid-template-columns:repeat(6,minmax(170px,1fr));gap:10px;overflow-x:auto}
+  .col{background:var(--chip);border-radius:10px;padding:8px;min-height:120px} .col h3{font-size:12.5px;margin:2px 4px 8px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+  .app{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:6px;cursor:pointer} .app:hover{border-color:var(--red)} .app small{color:var(--muted)}
+  .modal{position:fixed;inset:0;background:rgba(10,15,25,.55);display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow:auto;z-index:40} .modal .card{max-width:760px;width:100%}
+  .empty{color:var(--muted);text-align:center;padding:20px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60}
+  .pre{white-space:pre-wrap}
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Hiring</h1><nav><a href="/careers.html" target="_blank" rel="noopener">Public careers page ↗</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="card"><h2>Jobs <button class="sm primary" id="newJob">+ Job</button></h2><div id="jobs"></div></div>
+  <div class="card"><h2>Applicants <select id="jobF"><option value="">All jobs</option></select></h2><p class="sub">Applicants who are not hired are deleted (details and CV) after the retention period. Click one to open it.</p><div class="board" id="board"></div></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var day = function (t) { return t ? new Date(t).toLocaleDateString('en-JM') : ''; };
+  var STAGE = { new: 'New', screen: 'Screen', interview: 'Interview', offer: 'Offer', hired: 'Hired', rejected: 'Rejected' };
+  var KIND = { full_time: 'Full time', part_time: 'Part time', contract: 'Contract', freelance_rep: 'Freelance rep' };
+  var jobs = [];
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 3200); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); }
+        return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; });
+      });
+  }
+  function modal(h) { $('#modal').innerHTML = '<div class="modal"><div class="card">' + h + '</div></div>'; $('.modal').addEventListener('mousedown', function (e) { if (e.target.classList.contains('modal')) close(); }); }
+  function close() { $('#modal').innerHTML = ''; }
+
+  function loadJobs() {
+    return api('/api/hr/jobs').then(function (d) {
+      jobs = d.jobs;
+      $('#jobs').innerHTML = jobs.length ? '<table><thead><tr><th>Job</th><th>Type</th><th>Open</th>' + Object.keys(STAGE).map(function (s) { return '<th>' + STAGE[s] + '</th>'; }).join('') + '<th></th></tr></thead><tbody>' + jobs.map(function (j, i) {
+        return '<tr><td><b>' + esc(j.title) + '</b><br><small>' + esc([j.department, j.location].filter(Boolean).join(' · ')) + '</small></td><td>' + esc(KIND[j.kind] || j.kind) + '</td><td>' + (j.is_open ? '<span class="pill ok">open</span>' + (j.closes_on ? '<br><small>to ' + esc(day(j.closes_on)) + '</small>' : '') : '<span class="pill">closed</span>') + '</td>' +
+          Object.keys(STAGE).map(function (s) { return '<td>' + (j[s] || '') + '</td>'; }).join('') + '<td><button class="sm" data-ej="' + i + '">Edit</button></td></tr>';
+      }).join('') + '</tbody></table>' : '<div class="empty">No jobs posted yet.</div>';
+      $('#jobF').innerHTML = '<option value="">All jobs</option>' + jobs.map(function (j) { return '<option value="' + j.id + '">' + esc(j.title) + '</option>'; }).join('');
+      all('[data-ej]').forEach(function (b) { b.onclick = function () { jobForm(jobs[+b.getAttribute('data-ej')]); }; });
+    });
+  }
+  function jobForm(j) {
+    j = j || { kind: 'full_time', is_open: true };
+    modal('<h2>' + (j.id ? 'Edit job' : 'New job') + '</h2>' +
+      '<div class="controls"><div style="flex:2"><label>Title</label><input id="jt" value="' + esc(j.title || '') + '" style="width:100%"></div><div><label>Type</label><select id="jk">' + Object.keys(KIND).map(function (k) { return '<option value="' + k + '"' + (j.kind === k ? ' selected' : '') + '>' + KIND[k] + '</option>'; }).join('') + '</select></div></div>' +
+      '<div class="controls"><div><label>Department</label><input id="jd" value="' + esc(j.department || '') + '"></div><div><label>Location</label><input id="jl" value="' + esc(j.location || 'Kingston') + '"></div><div><label>Pay (shown)</label><input id="jp" value="' + esc(j.pay || '') + '"></div><div><label>Closes</label><input id="jc" type="date" value="' + esc(String(j.closes_on || '').slice(0, 10)) + '"></div></div>' +
+      '<label class="sub">One-line summary</label><input id="js" value="' + esc(j.summary || '') + '" style="width:100%"><label class="sub">The job</label><textarea id="jdesc" rows="5">' + esc(j.description || '') + '</textarea><label class="sub">What they need</label><textarea id="jr" rows="4">' + esc(j.requirements || '') + '</textarea>' +
+      '<label style="display:flex;gap:6px;align-items:center;margin:8px 0"><input type="checkbox" id="jo"' + (j.is_open !== false ? ' checked' : '') + '> Open (shown on the careers page)</label>' +
+      '<div class="controls"><button class="primary" id="jsave">Save</button><button id="jx">Cancel</button></div>');
+    $('#jx').onclick = close;
+    $('#jsave').onclick = function () {
+      var body = { title: $('#jt').value, kind: $('#jk').value, department: $('#jd').value, location: $('#jl').value, pay: $('#jp').value, closes_on: $('#jc').value, summary: $('#js').value, description: $('#jdesc').value, requirements: $('#jr').value, is_open: $('#jo').checked };
+      api('/api/hr/jobs' + (j.id ? '/' + j.id : ''), j.id ? 'PUT' : 'POST', body).then(function () { close(); toast('Saved'); loadJobs(); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  function loadBoard() {
+    return api('/api/hr/applications' + ($('#jobF').value ? '?job=' + $('#jobF').value : '')).then(function (d) {
+      $('#board').innerHTML = d.stages.map(function (s) {
+        var list = d.applications.filter(function (a) { return a.stage === s; });
+        return '<div class="col"><h3>' + STAGE[s] + ' (' + list.length + ')</h3>' + list.map(function (a) {
+          return '<div class="app" data-a="' + a.id + '"><b>' + esc(a.name) + '</b>' + (a.rating ? ' ' + '★'.repeat(a.rating) : '') + '<br><small>' + esc(a.job || '') + '<br>' + esc(day(a.created_at)) + (a.has_cv ? ' · CV' : '') + (a.notes ? ' · ' + a.notes + ' note' + (a.notes > 1 ? 's' : '') : '') + (a.interview_at ? '<br>interview ' + esc(new Date(a.interview_at).toLocaleString('en-JM', { dateStyle: 'short', timeStyle: 'short' })) : '') + '</small></div>';
+        }).join('') + '</div>';
+      }).join('');
+      all('[data-a]').forEach(function (el) { el.onclick = function () { openApp(el.getAttribute('data-a')); }; });
+    });
+  }
+  function openApp(id) {
+    api('/api/hr/applications/' + id).then(function (d) {
+      var a = d.application;
+      modal('<h2>' + esc(a.name) + ' <span class="pill">' + esc(STAGE[a.stage]) + '</span></h2><p class="sub">' + esc(a.job || '') + ' · applied ' + esc(day(a.created_at)) + ' · kept until ' + esc(day(a.retain_until)) + '</p>' +
+        '<p>' + esc(a.email) + ' · <a href="tel:' + esc(a.phone) + '">' + esc(a.phone) + '</a>' + (a.parish ? ' · ' + esc(a.parish) : '') + '</p>' +
+        (a.cover ? '<div class="card pre">' + esc(a.cover) + '</div>' : '') +
+        (a.cv_name ? '<p><a href="/api/hr/applications/' + a.id + '/cv" target="_blank" rel="noopener">Open CV (' + esc(a.cv_name) + ')</a> <small class="sub">opening it is recorded</small></p>' : '<p class="sub">No CV.</p>') +
+        '<div class="controls">' + (a.stage !== 'hired' ? '<div><label>Stage</label><select id="ast">' + Object.keys(STAGE).filter(function (s) { return s !== 'hired'; }).map(function (s) { return '<option value="' + s + '"' + (a.stage === s ? ' selected' : '') + '>' + STAGE[s] + '</option>'; }).join('') + '</select></div>' : '') +
+        '<div><label>Rating</label><select id="art"><option value="">–</option>' + [1, 2, 3, 4, 5].map(function (r) { return '<option' + (a.rating === r ? ' selected' : '') + '>' + r + '</option>'; }).join('') + '</select></div>' +
+        '<div><label>Interview</label><input id="aiv" type="datetime-local" value="' + (a.interview_at ? new Date(new Date(a.interview_at).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '') + '"></div></div>' +
+        '<label class="sub">Add a note</label><textarea id="ano" rows="2"></textarea>' +
+        '<div class="controls" style="margin-top:8px"><button class="primary" id="asave">Save</button>' + (a.stage !== 'hired' ? '<button id="ahire">Hire</button>' : '') + '<button id="adel">Delete applicant</button><button id="ax">Close</button></div>' +
+        '<h2 style="margin-top:12px">History</h2>' + (d.notes.length ? d.notes.map(function (n) { return '<p class="sub"><b>' + esc(new Date(n.at).toLocaleString('en-JM', { dateStyle: 'short', timeStyle: 'short' })) + '</b> ' + esc(n.by_name || '') + ': ' + esc(n.note || n.kind) + '</p>'; }).join('') : '<p class="sub">Nothing yet.</p>'));
+      $('#ax').onclick = close;
+      $('#asave').onclick = function () {
+        var body = { rating: $('#art').value, interview_at: $('#aiv').value || null, note: $('#ano').value };
+        if ($('#ast')) body.stage = $('#ast').value;
+        api('/api/hr/applications/' + a.id, 'PATCH', body).then(function () { toast('Saved'); close(); loadBoard(); loadJobs(); }).catch(function (e) { toast(e.message); });
+      };
+      if ($('#ahire')) $('#ahire').onclick = function () {
+        if (!confirm('Hire ' + a.name + '? A staff login is made for them, switched off until you set it up on the Staff screen.')) return;
+        api('/api/hr/applications/' + a.id + '/hire', 'POST').then(function (r) { alert('Hired. ' + r.next); close(); loadBoard(); loadJobs(); }).catch(function (e) { toast(e.message); });
+      };
+      $('#adel').onclick = function () {
+        if (!confirm('Delete this applicant\'s details and CV now? This cannot be undone.')) return;
+        api('/api/hr/applications/' + a.id, 'DELETE').then(function () { toast('Deleted'); close(); loadBoard(); loadJobs(); }).catch(function (e) { toast(e.message); });
+      };
+    }).catch(function (e) { toast(e.message); });
+  }
+  $('#newJob').onclick = function () { jobForm(null); };
+  $('#jobF').onchange = loadBoard;
+  loadJobs().then(loadBoard).catch(function (e) { $('#jobs').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+})();
+</script>
+</body>
+</html>

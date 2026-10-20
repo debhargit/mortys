@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security · Vision Auto Solutions</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0} header nav{margin-left:auto;display:flex;gap:14px;font-size:13px} header a{color:#fff;opacity:.85}
+  main{max-width:1150px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  input,select,button{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  button{cursor:pointer;background:var(--card)} button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600} button.sm{padding:3px 9px;font-size:12.5px}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 12px} .tabs button{border-radius:999px;padding:6px 13px;font-size:13px} .tabs button.on{background:var(--navy);border-color:var(--navy);color:#fff}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px} .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  table{width:100%;border-collapse:collapse} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600}
+  .scroll{overflow-x:auto}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip);white-space:nowrap}
+  .pill.ok{background:#16a34a22;color:var(--ok)} .pill.bad{background:#d6282822;color:var(--red)} .pill.warn{background:#f59e0b22;color:var(--warn)}
+  .note{padding:8px 10px;border-radius:8px;font-size:13px;margin-bottom:8px} .note.warn{background:#f59e0b18;border-left:3px solid var(--warn)} .note.info{background:var(--chip)}
+  .qr{background:#fff;padding:8px;border-radius:8px;display:inline-block} .qr svg{display:block}
+  .codes{font-family:ui-monospace,Menlo,Consolas,monospace;display:grid;grid-template-columns:repeat(2,max-content);gap:4px 24px;font-size:15px;margin:8px 0}
+  .detail{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;color:var(--muted);max-width:420px;white-space:pre-wrap;word-break:break-word}
+  .empty{color:var(--muted);text-align:center;padding:24px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60;max-width:90vw}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px} @media (max-width:860px){ .grid{grid-template-columns:1fr} }
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Security</h1><nav><a href="/accounting.html">Accounting</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"><button data-t="me" class="on">My sign-in</button><button data-t="staff">Staff</button><button data-t="rules">Sign-in rules</button><button data-t="audit">Audit log</button></div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div class="toast" id="toast"></div>
+<script src="/assets/vendor/qrcode-generator.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var when = function (t) { return t ? new Date(t).toLocaleString('en-JM', { dateStyle: 'short', timeStyle: 'short' }) : '–'; };
+  var tab = 'me';
+  try { tab = localStorage.getItem('vision.secTab') || 'me'; } catch (_) {}
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 3500); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); }
+        return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; });
+      });
+  }
+  function showCodes(codes) {
+    return '<div class="note warn"><b>Recovery codes.</b> Each works once if you lose your phone. Print them or write them down and keep them somewhere safe: they are not shown again.</div>' +
+      '<div class="codes">' + codes.map(function (c) { return '<span>' + esc(c) + '</span>'; }).join('') + '</div><button id="printCodes">Print</button>';
+  }
+
+  // ------------------------------------------------------------- my 2-step --
+  function me() {
+    return api('/api/sec/me').then(function (d) {
+      var h = '<div class="card"><h2>2-step sign-in ' + (d.two_step ? '<span class="pill ok">on</span>' : '<span class="pill">off</span>') + '</h2>' +
+        '<p class="sub">After your password, you also type a 6-digit code from an authenticator app on your phone (Google Authenticator, Microsoft Authenticator, Authy…). Someone who learns your password still cannot sign in.</p>';
+      if (!d.two_step && (d.required_here || d.required_from_outside)) h += '<div class="note warn">Your shop requires 2-step sign-in' + (d.required_here ? '' : ' when you sign in from outside the shop') + '. Set it up now.</div>';
+      if (d.two_step) {
+        h += '<p>On since ' + esc(when(d.enabled_at)) + '. Recovery codes left: <b>' + d.recovery_left + '</b>' + (d.recovery_left < 3 ? ' <span class="pill warn">make new ones</span>' : '') + '</p>' +
+          '<div class="controls"><div><label>Your password</label><input type="password" id="pw" autocomplete="current-password"></div><button id="newCodes">New recovery codes</button>' +
+          '<div><label>Code from the app</label><input id="offCode" inputmode="numeric" maxlength="6" style="width:110px"></div><button id="off">Turn off</button></div><div id="codesOut"></div>';
+      } else {
+        h += '<div id="setup"><div class="controls"><div><label>Your password</label><input type="password" id="pw" autocomplete="current-password"></div><button class="primary" id="start">Set up 2-step sign-in</button></div></div>';
+      }
+      $('#out').innerHTML = h + '</div>';
+      var printCodes = function () { var b = $('#printCodes'); if (b) b.onclick = function () { var w = window.open('', '_blank'); w.document.write('<pre style="font:16px monospace">Vision Auto Solutions recovery codes\n' + esc(d.email) + '\n\n' + all('.codes span').map(function (s) { return s.textContent; }).join('\n') + '</pre>'); w.print(); }; };
+      if ($('#start')) $('#start').onclick = function () {
+        api('/api/sec/me/2fa/start', 'POST', { password: $('#pw').value }).then(function (r) {
+          var qr = qrcode(0, 'M'); qr.addData(r.uri); qr.make();
+          $('#setup').innerHTML = '<div class="grid"><div><p><b>1.</b> In the authenticator app, add an account and scan this code:</p><div class="qr">' + qr.createSvgTag(4, 2) + '</div>' +
+            '<p class="sub">Cannot scan? Enter this key instead: <b style="font-family:monospace">' + esc(r.secret) + '</b></p></div>' +
+            '<div><p><b>2.</b> Type the 6-digit code the app shows:</p><div class="controls"><input id="cCode" inputmode="numeric" maxlength="6" style="width:120px;font-size:18px;letter-spacing:3px"><button class="primary" id="confirm">Turn on</button></div><div id="codesOut"></div></div></div>';
+          $('#cCode').focus();
+          $('#confirm').onclick = function () {
+            api('/api/sec/me/2fa/confirm', 'POST', { code: $('#cCode').value }).then(function (r2) {
+              $('#setup').innerHTML = '<p><span class="pill ok">2-step sign-in is on</span></p>' + showCodes(r2.recovery_codes); printCodes(); toast('2-step sign-in is on');
+            }).catch(function (e) { toast(e.message); });
+          };
+        }).catch(function (e) { toast(e.message); });
+      };
+      if ($('#newCodes')) $('#newCodes').onclick = function () {
+        if (!confirm('Make new recovery codes? The old ones stop working.')) return;
+        api('/api/sec/me/2fa/recovery', 'POST', { password: $('#pw').value }).then(function (r) { $('#codesOut').innerHTML = showCodes(r.recovery_codes); printCodes(); }).catch(function (e) { toast(e.message); });
+      };
+      if ($('#off')) $('#off').onclick = function () {
+        if (!confirm('Turn off 2-step sign-in? Your account will be protected by the password only.')) return;
+        api('/api/sec/me/2fa/off', 'POST', { password: $('#pw').value, code: $('#offCode').value }).then(function () { toast('Turned off'); me(); }).catch(function (e) { toast(e.message); });
+      };
+    });
+  }
+
+  // ---------------------------------------------------------------- staff --
+  function staff() {
+    return api('/api/sec/staff').then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>Staff sign-in</h2><p class="sub">Who has 2-step sign-in, when they last signed in and from where, and who is locked out.</p><div class="scroll"><table><thead><tr><th>Name</th><th>Role</th><th>2-step</th><th>Last sign-in</th><th>Status</th><th></th></tr></thead><tbody>' +
+        d.staff.map(function (u) {
+          return '<tr><td>' + esc(u.name || u.email) + '<br><small style="color:var(--muted)">' + esc(u.email) + '</small></td><td>' + esc(u.admin_role || '') + '</td>' +
+            '<td>' + (u.two_step ? '<span class="pill ok">on</span>' : '<span class="pill">off</span>') + '</td><td>' + esc(when(u.last_login_at)) + (u.last_login_ip ? '<br><small style="color:var(--muted)">' + esc(u.last_login_ip) + '</small>' : '') + '</td>' +
+            '<td>' + (u.disabled ? '<span class="pill">disabled</span>' : u.locked ? '<span class="pill bad">locked until ' + esc(new Date(u.locked_until).toLocaleTimeString('en-JM')) + '</span>' : u.failed_logins ? '<span class="pill warn">' + u.failed_logins + ' wrong</span>' : '<span class="pill ok">ok</span>') + '</td>' +
+            '<td style="white-space:nowrap">' + (u.locked || u.failed_logins ? '<button class="sm" data-unlock="' + u.id + '">Unlock</button> ' : '') + (u.two_step ? '<button class="sm" data-reset="' + u.id + '">Reset 2-step</button>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div></div>';
+      all('[data-unlock]').forEach(function (b) { b.onclick = function () { api('/api/sec/staff/' + b.getAttribute('data-unlock') + '/unlock', 'POST').then(function () { toast('Unlocked'); staff(); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-reset]').forEach(function (b) { b.onclick = function () { if (!confirm('Reset their 2-step sign-in? Do this only if they lost their phone and their recovery codes; they must set it up again.')) return; api('/api/sec/staff/' + b.getAttribute('data-reset') + '/reset-2fa', 'POST').then(function () { toast('Reset'); staff(); }).catch(function (e) { toast(e.message); }); }; });
+    });
+  }
+
+  // ---------------------------------------------------------------- rules --
+  function rules() {
+    return api('/api/sec/settings').then(function (s) {
+      var P = { off: 'Off: nobody is asked (staff who set it up still are)', remote: 'Required for staff signing in from outside the shop', managers: 'Owners and managers always; other staff from outside the shop', staff: 'Every staff member, everywhere' };
+      $('#out').innerHTML = '<div class="card"><h2>Sign-in rules</h2>' +
+        '<div class="controls"><div style="flex:1;min-width:280px"><label>2-step sign-in</label><select id="pol" style="width:100%">' + Object.keys(P).map(function (k) { return '<option value="' + k + '"' + (s.policy === k ? ' selected' : '') + '>' + P[k] + '</option>'; }).join('') + '</select></div></div>' +
+        '<div class="note info">Staff the rule covers who have not set it up can still sign in on the shop network (to set it up), but not from outside. Turn the rule on after you set up your own.</div>' +
+        '<div class="controls"><div><label>Wrong passwords before lock</label><input id="att" type="number" min="3" max="20" value="' + s.attempts + '" style="width:110px"></div>' +
+        '<div><label>Lock for (minutes)</label><input id="lm" type="number" min="1" max="1440" value="' + s.lockMinutes + '" style="width:110px"></div>' +
+        '<div><label>Sign out after idle (minutes, 0 = never)</label><input id="idle" type="number" min="0" max="10080" value="' + s.idleMinutes + '" style="width:130px"></div>' +
+        '<div><label>Keep audit log (days)</label><input id="ad" type="number" min="30" max="3650" value="' + s.auditDays + '" style="width:110px"></div></div>' +
+        '<button class="primary" id="save">Save</button></div>';
+      $('#save').onclick = function () {
+        api('/api/sec/settings', 'PUT', { policy: $('#pol').value, attempts: $('#att').value, lockMinutes: $('#lm').value, idleMinutes: $('#idle').value, auditDays: $('#ad').value })
+          .then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); });
+      };
+    });
+  }
+
+  // ---------------------------------------------------------------- audit --
+  var af = { kind: '', q: '', from: '', to: '', remote: false };
+  function audit() {
+    var qs = Object.keys(af).filter(function (k) { return af[k]; }).map(function (k) { return k + '=' + encodeURIComponent(af[k] === true ? '1' : af[k]); }).join('&');
+    return api('/api/sec/audit' + (qs ? '?' + qs : '')).then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>Audit log</h2><p class="sub">Every change staff make, and every sign-in. Passwords, PINs and codes are never recorded.</p>' +
+        '<div class="controls"><div><label>Show</label><select id="ak"><option value="">Everything</option><option value="changes"' + (af.kind === 'changes' ? ' selected' : '') + '>Changes</option><option value="security"' + (af.kind === 'security' ? ' selected' : '') + '>Sign-ins and security</option></select></div>' +
+        '<div><label>From</label><input type="date" id="af" value="' + af.from + '"></div><div><label>To</label><input type="date" id="at" value="' + af.to + '"></div>' +
+        '<div><label>Search</label><input id="aq" value="' + esc(af.q) + '" placeholder="what, or an id"></div><label style="display:flex;gap:6px;align-items:center;margin:0 0 8px;color:inherit"><input type="checkbox" id="ar"' + (af.remote ? ' checked' : '') + '> From outside the shop only</label><button class="primary" id="ago">Show</button></div>' +
+        '<div class="scroll"><table><thead><tr><th>When</th><th>Who</th><th>What</th><th>Result</th><th>Where from</th><th>Details</th></tr></thead><tbody>' +
+        (d.rows.length ? d.rows.map(function (r) {
+          var bad = r.status >= 400 || /failed|locked|refused/.test(r.action);
+          return '<tr><td style="white-space:nowrap">' + esc(when(r.at)) + '</td><td>' + esc(r.user_name || '–') + '</td><td>' + esc(r.action) + (r.target ? ' <small>#' + esc(r.target) + '</small>' : '') + '</td>' +
+            '<td>' + (r.status ? '<span class="pill ' + (r.status >= 400 ? 'bad' : 'ok') + '">' + r.status + '</span>' : bad ? '<span class="pill bad">!</span>' : '') + '</td>' +
+            '<td>' + esc(r.ip || '') + (r.remote ? ' <span class="pill warn">internet</span>' : '') + (r.station ? '<br><small>' + esc(r.station) + '</small>' : '') + '</td>' +
+            '<td><div class="detail">' + (r.detail ? esc(JSON.stringify(r.detail)) : '') + '</div></td></tr>';
+        }).join('') : '<tr><td colspan="6" class="empty">Nothing yet.</td></tr>') + '</tbody></table></div>' + (d.rows.length === 500 ? '<p class="sub">Latest 500 shown; narrow the search.</p>' : '') + '</div>';
+      $('#ago').onclick = function () { af = { kind: $('#ak').value, q: $('#aq').value.trim(), from: $('#af').value, to: $('#at').value, remote: $('#ar').checked }; audit(); };
+    });
+  }
+
+  function show() {
+    all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); });
+    try { localStorage.setItem('vision.secTab', tab); } catch (_) {}
+    ({ me: me, staff: staff, rules: rules, audit: audit }[tab] || me)().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
+  show();
+})();
+</script>
+</body>
+</html>

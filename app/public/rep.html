@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rep portal · Vision Auto Solutions</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px}
+  header h1{font-size:16px;margin:0} header .who{margin-left:auto;font-size:13px;opacity:.85} header button{background:transparent;color:#fff;border:1px solid #ffffff55;padding:4px 10px}
+  main{max-width:900px;margin:0 auto;padding:12px 14px 90px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 8px}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 10px}
+  input,select,button,textarea{font:inherit;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)}
+  input,select,textarea{width:100%}
+  button{cursor:pointer;background:var(--card)} button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600} button.sm{padding:4px 10px;font-size:13px;width:auto}
+  label{display:block;font-size:12.5px;color:var(--muted);margin:8px 0 3px}
+  nav.tabs{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:6px 4px;z-index:20}
+  nav.tabs button{border:0;background:none;font-size:12px;padding:6px 4px;color:var(--muted);flex:1}
+  nav.tabs button.on{color:var(--red);font-weight:700}
+  .kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:10px} @media (min-width:640px){ .kpis{grid-template-columns:repeat(4,1fr)} }
+  .kpi{background:var(--chip);border-radius:10px;padding:10px 12px} .kpi span{display:block;font-size:12px;color:var(--muted)} .kpi b{font-size:18px}
+  .row{display:flex;gap:8px;align-items:center} .row > *{flex:1}
+  .item{display:flex;gap:10px;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+  .item:last-child{border-bottom:0} .item small{color:var(--muted)}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip)} .pill.ok{background:#16a34a22;color:var(--ok)} .pill.warn{background:#f59e0b22;color:var(--warn)} .pill.bad{background:#d6282822;color:var(--red)}
+  .copy{display:flex;gap:6px} .copy input{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}
+  .codes{font-family:ui-monospace,Menlo,Consolas,monospace;display:grid;grid-template-columns:repeat(2,max-content);gap:4px 24px;font-size:15px;margin:8px 0}
+  .qr{background:#fff;padding:8px;border-radius:8px;display:inline-block}
+  .empty{color:var(--muted);text-align:center;padding:18px}
+  .toast{position:fixed;bottom:70px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60;max-width:90vw}
+  .badge{background:var(--red);color:#fff;border-radius:999px;padding:0 6px;font-size:11px;margin-left:3px}
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Vision Auto · Rep portal</h1><span class="who" id="who"></span><button id="out" style="display:none">Sign out</button></header>
+<main id="main"><div class="empty">Loading…</div></main>
+<nav class="tabs" id="tabs" style="display:none">
+  <button data-t="home" class="on">Home</button><button data-t="parts">Parts</button><button data-t="cart">Cart<span class="badge" id="cartN" style="display:none"></span></button>
+  <button data-t="customers">Customers</button><button data-t="pipe">My work</button><button data-t="money">Earnings</button>
+</nav>
+<div class="toast" id="toast"></div>
+<script src="/assets/vendor/qrcode-generator.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var J = function (v) { if (v == null) return '–'; var x = Number(v); return (x < 0 ? '-' : '') + 'J$' + Math.abs(x).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+  var day = function (t) { return t ? new Date(t).toLocaleDateString('en-JM') : ''; };
+  var M = $('#main'), me = null, tab = 'home', cart = [], customers = null;
+  try { cart = JSON.parse(localStorage.getItem('vision.repCart') || '[]'); } catch (_) {}
+  function saveCart() { try { localStorage.setItem('vision.repCart', JSON.stringify(cart)); } catch (_) {} var n = cart.reduce(function (s, i) { return s + i.qty; }, 0); $('#cartN').textContent = n; $('#cartN').style.display = n ? '' : 'none'; }
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 3200); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) { var e = new Error(j.error || ('Error ' + r.status)); e.status = r.status; throw e; } return j; }); });
+  }
+  function copyBox(v) { return '<div class="copy"><input readonly value="' + esc(v) + '"><button class="sm" data-copy="' + esc(v) + '">Copy</button></div>'; }
+  function wireCopy() { all('[data-copy]').forEach(function (b) { b.onclick = function () { navigator.clipboard.writeText(b.getAttribute('data-copy')).then(function () { toast('Copied'); }, function () { toast('Select and copy it'); }); }; }); }
+  var STATUS = { open: ['open', ''], ordered: ['ordered', 'ok'], converted: ['sold', 'ok'], pending: ['waiting for payment', 'warn'], completed: ['paid', 'ok'], expired: ['expired', 'bad'], cancelled: ['cancelled', 'bad'],
+    earned: ['earned', 'ok'], approved: ['approved', 'ok'], paid: ['paid', 'ok'], on_statement: ['on statement', ''], void: ['void', ''], draft: ['draft', 'warn'] };
+  var pill = function (s) { var x = STATUS[s] || [s, '']; return '<span class="pill ' + x[1] + '">' + esc(x[0]) + '</span>'; };
+
+  // --------------------------------------------------------- onboarding --
+  function invite(token) {
+    api('/api/rep/invite/' + encodeURIComponent(token)).then(function (d) {
+      M.innerHTML = '<div class="card"><h2>Welcome, ' + esc(d.name) + '</h2><p class="sub">Set up your sign-in for ' + esc(d.email) + '. You need a password and an authenticator app on your phone (Google Authenticator, Microsoft Authenticator or Authy).</p>' +
+        '<div id="step"><label>Choose a password (at least 10 characters)</label><input type="password" id="p1" autocomplete="new-password"><label>Type it again</label><input type="password" id="p2" autocomplete="new-password">' +
+        '<p><button class="primary" id="go1">Next</button></p></div></div>';
+      $('#go1').onclick = function () {
+        if ($('#p1').value !== $('#p2').value) return toast('The passwords are not the same');
+        api('/api/rep/invite/' + encodeURIComponent(token) + '/start', 'POST', { password: $('#p1').value }).then(function (r) {
+          var qr = qrcode(0, 'M'); qr.addData(r.uri); qr.make();
+          $('#step').innerHTML = '<p><b>Scan this</b> with your authenticator app (on a phone, tap and hold the key below and copy it into the app instead):</p><div class="qr">' + qr.createSvgTag(4, 2) + '</div>' +
+            '<p class="sub">Key: <b style="font-family:monospace">' + esc(r.secret) + '</b></p><label>Then type the 6-digit code it shows</label><input id="c1" inputmode="numeric" maxlength="6" style="font-size:20px;letter-spacing:4px"><p><button class="primary" id="go2">Finish</button></p>';
+          $('#go2').onclick = function () {
+            api('/api/rep/invite/' + encodeURIComponent(token) + '/finish', 'POST', { code: $('#c1').value }).then(function (r2) {
+              $('#step').innerHTML = '<p><span class="pill ok">You are set up</span></p><p><b>Recovery codes:</b> if you lose your phone, each of these lets you sign in once. Write them down or screenshot them and keep them safe.</p>' +
+                '<div class="codes">' + r2.recovery_codes.map(function (c) { return '<span>' + esc(c) + '</span>'; }).join('') + '</div><p><button class="primary" id="go3">Go to my portal</button></p>';
+              $('#go3').onclick = function () { history.replaceState(null, '', '/rep.html'); boot(); };
+            }).catch(function (e) { toast(e.message); });
+          };
+        }).catch(function (e) { toast(e.message); });
+      };
+    }).catch(function (e) { M.innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+
+  function login(msg) {
+    $('#tabs').style.display = 'none'; $('#out').style.display = 'none'; $('#who').textContent = '';
+    M.innerHTML = '<div class="card" style="max-width:420px;margin:8vh auto"><h2>Sign in</h2>' + (msg ? '<p class="sub">' + esc(msg) + '</p>' : '') +
+      '<label>Email</label><input id="em" type="email" autocomplete="username"><label>Password</label><input id="pw" type="password" autocomplete="current-password"><div id="codeBox" style="display:none"><label>6-digit code from your authenticator app (or a recovery code)</label><input id="cd" inputmode="numeric" autocomplete="one-time-code"></div>' +
+      '<p><button class="primary" id="go" style="width:100%">Sign in</button></p><p class="sub" id="err" style="color:var(--red)"></p></div>';
+    var stage = 'pw';
+    $('#go').onclick = function () {
+      $('#err').textContent = '';
+      var p = stage === 'pw' ? api('/api/auth/signin', 'POST', { email: $('#em').value, password: $('#pw').value }) : api('/api/auth/2fa', 'POST', { code: $('#cd').value });
+      p.then(function (r) {
+        if (r.need_2fa) { stage = 'code'; $('#codeBox').style.display = ''; $('#cd').focus(); $('#go').textContent = 'Check code'; return; }
+        boot();
+      }).catch(function (e) { $('#err').textContent = e.message; if (/Sign in again|Too many/.test(e.message)) { stage = 'pw'; $('#codeBox').style.display = 'none'; $('#go').textContent = 'Sign in'; } });
+    };
+    all('#em,#pw').forEach(function (i) { i.addEventListener('keydown', function (e) { if (e.key === 'Enter') $('#go').click(); }); });
+  }
+
+  // --------------------------------------------------------------- tabs --
+  function home() {
+    return api('/api/rep/me').then(function (d) {
+      me = d;
+      M.innerHTML = '<div class="card"><h2>Hi ' + esc(d.rep.name.split(' ')[0]) + '</h2><div class="kpis"><div class="kpi"><span>Your sales this month</span><b>' + J(d.counts.sales_month) + '</b></div><div class="kpi"><span>Commission this month</span><b>' + J(d.commission.this_month) + '</b></div>' +
+        '<div class="kpi"><span>Owed to you</span><b>' + J(d.commission.owed) + '</b></div><div class="kpi"><span>Waiting for customers to pay</span><b>' + J(d.commission.pending) + '</b></div></div>' +
+        '<p class="sub" style="margin-top:10px">' + d.counts.customers + ' customers · ' + d.counts.open_quotes + ' open quotes · ' + d.counts.waiting_orders + ' orders waiting for payment</p></div>' +
+        (d.rep.referral_link ? '<div class="card"><h2>Your referral link</h2><p class="sub">Share it anywhere. People who come to the shop\'s site through it and sign up become your customers.</p>' + copyBox(d.rep.referral_link) + '<p class="sub" style="margin-top:6px">Code: <b>' + esc(d.rep.referral_code) + '</b></p></div>' : '') +
+        '<div class="card"><h2>How it works</h2><p class="sub">Find parts, put them in the cart, choose your customer, then save a quote (and send it as a link the customer can accept) or send the order straight to the shop. The shop takes payment and gets the parts ready; your commission follows the sale.</p></div>';
+      wireCopy();
+    });
+  }
+
+  function parts() {
+    M.innerHTML = '<div class="card"><h2>Find parts</h2><div class="row"><input id="q" placeholder="Part number, name or vehicle"><button class="primary sm" id="qs">Search</button></div><div id="res"></div></div>';
+    var go = function () {
+      var q = $('#q').value.trim(); if (q.length < 2) return;
+      api('/api/rep/products?q=' + encodeURIComponent(q)).then(function (d) {
+        $('#res').innerHTML = d.products.length ? d.products.map(function (p, i) {
+          return '<div class="item"><div><b>' + esc(p.name) + '</b><br><small>' + esc([p.sku, p.make_model, p.category].filter(Boolean).join(' · ')) + '</small><br><small>' + esc(p.stock) + '</small></div>' +
+            '<div style="text-align:right;white-space:nowrap"><b>' + J(p.price_usd) + '</b><br><button class="sm" data-add="' + i + '">Add</button> <button class="sm" data-send="' + i + '">Send</button></div></div>';
+        }).join('') : '<div class="empty">Nothing found.</div>';
+        all('[data-add]').forEach(function (b) { b.onclick = function () { var p = d.products[+b.getAttribute('data-add')]; var ex = cart.find(function (c) { return c.product_img === p.img; }); if (ex) ex.qty++; else cart.push({ product_img: p.img, name: p.name, sku: p.sku, price: p.price_usd, qty: 1 }); saveCart(); toast('Added: ' + p.name); }; });
+        all('[data-send]').forEach(function (b) { b.onclick = function () { var p = d.products[+b.getAttribute('data-send')]; sendLink({ kind: 'product', target: p.img, title: p.name }); }; });
+      }).catch(function (e) { toast(e.message); });
+    };
+    $('#qs').onclick = go; $('#q').addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); }); $('#q').focus();
+    return Promise.resolve();
+  }
+
+  function loadCustomers() { return api('/api/rep/customers').then(function (d) { customers = d.customers; return customers; }); }
+  function custPicker(sel) { return '<select id="cust"><option value="">Choose your customer…</option>' + (customers || []).map(function (c) { return '<option value="' + c.id + '"' + (String(sel) === String(c.id) ? ' selected' : '') + '>' + esc(c.name) + ' · ' + esc(c.phone || '') + '</option>'; }).join('') + '</select>'; }
+
+  function cartTab() {
+    return loadCustomers().then(function () {
+      var total = cart.reduce(function (s, i) { return s + i.price * i.qty; }, 0);
+      M.innerHTML = '<div class="card"><h2>Cart</h2>' + (cart.length ? cart.map(function (i, k) {
+        return '<div class="item"><div><b>' + esc(i.name) + '</b><br><small>' + esc(i.sku || '') + ' · ' + J(i.price) + ' each</small></div><div class="row" style="flex:0 0 150px"><input type="number" min="1" value="' + i.qty + '" data-q="' + k + '" style="width:70px"><button class="sm" data-rm="' + k + '">✕</button></div></div>';
+      }).join('') + '<p style="text-align:right">Parts <b>' + J(total) + '</b> <small>(plus GCT; the shop\'s system works out the exact total)</small></p>' : '<div class="empty">Empty. Add parts from Parts.</div>') + '</div>' +
+        (cart.length ? '<div class="card"><h2>For</h2>' + custPicker('') + '<p class="sub" style="margin-top:6px">Not in the list? Add them under Customers.</p><label>Vehicle (for a quote)</label><input id="veh" placeholder="e.g. 2015 Corolla"><label>Note for the shop</label><textarea id="note" rows="2"></textarea>' +
+          '<div class="row" style="margin-top:10px"><button id="mkQuote">Save quote</button><button id="mkQuoteSend">Quote + send link</button><button class="primary" id="mkOrder">Send order</button></div></div>' : '');
+      all('[data-q]').forEach(function (i) { i.onchange = function () { cart[+i.getAttribute('data-q')].qty = Math.max(1, parseInt(i.value, 10) || 1); saveCart(); cartTab(); }; });
+      all('[data-rm]').forEach(function (b) { b.onclick = function () { cart.splice(+b.getAttribute('data-rm'), 1); saveCart(); cartTab(); }; });
+      if (!cart.length) return;
+      var body = function () { return { customer_id: $('#cust').value, items: cart.map(function (i) { return { product_img: i.product_img, qty: i.qty }; }), vehicle: $('#veh').value, notes: $('#note').value }; };
+      var need = function () { if (!$('#cust').value) { toast('Choose the customer'); return false; } return true; };
+      $('#mkQuote').onclick = function () { if (!need()) return; api('/api/rep/quotes', 'POST', body()).then(function (r) { cart = []; saveCart(); toast('Quote ' + r.quote_number + ' saved: ' + J(r.total_usd)); tab = 'pipe'; show(); }).catch(function (e) { toast(e.message); }); };
+      $('#mkQuoteSend').onclick = function () { if (!need()) return; var cid = $('#cust').value; api('/api/rep/quotes', 'POST', body()).then(function (r) { cart = []; saveCart(); sendLink({ kind: 'quote', target: r.id, title: 'Quote ' + r.quote_number, customer_id: cid, message: 'Here is your quote (' + J(r.total_usd) + '). Tap to see it and accept it.' }); }).catch(function (e) { toast(e.message); }); };
+      $('#mkOrder').onclick = function () { if (!need()) return; if (!confirm('Send this order to the shop? The customer pays at the shop.')) return; api('/api/rep/orders', 'POST', body()).then(function (r) { cart = []; saveCart(); toast(r.message); tab = 'pipe'; show(); }).catch(function (e) { toast(e.message); }); };
+    });
+  }
+
+  function customersTab() {
+    return loadCustomers().then(function (list) {
+      M.innerHTML = '<div class="card"><h2>Add a customer</h2><label>Name</label><input id="cn"><label>Phone</label><input id="cp" type="tel"><label>Email (optional)</label><input id="ce" type="email"><p><button class="primary" id="cadd">Add</button></p></div>' +
+        '<div class="card"><h2>Your customers (' + list.length + ')</h2>' + (list.length ? list.map(function (c) {
+          return '<div class="item"><div><b>' + esc(c.name) + '</b><br><small>' + esc(c.phone || '') + (c.email ? ' · ' + esc(c.email) : '') + '</small></div><div style="text-align:right"><small>' + (c.last_bought ? 'last bought ' + esc(day(c.last_bought)) + '<br>' : '') + J(c.spent_year) + ' this year</small></div></div>';
+        }).join('') : '<div class="empty">None yet.</div>') + '</div>';
+      $('#cadd').onclick = function () { api('/api/rep/customers', 'POST', { name: $('#cn').value, phone: $('#cp').value, email: $('#ce').value }).then(function (r) { toast(r.existed ? 'Already your customer' : 'Added'); customersTab(); }).catch(function (e) { toast(e.message); }); };
+    });
+  }
+
+  function pipe() {
+    return Promise.all([api('/api/rep/pipeline'), api('/api/rep/links')]).then(function (r) {
+      var d = r[0], links = r[1].links;
+      M.innerHTML = '<div class="card"><h2>Quotes</h2>' + (d.quotes.length ? d.quotes.map(function (q) {
+          return '<div class="item"><div><b>' + esc(q.quote_number) + '</b> ' + pill(q.status) + '<br><small>' + esc(q.customer_name || '') + ' · ' + esc(day(q.created_at)) + '</small></div><div style="text-align:right;white-space:nowrap"><b>' + J(q.total_usd) + '</b><br>' +
+            (q.status === 'open' ? '<button class="sm" data-ql="' + q.id + '" data-qn="' + esc(q.quote_number) + '">Send link</button> <button class="sm primary" data-qo="' + q.id + '">Order it</button>' : '') + '</div></div>';
+        }).join('') : '<div class="empty">No quotes.</div>') + '</div>' +
+        '<div class="card"><h2>Orders at the shop</h2>' + (d.orders.length ? d.orders.map(function (o) { return '<div class="item"><div>ORD-' + o.id + ' ' + pill(o.status) + '<br><small>' + esc(o.customer_name || '') + ' · ' + esc(day(o.created_at)) + (o.status === 'pending' && o.expires_at ? ' · waits until ' + esc(day(o.expires_at)) : '') + '</small></div><b>' + J(o.total_usd) + '</b></div>'; }).join('') : '<div class="empty">No orders.</div>') + '</div>' +
+        '<div class="card"><h2>Links you sent</h2>' + (links.length ? links.map(function (l) { return '<div class="item"><div>' + esc(l.title || l.kind) + (l.converted_at ? ' <span class="pill ok">accepted</span>' : l.expired ? ' <span class="pill">expired</span>' : '') + '<br><small>' + esc(l.customer || l.sent_to || '') + ' · ' + esc(day(l.created_at)) + '</small></div><small>' + l.opens + ' open' + (l.opens === 1 ? '' : 's') + '</small></div>'; }).join('') : '<div class="empty">None sent.</div>') + '</div>' +
+        '<div class="card"><h2>Sales</h2>' + (d.sales.length ? d.sales.map(function (s) { return '<div class="item"><div>' + esc(s.receipt_number) + '<br><small>' + esc(s.customer_name || '') + ' · ' + esc(day(s.created_at)) + '</small></div><b>' + J(s.total_usd) + '</b></div>'; }).join('') : '<div class="empty">No sales yet.</div>') + '</div>';
+      all('[data-qo]').forEach(function (b) { b.onclick = function () { if (!confirm('Send this quote to the shop as an order?')) return; api('/api/rep/quotes/' + b.getAttribute('data-qo') + '/order', 'POST').then(function () { toast('Order sent'); pipe(); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-ql]').forEach(function (b) { b.onclick = function () { sendLink({ kind: 'quote', target: b.getAttribute('data-ql'), title: 'Quote ' + b.getAttribute('data-qn'), message: 'Here is your quote. Tap to see it and accept it.' }); }; });
+    });
+  }
+
+  function money() {
+    return api('/api/rep/earnings').then(function (d) {
+      M.innerHTML = '<div class="card"><h2>Statements</h2>' + (d.statements.length ? d.statements.map(function (s) { return '<div class="item"><div>' + esc(s.number) + ' ' + pill(s.status) + '<br><small>up to ' + esc(String(s.period_to).slice(0, 10)) + '</small></div><b>' + J(s.total) + '</b></div>'; }).join('') : '<div class="empty">None yet.</div>') + '</div>' +
+        '<div class="card"><h2>Commission, last 120 days</h2>' + (d.entries.length ? d.entries.map(function (e) { return '<div class="item"><div>' + esc(e.item || e.note || e.kind) + ' ' + pill(e.status) + '<br><small>' + esc(e.receipt_number || '') + ' · ' + esc(day(e.earned_at)) + (e.kind !== 'earned' ? ' · ' + esc(e.note || e.kind) : '') + '</small></div><b>' + J(e.amount) + '</b></div>'; }).join('') : '<div class="empty">Nothing yet.</div>') + '</div>';
+    });
+  }
+
+  // Send a tracked link: copy it, WhatsApp it, or text / email it from the shop.
+  function sendLink(base) {
+    (customers ? Promise.resolve(customers) : loadCustomers()).then(function () {
+      var box = document.createElement('div');
+      box.style.cssText = 'position:fixed;inset:0;background:rgba(10,15,25,.55);z-index:50;display:flex;align-items:flex-end;justify-content:center';
+      box.innerHTML = '<div class="card" style="width:100%;max-width:520px;margin:0;border-radius:14px 14px 0 0"><h2>Send: ' + esc(base.title || '') + '</h2>' + custPicker(base.customer_id || '') +
+        '<label>Message</label><textarea id="lm" rows="2">' + esc(base.message || '') + '</textarea><label>How</label><select id="lc"><option value="whatsapp">WhatsApp (opens with the message ready)</option><option value="sms">Text from the shop</option><option value="email">Email from the shop</option><option value="copy">Just give me the link</option></select>' +
+        '<div class="row" style="margin-top:10px"><button id="lx">Cancel</button><button class="primary" id="lgo">Send</button></div><div id="lout"></div></div>';
+      document.body.appendChild(box);
+      $('#lx', box).onclick = function () { box.remove(); };
+      $('#lgo', box).onclick = function () {
+        var body = Object.assign({}, base, { customer_id: $('#cust', box).value || null, message: $('#lm', box).value, channel: $('#lc', box).value });
+        api('/api/rep/links', 'POST', body).then(function (r) {
+          var wa = (r.sent || []).find(function (s) { return s.wa_link; });
+          var bad = (r.sent || []).find(function (s) { return s.status === 'skipped'; });
+          $('#lout', box).innerHTML = '<p class="sub">Link (works ' + r.expires_days + ' days):</p>' + copyBox(r.url) + (bad ? '<p class="sub" style="color:var(--red)">Not sent: ' + esc(bad.reason) + '</p>' : '') + (r.sent && r.sent.some(function (s) { return s.status === 'stubbed'; }) ? '<p class="sub">Logged; the shop\'s texting is not switched on yet, so copy the link to the customer.</p>' : '');
+          wireCopy();
+          if (wa) window.open(wa.wa_link, '_blank', 'noopener');
+          $('#lgo', box).style.display = 'none'; $('#lx', box).textContent = 'Done';
+        }).catch(function (e) { toast(e.message); });
+      };
+    });
+  }
+
+  function show() {
+    all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); });
+    window.scrollTo(0, 0);
+    ({ home: home, parts: parts, cart: cartTab, customers: customersTab, pipe: pipe, money: money }[tab] || home)().catch(function (e) {
+      if (e.status === 401 || e.status === 403) return login(e.status === 403 ? e.message : '');
+      M.innerHTML = '<div class="card empty">' + esc(e.message) + '</div>';
+    });
+  }
+  all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
+  $('#out').onclick = function () { api('/api/auth/signout', 'POST').catch(function () {}).then(function () { login(''); }); };
+
+  function boot() {
+    api('/api/rep/me').then(function (d) {
+      me = d; $('#tabs').style.display = ''; $('#out').style.display = ''; $('#who').textContent = d.rep.name; saveCart(); tab = 'home'; show();
+    }).catch(function (e) { login(e.status === 403 ? e.message : ''); });
+  }
+  var inv = new URLSearchParams(location.search).get('invite');
+  if (inv) invite(inv); else boot();
+})();
+</script>
+</body>
+</html>

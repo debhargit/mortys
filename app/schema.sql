@@ -3221,6 +3221,45 @@ ON CONFLICT (kind, key) DO NOTHING;
 INSERT INTO warehouse_settings (key, value) VALUES ('gl_auto_post', 'on') ON CONFLICT (key) DO NOTHING;
 
 -- =============================================================================
+--  Phase 8.1: sign-in security and audit log (security.js)
+--  Failed-password lockout, idle sign-out, 2-step sign-in (authenticator app,
+--  RFC 6238) with one-time recovery codes, and a log of every change staff make.
+-- =============================================================================
+ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_logins    INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until     TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret      TEXT;          -- base32; set only once confirmed
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_pending     TEXT;          -- base32 being set up, not yet confirmed
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled_at  TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_recovery    JSONB;         -- sha256 of unused one-time recovery codes
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_last_step   BIGINT;        -- last time-step accepted: a code works once
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at    TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_ip    TEXT;
+
+CREATE TABLE IF NOT EXISTS audit_log (
+  id         BIGSERIAL PRIMARY KEY,
+  at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  user_id    INTEGER,
+  user_name  TEXT,
+  action     TEXT NOT NULL,          -- "PATCH /api/admin/products/:id" or signin, signin_failed, locked, 2fa_on ...
+  target     TEXT,                   -- the id in the path, when there is one
+  status     INTEGER,
+  ip         TEXT,
+  remote     BOOLEAN NOT NULL DEFAULT false,   -- came in over the internet, not the shop network
+  station    TEXT,
+  detail     JSONB                   -- request fields (passwords, PINs, codes and tokens removed)
+);
+CREATE INDEX IF NOT EXISTS idx_audit_log_at ON audit_log (at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log (user_id, at DESC);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('sec_lockout_attempts', '5'),     -- wrong passwords in a row before the account locks
+  ('sec_lockout_minutes', '15'),
+  ('sec_idle_minutes', '720'),       -- signed out after this long with no activity (0 = never)
+  ('sec_2fa_policy', 'off'),         -- off | remote | managers | staff
+  ('sec_audit_days', '730')          -- audit rows kept this long
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
 --  Phase 8.2: departments and the terminal journal (terminal.js)
 --  A department is a set of product categories. Staff and cashier stations
 --  are given departments; a counter agent can only sell their departments'
@@ -3279,6 +3318,379 @@ INSERT INTO warehouse_settings (key, value) VALUES
   ('tj_nosale_per_day', '5'),         -- no-sale drawer opens per person per day above this
   ('tj_removed_per_day', '15')        -- items taken back off carts per person per day above this
 ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 8.3: commission v2 (commission.js)
+--  Commission is worked out once per sale line and STORED (commission_entries),
+--  so changing a rate never rewrites what people were already owed. Rules by
+--  rep, category, supplier or part: % of the sale, % of the margin, or a flat
+--  amount per unit, with monthly tiers. Splits between reps, clawback on
+--  returns and voids, optional "only on collected sales", statements that a
+--  manager approves and pays, posted to the ledger (accrual, then payout).
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS commission_rules (
+  id           SERIAL PRIMARY KEY,
+  name         TEXT NOT NULL,
+  scope        TEXT NOT NULL DEFAULT 'all',     -- all | category | supplier | product
+  scope_value  TEXT,                            -- category name / supplier id / product img
+  rep_id       INTEGER REFERENCES mechanics(id) ON DELETE CASCADE,   -- NULL = every rep
+  basis        TEXT NOT NULL DEFAULT 'sale',    -- sale (% of line, ex GCT) | margin (% of line less cost) | flat (J$ per unit)
+  rate         NUMERIC(10,3) NOT NULL DEFAULT 0,
+  tiers        JSONB,                           -- [{"from": 500000, "rate": 4}, ...] month-to-date net sales of the rep
+  priority     INTEGER NOT NULL DEFAULT 0,      -- higher wins when several rules fit
+  starts_on    DATE,
+  ends_on      DATE,
+  is_active    BOOLEAN NOT NULL DEFAULT true,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Two or more reps sharing one sale. No rows = 100% to pos_sales.sales_rep_id.
+CREATE TABLE IF NOT EXISTS sale_reps (
+  sale_id    INTEGER NOT NULL REFERENCES pos_sales(id) ON DELETE CASCADE,
+  rep_id     INTEGER NOT NULL REFERENCES mechanics(id) ON DELETE CASCADE,
+  share_pct  NUMERIC(6,2) NOT NULL CHECK (share_pct > 0 AND share_pct <= 100),
+  set_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  set_at     TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (sale_id, rep_id)
+);
+
+CREATE TABLE IF NOT EXISTS commission_statements (
+  id           SERIAL PRIMARY KEY,
+  number       TEXT UNIQUE,                     -- CS-000012
+  rep_id       INTEGER NOT NULL REFERENCES mechanics(id),
+  period_to    DATE NOT NULL,                   -- everything earned up to this date
+  total        NUMERIC(14,2) NOT NULL DEFAULT 0,
+  status       TEXT NOT NULL DEFAULT 'draft',   -- draft | approved | paid | cancelled
+  note         TEXT,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  approved_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  approved_at  TIMESTAMPTZ,
+  paid_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  paid_at      TIMESTAMPTZ,
+  payout_id    INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS commission_entries (
+  id            BIGSERIAL PRIMARY KEY,
+  rep_id        INTEGER NOT NULL REFERENCES mechanics(id),
+  sale_id       INTEGER REFERENCES pos_sales(id) ON DELETE SET NULL,
+  sale_item_id  INTEGER,
+  return_id     INTEGER,
+  kind          TEXT NOT NULL,                  -- earned | clawback_return | clawback_void | adjust
+  basis         TEXT,                           -- sale | margin | flat
+  basis_amount  NUMERIC(14,2),
+  rate          NUMERIC(10,3),
+  share_pct     NUMERIC(6,2) NOT NULL DEFAULT 100,
+  amount        NUMERIC(14,2) NOT NULL,
+  rule_id       INTEGER,
+  rule_name     TEXT,
+  status        TEXT NOT NULL DEFAULT 'earned', -- pending (sale not paid yet) | earned | void | on_statement | approved | paid
+  statement_id  INTEGER REFERENCES commission_statements(id),
+  earned_at     TIMESTAMPTZ NOT NULL,           -- the sale / return time
+  note          TEXT,
+  created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_commission_earned ON commission_entries (sale_item_id, rep_id) WHERE kind = 'earned';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_commission_ret ON commission_entries (return_id, sale_item_id, rep_id) WHERE kind = 'clawback_return';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_commission_void ON commission_entries (sale_item_id, rep_id) WHERE kind = 'clawback_void';
+CREATE INDEX IF NOT EXISTS idx_commission_entries_rep ON commission_entries (rep_id, status, earned_at);
+CREATE INDEX IF NOT EXISTS idx_commission_entries_sale ON commission_entries (sale_id);
+
+ALTER TABLE commission_payouts ADD COLUMN IF NOT EXISTS statement_id INTEGER REFERENCES commission_statements(id);
+
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('2200', 'Commissions Payable', 'liability', 'Commissions Payable', 'OCLIAB', 'commissions_payable')
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('comm_paid_on', 'sale'),             -- sale: earned when sold | collected: only once the sale is fully paid
+  ('comm_unpaid_days', '90')            -- account sales still unpaid after this many days earn nothing
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 8.4: freelance reps, send-a-link, referrals (reps.js)
+--  A freelance rep is a staff login with the 'rep' role (no admin panel) and a
+--  rep record (mechanics). They join through a one-time invite link where they
+--  set a password and 2-step sign-in, which is then always required. In their
+--  portal they see prices and stock (never cost), keep their own customers,
+--  make quotes and orders that go to the shop's cashier queue, send tracked
+--  links, and see their sales and commission. A referral code ties new
+--  customers who arrive through their link to them.
+-- =============================================================================
+INSERT INTO roles (code, label, rank, can_manage, hidden_tabs, is_system) VALUES
+  ('rep', 'Freelance rep', 80, FALSE, '[]'::jsonb, TRUE)
+ON CONFLICT (code) DO NOTHING;
+
+ALTER TABLE mechanics ADD COLUMN IF NOT EXISTS is_freelance  BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE mechanics ADD COLUMN IF NOT EXISTS referral_code TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_mechanics_referral ON mechanics (upper(referral_code)) WHERE referral_code IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS rep_invites (
+  id           SERIAL PRIMARY KEY,
+  token_hash   TEXT NOT NULL UNIQUE,
+  mechanic_id  INTEGER NOT NULL REFERENCES mechanics(id) ON DELETE CASCADE,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at   TIMESTAMPTZ NOT NULL,
+  used_at      TIMESTAMPTZ,
+  revoked_at   TIMESTAMPTZ,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS share_links (
+  id              SERIAL PRIMARY KEY,
+  token           TEXT NOT NULL UNIQUE,          -- in the URL: /l/<token>
+  kind            TEXT NOT NULL,                 -- product | quote | search | page | video
+  target          TEXT NOT NULL,                 -- part img / quote id / search words / site path / video URL
+  title           TEXT,
+  message         TEXT,
+  rep_id          INTEGER REFERENCES mechanics(id) ON DELETE SET NULL,
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  customer_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  sent_to         TEXT,                          -- phone or email it went to
+  channel         TEXT,                          -- sms | whatsapp | email | copy
+  expires_at      TIMESTAMPTZ NOT NULL,
+  opens           INTEGER NOT NULL DEFAULT 0,
+  first_opened_at TIMESTAMPTZ,
+  last_opened_at  TIMESTAMPTZ,
+  converted_at    TIMESTAMPTZ,
+  conversion_ref  TEXT,                          -- order / sale it turned into
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_share_links_rep ON share_links (rep_id, created_at DESC);
+
+-- Orders from reps (or accepted quotes) wait longer than a counter order.
+ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS source     TEXT;   -- counter | rep | link
+
+INSERT INTO notify_templates (event, channel, enabled, subject, body) VALUES
+  ('share_link', 'sms',      true, NULL, '{shop}: {message} {url}'),
+  ('share_link', 'email',    true, '{title}', E'Hi {name},\n\n{message}\n\n{url}\n\n{shop} · {phone}'),
+  ('share_link', 'whatsapp', true, NULL, '{message} {url}')
+ON CONFLICT (event, channel) DO NOTHING;
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('public_base_url', ''),      -- the address customers reach this system on (for links); blank = this server
+  ('link_days', '14'),          -- links expire after this many days
+  ('rep_order_days', '7')       -- rep / link orders wait this many days for payment
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 8.5: careers and applicant tracking (careers.js)
+--  Public job posts with an application form (CV, consent); applications move
+--  New -> Screen -> Interview -> Offer -> Hired / Rejected; a hire becomes a
+--  staff login. CVs are stored outside the website folder and, with the
+--  applicant's details, removed after the retention period (Data Protection
+--  Act): only the job, dates and stage are kept for hiring statistics.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS job_posts (
+  id            SERIAL PRIMARY KEY,
+  title         TEXT NOT NULL,
+  department    TEXT,
+  location      TEXT,
+  kind          TEXT NOT NULL DEFAULT 'full_time',  -- full_time | part_time | contract | freelance_rep
+  pay           TEXT,
+  summary       TEXT,
+  description   TEXT,
+  requirements  TEXT,
+  is_open       BOOLEAN NOT NULL DEFAULT true,
+  closes_on     DATE,
+  created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS job_applications (
+  id              SERIAL PRIMARY KEY,
+  job_id          INTEGER REFERENCES job_posts(id) ON DELETE SET NULL,
+  name            TEXT,
+  email           TEXT,
+  phone           TEXT,
+  parish          TEXT,
+  cover           TEXT,
+  cv_file         TEXT,                   -- file name in data/careers-cvs (never served directly)
+  cv_name         TEXT,                   -- the applicant's original file name
+  consent_at      TIMESTAMPTZ NOT NULL,
+  consent_text    TEXT NOT NULL,
+  stage           TEXT NOT NULL DEFAULT 'new',   -- new | screen | interview | offer | hired | rejected
+  rating          SMALLINT,
+  interview_at    TIMESTAMPTZ,
+  hired_user_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  ip              TEXT,
+  retain_until    DATE NOT NULL,
+  anonymised_at   TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_job_applications_job ON job_applications (job_id, stage);
+
+CREATE TABLE IF NOT EXISTS application_notes (
+  id              SERIAL PRIMARY KEY,
+  application_id  INTEGER NOT NULL REFERENCES job_applications(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL DEFAULT 'note',  -- note | stage | cv_viewed
+  note            TEXT,
+  by_user         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  at              TIMESTAMPTZ DEFAULT NOW()
+);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('careers_retention_days', '365')   -- applicants not hired: CV and details removed after this
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 8b: time clock and attendance (timeclock.js)
+--  Separate from time_entries / time_punches, which time workshop jobs.
+--  Staff clock in with a PIN, password, badge or fingerprint / face (passkey:
+--  the fingerprint never leaves the device, only a public key is kept here).
+--  Being clocked in on site, inside the shift or approved overtime, is what
+--  lets someone take money. Overtime and extensions are approved by the admin
+--  and the department manager (screen or a signed email link). Timesheets with
+--  per-person overtime rules, weekly approval and a payroll export.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS staff_clock (
+  user_id            INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  methods            TEXT[] NOT NULL DEFAULT ARRAY['pin','password','badge','biometric'],
+  require_biometric  BOOLEAN NOT NULL DEFAULT false,   -- clock-in only with fingerprint / face
+  remote_allowed     BOOLEAN NOT NULL DEFAULT false,   -- may clock in from outside the shop (no money)
+  hourly_rate        NUMERIC(10,2),                    -- J$
+  ot_daily_hours     NUMERIC(5,2) NOT NULL DEFAULT 8,  -- overtime after this many hours in a day
+  ot_weekly_hours    NUMERIC(5,2) NOT NULL DEFAULT 40, -- ... or in a week
+  ot_rate            NUMERIC(4,2) NOT NULL DEFAULT 1.5,
+  approver_user_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,  -- besides the admin
+  badge_hash         TEXT,                             -- sha256 of the badge code (BADGE:...)
+  badge_issued_at    TIMESTAMPTZ,
+  updated_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at         TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_staff_clock_badge ON staff_clock (badge_hash) WHERE badge_hash IS NOT NULL;
+
+ALTER TABLE departments ADD COLUMN IF NOT EXISTS manager_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS staff_shifts (           -- the weekly pattern
+  id             SERIAL PRIMARY KEY,
+  user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  weekday        SMALLINT NOT NULL CHECK (weekday BETWEEN 0 AND 6),   -- 0 = Sunday
+  start_time     TIME NOT NULL,
+  end_time       TIME NOT NULL,
+  break_minutes  INTEGER NOT NULL DEFAULT 60,       -- unpaid
+  UNIQUE (user_id, weekday)
+);
+CREATE TABLE IF NOT EXISTS staff_leave (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  from_date   DATE NOT NULL,
+  to_date     DATE NOT NULL,
+  kind        TEXT NOT NULL DEFAULT 'vacation',     -- vacation | sick | unpaid | other
+  note        TEXT,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS public_holidays (
+  day   DATE PRIMARY KEY,
+  name  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS attendance (
+  id              BIGSERIAL PRIMARY KEY,
+  user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  work_day        DATE NOT NULL,                    -- Jamaica date of the clock-in
+  clock_in_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  clock_out_at    TIMESTAMPTZ,
+  mode            TEXT NOT NULL DEFAULT 'onsite',   -- onsite | remote
+  method_in       TEXT,                             -- pin | password | badge | biometric | manager
+  method_out      TEXT,
+  where_in        TEXT,                             -- station / terminal / address
+  photo_in        TEXT,
+  photo_out       TEXT,
+  shift_start     TIMESTAMPTZ,                      -- the schedule at clock-in, kept as it was
+  shift_end       TIMESTAMPTZ,
+  outside_shift   BOOLEAN NOT NULL DEFAULT false,
+  ot_reason       TEXT,
+  ot_status       TEXT NOT NULL DEFAULT 'none',     -- none | pending | approved | rejected
+  ext_until       TIMESTAMPTZ,                      -- approved extension: may work until
+  auto_closed     BOOLEAN NOT NULL DEFAULT false,
+  closed_note     TEXT,
+  edited          BOOLEAN NOT NULL DEFAULT false,   -- changed by an approved correction
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_attendance_open ON attendance (user_id) WHERE clock_out_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_attendance_day ON attendance (work_day, user_id);
+
+CREATE TABLE IF NOT EXISTS attendance_breaks (
+  id             BIGSERIAL PRIMARY KEY,
+  attendance_id  BIGINT NOT NULL REFERENCES attendance(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL DEFAULT 'break',     -- break | lunch
+  start_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  end_at         TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS clock_requests (
+  id             SERIAL PRIMARY KEY,
+  user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  attendance_id  BIGINT REFERENCES attendance(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL,                     -- extension | overtime | correction
+  minutes        INTEGER,                           -- extension length
+  reason         TEXT NOT NULL,
+  wanted         JSONB,                             -- correction: {clock_in_at, clock_out_at, day}
+  original       JSONB,                             -- correction: what it was (kept for the audit)
+  status         TEXT NOT NULL DEFAULT 'pending',   -- pending | approved | rejected | expired
+  token_hash     TEXT,                              -- the email approve / reject link (single use)
+  expires_at     TIMESTAMPTZ,
+  decided_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  decided_at     TIMESTAMPTZ,
+  decided_via    TEXT,                              -- screen | email
+  decision_note  TEXT,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_clock_requests_status ON clock_requests (status, created_at);
+
+CREATE TABLE IF NOT EXISTS passkeys (
+  id             SERIAL PRIMARY KEY,
+  user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  credential_id  TEXT NOT NULL UNIQUE,              -- base64url
+  public_key     JSONB NOT NULL,                    -- JWK
+  sign_count     BIGINT NOT NULL DEFAULT 0,
+  label          TEXT,
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  last_used_at   TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS timesheet_weeks (
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  week_start   DATE NOT NULL,                       -- Monday
+  totals       JSONB NOT NULL,                      -- frozen at approval
+  approved_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  approved_at  TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (user_id, week_start)
+);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('clock_enforce', 'off'),            -- on: money is taken only by staff clocked in on site, in their shift or approved overtime
+  ('clock_exempt_roles', 'owner'),     -- roles the rule never applies to
+  ('clock_early_minutes', '15'),       -- clocking in this early is not overtime
+  ('clock_late_minutes', '5'),         -- later than this counts as late
+  ('clock_grace_minutes', '15'),       -- an extension request keeps them working this long while waiting
+  ('clock_photo', 'off'),              -- take a photo at each punch
+  ('clock_break_paid_minutes', '15')   -- breaks up to this long are paid; lunch never is
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 8b (cont.) -- one approve / reject link per approver
+--
+--  Each approver gets their own single-use link, so an emailed decision is
+--  logged against the person who made it. Deciding (by any link or on screen)
+--  removes every link for that request.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS clock_request_links (
+  token_hash  TEXT PRIMARY KEY,
+  request_id  INTEGER NOT NULL REFERENCES clock_requests(id) ON DELETE CASCADE,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_clock_request_links_req ON clock_request_links (request_id);
 
 -- =============================================================================
 --  Receivables, payables and banking (QuickBooks-style)
@@ -3939,6 +4351,27 @@ UPDATE payroll_items SET pension_relief = true WHERE code = 'pension_ee2';
 INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
   ('6540', 'Employee Benefits (Insurance)', 'expense', 'Employee Benefits', 'EXP', 'benefits_expense')
 ON CONFLICT (code) DO NOTHING;
+
+-- =============================================================================
+--  Login help: password reset by email, and customer passkeys / Google sign-in
+--  (auth-extra.js). The passkeys table already exists (shared with the time
+--  clock); this only adds the reset-token table.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS password_resets (
+  id            SERIAL PRIMARY KEY,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash    TEXT NOT NULL UNIQUE,          -- sha256 of the link token; the token itself is only in the email
+  expires_at    TIMESTAMPTZ NOT NULL,
+  requested_ip  TEXT,
+  used_at       TIMESTAMPTZ,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets (user_id);
+CREATE INDEX IF NOT EXISTS idx_password_resets_exp ON password_resets (expires_at);
+
+-- Passkeys belong to a user; a customer may have several (phone + laptop). The
+-- shared table was staff-only before, so make sure the extra column exists.
+ALTER TABLE passkeys ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ;
 
 -- =============================================================================
 --  DEPARTMENT STORE (Phase 3, 2026-10): store locations containing departments.
