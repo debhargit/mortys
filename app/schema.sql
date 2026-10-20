@@ -756,6 +756,26 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS tax_exempt BOOLEAN NOT NULL DEFAULT f
 -- customer.tax_exempt at read time) so a receipt/invoice reprint stays
 -- accurate even if the customer's tax status is changed later.
 ALTER TABLE pos_sales ADD COLUMN IF NOT EXISTS tax_exempt BOOLEAN NOT NULL DEFAULT false;
+
+-- ----- Customer markup: selling an account ABOVE list ------------------------
+-- The mirror of discount_pct. That column only ever reduces -- the sale code
+-- reads `if (rate > 0)` and every discount path clamps at zero -- so there was
+-- no way to price an account up. A customer who has to be charged over list
+-- (a reseller the shop marks up, an account carrying its own overhead) had to
+-- have every line re-typed by hand, which also needed pos.price_override.
+--
+-- markup_pct applies to the unit price the line has already resolved to (sale
+-- price, tier price and quantity breaks first), so the INVOICE shows the
+-- increased unit price rather than list plus a surcharge line -- which is what
+-- the counter asked for. It deliberately does NOT travel through discount_usd:
+-- that field feeds commission and the discount columns of the sales reports,
+-- and a markup is not a negative discount.
+--
+-- Recorded on the sale as well as on the customer so a reprint stays accurate
+-- after the account's rate is changed later, exactly like tax_exempt above.
+ALTER TABLE users     ADD COLUMN IF NOT EXISTS markup_pct NUMERIC(5,2);
+ALTER TABLE pos_sales ADD COLUMN IF NOT EXISTS markup_pct NUMERIC(5,2);
+
 CREATE INDEX IF NOT EXISTS idx_users_account_number ON users (account_number);
 -- Backfill account numbers for rows that existed before this column did.
 --
@@ -1247,7 +1267,8 @@ CREATE TABLE IF NOT EXISTS coupon_redemptions (
 ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_role TEXT NOT NULL DEFAULT 'manager';
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_admin_role_check') THEN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_admin_role_check')
+     AND NOT EXISTS (SELECT 1 FROM users WHERE admin_role NOT IN ('owner','manager','cashier')) THEN  -- custom roles exist: dropped below anyway
     ALTER TABLE users ADD CONSTRAINT users_admin_role_check CHECK (admin_role IN ('owner','manager','cashier'));
   END IF;
 END $$;
@@ -1361,7 +1382,11 @@ CREATE TABLE IF NOT EXISTS account_payments (
   received_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
   created_at    TIMESTAMPTZ DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_account_payments_customer ON account_payments (customer_id);
+-- account_payments becomes a view later (receivables): index the real table, whichever name it has.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_class WHERE relname = 'account_payments_all' AND relkind = 'r') THEN CREATE INDEX IF NOT EXISTS idx_account_payments_customer ON account_payments_all (customer_id);
+  ELSE CREATE INDEX IF NOT EXISTS idx_account_payments_customer ON account_payments (customer_id); END IF;
+END $$;
 
 -- =============================================================================
 --  SHOP SETTINGS (2026-08-19) -- single-row shop configuration: company
@@ -1412,6 +1437,10 @@ UPDATE shop_settings SET address = '112C Waltham Park Road, Kingston'
   WHERE address = '127 Hagley Park Road, Kingston 11';
 UPDATE shop_settings SET phone = '(876) 728-4735'
   WHERE phone = '(876) 758-8503';
+-- The number changed again in Oct 2026. Same rule as above: only a till still
+-- holding the previous number is moved, so an operator-edited phone stays.
+UPDATE shop_settings SET phone = '(876) 728-4735'
+  WHERE phone IN ('(876) 758-5590', '876-758-5590');
 
 -- Rebrand (2026): the synthetic walk-in / no-email customer domain moved from
 -- @walkin.melthahonda.local to @walkin.visionautosolutions.local. Rename the
@@ -1437,10 +1466,6 @@ UPDATE users SET email = 'walkin@visionautosolutions.local'
 --  while wiring the Recall modal's new Quote/Invoice tabs alongside it.
 --  items_json here matches posCartPayload()'s shape exactly
 --  (unit_price_usd/discount_usd in dollars, not cents) -- same convention
--- The number changed again in Oct 2026. Same rule as above: only a till still
--- holding the previous number is moved, so an operator-edited phone stays.
-UPDATE shop_settings SET phone = '(876) 728-4735'
-  WHERE phone IN ('(876) 758-5590', '876-758-5590');
 --  pos_quotes.items_json already uses.
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS pos_holds (
@@ -2210,7 +2235,11 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_pos_sale_items_product_img ON pos_sale_items (product_img);
 CREATE INDEX IF NOT EXISTS idx_products_supplier          ON products (supplier_id);
 CREATE INDEX IF NOT EXISTS idx_purchase_orders_supplier   ON purchase_orders (supplier_id);
-CREATE INDEX IF NOT EXISTS idx_account_payments_reference ON account_payments (reference);
+-- account_payments becomes a view later (receivables): index the real table, whichever name it has.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_class WHERE relname = 'account_payments_all' AND relkind = 'r') THEN CREATE INDEX IF NOT EXISTS idx_account_payments_reference ON account_payments_all (reference);
+  ELSE CREATE INDEX IF NOT EXISTS idx_account_payments_reference ON account_payments (reference); END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_warehouse_activity_kind    ON warehouse_activity (kind, created_at);
 -- sku is not the primary key (img is), but both the receival and sales
 -- importers match existing stock with "img IN (...) OR sku IN (...)"; an
@@ -2324,6 +2353,7 @@ CREATE INDEX IF NOT EXISTS idx_purchase_orders_due_date     ON purchase_orders (
 ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS paid_on DATE;
 UPDATE purchase_order_payments SET paid_on = created_at::date WHERE paid_on IS NULL;
 CREATE INDEX IF NOT EXISTS idx_po_payments_paid_on ON purchase_order_payments (paid_on);
+
 -- =============================================================================
 --  WAREHOUSE FOUNDATION (Phase 1, 2026-10): bins, stock per bin, scan log
 --

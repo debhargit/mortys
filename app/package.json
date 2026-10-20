@@ -19,6 +19,7 @@
     "cf:data:selftest": "node tools/pg2d1.mjs --selftest"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
     "bcryptjs": "^2.4.3",
     "cookie-session": "^2.1.0",
     "dotenv": "^16.4.5",

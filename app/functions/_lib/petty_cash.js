@@ -15,8 +15,9 @@ const MOVEMENT_LABEL = {
 };
 
 // A merged, oldest-first ledger with a running balance. `payouts` are the
-// disbursements for this fund (cash out, shown as negative). Voided payouts
-// stay visible but don't move the running total.
+// disbursements for this fund (cash out, shown as negative). A voided payout
+// still counts as the cash going out; its void_reversal movement brings it
+// back, so skipping it as well would run the balance high by every void.
 export async function fundLedger(db, fundId, { from, to } = {}) {
   const range = from && to ? ' AND date(created_at) BETWEEN ? AND ?' : '';
   const rp = range ? [fundId, from, to] : [fundId];
@@ -63,18 +64,19 @@ export async function fundLedger(db, fundId, { from, to } = {}) {
 
   let bal = 0;
   for (const e of entries) {
-    if (!e.voided) bal += e.delta_usd;
+    bal += e.delta_usd;
     e.balance_usd = Math.round(bal * 100) / 100;
   }
   return entries;
 }
 
-// opening + Σ movement deltas − Σ non-voided payouts. A cross-check against
-// the denormalised balance; never the value written mid-request.
+// Σ movement deltas (void reversals included) − Σ every payout from the fund.
+// A cross-check against the denormalised balance; never the value written
+// mid-request.
 export async function recomputeBalanceCents(db, fundId) {
   const mv = await db.one(
     'SELECT COALESCE(SUM(delta_cents),0) AS s FROM petty_cash_movements WHERE fund_id = ?', fundId);
   const po = await db.one(
-    'SELECT COALESCE(SUM(amount_cents),0) AS s FROM cash_payouts WHERE fund_id = ? AND voided = 0', fundId);
+    `SELECT COALESCE(SUM(amount_cents),0) AS s FROM cash_payouts WHERE fund_id = ? AND source_type = 'fund'`, fundId);
   return (mv.s || 0) - (po.s || 0);
 }

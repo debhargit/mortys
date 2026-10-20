@@ -211,21 +211,10 @@ export default function mount(app) {
     return c.json({ user: publicUser(row), first_admin: isFirst });
   });
 
-  // ---- emergency admin reset (single well-known email only) ---------
-  app.post('/api/auth/reset-default-admin', async (c) => {
-    const db = d1(c.env);
-    const hash = await bcrypt.hash('password123', 10);
-    const existing = await db.one("SELECT id FROM users WHERE email = 'admin@visionautosolutions.com'");
-    if (existing) {
-      await db.run('UPDATE users SET is_admin = 1, password_hash = ? WHERE id = ?', hash, existing.id);
-    } else {
-      const id = await nextId(db, 'users');
-      await db.run(
-        `INSERT INTO users (id, email, name, password_hash, via, is_admin)
-           VALUES (?, 'admin@visionautosolutions.com', 'Vision Auto Solutions Admin', ?, 'local', 1)`, id, hash);
-    }
-    return c.json({ ok: true, email: 'admin@visionautosolutions.com', password: 'password123' });
-  });
+  // ---- emergency admin reset: disabled on the hosted port ------------
+  // Every request to a Worker comes from the internet, so there is no "at the
+  // till" case to allow (audit C1). Recovery is done on the shop PC instead.
+  app.post('/api/auth/reset-default-admin', (c) => c.json({ error: 'Not found' }, 404));
 
   // ---- self-serve profile edit ------------------------------------
   app.patch('/api/me', authMw, async (c) => {

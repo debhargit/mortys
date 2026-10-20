@@ -11,7 +11,9 @@
 //  Responsibilities, in order:
 //    1. Refuse to start twice (lock file + liveness check).
 //    2. Start the bundled PostgreSQL, if this build shipped with one
-//       (runtime\pgsql). Initialises the data directory on first run.
+//       (runtime\pgsql). Initialises the data directory on first run. If
+//       something already holds the port, confirm it is THIS install's data
+//       directory, and refuse to go any further if it is not.
 //    3. Seed app\db-config.json / app\server-config.json from portable.json,
 //       but ONLY if they don't exist yet -- once an operator has edited the
 //       database target from Admin -> Setup, that edit is the source of
@@ -146,36 +148,22 @@ function httpOk(port, urlPath, timeoutMs) {
 //
 // Returns { name, address, netmask } for the best candidate, or null when the
 // machine has no usable IPv4 yet (still acquiring a lease, cable unplugged).
-function primaryLocalIPv4() {
-  // A physical wired/wireless adapter before a virtual one. Hyper-V, WSL, VPN
-  // and the like each publish their own 172.x / 192.168.x address that no
-  // other machine in the shop can route to -- picking one of those as "our
-  // address" is the classic reason a till cannot reach a server that is up.
-  const virtualFirst = /^(vEthernet|VMware|VirtualBox|Loopback|Tailscale|ZeroTier|Hamachi|WSL|Npcap)/i;
-  const cands = [];
-  const ifaces = os.networkInterfaces();
-  for (const name of Object.keys(ifaces)) {
-    for (const nf of ifaces[name] || []) {
-      if (nf.family === 'IPv4' && !nf.internal && nf.address) {
-        cands.push({ name, address: nf.address, netmask: nf.netmask });
-      }
-    }
-  }
-  cands.sort((a, b) => (virtualFirst.test(a.name) ? 1 : 0) - (virtualFirst.test(b.name) ? 1 : 0));
-  return cands[0] || null;
-}
+// Which address to advertise, and the subnet it sits on. Both come from the
+// shared ranker in lan-address.js, so this file's machine-config.json and
+// server.js's discovery announce cannot disagree about where the shop should
+// point its tills.
+//
+// The name-PREFIX list that used to live here (vEthernet|VMware|Tailscale|...)
+// matched neither "DuckDuckGo.VPN" nor an OpenVPN TAP adapter showing up as
+// plain "Ethernet 2", so on the shop's own machine it ranked the VPN level
+// with the real Wi-Fi adapter and the VPN won on list order -- exactly the
+// failure the old comment here warned about.
+const { lanAddressDetail, networkCidr } = require('./lan-address');
 
-// "192.168.12.240" + "255.255.255.0" -> "192.168.12.0/24". pg_hba.conf wants
-// the network address and a prefix length, not a host address.
-function networkCidr(address, netmask) {
-  try {
-    const a = String(address).split('.').map(Number);
-    const m = String(netmask).split('.').map(Number);
-    if (a.length !== 4 || m.length !== 4 || a.concat(m).some((n) => Number.isNaN(n) || n < 0 || n > 255)) return null;
-    const net = a.map((o, i) => o & m[i]).join('.');
-    const bits = m.reduce((acc, o) => acc + o.toString(2).replace(/0/g, '').length, 0);
-    return net + '/' + bits;
-  } catch (_) { return null; }
+// { address, name, netmask, cidr, pinned, candidates } or null, same shape the
+// callers below already expected.
+function primaryLocalIPv4() {
+  return lanAddressDetail(APP_DIR);
 }
 
 // Runs on every boot, and on demand via `node boot.js --refresh-ip` (which is
@@ -206,14 +194,27 @@ async function refreshNetworkConfig() {
     return;
   }
   const cidr = networkCidr(me.address, me.netmask);
-  log('net: this PC is ' + me.address + ' on "' + me.name + '" (' + (cidr || 'subnet unknown') + ')');
+  log('net: this PC is ' + me.address + ' on "' + me.name + '" (' + (cidr || 'subnet unknown') + ')'
+    + (me.pinned ? ' [pinned in machine-config.json]' : ''));
+  // Name every address that lost, so a wrong choice is one line in the boot log
+  // rather than an afternoon of "the till says it cannot reach the server".
+  for (const c of (me.candidates || [])) {
+    if (c.address === me.address) continue;
+    log('net:   not using ' + c.address + ' on "' + c.name + '"'
+      + (c.virtual ? ' (virtual/VPN adapter)' : ' (less LAN-like address)'));
+  }
 
   // 1. persisted own address -------------------------------------------------
   try {
     const p = path.join(APP_DIR, 'machine-config.json');
     const mc = readJson(p, {});
     if (mc.name === undefined) mc.name = CFG.machineName || '';   // keep seedAppConfig's field
-    if (mc.lan_ip !== me.address) {
+    // A pinned address is the operator overruling the ranking -- usually
+    // because this machine has two real NICs, or a VPN adapter whose name
+    // gives nothing away. Never write over that.
+    if (mc.lan_ip_pinned === true) {
+      log('net: machine-config.json lan_ip is pinned to ' + (mc.lan_ip || '(unset)') + ' - left alone');
+    } else if (mc.lan_ip !== me.address) {
       const was = mc.lan_ip || '(unset)';
       mc.lan_ip = me.address;
       mc.lan_ip_checked_at = new Date().toISOString();
@@ -446,10 +447,80 @@ async function ensurePostgresTls() {
   }
 }
 
+// Whose PostgreSQL is on our port?
+//
+// "Something answers on 5433" used to be read as "our database is up". It is
+// not the same thing. Every portable build ships with pgPort 5433 -- the shop
+// PC had nine data directories configured for it -- and whichever install
+// starts first owns the port. From 8 Sep to 18 Oct 2026 this till ran against
+// the copy in C:\MHsrc\mortys without anyone knowing; when that cluster crashed,
+// the next boot found the port free, started this install's own months-old
+// data directory instead, and the website came up with no database at all.
+//
+// So ask the server where its data lives. That answer is authoritative -- it
+// is the very server server.js is about to connect to -- but it needs a
+// sign-in. When the sign-in fails (another install's password), fall back to
+// our own postmaster.pid: if the postgres that wrote it is not alive, whatever
+// holds the port is not ours, whatever else it might be.
+function samePath(a, b) {
+  // Postgres reports C:/MHsrc/... with forward slashes and the case it was
+  // started with; __dirname may say C:\mhsrc\... . Same folder, both ways.
+  const norm = (p) => {
+    let r = path.resolve(String(p));
+    try { r = fs.realpathSync.native(r); } catch (_) {}
+    return r.replace(/[\\/]+$/, '').toLowerCase();
+  };
+  return norm(a) === norm(b);
+}
+
+function ourPostmasterPid() {
+  // postmaster.pid: line 1 is the pid, line 4 the port it listens on.
+  try {
+    const lines = fs.readFileSync(path.join(PGDATA_DIR, 'postmaster.pid'), 'utf8').split(/\r?\n/);
+    const pid = parseInt(lines[0], 10);
+    if (pid && pidAlive(pid) && parseInt(lines[3], 10) === CFG.pgPort) return pid;
+  } catch (_) {}
+  return 0;
+}
+
+async function pgPortOwner() {
+  let dataDir = null, err = null;
+  try {
+    const { Client } = require(path.join(APP_DIR, 'node_modules', 'pg'));
+    const c = new Client({
+      host: '127.0.0.1', port: CFG.pgPort, user: CFG.pgUser,
+      password: CFG.pgPassword, database: 'postgres', connectionTimeoutMillis: 5000,
+    });
+    try {
+      await c.connect();
+      dataDir = (await c.query('SHOW data_directory')).rows[0].data_directory;
+    } finally { try { await c.end(); } catch (_) {} }
+  } catch (e) { err = ((e && e.code) ? e.code + ' ' : '') + ((e && e.message) || '(no detail)'); }
+
+  if (dataDir) return { ours: samePath(dataDir, PGDATA_DIR), dataDir, how: 'reported by the server' };
+  const pid = ourPostmasterPid();
+  return pid
+    ? { ours: true, dataDir: null, how: 'could not ask it (' + err + '), but our postmaster.pid ' + pid + ' is alive' }
+    : { ours: false, dataDir: null, how: 'could not ask it (' + err + ') and this install\'s postgres is not running' };
+}
+
+// Returns true when our database is up, false when it could not be started,
+// and 'foreign' when another install's PostgreSQL holds the port -- see the
+// caller in runSupervisor for why that one case is different.
 async function startBundledPostgres() {
   if (await tcpOpen('127.0.0.1', CFG.pgPort, 800)) {
-    log('postgres: already listening on ' + CFG.pgPort);
-    return true;
+    const who = await pgPortOwner();
+    if (who.ours) {
+      log('postgres: already listening on ' + CFG.pgPort + ' - this install\'s data directory (' + who.how + ')');
+      return true;
+    }
+    log('postgres: port ' + CFG.pgPort + ' is held by a DIFFERENT PostgreSQL, not this install\'s');
+    log('postgres:   expected ' + PGDATA_DIR);
+    log('postgres:   found    ' + (who.dataDir || 'unknown - ' + who.how));
+    log('postgres: refusing to start - the till would read and write that other database. Stop the other ' +
+        'install' + (who.dataDir ? ' (pg_ctl stop -D "' + who.dataDir + '")' : '') +
+        ', then start Vision Auto Solutions again.');
+    return 'foreign';
   }
   if (!pgInitialised() && !initPostgres()) return false;
   // Before pg_ctl start, so the setting is in place when it reads the config.
@@ -682,7 +753,12 @@ async function runSupervisor() {
   log('--- boot: ' + os.hostname() + ' node ' + process.version + ' ---');
 
   if (CFG.bundledPostgres && hasBundledPostgres()) {
-    await startBundledPostgres();
+    // 'foreign' is the one start result that must not fall through to
+    // server.js. Every other failure leaves the database down and the admin
+    // page up, which is the right way round. This one leaves a database UP --
+    // somebody else's -- and server.js would connect to it and write into it.
+    // Exiting before the lock is written, so the next start is not refused.
+    if (await startBundledPostgres() === 'foreign') process.exit(1);
   }
 
   await seedAppConfig();
@@ -779,7 +855,17 @@ async function doStatus() {
   const lock = runningInstance();
   const port = lock ? lock.port : effectivePort();
   const healthy = await httpOk(port, '/api/health', 2000);
-  console.log(JSON.stringify({ running: !!lock, pid: lock ? lock.pid : null, port, healthy }));
+  // Who owns the database port, so "healthy but talking to the wrong database"
+  // shows up here and not only as missing data on the website.
+  let postgres = 'not bundled';
+  if (CFG.bundledPostgres && hasBundledPostgres()) {
+    if (!(await tcpOpen('127.0.0.1', CFG.pgPort, 800))) postgres = 'not running';
+    else {
+      const who = await pgPortOwner();
+      postgres = who.ours ? 'ours' : 'FOREIGN: ' + (who.dataDir || who.how);
+    }
+  }
+  console.log(JSON.stringify({ running: !!lock, pid: lock ? lock.pid : null, port, healthy, postgres }));
 }
 
 // ------------------------------------------------------------------- main --

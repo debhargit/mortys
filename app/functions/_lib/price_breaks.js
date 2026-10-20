@@ -34,10 +34,12 @@ export async function loadBreaksByImg(db, imgs) {
   const list = [...new Set((imgs || []).filter(Boolean))];
   const map = new Map();
   if (!list.length) return map;
-  const ph = list.map(() => '?').join(',');
+  // One JSON parameter instead of one per item: D1 allows at most 100 bound
+  // parameters a query, and the storefront asks about thousands of parts at once.
+  const ph = 'SELECT value FROM json_each(?)';
   const [abs, pct] = await Promise.all([
-    db.many(`SELECT product_img, min_qty, price_cents FROM product_price_breaks WHERE product_img IN (${ph})`, ...list),
-    db.many(`SELECT product_img, min_qty, discount_pct FROM product_qty_discounts WHERE product_img IN (${ph})`, ...list),
+    db.many(`SELECT product_img, min_qty, price_cents FROM product_price_breaks WHERE product_img IN (${ph})`, JSON.stringify(list)),
+    db.many(`SELECT product_img, min_qty, discount_pct FROM product_qty_discounts WHERE product_img IN (${ph})`, JSON.stringify(list)),
   ]);
   const push = (img, row) => { if (!map.has(img)) map.set(img, []); map.get(img).push(row); };
   for (const r of abs) push(r.product_img, { min_qty: r.min_qty, price_cents: r.price_cents, discount_pct: null });
@@ -59,8 +61,8 @@ export async function loadTierPricesByImg(db, imgs) {
   const map = new Map();
   if (!list.length) return map;
   const rows = await db.many(
-    `SELECT product_img, tier, price_cents FROM product_tier_prices WHERE product_img IN (${list.map(() => '?').join(',')})`,
-    ...list
+    `SELECT product_img, tier, price_cents FROM product_tier_prices WHERE product_img IN (SELECT value FROM json_each(?))`,
+    JSON.stringify(list)
   );
   for (const r of rows) {
     if (!map.has(r.product_img)) map.set(r.product_img, {});
@@ -113,8 +115,8 @@ export async function loadActiveSaleCentsByImg(db, imgs) {
   if (!list.length) return map;
   const rows = await db.many(
     `SELECT img, ${ACTIVE_SALE_PRICE_SQL} AS active_sale_cents FROM products
-      WHERE img IN (${list.map(() => '?').join(',')})`,
-    ...list
+      WHERE img IN (SELECT value FROM json_each(?))`,
+    JSON.stringify(list)
   );
   for (const r of rows) map.set(r.img, r.active_sale_cents);
   return map;

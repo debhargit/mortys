@@ -327,6 +327,22 @@
      protect), and scoping these left every one of those inputs unstyled. */
   .fld{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:6px;font-size:13px;font-family:inherit;background:var(--card);box-sizing:border-box}
   .lbl{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700;display:block;margin-bottom:3px}
+  /* Tabbed data-entry forms (QuickBooks style): formTabs() / wireFormTabs(). */
+  .ftabs{display:flex;gap:2px;flex-wrap:wrap;border-bottom:2px solid var(--line);margin-bottom:14px}
+  .ftabs button{border:0;background:transparent;padding:9px 14px;font-size:13px;font-weight:600;font-family:inherit;color:var(--muted);cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;position:relative}
+  .ftabs button.on{color:var(--heading);border-bottom-color:var(--red)}
+  .ftabs button .req{color:var(--red);margin-left:2px}
+  .ftabs button.err::after{content:'';position:absolute;top:6px;right:4px;width:8px;height:8px;border-radius:50%;background:var(--red)}
+  .fpane{display:none}
+  .fpane.on{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .fpane .full{grid-column:1/-1}
+  .fnav{display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap}
+  .fld.bad{border-color:var(--red);box-shadow:0 0 0 2px rgba(214,40,40,.15)}
+  @media (max-width:640px){ .fpane.on{grid-template-columns:1fr} }
+  /* ⓘ tips: hover, or tap / keyboard focus on touch tills. */
+  .tip{display:inline-block;margin-left:5px;width:15px;height:15px;line-height:15px;text-align:center;border-radius:50%;background:var(--card-soft2,#e5e7eb);color:var(--muted);font-size:10px;font-weight:700;text-transform:none;letter-spacing:0;cursor:help;position:relative;vertical-align:1px}
+  .tip:hover::after,.tip:focus::after{content:attr(data-tip);position:absolute;left:-10px;bottom:calc(100% + 6px);width:max-content;max-width:260px;white-space:normal;background:#111827;color:#fff;font-size:12px;font-weight:400;line-height:1.4;padding:7px 9px;border-radius:6px;box-shadow:0 8px 20px rgba(0,0,0,.25);z-index:90;text-align:left}
+  .tip:focus{outline:2px solid var(--red);outline-offset:1px}
   .fld-mini{padding:4px 6px;border:1px solid var(--line);border-radius:5px;font-size:11.5px;font-family:inherit;width:72px}
 
   .empty{padding:60px 20px;text-align:center;color:var(--muted);font-size:14px}
@@ -387,12 +403,109 @@
   .anno-tools .gray:hover{background:#374151}
   .anno-tools input{padding:8px 10px;border:0;border-radius:6px;font-size:12.5px;font-family:inherit;min-width:170px}
   .anno-status{color:#cbd5e1;font-size:12px;margin-top:8px}
+
+  /* ---- PHONES AND SMALL TABLETS -----------------------------------------
+     The off-canvas sidebar above already covers navigation. This block makes
+     the rest usable at phone width: a slim sticky header that carries the
+     menu button, compact tiles, list tables shown as cards (mobileTables()
+     labels the cells), report tables that scroll inside their own box,
+     inline multi-column form grids stacked, and fingertip-sized controls.
+     Inline grid widths are written by the renderers, hence !important. */
+  @media (max-width:900px){
+    header.top{position:sticky;top:0;z-index:150;padding:8px 12px;gap:8px}
+    header.top .hdr-left{gap:10px!important;min-width:0}
+    header.top h1{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    header.top img{width:28px!important;height:28px!important}
+    header.top a.home,#whoLabel{display:none}
+    header.top .who{gap:6px;flex-shrink:0}
+    .hdr-menu{font-size:18px;line-height:1;padding:7px 11px!important;background:rgba(255,255,255,.12)!important}
+    .tiles-row .body-menu{display:none}
+    body.pos-fullscreen .tiles-row .body-menu{display:inline-block}
+    .tiles-row{flex-wrap:wrap}
+    /* One swipeable row of tiles instead of a screenful of them. */
+    .tiles{display:flex!important;overflow-x:auto;gap:8px;margin-bottom:12px;scroll-snap-type:x proximity;padding-bottom:4px;width:100%}
+    .tiles > .tile{flex:0 0 auto;min-width:138px;max-width:70vw;scroll-snap-align:start}
+    #panel .tiles{margin:0 0 12px}
+    .tiles::-webkit-scrollbar{display:none}
+    .tiles{scrollbar-width:none}
+    .rpt-layout > div:last-child{scroll-margin-top:60px}
+    .tile{padding:10px 12px;border-radius:10px}
+    .tile .val{font-size:20px}
+    .tile .val.v-long{font-size:16px}
+    .tile .val.v-xlong{font-size:14px}
+    .content-area{padding:10px}
+    /* Nothing inside the panel may be cut off: anything still wider than the
+       screen scrolls sideways instead. */
+    .panel{overflow-x:auto;-webkit-overflow-scrolling:touch}
+    table.m-scroll{display:block;overflow-x:auto;max-width:100%;-webkit-overflow-scrolling:touch}
+    .tabs button{padding:9px 12px}
+    .sidebar .item{padding:11px 14px 11px 18px;font-size:14px}
+    .sidebar .grp-title{padding:11px 14px;font-size:11px}
+    .sidebar{width:270px;left:-300px}
+    .sidebar.show{left:0}
+    /* Two-column report layout: menu on top, report underneath. */
+    .rpt-layout{grid-template-columns:minmax(0,1fr)!important}
+    .rpt-layout .rpt-menu{position:static;max-height:42vh;margin:10px!important}
+    .rpt-layout > div{align-self:auto!important;min-width:0}
+  }
+  @media (max-width:640px){
+    /* Form grids: three or more columns become two, two become one. */
+    #panel [style*="grid-template-columns:repeat(6,1fr)"],
+    #panel [style*="grid-template-columns:repeat(5,1fr)"],
+    #panel [style*="grid-template-columns:repeat(4,1fr)"],
+    #panel [style*="grid-template-columns:repeat(3,1fr)"],
+    #panel [style*="grid-template-columns:1fr 1fr 1fr"],
+    #panel [style*="grid-template-columns:2fr 1fr 1fr 1fr"]{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+    #panel [style*="grid-template-columns:1fr 1fr;"],
+    #panel [style$="grid-template-columns:1fr 1fr"],
+    #panel [style*="grid-template-columns:2fr 1fr;"],
+    #panel [style*="grid-template-columns:1fr 2fr"],
+    #panel [style*="grid-template-columns:1.5fr 1fr"],
+    #panel [style*="grid-template-columns:1.2fr 1fr"],
+    #panel [style*="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))"],
+    #panel [style*="grid-template-columns:repeat(auto-fill,minmax(230px,1fr))"]{grid-template-columns:minmax(0,1fr)!important}
+    #panel [style*="grid-column:span 3"],#panel [style*="grid-column:span 4"],
+    #panel [style*="grid-column:span 5"],#panel [style*="grid-column:span 6"]{grid-column:1/-1!important}
+    /* Fixed-width fields shrink to the screen. */
+    #panel input,#panel select,#panel textarea{max-width:100%}
+    /* 16px stops iOS zooming the page on every field tap. */
+    .fld,#panel input:not([type=checkbox]):not([type=radio]),#panel select,#panel textarea,.signin-card input{font-size:16px}
+    button.btn{padding:8px 12px;font-size:12.5px;min-height:34px;margin-bottom:4px}
+    .tip{width:20px;height:20px;line-height:20px;font-size:12px}
+    .tip:hover::after,.tip:focus::after{max-width:min(260px,80vw)}
+    .ftabs{flex-wrap:nowrap;overflow-x:auto}
+    .ftabs button{white-space:nowrap;padding:10px 12px}
+    .signin-card{padding:22px}
+    .empty{padding:36px 14px}
+
+    /* List tables as cards: one card per row, each cell with its column
+       heading beside it. mobileTables() sets the data-label attributes and
+       the m-cards class only on tables too wide for the screen. */
+    table.m-cards,table.m-cards tbody,table.m-cards tr,table.m-cards td{display:block;width:100%}
+    table.m-cards{min-width:0!important}
+    table.m-cards thead{display:none}
+    table.m-cards tr{border-bottom:6px solid var(--bg);padding:6px 0}
+    table.m-cards tr:hover td{background:transparent}
+    table.m-cards td{border:0;padding:4px 12px 4px calc(36% + 14px);position:relative;text-align:left!important;min-height:22px;max-width:none!important;white-space:normal!important;overflow-wrap:anywhere}
+    table.m-cards td[data-label]::before{content:attr(data-label);position:absolute;left:12px;top:6px;width:36%;font-size:10.5px;line-height:1.3;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;overflow-wrap:normal}
+    table.m-cards td:not([data-label]),table.m-cards td[data-label=""]{padding-left:12px}
+    table.m-cards td[data-label=""]::before{content:none}
+    table.m-cards td:first-child{font-size:14px}
+    table.m-cards td *{max-width:100%;white-space:normal!important}
+    table.m-cards td:empty{display:none}
+    table.m-cards tfoot tr{border-bottom:0}
+  }
 </style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 </head>
 <body>
 
 <header class="top">
-  <div style="display:flex;align-items:center;gap:14px">
+  <div class="hdr-left" style="display:flex;align-items:center;gap:14px">
+    <button class="menu-toggle hdr-menu" type="button" aria-label="Open menu" onclick="document.getElementById('sidebar').classList.toggle('show');document.getElementById('sbOverlay').classList.toggle('show')">☰</button>
     <img src="vision_logo.jpg" alt="Vision Auto Solutions" style="width:34px;height:34px;border-radius:8px;flex-shrink:0" />
     <h1>Vision Auto Solutions · Admin</h1>
     <a class="home" href="/">← Public site</a>
@@ -408,8 +521,8 @@
 <div class="wrap">
   <nav class="sidebar" id="sidebar"><!-- populated by JS --></nav>
   <main class="content-area">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-      <button class="menu-toggle" onclick="document.getElementById('sidebar').classList.toggle('show');document.getElementById('sbOverlay').classList.toggle('show')">☰ Menu</button>
+    <div class="tiles-row" style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <button class="menu-toggle body-menu" onclick="document.getElementById('sidebar').classList.toggle('show');document.getElementById('sbOverlay').classList.toggle('show')">☰ Menu</button>
       <div class="tiles" id="tiles" style="flex:1"></div>
     </div>
     <div class="panel" id="panel"><div class="empty">Loading…</div></div>
@@ -463,6 +576,9 @@ async function api(path, opts){
     headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin'
   };
+  // This device's cashier-module station (set on the Cashier page), so the
+  // server knows which counter position a sale or order comes from.
+  try { var stKey = localStorage.getItem('vision.stationKey'); if (stKey) init.headers['X-Station-Key'] = stKey; } catch (_) {}
   if (opts.body) init.body = JSON.stringify(opts.body);
   var res = await fetch(path, init);
   var data = null;
@@ -476,6 +592,14 @@ async function api(path, opts){
     err.status = res.status;
     err.data = data || null;
     if (data && data.db_down) err.db_down = true;
+    // The server has no session for this page any more (signed out elsewhere,
+    // or it timed out): bring the sign-in screen up instead of leaving a
+    // "Sign in required" the person cannot act on. Only the session replies --
+    // a wrong PIN or password is a 401 with a different message.
+    if (res.status === 401 && data && (data.error === 'Sign in required' || data.signed_out)) {
+      err.message = 'Your sign-in has ended. Sign in again, then retry.';
+      try { var sbg = document.getElementById('signinBg'); if (sbg) { sbg.style.zIndex = '10050'; sbg.classList.add('show'); } } catch (_) {}   // above any open modal
+    }
     throw err;
   }
   return data;
@@ -571,6 +695,14 @@ async function doSignIn(){
   err.classList.remove('show');
   try {
     var r = await api('/api/auth/signin', { method:'POST', body:{ email: email, password: password } });
+    // 2-step sign-in: the password was right, now the code from the authenticator app.
+    while (r && r.need_2fa) {
+      var code = prompt('Enter the 6-digit code from your authenticator app\n(or one of your recovery codes)');
+      if (code === null) return;
+      try { r = await api('/api/auth/2fa', { method:'POST', body:{ code: code.trim() } }); }
+      catch (e2) { if (/Sign in again|Too many/.test(e2.message || '')) throw e2; alert(e2.message); r = { need_2fa: true }; }
+      if (r && r.used_recovery) alert('You used a recovery code. It will not work again: make new ones on the Security page.');
+    }
     if (!r.user || !r.user.is_admin){
       err.textContent = 'This account does not have admin access.';
       err.classList.add('show');
@@ -638,7 +770,7 @@ document.addEventListener('DOMContentLoaded', function(){
   var reset = document.getElementById('resetDefaultLink');
   if (reset) reset.addEventListener('click', async function(e){
     e.preventDefault();
-    if (!confirm('Reset admin@visionautosolutions.com to password "password123"?\n\nThis is safe — it only resets THIS one account.')) return;
+    if (!confirm('Reset the password for admin@visionautosolutions.com?\n\nA new random password will be shown once. This only works on the shop PC (the till) itself.')) return;
     try {
       var r = await fetch('/api/auth/reset-default-admin', { method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json'}, body:'{}' });
       var text = await r.text();
@@ -648,6 +780,7 @@ document.addEventListener('DOMContentLoaded', function(){
         alert('⚠ The reset endpoint is not yet available on the server.\n\nThis means the server hasn\'t been restarted since the latest code update.\n\nRestart the admin server and try again, or sign in with the account the shop was set up with.');
         return;
       }
+      if (r.status === 404) { alert('Password reset only works on the shop PC (the till).\n\nOpen the admin page on that computer and try again.'); return; }
       if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
       document.getElementById('adEmail').value = d.email;
       document.getElementById('adPass').value = d.password;
@@ -822,6 +955,7 @@ var renderers = {
   deliveries:    renderDeliveries,
   suppliers:     renderSuppliers,
   purchaseorders: renderPurchaseOrders,
+  receivestock:  renderReceiveStock,
   pos:           renderPOS,
   quotes:        renderQuotes,
   cashier:       renderCashier,
@@ -877,6 +1011,7 @@ var SIDEBAR_GROUPS = [
   { title: '📊 Overview', items: [
     { tab:'dashboard', label:'📊 Dashboard' },
     { tab:'reports', label:'📑 Reports' },
+    { tab:'modules', label:'🧭 All modules' },
   ]},
   // The "🔧 Service Center" and "🚗 Cars & Vehicles" sidebar groups were
   // removed (2026-09-03) — this location no longer offers vehicle servicing.
@@ -889,11 +1024,15 @@ var SIDEBAR_GROUPS = [
     { tab:'warehouse', label:'🏗 Warehouse' },
     { tab:'deliveries', label:'🚚 Deliveries' },
     { tab:'suppliers', label:'🏭 Suppliers' },
-    { tab:'purchaseorders', label:'📥 Receive PO' },
     { tab:'partsreq', label:'📤 Parts Requisitions' },
     { tab:'inquiries', label:'📨 Parts Inquiries' },
     { tab:'notifications', label:'🔔 Notify-Me (back in stock)' },
     { tab:'lowstock', label:'⚠ Low Stock' },
+  ]},
+  // Buying stock: the orders, and one screen to receive a delivery with its bill.
+  { title: '🛒 Purchasing', items: [
+    { tab:'purchaseorders', label:'📋 Purchase Orders' },
+    { tab:'receivestock', label:'📥 Receive Stock' },
   ]},
   { title: '💵 Sales & POS', items: [
     { tab:'pos', label:'💵 POS Terminal' },
@@ -902,12 +1041,17 @@ var SIDEBAR_GROUPS = [
     { tab:'orders', label:'🛒 Orders' },
     { tab:'cashreport', label:'📈 Cash Report' },
     { tab:'pettycash', label:'💰 Petty Cash' },
-    { tab:'recurring', label:'🔁 Recurring Charges' },
-    { tab:'reviews', label:'⭐ Reviews' },
-    { tab:'coupons', label:'🏷 Coupons' },
-    { tab:'giftcards', label:'🎁 Gift Cards' },
-    { tab:'redemptions', label:'🎟 Redeemables' },
+  ]},
+  // Sell-alongside instruments and after-sale programs — each is a thing the
+  // counter attaches to or redeems against a sale rather than a sale itself,
+  // so they live together here instead of cluttering the register group.
+  { title: '🎫 POS Add-ons', items: [
     { tab:'warranty', label:'🛡 Warranty' },
+    { tab:'redemptions', label:'🎟 Redeemables' },
+    { tab:'giftcards', label:'🎁 Gift Cards' },
+    { tab:'coupons', label:'🏷 Coupons' },
+    { tab:'reviews', label:'⭐ Reviews' },
+    { tab:'recurring', label:'🔁 Recurring Charges' },
   ]},
   { title: '👥 Customers', items: [
     { tab:'customers', label:'👥 Customers (CRM)' },
@@ -1872,6 +2016,56 @@ async function startInventoryImport(file, onDone){
   });
 }
 
+// ---- Tabbed data-entry forms and ⓘ tips (QuickBooks style) ---------------------
+// Used by "Add new part", "New purchase order" and "Receive stock without a PO".
+// formTabs(tabs) -> a tab bar and one pane per tab ({key, label, req, html, hidden});
+// wireFormTabs(root) makes the tabs, and any [data-fnext] / [data-fprev] buttons, switch
+// panes; formTabsCheck(root, checks) puts a red dot on each tab holding a field that
+// fails, outlines the field, opens the first such tab and returns its message.
+// Fields keep their own ids, so the code that reads them does not change.
+function tip(text){ return '<span class="tip" tabindex="0" role="note" aria-label="' + esc(text) + '" data-tip="' + esc(text) + '">i</span>'; }
+function flbl(text, tipText, req){ return '<label class="lbl">' + text + (req ? ' *' : '') + (tipText ? tip(tipText) : '') + '</label>'; }
+function formTabs(tabs){
+  tabs = tabs.filter(function(t){ return !t.hidden; });
+  return '<div class="ftabs" role="tablist">' + tabs.map(function(t, i){
+      return '<button type="button" role="tab" data-ft="' + t.key + '"' + (i ? '' : ' class="on"') + '>' + esc(t.label) + (t.req ? '<span class="req">*</span>' : '') + '</button>';
+    }).join('') + '</div>' +
+    tabs.map(function(t, i){ return '<div class="fpane' + (i ? '' : ' on') + '" data-fp="' + t.key + '" role="tabpanel">' + t.html + '</div>'; }).join('');
+}
+function openFormTab(root, key){
+  root.querySelectorAll('[data-ft]').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-ft') === key); });
+  root.querySelectorAll('[data-fp]').forEach(function(p){ p.classList.toggle('on', p.getAttribute('data-fp') === key); });
+  if (root.__onTab) root.__onTab(key);
+}
+function wireFormTabs(root, onTab){
+  if (!root) return;
+  root.__onTab = onTab || null;
+  var keys = function(){ return Array.prototype.map.call(root.querySelectorAll('.ftabs [data-ft]'), function(b){ return b.getAttribute('data-ft'); }); };
+  var cur = function(){ var on = root.querySelector('.ftabs .on'); return on ? on.getAttribute('data-ft') : keys()[0]; };
+  root.querySelectorAll('.ftabs [data-ft]').forEach(function(b){ b.addEventListener('click', function(){ openFormTab(root, b.getAttribute('data-ft')); }); });
+  root.querySelectorAll('[data-fnext],[data-fprev]').forEach(function(b){
+    b.addEventListener('click', function(){ var k = keys(), i = k.indexOf(cur()) + (b.hasAttribute('data-fnext') ? 1 : -1); if (i >= 0 && i < k.length) openFormTab(root, k[i]); });
+  });
+}
+// checks: [{ id: field id, ok: true/false, msg }]
+function formTabsCheck(root, checks){
+  root.querySelectorAll('.ftabs .err').forEach(function(b){ b.classList.remove('err'); });
+  root.querySelectorAll('.fld.bad').forEach(function(x){ x.classList.remove('bad'); });
+  var first = null;
+  checks.forEach(function(c){
+    if (c.ok) return;
+    var el = document.getElementById(c.id), pane = el && el.closest('[data-fp]');
+    if (el && el.classList.contains('fld')) el.classList.add('bad');
+    if (pane) { var b = root.querySelector('.ftabs [data-ft="' + pane.getAttribute('data-fp') + '"]'); if (b) b.classList.add('err'); }
+    if (!first) first = { c: c, el: el, pane: pane };
+  });
+  if (!first) return null;
+  if (first.pane) openFormTab(root, first.pane.getAttribute('data-fp'));
+  if (first.el && first.el.focus) try { first.el.focus(); } catch (_) {}
+  return first.c.msg;
+}
+var FNAV = '<button type="button" class="btn" data-fprev>◀ Back</button><button type="button" class="btn" data-fnext>Next ▶</button>';
+
 async function renderProducts(panel){
   // The category list has to match what's actually stored, or filtering (and
   // any part added through this form) silently misses every existing row.
@@ -1902,51 +2096,58 @@ async function renderProducts(panel){
     '<details style="border-bottom:1px solid var(--line);background:var(--card-soft)">' +
       '<summary style="padding:14px 16px;cursor:pointer;font-weight:700;font-size:14px;color:var(--heading);user-select:none">+ Add new part (or 📸 snap a photo)</summary>' +
       '<div style="padding:16px 18px">' +
-        '<form id="newProdForm" onsubmit="event.preventDefault();submitNewProduct();" enctype="multipart/form-data" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:880px">' +
-          '<div style="grid-column:1/-1" id="npImageWidget"></div>' +
-          '<div style="grid-column:1/-1"><label class="lbl">More photos <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional — first photo above is the main one)</span></label>' +
-            '<input type="file" id="npMorePhotos" accept="image/*" multiple style="width:100%;font-size:13px"/></div>' +
-          '<div style="grid-column:1/-1;position:relative">' +
-            '<label class="lbl">Copy from an existing part <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional — prefills the fields below)</span></label>' +
-            '<input id="npCopy" placeholder="🔎 search a part to copy its details…" autocomplete="off" class="fld"/>' +
-            '<div id="npCopyResults" style="display:none;position:absolute;z-index:60;left:0;right:0;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 14px 36px rgba(0,0,0,.30);max-height:min(46vh,340px);overflow-y:auto"></div>' +
-          '</div>' +
-          '<div><label class="lbl">Part name *</label><input id="npName" required placeholder="e.g. AC Compressor" class="fld"/></div>' +
-          '<div><label class="lbl">Vehicle / fitment</label><input id="npMakeModel" placeholder="e.g. 2020 Honda Accord" class="fld"/></div>' +
-          '<div><label class="lbl">Category *</label><select id="npCategory" required class="fld">' +
-            cats.map(function(c){ return '<option value="' + c[0] + '">' + c[1] + '</option>'; }).join('') +
-          '</select></div>' +
-          '<div><label class="lbl">Condition</label><select id="npCondition" class="fld"><option value="USED" selected>USED</option><option value="NEW">NEW</option></select></div>' +
-          '<div style="grid-column:1/-1"><label class="lbl">Item type</label><select id="npItemType" class="fld">' +
-            '<option value="inventory">Inventory — a stocked part</option>' +
-            '<option value="tracked">Tracked — a counted non-warehouse item (e.g. tokens)</option>' +
-            '<option value="service">Service / fee — no stock concept (e.g. delivery, rent)</option>' +
-          '</select></div>' +
-          '<div><label class="lbl">SKU</label><input id="npSku" placeholder="internal code" class="fld"/></div>' +
-          '<div><label class="lbl">Barcode</label><input id="npBarcode" placeholder="UPC / EAN" class="fld"/></div>' +
-          '<div><label class="lbl">Cost / buy price (USD)</label><input id="npCost" type="number" step="0.01" min="0" placeholder="0.00" class="fld"/></div>' +
-          '<div><label class="lbl">Markup %</label><input id="npMarkup" type="number" step="0.1" min="0" placeholder="e.g. 35" class="fld"/></div>' +
-          '<div><label class="lbl">Sell price / retail (USD)</label><input id="npPrice" type="number" step="0.01" min="0" placeholder="auto from cost × markup" class="fld"/></div>' +
-          '<div><label class="lbl">List / MSRP (USD)</label><input id="npList" type="number" step="0.01" min="0" placeholder="reference" class="fld"/></div>' +
-          '<div><label class="lbl">Stock count</label><input id="npStock" type="number" min="0" value="1" class="fld"/></div>' +
-          '<div><label class="lbl">Low-stock threshold</label><input id="npLow" type="number" min="0" placeholder="0" class="fld"/></div>' +
-          '<div><label class="lbl">Stock unit</label><select id="npStockUom" class="fld">' + uomOptions('each') + '</select></div>' +
-          '<div><label class="lbl">Purchase unit</label><select id="npPurchUom" class="fld">' + uomOptions('') + '</select></div>' +
-          '<div><label class="lbl">Units per purchase</label><input id="npUnitsPerPurch" type="number" step="0.001" min="0" placeholder="e.g. 12 per box" class="fld"/></div>' +
-          '<div><label class="lbl">Costing method</label><select id="npCosting" class="fld">' +
-            COSTING_OPTS.map(function(o){ return '<option value="' + o[0] + '">' + o[1] + '</option>'; }).join('') +
-          '</select></div>' +
-          '<div><label class="lbl">Supplier</label><select id="npSupplier" class="fld">' + supplierOptions('') + '</select></div>' +
-          '<div><label class="lbl">Supplier part #</label><input id="npSupPartNo" placeholder="vendor catalogue no." class="fld"/></div>' +
-          '<div><label class="lbl">Warranty (days)</label><input id="npWarranty" type="number" min="0" placeholder="e.g. 90" class="fld"/></div>' +
-          '<div><label class="lbl">Bin / Rack</label><input id="npBin" placeholder="e.g. A-12" class="fld"/></div>' +
-          '<div><label class="lbl">📍 Location</label>' +
-            '<select id="npLocation" class="fld">' +
-              locs.map(function(l){ return '<option value="' + l + '">' + l + '</option>'; }).join('') +
-            '</select></div>' +
-          '<div style="grid-column:1/-1"><label style="display:inline-flex;align-items:center;gap:7px;font-size:13px"><input type="checkbox" id="npSerial"/> Serial number required at sale</label></div>' +
-          '<div id="npMsg" style="grid-column:1/-1;display:none;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
-          '<button type="submit" id="npSubmit" style="grid-column:1/-1;background:var(--red);color:#fff;border:0;border-radius:7px;padding:11px 22px;font-weight:700;cursor:pointer;font-size:14px;font-family:inherit;margin-top:6px">Add Part to Inventory</button>' +
+        '<form id="newProdForm" novalidate onsubmit="event.preventDefault();submitNewProduct();" enctype="multipart/form-data" style="max-width:880px">' +
+          formTabs([
+            { key: 'general', label: 'General', req: true, html:
+              '<div class="full" id="npImageWidget"></div>' +
+              '<div class="full" style="position:relative">' + flbl('Copy from an existing part', 'Optional. Pick a part like this one and its details fill in below; then change what is different and give it its own SKU, photo and stock.') +
+                '<input id="npCopy" placeholder="🔎 search a part to copy its details…" autocomplete="off" class="fld"/>' +
+                '<div id="npCopyResults" style="display:none;position:absolute;z-index:60;left:0;right:0;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 14px 36px rgba(0,0,0,.30);max-height:min(46vh,340px);overflow-y:auto"></div>' +
+              '</div>' +
+              '<div>' + flbl('Part name', 'What the customer and the till see, e.g. "AC Compressor". Keep it short and searchable.', true) + '<input id="npName" placeholder="e.g. AC Compressor" class="fld"/></div>' +
+              '<div>' + flbl('Category', 'The department the part belongs to. It decides where the part shows in the shop and which income and cost accounts its sales post to.', true) + '<select id="npCategory" class="fld">' +
+                cats.map(function(c){ return '<option value="' + c[0] + '">' + c[1] + '</option>'; }).join('') + '</select></div>' +
+              '<div>' + flbl('Vehicle / fitment', 'Which vehicles it fits, e.g. "2015-2019 Toyota Corolla". Customers search by this.') + '<input id="npMakeModel" placeholder="e.g. 2020 Honda Accord" class="fld"/></div>' +
+              '<div>' + flbl('Condition', 'NEW for a new part, USED for a second-hand or pulled part.') + '<select id="npCondition" class="fld"><option value="USED" selected>USED</option><option value="NEW">NEW</option></select></div>' +
+              '<div class="full">' + flbl('Item type', 'Inventory: a part you keep on a shelf and count. Tracked: counted but not shelved (e.g. tokens). Service / fee: nothing to count, e.g. delivery, labour, rent.') + '<select id="npItemType" class="fld">' +
+                '<option value="inventory">Inventory — a stocked part</option>' +
+                '<option value="tracked">Tracked — a counted non-warehouse item (e.g. tokens)</option>' +
+                '<option value="service">Service / fee — no stock concept (e.g. delivery, rent)</option>' +
+              '</select></div>' +
+              '<div>' + flbl('SKU', 'Your own part number. Leave blank and one is made for you.') + '<input id="npSku" placeholder="internal code" class="fld"/></div>' +
+              '<div>' + flbl('Barcode', 'The number under the barcode on the box (UPC / EAN), so the scanner finds it.') + '<input id="npBarcode" placeholder="UPC / EAN" class="fld"/></div>' },
+            { key: 'pricing', label: 'Pricing', html:
+              '<div>' + flbl('Cost / buy price (USD)', 'What one unit costs you from the supplier. Used for profit and stock value.') + '<input id="npCost" type="number" step="0.01" min="0" placeholder="0.00" class="fld"/></div>' +
+              '<div>' + flbl('Markup %', 'How much to add on top of cost. With cost and markup filled, the sell price works itself out until you type one.') + '<input id="npMarkup" type="number" step="0.1" min="0" placeholder="e.g. 35" class="fld"/></div>' +
+              '<div>' + flbl('Sell price / retail (USD)', 'What the till charges. Fills in from cost × markup; type your own to override.') + '<input id="npPrice" type="number" step="0.01" min="0" placeholder="auto from cost × markup" class="fld"/></div>' +
+              '<div>' + flbl('List / MSRP (USD)', 'The manufacturer\'s suggested price, for reference and "you save" labels. Not charged.') + '<input id="npList" type="number" step="0.01" min="0" placeholder="reference" class="fld"/></div>' +
+              '<div>' + flbl('Costing method', 'How the cost of stock is worked out when buy prices change. Leave on the shop default unless your accountant says otherwise.') + '<select id="npCosting" class="fld">' +
+                COSTING_OPTS.map(function(o){ return '<option value="' + o[0] + '">' + o[1] + '</option>'; }).join('') + '</select></div>' +
+              '<div>' + flbl('Warranty (days)', 'How long the shop covers the part after the sale, e.g. 90. Printed on the receipt.') + '<input id="npWarranty" type="number" min="0" placeholder="e.g. 90" class="fld"/></div>' },
+            { key: 'stock', label: 'Stock & bins', html:
+              '<div>' + flbl('Stock count', 'How many you have on hand right now.') + '<input id="npStock" type="number" min="0" value="1" class="fld"/></div>' +
+              '<div>' + flbl('Low-stock threshold', 'When stock drops to this number the part shows as low and goes on the reorder list. 0 = never warn.') + '<input id="npLow" type="number" min="0" placeholder="0" class="fld"/></div>' +
+              '<div>' + flbl('Stock unit', 'How you count it on the shelf: each, pair, litre…') + '<select id="npStockUom" class="fld">' + uomOptions('each') + '</select></div>' +
+              '<div>' + flbl('Purchase unit', 'How the supplier sells it to you, if different: box, case…') + '<select id="npPurchUom" class="fld">' + uomOptions('') + '</select></div>' +
+              '<div>' + flbl('Units per purchase', 'How many stock units are in one purchase unit, e.g. 12 in a box.') + '<input id="npUnitsPerPurch" type="number" step="0.001" min="0" placeholder="e.g. 12 per box" class="fld"/></div>' +
+              '<div>' + flbl('📍 Location', 'Which store or area holds it.') + '<select id="npLocation" class="fld">' +
+                locs.map(function(l){ return '<option value="' + l + '">' + l + '</option>'; }).join('') + '</select></div>' +
+              '<div>' + flbl('Bin / Rack', 'The shelf spot, e.g. A-12, so staff can find it fast.') + '<input id="npBin" placeholder="e.g. A-12" class="fld"/></div>' +
+              '<div class="full"><label style="display:inline-flex;align-items:center;gap:7px;font-size:13px"><input type="checkbox" id="npSerial"/> Serial number required at sale' + tip('Tick for parts with their own serial number (batteries, ECUs). The till then asks for it when selling, for warranty.') + '</label></div>' },
+            { key: 'supplier', label: 'Supplier', html:
+              '<div>' + flbl('Supplier', 'Who you usually buy it from. Purchase orders and reorder lists use this.') + '<select id="npSupplier" class="fld">' + supplierOptions('') + '</select></div>' +
+              '<div>' + flbl('Supplier part #', 'The supplier\'s own catalogue number, so orders to them are exact.') + '<input id="npSupPartNo" placeholder="vendor catalogue no." class="fld"/></div>' },
+            { key: 'accounting', label: 'Accounting', hidden: ON_WEBSITE, html:
+              '<p class="full" style="margin:0;font-size:12.5px;color:var(--muted)">Leave these blank to use the part\'s category (Accounting → Posting rules). Set them only when this one part should post somewhere else, e.g. a rent or service item to its own income account.</p>' +
+              '<div>' + flbl('Income account', 'Where sales of this part are counted as income. Blank: the category\'s income account.') + '<select id="npIncomeAcct" class="fld"><option value="">Category rule</option></select></div>' +
+              '<div>' + flbl('Cost account', 'Where the cost of this part goes when it is sold. Blank: the category\'s cost of sales account.') + '<select id="npCogsAcct" class="fld"><option value="">Category rule</option></select></div>' },
+            { key: 'photos', label: 'More photos', html:
+              '<div class="full">' + flbl('More photos', 'Optional extra pictures for the shop page; the photo on General is the main one.') +
+                '<input type="file" id="npMorePhotos" accept="image/*" multiple style="width:100%;font-size:13px"/></div>' },
+          ]) +
+          '<div id="npMsg" style="display:none;margin-top:10px;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
+          '<div class="fnav">' + FNAV + '<span style="flex:1"></span>' +
+            '<button type="submit" id="npSubmit" style="background:var(--red);color:#fff;border:0;border-radius:7px;padding:11px 22px;font-weight:700;cursor:pointer;font-size:14px;font-family:inherit">Add Part to Inventory</button></div>' +
         '</form>' +
       '</div>' +
     '</details>';
@@ -1962,6 +2163,16 @@ async function renderProducts(panel){
 
   panel.innerHTML = addPanel + toolbar + '<div id="prodList"></div>';
   mountImageWidget('npImageWidget', 'npPhotoHidden');
+  var acctsLoaded = false;
+  wireFormTabs(document.getElementById('newProdForm'), function(key){
+    if (key !== 'accounting' || acctsLoaded) return;
+    acctsLoaded = true;
+    api('/api/books/accounts').then(function(r){
+      var opt = function(types){ return '<option value="">Category rule</option>' + (r.accounts || []).filter(function(a){ return types.indexOf(a.type) >= 0; }).map(function(a){ return '<option value="' + a.id + '">' + esc(a.code + ' ' + a.name) + '</option>'; }).join(''); };
+      document.getElementById('npIncomeAcct').innerHTML = opt(['income', 'other_income']);
+      document.getElementById('npCogsAcct').innerHTML = opt(['cogs', 'expense']);
+    }).catch(function(){ acctsLoaded = false; });
+  });
 
   // "+ Add new part" helpers: retail auto-fills from cost × markup (until the
   // user types a price), and a live search prefills the whole form from an
@@ -3532,6 +3743,113 @@ function posResetTicket(){
   if (POS_RULES.enforce_login) { POS_OP = null; posSaveOp(); }
 }
 
+// Terminal journal (terminal.js): what happens on this till's screen --
+// items added and taken off, quantity, price and discount changes, carts
+// emptied, holds recalled -- goes to the server in small batches.
+var POS_TJ_Q = [];
+function posJournal(kind, d){
+  try {
+    d = d || {}; d.kind = kind; d.at = new Date().toISOString();
+    if (!POS.tjTicket) POS.tjTicket = Math.random().toString(36).slice(2, 10);
+    d.ticket = POS.tjTicket;
+    POS_TJ_Q.push(d);
+    if (POS_TJ_Q.length >= 25) posJournalFlush();
+  } catch (_) {}
+}
+function posJournalFlush(){
+  if (!POS_TJ_Q.length || !CURRENT_ADMIN_ID) return;
+  var batch = POS_TJ_Q.splice(0, POS_TJ_Q.length);
+  api('/api/tj/events', { method:'POST', body:{ events: batch } }).catch(function(){});
+}
+setInterval(posJournalFlush, 5000);
+window.addEventListener('pagehide', function(){
+  try { if (POS_TJ_Q.length && navigator.sendBeacon) navigator.sendBeacon('/api/tj/events', new Blob([JSON.stringify({ events: POS_TJ_Q.splice(0, POS_TJ_Q.length) })], { type: 'application/json' })); } catch (_) {}
+});
+
+// Departments (terminal.js): when the shop limits staff to their departments'
+// parts, anything else needs a manager's PIN on this till. The server checks
+// again when the sale is made, so this is the friendly half of the rule.
+var POS_DEPT = null, POS_DEPT_OK = {};
+async function posLoadDept(){ try { POS_DEPT = await api('/api/dept/mine'); } catch (_) { POS_DEPT = null; } posPaintDeptChip(); }
+// The department shown next to the cart (terminal.js /api/dept/mine). Owners and
+// managers can switch to GENERAL: every department as one stock, plus a picker
+// for which cashier collects payment on the ticket.
+var POS_TILL = null, POS_COLLECTORS = [], POS_COLLECTORS_AT = 0;
+function posDeptLabel(){ var c = POS_DEPT && POS_DEPT.current; return c && c.name ? c.name : 'All departments'; }
+function posPaintDeptChip(){
+  var el = document.getElementById('posDeptChip');
+  if (!el) return;
+  var many = !!(POS_DEPT && POS_DEPT.options && POS_DEPT.options.length > 1);
+  el.innerHTML = '🏬 ' + esc(posDeptLabel()) + (many ? ' ▾' : '');
+  el.title = 'Current department' + (many ? ' — click to switch' : '') +
+    (POS_TILL && POS_TILL.station ? '\nTill: ' + POS_TILL.station.name + (POS_TILL.session ? ' (shift open)' : ' (no shift)') : '');
+  var g = !!(POS_DEPT && POS_DEPT.general);
+  var wrap = document.getElementById('posCollectWrap');
+  if (wrap) { wrap.style.display = g ? 'inline-flex' : 'none'; if (g) posLoadCollectors(false); else POS.collectAt = ''; }
+}
+async function posPickDept(){
+  if (!POS_DEPT || !(POS_DEPT.options || []).length) return posToast('You have no other department to switch to.', true);
+  var cur = POS_DEPT.current && POS_DEPT.current.id;
+  posModal('🏬 Department', '<div style="display:grid;gap:8px">' + POS_DEPT.options.map(function(d){
+    return '<button type="button" class="btn" data-dept="' + d.id + '" style="text-align:left;padding:10px 12px;' + (d.id === cur ? 'outline:2px solid #0891b2;' : '') + '"><b>' + esc(d.name) + '</b>' +
+      (d.kind === 'general' ? '<div style="color:var(--muted);font-size:12px;font-weight:400;margin-top:2px">Sell from every department as one stock, and choose which cashier collects.</div>' : '') + '</button>';
+  }).join('') + '</div>', 420);
+  document.querySelectorAll('#mhPosModal [data-dept]').forEach(function(b){
+    b.addEventListener('click', async function(){
+      try {
+        await api('/api/dept/mine', { method: 'POST', body: { department_id: Number(b.getAttribute('data-dept')) } });
+        posCloseModal(); POS.collectAt = '';
+        await posLoadDept();
+        posToast('Now working in ' + posDeptLabel() + '.');
+      } catch (e) { posToast((e && e.message) || 'Could not switch department.', true); }
+    });
+  });
+}
+async function posLoadCollectors(force){
+  var sel = document.getElementById('posCollectAt');
+  if (!sel) return;
+  if (force || Date.now() - POS_COLLECTORS_AT > 30000) {
+    POS_COLLECTORS_AT = Date.now();
+    try { POS_COLLECTORS = (await api('/api/cash/collectors')).collectors || []; } catch (_) { POS_COLLECTORS = []; }
+  }
+  sel.innerHTML = '<option value="">💵 Collect here</option>' + POS_COLLECTORS.map(function(c){
+    return '<option value="' + c.id + '"' + (String(POS.collectAt || '') === String(c.id) ? ' selected' : '') + '>→ ' + esc(c.name) + (c.cashier ? ' · ' + esc(c.cashier) : ' · closed') + '</option>';
+  }).join('');
+}
+// As soon as the POS opens, make sure this terminal's till has an open shift.
+async function posEnsureTill(){
+  try {
+    POS_TILL = await api('/api/cash/till/ensure', { method: 'POST', body: {} });
+    if (POS_TILL && POS_TILL.opened) posToast('Shift opened on ' + POS_TILL.station.name + '.');
+  } catch (_) { POS_TILL = null; }
+  posPaintDeptChip();
+}
+if (!window.__posDeptWired) {
+  window.__posDeptWired = true;
+  document.addEventListener('click', function(e){ if (e.target && e.target.closest && e.target.closest('#posDeptChip')) posPickDept(); });
+  document.addEventListener('change', function(e){
+    if (!e.target || e.target.id !== 'posCollectAt') return;
+    POS.collectAt = e.target.value;
+    posToast(POS.collectAt ? 'Checkout will send this ticket to ' + e.target.options[e.target.selectedIndex].text.replace(/^→ /, '') + ' to collect.' : 'You will take payment here.');
+  });
+}
+function posDeptBlocked(p){
+  if (!POS_DEPT || !POS_DEPT.restricted || !p || !p.img || POS_DEPT_OK[p.img]) return false;
+  return (POS_DEPT.categories || []).indexOf(String(p.category || '').toLowerCase()) < 0;
+}
+async function posDeptApprove(p, qty){
+  var appr = await posPinPrompt({
+    purpose: 'override',
+    title: 'Outside your department',
+    detail: (p.name || 'This part') + ' is in ' + (p.category || 'another category') + ', not in ' + (POS_DEPT.departments || []).join(', ') + '. A manager can approve it with their PIN.',
+    endpoint: '/api/dept/override?item=' + encodeURIComponent(p.img),
+  });
+  if (!appr) return;
+  POS_DEPT_OK[p.img] = true;
+  posAddToCart(p, qty);
+  if (window.__posRedraw) window.__posRedraw();
+}
+
 // pos_holds / pos_quotes / pos_favourites store items_json as Postgres JSONB.
 // The pg driver hands JSONB back already parsed -- an array -- so the old
 // JSON.parse(items_json) threw "[object Object] is not valid JSON", which the
@@ -3865,6 +4183,10 @@ function posCartPayload(){
       description: i.name,
       qty: i.qty,
       unit_price_usd: Number(i.price) || 0,
+      // Whether the cashier typed this price. The server gates it on
+      // pos.price_override, and skips the account markup for such a line --
+      // a typed figure is the figure they mean to charge.
+      price_manual: !!i.priceManual,
       discount_usd: posLineDisc(i),
       discount_note: i.discNote || null,
       serial_number: i.serialNumber || null,
@@ -3912,6 +4234,27 @@ function posTierPrice(p){
   return (v == null || v === '') ? null : Number(v);
 }
 
+// The attached account's standing markup -- what this customer pays ABOVE list
+// (users.markup_pct) -- as a multiplier. 1 means charge normally.
+function posMarkupMul(){
+  var m = POS.customer && Number(POS.customer.markup_pct);
+  return (isFinite(m) && m > 0) ? 1 + m / 100 : 1;
+}
+// Mark a resolved unit price up. Applied AFTER the sale-price / tier /
+// quantity-break ladder, so the markup sits on whatever price the line
+// actually earned rather than always on full retail.
+//
+// Doing it here, in the price itself, is the point of the feature: the ticket,
+// the receipt and the invoice all show the increased figure as THE unit price
+// instead of list with a surcharge added at the bottom. The server applies the
+// same rate (and is told the rate already applied, via markup_applied_pct, so
+// it does not double it), which keeps what the cashier sees and what the
+// invoice prints the same number.
+function posMarkUp(price){
+  var mul = posMarkupMul();
+  return mul === 1 ? price : Math.round(price * mul * 100) / 100;
+}
+
 // Serial capture on a cart line: a picker of in-stock serials when the
 // register is loaded, a free input otherwise. Free-type of an off-register
 // serial is only *offered* when the operator has pos.serial_freetype; the
@@ -3946,16 +4289,25 @@ function posRepriceForCustomer(){
   var t = POS.customer && POS.customer.price_tier;
   (POS.cart || []).forEach(function(line){
     if (line.priceManual || line.serialRequired || line.isRedeemable) return;
+    // A line recalled from a hold or a quote carries only its stored price --
+    // no basePrice, saleBase or priceBreaks to re-derive from -- so there is
+    // nothing to re-price against and the arithmetic below would resolve it to
+    // 0 and sell the part for nothing. Leave the stored price standing. (The
+    // account markup is already in that stored figure, and the sale posts
+    // markup_applied_pct, so it is not applied twice either.)
+    if (line.basePrice == null && line.saleBase == null) return;
     var saleBase = Number(line.saleBase != null ? line.saleBase : line.basePrice) || 0;
     var tierP = (t && t !== 'retail' && line.tierPrices && line.tierPrices[t] != null && line.tierPrices[t] !== '')
       ? Number(line.tierPrices[t]) : null;
     line.basePrice = (tierP != null && tierP < saleBase) ? tierP : saleBase;
     line.tierApplied = tierP != null && tierP < saleBase;
-    line.price = posBestUnitPrice(line.basePrice, line.priceBreaks, line.qty, line.regularPrice);
+    line.price = posMarkUp(posBestUnitPrice(line.basePrice, line.priceBreaks, line.qty, line.regularPrice));
   });
 }
 
 function posAddToCart(p, qty){
+  if (posDeptBlocked(p)) { posDeptApprove(p, qty); return; }
+  posJournal('item_added', { img: p.img, sku: p.sku, name: p.name, qty: qty || 1, after: Number(p.price_usd) || 0, amount: (Number(p.price_usd) || 0) * (qty || 1) });
   var serialRequired = !!p.serial_required;
   var isRedeemable = !!p.is_redeemable;
   // The lowest of the regular price, an active sale price and the attached
@@ -3993,7 +4345,7 @@ function posAddToCart(p, qty){
     var n = Math.max(1, qty || 1);
     for (var i = 0; i < n; i++) {
       POS.cart.push(Object.assign({ img: p.img, name: p.name, make_model: p.make_model, sku: p.sku || null,
-        price: basePrice, qty: 1 }, extra));
+        price: posMarkUp(basePrice), qty: 1 }, extra));
     }
     posSaveState();
     return;
@@ -4001,11 +4353,11 @@ function posAddToCart(p, qty){
   var ex = POS.cart.find(function(c){ return c.img === p.img && !c.serialRequired && !c.isRedeemable; });
   if (ex) {
     ex.qty += (qty || 1);
-    if (!ex.priceManual) ex.price = posBestUnitPrice(ex.basePrice, ex.priceBreaks, ex.qty, ex.regularPrice);
+    if (!ex.priceManual) ex.price = posMarkUp(posBestUnitPrice(ex.basePrice, ex.priceBreaks, ex.qty, ex.regularPrice));
   } else {
     var q = qty || 1;
     POS.cart.push(Object.assign({ img: p.img, name: p.name, make_model: p.make_model, sku: p.sku || null,
-      price: posBestUnitPrice(basePrice, priceBreaks, q, regularPrice), qty: q }, extra));
+      price: posMarkUp(posBestUnitPrice(basePrice, priceBreaks, q, regularPrice)), qty: q }, extra));
   }
   posSaveState();
 }
@@ -4071,6 +4423,7 @@ async function posRenderLockScreen(panel){
 }
 
 async function renderPOS(panel){
+  await posEnsureTill();   // open this terminal's till + register shift first, so the bar below shows "Shift open"
   if (!can('pos.access')) {
     panel.innerHTML = '<div style="padding:60px 20px;text-align:center;color:var(--muted)">' +
       '<div style="font-size:44px">🔒</div>' +
@@ -4202,6 +4555,9 @@ async function renderPOS(panel){
       '<b style="color:#fff">' + esc(c.name || '(no name)') + '</b>' +
       '<span style="background:' + col + ';color:#fff;font-size:' + posBarFS(9.5) + ';font-weight:800;padding:2px 6px;border-radius:3px;text-transform:uppercase">' + esc(c.price_tier || 'retail') + '</span>' +
       (c.tax_exempt ? '<span style="background:#dcfce7;color:#166534;font-size:' + posBarFS(9.5) + ';font-weight:800;padding:2px 6px;border-radius:3px;text-transform:uppercase" title="No GCT is charged on this customer\'s sales">tax exempt</span>' : '') +
+      // Say so on the ticket bar, or a cashier has no way to tell why this
+      // customer's prices sit above the shelf price.
+      (Number(c.markup_pct) > 0 ? '<span style="background:#fef3c7;color:#92400e;font-size:' + posBarFS(9.5) + ';font-weight:800;padding:2px 6px;border-radius:3px;text-transform:uppercase" title="Every line is priced ' + Number(c.markup_pct) + '% above list for this account">+' + Number(c.markup_pct) + '% markup</span>' : '') +
       (c.phone ? '<span style="color:#cbd5e1">' + esc(c.phone) + '</span>' : '') +
       (c.points_balance ? '<span style="color:#fde68a;font-weight:700">⭐ ' + c.points_balance + '</span>' : '') +
       (c.open_balance_cents > 0 ? '<span style="background:#fee2e2;color:#b91c1c;font-weight:700;padding:1px 6px;border-radius:3px">owes ' + posCents(c.open_balance_cents) + '</span>' : '') +
@@ -4240,8 +4596,8 @@ async function renderPOS(panel){
         '<span id="posNotifCount" style="display:none;position:absolute;top:-6px;right:-6px;min-width:16px;height:16px;padding:0 4px;border-radius:9px;background:#f59e0b;color:#111;font-size:10px;font-weight:900;line-height:16px;text-align:center">0</span>' +
       '</button>' +
       (shiftSession
-        ? '<button type="button" id="posShiftBtn" class="posBarBtn" style="background:rgba(22,163,74,.35)" title="Shift #' + shiftSession.id + ' open since ' + fmtDate(shiftSession.opened_at) + (shiftSession.opener_name ? ' by ' + esc(shiftSession.opener_name) : '') + '. Float ' + fmtMoney(shiftSession.opening_float) + '. Click to close.">🗄 Shift open · float ' + fmtMoney(shiftSession.opening_float) + '</button>'
-        : '<button type="button" id="posShiftBtn" class="posBarBtn" style="background:rgba(220,38,38,.45)" title="No cash drawer shift is open. Click to open one with a starting float.">🗄 No shift open</button>') +
+        ? '<button type="button" id="posShiftBtn" class="posBarBtn" style="background:rgba(22,163,74,.35)" title="Shift #' + shiftSession.id + ' open since ' + fmtDate(shiftSession.opened_at) + (shiftSession.opener_name ? ' by ' + esc(shiftSession.opener_name) : '') + '. Float ' + fmtMoney(shiftSession.opening_float) + '. Click to sign in / out or close the shift.">🗄 Shift open · ' + esc(CURRENT_ADMIN_NAME || 'signed in') + '</button>'
+        : '<button type="button" id="posShiftBtn" class="posBarBtn" style="background:rgba(220,38,38,.45)" title="No cash drawer shift is open. Click to open one, or to sign in / out.">🗄 No shift open</button>') +
       // Terminal name + how this till is reaching the app: on the shop LAN
       // ("Local"), or over the internet to visionautosolutions.com ("Internet").
       // Detected from the machine endpoint (cloud stub sets cloud:true) with a
@@ -4279,7 +4635,7 @@ async function renderPOS(panel){
                 'style="font-size:11px;color:#cbd5e1;display:flex;align-items:center;gap:6px;white-space:nowrap;background:rgba(255,255,255,.14);border:0;border-radius:5px;padding:5px 8px;cursor:pointer;font-family:inherit">' +
                 badge + ' <span style="opacity:.65">▾</span>' +
               '</button>' +
-              '<div id="posTermMenu" style="display:none;position:absolute;top:100%;right:0;margin-top:5px;width:330px;max-height:64vh;overflow-y:auto;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:10px;box-shadow:0 14px 36px rgba(0,0,0,.30);z-index:80"></div>' +
+              '<div id="posTermMenu" style="display:none;position:absolute;top:100%;right:0;margin-top:5px;width:330px;max-width:calc(100vw - 20px);max-height:64vh;overflow-y:auto;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:10px;box-shadow:0 14px 36px rgba(0,0,0,.30);z-index:80"></div>' +
             '</span>';
         }
         return '<span title="' + esc(tip) + '" style="font-size:11px;color:#cbd5e1;display:flex;align-items:center;gap:6px;white-space:nowrap">' + badge + '</span>';
@@ -4331,6 +4687,7 @@ async function renderPOS(panel){
             '<input id="posScan" placeholder="Scan, or qty*code → Enter" title="Type a quantity, *, then the barcode/part no. (e.g. 3*BMP-001) to add several units in one scan" autocomplete="off" style="width:100%;padding:9px 11px 9px 32px;border:2px solid #0891b2;border-radius:6px;font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace"/>' +
           '</div>' +
           '<input id="posSearch" placeholder="Search part no., name or vehicle… (commas for multi-term)" autocomplete="off" style="flex:1;min-width:190px;padding:9px 11px;border:1px solid var(--line);border-radius:6px;font-size:13px"/>' +
+          '<button type="button" id="posLostBtn" class="btn" title="Customer asked for a part we could not sell: record it for reordering and a call-back" style="padding:8px 11px;font-size:12.5px;white-space:nowrap">✗ Lost sale</button>' +
           '<div class="posViewGroup" role="group" aria-label="List view">' +
             posViewBtn('grid', '▦', 'Grid view') + posViewBtn('list', '☰', 'List view') + posViewBtn('compact', '≡', 'Compact list view') +
           '</div>' +
@@ -4421,6 +4778,8 @@ async function renderPOS(panel){
         '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#111827;color:#fff">' +
           '<button id="posCartToggle" title="Collapse / expand cart" style="background:rgba(255,255,255,.15);color:#fff;border:0;width:32px;height:32px;border-radius:6px;cursor:pointer;font-size:15px;font-weight:700">' + (POS.collapsed ? '◀' : '▶') + '</button>' +
           '<b id="posCartTitle" style="font-size:13px;letter-spacing:.5px;flex-shrink:0">' + (POS.collapsed ? '' : '🛒 CART') + '</b>' +
+          '<button type="button" id="posDeptChip" style="' + (POS.collapsed ? 'display:none;' : '') + 'background:rgba(255,255,255,.15);color:#fff;border:0;height:28px;padding:0 10px;border-radius:14px;cursor:pointer;font-size:12px;font-weight:700;margin-left:8px;white-space:nowrap;flex-shrink:0;font-family:inherit">🏬 ' + esc(posDeptLabel()) + '</button>' +
+          '<span id="posCollectWrap" style="display:none;margin-left:6px;flex-shrink:0"><select id="posCollectAt" title="Who collects payment for this ticket" style="height:28px;border-radius:14px;border:0;padding:0 8px;font-size:12px;font-weight:700;max-width:200px;font-family:inherit"></select></span>' +
           // Full screen only: subtotal / discount / tax / total move up here, in
           // line with the CART label and Exit, so #posCartTotals below can go to
           // zero height and #posCartItems gets that space. Filled by drawCart().
@@ -5219,19 +5578,23 @@ async function renderPOS(panel){
     items.querySelectorAll('.posQty').forEach(function(inp){
       inp.addEventListener('change', function(){
         var line = POS.cart[parseInt(inp.getAttribute('data-idx'), 10)];
+        var wasQty = line.qty;
         line.qty = Math.max(1, parseInt(inp.value, 10) || 1);
+        if (line.qty !== wasQty) posJournal('qty_changed', { img: line.img, sku: line.sku, name: line.name, before: wasQty, after: line.qty, qty: line.qty });
         // A manually-typed price (pos.price_override) is a deliberate call by
         // the cashier and must survive a quantity change; otherwise re-price
         // against this product's bulk tiers for the new quantity.
-        if (!line.priceManual) line.price = posBestUnitPrice(line.basePrice, line.priceBreaks, line.qty, line.regularPrice);
+        if (!line.priceManual) line.price = posMarkUp(posBestUnitPrice(line.basePrice, line.priceBreaks, line.qty, line.regularPrice));
         drawCart();
       });
     });
     items.querySelectorAll('.posPrice').forEach(function(inp){
       inp.addEventListener('change', function(){
         var line = POS.cart[parseInt(inp.getAttribute('data-pidx'), 10)];
+        var wasPrice = Number(line.price) || 0;
         line.price = Math.max(0, Number(inp.value) || 0);
         line.priceManual = true;
+        if (line.price !== wasPrice) posJournal('price_changed', { img: line.img, sku: line.sku, name: line.name, before: wasPrice, after: line.price, qty: line.qty, amount: (wasPrice - line.price) * (Number(line.qty) || 1) });
         drawCart();
       });
     });
@@ -5285,6 +5648,7 @@ async function renderPOS(panel){
           line.discNote = (line.discNote ? line.discNote + ' — ' : '') + 'approved by ' + appr.name;
         }
         if (isPct) line.discPct = raw; else line.disc = raw;
+        if (posLineDisc(line) !== was) posJournal('discount_changed', { img: line.img, sku: line.sku, name: line.name, before: was, after: posLineDisc(line), qty: line.qty, amount: posLineDisc(line) - was, note: line.discApprovedBy ? 'approved by ' + line.discApprovedBy : '' });
         drawCart();
       });
     });
@@ -5317,6 +5681,8 @@ async function renderPOS(panel){
     });
     items.querySelectorAll('[data-rm]').forEach(function(btn){
       btn.addEventListener('click', function(){
+        var gone = POS.cart[parseInt(btn.getAttribute('data-rm'), 10)];
+        if (gone) posJournal('item_removed', { img: gone.img, sku: gone.sku, name: gone.name, qty: gone.qty, amount: posLineNet(gone) });
         POS.cart.splice(parseInt(btn.getAttribute('data-rm'), 10), 1);
         drawCart();
       });
@@ -5353,6 +5719,7 @@ async function renderPOS(panel){
   // re-checks every one of these on write -- this is only so the operator
   // isn't offered a button that will 403.
   function posApplyPerms(){
+    posLoadDept();
     if (MY_PERMS_FULL) return;
     var apply = function(sel, mode){
       document.querySelectorAll(sel).forEach(function(el){
@@ -5856,6 +6223,10 @@ async function renderPOS(panel){
         open_balance_cents: m.open_balance_cents || 0, last_vehicle: m.last_vehicle || null,
         credit_limit_usd: m.credit_limit_usd, payment_terms_days: m.payment_terms_days, discount_limit_pct: m.discount_limit_pct,
         tax_exempt: !!m.tax_exempt,
+        // What this account is charged ABOVE list. posMarkUp() applies it to
+        // every non-manually-priced line as the customer is attached, so the
+        // ticket shows the increased unit price straight away.
+        markup_pct: m.markup_pct != null ? Number(m.markup_pct) : null,
       };
       POS.custName = m.name || POS.custName;
       POS.custPhone = m.phone || POS.custPhone;
@@ -6053,6 +6424,17 @@ async function renderPOS(panel){
   });
 
   document.getElementById('posSearch').addEventListener('input', drawGrid);
+  // Lost sale: the dialog lives in /assets/lost-sale.js, loaded on first use.
+  document.getElementById('posLostBtn').addEventListener('click', function(){
+    var q = (document.getElementById('posSearch').value || '').trim();
+    var go = function(){ window.VisionLostSale.open({ q: q, onSaved: function(){ posToast('Lost sale recorded'); } }); };
+    if (window.VisionLostSale) return go();
+    var s = document.createElement('script');
+    s.src = '/assets/lost-sale.js';
+    s.onload = go;
+    s.onerror = function(){ posToast('Could not load the lost-sale form'); };
+    document.head.appendChild(s);
+  });
   // ↑/↓ from inside the search box walk the results list and Enter adds the
   // highlighted part -- without needing Legacy keys mode or moving focus off
   // the box (the global counter shortcuts skip arrows while a field is
@@ -6263,6 +6645,7 @@ async function renderPOS(panel){
     if (!posRequireCustomer()) return;
     // Operators without pos.finalise_invoice don't ring the sale -- they save
     // an order and a cashier takes payment / mints the invoice.
+    if (POS_DEPT && POS_DEPT.general && POS.collectAt) return posSaveCartAsOrder(refreshBar);
     if (!can('pos.finalise_invoice')) return posSaveCartAsOrder(refreshBar);
     openTenderModal(refreshBar);
   });
@@ -6270,9 +6653,11 @@ async function renderPOS(panel){
   document.getElementById('posClear').addEventListener('click', async function(){
     if (!POS.cart.length) return;
     if (!(await posConfirm('Empty the cart?', { ok:'Empty', danger:true }))) return;
+    posJournal('cart_cleared', { qty: POS.cart.length, amount: POS.cart.reduce(function(s, l){ return s + posLineNet(l); }, 0) });
     POS.cart = [];
     drawCart();
   });
+  window.__posRedraw = drawCart;   // lets a manager approval (posDeptApprove) redraw this cart
 
   // Counter keyboard shortcuts. A till gets driven by hand, not by mouse.
   if (!window.__posKeys) {
@@ -6383,6 +6768,7 @@ function posCustomerModal(after){
             open_balance_cents: m.open_balance_cents || 0,
             last_vehicle: m.last_vehicle || null,
             last_address: m.last_address || null,
+            markup_pct: m.markup_pct != null ? Number(m.markup_pct) : null,
           };
           POS.custName = m.name || POS.custName;
           POS.custPhone = m.phone || POS.custPhone;
@@ -6780,6 +7166,7 @@ async function posRecallModal(after){
           var h = res.hold;
           var items = posItemsArray(h.items_json);
           POS = posBlankTicket();
+          posJournal('hold_recalled', { qty: items.length, note: 'hold ' + id + (h.customer_name ? ' · ' + h.customer_name : '') });
           // items_json stores exactly what posCartPayload() sends --
           // unit_price_usd/discount_usd (dollars), not the _cents names.
           POS.cart = items.map(function(it){
@@ -6799,7 +7186,7 @@ async function posRecallModal(after){
             try {
               var lk = await api('/api/admin/pos/customer-lookup?q=' + encodeURIComponent(h.customer_name || ''));
               var m = (lk.matches || []).find(function(x){ return x.id === h.customer_id; });
-              if (m) POS.customer = { id: m.id, name: m.name, phone: m.phone, email: m.email, price_tier: m.price_tier, points_balance: m.points_balance || 0, open_balance_cents: m.open_balance_cents || 0 };
+              if (m) POS.customer = { id: m.id, name: m.name, phone: m.phone, email: m.email, price_tier: m.price_tier, points_balance: m.points_balance || 0, open_balance_cents: m.open_balance_cents || 0, markup_pct: m.markup_pct != null ? Number(m.markup_pct) : null };
             } catch (_) {}
           }
           posSaveState();
@@ -7070,7 +7457,13 @@ function posSaveCartAsOrder(after){
       vehicle_info: POS.vehicle || null,
       sales_rep_id: posRepIdForPayload(), sales_rep_name: POS.rep ? POS.rep.name : null,
       notes: POS.notes || null, no_tax: !!POS.noTax, fulfilment: f,
+      collect_station_id: (POS_DEPT && POS_DEPT.general && POS.collectAt) ? Number(POS.collectAt) : null,
       ship_instructions: g('soInstr') || null,
+      // The account markup already baked into every unit_price_usd above, so
+      // the server re-applies it only if this is missing or stale (an older
+      // till, or a sale posted straight at the API) rather than doubling it.
+      markup_applied_pct: POS.customer && Number(POS.customer.markup_pct) > 0
+        ? Number(POS.customer.markup_pct) : 0,
     };
     if (f !== 'pickup') {
       body.ship_method = soMethodSel.value || null;
@@ -7113,59 +7506,232 @@ function posSaveCartAsOrder(after){
 // Counter operators without pos.finalise_invoice save orders here; a cashier
 // picks one up, takes payment (replayed through the real /pos/sale path so
 // stock + the invoice are minted exactly as a normal sale), and it closes.
-var CASHIER_VIEW_ID = null;
+var CASHIER_VIEW_ID = null, CASHIER_POLL = null;
+// Cashier: one screen, three panes. Left, the orders waiting for payment;
+// centre, the tender window for the order being paid, with this till's shift on
+// it; right, the invoices already paid on that shift. The queues refresh on
+// their own; the tender window is left alone so a half-entered payment is not
+// wiped by a refresh.
+function renderCashierOrder(panel, id){ CASHIER_VIEW_ID = id; return renderCashier(panel); }
 async function renderCashier(panel){
-  if (CASHIER_VIEW_ID) return renderCashierOrder(panel, CASHIER_VIEW_ID);
-  panel.innerHTML = '<div class="empty">Loading orders…</div>';
-  // The order queue (order first at the counter, pay at the till) needs the
-  // pos_orders table, which this backend does not have -- the endpoint 404s
-  // here. That used to kill the whole screen on the way in, so a cashier could
-  // not reach anything on it. Invoice recall only needs pos_sales, so the queue
-  // degrades to a note and the rest of the screen still works.
-  var rows = [];
-  var queueErr = null;
-  try { rows = (await api('/api/admin/pos/orders?status=pending')).orders || []; }
-  catch (e) { queueErr = e.message; }
+  if (CASHIER_POLL) { clearInterval(CASHIER_POLL); CASHIER_POLL = null; }
+  try { await api('/api/cash/till/ensure', { method: 'POST', body: {} }); } catch (_) {}   // terminal open -> shift open
+  var paneHead = 'padding:9px 12px;background:var(--card-soft);border-bottom:1px solid var(--line);font-weight:800;font-size:12.5px;display:flex;justify-content:space-between;align-items:center;gap:8px';
   panel.innerHTML =
-    '<div style="padding:12px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line);flex-wrap:wrap">' +
-      '<h3 style="margin:0;font-size:16px">💵 Cashier — orders awaiting payment</h3>' +
-      '<span style="color:var(--muted);font-size:12.5px">' + rows.length + ' pending</span>' +
-      // Recalling an invoice is never "which of today's did I mean" -- the
-      // customer is standing there with a printed copy from any date. This
-      // searches every sale on file, not just the orders still unpaid, which
-      // was all this screen could show before.
-      '<div style="margin-left:auto;display:flex;gap:6px;align-items:center">' +
+    '<div style="padding:10px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line);flex-wrap:wrap">' +
+      '<h3 style="margin:0;font-size:16px">💵 Cashier</h3>' +
+      '<div style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
         '<input id="cashRecall" class="fld" style="width:230px" placeholder="Recall invoice: no., name, phone, amount"/>' +
         '<button class="btn" id="cashRecallGo" style="font-size:12px">🔎 Find</button>' +
         '<button class="btn" id="cashRefresh" style="font-size:12px">↻ Refresh</button>' +
       '</div>' +
     '</div>' +
     '<div id="cashRecallBox"></div>' +
-    (rows.length
-      ? '<table><thead><tr><th>Order</th><th>Taken</th><th>By</th><th>Customer</th><th>Leaves</th><th class="r">Units</th><th class="r">Total</th><th></th></tr></thead><tbody>' +
-        rows.map(function(o){
-          return '<tr class="cashRow" data-id="' + o.id + '" style="cursor:pointer">' +
-            '<td><b>#' + o.id + '</b></td>' +
-            '<td>' + esc(fmtDate(o.created_at)) + '</td>' +
-            '<td>' + esc(o.taken_by_name || '—') + '</td>' +
-            '<td>' + esc(o.customer_name || 'Walk-in') + (o.customer_phone ? ' · ' + esc(o.customer_phone) : '') + '</td>' +
-            '<td>' + esc(o.ship_instructions ? '📝 ' : '') + (o.sales_rep_name ? 'rep ' + esc(o.sales_rep_name) : '') + '</td>' +
-            '<td class="r">' + (o.unit_count || 0) + '</td>' +
-            '<td class="r"><b>' + fmtMoney(o.total_usd || 0) + '</b></td>' +
-            '<td class="r"><button class="btn ok" data-take="' + o.id + '" style="font-size:11.5px">Take payment ›</button></td>' +
-          '</tr>';
-        }).join('') + '</tbody></table>'
-      : (queueErr
-          ? '<div class="empty" style="padding:26px 32px;line-height:1.55">' +
-              '<b>The order queue is not available on this server.</b><br/>' +
-              '<span style="font-size:12.5px">Order-first checkout (take the order at the counter, pay at the till) ' +
-              'needs tables this installation does not have, so there is nothing to queue. ' +
-              'Invoice recall above works on every sale on file.</span></div>'
-          : '<div class="empty" style="padding:32px">No orders waiting. When a counter operator saves an order it shows up here.</div>'));
-  var rf = document.getElementById('cashRefresh');
-  if (rf) rf.addEventListener('click', function(){ renderCashier(panel); });
+    '<div id="cashGrid" style="display:grid;grid-template-columns:' + (window.innerWidth < 900 ? '1fr' : 'minmax(230px,300px) minmax(340px,1fr) minmax(230px,320px)') + ';min-height:calc(100vh - 170px)">' +
+      '<section style="border-right:1px solid var(--line);display:flex;flex-direction:column;min-width:0">' +
+        '<div style="' + paneHead + '">⏳ Due for payment <span id="cashPendN" style="color:var(--muted);font-weight:600"></span></div>' +
+        '<div id="cashPending" style="flex:1;overflow-y:auto;max-height:calc(100vh - 210px)"></div>' +
+      '</section>' +
+      '<section id="cashTender" style="min-width:0;overflow-y:auto"></section>' +
+      '<section style="border-left:1px solid var(--line);display:flex;flex-direction:column;min-width:0">' +
+        '<div style="' + paneHead + '">✅ Paid <span id="cashPaidN" style="color:var(--muted);font-weight:600"></span></div>' +
+        '<div id="cashPaid" style="flex:1;overflow-y:auto;max-height:calc(100vh - 210px)"></div>' +
+      '</section>' +
+    '</div>';
 
-  // ---- invoice recall ----------------------------------------------------
+  var paid = null;   // last /api/cash/paid reply: { station, shift, totals, sales }
+  var selBg = 'background:rgba(8,145,178,.14);box-shadow:inset 4px 0 0 #0891b2;';
+
+  function shiftBoxHtml(){
+    var sh = paid && paid.shift;
+    var st = paid && paid.station;
+    return '<div id="cashShiftBox" style="margin:12px 14px 0;border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;gap:6px 16px;flex-wrap:wrap;align-items:center;font-size:12.5px;background:' + (sh ? 'rgba(22,163,74,.10)' : 'rgba(220,38,38,.10)') + '">' +
+      (sh
+        ? '<b style="font-size:13.5px">🗄 ' + esc(st ? st.name : 'Till') + ' · Shift #' + sh.id + '</b>' +
+          '<span>Opened ' + esc(fmtDate(sh.opened_at)) + (sh.cashier ? ' by <b>' + esc(sh.cashier) + '</b>' : '') + '</span>' +
+          '<span>Float <b>' + fmtMoney(sh.opening_float) + '</b></span>' +
+          '<span>Paid <b>' + paid.totals.count + '</b> · <b>' + fmtMoney(paid.totals.total) + '</b></span>'
+        : '<b style="font-size:13.5px">🗄 No shift open</b>' + (st ? '<span style="color:var(--muted)">' + esc(st.name) + '</span>' : '')) +
+      '</div>';
+  }
+  function paintShiftBox(){
+    var box = document.getElementById('cashShiftBox');
+    if (box) box.outerHTML = shiftBoxHtml();
+  }
+
+  async function loadQueues(){
+    var pend = document.getElementById('cashPending');
+    if (!pend) { if (CASHIER_POLL) { clearInterval(CASHIER_POLL); CASHIER_POLL = null; } return; }   // left the tab
+    var rows = [], err = null;
+    try { rows = (await api('/api/admin/pos/orders?status=pending')).orders || []; } catch (e) { err = e.message; }
+    pend = document.getElementById('cashPending');
+    if (!pend) return;
+    document.getElementById('cashPendN').textContent = rows.length ? rows.length + ' waiting' : '';
+    pend.innerHTML = rows.length
+      ? rows.map(function(o){
+          return '<div data-oid="' + o.id + '" style="padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer;' + (o.id === CASHIER_VIEW_ID ? selBg : '') + '">' +
+            '<div style="display:flex;justify-content:space-between;gap:8px"><b>Order #' + o.id + '</b><b style="color:var(--red)">' + fmtMoney(o.total_usd || 0) + '</b></div>' +
+            '<div style="font-size:12.5px;margin-top:2px">' + esc(o.customer_name || 'Walk-in') + (o.customer_phone ? ' · ' + esc(o.customer_phone) : '') + '</div>' +
+            '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + esc(fmtDate(o.created_at)) +
+              (o.taken_by_name ? ' · by ' + esc(o.taken_by_name) : '') + (o.cashier_station ? ' · → ' + esc(o.cashier_station) : '') + '</div>' +
+          '</div>';
+        }).join('')
+      : '<div class="empty" style="padding:22px 14px;font-size:12.5px">' + (err ? esc(err) : 'No orders waiting. When the counter saves an order it appears here.') + '</div>';
+    pend.querySelectorAll('[data-oid]').forEach(function(el){
+      el.addEventListener('click', function(){
+        CASHIER_VIEW_ID = parseInt(el.getAttribute('data-oid'), 10);
+        pend.querySelectorAll('[data-oid]').forEach(function(x){ x.style.background = ''; x.style.boxShadow = ''; });
+        el.style.background = 'rgba(8,145,178,.14)'; el.style.boxShadow = 'inset 4px 0 0 #0891b2';
+        drawTender();
+      });
+    });
+    if (CASHIER_VIEW_ID && !rows.some(function(o){ return o.id === CASHIER_VIEW_ID; })) { CASHIER_VIEW_ID = null; drawTender(); }
+
+    try { paid = await api('/api/cash/paid'); } catch (_) { paid = null; }
+    var pl = document.getElementById('cashPaid');
+    if (!pl) return;
+    var sales = (paid && paid.sales) || [];
+    document.getElementById('cashPaidN').textContent = paid
+      ? (paid.scope === 'shift' ? 'this shift · ' : 'today · ') + paid.totals.count + ' · ' + fmtMoney(paid.totals.total)
+      : '';
+    pl.innerHTML = sales.length
+      ? sales.map(function(s){
+          return '<div data-sid="' + s.id + '" style="padding:9px 12px;border-bottom:1px solid var(--line);cursor:pointer;' + (s.voided ? 'opacity:.5;' : '') + '">' +
+            '<div style="display:flex;justify-content:space-between;gap:8px"><b>' + esc(s.invoice_number || s.receipt_number || ('#' + s.id)) + '</b><b>' + fmtMoney(s.total_usd) + '</b></div>' +
+            '<div style="font-size:12.5px;margin-top:2px">' + esc(s.customer_name || 'Walk-in') + '</div>' +
+            '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + esc(fmtDate(s.created_at)) + ' · ' + esc(s.payment_method || '') +
+              (s.cashier_name ? ' · ' + esc(s.cashier_name) : '') + (s.voided ? ' · voided' : '') + '</div>' +
+          '</div>';
+        }).join('')
+      : '<div class="empty" style="padding:22px 14px;font-size:12.5px">Nothing paid ' + (paid && paid.scope === 'shift' ? 'on this shift' : 'today') + ' yet.</div>';
+    pl.querySelectorAll('[data-sid]').forEach(function(el){
+      el.addEventListener('click', function(){ posSaleDetail(parseInt(el.getAttribute('data-sid'), 10), function(){ loadQueues(); }); });
+    });
+    paintShiftBox();
+  }
+
+  // Centre pane: the tender window for the selected order.
+  async function drawTender(){
+    var box = document.getElementById('cashTender');
+    if (!box) return;
+    if (!CASHIER_VIEW_ID) {
+      box.innerHTML = shiftBoxHtml() +
+        '<div class="empty" style="padding:40px 24px;line-height:1.6">Pick an order on the left to take payment.<br/>' +
+        '<span style="font-size:12.5px;color:var(--muted)">Paid invoices appear on the right.</span></div>';
+      return;
+    }
+    var id = CASHIER_VIEW_ID;
+    box.innerHTML = shiftBoxHtml() + '<div class="empty">Loading order #' + id + '…</div>';
+    var d;
+    try { d = await api('/api/admin/pos/orders/' + id); }
+    catch (e) { box.innerHTML = shiftBoxHtml() + '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return; }
+    if (CASHIER_VIEW_ID !== id) return;   // another order was picked meanwhile
+    var o = d.order, pay = d.payload || {}, items = d.items || [];
+    var guide = (o.total_cents || 0) / 100;
+    var ship = pay.fulfilment && pay.fulfilment !== 'pickup';
+    box.innerHTML = shiftBoxHtml() +
+      '<div style="padding:12px 14px;display:flex;align-items:center;gap:10px">' +
+        '<h3 style="margin:0;font-size:16px">Order #' + o.id + '</h3>' +
+        (o.status !== 'pending' ? badge(o.status, o.status === 'completed' ? 'ok' : 'bad') : '') +
+        '<button class="btn" id="cashDeselect" style="margin-left:auto;font-size:11.5px">✕ Close</button>' +
+        '<button class="btn" id="cashCancel" style="background:#fee2e2;color:#b91c1c;font-size:11.5px">Cancel order</button>' +
+      '</div>' +
+      '<div style="padding:0 14px 16px;display:grid;grid-template-columns:1fr;gap:16px;align-items:start">' +
+        '<div style="min-width:0">' +
+          '<div style="color:var(--muted);font-size:12.5px;margin-bottom:8px">' +
+            esc(o.customer_name || 'Cash Customer – Walk-in') + (o.customer_phone ? ' · ' + esc(o.customer_phone) : '') +
+            (pay.sales_rep_name ? ' · rep ' + esc(pay.sales_rep_name) : '') +
+            (pay.vehicle_info ? ' · ' + esc(pay.vehicle_info) : '') + '</div>' +
+          '<table><thead><tr><th>Part</th><th>Description</th><th class="r">Qty</th><th class="r">Unit</th></tr></thead><tbody>' +
+            items.map(function(it){
+              return '<tr><td><code>' + esc(it.sku || it.product_img || '—') + '</code></td>' +
+                '<td>' + esc(it.name || (pay.items || []).reduce(function(a, x){ return x.product_img === it.product_img ? x.description : a; }, '') || '') + '</td>' +
+                '<td class="r">' + it.qty + '</td><td class="r">' + fmtMoney(it.unit_price_usd || 0) + '</td></tr>';
+            }).join('') + '</tbody></table>' +
+          (ship
+            ? '<div style="margin-top:12px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:12.5px">' +
+              '<b>' + esc((pay.fulfilment || '').toUpperCase()) + '</b>' + (pay.ship_method ? ' via ' + esc(pay.ship_method) : '') +
+              (pay.ship_courier ? ' (' + esc(pay.ship_courier) + ')' : '') +
+              (pay.ship_fee_usd ? ' · fee ' + fmtMoney(pay.ship_fee_usd) : '') + '<br>' +
+              esc([pay.ship_name, pay.ship_phone].filter(Boolean).join(' · ')) + '<br>' +
+              esc([pay.ship_line1, pay.ship_line2, pay.ship_city, pay.ship_parish].filter(Boolean).join(', ')) +
+              (pay.tracking_number ? '<br><span style="font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:700">🏷 ' + esc(pay.tracking_number) + '</span>' : '') +
+              (pay.notify_methods && pay.notify_methods.length ? '<br><span style="color:var(--muted)">Notify: ' + esc(pay.notify_methods.join(', ')) + '</span>' : '') +
+              (pay.tracking_number ? '<br><button type="button" class="btn" id="cashLabel" style="margin-top:6px;font-size:11.5px">🏷 Print shipping label</button>' : '') +
+              '</div>'
+            : '') +
+          (o.ship_instructions ? '<div style="margin-top:10px;background:#fef9c3;color:#111;border:1px solid #fde68a;border-radius:8px;padding:9px 12px;font-size:12.5px"><b>Instructions:</b> ' + esc(o.ship_instructions) + '</div>' : '') +
+        '</div>' +
+        '<div style="border:1px solid var(--line);border-radius:10px;padding:14px;background:var(--card-soft2);order:-1">' +
+          '<div style="font-size:12px;color:var(--muted)">Amount to collect <span style="font-size:10.5px">(guide — final figure is calculated on save)</span></div>' +
+          '<div style="font-size:28px;font-weight:900;color:var(--red);margin:2px 0 12px">' + fmtMoney(guide) + '</div>' +
+          '<label class="lbl">Payment method</label>' +
+          '<select id="cashMethod" class="fld">' +
+            ['cash', 'card', 'cheque', 'bank', 'account'].map(function(m){ return '<option value="' + m + '">' + m.charAt(0).toUpperCase() + m.slice(1) + '</option>'; }).join('') +
+          '</select>' +
+          '<div id="cashCashRow"><label class="lbl">Cash tendered</label><input id="cashTendered" type="number" step="0.01" min="0" class="fld" placeholder="' + guide.toFixed(2) + '"/></div>' +
+          '<div id="cashChange" style="font-size:13px;margin-top:6px"></div>' +
+          '<div id="cashRefRow" style="display:none"><label class="lbl">Reference</label><input id="cashRef" class="fld" placeholder="auth / cheque / PO no."/></div>' +
+          '<button class="btn ok" id="cashInvoice" style="width:100%;margin-top:12px;padding:12px;font-weight:800">✅ Take payment &amp; invoice</button>' +
+          '<div id="cashMsg" style="font-size:12px;margin-top:8px"></div>' +
+        '</div>' +
+      '</div>';
+
+    document.getElementById('cashDeselect').addEventListener('click', function(){ CASHIER_VIEW_ID = null; drawTender(); loadQueues(); });
+    var cashLabel = document.getElementById('cashLabel');
+    if (cashLabel) cashLabel.addEventListener('click', function(){
+      posDocLabel(posOrderLabelData({
+        name: pay.ship_name, phone: pay.ship_phone, line1: pay.ship_line1, line2: pay.ship_line2,
+        city: pay.ship_city, parish: pay.ship_parish, method: pay.ship_method, courier: pay.ship_courier,
+        tracking: pay.tracking_number, instructions: o.ship_instructions,
+      }, 'Order #' + o.id, items.map(function(it){ return { qty: it.qty }; })));
+    });
+    var mSel = document.getElementById('cashMethod');
+    var tIn = document.getElementById('cashTendered');
+    function paintChange(){
+      var ch = document.getElementById('cashChange');
+      if (!ch) return;
+      if (mSel.value !== 'cash' || tIn.value === '') { ch.textContent = ''; return; }
+      var diff = Number(tIn.value) - guide;
+      ch.innerHTML = diff >= 0 ? 'Change due: <b>' + fmtMoney(diff) + '</b>' : '<span style="color:var(--red)">Short by <b>' + fmtMoney(-diff) + '</b></span>';
+    }
+    tIn.addEventListener('input', paintChange);
+    mSel.addEventListener('change', function(){
+      document.getElementById('cashCashRow').style.display = this.value === 'cash' ? 'block' : 'none';
+      document.getElementById('cashRefRow').style.display = ['card', 'cheque', 'bank', 'account'].indexOf(this.value) !== -1 ? 'block' : 'none';
+      paintChange();
+    });
+    document.getElementById('cashCancel').addEventListener('click', async function(){
+      if (!(await posConfirm('Cancel order #' + o.id + '? The counter operator would have to ring it again.', { ok: 'Cancel order', danger: true }))) return;
+      try { await api('/api/admin/pos/orders/' + o.id + '/cancel', { method: 'POST' }); CASHIER_VIEW_ID = null; drawTender(); loadQueues(); }
+      catch (e) { posToast(e.message, true); }
+    });
+    document.getElementById('cashInvoice').addEventListener('click', async function(){
+      var method = mSel.value;
+      var p = { method: method, amount_usd: null, reference: null, amount_tendered: null };
+      if (method === 'cash') p.amount_tendered = tIn.value === '' ? guide : Number(tIn.value);
+      else p.reference = (document.getElementById('cashRef').value || '').trim() || null;
+      var msg = document.getElementById('cashMsg'); msg.style.color = 'var(--muted)'; msg.textContent = 'Posting…';
+      this.disabled = true;
+      try {
+        var res = await api('/api/admin/pos/orders/' + o.id + '/invoice', { method: 'POST', body: { payments: [p] } });
+        var s = res.sale || {};
+        CASHIER_VIEW_ID = null;
+        drawTender();
+        loadQueues();
+        if (await posConfirm('Invoice ' + (s.invoice_number || '#' + s.id) + ' — ' + fmtMoney(s.total_usd || guide) +
+            (s.change_due ? '\n\nChange due: ' + fmtMoney(s.change_due) : '') + '\n\nPrint it now?', { ok: 'Print', cancel: 'Not now' })) {
+          try { var full = await api('/api/admin/pos/sales/' + s.id); posPrintDoc('invoice', posSaleToDocData(full, POS_SHOP)); } catch (_) {}
+        }
+      } catch (e) {
+        this.disabled = false; msg.style.color = 'var(--red)'; msg.textContent = e.message;
+      }
+    });
+  }
+
+  document.getElementById('cashRefresh').addEventListener('click', function(){ loadQueues(); });
+
+  // ---- invoice recall: every sale on file, not just this shift ----------
   var recallBox = document.getElementById('cashRecallBox');
   var recallIn = document.getElementById('cashRecall');
   async function doRecall(){
@@ -7205,124 +7771,16 @@ async function renderCashier(panel){
       }).join('') + '</tbody></table>';
     var clr = document.getElementById('cashRecallClear');
     if (clr) clr.addEventListener('click', function(){ recallIn.value = ''; recallBox.innerHTML = ''; });
-    // posSaleDetail already knows how to show a finished sale -- its lines,
-    // tenders, returns, and the reprint and refund actions -- so a recalled
-    // invoice opens in exactly the same view as one reached from the sales
-    // list, rather than a second half-built one.
     recallBox.querySelectorAll('[data-recall-open]').forEach(function(b){
-      b.addEventListener('click', function(){
-        posSaleDetail(parseInt(b.getAttribute('data-recall-open'), 10), function(){ doRecall(); });
-      });
+      b.addEventListener('click', function(){ posSaleDetail(parseInt(b.getAttribute('data-recall-open'), 10), function(){ doRecall(); }); });
     });
   }
-  var rgo = document.getElementById('cashRecallGo');
-  if (rgo) rgo.addEventListener('click', doRecall);
-  if (recallIn) recallIn.addEventListener('keydown', function(e){ if (e.key === 'Enter') doRecall(); });
-  panel.querySelectorAll('.cashRow, [data-take]').forEach(function(el){
-    el.addEventListener('click', function(e){
-      e.stopPropagation();
-      CASHIER_VIEW_ID = parseInt(el.getAttribute('data-id') || el.getAttribute('data-take'), 10);
-      renderCashierOrder(panel, CASHIER_VIEW_ID);
-    });
-  });
-}
+  document.getElementById('cashRecallGo').addEventListener('click', doRecall);
+  recallIn.addEventListener('keydown', function(e){ if (e.key === 'Enter') doRecall(); });
 
-async function renderCashierOrder(panel, id){
-  panel.innerHTML = '<div class="empty">Loading order #' + id + '…</div>';
-  var d;
-  try { d = await api('/api/admin/pos/orders/' + id); }
-  catch (e) { panel.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return; }
-  var o = d.order, pay = d.payload || {}, items = d.items || [];
-  var guide = (o.total_cents || 0) / 100;
-  var ship = pay.fulfilment && pay.fulfilment !== 'pickup';
-  panel.innerHTML =
-    '<div style="padding:12px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line)">' +
-      '<button class="btn" id="cashBack">‹ All orders</button>' +
-      '<h3 style="margin:0;font-size:16px">Order #' + o.id + '</h3>' +
-      (o.status !== 'pending' ? badge(o.status, o.status === 'completed' ? 'ok' : 'bad') : '') +
-      '<button class="btn" id="cashCancel" style="margin-left:auto;background:#fee2e2;color:#b91c1c;font-size:11.5px">Cancel order</button>' +
-    '</div>' +
-    '<div style="padding:16px;display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:start">' +
-      '<div>' +
-        '<div style="color:var(--muted);font-size:12.5px;margin-bottom:8px">' +
-          esc(o.customer_name || 'Cash Customer – Walk-in') + (o.customer_phone ? ' · ' + esc(o.customer_phone) : '') +
-          (pay.sales_rep_name ? ' · rep ' + esc(pay.sales_rep_name) : '') +
-          (pay.vehicle_info ? ' · ' + esc(pay.vehicle_info) : '') + '</div>' +
-        '<table><thead><tr><th>Part</th><th>Description</th><th class="r">Qty</th><th class="r">Unit</th></tr></thead><tbody>' +
-          items.map(function(it){
-            return '<tr><td><code>' + esc(it.sku || it.product_img || '—') + '</code></td>' +
-              '<td>' + esc(it.name || (pay.items || []).reduce(function(a,x){ return x.product_img === it.product_img ? x.description : a; }, '') || '') + '</td>' +
-              '<td class="r">' + it.qty + '</td><td class="r">' + fmtMoney(it.unit_price_usd || 0) + '</td></tr>';
-          }).join('') + '</tbody></table>' +
-        (ship
-          ? '<div style="margin-top:12px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:12.5px">' +
-            '<b>' + esc((pay.fulfilment || '').toUpperCase()) + '</b>' + (pay.ship_method ? ' via ' + esc(pay.ship_method) : '') +
-            (pay.ship_courier ? ' (' + esc(pay.ship_courier) + ')' : '') +
-            (pay.ship_fee_usd ? ' · fee ' + fmtMoney(pay.ship_fee_usd) : '') + '<br>' +
-            esc([pay.ship_name, pay.ship_phone].filter(Boolean).join(' · ')) + '<br>' +
-            esc([pay.ship_line1, pay.ship_line2, pay.ship_city, pay.ship_parish].filter(Boolean).join(', ')) +
-            (pay.tracking_number ? '<br><span style="font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:700">🏷 ' + esc(pay.tracking_number) + '</span>' : '') +
-            (pay.notify_methods && pay.notify_methods.length ? '<br><span style="color:var(--muted)">Notify: ' + esc(pay.notify_methods.join(', ')) + '</span>' : '') +
-            (pay.tracking_number ? '<br><button type="button" class="btn" id="cashLabel" style="margin-top:6px;font-size:11.5px">🏷 Print shipping label</button>' : '') +
-            '</div>'
-          : '') +
-        (o.ship_instructions ? '<div style="margin-top:10px;background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:9px 12px;font-size:12.5px"><b>Instructions:</b> ' + esc(o.ship_instructions) + '</div>' : '') +
-      '</div>' +
-      '<div style="border:1px solid var(--line);border-radius:10px;padding:14px;background:var(--card-soft2)">' +
-        '<div style="font-size:12px;color:var(--muted)">Amount to collect <span style="font-size:10.5px">(guide — final figure is calculated on save)</span></div>' +
-        '<div style="font-size:26px;font-weight:900;color:var(--red);margin:2px 0 12px">' + fmtMoney(guide) + '</div>' +
-        '<label class="lbl">Payment method</label>' +
-        '<select id="cashMethod" class="fld">' +
-          ['cash','card','cheque','bank','account'].map(function(m){ return '<option value="' + m + '">' + m.charAt(0).toUpperCase() + m.slice(1) + '</option>'; }).join('') +
-        '</select>' +
-        '<div id="cashCashRow"><label class="lbl">Cash tendered (USD)</label><input id="cashTendered" type="number" step="0.01" min="0" class="fld" placeholder="' + guide.toFixed(2) + '"/></div>' +
-        '<div id="cashRefRow" style="display:none"><label class="lbl">Reference</label><input id="cashRef" class="fld" placeholder="auth / cheque / PO no."/></div>' +
-        '<button class="btn ok" id="cashInvoice" style="width:100%;margin-top:12px;padding:11px;font-weight:800">✅ Take payment &amp; invoice</button>' +
-        '<div id="cashMsg" style="font-size:12px;margin-top:8px"></div>' +
-      '</div>' +
-    '</div>';
-  document.getElementById('cashBack').addEventListener('click', function(){ CASHIER_VIEW_ID = null; renderCashier(panel); });
-  var cashLabel = document.getElementById('cashLabel');
-  if (cashLabel) cashLabel.addEventListener('click', function(){
-    posDocLabel(posOrderLabelData({
-      name: pay.ship_name, phone: pay.ship_phone, line1: pay.ship_line1, line2: pay.ship_line2,
-      city: pay.ship_city, parish: pay.ship_parish, method: pay.ship_method, courier: pay.ship_courier,
-      tracking: pay.tracking_number, instructions: o.ship_instructions,
-    }, 'Order #' + o.id, items.map(function(it){ return { qty: it.qty }; })));
-  });
-  var mSel = document.getElementById('cashMethod');
-  mSel.addEventListener('change', function(){
-    document.getElementById('cashCashRow').style.display = this.value === 'cash' ? 'block' : 'none';
-    document.getElementById('cashRefRow').style.display = ['card','cheque','bank','account'].indexOf(this.value) !== -1 ? 'block' : 'none';
-  });
-  document.getElementById('cashCancel').addEventListener('click', async function(){
-    if (!(await posConfirm('Cancel order #' + o.id + '? The counter operator would have to ring it again.', { ok:'Cancel order', danger:true }))) return;
-    try { await api('/api/admin/pos/orders/' + o.id + '/cancel', { method:'POST' }); CASHIER_VIEW_ID = null; renderCashier(panel); }
-    catch (e) { posToast(e.message, true); }
-  });
-  document.getElementById('cashInvoice').addEventListener('click', async function(){
-    var method = mSel.value;
-    var p = { method: method, amount_usd: null, reference: null, amount_tendered: null };
-    if (method === 'cash') {
-      var tv = document.getElementById('cashTendered').value;
-      p.amount_tendered = tv === '' ? guide : Number(tv);
-    } else {
-      p.reference = (document.getElementById('cashRef').value || '').trim() || null;
-    }
-    var msg = document.getElementById('cashMsg'); msg.style.color = 'var(--muted)'; msg.textContent = 'Posting…';
-    this.disabled = true;
-    try {
-      var res = await api('/api/admin/pos/orders/' + o.id + '/invoice', { method:'POST', body: { payments: [p] } });
-      var s = res.sale || {};
-      if (await posConfirm('Invoice ' + (s.invoice_number || '#' + s.id) + ' — ' + fmtMoney(s.total_usd || guide) +
-          (s.change_due ? '\n\nChange due: ' + fmtMoney(s.change_due) : '') + '\n\nPrint it now?', { ok:'Print', cancel:'Not now' })) {
-        try { var full = await api('/api/admin/pos/sales/' + s.id); posPrintDoc('invoice', posSaleToDocData(full, POS_SHOP)); } catch (_) {}
-      }
-      CASHIER_VIEW_ID = null; renderCashier(panel);
-    } catch (e) {
-      this.disabled = false; msg.style.color = 'var(--red)'; msg.textContent = e.message;
-    }
-  });
+  drawTender();
+  await loadQueues();
+  CASHIER_POLL = setInterval(loadQueues, 15000);
 }
 
 // Everything the counter saves from the POS lands here, priced or not. A quote
@@ -8732,7 +9190,39 @@ function posConfirm(msg, opts){
 // own "open/close till" already uses (opening_float, closing_amount vs.
 // expected_cash = opening_float + cash sales since opened_at, variance) --
 // one shift per register regardless of which screen opened or closed it.
+// The shift button is also where people sign in to and out of the cart: the
+// modal opens with who is at the cart, a PIN sign-in (the cart and its shift
+// stay; the page reloads as the new person -- the ticket is stored per till)
+// and a sign-out, above the usual open / close shift form.
 async function posShiftModal(session, after){
+  await posShiftModalInner(session, after);
+  posShiftUserBar();
+}
+function posShiftUserBar(){
+  var card = document.querySelector('#mhPosModal > div');
+  if (!card || !card.firstElementChild) return;
+  var box = document.createElement('div');
+  box.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 14px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card-soft)';
+  box.innerHTML = '<span style="font-size:13px">👤 At this cart: <b>' + esc(CURRENT_ADMIN_NAME || 'signed in') + '</b>' + (CURRENT_ADMIN_ROLE ? ' <span style="color:var(--muted)">(' + esc(CURRENT_ADMIN_ROLE) + ')</span>' : '') + '</span>' +
+    '<button type="button" class="btn" id="psSignIn" style="margin-left:auto;font-size:12px">🔑 Sign in (PIN)</button>' +
+    '<button type="button" class="btn" id="psSignOut" style="font-size:12px;background:#fee2e2;color:#b91c1c">⎋ Sign out</button>';
+  card.firstElementChild.insertAdjacentElement('afterend', box);
+  document.getElementById('psSignIn').addEventListener('click', async function(){
+    posCloseModal();
+    try { await posFlushPrefs(); } catch (_) {}
+    var who = await posPinPrompt({ endpoint: '/api/auth/pin-signin', title: 'Sign in to this cart', detail: 'Enter your till PIN. The cart and the shift stay open; you take over.' });
+    if (!who) return;
+    posToast('Signed in: ' + (who.name || who.email) + '.');
+    location.reload();   // comes back as the new person: role, permissions, prefs
+  });
+  document.getElementById('psSignOut').addEventListener('click', async function(){
+    if (!(await posConfirm('Sign out of this cart? The shift stays open for the next person.', { ok: 'Sign out', danger: true }))) return;
+    try { await posFlushPrefs(); } catch (_) {}
+    try { await api('/api/auth/signout', { method: 'POST' }); } catch (_) {}
+    location.reload();
+  });
+}
+async function posShiftModalInner(session, after){
   var mechs = [];
   try { mechs = (await api('/api/admin/mechanics?active=true')).mechanics || []; } catch (_) {}
   var mechOptions = '<option value="">— (not tracked)</option>' +
@@ -10232,7 +10722,20 @@ async function renderRecurring(panel){
   panel.innerHTML = '<div class="empty">Loading…</div>';
   var r;
   try { r = await api('/api/admin/recurring-plans'); }
-  catch (e) { panel.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return; }
+  catch (e) {
+    // The till has no recurring-plans engine of its own: recurring charges there
+    // are the Books' recurring invoices (billing.js), which bill each period once
+    // and post to the ledger. Send staff there rather than run a second engine.
+    if (e.status === 404) {
+      panel.innerHTML = '<div class="panel" style="padding:18px;max-width:640px">' +
+        '<div style="font-weight:800;font-size:15px;margin-bottom:6px">🔁 Recurring charges live in Receivables on this till</div>' +
+        '<p style="margin:0 0 12px;color:var(--muted);font-size:13px">Rent and other regular charges are set up as <b>recurring invoices</b> on the customer: each period\'s invoice is raised on its date, goes on the customer\'s account and posts to the books. Recurring bills you pay are under Payables.</p>' +
+        '<a class="btn ok" href="/receivables.html" target="_blank" rel="noopener">Open Receivables → Recurring invoices</a> ' +
+        '<a class="btn" href="/payables.html" target="_blank" rel="noopener" style="margin-left:6px">Recurring bills (Payables)</a></div>';
+      return;
+    }
+    panel.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return;
+  }
 
   RC_ITEMS = [{ description: '', qty: 1, unit_price_usd: '' }];
   RC_CUSTOMER = null;
@@ -10541,7 +11044,17 @@ async function submitSupplier(){
 
 // ============= PURCHASE ORDERS =============
 var PO_VIEW_ID = null; // set when drilled into a single PO's detail
+// On the website, purchasing opens the till's admin: stock received and supplier
+// bills have to land in the till's database (the books), not the website's copy.
+function purchasingOnTill(panel, tab){
+  if (!ON_WEBSITE) return false;
+  var href = TILL_ORIGIN + '/admin.html#tab=' + tab;
+  panel.innerHTML = '<div class="empty">Purchasing is done on the till, so stock and supplier bills go into the shop\'s books.<br/><br/><a class="btn ok" href="' + href + '">Open it on the till ›</a></div>';
+  location.href = href;
+  return true;
+}
 async function renderPurchaseOrders(panel){
+  if (purchasingOnTill(panel, 'purchaseorders')) return;
   if (PO_VIEW_ID) return renderPoDetail(panel, PO_VIEW_ID);
   panel.innerHTML = '<div class="empty">Loading…</div>';
   var r, sup;
@@ -10553,55 +11066,37 @@ async function renderPurchaseOrders(panel){
   panel.innerHTML =
     '<details style="border-bottom:1px solid var(--line);background:var(--card-soft)">' +
       '<summary style="padding:12px 16px;cursor:pointer;font-weight:700;color:var(--heading)">+ New purchase order</summary>' +
-      '<form id="newPo" style="padding:14px 18px;display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:640px" onsubmit="event.preventDefault();submitPo();">' +
-        '<div><label class="lbl">Supplier *</label><select id="poSupplier" required class="fld">' +
-          '<option value="">— choose —</option>' +
-          sup.suppliers.map(function(s){ return '<option value="' + s.id + '">' + esc(s.name) + '</option>'; }).join('') +
-          '<option value="__new__">➕ Add a new supplier…</option>' +
-        '</select>' +
-          '<div id="poNewSup" style="display:none;margin-top:8px;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--card)">' +
-            '<div style="display:grid;grid-template-columns:2fr 1fr auto;gap:8px;align-items:end">' +
-              '<div><label class="lbl">New supplier name *</label><input id="poNewSupName" class="fld"/></div>' +
-              '<div><label class="lbl">Phone</label><input id="poNewSupPhone" class="fld"/></div>' +
-              '<button type="button" class="btn ok" id="poNewSupSave">Create</button>' +
-            '</div>' +
-            '<span id="poNewSupMsg" style="font-size:12px"></span>' +
-          '</div>' +
-        '</div>' +
-        '<div><label class="lbl">Expected date</label><input id="poExpected" type="date" class="fld"/></div>' +
-        '<div style="grid-column:1/-1"><label class="lbl">Notes</label><input id="poNotes" class="fld"/></div>' +
-        '<div id="poMsg" style="grid-column:1/-1;display:none;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
-        '<button type="submit" style="grid-column:1/-1;background:var(--red);color:#fff;border:0;padding:11px 22px;border-radius:7px;font-weight:700;cursor:pointer">Create PO</button>' +
-      '</form>' +
-    '</details>' +
-    '<details style="border-bottom:1px solid var(--line);background:var(--card-soft)">' +
-      '<summary style="padding:12px 16px;cursor:pointer;font-weight:700;color:var(--heading)">📦 Receive stock without a PO</summary>' +
-      '<div style="padding:14px 18px;max-width:900px">' +
-        '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">' +
-          '<div><label class="lbl">Supplier</label><select id="rcvSupplier" class="fld" style="width:220px">' +
-            '<option value="">— none / walk-in —</option>' +
+      '<form id="newPo" novalidate style="padding:14px 18px;max-width:900px" onsubmit="event.preventDefault();submitPo();">' +
+        formTabs([
+          { key: 'supplier', label: 'Supplier & dates', req: true, html:
+            '<div>' + flbl('Supplier', 'Who you are ordering from. Not on the list? Choose ➕ Add a new supplier.', true) + '<select id="poSupplier" class="fld">' + '<option value="">— choose —</option>' +
             sup.suppliers.map(function(s){ return '<option value="' + s.id + '">' + esc(s.name) + '</option>'; }).join('') +
-            '<option value="__new__">➕ Add a new supplier…</option>' +
-          '</select></div>' +
-          '<div><label class="lbl">Supplier invoice #</label><input id="rcvInvoice" class="fld" style="width:180px"/></div>' +
-        '</div>' +
-        '<div id="rcvNewSup" style="display:none;margin-bottom:10px;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--card)">' +
-          '<div style="display:grid;grid-template-columns:2fr 1fr auto;gap:8px;align-items:end">' +
-            '<div><label class="lbl">New supplier name *</label><input id="rcvNewSupName" class="fld"/></div>' +
-            '<div><label class="lbl">Phone</label><input id="rcvNewSupPhone" class="fld"/></div>' +
-            '<button type="button" class="btn ok" id="rcvNewSupSave">Create</button>' +
-          '</div><span id="rcvNewSupMsg" style="font-size:12px"></span>' +
-        '</div>' +
-        '<div style="position:relative"><label class="lbl">Find the part</label>' +
-          '<input id="rcvSearch" class="fld" placeholder="Search part name or SKU…" autocomplete="off"/>' +
-          '<div id="rcvResults" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:40;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 12px 30px rgba(0,0,0,.22);max-height:260px;overflow-y:auto"></div>' +
-        '</div>' +
-        '<div id="rcvList" style="margin-top:12px;overflow-x:auto"></div>' +
-        '<div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap">' +
-          '<button class="btn ok" id="rcvGo" disabled>Receive 0 items</button>' +
-          '<span id="rcvMsg" style="font-size:12.5px"></span>' +
-        '</div>' +
-      '</div>' +
+            '<option value="__new__">➕ Add a new supplier…</option>' + '</select></div>' +
+            '<div>' + flbl('Expected date', 'When you expect the goods to arrive. Late orders show up on the purchasing screens.') + '<input id="poExpected" type="date" class="fld"/></div>' +
+            '<div id="poNewSup" class="full" style="display:none;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--card)">' +
+              '<div style="display:grid;grid-template-columns:2fr 1fr auto;gap:8px;align-items:end">' +
+                '<div>' + flbl('New supplier name', 'The company you buy from, as on their invoice.', true) + '<input id="poNewSupName" class="fld"/></div>' +
+                '<div>' + flbl('Phone', 'A number to call about orders.') + '<input id="poNewSupPhone" class="fld"/></div>' +
+                '<button type="button" class="btn ok" id="poNewSupSave">Create</button>' +
+              '</div><span id="poNewSupMsg" style="font-size:12px"></span>' +
+            '</div>' },
+          { key: 'lines', label: 'Lines', html:
+            '<div class="full" style="position:relative">' + flbl('Add a part', 'Search your parts by name or SKU and pick one; it is added with its last cost. You can also add lines later on the order itself.') +
+              '<input id="poLnSearch" class="fld" placeholder="Search part name or SKU…" autocomplete="off"/>' +
+              '<div id="poLnResults" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:40;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 12px 30px rgba(0,0,0,.22);max-height:260px;overflow-y:auto"></div>' +
+            '</div>' +
+            '<div class="full"><button type="button" class="btn" id="poLnFree">+ Line not in the parts list</button>' + tip('For something you do not stock: describe it and give the quantity and cost. It is not added to your parts list.') + '</div>' +
+            '<div class="full" id="poLnList" style="overflow-x:auto"></div>' },
+          { key: 'ship', label: 'Shipping & terms', html:
+            '<div>' + flbl('Shipping (USD)', 'Freight the supplier charges on this order. It is added to the order total.') + '<input id="poShipping" type="number" step="0.01" min="0" placeholder="0.00" class="fld"/></div>' +
+            (ON_WEBSITE ? '' : '<div>' + flbl('Payment terms (days)', 'How many days after their invoice you have to pay, e.g. 30. Sets the due date in Payables.') + '<input id="poTerms" type="number" min="0" max="365" placeholder="e.g. 30" class="fld"/></div>') },
+          { key: 'notes', label: 'Notes', html:
+            '<div class="full">' + flbl('Notes', 'Anything about the order: delivery instructions, who asked for it, a quote number.') + '<textarea id="poNotes" rows="3" class="fld"></textarea></div>' },
+        ]) +
+        '<div id="poMsg" style="display:none;margin-top:10px;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
+        '<div class="fnav">' + FNAV + '<span style="flex:1"></span><b id="poLnTotal" style="font-size:13px"></b>' +
+          '<button type="submit" id="poSubmit" style="background:var(--red);color:#fff;border:0;padding:11px 22px;border-radius:7px;font-weight:700;cursor:pointer">Create PO</button></div>' +
+      '</form>' +
     '</details>' +
     (r.purchase_orders.length
       ? '<table><thead><tr><th>PO #</th><th>Supplier</th><th>Created</th><th>Expected</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>' +
@@ -10626,7 +11121,7 @@ async function renderPurchaseOrders(panel){
   var poNewSup = document.getElementById('poNewSup');
   if (poSupSel && poNewSup) {
     poSupSel.addEventListener('change', function(){
-      poNewSup.style.display = this.value === '__new__' ? 'block' : 'none';
+      poNewSup.style.display = this.value === '__new__' ? '' : 'none';
       if (this.value === '__new__') { var n = document.getElementById('poNewSupName'); if (n) n.focus(); }
     });
     var sv = document.getElementById('poNewSupSave');
@@ -10650,136 +11145,349 @@ async function renderPurchaseOrders(panel){
     });
   }
 
-  // ---- Receive without a PO -------------------------------------------------
-  var rcvLines = [];   // { img, name, sku, qty, cost, sell, bin }
-  var rcvSearch = document.getElementById('rcvSearch');
-  var rcvResults = document.getElementById('rcvResults');
-  var rcvList = document.getElementById('rcvList');
-  var rcvGo = document.getElementById('rcvGo');
-  var rcvMsg = document.getElementById('rcvMsg');
-  var rcvDeb = null;
-
-  // Inline "add a new supplier" for the receive form (same as the New PO one).
-  var rcvSupSel = document.getElementById('rcvSupplier');
-  var rcvNewSup = document.getElementById('rcvNewSup');
-  if (rcvSupSel && rcvNewSup) {
-    rcvSupSel.addEventListener('change', function(){
-      rcvNewSup.style.display = this.value === '__new__' ? 'block' : 'none';
-      if (this.value === '__new__') { var n = document.getElementById('rcvNewSupName'); if (n) n.focus(); }
-    });
-    var rsv = document.getElementById('rcvNewSupSave');
-    if (rsv) rsv.addEventListener('click', async function(){
-      var name = document.getElementById('rcvNewSupName').value.trim();
-      var m = document.getElementById('rcvNewSupMsg');
-      if (!name) { m.textContent = 'Name required'; m.style.color = 'var(--red)'; return; }
-      rsv.disabled = true; m.textContent = 'Creating…'; m.style.color = 'var(--muted)';
-      try {
-        var sr = await api('/api/admin/suppliers', { method: 'POST', body: { name: name, phone: document.getElementById('rcvNewSupPhone').value.trim() || null } });
-        var opt = document.createElement('option');
-        opt.value = sr.id; opt.textContent = name;
-        rcvSupSel.insertBefore(opt, rcvSupSel.querySelector('option[value="__new__"]'));
-        rcvSupSel.value = String(sr.id);
-        rcvNewSup.style.display = 'none'; m.textContent = '';
-        posToast('Supplier “' + name + '” added');
-      } catch (e) { m.textContent = e.message; m.style.color = 'var(--red)'; rsv.disabled = false; }
-    });
-  }
-
-  function rcvRender(){
-    rcvGo.disabled = !rcvLines.length;
-    rcvGo.textContent = 'Receive ' + rcvLines.length + ' item' + (rcvLines.length === 1 ? '' : 's');
-    if (!rcvLines.length) { rcvList.innerHTML = ''; return; }
+  // ---- New PO: lines entered on the Lines tab, saved with the order ----------
+  var poForm = document.getElementById('newPo');
+  wireFormTabs(poForm);
+  var poLines = [];   // { img, name, sku, qty, cost }
+  window.__poLines = poLines;
+  var poLnSearch = document.getElementById('poLnSearch'), poLnResults = document.getElementById('poLnResults'), poLnList = document.getElementById('poLnList'), poLnDeb = null;
+  var poLnTotal = function(){
+    var t = poLines.reduce(function(a, l){ return a + (Number(l.qty) || 0) * (Number(l.cost) || 0); }, 0) + (Number(document.getElementById('poShipping').value) || 0);
+    document.getElementById('poLnTotal').textContent = poLines.length ? poLines.length + ' line' + (poLines.length === 1 ? '' : 's') + ' · ' + fmtMoney(t) : '';
+  };
+  var poLnRender = function(){
+    poLnTotal();
+    if (!poLines.length) { poLnList.innerHTML = '<small style="color:var(--muted)">No lines yet. Lines are optional here: you can also add them on the order after it is created.</small>'; return; }
     var mini = 'width:100%;padding:4px 6px;border:1px solid var(--line);border-radius:5px;font-size:12px;font-family:inherit';
-    rcvList.innerHTML = '<table style="width:100%;min-width:760px"><thead><tr>' +
-      '<th style="text-align:left">Part</th><th style="width:150px">Description</th><th style="width:70px">Qty</th>' +
-      '<th style="width:90px">Cost</th><th style="width:90px">Sell price</th><th style="width:90px">Bin</th><th style="width:36px"></th>' +
-      '</tr></thead><tbody>' +
-      rcvLines.map(function(l, i){
-        return '<tr><td><b style="font-size:12.5px">' + esc(l.name) + '</b><br/><small style="color:var(--muted)">' + esc(l.sku || l.img) + '</small></td>' +
-          '<td><input class="rcvName" data-i="' + i + '" value="' + esc(l.name || '') + '" style="' + mini + '"/></td>' +
-          '<td><input type="number" min="1" class="rcvQty" data-i="' + i + '" value="' + l.qty + '" style="' + mini + '"/></td>' +
-          '<td><input type="number" min="0" step="0.01" class="rcvCost" data-i="' + i + '" value="' + (l.cost != null ? l.cost : '') + '" placeholder="—" style="' + mini + '"/></td>' +
-          '<td><input type="number" min="0" step="0.01" class="rcvSell" data-i="' + i + '" value="' + (l.sell != null ? l.sell : '') + '" placeholder="—" style="' + mini + '"/></td>' +
-          '<td><input class="rcvBin" data-i="' + i + '" value="' + esc(l.bin || '') + '" placeholder="—" style="' + mini + '"/></td>' +
-          '<td><button class="btn rcvDel" data-i="' + i + '" style="background:#fee2e2;color:#b91c1c;border:0">×</button></td></tr>';
+    poLnList.innerHTML = '<table style="width:100%;min-width:620px"><thead><tr><th style="text-align:left">Part / description</th><th style="width:80px">Qty</th><th style="width:110px">Unit cost</th><th style="width:110px">Line total</th><th style="width:36px"></th></tr></thead><tbody>' +
+      poLines.map(function(l, i){
+        return '<tr><td>' + (l.img ? '<b style="font-size:12.5px">' + esc(l.name) + '</b><br/><small style="color:var(--muted)">' + esc(l.sku || l.img) + '</small>' : '<input class="poLnDesc" data-i="' + i + '" value="' + esc(l.name) + '" placeholder="What is it?" style="' + mini + '"/>') + '</td>' +
+          '<td><input type="number" min="1" class="poLnQty" data-i="' + i + '" value="' + l.qty + '" style="' + mini + '"/></td>' +
+          '<td><input type="number" min="0" step="0.01" class="poLnCost" data-i="' + i + '" value="' + (l.cost != null ? l.cost : '') + '" placeholder="0.00" style="' + mini + '"/></td>' +
+          '<td style="text-align:right">' + fmtMoney((Number(l.qty) || 0) * (Number(l.cost) || 0)) + '</td>' +
+          '<td><button type="button" class="btn poLnDel" data-i="' + i + '" style="background:#fee2e2;color:#b91c1c;border:0">×</button></td></tr>';
       }).join('') + '</tbody></table>';
-    var bind = function(cls, fn){ rcvList.querySelectorAll('.' + cls).forEach(function(el){ el.addEventListener('change', function(){ fn(rcvLines[+el.dataset.i], el.value); }); }); };
-    bind('rcvName', function(l, v){ l.name = v.trim(); });
-    bind('rcvQty',  function(l, v){ l.qty = Math.max(1, parseInt(v, 10) || 1); });
-    bind('rcvCost', function(l, v){ l.cost = v.trim() === '' ? null : Number(v); });
-    bind('rcvSell', function(l, v){ l.sell = v.trim() === '' ? null : Number(v); });
-    bind('rcvBin',  function(l, v){ l.bin = v.trim() || null; });
-    rcvList.querySelectorAll('.rcvDel').forEach(function(el){ el.addEventListener('click', function(){ rcvLines.splice(+el.dataset.i, 1); rcvRender(); }); });
-  }
-  function rcvAdd(p){
-    var ex = rcvLines.find(function(x){ return x.img === p.img; });
-    if (ex) { ex.qty += 1; }
-    else rcvLines.push({
-      img: p.img, name: p.name, sku: p.sku || '', qty: 1,
-      cost: p.cost_usd != null ? Number(p.cost_usd) : null,
-      sell: p.price_usd != null ? Number(p.price_usd) : null,
-      bin: p.bin_location || null,
-    });
-    rcvSearch.value = ''; rcvResults.style.display = 'none'; rcvRender(); rcvSearch.focus();
-  }
-  rcvSearch.addEventListener('input', function(){
+    var bind = function(cls, fn){ poLnList.querySelectorAll('.' + cls).forEach(function(el){ el.addEventListener('change', function(){ fn(poLines[+el.dataset.i], el.value); poLnRender(); }); }); };
+    bind('poLnDesc', function(l, v){ l.name = v.trim(); });
+    bind('poLnQty', function(l, v){ l.qty = Math.max(1, parseInt(v, 10) || 1); });
+    bind('poLnCost', function(l, v){ l.cost = v.trim() === '' ? null : Number(v); });
+    poLnList.querySelectorAll('.poLnDel').forEach(function(el){ el.addEventListener('click', function(){ poLines.splice(+el.dataset.i, 1); poLnRender(); }); });
+  };
+  document.getElementById('poShipping').addEventListener('input', poLnTotal);
+  document.getElementById('poLnFree').addEventListener('click', function(){ poLines.push({ img: null, name: '', sku: '', qty: 1, cost: null }); poLnRender(); var all = poLnList.querySelectorAll('.poLnDesc'); if (all.length) all[all.length - 1].focus(); });
+  poLnSearch.addEventListener('input', function(){
     var q = this.value.trim();
-    clearTimeout(rcvDeb);
-    if (q.length < 2) { rcvResults.style.display = 'none'; return; }
-    rcvDeb = setTimeout(async function(){
+    clearTimeout(poLnDeb);
+    if (q.length < 2) { poLnResults.style.display = 'none'; return; }
+    poLnDeb = setTimeout(async function(){
       try {
         var res = await api('/api/products?limit=8&q=' + encodeURIComponent(q));
         var list = res.products || [];
-        rcvResults.innerHTML = list.length
-          ? list.map(function(p){
-              return '<button type="button" class="rcvHit" data-img="' + esc(p.img) + '" style="display:flex;width:100%;gap:10px;align-items:center;text-align:left;border:0;border-bottom:1px solid var(--hover);background:var(--card);color:var(--ink);padding:8px 11px;cursor:pointer;font-family:inherit">' +
-                '<b style="flex:1;min-width:0">' + esc(p.name) + '</b>' +
-                '<small style="color:var(--muted)">' + esc(p.sku || p.img) + '</small>' +
-                '<span style="color:var(--muted)">stock ' + (p.stock_count || 0) + '</span>' +
-              '</button>';
-            }).join('')
-          : '<div style="padding:10px 12px;font-size:12px;color:var(--muted)">no match</div>';
-        rcvResults.style.display = 'block';
-        rcvResults.querySelectorAll('.rcvHit').forEach(function(b){
-          b.addEventListener('click', function(){ var p = list.find(function(x){ return x.img === b.dataset.img; }); if (p) rcvAdd(p); });
+        poLnResults.innerHTML = list.length ? list.map(function(p){
+          return '<button type="button" class="poLnHit" data-img="' + esc(p.img) + '" style="display:flex;width:100%;gap:10px;align-items:center;text-align:left;border:0;border-bottom:1px solid var(--hover);background:var(--card);color:var(--ink);padding:8px 11px;cursor:pointer;font-family:inherit">' +
+            '<b style="flex:1;min-width:0">' + esc(p.name) + '</b><small style="color:var(--muted)">' + esc(p.sku || p.img) + '</small><span style="color:var(--muted)">stock ' + (p.stock_count || 0) + '</span></button>';
+        }).join('') : '<div style="padding:10px 12px;font-size:12px;color:var(--muted)">no match: use “Line not in the parts list”</div>';
+        poLnResults.style.display = 'block';
+        poLnResults.querySelectorAll('.poLnHit').forEach(function(b){
+          b.addEventListener('click', function(){
+            var p = list.find(function(x){ return x.img === b.dataset.img; }); if (!p) return;
+            var ex = poLines.find(function(x){ return x.img === p.img; });
+            if (ex) ex.qty += 1; else poLines.push({ img: p.img, name: p.name, sku: p.sku || '', qty: 1, cost: p.cost_usd != null ? Number(p.cost_usd) : null });
+            poLnSearch.value = ''; poLnResults.style.display = 'none'; poLnRender(); poLnSearch.focus();
+          });
         });
-      } catch (e) { rcvResults.innerHTML = '<div style="padding:10px;color:#b91c1c;font-size:12px">' + esc(e.message) + '</div>'; rcvResults.style.display = 'block'; }
+      } catch (e) { poLnResults.innerHTML = '<div style="padding:10px;color:#b91c1c;font-size:12px">' + esc(e.message) + '</div>'; poLnResults.style.display = 'block'; }
     }, 200);
   });
-  document.addEventListener('click', function(e){ if (rcvResults && !rcvResults.contains(e.target) && e.target !== rcvSearch) rcvResults.style.display = 'none'; });
-  rcvGo.addEventListener('click', async function(){
-    if (!rcvLines.length) return;
-    rcvGo.disabled = true; rcvMsg.textContent = 'Receiving…'; rcvMsg.style.color = 'var(--muted)';
+  document.addEventListener('click', function(e){ if (poLnResults && !poLnResults.contains(e.target) && e.target !== poLnSearch) poLnResults.style.display = 'none'; });
+  poLnRender();
+}
+
+// ============= RECEIVE STOCK =============
+// One screen for a delivery: against an open PO or without one, with the
+// supplier's bill (subtotal, GCT, freight, total, bill and due dates) entered in
+// the same step and tallied against the value received. A difference is
+// explained before posting (back order / bill adjustment / supplier credit /
+// other); POST /api/admin/receive-stock does stock, bill and any back-order PO
+// in one transaction (see server.js for the ledger lines).
+var RECEIVE_PO_ID = null;   // set by "Receive Stock for this PO" on the PO page
+async function renderReceiveStock(panel){
+  if (purchasingOnTill(panel, 'receivestock')) return;
+  panel.innerHTML = '<div class="empty">Loading…</div>';
+  var pos, sup, accts = [];
+  try {
+    pos = ((await api('/api/admin/purchase-orders')).purchase_orders || []).filter(function(p){ return ['received', 'cancelled'].indexOf(p.status) < 0; });
+    sup = (await api('/api/admin/suppliers?active=true')).suppliers || [];
+  } catch (e) { panel.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return; }
+  try { accts = (await api('/api/books/accounts')).accounts || []; } catch (_) {}
+  var preset = RECEIVE_PO_ID; RECEIVE_PO_ID = null;
+  var st = { mode: preset ? 'po' : (pos.length ? 'po' : 'none'), po: null, poLines: [], loose: [], dueTouched: false };
+  var J = function(v){ return fmtMoney(v); };
+  var mini = 'width:100%;padding:4px 6px;border:1px solid var(--line);border-radius:5px;font-size:12px;font-family:inherit';
+  var val = function(id){ var el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  var num = function(id){ var v = val(id); return v === '' ? null : Number(v); };
+
+  panel.innerHTML =
+    '<div style="padding:16px 18px;max-width:980px" id="rsForm">' +
+      '<h2 style="margin:0 0 4px">📥 Receive Stock</h2><p style="margin:0 0 14px;color:var(--muted);font-size:13px">What arrived, and the supplier\'s bill with it. The bill goes to Payables; any difference between the bill and what arrived is explained before it is posted.</p>' +
+      formTabs([
+        { key: 'source', label: 'Source', req: true, html:
+          '<div class="full" style="display:flex;gap:18px;flex-wrap:wrap">' +
+            '<label style="display:inline-flex;gap:7px;align-items:center;font-size:13px"><input type="radio" name="rsMode" value="po"' + (st.mode === 'po' ? ' checked' : '') + (pos.length ? '' : ' disabled') + '/> Against a purchase order' + tip('The delivery is for an order you placed: its lines and costs come from the PO, and what is not delivered stays on the PO.') + '</label>' +
+            '<label style="display:inline-flex;gap:7px;align-items:center;font-size:13px"><input type="radio" name="rsMode" value="none"' + (st.mode === 'none' ? ' checked' : '') + '/> No purchase order' + tip('A delivery or purchase with no PO: pick the parts yourself on the Items tab.') + '</label>' +
+          '</div>' +
+          '<div id="rsPoWrap">' + flbl('Purchase order', 'Only orders not yet fully received are listed.', true) + '<select id="rsPo" class="fld"><option value="">— choose —</option>' +
+            pos.map(function(p){ return '<option value="' + p.id + '"' + (String(p.id) === String(preset) ? ' selected' : '') + '>' + esc(p.po_number + ' · ' + (p.supplier_name || '') + ' · ' + p.status) + '</option>'; }).join('') + '</select></div>' +
+          '<div id="rsSupWrap">' + flbl('Supplier', 'Who the goods came from. Needed when the bill is entered. ➕ adds a new supplier.') + '<select id="rsSupplier" class="fld"><option value="">— none / walk-in —</option>' +
+            sup.map(function(x){ return '<option value="' + x.id + '">' + esc(x.name) + '</option>'; }).join('') + '<option value="__new__">➕ Add a new supplier…</option></select></div>' +
+          '<div>' + flbl('Date received', 'When the goods came in. Defaults to today; set it when keying in a delivery from an earlier day.') + '<input id="rsEntry" type="date" class="fld" value="' + todayStr() + '"/></div>' +
+          '<div id="rsNewSup" class="full" style="display:none;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--card)">' +
+            '<div style="display:grid;grid-template-columns:2fr 1fr auto;gap:8px;align-items:end">' +
+              '<div>' + flbl('New supplier name', 'The company, as on their bill.', true) + '<input id="rsNewSupName" class="fld"/></div>' +
+              '<div>' + flbl('Phone', 'A number to call about orders.') + '<input id="rsNewSupPhone" class="fld"/></div>' +
+              '<button type="button" class="btn ok" id="rsNewSupSave">Create</button>' +
+            '</div><span id="rsNewSupMsg" style="font-size:12px"></span></div>' },
+        { key: 'items', label: 'Items', req: true, html: '<div class="full" id="rsItems"></div>' },
+        { key: 'bill', label: 'Supplier bill', html:
+          '<div class="full"><label style="display:inline-flex;gap:7px;align-items:center;font-size:13px"><input type="checkbox" id="rsHaveBill" checked/> The supplier\'s bill came with it' + tip('Untick when the bill has not arrived: the stock is received now and the bill is entered later in Payables → Enter a bill, against 2050 Goods Received Not Invoiced.') + '</label></div>' +
+          '<div class="rsB">' + flbl('Bill number', 'The number on the supplier\'s bill or invoice. The same number twice from one supplier is refused.') + '<input id="rsBillNo" class="fld"/></div>' +
+          '<div class="rsB">' + flbl('Bill date', 'The date printed on the bill. Payment terms run from here.', true) + '<input id="rsBillDate" type="date" class="fld" value="' + todayStr() + '"/></div>' +
+          '<div class="rsB">' + flbl('Due date', 'When it must be paid. Leave blank to work it out from the PO\'s or supplier\'s payment terms.') + '<input id="rsDue" type="date" class="fld"/></div>' +
+          '<div class="rsB">' + flbl('Subtotal', 'The goods before GCT and freight. This is what is tallied against what arrived.', true) + '<input id="rsSub" type="number" step="0.01" min="0" class="fld"/></div>' +
+          '<div class="rsB">' + flbl('GCT', 'The GCT on the bill: claimable, so it goes to GCT Recoverable.') + '<input id="rsTax" type="number" step="0.01" min="0" class="fld" placeholder="0.00"/></div>' +
+          '<div class="rsB">' + flbl('Freight', 'Freight, delivery or duty the supplier charged on this bill.') + '<input id="rsFreight" type="number" step="0.01" min="0" class="fld" placeholder="0.00"/></div>' +
+          '<div class="rsB">' + flbl('Bill total', 'The amount at the bottom of the bill. It must equal subtotal + GCT + freight.', true) + '<input id="rsTotal" type="number" step="0.01" min="0" class="fld"/><small id="rsTotHint" style="color:var(--muted)"></small></div>' },
+        { key: 'tally', label: 'Tally & post', html: '<div class="full" id="rsTally"></div>' +
+          '<div class="full" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px"><button type="button" class="btn ok" id="rsGo">Receive stock</button><span id="rsMsg" style="font-size:12.5px"></span></div>' },
+      ]) +
+      '<div class="fnav">' + FNAV + '</div>' +
+    '</div>';
+  var form = document.getElementById('rsForm');
+
+  // ---- lines -------------------------------------------------------------
+  var lines = function(){
+    if (st.mode === 'po') return st.poLines.filter(function(l){ return l.qty > 0; }).map(function(l){ return { qty: l.qty, cost: l.unit_cost }; });
+    return st.loose.map(function(l){ return { qty: l.qty, cost: l.cost != null ? l.cost : (l.oldCost || 0) }; });
+  };
+  var value = function(){ return Math.round(lines().reduce(function(t, l){ return t + l.qty * l.cost; }, 0) * 100) / 100; };
+  function drawItems(){
+    var el = document.getElementById('rsItems');
+    if (st.mode === 'po') {
+      if (!st.po) { el.innerHTML = '<small style="color:var(--muted)">Choose the purchase order on the Source tab.</small>'; return; }
+      el.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:8px"><b>' + esc(st.po.po_number) + '</b> · ' + esc(st.po.supplier_name || '') + '<button type="button" class="btn" id="rsAll" style="margin-left:auto">Everything outstanding arrived</button></div>' +
+        '<table style="width:100%;min-width:700px"><thead><tr><th style="text-align:left">Line</th><th>Ordered</th><th>Already in</th><th style="width:80px">Arrived now' + tip('How many of this line are in this delivery. Leave 0 for what did not come.') + '</th><th>Unit cost</th><th style="width:90px">Sell price' + tip('Optional: a new shelf price for the part.') + '</th><th style="width:90px">Bin</th><th>Value</th></tr></thead><tbody>' +
+        st.poLines.map(function(l, i){
+          var out = l.qty_ordered - l.qty_received;
+          return '<tr><td>' + esc(l.description) + (l.sku ? '<br/><small style="color:var(--muted)">' + esc(l.sku) + '</small>' : '') + '</td><td>' + l.qty_ordered + '</td><td>' + l.qty_received + '</td>' +
+            (out > 0 ? '<td><input type="number" min="0" max="' + out + '" class="rsQ" data-i="' + i + '" value="' + l.qty + '" style="' + mini + '"/></td>' : '<td><small style="color:var(--muted)">complete</small></td>') +
+            '<td>' + J(l.unit_cost) + '</td>' +
+            (out > 0 ? '<td><input type="number" min="0" step="0.01" class="rsP" data-i="' + i + '" value="' + (l.price != null ? l.price : '') + '" placeholder="—" style="' + mini + '"/></td><td><input class="rsBin" data-i="' + i + '" value="' + esc(l.bin || '') + '" style="' + mini + '"/></td>' : '<td></td><td></td>') +
+            '<td style="text-align:right">' + J(l.qty * l.unit_cost) + '</td></tr>';
+        }).join('') + '</tbody></table><div style="text-align:right;margin-top:6px">Value arriving: <b>' + J(value()) + '</b></div>';
+      var bind = function(cls, fn){ el.querySelectorAll('.' + cls).forEach(function(x){ x.addEventListener('change', function(){ fn(st.poLines[+x.dataset.i], x.value); drawItems(); }); }); };
+      bind('rsQ', function(l, v){ var out = l.qty_ordered - l.qty_received; l.qty = Math.max(0, Math.min(out, parseInt(v, 10) || 0)); });
+      bind('rsP', function(l, v){ l.price = v.trim() === '' ? null : Number(v); });
+      bind('rsBin', function(l, v){ l.bin = v.trim() || null; });
+      document.getElementById('rsAll').addEventListener('click', function(){ st.poLines.forEach(function(l){ l.qty = Math.max(0, l.qty_ordered - l.qty_received); }); drawItems(); });
+      return;
+    }
+    el.innerHTML = '<div style="position:relative">' + flbl('Find the part', 'Search by name or SKU and pick it; picking it again adds one more.', true) +
+        '<input id="rsSearch" class="fld" placeholder="Search part name or SKU…" autocomplete="off"/>' +
+        '<div id="rsResults" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:40;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 12px 30px rgba(0,0,0,.22);max-height:260px;overflow-y:auto"></div></div>' +
+      '<div style="margin-top:10px;overflow-x:auto">' + (st.loose.length ? '<table style="width:100%;min-width:700px"><thead><tr><th style="text-align:left">Part</th><th style="width:70px">Qty</th><th style="width:90px">Unit cost' + tip('What each one cost on this bill. Blank keeps the part\'s current cost.') + '</th><th style="width:90px">Sell price</th><th style="width:90px">Bin</th><th>Value</th><th style="width:36px"></th></tr></thead><tbody>' +
+        st.loose.map(function(l, i){
+          return '<tr><td><b style="font-size:12.5px">' + esc(l.name) + '</b><br/><small style="color:var(--muted)">' + esc(l.sku || l.img) + '</small></td>' +
+            '<td><input type="number" min="1" class="rsLQ" data-i="' + i + '" value="' + l.qty + '" style="' + mini + '"/></td>' +
+            '<td><input type="number" min="0" step="0.01" class="rsLC" data-i="' + i + '" value="' + (l.cost != null ? l.cost : '') + '" placeholder="' + (l.oldCost != null ? Number(l.oldCost).toFixed(2) : '—') + '" style="' + mini + '"/></td>' +
+            '<td><input type="number" min="0" step="0.01" class="rsLP" data-i="' + i + '" value="' + (l.sell != null ? l.sell : '') + '" placeholder="—" style="' + mini + '"/></td>' +
+            '<td><input class="rsLB" data-i="' + i + '" value="' + esc(l.bin || '') + '" style="' + mini + '"/></td>' +
+            '<td style="text-align:right">' + J(l.qty * (l.cost != null ? l.cost : (l.oldCost || 0))) + '</td>' +
+            '<td><button type="button" class="btn rsLD" data-i="' + i + '" style="background:#fee2e2;color:#b91c1c;border:0">×</button></td></tr>';
+        }).join('') + '</tbody></table><div style="text-align:right;margin-top:6px">Value arriving: <b>' + J(value()) + '</b></div>' : '<small style="color:var(--muted)">No parts yet: search above.</small>') + '</div>';
+    var bindL = function(cls, fn){ el.querySelectorAll('.' + cls).forEach(function(x){ x.addEventListener('change', function(){ fn(st.loose[+x.dataset.i], x.value); drawItems(); }); }); };
+    bindL('rsLQ', function(l, v){ l.qty = Math.max(1, parseInt(v, 10) || 1); });
+    bindL('rsLC', function(l, v){ l.cost = v.trim() === '' ? null : Number(v); });
+    bindL('rsLP', function(l, v){ l.sell = v.trim() === '' ? null : Number(v); });
+    bindL('rsLB', function(l, v){ l.bin = v.trim() || null; });
+    el.querySelectorAll('.rsLD').forEach(function(x){ x.addEventListener('click', function(){ st.loose.splice(+x.dataset.i, 1); drawItems(); }); });
+    var srch = document.getElementById('rsSearch'), out = document.getElementById('rsResults'), deb = null;
+    srch.addEventListener('input', function(){
+      var q = this.value.trim(); clearTimeout(deb);
+      if (q.length < 2) { out.style.display = 'none'; return; }
+      deb = setTimeout(async function(){
+        try {
+          var list = (await api('/api/products?limit=8&q=' + encodeURIComponent(q))).products || [];
+          out.innerHTML = list.length ? list.map(function(p){ return '<button type="button" class="rsHit" data-img="' + esc(p.img) + '" style="display:flex;width:100%;gap:10px;text-align:left;border:0;border-bottom:1px solid var(--hover);background:var(--card);color:var(--ink);padding:8px 11px;cursor:pointer;font-family:inherit"><b style="flex:1;min-width:0">' + esc(p.name) + '</b><small style="color:var(--muted)">' + esc(p.sku || p.img) + '</small><span style="color:var(--muted)">stock ' + (p.stock_count || 0) + '</span></button>'; }).join('')
+            : '<div style="padding:10px 12px;font-size:12px;color:var(--muted)">no match: add the part in Parts Department first</div>';
+          out.style.display = 'block';
+          out.querySelectorAll('.rsHit').forEach(function(b){ b.addEventListener('click', function(){
+            var p = list.find(function(x){ return x.img === b.dataset.img; }); if (!p) return;
+            var ex = st.loose.find(function(x){ return x.img === p.img; });
+            if (ex) ex.qty += 1; else st.loose.push({ img: p.img, name: p.name, sku: p.sku || '', qty: 1, cost: null, oldCost: p.cost_usd != null ? Number(p.cost_usd) : null, sell: null, bin: p.bin_location || null });
+            drawItems(); var s2 = document.getElementById('rsSearch'); if (s2) s2.focus();
+          }); });
+        } catch (e) { out.innerHTML = '<div style="padding:10px;color:#b91c1c;font-size:12px">' + esc(e.message) + '</div>'; out.style.display = 'block'; }
+      }, 200);
+    });
+  }
+  async function loadPo(id){
+    st.po = null; st.poLines = [];
+    if (id) {
+      try {
+        var d = await api('/api/admin/purchase-orders/' + id);
+        st.po = d.purchase_order;
+        st.poLines = (d.items || []).map(function(it){ return { id: it.id, description: it.description, sku: it.sku, qty_ordered: it.qty_ordered, qty_received: it.qty_received, unit_cost: Number(it.unit_cost_usd) || 0, qty: 0, price: null, bin: it.bin_location || null }; });
+      } catch (e) { posToast('Could not load the PO: ' + e.message, true); }
+    }
+    drawItems();
+  }
+  function setMode(){
+    st.mode = (form.querySelector('[name=rsMode]:checked') || {}).value || 'none';
+    document.getElementById('rsPoWrap').style.display = st.mode === 'po' ? '' : 'none';
+    document.getElementById('rsSupWrap').style.display = st.mode === 'po' ? 'none' : '';
+    drawItems();
+  }
+  form.querySelectorAll('[name=rsMode]').forEach(function(x){ x.addEventListener('change', setMode); });
+  document.getElementById('rsPo').addEventListener('change', function(){ loadPo(this.value); });
+  var supSel = document.getElementById('rsSupplier');
+  supSel.addEventListener('change', function(){ document.getElementById('rsNewSup').style.display = this.value === '__new__' ? '' : 'none'; });
+  document.getElementById('rsNewSupSave').addEventListener('click', async function(){
+    var btn = this, m = document.getElementById('rsNewSupMsg'), name = val('rsNewSupName');
+    if (!name) { m.textContent = 'Name required'; m.style.color = 'var(--red)'; return; }
+    btn.disabled = true;
     try {
-      var res = await api('/api/admin/receive', { method: 'POST', body: {
-        supplier_id: (rcvSupSel && rcvSupSel.value && rcvSupSel.value !== '__new__') ? rcvSupSel.value : null,
-        invoice: document.getElementById('rcvInvoice').value.trim() || null,
-        items: rcvLines.map(function(l){ return {
-          product_img: l.img, qty: l.qty, unit_cost_usd: l.cost, price_usd: l.sell,
-          name: l.name, bin_location: l.bin,
-        }; }),
-      }});
-      var okN = (res.received || []).filter(function(x){ return x.ok; }).length;
-      var bad = (res.received || []).filter(function(x){ return !x.ok; });
-      posToast('Received ' + okN + ' item' + (okN === 1 ? '' : 's') + ' into stock' + (bad.length ? ' — ' + bad.length + ' failed' : ''), bad.length > 0);
-      rcvLines = []; document.getElementById('rcvInvoice').value = ''; rcvRender(); rcvMsg.textContent = '';
-      renderPurchaseOrders(panel);
-    } catch (e) { rcvMsg.textContent = e.message; rcvMsg.style.color = 'var(--red)'; rcvGo.disabled = false; }
+      var sr = await api('/api/admin/suppliers', { method: 'POST', body: { name: name, phone: val('rsNewSupPhone') || null } });
+      var o = document.createElement('option'); o.value = sr.id; o.textContent = name;
+      supSel.insertBefore(o, supSel.querySelector('option[value="__new__"]')); supSel.value = String(sr.id);
+      document.getElementById('rsNewSup').style.display = 'none'; m.textContent = ''; posToast('Supplier “' + name + '” added');
+    } catch (e) { m.textContent = e.message; m.style.color = 'var(--red)'; btn.disabled = false; }
   });
+
+  // ---- bill and tally -------------------------------------------------------
+  var haveBill = function(){ return document.getElementById('rsHaveBill').checked; };
+  document.getElementById('rsHaveBill').addEventListener('change', function(){ form.querySelectorAll('.rsB').forEach(function(x){ x.style.display = haveBill() ? '' : 'none'; }); });
+  var totHint = function(){
+    var sum = (num('rsSub') || 0) + (num('rsTax') || 0) + (num('rsFreight') || 0);
+    document.getElementById('rsTotHint').textContent = 'subtotal + GCT + freight = ' + J(sum);
+  };
+  ['rsSub', 'rsTax', 'rsFreight'].forEach(function(id){ document.getElementById(id).addEventListener('input', function(){
+    totHint();
+    var t = document.getElementById('rsTotal');
+    if (!t.dataset.touched) t.value = ((num('rsSub') || 0) + (num('rsTax') || 0) + (num('rsFreight') || 0)).toFixed(2);
+  }); });
+  document.getElementById('rsTotal').addEventListener('input', function(){ this.dataset.touched = '1'; });
+  var KINDS = {
+    back_order: ['Back order', 'The bill includes goods still to come. The difference waits in Goods Received Not Invoiced until they arrive', 'pos'],
+    adjustment: ['Bill adjustment', 'The supplier\'s price or quantity differs from ours. The difference goes to Purchase Price Variance', 'any'],
+    credit: ['Supplier credit due', 'They billed more than they should: they owe us a credit. The difference goes to Supplier Claims Receivable', 'pos'],
+    other: ['Other', 'Something else: choose the account it goes to and say why', 'any'],
+  };
+  function drawTally(){
+    var el = document.getElementById('rsTally'), v = value();
+    if (!haveBill()) { el.innerHTML = '<p style="margin:0">Value arriving <b>' + J(v) + '</b>. No bill: the stock is received now; enter the bill later in <b>Payables → Enter a bill</b> against 2050 Goods Received Not Invoiced.</p>'; return; }
+    var sub = num('rsSub'), diff = sub == null ? null : Math.round((sub - v) * 100) / 100;
+    var prev = (form.querySelector('[name=rsVar]:checked') || {}).value;
+    el.innerHTML = '<table style="max-width:460px"><tbody><tr><td>Value arriving (qty × cost)</td><td style="text-align:right"><b>' + J(v) + '</b></td></tr><tr><td>Bill subtotal</td><td style="text-align:right"><b>' + (sub == null ? '—' : J(sub)) + '</b></td></tr>' +
+      '<tr><td>Difference</td><td style="text-align:right"><b style="color:' + (diff == null ? 'inherit' : Math.abs(diff) <= 1 ? 'var(--ok,#15803d)' : '#b45309') + '">' + (diff == null ? '—' : J(diff)) + '</b></td></tr></tbody></table>' +
+      (diff == null ? '<p style="color:var(--muted)">Enter the bill subtotal on the Supplier bill tab.</p>'
+        : Math.abs(diff) <= 1 ? '<p style="color:var(--ok,#15803d)">' + (diff ? 'Matches to within J$1 (the cents go to Purchase Price Variance).' : 'The bill matches what arrived.') + '</p>'
+        : '<p style="margin:10px 0 6px">The bill is <b>' + J(Math.abs(diff)) + (diff > 0 ? ' more' : ' less') + '</b> than what arrived. Why?</p>' +
+          Object.keys(KINDS).map(function(k){
+            var ok = KINDS[k][2] === 'any' || diff > 0;
+            return '<label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:4px 0;' + (ok ? '' : 'opacity:.45') + '"><input type="radio" name="rsVar" value="' + k + '"' + (ok ? '' : ' disabled') + (prev === k && ok ? ' checked' : '') + '/> <span><b>' + KINDS[k][0] + '</b> — ' + KINDS[k][1] +
+              (k === 'back_order' ? (st.mode === 'po' ? ' (the rest stays on the PO).' : ' (a back-order PO is opened for ' + J(diff) + ').') : '.') + '</span></label>';
+          }).join('') +
+          '<div id="rsOtherWrap" style="display:none;margin-top:6px">' + flbl('Account', 'Where the difference is booked.', true) + '<select id="rsOtherAcct" class="fld" style="max-width:360px"><option value="">— choose —</option>' +
+            accts.filter(function(a){ return !a.ar_ap; }).map(function(a){ return '<option value="' + a.id + '">' + esc(a.code + ' ' + a.name) + '</option>'; }).join('') + '</select></div>' +
+          '<div style="margin-top:6px;max-width:520px">' + flbl('Note', 'Why the bill differs, e.g. "2 brake kits short, coming next week". Required for Other.') + '<input id="rsReason" class="fld"/></div>');
+    form.querySelectorAll('[name=rsVar]').forEach(function(x){ x.addEventListener('change', function(){ document.getElementById('rsOtherWrap').style.display = x.value === 'other' ? '' : 'none'; }); });
+    var ow = document.getElementById('rsOtherWrap'); if (ow && prev === 'other') ow.style.display = '';
+  }
+  wireFormTabs(form, function(key){ if (key === 'tally') drawTally(); });
+
+  // ---- post ------------------------------------------------------------------
+  document.getElementById('rsGo').addEventListener('click', async function(){
+    var btn = this, msg = document.getElementById('rsMsg');
+    var bill = haveBill(), v = value(), sub = num('rsSub'), diff = sub == null ? null : Math.round((sub - v) * 100) / 100;
+    var vk = (form.querySelector('[name=rsVar]:checked') || {}).value || null;
+    var supId = st.mode === 'po' ? (st.po && st.po.supplier_id) : (supSel.value && supSel.value !== '__new__' ? supSel.value : null);
+    var sum = (sub || 0) + (num('rsTax') || 0) + (num('rsFreight') || 0);
+    var bad = formTabsCheck(form, [
+      { id: 'rsPo', ok: st.mode !== 'po' || !!st.po, msg: 'Choose the purchase order.' },
+      { id: 'rsSupplier', ok: st.mode === 'po' || supSel.value !== '__new__', msg: 'Finish adding the new supplier (Create), or choose one.' },
+      { id: 'rsItems', ok: lines().length > 0, msg: st.mode === 'po' ? 'Enter how many arrived on at least one line.' : 'Add at least one part.' },
+      { id: 'rsSupplier', ok: !bill || !!supId, msg: 'Choose the supplier the bill is from.' },
+      { id: 'rsBillDate', ok: !bill || !!val('rsBillDate'), msg: 'Enter the bill date.' },
+      { id: 'rsSub', ok: !bill || (sub != null && sub >= 0), msg: 'Enter the bill subtotal.' },
+      { id: 'rsTotal', ok: !bill || (num('rsTotal') > 0 && Math.abs(num('rsTotal') - sum) <= 0.01), msg: 'The bill total must equal subtotal + GCT + freight (' + fmtMoney(sum) + ').' },
+      { id: 'rsDue', ok: !bill || !val('rsDue') || val('rsDue') >= val('rsBillDate'), msg: 'The due date is before the bill date.' },
+    ]);
+    if (!bad && bill && Math.abs(diff) > 1 && !vk) { openFormTab(form, 'tally'); drawTally(); bad = 'Say why the bill differs from what arrived.'; }
+    if (!bad && vk === 'other' && (!val('rsOtherAcct') || val('rsReason').length < 3)) { openFormTab(form, 'tally'); bad = 'For Other, choose the account and write a note.'; }
+    if (bad) { msg.textContent = bad; msg.style.color = 'var(--red)'; return; }
+    btn.disabled = true; msg.textContent = 'Receiving…'; msg.style.color = 'var(--muted)';
+    var body = { entry_date: val('rsEntry') || null };
+    if (st.mode === 'po') {
+      body.po_id = st.po.id;
+      body.items = st.poLines.filter(function(l){ return l.qty > 0; }).map(function(l){ return { id: l.id, qty_now: l.qty, price_now: l.price, bin_now: l.bin }; });
+    } else {
+      body.supplier_id = supId;
+      body.items = st.loose.map(function(l){ return { product_img: l.img, qty: l.qty, unit_cost_usd: l.cost, price_usd: l.sell, bin_location: l.bin }; });
+    }
+    if (bill) {
+      body.bill = { number: val('rsBillNo'), bill_date: val('rsBillDate'), due_date: val('rsDue') || null, subtotal: sub, tax: num('rsTax') || 0, freight: num('rsFreight') || 0, total: num('rsTotal') };
+      if (vk) body.variance = { kind: vk, account_id: val('rsOtherAcct') || null, reason: val('rsReason') || null };
+    }
+    try {
+      var r = await api('/api/admin/receive-stock', { method: 'POST', body: body });
+      posToast('Received ' + r.lines.length + ' line' + (r.lines.length === 1 ? '' : 's') + ' (' + fmtMoney(r.value_received) + ')' +
+        (r.bill ? '; bill ' + (r.bill.number || '') + ' ' + fmtMoney(r.bill.total) + ' in Payables, due ' + r.bill.due_date : '') +
+        (r.back_order_po ? '; back-order ' + r.back_order_po.po_number + ' opened' : ''));
+      if (st.mode === 'po') { PO_VIEW_ID = st.po.id; show('purchaseorders'); } else renderReceiveStock(panel);
+    } catch (e) { msg.textContent = e.message; msg.style.color = 'var(--red)'; btn.disabled = false; }
+  });
+
+  setMode();
+  if (preset) { await loadPo(preset); openFormTab(form, 'items'); }
 }
 async function submitPo(){
   var msg = document.getElementById('poMsg');
   msg.style.display = 'block'; msg.style.background = '#dbeafe'; msg.style.color = '#1e40af'; msg.textContent = 'Saving…';
   try {
     var supplierId = document.getElementById('poSupplier').value;
-    if (!supplierId || supplierId === '__new__') throw new Error('Choose a supplier, or create one with ➕ Add a new supplier…');
-    await api('/api/admin/purchase-orders', { method:'POST', body: {
+    var lines = window.__poLines || [];
+    var ship = document.getElementById('poShipping').value, terms = document.getElementById('poTerms');
+    var bad = formTabsCheck(document.getElementById('newPo'), [
+      { id: 'poSupplier', ok: !!supplierId && supplierId !== '__new__', msg: 'Choose a supplier, or create one with ➕ Add a new supplier…' },
+      { id: 'poLnSearch', ok: lines.every(function(l){ return l.img || (l.name && l.name.trim()); }), msg: 'Describe every line that is not a part (or remove it).' },
+      { id: 'poLnSearch', ok: lines.every(function(l){ return l.cost != null && l.cost >= 0; }), msg: 'Give every line its unit cost (0 if free).' },
+      { id: 'poShipping', ok: !(Number(ship) < 0), msg: 'Shipping cannot be negative.' },
+      { id: 'poTerms', ok: !terms || terms.value === '' || (Number(terms.value) >= 0 && Number(terms.value) <= 365), msg: 'Payment terms are 0 to 365 days.' },
+    ]);
+    if (bad) throw new Error(bad);
+    var btn = document.getElementById('poSubmit'); if (btn) btn.disabled = true;
+    var po = await api('/api/admin/purchase-orders', { method:'POST', body: {
       supplier_id: supplierId,
       expected_date: document.getElementById('poExpected').value || null,
       notes: document.getElementById('poNotes').value.trim() || null,
     }});
+    // Lines, then shipping and terms. The order exists from here: a failure leaves it to finish on its own page.
+    var failed = 0;
+    if (po.id) {
+      for (var i = 0; i < lines.length; i++) {
+        try { await api('/api/admin/purchase-orders/' + po.id + '/items', { method:'POST', body: { product_img: lines[i].img || null, sku: lines[i].sku || null, description: lines[i].name || lines[i].img, qty_ordered: lines[i].qty, unit_cost_usd: lines[i].cost } }); }
+        catch (_) { failed++; }
+      }
+      var patch = {};
+      if (ship !== '' && Number(ship) > 0) patch.shipping_usd = Number(ship);   // the website's copy turns it into cents itself
+      if (terms && terms.value !== '') patch.payment_terms_days = parseInt(terms.value, 10);
+      if (Object.keys(patch).length) { try { await api('/api/admin/purchase-orders/' + po.id, { method:'PATCH', body: patch }); } catch (_) { failed++; } }
+    }
+    posToast('PO ' + (po.po_number || '') + ' created' + (lines.length ? ' with ' + (lines.length - failed) + ' line' + (lines.length - failed === 1 ? '' : 's') : '') + (failed ? ' — ' + failed + ' part(s) did not save: finish them on the order' : ''), failed > 0);
+    if (po.id) PO_VIEW_ID = po.id;
     show('purchaseorders');
   } catch (e) {
+    var b2 = document.getElementById('poSubmit'); if (b2) b2.disabled = false;
     msg.style.background = '#fee2e2'; msg.style.color = '#b91c1c'; msg.textContent = e.message;
   }
 }
@@ -10858,7 +11566,7 @@ async function renderPoDetail(panel, id){
       (po.notes ? '<div><div class="lbl">Notes</div>' + esc(po.notes) + '</div>' : '') +
     '</div>' +
     '<div style="padding:14px 16px">' +
-      '<table><thead><tr><th>Description</th><th>SKU</th><th>Ordered</th><th>Received</th><th>Unit cost</th><th>Total</th>' + (canReceive ? '<th>Receive now</th><th>Sell price</th><th>Bin</th>' : '') + '</tr></thead><tbody>' +
+      '<table><thead><tr><th>Description</th><th>SKU</th><th>Ordered</th><th>Received</th><th>Unit cost</th><th>Total</th></tr></thead><tbody>' +
         d.items.map(function(it){
           var outstanding = it.qty_ordered - it.qty_received;
           return '<tr><td>' + esc(it.description) + (it.product_name ? '<br/><small style="color:var(--muted)">' + esc(it.product_name) + '</small>' : '') + '</td>' +
@@ -10867,13 +11575,6 @@ async function renderPoDetail(panel, id){
             '<td>' + it.qty_received + (outstanding > 0 ? ' <small style="color:#b45309">(' + outstanding + ' due)</small>' : '') + '</td>' +
             '<td>' + fmtMoney(it.unit_cost_usd) + '</td>' +
             '<td><b>' + fmtMoney(it.total_usd) + '</b></td>' +
-            (canReceive
-              ? (outstanding > 0
-                  ? '<td><input type="number" min="0" max="' + outstanding + '" class="fld-mini" data-recv="' + it.id + '" placeholder="0"/></td>' +
-                    '<td><input type="number" min="0" step="0.01" class="fld-mini" data-price="' + it.id + '" placeholder="—"/></td>' +
-                    '<td><input class="fld-mini" data-bin="' + it.id + '" value="' + esc(it.bin_location || '') + '" placeholder="—"/></td>'
-                  : '<td colspan="3"><small style="color:var(--muted)">complete</small></td>')
-              : '') +
           '</tr>';
         }).join('') +
       '</tbody></table>' +
@@ -10884,7 +11585,13 @@ async function renderPoDetail(panel, id){
       // exactly when the invoice is in your hand and the terms need entering.
       // With nothing left to receive, "Save invoice details" PATCHes the PO
       // instead of going through the receive action.
-      ('<div class="panel" style="margin-top:14px">' +
+      (canReceive ? '<div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn ok" id="poToReceive">📥 Receive Stock for this PO</button>' +
+          '<small style="color:var(--muted)">Enter what arrived and the supplier\'s bill together; the bill goes to Payables.</small></div>' : '') +
+      ((d.bills || []).length ? '<div class="panel" style="margin-top:14px"><div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">🧾 Supplier bills (Payables)</div><div style="padding:10px 14px"><table><tbody>' +
+          d.bills.map(function(bl){ return '<tr style="' + (bl.voided_at ? 'opacity:.5' : '') + '"><td><b>' + esc(bl.number || 'Bill ' + bl.id) + '</b></td><td>' + esc(bl.bill_date) + '</td><td>due ' + esc(bl.due_date || '') + '</td><td><b>' + fmtMoney(bl.total) + '</b></td><td><small>' + (bl.variance_kind ? esc(bl.variance_kind.replace('_', ' ')) + ' ' + fmtMoney(bl.variance_amount) : '') + (bl.voided_at ? ' void' : '') + '</small></td></tr>'; }).join('') +
+        '</tbody></table></div></div>' : '') +
+      // The PO's own invoice panel is for POs not billed through Receive Stock (older ones); a PO with a bill there is billed once, by that bill.
+      ((canReceive || (d.bills || []).length) ? '' : '<div class="panel" style="margin-top:14px">' +
             '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">' +
               '🧾 Supplier invoice <span style="font-weight:600;color:var(--muted)">' +
               (canReceive ? '— optional, saved with the receipt' : '— edit and save on its own') + '</span>' +
@@ -10901,12 +11608,14 @@ async function renderPoDetail(panel, id){
               '<div><label class="lbl">Terms (net days)</label><input id="poInvTerms" type="number" min="0" step="1" class="fld" value="' + esc(po.payment_terms_days == null ? '' : po.payment_terms_days) + '" placeholder="e.g. 30"/>' +
                 (po.due_date ? '<small style="color:var(--muted)">due ' + esc(String(po.due_date).slice(0, 10)) + '</small>' : '') + '</div>' +
             '</div>' +
-            (canReceive ? '' :
-              '<div style="padding:0 14px 12px"><button class="btn ok" id="poInvSave">Save invoice details</button></div>') +
+            '<div style="padding:0 14px 12px"><button class="btn ok" id="poInvSave">Save invoice details</button></div>' +
           '</div>') +
-      (canReceive ? '<button class="btn ok" id="poReceiveGo" style="margin-top:10px">Receive entered quantities</button>' : '') +
     '</div>' +
-    poPaymentsPanel(po) +
+    // A PO billed on Receive Stock is paid in Payables (Pay Bills), against its bill; the
+    // PO's own payment panel only knows payments recorded on the PO and would read "settled".
+    ((d.bills || []).length
+      ? '<div class="panel" style="margin:0 16px 16px;padding:12px 14px;font-size:13px">💵 Billed through Payables: pay ' + (d.bills.length === 1 ? 'this bill' : 'these bills') + ' with <a href="' + tillHref('/payables.html') + '">Payables → Pay bills</a>.</div>'
+      : poPaymentsPanel(po)) +
     '<details style="border-top:1px solid var(--line);background:var(--card-soft)">' +
       '<summary style="padding:12px 16px;cursor:pointer;font-weight:700;color:var(--heading)">+ Add line item</summary>' +
       '<form id="poItemForm" style="padding:14px 18px;display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:10px;max-width:760px" onsubmit="event.preventDefault();submitPoItem(' + id + ');">' +
@@ -10921,6 +11630,8 @@ async function renderPoDetail(panel, id){
     '</details>';
 
   document.getElementById('poBack').addEventListener('click', function(){ PO_VIEW_ID = null; renderPurchaseOrders(panel); });
+  var toRcv = document.getElementById('poToReceive');
+  if (toRcv) toRcv.addEventListener('click', function(){ RECEIVE_PO_ID = id; show('receivestock'); });
   var recvBtn = document.getElementById('poReceiveGo');
   if (recvBtn) recvBtn.addEventListener('click', async function(){
     var items = [];
@@ -11512,7 +12223,7 @@ function posPinPrompt(opts){
     wrap.style.cssText = 'position:fixed;inset:0;background:rgba(2,6,23,.72);z-index:9999;display:flex;align-items:center;justify-content:center';
     var digits = '';
     wrap.innerHTML =
-      '<div style="background:var(--card);border-radius:14px;padding:22px;width:320px;box-shadow:0 24px 60px rgba(0,0,0,.45)">' +
+      '<div style="background:var(--card);border-radius:14px;padding:22px;width:320px;max-width:calc(100vw - 24px);box-shadow:0 24px 60px rgba(0,0,0,.45)">' +
         '<div style="font-weight:800;font-size:16px;color:var(--heading);margin-bottom:2px">' + esc(o.title || 'Enter your PIN') + '</div>' +
         '<div style="font-size:12.5px;color:var(--muted);margin-bottom:12px">' + esc(o.detail || '') + '</div>' +
         '<div id="pinDots" style="font-size:26px;letter-spacing:9px;height:34px;text-align:center;color:var(--heading);font-weight:700"></div>' +
@@ -11582,7 +12293,7 @@ function posVerificationPrompt(opts){
     var wrap = document.createElement('div');
     wrap.style.cssText = 'position:fixed;inset:0;background:rgba(2,6,23,.72);z-index:9999;display:flex;align-items:center;justify-content:center';
     wrap.innerHTML =
-      '<div style="background:var(--card);border-radius:14px;padding:22px;width:360px;box-shadow:0 24px 60px rgba(0,0,0,.45)">' +
+      '<div style="background:var(--card);border-radius:14px;padding:22px;width:360px;max-width:calc(100vw - 24px);box-shadow:0 24px 60px rgba(0,0,0,.45)">' +
         '<div style="font-weight:800;font-size:16px;color:var(--heading);margin-bottom:2px">Verification required</div>' +
         '<div style="font-size:12.5px;color:var(--muted);margin-bottom:14px">' + esc(o.detail || 'One or more items require this to be recorded before the sale can complete.') + '</div>' +
         (o.needId ?
@@ -11843,6 +12554,11 @@ async function renderCustomerDetail(panel, id){
             CUST_TYPE_OPTS.map(function(t){ return '<option value="' + t + '"' + (t===u.customer_type?' selected':'') + '>' + t + '</option>'; }).join('') + '</select></div>' +
           '<div><label class="lbl">Price tier</label><input id="cpTier" class="fld" value="' + esc(u.price_tier || '') + '" placeholder="retail/trade/fleet/dealer"/></div>' +
           '<div><label class="lbl">Discount %</label><input id="cpDisc" type="number" min="0" max="100" step="0.1" class="fld" value="' + (u.discount_pct != null ? u.discount_pct : '') + '"/></div>' +
+          // The mirror of Discount %: what this account is charged ABOVE list.
+          // The POS marks every non-manually-priced line up by this, so the
+          // invoice prints the increased unit price rather than list plus a
+          // surcharge. Blank or 0 = charge list.
+          '<div><label class="lbl">Markup % (charge above list)</label><input id="cpMarkup" type="number" min="0" max="100" step="0.1" class="fld" placeholder="blank = list price" value="' + (u.markup_pct != null ? u.markup_pct : '') + '"/></div>' +
           // The four credit presets the counter quotes from, kept together:
           // type (how it settles), limit (how much), length (how long before
           // review), term (how many days to pay).
@@ -12222,6 +12938,7 @@ async function submitCustProfile(id){
       customer_type: document.getElementById('cpType').value || null,
       price_tier: document.getElementById('cpTier').value.trim() || null,
       discount_pct: document.getElementById('cpDisc').value || null,
+      markup_pct: document.getElementById('cpMarkup').value || null,
       credit_type: document.getElementById('cpCreditType').value || null,
       credit_limit_usd: document.getElementById('cpCredit').value || null,
       credit_length_months: document.getElementById('cpCreditLen').value || null,
@@ -14841,11 +15558,32 @@ async function renderReports(panel){
     // same height as itself -- which is why the menu scrolled away with the
     // page. The menu column stretches to the row instead, giving the sticky
     // panel inside it somewhere to travel.
-    '<div style="display:grid;grid-template-columns:210px 1fr;gap:0;align-items:start">' +
+    '<div class="rpt-layout" style="display:grid;grid-template-columns:210px 1fr;gap:0;align-items:start">' +
     '<div style="align-self:stretch">' +
       '<div class="panel rpt-menu" style="margin:16px 0 18px 18px">' +
         '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">📑 Reports</div>' +
         '<button class="rptPick" data-key="__overview" style="display:block;width:100%;text-align:left;padding:9px 14px;font-size:12.5px;font-weight:700;background:none;border:0;border-left:3px solid transparent;cursor:pointer;font-family:inherit;color:inherit">▦ Overview</button>' +
+        // Full-page tools that live outside this menu.
+        '<div style="padding:4px 14px 8px;border-bottom:1px solid var(--line);font-size:12.5px;display:grid;gap:3px">' +
+          '<a href="/report-planning.html" target="_blank" rel="noopener">📈 Planning &amp; lost sales ↗</a>' +
+          '<a href="/report-balancing.html" target="_blank" rel="noopener">⚖ Balancing report ↗</a>' +
+          '<a href="/messages.html" target="_blank" rel="noopener">✉ Customer messages ↗</a>' +
+          '<a href="/accounting.html" target="_blank" rel="noopener">📒 Accounting ↗</a>' +
+          '<a href="/security.html" target="_blank" rel="noopener">🔒 Security and audit log ↗</a>' +
+          '<a href="/terminal.html" target="_blank" rel="noopener">🧾 Terminal journal and departments ↗</a>' +
+          '<a href="/commission.html" target="_blank" rel="noopener">💰 Commission ↗</a>' +
+          '<a href="/hiring.html" target="_blank" rel="noopener">🧑‍💼 Hiring and careers ↗</a>' +
+          '<a href="/attendance.html" target="_blank" rel="noopener">🕘 Attendance ↗</a>' +
+          '<a href="/clock.html" target="_blank" rel="noopener">⏱️ Time clock ↗</a>' +
+          '<a href="/stockcash.html" target="_blank" rel="noopener">🏷️ Stock to cash (clearance, returns, lots) ↗</a>' +
+          '<a href="/ai.html" target="_blank" rel="noopener">🤖 AI parts assistant ↗</a>' +
+          '<a href="/training.html" target="_blank" rel="noopener">🎓 Training ↗</a>' +
+          '<a href="/receivables.html" target="_blank" rel="noopener">📥 Receivables (customers, payments, collections) ↗</a>' +
+          '<a href="/payables.html" target="_blank" rel="noopener">📤 Payables (bills, pay bills) ↗</a>' +
+          '<a href="/banking.html" target="_blank" rel="noopener">🏦 Banking (registers, deposits, reconcile) ↗</a>' +
+          '<a href="/payroll.html" target="_blank" rel="noopener">🧾 Payroll (optional module) ↗</a>' +
+          '<a href="/system.html" target="_blank" rel="noopener">🛡 System: audit, security &amp; IT help ↗</a>' +
+        '</div>' +
         // Favourite group first, then the rest in their declared order. One open
         // at a time, so a 44-entry menu shows one group's worth instead of all
         // of it.
@@ -17006,7 +17744,158 @@ function stub(label){ return async function(panel){ panel.innerHTML = '<div clas
 // hoist, so `renderers.dashboard = renderDashboard` below still resolves.
 
 // Hook marketing into the renderer map + sidebar
+// ---------------------------------------------------------------- MODULES --
+// One menu for every full-page module. They each open in their own browser
+// tab (as the links in Reports always did), and each page checks the signed-in
+// user's permissions itself, so this menu only has to list them. Two tiles
+// depend on the server: System management only appears when /api/sys is
+// installed, and Payroll shows whether the optional module is switched on.
+//
+// Modules that only exist on the till. visionautosolutions.com is the
+// Cloudflare port, and these pages were all built on the till after it: on the
+// website every one of them answered "This endpoint is not ported to
+// Cloudflare yet" (payables, receivables, banking, payroll, clock, fleet,
+// warehouse...). The till has them all and is where the books are kept, so on
+// the website their links point at till.visionautosolutions.com instead --
+// staff sign in there once, with its own 30-day session. Pages the port DID
+// cover (department store, supplier management, messages, the shop) stay on
+// the website, and so do print pages (receipt, invoice, quote, pick slip),
+// which work there and need the website's own sign-in. Accounting moved to
+// the till on 19 Oct 2026: the categories, classes and category reports added
+// that day exist only in the till's ledger, which is the one that keeps posting.
+// On the till itself, or localhost, nothing here changes anything.
+var TILL_ORIGIN = 'https://till.visionautosolutions.com';
+var ON_WEBSITE = location.hostname !== 'till.visionautosolutions.com' &&
+  /(^|\.)visionautosolutions\.(com|pages\.dev)$/.test(location.hostname);
+var TILL_ONLY_PAGES = ['accounting', 'documents', 'receivables', 'payables', 'banking', 'loans-rent', 'report-balancing', 'payroll',
+  'clock', 'attendance', 'commission', 'training', 'hiring', 'dispatch', 'fleet-wall', 'mobile',
+  'driver', 'cashier', 'warehouse', 'stockcash', 'report-planning', 'terminal', 'ai', 'system', 'security'];
+function tillHref(href) {
+  if (!ON_WEBSITE || !href || href.charAt(0) !== '/' || href.charAt(1) === '/') return href;
+  var page = href.split(/[?#]/)[0].replace(/^\//, '').replace(/\.html$/, '');
+  return TILL_ONLY_PAGES.indexOf(page) >= 0 ? TILL_ORIGIN + href : href;
+}
+// Catches every other link to these pages (the Reports screen lists them too),
+// including middle-click / ctrl-click, by fixing the href just before it is used.
+if (ON_WEBSITE) ['click', 'auxclick'].forEach(function (ev) {
+  document.addEventListener(ev, function (e) {
+    var a = e.target && e.target.closest && e.target.closest('a[href]');
+    if (!a) return;
+    var h = a.getAttribute('href'), t = tillHref(h);
+    if (t !== h) a.setAttribute('href', t);
+  }, true);
+});
+
+var MODULE_GROUPS = [
+  { title: '🏭 Suppliers', items: [
+    { href: '/supplier-admin.html', icon: '🏭', name: 'Supplier management', blurb: 'Give suppliers portal logins, set credit, consignment, retail and training', key: 'suppliers' },
+    { href: '/supplier.html', icon: '📦', name: 'Supplier portal', blurb: 'The portal suppliers sign in to (preview / their link)', key: null },
+  ]},
+  { title: '🗂 Documents and communications', items: [
+    { href: '/documents.html', icon: '🗂', name: 'Document centre', blurb: 'Every filed document, forms and templates, approvals, expiry, assets, inventory images' },
+    { href: '/documents.html#comms', icon: '📨', name: 'Communications journal', blurb: 'Every email, SMS, chat, WhatsApp and inquiry in one timeline' },
+    { href: '/documents.html#forms', icon: '📝', name: 'Forms (leave and others)', blurb: 'Fill in a leave form, letter or report; managers approve' },
+  ]},
+  { title: '💰 Money', items: [
+    { href: '/accounting.html',  icon: '📒', name: 'Accounting', blurb: 'General ledger, journals, trial balance, QuickBooks export' },
+    { href: '/receivables.html', icon: '📥', name: 'Receivables', blurb: 'Customer accounts, payments, statements, collections' },
+    { href: '/payables.html',    icon: '📤', name: 'Payables', blurb: 'Supplier bills and paying them' },
+    { href: '/banking.html',     icon: '🏦', name: 'Banking', blurb: 'Registers, deposits, reconciliation' },
+    { href: '/loans-rent.html',  icon: '🏠', name: 'Loans & Rent', blurb: 'Loans, rent and recurring bills: register, statements, schedules' },
+    { href: '/report-balancing.html', icon: '⚖', name: 'Balancing report', blurb: 'Stock ledger and cost at sale' },
+  ]},
+  { title: '👥 People', items: [
+    { href: '/payroll.html',     icon: '🧾', name: 'Payroll', blurb: 'Jamaican payroll: NIS, NHT, Ed Tax, HEART, PAYE, contractors, loans, deductions', key: 'payroll' },
+    { href: '/clock.html',       icon: '⏱️', name: 'Time clock', blurb: 'Clock in and out' },
+    { href: '/attendance.html',  icon: '🕘', name: 'Attendance', blurb: 'Hours, lateness, shifts' },
+    { href: '/commission.html',  icon: '💰', name: 'Commission', blurb: 'Sales commission and boosts' },
+    { href: '/training.html',    icon: '🎓', name: 'Training', blurb: 'Lessons, quizzes, practice till' },
+    { href: '/hiring.html',      icon: '🧑‍💼', name: 'Hiring and careers', blurb: 'Job posts and applicants' },
+  ]},
+  { title: '🚚 Deliveries and mobile', items: [
+    { href: '/dispatch.html', icon: '🗺️', name: 'Dispatch', blurb: 'Delivery and admin-run queue, assign drivers, routes, live map, alerts', key: 'fleet' },
+    { href: '/fleet-wall.html', icon: '🖥️', name: 'Security screen', blurb: 'Full-screen live driver map for the security monitor', key: 'fleet' },
+    { href: '/mobile.html', icon: '📱', name: 'Mobile app', blurb: 'For phones: stock count, pick and put away, driver, clock, cashier', key: null },
+    { href: '/driver.html', icon: '🚚', name: 'Driver app', blurb: 'Jobs, route, signatures and photos, SOS (for drivers)' },
+  ]},
+  { title: '📦 Stock and sales', items: [
+    { href: '/cashier.html',     icon: '💵', name: 'Cashier', blurb: 'Drawer shifts and taking payment' },
+    { href: '/warehouse.html',   icon: '🏗', name: 'Warehouse', blurb: 'Bins, receiving, picking, packing, counts' },
+    { href: '/stockcash.html',   icon: '🏷️', name: 'Stock to cash', blurb: 'Clearance ladder, returns grading, liquidation lots' },
+    { href: '/report-planning.html', icon: '📈', name: 'Planning and lost sales', blurb: 'Reorder planning and missed sales' },
+    { href: '/terminal.html',    icon: '🧾', name: 'Terminal journal', blurb: 'Till journal per terminal, departments' },
+    { href: '/deptstore.html',   icon: '🏬', name: 'Department store', blurb: 'Stores and branches, inventory and sales by department, stock transfers', key: 'dept' },
+  ]},
+  { title: '💬 Customers', items: [
+    { href: '/messages.html',    icon: '✉', name: 'Customer messages', blurb: 'Messages, campaigns, consent' },
+    { href: '/ai.html',          icon: '🤖', name: 'AI parts assistant', blurb: 'Counter and phone assistant settings' },
+    { href: '/',                 icon: '🌐', name: 'Website', blurb: 'The shop front customers see' },
+  ]},
+  { title: '🛡 Security and system', items: [
+    { href: '/system.html',      icon: '🛡', name: 'System management', blurb: 'Audit, security, threats, network, help desk, equipment', key: 'system' },
+    { href: '/security.html',    icon: '🔒', name: 'Security and audit log', blurb: 'Lockouts, 2-step sign-in, audit trail' },
+  ]},
+];
+var MODULES_CSS_DONE = false;
+function modulesCss(){
+  if (MODULES_CSS_DONE) return; MODULES_CSS_DONE = true;
+  var st = document.createElement('style');
+  st.textContent =
+    '.mod-wrap{padding:18px}' +
+    '.mod-wrap h2{margin:0 0 4px;font-size:18px}' +
+    '.mod-wrap .mod-sub{color:var(--muted,#6b7280);font-size:13px;margin:0 0 14px}' +
+    '.mod-find{width:100%;max-width:420px;padding:9px 12px;border:1px solid var(--line,#e5e7eb);border-radius:8px;font:inherit;margin-bottom:6px}' +
+    '.mod-grp{margin-top:16px}' +
+    '.mod-grp h3{font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted,#6b7280);margin:0 0 8px}' +
+    '.mod-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}' +
+    '.mod-tile{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border:1px solid var(--line,#e5e7eb);border-radius:10px;background:var(--card,#fff);color:inherit;text-decoration:none;transition:border-color .15s,box-shadow .15s,transform .15s}' +
+    '.mod-tile:hover{border-color:#d61f2b;box-shadow:0 6px 16px rgba(0,0,0,.08);transform:translateY(-1px)}' +
+    '.mod-tile .ic{font-size:24px;line-height:1;flex:0 0 auto}' +
+    '.mod-tile b{display:block;font-size:14px;margin-bottom:2px}' +
+    '.mod-tile small{display:block;color:var(--muted,#6b7280);font-size:12px;line-height:1.4}' +
+    '.mod-tile .tag{display:inline-block;margin-left:6px;font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:999px;vertical-align:1px}' +
+    '.mod-tile .tag.on{background:#dcfce7;color:#166534}.mod-tile .tag.off{background:#f3f4f6;color:#6b7280}';
+  document.head.appendChild(st);
+}
+async function renderModules(panel){
+  modulesCss();
+  // Ask the server which optional parts exist / are on; failure just means "unknown".
+  var hasSystem = false, payroll = null;
+  try { var r1 = await fetch('/api/sys/me', { credentials: 'same-origin' }); hasSystem = r1.ok; } catch (_) {}
+  try { var r2 = await fetch('/api/payroll/module', { credentials: 'same-origin' }); if (r2.ok) payroll = await r2.json(); } catch (_) {}
+  // On the website those two checks hit the port, which has neither; the tiles
+  // open on the till, which has System management, so show it.
+  if (ON_WEBSITE) hasSystem = true;
+  var html = '<div class="mod-wrap"><h2>🧭 All modules</h2>' +
+    '<p class="mod-sub">Every business module in one place. Each opens in its own tab; what you can do there depends on your role.</p>' +
+    '<input class="mod-find" id="modFind" type="search" placeholder="Find a module… (e.g. payroll, bank, clearance)">';
+  MODULE_GROUPS.forEach(function(g){
+    var items = g.items.filter(function(it){ return it.key !== 'system' || hasSystem; });
+    if (!items.length) return;
+    html += '<div class="mod-grp"><h3>' + esc(g.title) + '</h3><div class="mod-grid">';
+    items.forEach(function(it){
+      var tag = '';
+      if (it.key === 'payroll' && payroll) tag = payroll.on ? '<span class="tag on">On</span>' : '<span class="tag off">Switched off</span>';
+      html += '<a class="mod-tile" href="' + tillHref(it.href) + '" target="_blank" rel="noopener" data-find="' + esc((it.name + ' ' + it.blurb + ' ' + g.title).toLowerCase()) + '">' +
+        '<span class="ic">' + it.icon + '</span><span><b>' + esc(it.name) + tag + '</b><small>' + esc(it.blurb) + '</small></span></a>';
+    });
+    html += '</div></div>';
+  });
+  html += '</div>';
+  panel.innerHTML = html;
+  var find = document.getElementById('modFind');
+  if (find) find.addEventListener('input', function(){
+    var q = find.value.trim().toLowerCase();
+    panel.querySelectorAll('.mod-tile').forEach(function(t){ t.style.display = !q || t.getAttribute('data-find').indexOf(q) !== -1 ? '' : 'none'; });
+    panel.querySelectorAll('.mod-grp').forEach(function(gr){
+      var any = Array.prototype.some.call(gr.querySelectorAll('.mod-tile'), function(t){ return t.style.display !== 'none'; });
+      gr.style.display = any ? '' : 'none';
+    });
+  });
+}
+
 renderers.marketing      = renderMarketing;
+renderers.modules        = renderModules;
 // Re-bind the stub renderers (var X = stub(...) hoists the declaration but not the
 // assignment, so the original renderers map captured `undefined` for these. Re-bind
 // here, AFTER the stubs are actually assigned, so clicking the sidebar items works.)
@@ -17026,6 +17915,7 @@ renderers.warehouse      = renderWarehouse;
 renderers.deliveries     = renderDeliveries;
 renderers.suppliers      = renderSuppliers;
 renderers.purchaseorders = renderPurchaseOrders;
+renderers.receivestock   = renderReceiveStock;
 renderers.vehiclehistory = renderVehicleHistory;
 renderers.maintdue       = renderMaintDue;
 renderers.laborstd       = renderLaborStandards;
@@ -18128,7 +19018,15 @@ async function submitNewProduct(){
     var w = document.getElementById('npImageWidget').__widget;
     var f = w ? w.getFile() : null;
     var url = w ? w.getUrl() : '';
-    if (!f && !url) throw new Error('Please add a photo (camera/file/URL).');
+    var bad = formTabsCheck(document.getElementById('newProdForm'), [
+      { id: 'npImageWidget', ok: !!(f || url), msg: 'Please add a photo (camera/file/URL).' },
+      { id: 'npName', ok: !!document.getElementById('npName').value.trim(), msg: 'Give the part a name.' },
+      { id: 'npCategory', ok: !!document.getElementById('npCategory').value, msg: 'Choose the category.' },
+      { id: 'npCost', ok: !(Number(document.getElementById('npCost').value) < 0), msg: 'Cost cannot be negative.' },
+      { id: 'npPrice', ok: !(Number(document.getElementById('npPrice').value) < 0), msg: 'Sell price cannot be negative.' },
+      { id: 'npStock', ok: !(Number(document.getElementById('npStock').value) < 0), msg: 'Stock cannot be negative.' },
+    ]);
+    if (bad) throw new Error(bad);
     var fd = new FormData();
     if (f) fd.append('photo', f);
     if (url) fd.append('photo_url', url);
@@ -18146,7 +19044,7 @@ async function submitNewProduct(){
     fd.append('cost_usd', document.getElementById('npCost').value || '');
     fd.append('markup_pct', document.getElementById('npMarkup').value || '');
     fd.append('list_price_usd', document.getElementById('npList').value || '');
-    fd.append('low_threshold', document.getElementById('npLow').value || '');
+    fd.append('low_threshold', document.getElementById('npLow').value || '0');   // blank = never warn; the till's parseInt('') was NaN and refused the part
     fd.append('stock_uom', document.getElementById('npStockUom').value || '');
     fd.append('purchase_uom', document.getElementById('npPurchUom').value || '');
     fd.append('units_per_purchase', document.getElementById('npUnitsPerPurch').value || '');
@@ -18165,6 +19063,14 @@ async function submitNewProduct(){
       var gfd = new FormData();
       for (var gi = 0; gi < more.files.length; gi++) gfd.append('photo' + gi, more.files[gi]);
       try { await fetch('/api/admin/products/' + encodeURIComponent(newImg) + '/images', { method:'POST', body: gfd, credentials:'same-origin' }); } catch (_) {}
+    }
+    var incA = document.getElementById('npIncomeAcct'), cogA = document.getElementById('npCogsAcct');
+    if (newImg && ((incA && incA.value) || (cogA && cogA.value))) {
+      try {
+        var gp = await api('/api/gl/products?q=' + encodeURIComponent(newImg));
+        var mine = (gp.products || []).find(function(p){ return p.img === newImg; });
+        if (mine) await api('/api/gl/products/' + mine.id, { method: 'PUT', body: { income_account_id: incA ? incA.value : '', cogs_account_id: cogA ? cogA.value : '' } });
+      } catch (e) { posToast('Part added, but its accounts were not saved: ' + e.message, true); }
     }
     msg.style.background = '#dcfce7';
     msg.style.color = '#166534';
@@ -18288,7 +19194,9 @@ async function init(){
     var landing = POS_PREFS && POS_PREFS.landingTab;
     var hidden = (MY_ROLE && Array.isArray(MY_ROLE.hidden_tabs)) ? MY_ROLE.hidden_tabs : [];
     if (!landing || !renderers[landing] || hidden.indexOf(landing) !== -1) landing = null;
-    await show(currentTab || landing || 'pos');
+    var linked = (location.hash.match(/^#tab=([a-z]+)$/) || [])[1];
+    if (linked && renderers[linked] && hidden.indexOf(linked) === -1) landing = linked; else linked = null;
+    await show((linked && landing) || currentTab || landing || 'pos');
   } catch (e) {
     console.warn('[init] failed:', e);
     var p = document.getElementById('panel');
@@ -18329,6 +19237,89 @@ document.addEventListener('DOMContentLoaded', async function(){
   }
 });
 
+</script>
+<script src="/assets/clock-banner.js" defer></script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+<script>
+// Phones: a list table wider than the screen is shown as cards, one per row,
+// each cell labelled with its column heading (CSS: table.m-cards). Only
+// tables that actually overflow are switched, so narrow tables, the till's
+// cart and report tables (which scroll inside .rpt-scroll) are left alone.
+// Add class "no-mcard" to a table to keep it as a table.
+(function(){
+  var mq = window.matchMedia('(max-width:640px)'), mqTab = window.matchMedia('(max-width:900px)');
+  var queued = false;
+  function headings(t){
+    var row = t.tHead && t.tHead.rows[t.tHead.rows.length - 1];
+    if (!row) return null;
+    var out = [];
+    for (var i = 0; i < row.cells.length; i++) {
+      // Without the ⓘ tips and sort arrows, which would read as part of the label.
+      var cell = row.cells[i].cloneNode(true);
+      cell.querySelectorAll('.tip, .rpt-ar, .rpt-rs').forEach(function(x){ x.remove(); });
+      var span = row.cells[i].colSpan || 1, txt = (cell.textContent || '').replace(/[▲▼↕⇅]/g, '').trim();
+      for (var j = 0; j < span; j++) out.push(txt);
+    }
+    return out.length >= 3 ? out : null;
+  }
+  function label(t, h){
+    var bodies = t.tBodies;
+    for (var b = 0; b < bodies.length; b++) {
+      var rows = bodies[b].rows;
+      for (var r = 0; r < rows.length; r++) {
+        var cells = rows[r].cells, col = 0;
+        if (cells.length === 1) { col = 0; continue; }
+        for (var c = 0; c < cells.length; c++) {
+          if (!cells[c].hasAttribute('data-label')) cells[c].setAttribute('data-label', h[col] || '');
+          col += cells[c].colSpan || 1;
+        }
+      }
+    }
+  }
+  function run(){
+    queued = false;
+    // Phones get cards; tablets keep the table but let it scroll on its own
+    // instead of dragging the whole panel (and its filters) sideways.
+    var mode = mq.matches ? 'm-cards' : (mqTab.matches ? 'm-scroll' : '');
+    var tables = document.querySelectorAll('#panel table, body > div table');
+    for (var i = 0; i < tables.length; i++) {
+      var t = tables[i];
+      if (!mode) { t.classList.remove('m-cards', 'm-scroll'); continue; }
+      // The schedule calendar is a grid, not a list: it keeps scrolling.
+      if (t.classList.contains('no-mcard') || t.classList.contains('cal') || t.closest('.rpt-scroll, #posShell, .no-mcard')) continue;
+      if (t.parentElement && t.parentElement.closest('td')) continue;
+      var h = headings(t);
+      if (!h) continue;
+      if (t.classList.contains('m-cards')) { label(t, h); continue; }
+      if (t.classList.contains('m-scroll')) continue;
+      // Re-measured whenever the row count changes: most lists render a
+      // "Loading…" row first and fill the same table in later.
+      if (!t.offsetWidth || t.dataset.mcChecked === String(t.rows.length)) continue;
+      var box = t.parentElement, avail = box ? box.clientWidth : innerWidth;
+      t.dataset.mcChecked = String(t.rows.length);
+      if (t.scrollWidth > Math.min(avail, innerWidth) + 4) {
+        if (mode === 'm-cards') label(t, h);
+        t.classList.add(mode);
+      }
+    }
+  }
+  function queue(){ if (!queued) { queued = true; setTimeout(run, 30); } }
+  function recheck(){ document.querySelectorAll('table[data-mc-checked]').forEach(function(t){ delete t.dataset.mcChecked; t.classList.remove('m-cards', 'm-scroll'); }); queue(); }
+  new MutationObserver(queue).observe(document.body, { childList: true, subtree: true });
+  document.addEventListener('click', function(){ setTimeout(queue, 60); }, true);
+  [mq, mqTab].forEach(function(m){ if (m.addEventListener) m.addEventListener('change', recheck); else m.addListener(recheck); });
+  // Reports: the menu sits above the report on a phone, so picking one
+  // scrolls down to it.
+  document.addEventListener('click', function(e){
+    if (!mq.matches || !e.target.closest || !e.target.closest('.rpt-layout .rptPick')) return;
+    setTimeout(function(){
+      var body = document.querySelector('.rpt-layout > div:last-child');
+      if (body) body.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 250);
+  });
+  window.mobileTables = queue;
+  queue();
+})();
 </script>
 </body>
 </html>

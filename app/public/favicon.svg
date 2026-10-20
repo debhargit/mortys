@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Vision Auto mark: the logo's black V-shield and red badge, without the
+       lettering (unreadable at icon sizes). -->
+  <path d="M3.5 8.5h57L32 61z" fill="#0a0a0c" stroke="#0a0a0c" stroke-width="3" stroke-linejoin="round"/>
+  <circle cx="32" cy="26" r="19.5" fill="#fff"/>
+  <circle cx="32" cy="26" r="17" fill="#d61f2b"/>
+  <path d="M20.5 15h7.2L32 27.6 36.3 15h7.2L35 38h-6z" fill="#fff"/>
+</svg>

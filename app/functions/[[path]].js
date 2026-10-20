@@ -29,6 +29,9 @@ import mountService from './_routes/service.js'; // Phase 13 (service centre)
 import mountOps from './_routes/ops.js'; // Phase 14 (ops)
 import mountReports from './_routes/reports.js';   // Phase 15 (analytics + reports)
 import mountAdminMisc from './_routes/admin_misc.js'; // Phase 15 (settings, marketing, schedule, misc)
+import mountStoreOps from './_routes/storeops.js'; // departments, store locations, cashier (migration 0064)
+import mountGl from './_routes/gl.js'; // general ledger: chart, journal, reports, exports (migration 0064)
+import { isTillHistoryRead, fromTill } from './_lib/till_gateway.js'; // full-history reads from the till
 
 const app = new Hono();
 
@@ -54,6 +57,8 @@ mountService(app);
 mountOps(app);
 mountReports(app);
 mountAdminMisc(app);
+mountStoreOps(app);
+mountGl(app);
 
 // admin.html's checkDbUp() shows a "database is not running" banner unless this
 // reports db:'up', so it must actually probe D1 (a one-row read). D1 has no
@@ -65,16 +70,34 @@ app.get('/api/health', async (c) => {
     await d1(c.env).one("SELECT 1 AS ok");
     db = 'up';
   } catch { db = 'down'; }
-  return c.json({ ok: db === 'up', db, runtime: 'cloudflare-pages', ported_phases: [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15] }, db === 'up' ? 200 : 503);
+  return c.json({ ok: db === 'up', db, runtime: 'cloudflare-pages', ported_phases: [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15], store_ops: true, gl: true }, db === 'up' ? 200 : 503);
+});
+
+// D1's free tier stops answering once the daily row-read allowance is used up
+// (resets 00:00 UTC). Say so plainly instead of a bare 500 -- staff otherwise
+// read it as a broken login. Everything else keeps the generic 500.
+app.onError((err, c) => {
+  const m = String((err && (err.message || (err.cause && err.cause.message))) || '');
+  if (/row read limit|exceeded d1|daily .*limit|\b7500\b/i.test(m)) {
+    return c.json({ error: 'The website database has reached its free daily limit and is paused until 00:00 UTC (7 pm Jamaica). Use the shop till in the meantime.', d1_limit: true }, 503);
+  }
+  console.error('[functions]', err);
+  return c.json({ error: 'Server error' }, 500);
 });
 
 // Anything under /api not yet ported.
 app.all('/api/*', (c) => c.json({ error: 'This endpoint is not ported to Cloudflare yet — see app/PORT.md' }, 501));
 
-export const onRequest = (context) => {
+export const onRequest = async (context) => {
   const { pathname } = new URL(context.request.url);
   // Dynamic routes go to Hono; everything else is a static asset in public/.
   if (pathname.startsWith('/api/') || pathname.startsWith('/uploads/')) {
+    // Reports and sales history come from the till's full database when it
+    // answers; on anything else the D1 route below answers as it always has.
+    if (isTillHistoryRead(context.request, pathname)) {
+      const tillRes = await fromTill(context.request, context.env);
+      if (tillRes) return tillRes;
+    }
     return app.fetch(context.request, context.env, context);
   }
   return context.next();

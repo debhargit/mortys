@@ -58,9 +58,9 @@ export async function loadAltNumbersByImg(db, imgs) {
             s.stock_count AS s_stock, s.low_threshold AS s_low, s.item_type AS s_item_type
        FROM product_alt_numbers an
        LEFT JOIN products s ON s.img = an.substitute_img
-      WHERE an.product_img IN (${list.map(() => '?').join(',')})
+      WHERE an.product_img IN (SELECT value FROM json_each(?))
       ORDER BY an.product_img, an.id`,
-    ...list
+    JSON.stringify(list)
   );
   for (const r of rows) {
     if (!map.has(r.product_img)) map.set(r.product_img, []);
@@ -106,9 +106,9 @@ export async function loadSubstitutesByImg(db, imgs) {
             p.stock_count, p.low_threshold, p.item_type
        FROM product_alt_numbers an
        JOIN products p ON p.img = an.product_img
-      WHERE an.substitute_img IN (${list.map(() => '?').join(',')}) AND p.is_active = 1
+      WHERE an.substitute_img IN (SELECT value FROM json_each(?)) AND p.is_active = 1
       ORDER BY an.substitute_img, an.id`,
-    ...list
+    JSON.stringify(list)
   );
   for (const r of revRows) {
     const bucket = out.get(r.target);

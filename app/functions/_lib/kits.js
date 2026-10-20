@@ -25,9 +25,9 @@ export async function loadKitComponentsByImg(db, kitImgs) {
             p.restricted_instore_only, p.restricted_manager_approval,
             p.restricted_id_required, p.restricted_tax_id_required, p.is_redeemable
        FROM kit_components kc JOIN products p ON p.img = kc.component_img
-      WHERE kc.kit_img IN (${list.map(() => '?').join(',')})
+      WHERE kc.kit_img IN (SELECT value FROM json_each(?))
       ORDER BY kc.kit_img, kc.sort_order, kc.id`,
-    ...list
+    JSON.stringify(list)
   );
   for (const r of rows) {
     if (!map.has(r.kit_img)) map.set(r.kit_img, []);

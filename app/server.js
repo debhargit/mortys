@@ -33,9 +33,23 @@ const express = require('express');
 const { execFile } = require('child_process');
 const os = require('os');
 const dgram = require('dgram');
+const { lanAddress } = require('./lan-address');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const cookieSession = require('cookie-session');
+// VISION_DEV=1 runs a development copy against a copy of the shop database.
+// That database carries the live settings, so without this a dev server would
+// email/SMS real customers, run the off-site backup on top of the real one,
+// and announce itself on the shop LAN where tills could join it. Credentials
+// are cleared BEFORE mailer/sms/payments read them, so they fall back to their
+// log-to-console mode.
+const DEV_MODE = process.env.VISION_DEV === '1';
+if (DEV_MODE) {
+  for (const k of Object.keys(process.env)) {
+    if (/^(SMTP_|TWILIO_|FYGARO_|DHL_|FEDEX_|MH_BACKUP_)/.test(k)) delete process.env[k];
+  }
+  console.log('[dev] VISION_DEV=1: email, SMS, payments, carriers, LAN discovery and off-site backup are OFF');
+}
 const mailer = require('./mailer');
 const payments = require('./payments');
 const sms = require('./sms');
@@ -332,14 +346,17 @@ let MACHINE_CFG = loadMachineConfig();
 function machineName() {
   return (MACHINE_CFG.name && MACHINE_CFG.name.trim()) || os.hostname();
 }
+// The address other machines in the shop are told to connect to -- it goes
+// into the discovery announce and the `terminals` table, so a wrong answer
+// reads as "the till cannot reach the server" even though the server is up.
+//
+// This used to return the first non-internal IPv4 os.networkInterfaces()
+// happened to list, with no filtering: on the shop's own machine that was the
+// VPN adapter (10.110.8.189) rather than the Wi-Fi LAN (192.168.12.240).
+// lan-address.js does the ranking, and honours an operator's pinned answer in
+// machine-config.json.
 function primaryLocalIPv4() {
-  const ifaces = os.networkInterfaces();
-  for (const name of Object.keys(ifaces)) {
-    for (const iface of ifaces[name] || []) {
-      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
-    }
-  }
-  return '127.0.0.1';
+  return lanAddress(__dirname);
 }
 
 // Re-detected on boot and every 30s so Setup and the POS bar can show "local
@@ -578,7 +595,29 @@ function announcePayload() {
   };
 }
 
+// HTTPS on PORT+1 for phones. Browsers only allow the camera (barcode scanning
+// in warehouse.html) on a secure page, and phones reach the till by its LAN
+// address, which plain http is not. Self-signed with this PC's LAN addresses in
+// the certificate (tls-cert.js); each phone accepts it once. Kept outside app/
+// so the key is never inside the static web root.
+async function startHttpsListener() {
+  const httpsPort = Number(process.env.HTTPS_PORT) || (Number(PORT) + 1);
+  try {
+    const dir = path.join(__dirname, '..', 'data', 'web-tls');
+    fs.mkdirSync(dir, { recursive: true });
+    const { ensureServerCert, CERT_NAME, KEY_NAME } = require('./tls-cert');
+    await ensureServerCert(dir);
+    require('https')
+      .createServer({ cert: fs.readFileSync(path.join(dir, CERT_NAME)), key: fs.readFileSync(path.join(dir, KEY_NAME)) }, app)
+      .on('error', (e) => console.warn('[https] not started:', e.message))
+      .listen(httpsPort, () => console.log('[https] phones and scanners: https://<this-pc>:' + httpsPort + '/warehouse'));
+  } catch (e) {
+    console.warn('[https] not started:', e.message);
+  }
+}
+
 function startDiscoveryService() {
+  if (DEV_MODE) return;
   try {
     const sock = dgram.createSocket({ type: 'udp4', reuseAddr: true });
     sock.on('error', (err) => {
@@ -721,6 +760,64 @@ app.use(
   })
 );
 
+// -----------------------------------------------------------------------------
+//  Cloudflare gateway: history reads on behalf of a website admin.
+//
+//  visionautosolutions.com runs on Cloudflare with its own D1 database, and D1
+//  only holds 2026 -- the free plan's 500 MB and 100,000-writes-a-day limits
+//  rule out 17 years of sales. For report and sales-history screens it asks
+//  this server instead, over the till.visionautosolutions.com tunnel, and
+//  vouches for the admin signed in there with an HMAC over the request
+//  (functions/_lib/till_gateway.js signs; this checks).
+//
+//  This is a second way into a public server, accepted on purpose by the
+//  owner on 19 Oct 2026. It is kept narrow so a leaked secret can read history
+//  and nothing else:
+//    - GET only, and only paths matching GATEWAY_PATHS;
+//    - signed over timestamp, method, path+query and email; 60 s window;
+//    - the account is looked up HERE by email, so this server's own admin,
+//      capability and disabled checks still decide what comes back.
+//  The session built below lives for this one request: Cloudflare strips the
+//  Set-Cookie that cookie-session adds, so no browser ever holds a till cookie
+//  this way. Off unless server-config.json has gateway.secret (read at start).
+//  To revoke: delete gateway.secret here and restart, or change it on both sides.
+// -----------------------------------------------------------------------------
+const GATEWAY_SECRET = String((SERVER_CFG.gateway && SERVER_CFG.gateway.secret) || '');
+const GATEWAY_PATHS = /^\/api\/admin\/(reports\/[a-z0-9-]+|analytics|dashboard|pos\/sales(\/\d+)?)$/;
+app.use(async (req, res, next) => {
+  const sig = String(req.get('x-vision-gateway-sig') || '');
+  if (!sig) return next();
+  const refuse = (why) => {
+    console.log('[gateway] refused ' + req.method + ' ' + req.path + ': ' + why);
+    return res.status(401).json({ error: 'Gateway request refused' });
+  };
+  if (GATEWAY_SECRET.length < 32) return refuse('no gateway.secret (32+ chars) in server-config.json');
+  if (req.method !== 'GET' || !GATEWAY_PATHS.test(req.path)) return refuse('not a gateway path');
+  const email = String(req.get('x-vision-gateway-user') || '').trim().toLowerCase();
+  const ts = Number(req.get('x-vision-gateway-ts'));
+  if (!email || !ts || Math.abs(Date.now() - ts) > 60000) return refuse('missing or stale');
+  const want = nodeCrypto.createHmac('sha256', GATEWAY_SECRET)
+    .update(ts + '\n' + req.method + '\n' + req.originalUrl + '\n' + email).digest('hex');
+  if (want.length !== sig.length || !nodeCrypto.timingSafeEqual(Buffer.from(want), Buffer.from(sig))) {
+    return refuse('bad signature');
+  }
+  try {
+    const { rows } = await query(
+      'SELECT id FROM users WHERE lower(email) = $1 AND is_admin AND NOT COALESCE(disabled, false) ORDER BY id LIMIT 1',
+      [email]
+    );
+    if (!rows.length) return refuse('no active admin ' + email + ' on this server');
+    // The shape every sign-in path writes (userId/epoch/at -- see signInSession
+    // in auth-extra.js), plus `seen` so security.js's idle sign-out counts it active.
+    const now = Date.now();
+    req.session = { userId: rows[0].id, epoch: SESSION_EPOCH, at: now, seen: now };
+    console.log('[gateway] ' + req.method + ' ' + req.originalUrl + ' for ' + email);
+  } catch (e) {
+    return next(e);
+  }
+  next();
+});
+
 // Sessions carry the epoch they were signed in under. "Terminate this
 // terminal" bumps SESSION_EPOCH, which invalidates every session on this
 // machine at once -- cookie-session is stateless, so there is no server-side
@@ -728,6 +825,26 @@ app.use(
 app.use((req, res, next) => {
   if (req.session && req.session.userId && req.session.epoch !== SESSION_EPOCH) req.session = null;
   next();
+});
+// Sign-in security (lockout, idle sign-out, 2-step) and the audit log of every
+// change staff make (security.js). Mounted before any route on purpose.
+const security = require('./security').register(app, { query, requireAdmin, requireCap, bcrypt, publicUser, getEpoch: () => SESSION_EPOCH });
+// System management: audit, security and IT support (sysops.js). Early: its
+// middleware ends sessions signed out by the administrator before other routes run.
+const sysops = require('./sysops').register(app, { query, requireAdmin, requireCap, userCan, bcrypt, mailer, devMode: DEV_MODE,
+  permState: (id) => userPermState(id), getCapabilities: () => CAPABILITIES, getRestricted: () => RESTRICTED_CAPS });
+// Cyber security (threat detection, blocking, risks) and network management (cyber.js).
+require('./cyber').register(app, { query, requireAdmin, requireCap, mailer, devMode: DEV_MODE, sysops });
+// Document and communication centre (docs.js): the filed-document library, templates and
+// forms, and the journal of every email / SMS the system sends (it wraps mailer and sms).
+require('./docs').register(app, { query, requireCap, userCan, mailer, sms, devMode: DEV_MODE, sysops });
+// Dispatch, the driver app and vehicle tracking (fleet.js), plus the mobile app shell.
+require('./fleet').register(app, { query, requireCap, userCan, permState: (id) => userPermState(id), mailer, devMode: DEV_MODE });
+// Time clock: attendance, the clocked-in-on-site rule for taking money, shifts,
+// overtime and extensions, timesheets (timeclock.js). Before every money route.
+const timeclock = require('./timeclock').register(app, {
+  query, getPool: () => pool, requireAdmin, requireCap, bcrypt, mailer, publicUser, isLocal: security.isLocal,
+  getShopName: async () => { try { const s = shopSettingsToShop(await getShopSettings()); return s && (s.name || s.shop_name); } catch (_) { return null; } },
 });
 
 // -----------------------------------------------------------------------------
@@ -797,9 +914,14 @@ app.use((req, _res, next) => {
 // dotfiles:'ignore', but they're listed here too so the whole rule reads in
 // one place. /api/* is exempt: those routes have their own auth guards and
 // some of them legitimately end in .json-looking paths.
+// Not anchored on the extension alone: a protected name followed by ANY suffix
+// (db-config.json.bak-melthahonda, server.js.copy, index.html.bak-hero) is
+// still private -- the old `$`-anchored form let those straight through (audit
+// C2). Backup/temp suffixes and config formats are denied outright; no page
+// fetches a static .json/.yml/.toml, so blocking them costs nothing.
 const PRIVATE_FILE_RE =
-  /(^|\/)(\.env.*|db-config\.json|server-config\.json|machine-config\.json|terminal-id\.json|portable\.json|package(-lock)?\.json|[^\/]*\.(js|mjs|cjs|sql|csv|bat|cmd|ps1|vbs|log|md))$/i;
-const PRIVATE_DIR_RE = /^\/(node_modules|migrations|logs|runtime|pgdata|scripts|functions)(\/|$)/i;
+  /(^|\/)(\.env[^\/]*|[^\/]*\.(js|mjs|cjs|sql|csv|bat|cmd|ps1|vbs|log|md|json|ya?ml|toml|pem|key|crt|pfx|exe|dbf|qbw|qbb|zip|rar)([.\-_~][^\/]*)?|[^\/]*\.(bak|old|orig|tmp|copy|swp|save|retired)([.\-_~][^\/]*)?|[^\/]*\.(html?)[.\-_~][^\/]*|[^\/]*~)$/i;
+const PRIVATE_DIR_RE = /^\/(node_modules|migrations|logs|runtime|pgdata|scripts|functions|dist|tools|test|cron-worker)(\/|$)|(^|\/)\.[^\/]+|\.(sqlite[^\/]*|sh|db)$/i;
 
 // Front-end asset bundle. app/assets/ holds only browser-side JS/CSS that the
 // storefront pages load with <script src>/<link href> -- it must be reachable
@@ -934,12 +1056,95 @@ const CAPABILITIES = [
   { key: 'pos.hold_recall',       group: 'POS',        label: 'Hold and recall tickets' },
   { key: 'pos.open_close_shift',  group: 'POS',        label: 'Open / close a cash-drawer shift' },
   { key: 'pos.reprint_receipt',   group: 'POS',        label: 'Reprint a receipt' },
+  { key: 'pos.redeemable_mint',   group: 'POS',        label: 'Sell a redeemable item with no code loaded (a code is generated)' },
   { key: 'inventory.edit_price',  group: 'Inventory',  label: 'Edit a product price' },
   { key: 'inventory.adjust_stock',group: 'Inventory',  label: 'Adjust stock counts' },
   { key: 'customers.view_balances',group: 'Customers', label: 'See customer account balances' },
   { key: 'reports.view',          group: 'Reports',    label: 'View reports' },
+  { key: 'warehouse.access',      group: 'Warehouse',  label: 'Open the warehouse scanner' },
+  { key: 'warehouse.move_stock',  group: 'Warehouse',  label: 'Move stock between bins / put away' },
+  { key: 'warehouse.manage_bins', group: 'Warehouse',  label: 'Create and edit bins' },
+  { key: 'purchasing.receive',        group: 'Purchasing', label: 'Receive goods against purchase orders' },
+  { key: 'purchasing.create_po',      group: 'Purchasing', label: 'See reorder suggestions and draft / cancel purchase orders' },
+  { key: 'purchasing.approve_bills',  group: 'Purchasing', label: 'Confirm or dispute supplier bills' },
+  { key: 'purchasing.settings',       group: 'Purchasing', label: 'Change exchange rates, pricing rules and reorder settings' },
+  { key: 'fulfil.pick',     group: 'Orders', label: 'See the order queue and pick orders' },
+  { key: 'fulfil.pack',     group: 'Orders', label: 'Pack orders and mark them ready' },
+  { key: 'fulfil.dispatch', group: 'Orders', label: 'Make manifests, dispatch and confirm deliveries' },
+  { key: 'fulfil.collect',  group: 'Orders', label: 'Hand over pickup orders at the counter' },
+  { key: 'fulfil.hold',     group: 'Orders', label: 'Put orders on hold and release them' },
+  { key: 'fulfil.manage',   group: 'Orders', label: 'Send sales to the warehouse, cancel orders, change order settings' },
+  { key: 'pos.finalise_invoice', group: 'POS',     label: 'Take payment at the POS (off: checkout sends the order to a cashier)' },
+  { key: 'cashier.access',       group: 'Cashier', label: 'Take payment on orders at a cashier station' },
+  { key: 'cashier.manage',       group: 'Cashier', label: 'Set up stations, see drawer variances, approve drawer counts' },
+  { key: 'count.do',      group: 'Stock counts', label: 'Count bins (blind)' },
+  { key: 'count.create',  group: 'Stock counts', label: 'Start stock counts and see what is due' },
+  { key: 'count.approve', group: 'Stock counts', label: 'See count differences, send bins for recount, post adjustments' },
+  { key: 'sales.lost_record', group: 'Planning', label: 'Record lost sales (parts asked for that we could not sell) and call customers back' },
+  { key: 'planning.view',     group: 'Planning', label: 'See the planning dashboard and lost-sales report' },
+  { key: 'planning.targets',  group: 'Planning', label: 'Change planning targets (fill rate, stock days, profit, dead stock)' },
+  { key: 'notify.view',   group: 'Customer messages', label: 'See the customer message log and templates' },
+  { key: 'notify.send',   group: 'Customer messages', label: 'Resend messages and send WhatsApp messages by hand' },
+  { key: 'notify.manage', group: 'Customer messages', label: 'Edit message templates, quiet hours, switch messages on or off' },
+  { key: 'acct.view',   group: 'Accounting', label: 'See the journal, trial balance and tie-out' },
+  { key: 'acct.post',   group: 'Accounting', label: 'Post manual journal entries and reverse entries' },
+  { key: 'acct.setup',  group: 'Accounting', label: 'Start the ledger, edit accounts and posting rules' },
+  { key: 'acct.close',  group: 'Accounting', label: 'Close and reopen months' },
+  { key: 'acct.export', group: 'Accounting', label: 'Export to QuickBooks' },
+  { key: 'sec.manage', group: 'Security', label: 'Set sign-in rules, unlock accounts, reset 2-step sign-in' },
+  { key: 'audit.view', group: 'Security', label: 'See the audit log of who changed what' },
+  { key: 'dept.manage', group: 'Departments', label: 'Set up departments, who works in them, and till exception rules' },
+  { key: 'tj.view',     group: 'Departments', label: 'See the terminal journal and till exceptions' },
+  { key: 'comm.view',    group: 'Commission', label: 'See commission for every rep' },
+  { key: 'comm.rules',   group: 'Commission', label: 'Set commission rules and switch tracking on' },
+  { key: 'comm.approve', group: 'Commission', label: 'Split sales, adjust, approve and pay commission statements' },
+  { key: 'reps.manage',  group: 'Freelance reps', label: 'Add freelance reps, send their invite links, switch them off' },
+  { key: 'links.send',   group: 'Freelance reps', label: 'Send customers tracked links (parts, quotes, pages, videos)' },
+  { key: 'hr.manage',    group: 'Careers', label: 'Post jobs, read applications and CVs, hire' },
+  { key: 'clock.manage',  group: 'Time clock', label: 'Set shifts, overtime rules, badges, fingerprints; timesheets and payroll' },
+  { key: 'clock.approve', group: 'Time clock', label: 'See who is in; approve overtime, extensions and time corrections' },
+  { key: 'mkt.manage',          group: 'Stock to cash', label: 'Clearance prices, stock classes, lots, supplier claims and offer campaigns' },
+  { key: 'stock.grade_returns', group: 'Stock to cash', label: 'Grade returned parts (A back to stock, B open box, C write-off or claim)' },
+  { key: 'ai.manage',           group: 'AI assistant',  label: 'Switch the AI sales assistant on or off, read its chats and answer handed-over customers' },
+  { key: 'ai.assist',           group: 'AI assistant',  label: 'Use the staff assistant (how-do-I answers and sale tips)' },
+  { key: 'training.manage',     group: 'Training',      label: 'See everyone\'s training, edit lessons and quiz questions' },
+  { key: 'ar.manage',           group: 'Accounting',    label: 'Customer accounts: receive and apply payments, credit holds, collections' },
+  { key: 'ap.manage',           group: 'Accounting',    label: 'Supplier bills: enter bills and credits, pay bills, void payments' },
+  { key: 'bank.manage',         group: 'Accounting',    label: 'Banking: registers, cheques, deposits, transfers, reconciliation, statement import' },
+  { key: 'payroll.view',        group: 'Payroll',       label: 'See pay runs, everyone\'s payslips and the payroll returns' },
+  { key: 'payroll.run',         group: 'Payroll',       label: 'Set up employees and pay, prepare pay runs, pay wages and statutory deductions, change rates' },
+  { key: 'payroll.approve',     group: 'Payroll',       label: 'Approve and void pay runs' },
+  { key: 'sys.audit',           group: 'System management', label: 'Audit trail and tamper check, audit exceptions and reviews, access reviews' },
+  { key: 'sys.security',        group: 'System management', label: 'Security posture, who is online, sign people out, disable accounts, incidents' },
+  { key: 'sys.support',         group: 'System management', label: 'IT help desk (all tickets), equipment register, change log, system health' },
+  { key: 'support.raise',       group: 'System management', label: 'Ask IT for help (raise and follow own tickets)' },
+  { key: 'sys.network',         group: 'System management', label: 'Network management: monitoring, devices on the network, open ports, firewall, Wi-Fi register' },
+  { key: 'docs.view',           group: 'Documents',     label: 'Open the document centre: public and internal documents, templates' },
+  { key: 'docs.upload',         group: 'Documents',     label: 'File documents, fill in forms (leave and others), log calls and letters' },
+  { key: 'docs.manage',         group: 'Documents',     label: 'Manage the library: edit or delete any document, folders, templates, legal hold, recycle bin, access log' },
+  { key: 'docs.confidential',   group: 'Documents',     label: 'See confidential documents (tax, contracts, completed forms, resumes)' },
+  { key: 'docs.restricted',     group: 'Documents',     label: 'See restricted documents (IDs, staff files, security clearances, legal)' },
+  { key: 'docs.approve',        group: 'Documents',     label: 'Approve or reject submitted forms (leave, warnings, SOPs)' },
+  { key: 'comms.journal',       group: 'Documents',     label: 'Read the communications journal (every email, SMS, chat and inquiry)' },
+  { key: 'suppliers.manage',    group: 'Suppliers',     label: 'Run the supplier portal: logins, credit, consignment, orders, training' },
+  { key: 'fleet.drive',         group: 'Deliveries & drivers', label: 'Driver app: take assigned jobs, share location while on shift' },
+  { key: 'fleet.view',          group: 'Deliveries & drivers', label: 'See the dispatch board, live driver map and history' },
+  { key: 'fleet.dispatch',      group: 'Deliveries & drivers', label: 'Create and assign driver jobs, set routes, clear alerts, make security-screen links' },
 ];
 const CAPABILITY_KEYS = new Set(CAPABILITIES.map((c) => c.key));
+// Supervisory functions: off for staff by default (owners and managers have
+// everything; anyone else needs them granted by name in their permissions).
+// Without this, a new capability is open to every staff member until someone
+// remembers to deny it -- the wrong default for payroll, the ledger, prices,
+// approvals and the audit log.
+const RESTRICTED_CAPS = new Set([
+  'purchasing.approve_bills', 'purchasing.settings', 'fulfil.manage', 'cashier.manage', 'count.approve', 'planning.targets', 'notify.manage',
+  'acct.view', 'acct.post', 'acct.setup', 'acct.close', 'acct.export', 'sec.manage', 'audit.view', 'dept.manage', 'tj.view',
+  'comm.view', 'comm.rules', 'comm.approve', 'reps.manage', 'hr.manage', 'clock.manage', 'clock.approve', 'mkt.manage', 'ai.manage', 'training.manage',
+  'ar.manage', 'ap.manage', 'bank.manage', 'payroll.view', 'payroll.run', 'payroll.approve', 'sys.audit', 'sys.security', 'sys.support', 'sys.network',
+  'docs.manage', 'docs.confidential', 'docs.restricted', 'docs.approve', 'comms.journal',
+  'fleet.drive', 'fleet.view', 'fleet.dispatch', 'suppliers.manage',
+]);
 
 // Resolve a user's effective capability map across all three layers:
 //   role.can_manage -> full access (nothing below applies)
@@ -967,7 +1172,7 @@ async function userPermState(userId) {
   const perms = {};
   for (const c of CAPABILITIES) {
     if (full) { perms[c.key] = true; continue; }
-    let allowed = !catDeny[c.key];
+    let allowed = !catDeny[c.key] && !RESTRICTED_CAPS.has(c.key);
     if (userOv[c.key] === true) allowed = true;
     if (userOv[c.key] === false) allowed = false;
     perms[c.key] = allowed;
@@ -1063,17 +1268,38 @@ async function nextAccountNumber() {
 // till and any later account payment referencing the receipt. A fully cash
 // invoice nets to zero and drops out on the HAVING, which is why this can be
 // based on all sales without flooding the report with paid ones.
+//
+// Invoices raised on the books rather than at the till (rent, recharges, late
+// fees -- billing.js, table ar_invoices) are open items too, so they are
+// unioned in with `doc` = 'invoice'. `id` is then only unique together with
+// `doc`: Receive Payment applies to (doc, id). An invoice is settled only by
+// payments applied to it -- nothing is paid at issue, and an unapplied payment
+// referencing its number stays a credit on the account (CREDIT_SQL in books.js
+// treats only POS receipt numbers that way). Dated at noon Jamaica time so
+// `created_at::date` is the invoice date; `payment_status` carries the
+// invoice's kind ('invoice' or 'late_fee').
 const AR_OPEN_SQL = `
-  SELECT s.id, s.receipt_number, s.created_at, s.customer_id,
+  SELECT 'sale'::text AS doc, s.id, s.receipt_number, s.created_at, s.customer_id,
          COALESCE(NULLIF(s.customer_name,''),'Walk-in') AS customer_name,
          s.due_date, s.payment_status,
          s.total_usd::float AS charged,
          (COALESCE(s.amount_paid_usd, 0)
+          + COALESCE((SELECT SUM(x.amount) FROM ar_applications x JOIN account_payments ap ON ap.id = x.payment_id
+                       WHERE x.sale_id = s.id), 0)
           + COALESCE((SELECT SUM(ap.amount_usd) FROM account_payments ap
-                       WHERE ap.reference = s.receipt_number), 0))::float AS settled
+                       WHERE ap.reference = s.receipt_number
+                         AND NOT EXISTS (SELECT 1 FROM ar_applications x WHERE x.payment_id = ap.id)), 0))::float AS settled
     FROM pos_sales s
    WHERE s.voided = false
-     AND s.total_usd - COALESCE(s.amount_paid_usd, 0) > 0.005`;
+     AND s.total_usd - COALESCE(s.amount_paid_usd, 0) > 0.005
+  UNION ALL
+  SELECT 'invoice'::text AS doc, i.id, i.number, (i.invoice_date + TIME '12:00') AT TIME ZONE 'America/Jamaica', i.customer_id,
+         COALESCE(NULLIF(u.name,''), u.email, 'Customer'), i.due_date, i.kind,
+         i.total::float,
+         COALESCE((SELECT SUM(x.amount) FROM ar_applications x JOIN account_payments ap ON ap.id = x.payment_id
+                    WHERE x.invoice_id = i.id), 0)::float
+    FROM ar_invoices i LEFT JOIN users u ON u.id = i.customer_id
+   WHERE i.voided_at IS NULL`;
 
 // Cached after the first lookup -- this row's id never changes once seeded,
 // so there's no reason to hit the DB for it on every single sale.
@@ -1092,12 +1318,16 @@ async function getWalkinCustomerId() {
 // endpoints below so none of them can disagree about what's owed.
 // `exec` lets a caller inside a transaction pass its client instead of the
 // module-level pool (same (sql, params) => {rows} shape either way).
+// Invoices raised on the books (rent, late fees -- ar_invoices) count as
+// charges too: their payments are in account_payments, so leaving them out
+// would let a tenant's rent payment free up credit at the till.
 async function getAccountBalance(customerId, exec) {
   const run = exec || query;
   const { rows } = await run(
     `SELECT
         COALESCE((SELECT SUM(sp.amount_usd) FROM sale_payments sp JOIN pos_sales s ON s.id = sp.sale_id
                    WHERE sp.method = 'account' AND s.customer_id = $1 AND s.voided = false), 0)
+      + COALESCE((SELECT SUM(total) FROM ar_invoices WHERE customer_id = $1 AND voided_at IS NULL), 0)
       - COALESCE((SELECT SUM(amount_usd) FROM account_payments WHERE customer_id = $1), 0) AS balance`,
     [customerId]
   );
@@ -2251,7 +2481,9 @@ app.post('/api/auth/signup', async (req, res) => {
       [email, name || null, hash, phone || null, isFirst, acctNo]
     );
     req.session.userId = rows[0].id;
-    req.session.epoch = SESSION_EPOCH;   // see the epoch middleware -- terminate signs these out
+    req.session.epoch = SESSION_EPOCH; req.session.at = Date.now();   // see the epoch middleware -- terminate signs these out
+    // Came through a rep's referral or link: they become that rep's customer.
+    if (typeof reps !== 'undefined' && reps) await reps.attributeReferral(req, rows[0].id);
     if (isFirst) console.log('[ok] first user "' + rows[0].email + '" auto-promoted to admin');
     res.json({ user: publicUser(rows[0]), first_admin: isFirst });
     // 100-point welcome bonus
@@ -2269,12 +2501,23 @@ app.post('/api/auth/signup', async (req, res) => {
   }
 });
 
-// Emergency reset for admin@visionautosolutions.com → password123. Always works.
-// Restricted to JUST this one well-known email so it can never be used to
-// hijack a real customer/staff account.
-app.post('/api/auth/reset-default-admin', async (_req, res) => {
+// Emergency reset for admin@visionautosolutions.com. Only answers someone
+// sitting at the till itself: the socket must be loopback AND the request must
+// carry no proxy headers. The Cloudflare tunnel also connects from 127.0.0.1,
+// so loopback alone would still let the whole internet in (audit C1); the
+// tunnel always adds cf-connecting-ip / x-forwarded-for, and a direct local
+// browser never does. The new password is random, never a known default.
+function isTillLocalRequest(req) {
+  const addr = req.socket && req.socket.remoteAddress;
+  const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(addr);
+  const proxied = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.headers['cf-ray'];
+  return loopback && !proxied;
+}
+app.post('/api/auth/reset-default-admin', async (req, res) => {
+  if (!isTillLocalRequest(req)) return res.status(404).json({ error: 'Not found' });
   try {
-    const hash = await bcrypt.hash('password123', 10);
+    const newPassword = nodeCrypto.randomBytes(9).toString('base64url');
+    const hash = await bcrypt.hash(newPassword, 10);
     const { rows } = await query(
       `INSERT INTO users (email, name, password_hash, via, is_admin)
          VALUES ('admin@visionautosolutions.com', 'Vision Auto Solutions Admin', $1, 'local', true)
@@ -2283,8 +2526,8 @@ app.post('/api/auth/reset-default-admin', async (_req, res) => {
          RETURNING id`,
       [hash]
     );
-    console.log('[ok] admin@visionautosolutions.com password reset to default (via /api/auth/reset-default-admin)');
-    res.json({ ok: true, email: 'admin@visionautosolutions.com', password: 'password123' });
+    console.log('[ok] admin@visionautosolutions.com password reset from the till (via /api/auth/reset-default-admin)');
+    res.json({ ok: true, email: 'admin@visionautosolutions.com', password: newPassword });
   } catch (e) {
     // Same distinction sign-in makes. This is the recovery link someone clicks
     // *because* they cannot get in, so it is the second thing they try on a
@@ -2331,9 +2574,11 @@ app.post('/api/terminal/auth/verify', async (req, res) => {
     const { rows } = await query(
       `SELECT id, email, name, password_hash, is_admin, admin_role, disabled FROM users WHERE lower(email) = lower($1) LIMIT 1`,
       [email]);
-    if (!rows.length) return res.status(401).json({ error: 'Invalid credentials' });
+    const locked = await security.checkLocked(req, rows[0]);
+    if (locked) return res.status(423).json({ error: locked });
+    if (!rows.length) { await security.failed(req, null, email); return res.status(401).json({ error: 'Invalid credentials' }); }
     const ok = await bcrypt.compare(password, rows[0].password_hash || '');
-    if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+    if (!ok) { const msg = await security.failed(req, rows[0]); return res.status(401).json({ error: msg || 'Invalid credentials' }); }
     if (rows[0].disabled) return res.status(403).json({ error: 'This account has been disabled.' });
     res.json({ ok: true, user: publicUser(rows[0]) });
   } catch (e) {
@@ -2363,7 +2608,7 @@ app.post('/api/auth/signin', async (req, res) => {
       }
       if (!r.ok || !r.user) return res.status(401).json({ error: 'Invalid credentials' });
       req.session.userId = r.user.id;
-      req.session.epoch = SESSION_EPOCH;
+      req.session.epoch = SESSION_EPOCH; req.session.at = Date.now();
       return res.json({ user: r.user });
     }
 
@@ -2371,13 +2616,21 @@ app.post('/api/auth/signin', async (req, res) => {
       `SELECT id, email, name, password_hash, is_admin, admin_role, disabled FROM users WHERE lower(email) = lower($1) LIMIT 1`,
       [email]
     );
-    if (!rows.length)
+    const locked = await security.checkLocked(req, rows[0]);
+    if (locked) return res.status(423).json({ error: locked });
+    if (!rows.length) {
+      await security.failed(req, null, email);
       return res.status(401).json({ error: 'Invalid credentials' });
+    }
     const ok = await bcrypt.compare(password, rows[0].password_hash || '');
-    if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+    if (!ok) { const msg = await security.failed(req, rows[0]); return res.status(401).json({ error: msg || 'Invalid credentials' }); }
     if (rows[0].disabled) return res.status(403).json({ error: 'This account has been disabled. Ask a manager.' });
+    // Lockout counters reset, 2-step asked for when the account or policy needs it.
+    const step = await security.passed(req, rows[0]);
+    if (step.need2fa) return res.json({ need_2fa: true });
+    if (step.error) return res.status(403).json({ error: step.error });
     req.session.userId = rows[0].id;
-    req.session.epoch = SESSION_EPOCH;   // see the epoch middleware -- terminate signs these out
+    req.session.epoch = SESSION_EPOCH; req.session.at = Date.now();   // see the epoch middleware -- terminate signs these out
     res.json({ user: publicUser(rows[0]) });
   } catch (e) {
     // A database that is not running is the single most common reason sign-in
@@ -2465,7 +2718,7 @@ app.post('/api/auth/pin-signin', async (req, res) => {
     }
     PIN_ATTEMPTS.delete(key);
     req.session.userId = hit.id;
-    req.session.epoch = SESSION_EPOCH;
+    req.session.epoch = SESSION_EPOCH; req.session.at = Date.now();
     console.log('[signin] PIN sign-in:', hit.email);
     res.json({ user: publicUser(hit) });
   } catch (e) {
@@ -2677,7 +2930,10 @@ app.patch('/api/admin/users/:id', requireAdmin, requireCap('pos.edit_customer'),
   // (payment_terms_days). account_number is here so a customer created at the
   // counter can be given the shop's own number rather than only the generated
   // one.
-  const fields = ['name','phone','company_name','customer_type','tax_id','credit_limit_usd','discount_pct','price_tier','sales_rep_id','how_heard','rating','internal_notes','email_opt_in','sms_opt_in','preferred_contact','payment_terms_days','discount_limit_pct','tax_exempt','credit_type','credit_length_months','account_number',
+  // markup_pct is the mirror of discount_pct -- what this account is charged
+  // ABOVE list. See the POS sale route, which applies it to each line's unit
+  // price so the invoice prints the increased price.
+  const fields = ['name','phone','company_name','customer_type','tax_id','credit_limit_usd','discount_pct','markup_pct','price_tier','sales_rep_id','how_heard','rating','internal_notes','email_opt_in','sms_opt_in','preferred_contact','payment_terms_days','discount_limit_pct','tax_exempt','credit_type','credit_length_months','account_number',
     // Restoring an archived customer goes through here. Without it the Restore
     // button would report success and change nothing.
     'is_archived'];
@@ -4265,6 +4521,11 @@ app.patch('/api/admin/products/:img', requireAdmin, async (req, res) => {
   if (b.condition != null){ params.push(String(b.condition)); sets.push(`condition = $${params.length}`); }
   if (b.location != null){ params.push(String(b.location)); sets.push(`location = $${params.length}`); }
   if (b.bin_location != null){ params.push(String(b.bin_location)); sets.push(`bin_location = $${params.length}`); }
+  // The product editor's serial / warranty / redeemable fields (the POS reads
+  // them off /api/products to ask for serials, date warranties and assign codes).
+  if (b.serial_required != null){ params.push(!!b.serial_required); sets.push(`serial_required = $${params.length}`); }
+  if (b.is_redeemable != null){ params.push(!!b.is_redeemable); sets.push(`is_redeemable = $${params.length}`); }
+  if (b.warranty_days !== undefined){ const w = parseInt(b.warranty_days, 10); params.push(w > 0 ? w : null); sets.push(`warranty_days = $${params.length}`); }
   // Per-part commission override. `!== undefined`, not `!= null`, because the
   // editor sends null to mean "no override, use the rep's rate" -- with the
   // usual != null test an override could be set but never cleared.
@@ -4497,7 +4758,9 @@ app.get('/api/products', async (req, res) => {
       const [{ rows }, { rows: estRows }] = await Promise.all([
         q(
           `SELECT img, name, make_model, category, condition, price_usd, stock_count, low_threshold,
-                  sku, barcode, bin_location, location,
+                  sku, barcode, bin_location, location, warranty_days, serial_required, is_redeemable,
+                  CASE WHEN is_redeemable THEN (SELECT COUNT(*)::int FROM redemption_instruments ri
+                                                 WHERE ri.product_img = products.img AND ri.status = 'in_stock') END AS redeemables_available,
                   CASE WHEN stock_count <= 0 THEN 'out'
                        WHEN stock_count <= low_threshold THEN 'low'
                        ELSE 'in' END AS stock_level
@@ -4544,7 +4807,9 @@ app.get('/api/products', async (req, res) => {
     const [pageRes, cntRes] = await Promise.all([
       q(
         `SELECT img, name, make_model, category, condition, price_usd, stock_count, low_threshold,
-                sku, barcode, bin_location, location,
+                sku, barcode, bin_location, location, warranty_days, serial_required, is_redeemable,
+                CASE WHEN is_redeemable THEN (SELECT COUNT(*)::int FROM redemption_instruments ri
+                                               WHERE ri.product_img = products.img AND ri.status = 'in_stock') END AS redeemables_available,
                 CASE WHEN stock_count <= 0 THEN 'out'
                      WHEN stock_count <= low_threshold THEN 'low'
                      ELSE 'in' END AS stock_level
@@ -4643,7 +4908,7 @@ async function loadCoupon(rawCode) {
   if (!code) return { ok: false, error: 'Coupon code required' };
   const { rows } = await query(
     `SELECT code, kind, amount::float AS amount, min_subtotal::float AS min_subtotal,
-            max_redemptions, redeemed_count, expires_at, is_active, description
+            max_redemptions, redeemed_count, expires_at, is_active, description, scope
        FROM coupons WHERE code = $1`,
     [code]
   );
@@ -4654,6 +4919,13 @@ async function loadCoupon(rawCode) {
   if (c.max_redemptions != null && c.redeemed_count >= c.max_redemptions)
     return { ok: false, error: 'This coupon has reached its redemption limit' };
   return { ok: true, coupon: c };
+}
+
+// What a coupon applies to: the whole cart, or (scope 'clearance') only the
+// lines on clearance. items: [{qty, price_usd, clearance_step}].
+function couponBase(coupon, items, subtotal) {
+  if (coupon.scope !== 'clearance') return subtotal;
+  return Math.round(items.filter((it) => Number(it.clearance_step) > 0).reduce((s, it) => s + Number(it.price_usd || 0) * it.qty, 0) * 100) / 100;
 }
 
 function computeCouponDiscount(coupon, subtotal) {
@@ -4673,11 +4945,13 @@ app.post('/api/coupon/validate', requireAuth, async (req, res) => {
   const r = await loadCoupon(req.body && req.body.code);
   if (!r.ok) return res.status(400).json({ error: r.error });
   const { rows: items } = await query(
-    `SELECT c.qty, p.price_usd FROM cart_items c JOIN products p ON p.id = c.product_id WHERE c.user_id = $1`,
+    `SELECT c.qty, p.price_usd, p.clearance_step FROM cart_items c JOIN products p ON p.id = c.product_id WHERE c.user_id = $1`,
     [req.session.userId]
   );
   const subtotal = items.reduce((s, it) => s + Number(it.price_usd || 0) * it.qty, 0);
-  const { discount, reason } = computeCouponDiscount(r.coupon, subtotal);
+  const base = couponBase(r.coupon, items, subtotal);
+  if (r.coupon.scope === 'clearance' && !(base > 0)) return res.status(400).json({ error: 'This code is for clearance items only: add one from the Clearance page' });
+  const { discount, reason } = computeCouponDiscount(r.coupon, base);
   if (discount === 0 && reason) return res.status(400).json({ error: reason });
   res.json({
     code: r.coupon.code,
@@ -4708,10 +4982,10 @@ app.post('/api/admin/coupons', requireManager, async (req, res) => {
   if (kind === 'percent' && amount > 100) return res.status(400).json({ error: 'percent cannot exceed 100' });
   try {
     await query(
-      `INSERT INTO coupons (code, kind, amount, min_subtotal, max_redemptions, expires_at, description, is_active)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      `INSERT INTO coupons (code, kind, amount, min_subtotal, max_redemptions, expires_at, description, is_active, scope)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       [code, kind, amount, Number(b.min_subtotal || 0), b.max_redemptions || null,
-       b.expires_at || null, b.description || null, b.is_active !== false]
+       b.expires_at || null, b.description || null, b.is_active !== false, b.scope === 'clearance' ? 'clearance' : null]
     );
     res.json({ ok: true, code });
   } catch (e) {
@@ -4893,7 +5167,7 @@ app.post('/api/checkout', requireAuth, async (req, res) => {
   try {
     await client.query('BEGIN');
     const { rows: items } = await client.query(
-      `SELECT c.product_img, c.qty, p.price_usd, p.name, p.make_model
+      `SELECT c.product_img, c.qty, p.price_usd, p.name, p.make_model, p.clearance_step
          FROM cart_items c JOIN products p ON p.id = c.product_id
          WHERE c.user_id = $1`,
       [req.session.userId]
@@ -4908,7 +5182,7 @@ app.post('/api/checkout', requireAuth, async (req, res) => {
     if (req.body && req.body.coupon_code) {
       const cr = await loadCoupon(req.body.coupon_code);
       if (cr.ok) {
-        const cd = computeCouponDiscount(cr.coupon, total);
+        const cd = computeCouponDiscount(cr.coupon, Math.min(total, couponBase(cr.coupon, items, total)));
         if (cd.discount > 0) { couponCode = cr.coupon.code; couponDiscount = cd.discount; total -= couponDiscount; }
       }
     }
@@ -5999,6 +6273,81 @@ app.get('/api/admin/bin/:bin', requireAdmin, async (req, res) => {
   res.json({ bin: req.params.bin, products: rows });
 });
 
+// Inbound: reorder, receiving batches, landed/average cost, bills, BOJ rate (inbound.js).
+const inbound = require('./inbound').register(app, {
+  query, getPool: () => pool, requireAdmin, requireCap, recalcPoDueDate, recalcPoPaid, DEV_MODE,
+});
+// Customer notifications: templates, log, quiet hours, retries (notify.js).
+const notify = require('./notify').register(app, {
+  query, getPool: () => pool, requireAdmin, requireCap, sms, mailer,
+  getShopName: async () => { try { const s = shopSettingsToShop(await getShopSettings()); return s && (s.name || s.shop_name); } catch (_) { return null; } },
+});
+// Outbound: pick, pack, dispatch, counter pickup, holds, boards (outbound.js).
+require('./outbound').register(app, { query, getPool: () => pool, requireAdmin, requireCap, notify });
+// Balancing report: inventory roll-forward, sales, collections, earnings (balancing.js).
+require('./balancing').register(app, { query, requireAdmin, requireCap });
+// Departments (who may sell which categories) and the terminal journal
+// (terminal.js). Above cashier.js and the POS sale route: it guards both.
+require('./terminal').register(app, { query, requireAdmin, requireCap, bcrypt, roleCanManage });
+// Cashier: stations, POS orders paid at a cashier, drawer shifts (cashier.js).
+// Must stay above app.post('/api/admin/pos/sale'): it guards that route.
+require('./cashier').register(app, { query, requireAdmin, requireCap, userCan, bcrypt, posSaleHandler });
+// Stock counts: bin counts, blind, recount, photos, approval, ABC cycle (counts.js).
+// upload is assigned at boot, so it is looked up per request.
+require('./counts').register(app, {
+  query, getPool: () => pool, requireAdmin, requireCap, userCan,
+  upload: { single: (field) => (req, res, next) => upload.single(field)(req, res, next) },
+});
+// Warehouse: scanning, bins, stock per bin, moves/putaway (warehouse.js).
+require('./warehouse').register(app, { query, getPool: () => pool, requireAdmin, requireCap, batchInfo: inbound.batchInfo });
+// Sales and planning: lost sales, planning dashboard, targets (planning.js).
+require('./planning').register(app, { query, requireAdmin, requireCap, userCan, notify });
+// General ledger: posting, journal, trial balance, tie-out, QuickBooks export (gl.js).
+const gl = require('./gl').register(app, { query, getPool: () => pool, requireAdmin, requireCap, userCan });
+// Receivables, payables and banking (books.js): QuickBooks-style customer and supplier centres, bank registers.
+const books = require('./books').register(app, { query, getPool: () => pool, requireAdmin, requireCap, userCan, mailer, glPost: () => gl.postAll(null),
+  getShop: async () => shopSettingsToShop(await getShopSettings()), arOpenSql: AR_OPEN_SQL });
+// Loans, invoices raised on the books, recurring invoices and bills, scheduled reminders and late fees (billing.js).
+require('./billing').register(app, { query, getPool: () => pool, requireAdmin, requireCap, userCan, mailer, books, notify,
+  getShop: async () => shopSettingsToShop(await getShopSettings()) });
+// POS add-ons: petty cash and payouts, warranty register and claims, redeemable instruments, terminal presence (posaddons.js).
+const posAddons = require('./posaddons');
+posAddons.register(app, { query, getPool: () => pool, requireAdmin, requireManager, userCan, upload });
+// Payroll for Jamaica (payroll.js): an optional module, off until switched on.
+require('./payroll').register(app, { query, getPool: () => pool, requireAdmin, requireCap, userCan, mailer, glPost: () => gl.postAll(null),
+  getShop: async () => shopSettingsToShop(await getShopSettings()), weekFor: timeclock.weekFor });
+// Commission v2: stored per sale line, rules, splits, clawbacks, statements (commission.js).
+require('./commission').register(app, { query, getPool: () => pool, requireAdmin, requireCap });
+// Freelance reps (portal, invites, quotes, orders), tracked links, referrals (reps.js).
+// Careers page and applicant tracking (careers.js).
+require('./careers').register(app, { query, requireAdmin, requireCap, bcrypt });
+const reps = require('./reps').register(app, {
+  query, getPool: () => pool, requireAdmin, requireCap, bcrypt, posSaleHandler, nextQuoteNumber, notify,
+  getEpoch: () => SESSION_EPOCH, totp: require('./security')._totp,
+  getShopName: async () => { try { const s = shopSettingsToShop(await getShopSettings()); return s && (s.name || s.shop_name); } catch (_) { return null; } },
+});
+// Extra sign-in: password reset by email, customer passkeys, Google sign-in (auth-extra.js).
+require('./auth-extra').register(app, { query, bcrypt, mailer, publicUser, getEpoch: () => SESSION_EPOCH, nextAccountNumber, reps, devMode: DEV_MODE });
+// Supplier portal: supplier logins, items, consignment, orders, reports (supplierportal.js).
+require('./supplierportal').register(app, { query, requireCap, userCan, bcrypt, mailer, devMode: DEV_MODE });
+// Department store: store locations, inventory & sales by department, stock
+// transfers between branches (deptstore.js). Departments themselves (categories,
+// staff, tills) are managed on the terminal journal page via /api/dept.
+require('./deptstore').register(app, { query, getPool: () => pool, requireCap, userCan });
+// Stock to cash: stock classes, clearance ladder, open box / damaged, return
+// grading, supplier claims, liquidation lots, offer campaigns (stockcash.js).
+// Staff training: lessons, quizzes, practice till, team progress (training.js).
+require('./training').register(app, { query, requireAdmin, requireCap, userCan, posSaleHandler });
+// AI counter sales agent: website chat and counter kiosk on the Claude API (ai.js).
+require('./ai').register(app, {
+  query, getPool: () => pool, requireAdmin, requireCap, posSaleHandler, mailer, isLocal: security.isLocal, nextAccountNumber, devMode: DEV_MODE, urlencoded: express.urlencoded({ extended: false, limit: "64kb" }),
+  getShop: async () => shopSettingsToShop(await getShopSettings()),
+});
+const stockcash = require('./stockcash').register(app, {
+  query, getPool: () => pool, requireAdmin, requireCap, userCan, posSaleHandler, mailer, sms,
+  getShopName: async () => { try { const s = shopSettingsToShop(await getShopSettings()); return s && (s.name || s.shop_name); } catch (_) { return null; } },
+});
+
 // POS barcode-gun scan: the counter's #posScan input calls this on every
 // Enter. A scanner always sends the complete code, so this is a plain exact
 // match (case-insensitive) on sku/barcode/img -- no ILIKE, no ranking, just
@@ -6017,7 +6366,9 @@ app.get('/api/admin/pos/scan', requireAdmin, async (req, res) => {
   if (!code) return res.status(400).json({ error: 'code required' });
   const { rows } = await query(
     `SELECT img, name, make_model, category, condition, price_usd, stock_count, low_threshold,
-            sku, barcode, bin_location, location,
+            sku, barcode, bin_location, location, warranty_days, serial_required, is_redeemable,
+            CASE WHEN is_redeemable THEN (SELECT COUNT(*)::int FROM redemption_instruments ri
+                                           WHERE ri.product_img = products.img AND ri.status = 'in_stock') END AS redeemables_available,
             CASE WHEN stock_count <= 0 THEN 'out'
                  WHEN stock_count <= low_threshold THEN 'low'
                  ELSE 'in' END AS stock_level
@@ -6142,8 +6493,10 @@ app.post('/api/admin/products-photo', requireAdmin, upload.single('photo'), asyn
 // =============================================================================
 //  MARKETING — campaigns, segmentation
 // =============================================================================
-async function recipientsForSegment(seg) {
-  let where = "email IS NOT NULL AND email <> '' AND email_opt_in = true";
+async function recipientsForSegment(seg, kind) {
+  let where = kind === 'sms' || kind === 'whatsapp'
+    ? "NOT is_staff AND NOT COALESCE(is_admin, false) AND NOT disabled AND sms_opt_in = true AND length(regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g')) >= 7"
+    : "NOT is_staff AND NOT COALESCE(is_admin, false) AND NOT disabled AND email IS NOT NULL AND email <> '' AND email NOT ILIKE '%.local' AND email_opt_in = true";
   if (seg === 'retail') where += " AND (price_tier IS NULL OR price_tier = 'retail')";
   else if (seg === 'trade') where += " AND price_tier = 'trade'";
   else if (seg === 'fleet') where += " AND price_tier = 'fleet'";
@@ -6185,16 +6538,19 @@ app.post('/api/admin/marketing/campaigns/:id/send', requireManager, async (req, 
   const { rows: c } = await query('SELECT * FROM marketing_campaigns WHERE id = $1', [req.params.id]);
   if (!c.length) return res.status(404).json({ error: 'Campaign not found' });
   if (c[0].status === 'sent') return res.status(400).json({ error: 'Already sent' });
-  const recipients = await recipientsForSegment(c[0].segment === 'all' ? '' : c[0].segment);
+  const recipients = await recipientsForSegment(c[0].segment === 'all' ? '' : c[0].segment, c[0].kind);
   let sent = 0, failed = 0;
   // Best-effort send via existing mailer / sms; if unavailable, just log
   for (const r of recipients) {
     try {
       if (c[0].kind === 'email' && r.email) {
-        await mailer.sendEmail({ to: r.email, subject: c[0].subject || c[0].name, text: c[0].body, html: '<p>' + c[0].body.replace(/\n/g, '<br/>') + '</p>' });
+        const un = await stockcash.unsubLink(req, r.id, 'email');
+        const escB = String(c[0].body).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+        await mailer.sendEmail({ to: r.email, subject: c[0].subject || c[0].name, text: c[0].body + '\n\nUnsubscribe: ' + un,
+          html: '<p>' + escB.replace(/\n/g, '<br/>') + '</p><p style="color:#888;font-size:12px"><a href="' + un + '">Unsubscribe</a></p>' });
         sent++;
       } else if (c[0].kind === 'sms' && r.phone) {
-        await sms.sendSMS({ to: r.phone, body: c[0].body });
+        await sms.sendSMS({ to: r.phone, body: c[0].body + ' Stop: ' + (await stockcash.unsubLink(req, r.id, 'sms')) });
         sent++;
       } else {
         // 'whatsapp' and 'social' are manual share — just count as attempt
@@ -6500,7 +6856,8 @@ app.get('/api/admin/suppliers', requireAdmin, async (req, res) => {
   const where = req.query.active === 'true' ? 'WHERE is_active = true' : '';
   const { rows } = await query(
     `SELECT id, code, name, contact_name, phone, email, address, website,
-            payment_terms, account_number, lead_time_days, notes, is_active, created_at
+            payment_terms, account_number, lead_time_days, notes, is_active, created_at,
+            portal_enabled, web_retail_enabled, credit_limit, credit_set_by
        FROM suppliers ${where} ORDER BY is_active DESC, name ASC`
   );
   res.json({ suppliers: rows });
@@ -6616,7 +6973,12 @@ app.get('/api/admin/purchase-orders/:id', requireAdmin, async (req, res) => {
   const { rows: po } = await query(`SELECT po.*, s.name AS supplier_name, s.phone AS supplier_phone, s.email AS supplier_email FROM purchase_orders po LEFT JOIN suppliers s ON s.id = po.supplier_id WHERE po.id = $1`, [req.params.id]);
   if (!po.length) return res.status(404).json({ error: 'PO not found' });
   const { rows: items } = await query(`SELECT poi.*, p.name AS product_name, p.stock_count AS current_stock FROM purchase_order_items poi LEFT JOIN products p ON p.id = poi.product_id WHERE poi.po_id = $1 ORDER BY poi.id`, [req.params.id]);
-  res.json({ purchase_order: po[0], items });
+  // Supplier bills entered on Receive Stock for this PO (they, not the PO's own invoice total, are what Payables owes).
+  const { rows: bills } = await query(
+    `SELECT id, number, to_char(bill_date, 'YYYY-MM-DD') AS bill_date, to_char(due_date, 'YYYY-MM-DD') AS due_date, total::float AS total,
+            variance_kind, variance_amount::float AS variance_amount, voided_at
+       FROM ap_bills WHERE po_id = $1 ORDER BY bill_date, id`, [req.params.id]).catch(() => ({ rows: [] }));
+  res.json({ purchase_order: po[0], items, bills });
 });
 
 app.post('/api/admin/purchase-orders', requireManager, async (req, res) => {
@@ -6777,11 +7139,12 @@ app.delete('/api/admin/purchase-orders/:poId/items/:id', requireManager, async (
 
 // Receive a PO (full or partial): bumps inventory + updates last cost.
 // Body: { items: [{ id: <po_item_id>, qty_now: <number> }, ...] }
-app.post('/api/admin/purchase-orders/:id/receive', requireManager, async (req, res) => {
-  const items = (req.body && req.body.items) || [];
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+// Receive PO lines inside the caller's transaction: stock up (weighted-average
+// cost), optional sell price / bin, qty_received, and the PO's status. Returns
+// what came in at the PO's unit cost -- the value the supplier's bill is tallied
+// against on Receive Stock.
+async function receivePoItems(client, poId, items) {
+    const received = [];
     let anyOutstanding = false;
     for (const r of items) {
       const qty = parseInt(r.qty_now, 10);
@@ -6792,20 +7155,41 @@ app.post('/api/admin/purchase-orders/:id/receive', requireManager, async (req, r
       const max = it.qty_ordered - it.qty_received;
       const got = Math.min(qty, max);
       if (got <= 0) continue;
-      // Bump inventory if linked to a product. Cost tracks the PO line's unit
-      // cost; a sell price and/or bin can be set on the same action.
+      // Bump inventory if linked to a product. Cost becomes the weighted
+      // average of the stock on hand and this delivery -- it used to be
+      // overwritten with the latest PO cost, which mis-stated the margin on
+      // every unit already on the shelf. (The Receive screen in
+      // warehouse.html also adds freight/duty; this quick path does not.)
+      // A sell price and/or bin can be set on the same action.
+      await client.query("SELECT set_config('vision.stock_reason', 'po_quick_receive', true)");   // stock ledger: why it moved (GL)
       if (it.product_img) {
-        await client.query('UPDATE products SET stock_count = stock_count + $1, cost_usd = $2 WHERE img = $3', [got, it.unit_cost_usd, it.product_img]);
+        await client.query(
+          `UPDATE products
+              SET cost_usd = CASE WHEN COALESCE(cost_usd, 0) <= 0 OR stock_count <= 0 OR $2::numeric IS NULL
+                                  THEN COALESCE($2::numeric, cost_usd)
+                                  ELSE ROUND((cost_usd * stock_count + $2::numeric * $1) / (stock_count + $1), 2) END,
+                  stock_count = stock_count + $1,
+                  costing_method = 'average'
+            WHERE img = $3`, [got, it.unit_cost_usd, it.product_img]);
         const pn = (r.price_now != null && r.price_now !== '' && Number.isFinite(Number(r.price_now))) ? Number(r.price_now) : null;
         if (pn != null) await client.query('UPDATE products SET price_usd = $1 WHERE img = $2', [pn, it.product_img]);
         if (r.bin_now != null && String(r.bin_now).trim()) await client.query('UPDATE products SET bin_location = $1 WHERE img = $2', [String(r.bin_now).trim(), it.product_img]);
       }
       await client.query('UPDATE purchase_order_items SET qty_received = qty_received + $1 WHERE id = $2', [got, it.id]);
       if (got < max) anyOutstanding = true;
+      received.push({ po_item_id: it.id, product_img: it.product_img, description: it.description, qty: got, unit_cost: Number(it.unit_cost_usd) || 0 });
     }
     // Also check items not in this batch but still outstanding
-    const { rows: rem } = await client.query('SELECT SUM(qty_ordered - qty_received)::int AS r FROM purchase_order_items WHERE po_id = $1', [req.params.id]);
-    const newStatus = (rem[0].r || 0) > 0 ? (anyOutstanding ? 'partial' : 'partial') : 'received';
+    const { rows: rem } = await client.query('SELECT SUM(qty_ordered - qty_received)::int AS r FROM purchase_order_items WHERE po_id = $1', [poId]);
+    return { received, status: (rem[0].r || 0) > 0 ? 'partial' : 'received', outstanding: rem[0].r || 0 };
+}
+
+app.post('/api/admin/purchase-orders/:id/receive', requireManager, async (req, res) => {
+  const items = (req.body && req.body.items) || [];
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { status: newStatus } = await receivePoItems(client, req.params.id, items);
 
     // The supplier's paperwork, captured in the same action as the goods -- it
     // arrives in the same box, and asking the clerk to go back and edit the PO
@@ -6893,18 +7277,33 @@ app.post('/api/admin/receive', requireManager, requireCap('inventory.adjust_stoc
   ].filter(Boolean).join(' · ') || 'Received without a PO';
 
   const client = await pool.connect();
-  const results = [];
   try {
     await client.query('BEGIN');
+    const results = await receiveLooseItems(client, supplierId, rows, activityNote);
+    await client.query('COMMIT');
+    res.json({ ok: results.every((x) => x.ok), received: results });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('[receive no-po]', e);
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+// Receive parts without a PO inside the caller's transaction. Each result says
+// the unit cost it came in at (the cost given, else the part's cost before), so
+// Receive Stock can tally the value against the supplier's bill.
+async function receiveLooseItems(client, supplierId, rows, activityNote) {
+    const results = [];
     for (const r of rows) {
       const qty = parseInt(r.qty, 10);
       if (!qty || qty < 1) { results.push({ ok: false, error: 'qty must be a positive whole number', item: r }); continue; }
       const key = String(r.product_img || r.sku || '').trim();
       if (!key) { results.push({ ok: false, error: 'product_img or sku required', item: r }); continue; }
       const { rows: pr } = await client.query(
-        'SELECT img, name, stock_count FROM products WHERE img = $1 OR (sku IS NOT NULL AND sku = $1) LIMIT 1', [key]);
+        'SELECT img, name, stock_count, cost_usd FROM products WHERE img = $1 OR (sku IS NOT NULL AND sku = $1) LIMIT 1', [key]);
       if (!pr.length) { results.push({ ok: false, error: 'no product matches "' + key + '"', item: r }); continue; }
       const p = pr[0];
+      await client.query("SELECT set_config('vision.stock_reason', 'po_quick_receive', true)");   // stock ledger: why it moved (GL)
       await client.query('UPDATE products SET stock_count = stock_count + $1 WHERE img = $2', [qty, p.img]);
       const num = function (v) { return (v != null && v !== '') && Number.isFinite(Number(v)) ? Number(v) : null; };
       const cost = num(r.unit_cost_usd);
@@ -6920,14 +7319,150 @@ app.post('/api/admin/receive', requireManager, requireCap('inventory.adjust_stoc
         bin_location: r.bin_location != null ? String(r.bin_location) : null,
         ref_kind: 'no_po', ref_id: supplierId, notes: activityNote,
       });
-      results.push({ ok: true, product_img: p.img, name: p.name, qty_added: qty, stock_after: p.stock_count + qty });
+      results.push({ ok: true, product_img: p.img, name: p.name, qty_added: qty, stock_after: p.stock_count + qty, unit_cost: cost != null ? cost : Number(p.cost_usd) || 0 });
+    }
+    return results;
+}
+
+// =============================================================================
+//  RECEIVE STOCK (2026-10): one screen for a delivery, against a PO or without
+//  one, with the supplier's bill entered in the same step.
+//
+//  Body: { po_id | supplier_id, items, entry_date, notes,
+//          bill: null | { number, bill_date, due_date, subtotal, tax, freight, total },
+//          variance: { kind, account_id, reason } }
+//    items with a PO: [{ id: po_item_id, qty_now, price_now, bin_now }]
+//    items without:   [{ product_img | sku, qty, unit_cost_usd, price_usd, name, bin_location }]
+//
+//  Stock comes in exactly as the two older receive routes do it (same helpers,
+//  same 'po_quick_receive' stock reason, so the ledger's daily stock entry
+//  credits Goods Received Not Invoiced). The bill, when given, is an A/P bill
+//  (Payables, Pay Bills, gl.js ap_bill poster):
+//    Dr 2050 Goods Received Not Invoiced   the value received (qty x unit cost)
+//    Dr 1160 GCT Recoverable               the bill's GCT (gct_amount)
+//    Dr 5060 Freight and Duty In           freight
+//    Dr / Cr the variance                  bill subtotal less the value received:
+//        within J$1          rounding     -> 5050 Purchase Price Variance
+//        back_order (> 0)    the rest is still to come -> stays in 2050; with no
+//                            PO, a back-order PO is opened for that amount
+//        adjustment          the supplier's price differs -> 5050 Purchase Price Variance
+//        credit (> 0)        they owe us a credit -> 1150 Supplier Claims Receivable
+//        other               the account chosen, with a reason
+//    Cr 2000 Accounts Payable              the bill total
+//  The PO keeps the bill's number and date for reference but not its total:
+//  a PO with an invoice total is billed through the PO itself, and this bill
+//  would count it twice. Everything is one transaction: stock, bill and any
+//  back-order PO all go in, or none of it does.
+// =============================================================================
+app.post('/api/admin/receive-stock', requireManager, async (req, res) => {
+  const b = req.body || {};
+  const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
+  const money = (v) => 'J$' + r2(v).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const isDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+  const items = Array.isArray(b.items) ? b.items : [];
+  const poId = parseInt(b.po_id, 10) || null;
+  if (!items.length) return res.status(400).json({ error: 'Nothing to receive: add at least one line' });
+  if (!poId && !(await userCan(req, 'inventory.adjust_stock'))) return res.status(403).json({ error: 'Your account is not allowed to receive stock without a purchase order.' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    let po = null, supplierId = parseInt(b.supplier_id, 10) || null;
+    if (poId) {
+      const { rows } = await client.query(`SELECT * FROM purchase_orders WHERE id = $1 FOR UPDATE`, [poId]);
+      if (!rows.length) throw Object.assign(new Error('Purchase order not found'), { status: 404 });
+      po = rows[0];
+      if (['received', 'cancelled'].includes(po.status)) throw Object.assign(new Error('This purchase order is ' + po.status + ': nothing is left to receive'), { status: 409 });
+      supplierId = po.supplier_id;
+    }
+    const { rows: sup } = supplierId ? await client.query(`SELECT id, name, payment_terms_days FROM suppliers WHERE id = $1`, [supplierId]) : { rows: [] };
+    const supplier = sup[0] || null;
+
+    // 1. The stock.
+    let lines, status = null, outstanding = 0;
+    if (po) {
+      const out = await receivePoItems(client, poId, items);
+      lines = out.received; status = out.status; outstanding = out.outstanding;
+      if (!lines.length) throw Object.assign(new Error('Enter a quantity on at least one line'), { status: 400 });
+      await client.query(`UPDATE purchase_orders SET status = $2, received_date = COALESCE(received_date, $3::timestamptz, NOW()) WHERE id = $1`, [poId, status, isDate(b.entry_date) ? b.entry_date : null]);
+    } else {
+      const note = [supplier ? 'supplier: ' + supplier.name : '', b.bill && b.bill.number ? 'bill ' + b.bill.number : '', String(b.notes || '').trim()].filter(Boolean).join(' · ') || 'Received without a PO';
+      const res2 = await receiveLooseItems(client, supplierId, items, note);
+      const bad = res2.filter((x) => !x.ok);
+      if (bad.length) throw Object.assign(new Error(bad.map((x) => x.error).join('; ')), { status: 400 });
+      lines = res2.map((x) => ({ product_img: x.product_img, description: x.name, qty: x.qty_added, unit_cost: x.unit_cost }));
+    }
+    const value = r2(lines.reduce((t, l) => t + l.qty * l.unit_cost, 0));
+
+    // 2. The bill.
+    let bill = null, backOrderPo = null, variance = null;
+    if (b.bill) {
+      const bl = b.bill;
+      if (!supplier) throw Object.assign(new Error('Choose the supplier the bill is from'), { status: 400 });
+      if (!isDate(bl.bill_date)) throw Object.assign(new Error('Bill date'), { status: 400 });
+      const sub = r2(bl.subtotal), tax = r2(bl.tax), frt = r2(bl.freight), tot = r2(bl.total);
+      if (sub < 0 || tax < 0 || frt < 0) throw Object.assign(new Error('Bill amounts cannot be negative'), { status: 400 });
+      if (!(tot > 0)) throw Object.assign(new Error('Bill total'), { status: 400 });
+      if (Math.abs(r2(sub + tax + frt) - tot) > 0.01) throw Object.assign(new Error('Subtotal + GCT + freight is ' + money(sub + tax + frt) + ', not the bill total ' + money(tot)), { status: 400 });
+      const number = String(bl.number || '').trim().slice(0, 60) || null;
+      if (number) {
+        const { rows: dup } = await client.query(`SELECT 1 FROM ap_bills WHERE supplier_id = $1 AND lower(number) = lower($2) AND kind = 'bill' AND voided_at IS NULL`, [supplierId, number]);
+        if (dup.length) throw Object.assign(new Error(supplier.name + ' already has a bill numbered ' + number), { status: 409 });
+      }
+      const terms = po && po.payment_terms_days != null ? po.payment_terms_days : supplier.payment_terms_days || 0;
+      const due = isDate(bl.due_date) ? bl.due_date : new Date(Date.parse(bl.bill_date) + terms * 86400000).toISOString().slice(0, 10);
+      if (due < bl.bill_date) throw Object.assign(new Error('The due date is before the bill date'), { status: 400 });
+      const v = r2(sub - value), vb = b.variance || {};
+      const acct = async (key) => { const { rows } = await client.query(`SELECT id FROM gl_accounts WHERE system_key = $1`, [key]); if (!rows.length) throw new Error('No account set up for ' + key); return rows[0].id; };
+      let kind = null, vAcct = null, reason = String(vb.reason || '').trim().slice(0, 300) || null;
+      if (Math.abs(v) <= 1) { kind = v ? 'rounding' : null; vAcct = v ? await acct('ppv') : null; }
+      else {
+        kind = ['back_order', 'adjustment', 'credit', 'other'].includes(vb.kind) ? vb.kind : null;
+        if (!kind) throw Object.assign(new Error('The bill subtotal is ' + money(sub) + ' but ' + money(value) + ' was received: say why (back order, bill adjustment, supplier credit or other)'), { status: 400, variance: v });
+        if ((kind === 'back_order' || kind === 'credit') && v < 0) throw Object.assign(new Error('The bill is less than what was received, so it cannot be a ' + (kind === 'back_order' ? 'back order' : 'credit due') + ': use bill adjustment or other'), { status: 400 });
+        if (kind === 'back_order') vAcct = await acct('grni');
+        if (kind === 'adjustment') vAcct = await acct('ppv');
+        if (kind === 'credit') vAcct = await acct('supplier_claims');
+        if (kind === 'other') {
+          if (!reason || reason.length < 3) throw Object.assign(new Error('Say what the difference is for'), { status: 400 });
+          const { rows: oa } = await client.query(`SELECT id, system_key, qb_type FROM gl_accounts WHERE id = $1 AND is_active`, [parseInt(vb.account_id, 10) || 0]);
+          if (!oa.length || ['ar', 'ap'].includes(oa[0].system_key) || ['AR', 'AP'].includes(oa[0].qb_type)) throw Object.assign(new Error('Choose the account the difference goes to'), { status: 400 });
+          vAcct = oa[0].id;
+        }
+      }
+      variance = { amount: v, kind };
+      const grni = await acct('grni');
+      const bl2 = [];
+      const goods = r2(value + (kind === 'back_order' ? v : 0));
+      if (goods) bl2.push([grni, 'Goods received' + (kind === 'back_order' ? ' and billed ahead (back order)' : ''), goods]);
+      if (vAcct && kind !== 'back_order' && v) bl2.push([vAcct, ({ rounding: 'Rounding', adjustment: 'Bill adjustment', credit: 'Supplier credit due', other: 'Other' })[kind] + (reason ? ': ' + reason : ''), v]);
+      if (frt) bl2.push([await acct('freight_in'), 'Freight and duty', frt]);
+      const memo = 'Receive Stock' + (po ? ' · ' + po.po_number : '') + (number ? ' · bill ' + number : '');
+      const { rows: ab } = await client.query(
+        `INSERT INTO ap_bills (kind, supplier_id, number, bill_date, due_date, memo, gct_amount, total, created_by, po_id, variance_kind, variance_amount, variance_reason)
+         VALUES ('bill',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+        [supplierId, number, bl.bill_date, due, memo, tax, tot, req.session.userId, poId, kind, kind ? v : null, reason]);
+      for (const [a, d, amt] of bl2) await client.query(`INSERT INTO ap_bill_lines (bill_id, account_id, description, amount) VALUES ($1,$2,$3,$4)`, [ab[0].id, a, d, amt]);
+      bill = { id: ab[0].id, number, total: tot, due_date: due };
+      // The PO keeps the paperwork for reference; its total stays off so Payables does not count it twice.
+      if (po) await client.query(`UPDATE purchase_orders SET invoice_number = COALESCE($2, invoice_number), invoice_date = COALESCE($3::date, invoice_date) WHERE id = $1`, [poId, number, bl.bill_date]);
+      // Back order with no PO: open one for the missing amount, to receive when it arrives.
+      if (kind === 'back_order' && !po) {
+        const poNum = await nextPoNumber();
+        const { rows: np } = await client.query(`INSERT INTO purchase_orders (po_number, supplier_id, notes, created_by) VALUES ($1,$2,$3,$4) RETURNING id`,
+          [poNum, supplierId, 'Back order: billed on ' + (number || 'bill ' + bill.id) + ' but not yet received' + (reason ? ' · ' + reason : ''), req.session.userId]);
+        await client.query(`INSERT INTO purchase_order_items (po_id, description, qty_ordered, unit_cost_usd, total_usd, condition) VALUES ($1,$2,1,$3,$3,'NEW')`,
+          [np[0].id, 'Back order on ' + (number || 'bill ' + bill.id) + (reason ? ': ' + reason : ''), v]);
+        await client.query(`UPDATE purchase_orders SET subtotal_usd = $2, total_usd = $2 WHERE id = $1`, [np[0].id, v]);   // recalcPoTotals() reads outside this transaction
+        backOrderPo = { id: np[0].id, po_number: poNum };
+      }
     }
     await client.query('COMMIT');
-    res.json({ ok: results.every((x) => x.ok), received: results });
+    if (bill) { try { await gl.postAll(null); } catch (_) {} }
+    res.json({ ok: true, value_received: value, lines, po_status: status, po_outstanding: outstanding, bill, variance, back_order_po: backOrderPo });
   } catch (e) {
-    await client.query('ROLLBACK');
-    console.error('[receive no-po]', e);
-    res.status(500).json({ error: e.message });
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    if (!e.status) console.error('[receive-stock]', e);
+    res.status(e.status || 500).json({ error: e.message, variance: e.variance });
   } finally { client.release(); }
 });
 
@@ -7088,8 +7623,25 @@ app.get('/api/admin/pos/quotes/:id', requireAdmin, async (req, res) => {
 //     discount_usd,
 //     customer_id?, customer_name, customer_phone, vehicle_info, notes,
 //     loyalty_points_redeemed?  // integer points to burn for discount
+//     dry_run?                  // true: work out the totals, save nothing (cashier.js)
 //   }
-app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
+//
+// A named function so cashier.js can run a POS order through exactly this
+// path when a cashier takes payment on it (req.cashierOrder set), instead of
+// a second copy of the pricing / tax / stock / payment rules.
+// Which store a till belongs to: its X-Station-Key -> pos_stations.location_id.
+// null means the main (default) store. Used to tag sales, voids and returns so
+// the products_location_delta trigger moves that branch's stock (deptstore).
+async function stationLocationId(req, q) {
+  const key = req.get('x-station-key');
+  if (!key) return null;
+  try {
+    const { rows } = await q('SELECT location_id FROM pos_stations WHERE device_key_hash = $1 AND is_active', [nodeCrypto.createHash('sha256').update(String(key)).digest('hex')]);
+    return rows[0] ? rows[0].location_id : null;
+  } catch (_) { return null; }
+}
+
+async function posSaleHandler(req, res) {
   const b = req.body || {};
   const items = Array.isArray(b.items) ? b.items : [];
   if (!items.length) return res.status(400).json({ error: 'At least one item required' });
@@ -7116,7 +7668,16 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
   // ----- Per-user permission gate ------------------------------------------
   // Re-checked here, not just hidden in the POS: a denied cashier posting the
   // sale straight to the API is exactly what UI-only enforcement would miss.
-  {
+  //
+  // A POS order being paid at a cashier station (req.cashierOrder, set only by
+  // cashier.js, never from the request) had its discounts, price overrides and
+  // GCT switch checked against the person who built the cart when it was
+  // saved; the cashier is only taking the money. The account-charge check is a
+  // tender, so it always applies to whoever takes payment.
+  if (req.cashierOrder) {
+    if (payments.some((p) => p.method === 'account') && !(await userCan(req, 'pos.charge_to_account')))
+      return res.status(403).json({ error: 'Your account is not allowed to take a charge / account sale.' });
+  } else {
     const lineDisc = items.reduce((s, it) => s + Math.max(0, Number(it.discount_usd || 0)), 0);
     if (lineDisc > 0 && !(await userCan(req, 'pos.line_discount')))
       return res.status(403).json({ error: 'Your account is not allowed to give a per-line discount.' });
@@ -7126,11 +7687,65 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
       return res.status(403).json({ error: 'Your account is not allowed to take a charge / account sale.' });
     if (b.no_tax === true && !(await userCan(req, 'pos.no_tax')))
       return res.status(403).json({ error: 'Your account is not allowed to switch GCT off.' });
+    // pos.price_override was declared in the capability list and enforced only
+    // by making the POS price box readonly, so a cashier without it could still
+    // post any unit price straight to this endpoint -- the gap this very block
+    // exists to close for the discount permissions beside it.
+    //
+    // This trusts the client's price_manual flag to say which lines were
+    // re-priced by hand, because the server cannot otherwise tell a typed price
+    // from a legitimate one: the ladder behind a line is a sale price, a tier
+    // price, quantity breaks and now the account markup. That makes it a check
+    // on stated intent, not on the number itself -- a caller that simply omits
+    // the flag is not caught. Deriving the expected price server-side would
+    // close that too, and wants the price-break helper the D1 side already has
+    // (functions/_lib/price_breaks.js) ported over first.
+    if (items.some((it) => it.price_manual) && !(await userCan(req, 'pos.price_override')))
+      return res.status(403).json({ error: 'Your account is not allowed to change a line’s unit price.' });
   }
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // ----- 0. The attached account, and its standing markup -----------------
+    // walkinId / isWalkinCustomer are resolved here rather than further down
+    // in step 2 (loyalty) because the markup has to reach the unit prices
+    // before any total is computed from them.
+    const walkinId = await getWalkinCustomerId();
+    const isWalkinCustomer = b.customer_id && Number(b.customer_id) === walkinId;
+
+    // users.markup_pct -- what this account pays ABOVE list. Applied to each
+    // line's unit price here, ahead of the totals, so the stored line, the
+    // receipt and the invoice all read the increased figure as THE unit price
+    // instead of showing list with a surcharge bolted on at the bottom. It
+    // never touches discount_usd: a markup is not a negative discount, and
+    // that column feeds commission and the discount totals on the reports.
+    //
+    // Skipped for the shared walk-in account, like the discount rate in step
+    // 2b -- that is one row sitting behind every counter sale, so a rate on it
+    // would quietly re-price all of them.
+    //
+    // The POS applies this client-side as well, so the cashier sees the real
+    // price while ringing up, and says so with markup_applied_pct. Re-applying
+    // only when that is missing or stale (an older till, or a sale posted
+    // straight at the API) keeps this idempotent rather than compounding the
+    // rate on every ordinary sale.
+    //
+    // A manually-priced line is left alone: the cashier typed the figure they
+    // mean to charge, and marking it up again would overrule them.
+    let markupRate = 0;
+    if (b.customer_id && !isWalkinCustomer) {
+      const { rows: mk } = await client.query(
+        'SELECT markup_pct::float AS markup_pct FROM users WHERE id = $1', [b.customer_id]);
+      markupRate = Math.max(0, Number(mk[0] && mk[0].markup_pct) || 0);
+    }
+    if (markupRate > 0 && Math.abs((Number(b.markup_applied_pct) || 0) - markupRate) > 0.001) {
+      for (const it of items) {
+        if (it.price_manual) continue;
+        it.unit_price_usd = Math.round(Number(it.unit_price_usd) * (1 + markupRate / 100) * 100) / 100;
+      }
+    }
 
     // ----- 1. Compute totals -----------------------------------------------
     // Per line: gross, then a per-line discount (0010) capped at the line
@@ -7157,8 +7772,8 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
     // never earn or redeem points -- it's one row shared by every walk-in
     // sale, so points on it would be meaningless (and redemption would let
     // one walk-in spend points a different walk-in "earned").
-    const walkinId = await getWalkinCustomerId();
-    const isWalkinCustomer = b.customer_id && Number(b.customer_id) === walkinId;
+    // walkinId / isWalkinCustomer are resolved in step 0 above -- the markup
+    // needs them before the totals, and they are the same two values here.
     const redeemPts = isWalkinCustomer ? 0 : Math.max(0, parseInt(b.loyalty_points_redeemed || 0, 10) || 0);
     let loyaltyDiscount = 0;
     if (redeemPts > 0) {
@@ -7185,7 +7800,7 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
     if (b.customer_id && !isWalkinCustomer) {
       const { rows: cl } = await client.query(
         `SELECT credit_limit_usd, discount_limit_pct, payment_terms_days, tax_exempt,
-                discount_pct::float AS discount_pct, name
+                discount_pct::float AS discount_pct, name, credit_hold, credit_hold_reason
            FROM users WHERE id = $1`,
         [b.customer_id]
       );
@@ -7241,6 +7856,19 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
     const taxable = Math.round((goods + shipFee) * 100) / 100;
     const tax = taxExempt ? 0 : Math.round(taxable * TAX_RATE * 100) / 100;
     const total = Math.round((taxable + tax) * 100) / 100;
+
+    // Dry run: the exact figures this sale would carry (account markup and
+    // rate, loyalty, GCT, delivery fee), with nothing written. Used when an
+    // order is sent to a cashier, so the amount shown at the till is the
+    // amount that will be charged.
+    if (b.dry_run === true) {
+      await client.query('ROLLBACK');
+      return res.json({
+        ok: true, dry_run: true, subtotal_usd: subtotal, discount_usd: totalDiscount,
+        customer_discount_usd: customerDiscount, loyalty_discount_usd: loyaltyDiscount,
+        tax_usd: tax, tax_exempt: taxExempt, ship_fee_usd: shipFee, fulfilment, total_usd: total,
+      });
+    }
 
     // ----- 3. Distribute payment amounts -------------------------------------
     // For any row with amount_usd == null/blank, treat it as "the rest".
@@ -7312,6 +7940,10 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'This customer has no payment terms set up -- cannot sell on account' });
       }
+      if (customerLimits.credit_hold) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'This account is on credit hold' + (customerLimits.credit_hold_reason ? ' (' + customerLimits.credit_hold_reason + ')' : '') + ': take payment instead, or ask a manager.' });
+      }
       if (customerLimits.credit_limit_usd != null) {
         const currentBalance = await getAccountBalance(b.customer_id, client.query.bind(client));
         const projected = currentBalance + accountAmount;
@@ -7345,6 +7977,17 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
       }
     }
 
+    // ----- 3e. Redeemable items (scratch cards): a pre-loaded code for every
+    // unit, or a generated one when this cashier may (posaddons.js). Checked
+    // before anything is written, so a ticket short of codes writes nothing.
+    let redeemPlan;
+    try { redeemPlan = await posAddons.planRedeemables(client, items, await userCan(req, 'pos.redeemable_mint')); }
+    catch (e) {
+      if (e.status !== 400) throw e;
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: e.message });
+    }
+
     // ----- 4. Insert the sale ------------------------------------------------
     const headerMethod = filledPayments.length === 1 ? filledPayments[0].method : 'split';
     const headerRef = filledPayments.length === 1 ? (filledPayments[0].reference || null)
@@ -7363,9 +8006,10 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
                               sales_rep_id, sales_rep_name,
                               fulfilment, ship_method, ship_fee_usd, ship_name, ship_phone,
                               ship_line1, ship_line2, ship_city, ship_parish, ship_instructions,
-                              payment_status, amount_paid_usd, balance_due_usd, due_date, po_number, quote_id)
+                              payment_status, amount_paid_usd, balance_due_usd, due_date, po_number, quote_id,
+                              markup_pct)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,
-                 $23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38) RETURNING id`,
+                 $23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39) RETURNING id`,
       [receipt, invoiceNumber, b.cashier_id || req.session.userId, b.customer_id || null,
        b.customer_name || null, b.customer_phone || null, b.vehicle_info || null,
        subtotal, tax, taxExempt, totalDiscount, total, headerTendered, changeDue,
@@ -7388,7 +8032,10 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
        fulfilment === 'pickup' ? null : (b.ship_instructions || null),
        paymentStatus, amountPaid, balanceDue, dueDate,
        b.po_number ? String(b.po_number).slice(0, 60) : null,
-       Number.isInteger(b.quote_id) ? b.quote_id : null]
+       Number.isInteger(b.quote_id) ? b.quote_id : null,
+       // The rate this sale was actually priced at, so a reprint stays right
+       // after the account's markup is changed later. NULL when there was none.
+       markupRate > 0 ? markupRate : null]
     );
     const saleId = sale[0].id;
 
@@ -7416,20 +8063,35 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
       }
     }
 
+    // ----- 5b. Store: tag the sale with the till's store; the stock trigger then
+    // takes the sold units off that branch as well as off the total.
+    const saleLoc = await stationLocationId(req, (t, p) => client.query(t, p));
+    if (saleLoc) {
+      await client.query('UPDATE pos_sales SET location_id = $1 WHERE id = $2', [saleLoc, saleId]);
+      await client.query("SELECT set_config('vision.location_id', $1, true)", [String(saleLoc)]);
+    }
+
     // ----- 6. Line items + inventory deduction -------------------------------
+    const redeemCodes = [];
     for (let li = 0; li < items.length; li++) {
       const it = items[li];
       const lc = lineCalc[li];   // { gross, disc, net } computed once in step 1
       let warrantyUntil = null;
       if (it.warranty_days) warrantyUntil = new Date(Date.now() + Number(it.warranty_days) * 86400000).toISOString().slice(0,10);
-      await client.query(
+      const { rows: lineRow } = await client.query(
         `INSERT INTO pos_sale_items (sale_id, product_img, product_id, description, qty, unit_price_usd, core_charge_usd, env_fee_usd, discount_usd, discount_note, serial_number, warranty_until, total_usd)
-           VALUES ($1,$2,(SELECT id FROM products WHERE img = $2),$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+           VALUES ($1,$2,(SELECT id FROM products WHERE img = $2),$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
         [saleId, it.product_img || null, it.description, Number(it.qty), Number(it.unit_price_usd),
          Number(it.core_charge_usd || 0), Number(it.env_fee_usd || 0),
          lc.disc, lc.disc > 0 && it.discount_note ? String(it.discount_note).slice(0, 300) : null,
          it.serial_number || null, warrantyUntil, lc.net]
       );
+      if (redeemPlan[li]) {
+        const codes = await posAddons.sellRedeemables(client, redeemPlan[li], { saleId, saleItemId: lineRow[0].id,
+          productImg: it.product_img, unitPriceUsd: it.unit_price_usd, userId: req.session.userId });
+        redeemCodes.push(...codes.map((code) => ({ code, description: it.description })));
+      }
+      await client.query("SELECT set_config('vision.stock_reason', 'sale', true)");   // stock ledger: why it moved (GL)
       if (it.product_img) {
         await client.query('UPDATE products SET stock_count = GREATEST(0, stock_count - $1) WHERE img = $2', [Number(it.qty), it.product_img]);
       }
@@ -7500,13 +8162,15 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
       due_date: dueDate,
       payments: filledPayments,
       loyalty: b.customer_id ? { points_redeemed: redeemPts, points_earned: earnedPoints, balance: newBalance } : null,
+      redemptions: redeemCodes,
     });
   } catch (e) {
     await client.query('ROLLBACK');
     console.error('[pos sale]', e);
     res.status(500).json({ error: e.message });
   } finally { client.release(); }
-});
+}
+app.post('/api/admin/pos/sale', requireAdmin, posSaleHandler);
 
 // -----------------------------------------------------------------------------
 // Customer lookup for the POS tender modal.
@@ -7532,7 +8196,7 @@ app.get('/api/admin/pos/customer-lookup', requireAdmin, async (req, res) => {
       ' OR LOWER(COALESCE(account_number,\'\')) LIKE $' + params.length + ')';
   }
   const sql =
-    'SELECT u.id, u.name, u.email, u.phone, u.price_tier, u.discount_pct, u.account_number, ' +
+    'SELECT u.id, u.name, u.email, u.phone, u.price_tier, u.discount_pct, u.markup_pct, u.account_number, ' +
     '       u.credit_limit_usd, u.payment_terms_days, u.discount_limit_pct, u.tax_exempt, ' +
     '       COALESCE(p.balance, 0) AS points_balance, ' +
     // Real balance owed (charged to 'account' minus payments recorded
@@ -7888,6 +8552,7 @@ app.post('/api/admin/pos/sales/:id/void', requireAdmin, requireCap('pos.void_sal
   try {
     await client.query('BEGIN');
     const { rows: s } = await client.query('SELECT * FROM pos_sales WHERE id = $1', [req.params.id]);
+    if (s[0] && s[0].location_id) await client.query("SELECT set_config('vision.location_id', $1, true)", [String(s[0].location_id)]);   // restock to the sale's store
     if (!s.length || s[0].voided) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Not voidable' }); }
     const { rows: items } = await client.query('SELECT * FROM pos_sale_items WHERE sale_id = $1', [req.params.id]);
     // Only restock what hasn't already come back through an itemized return
@@ -7902,9 +8567,12 @@ app.post('/api/admin/pos/sales/:id/void', requireAdmin, requireCap('pos.void_sal
     returnedRows.forEach((r) => { returnedById[r.sale_item_id] = r.qty; });
     for (const it of items) {
       const restockQty = it.qty - (returnedById[it.id] || 0);
+      await client.query("SELECT set_config('vision.stock_reason', 'return', true)");   // stock ledger: why it moved (GL)
       if (it.product_img && restockQty > 0) await client.query('UPDATE products SET stock_count = stock_count + $1 WHERE img = $2', [restockQty, it.product_img]);
     }
     await client.query(`UPDATE pos_sales SET voided = true, voided_at = NOW(), voided_by = $1 WHERE id = $2`, [req.session.userId, req.params.id]);
+    // Redeemable codes sold on it: pre-loaded ones back on the shelf, generated ones void.
+    await posAddons.voidSaleRedeemables((t, p) => client.query(t, p), s[0].id);
     await client.query('COMMIT');
     res.json({ ok: true });
   } catch (e) { await client.query('ROLLBACK'); console.error(e); res.status(500).json({ error: e.message }); }
@@ -7935,6 +8603,7 @@ app.post('/api/admin/pos/sales/:id/return', requireAdmin, requireCap('pos.refund
   try {
     await client.query('BEGIN');
     const { rows: saleRows } = await client.query('SELECT * FROM pos_sales WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (saleRows[0] && saleRows[0].location_id) await client.query("SELECT set_config('vision.location_id', $1, true)", [String(saleRows[0].location_id)]);   // returned stock goes back to the sale's store
     if (!saleRows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Sale not found' }); }
     const sale = saleRows[0];
     if (sale.voided) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Cannot return items from a voided sale' }); }
@@ -8020,6 +8689,7 @@ app.post('/api/admin/pos/sales/:id/return', requireAdmin, requireCap('pos.refund
         `INSERT INTO pos_sale_return_items (return_id, sale_item_id, qty, refund_usd) VALUES ($1,$2,$3,$4)`,
         [returnId, lw.item.id, lw.qty, lw.refundLine]
       );
+      await client.query("SELECT set_config('vision.stock_reason', 'return', true)");   // stock ledger: why it moved (GL)
       if (lw.item.product_img) {
         await client.query('UPDATE products SET stock_count = stock_count + $1 WHERE img = $2', [lw.qty, lw.item.product_img]);
       }
@@ -8076,12 +8746,18 @@ app.post('/api/admin/cash-drawer/:id/close', requireAdmin, requireCap('pos.open_
     `SELECT COALESCE(SUM(total_usd),0)::float AS s FROM pos_sales WHERE payment_method = 'cash' AND voided = false AND created_at >= $1`,
     [sess[0].opened_at]
   );
-  const expected = Number(sess[0].opening_float) + cs[0].s;
+  // Cash paid straight out of this drawer (Cash Report payouts, a petty cash
+  // top-up) never made it into the count -- without this every payout would
+  // read as an unexplained shortage.
+  const { rows: po } = await query(
+    `SELECT COALESCE(SUM(amount_cents),0)::float / 100 AS s FROM cash_payouts WHERE source_type = 'drawer' AND NOT voided AND drawer_session_id = $1`,
+    [sess[0].id]);
+  const expected = Math.round((Number(sess[0].opening_float) + cs[0].s - po[0].s) * 100) / 100;
   const closing = Number(b.closing_amount || 0);
   const variance = Math.round((closing - expected) * 100) / 100;
   await query(`UPDATE cash_drawer_sessions SET closed_by = $1, closing_amount = $2, expected_cash = $3, variance = $4, notes = $5, closed_at = NOW() WHERE id = $6`,
     [b.closed_by || null, closing, expected, variance, b.notes || sess[0].notes, req.params.id]);
-  res.json({ ok: true, expected_cash: expected, closing_amount: closing, variance });
+  res.json({ ok: true, expected_cash: expected, closing_amount: closing, variance, payouts: po[0].s });
 });
 
 // =============================================================================
@@ -8640,6 +9316,7 @@ app.post('/api/admin/parts-requisitions/:id/fulfill', requireAdmin, async (req, 
       const got = Math.max(0, Math.min(want, avail));
       if (got < want) anyBack = true;
       if (got > 0) {
+        await client.query("SELECT set_config('vision.stock_reason', 'requisition', true)");   // stock ledger: why it moved (GL)
         if (it.product_img) await client.query('UPDATE products SET stock_count = GREATEST(0, stock_count - $1) WHERE img = $2', [got, it.product_img]);
         const unit = Number(it.unit_price_usd || 0);
         const total = Math.round(got * unit * 100) / 100;
@@ -8927,17 +9604,18 @@ async function initDb() {
     console.error('[initDb] schema apply failed:', e.message);
   }
 
-  // 2) Seed default admin (admin@visionautosolutions.com / password123) — always reset password
+  // 2) Seed the default admin ONLY when it does not exist yet (fresh install).
+  //    It used to reset the password to password123 on every boot, so a
+  //    changed admin password never survived a restart.
   try {
     const hash = await bcrypt.hash('password123', 10);
     await query(
       `INSERT INTO users (email, name, phone, password_hash, is_admin)
          VALUES ($1, $2, $3, $4, true)
-       ON CONFLICT (email) DO UPDATE
-         SET is_admin = true, password_hash = EXCLUDED.password_hash`,
-      ['admin@visionautosolutions.com', 'Admin', '(876) 758-5590', hash]
+       ON CONFLICT (email) DO NOTHING`,
+      ['admin@visionautosolutions.com', 'Admin', '(876) 728-4735', hash]
     );
-    console.log('[initDb] default admin seeded (admin@visionautosolutions.com / password123)');
+    console.log('[initDb] default admin ensured (created only if missing)');
 
     // A default till PIN for that same account, so PIN sign-in works out of
     // the box on a new machine.
@@ -10046,7 +10724,7 @@ app.post('/api/admin/mechanics/:id/commission-payouts', requireManager, async (r
 // stock AND actually sold in the range. Everything else is a dormant SKU, not
 // a thing to buy.
 const REORDER_WHERE = `
-  pr.is_active = true AND (
+  pr.is_active = true AND NOT pr.discontinued AND pr.superseded_by IS NULL AND pr.variant_of IS NULL AND (
     (COALESCE(pr.reorder_point,0) > 0 AND pr.stock_count <= pr.reorder_point)
     OR (pr.low_threshold > 0 AND pr.stock_count <= pr.low_threshold)
     OR (pr.stock_count <= 0 AND EXISTS (
@@ -10185,15 +10863,16 @@ app.get('/api/admin/reports/vendor-list', requireAdmin, async (_req, res) => {
 });
 
 // ---- users & staff ---------------------------------------------------------
-// The Cloudflare build fills a "last seen" column from admin_presence; this
-// schema has no such table, so that column comes back null rather than faked.
+// "Last seen" is the newest admin_presence heartbeat for the user (posaddons.js);
+// rows are pruned after a day, so anyone older reads blank.
 app.get('/api/admin/reports/users-staff', requireAdmin, async (_req, res) => {
   const [rows, byRole, tiles, roleDefs] = await Promise.all([
     query(`SELECT u.id, u.name, u.email, u.employee_no, u.admin_role,
                   CASE WHEN u.pin_hash IS NOT NULL THEN 'yes' ELSE 'no' END AS pin_set,
                   CASE WHEN u.disabled THEN 'disabled'
                        WHEN u.is_archived THEN 'archived' ELSE 'active' END AS state,
-                  u.created_at::date::text AS joined, NULL::text AS last_seen,
+                  u.created_at::date::text AS joined,
+                  (SELECT to_char(MAX(ap.last_seen), 'YYYY-MM-DD HH24:MI') FROM admin_presence ap WHERE ap.user_id = u.id) AS last_seen,
                   m.specialty, m.role AS staff_role
              FROM users u LEFT JOIN mechanics m ON m.user_id = u.id
             WHERE u.is_staff = true OR u.is_admin = true
@@ -11949,6 +12628,16 @@ app.get('/api/admin/reports/customer-statement', requireAdmin, async (req, res) 
               WHERE s.customer_id = $1 AND s.voided = false
                 AND s.created_at::date BETWEEN $2::date AND $3::date
              UNION ALL
+             -- Invoices raised on the books (rent, late fees): nothing is paid at
+             -- issue, so the whole total is still due; payments come in below.
+             SELECT (i.invoice_date + TIME '12:00') AT TIME ZONE 'America/Jamaica' AS at, i.invoice_date::text AS day,
+                    CASE WHEN i.kind = 'late_fee' THEN 'Late fee' ELSE 'Invoice' END AS kind,
+                    i.number AS reference, i.total::float AS charge, 0::float AS credit,
+                    COALESCE(i.memo, '') AS detail, i.due_date, NULL::text AS payment_status, i.total::float AS still_due
+               FROM ar_invoices i
+              WHERE i.customer_id = $1 AND i.voided_at IS NULL
+                AND i.invoice_date BETWEEN $2::date AND $3::date
+             UNION ALL
              SELECT ap.created_at AS at, ap.created_at::date::text AS day, 'Payment' AS kind,
                     COALESCE(ap.reference,'') AS reference, 0::float AS charge, ap.amount_usd::float AS credit,
                     COALESCE(ap.method,'') AS detail,
@@ -11981,17 +12670,21 @@ app.get('/api/admin/reports/customer-statement', requireAdmin, async (req, res) 
     // balance by walking that array made a busy account close short by
     // whatever fell past the cap -- 1,507 invoices on one trade account
     // reported J$446,134.63 against a true J$1,003,409.62.
-    query(`SELECT
-             (SELECT COUNT(*) FROM pos_sales s
+    // Invoices raised on the books are added to each figure (the whole total is
+    // left owing at issue).
+    query(`WITH bi AS (SELECT COUNT(*)::int AS n, COALESCE(SUM(total), 0) AS t FROM ar_invoices
+                        WHERE customer_id = $1 AND voided_at IS NULL AND invoice_date BETWEEN $2::date AND $3::date)
+           SELECT
+             ((SELECT COUNT(*) FROM pos_sales s
                WHERE s.customer_id = $1 AND s.voided = false
-                 AND s.created_at::date BETWEEN $2::date AND $3::date)::int AS invoices,
-             (SELECT COALESCE(SUM(GREATEST(s.total_usd - COALESCE(s.amount_paid_usd,0), 0)), 0)
+                 AND s.created_at::date BETWEEN $2::date AND $3::date) + (SELECT n FROM bi))::int AS invoices,
+             ((SELECT COALESCE(SUM(GREATEST(s.total_usd - COALESCE(s.amount_paid_usd,0), 0)), 0)
                 FROM pos_sales s
                WHERE s.customer_id = $1 AND s.voided = false
-                 AND s.created_at::date BETWEEN $2::date AND $3::date)::float AS left_owing,
-             (SELECT COALESCE(SUM(s.total_usd), 0) FROM pos_sales s
+                 AND s.created_at::date BETWEEN $2::date AND $3::date) + (SELECT t FROM bi))::float AS left_owing,
+             ((SELECT COALESCE(SUM(s.total_usd), 0) FROM pos_sales s
                WHERE s.customer_id = $1 AND s.voided = false
-                 AND s.created_at::date BETWEEN $2::date AND $3::date)::float AS billed,
+                 AND s.created_at::date BETWEEN $2::date AND $3::date) + (SELECT t FROM bi))::float AS billed,
              (SELECT COUNT(*) FROM account_payments ap
                WHERE ap.customer_id = $1
                  AND ap.created_at::date BETWEEN $2::date AND $3::date)::int AS payments,
@@ -12019,7 +12712,7 @@ app.get('/api/admin/reports/customer-statement', requireAdmin, async (req, res) 
     // credited the customer for overpayments on unrelated settled invoices and
     // closed J$713,391.93 below the J$1,003,409.62 actually outstanding. An
     // over-settled invoice owes nothing; it does not pay off another one.
-    l.outstanding = l.kind === 'Invoice' ? Math.max(0, Number(l.still_due) || 0) : 0;
+    l.outstanding = l.kind === 'Invoice' || l.kind === 'Late fee' ? Math.max(0, Number(l.still_due) || 0) : 0;
     bal = Math.round((bal + l.outstanding - Number(l.credit || 0)) * 100) / 100;
     l.balance = bal;
   }
@@ -12156,11 +12849,12 @@ async function start() {
   app.listen(PORT, () => {
     console.log('[boot] Vision Auto Solutions server listening on http://localhost:' + PORT);
   });
+  startHttpsListener();
 
   // Off-site backup: only the database-owning machine runs the schedule.
   // First check shortly after boot (catch-up for an overnight outage), then
   // every 10 minutes -- backupTick() itself decides whether anything is due.
-  if (ownsSchema()) {
+  if (ownsSchema() && !DEV_MODE) {
     setTimeout(() => { backupTick(); }, 45000);
     setInterval(() => { backupTick(); }, 10 * 60 * 1000);
   }
