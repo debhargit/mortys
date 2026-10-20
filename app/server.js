@@ -30,6 +30,7 @@ require('dotenv').config();
 const path = require('path');
 const fs = require('fs');
 const express = require('express');
+const compression = require('compression');
 const { execFile } = require('child_process');
 const os = require('os');
 const dgram = require('dgram');
@@ -745,6 +746,19 @@ app.post(
     }
   }
 );
+
+// ---- Response compression --------------------------------------------------
+// admin.html is a megabyte in one file and is deliberately served no-cache
+// (see the setHeaders comment on the static mount), so every admin page load
+// pulls the whole thing down again. Internet visitors come through the
+// Cloudflare tunnel, which compresses at the edge -- but a till talking
+// straight to http://<shop-pc>:3040 was getting the full uncompressed
+// megabyte on every load. gzip takes admin.html to ~242 KB and shop.html to
+// ~64 KB. Mounted here, before the session and every route, so it covers both
+// static files and JSON API responses. compression() already skips responses
+// that are too small to be worth it, anything already encoded, and any
+// response carrying `Cache-Control: no-transform`.
+app.use(compression());
 
 app.use(express.json({ limit: '1mb' }));
 app.use(
