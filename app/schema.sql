@@ -3492,6 +3492,455 @@ INSERT INTO gl_accounts (code, name, type, qb_name, qb_type) VALUES
 ON CONFLICT (code) DO NOTHING;
 
 -- =============================================================================
+--  Payroll (payroll.js) -- an optional module, OFF until switched on
+--
+--  Jamaican payroll: PAYE (income tax), NIS, NHT, Education Tax and HEART/NSTA,
+--  approved pension, recurring earnings and deductions (loans, advances,
+--  union dues, insurance), pay runs (weekly / fortnightly / monthly) built from
+--  salaries or the time clock's approved timesheets, commission statements,
+--  leave and public holidays; payslips, bank file, S01 monthly return and
+--  remittance, S02 / P24 year end, P45 on leaving. Approved runs post to the
+--  ledger (when it is started and the setting is on).
+--
+--  Statutory rates are effective-dated rows in payroll_rates: when the
+--  government changes a rate or the tax-free threshold, add a row -- old pay
+--  runs keep the rates they were worked out with (a copy is kept on the run).
+-- =============================================================================
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('payroll_module', 'off'),              -- on: the module is in use (screens, routes, posting)
+  ('payroll_use_timeclock', 'on'),        -- hourly staff are paid from approved time clock weeks
+  ('payroll_include_commission', 'on'),   -- approved commission statements are paid through payroll
+  ('payroll_post_ledger', 'on'),          -- approved runs post to the general ledger
+  ('payroll_self_service', 'on'),         -- staff see their own payslips
+  ('payroll_two_person', 'off'),          -- on: the person who prepared a run cannot approve it
+  ('payroll_heart', 'on'),                -- employer pays HEART/NSTA 3%
+  ('payroll_vacation_days', '10'),        -- statutory: 2 weeks after 220 days worked in the year
+  ('payroll_sick_days', '10'),            -- statutory: 10 days after 110 days worked
+  ('payroll_employer_trn', ''),
+  ('payroll_employer_nis', '')
+ON CONFLICT (key) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS payroll_rates (
+  id               SERIAL PRIMARY KEY,
+  effective_from   DATE NOT NULL UNIQUE,              -- by pay date
+  paye_threshold   NUMERIC(14,2) NOT NULL,            -- annual tax-free income
+  paye_rate1       NUMERIC(6,4) NOT NULL DEFAULT 0.25,
+  paye_band2_from  NUMERIC(14,2) NOT NULL DEFAULT 6000000,   -- annual statutory income taxed at rate 2 above this
+  paye_rate2       NUMERIC(6,4) NOT NULL DEFAULT 0.30,
+  nis_ee           NUMERIC(6,4) NOT NULL DEFAULT 0.03,
+  nis_er           NUMERIC(6,4) NOT NULL DEFAULT 0.03,
+  nis_ceiling      NUMERIC(14,2) NOT NULL DEFAULT 5000000,   -- annual insurable wage ceiling
+  nht_ee           NUMERIC(6,4) NOT NULL DEFAULT 0.02,
+  nht_er           NUMERIC(6,4) NOT NULL DEFAULT 0.03,
+  ed_ee            NUMERIC(6,4) NOT NULL DEFAULT 0.0225,
+  ed_er            NUMERIC(6,4) NOT NULL DEFAULT 0.035,
+  heart_er         NUMERIC(6,4) NOT NULL DEFAULT 0.03,
+  pension_cap      NUMERIC(6,4) NOT NULL DEFAULT 0.20,       -- approved pension deductible up to this share of pay
+  min_wage_week    NUMERIC(10,2),                            -- national minimum wage per 40-hour week
+  min_wage_hours   NUMERIC(5,2) NOT NULL DEFAULT 40,
+  note             TEXT,
+  updated_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+INSERT INTO payroll_rates (effective_from, paye_threshold, min_wage_week, note) VALUES
+  ('2026-04-01', 1902360, 16000, 'Threshold J$1,902,360 from 1 April 2026; minimum wage J$16,000 a 40-hour week. Check against TAJ / MLSS notices.'),
+  ('2026-07-01', 1902360, 17000, 'Minimum wage J$17,000 a 40-hour week from 1 July 2026.')
+ON CONFLICT (effective_from) DO NOTHING;
+
+-- Earning and deduction types. Flags say which contributions an earning attracts.
+CREATE TABLE IF NOT EXISTS payroll_items (
+  code           TEXT PRIMARY KEY,
+  label          TEXT NOT NULL,
+  kind           TEXT NOT NULL CHECK (kind IN ('earning', 'deduction')),
+  paye           BOOLEAN NOT NULL DEFAULT true,
+  nis            BOOLEAN NOT NULL DEFAULT true,
+  nht            BOOLEAN NOT NULL DEFAULT true,
+  ed             BOOLEAN NOT NULL DEFAULT true,
+  heart          BOOLEAN NOT NULL DEFAULT true,
+  gl_account_id  INTEGER REFERENCES gl_accounts(id),       -- blank: wages (earnings) / deductions payable
+  is_system      BOOLEAN NOT NULL DEFAULT false,           -- worked out by the system (cannot be removed)
+  is_active      BOOLEAN NOT NULL DEFAULT true,
+  sort           INTEGER NOT NULL DEFAULT 100
+);
+INSERT INTO payroll_items (code, label, kind, paye, nis, nht, ed, heart, is_system, sort) VALUES
+  ('basic',          'Basic pay',                     'earning',   true,  true,  true,  true,  true,  true,  10),
+  ('overtime',       'Overtime',                      'earning',   true,  true,  true,  true,  true,  true,  20),
+  ('holiday_work',   'Public holiday worked (extra)', 'earning',   true,  true,  true,  true,  true,  true,  25),
+  ('holiday_pay',    'Public holiday pay',            'earning',   true,  true,  true,  true,  true,  true,  26),
+  ('vacation_pay',   'Vacation pay',                  'earning',   true,  true,  true,  true,  true,  true,  30),
+  ('sick_pay',       'Sick pay',                      'earning',   true,  true,  true,  true,  true,  true,  31),
+  ('unpaid_leave',   'Unpaid leave',                  'earning',   true,  true,  true,  true,  true,  true,  32),
+  ('commission',     'Commission',                    'earning',   true,  true,  true,  true,  true,  true,  40),
+  ('bonus',          'Bonus',                         'earning',   true,  true,  true,  true,  true,  false, 50),
+  ('back_pay',       'Back pay / retroactive',        'earning',   true,  true,  true,  true,  true,  false, 55),
+  ('travel_allow',   'Travelling allowance',          'earning',   true,  true,  true,  true,  true,  false, 60),
+  ('meal_allow',     'Meal allowance',                'earning',   true,  true,  true,  true,  true,  false, 61),
+  ('other_allow',    'Other allowance',               'earning',   true,  true,  true,  true,  true,  false, 62),
+  ('reimbursement',  'Reimbursement (not pay)',       'earning',   false, false, false, false, false, false, 90),
+  ('loan',           'Loan repayment',                'deduction', false, false, false, false, false, false, 110),
+  ('advance',        'Salary advance recovered',      'deduction', false, false, false, false, false, false, 111),
+  ('union_dues',     'Union dues',                    'deduction', false, false, false, false, false, false, 120),
+  ('health_ins',     'Health insurance',              'deduction', false, false, false, false, false, false, 121),
+  ('credit_union',   'Credit union / savings',        'deduction', false, false, false, false, false, false, 122),
+  ('court_order',    'Court order / garnishment',     'deduction', false, false, false, false, false, false, 123),
+  ('other_ded',      'Other deduction',               'deduction', false, false, false, false, false, false, 130)
+ON CONFLICT (code) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS payroll_employees (
+  id                  SERIAL PRIMARY KEY,
+  user_id             INTEGER UNIQUE REFERENCES users(id) ON DELETE SET NULL,   -- blank: not a system user
+  employee_no         TEXT,
+  name                TEXT NOT NULL,
+  email               TEXT,
+  phone               TEXT,
+  address             TEXT,
+  trn                 TEXT,
+  nis_no              TEXT,
+  date_of_birth       DATE,
+  hire_date           DATE,
+  termination_date    DATE,
+  termination_reason  TEXT,
+  job_title           TEXT,
+  department          TEXT,
+  pay_type            TEXT NOT NULL DEFAULT 'salary' CHECK (pay_type IN ('salary', 'hourly')),
+  frequency           TEXT NOT NULL DEFAULT 'monthly' CHECK (frequency IN ('weekly', 'fortnightly', 'monthly')),
+  salary_annual       NUMERIC(14,2),
+  hourly_rate         NUMERIC(10,2),
+  ot_rate             NUMERIC(4,2) NOT NULL DEFAULT 1.5,
+  hours_per_period    NUMERIC(6,2),            -- hourly staff not on the time clock
+  hours_per_day       NUMERIC(4,2) NOT NULL DEFAULT 8,
+  use_timeclock       BOOLEAN NOT NULL DEFAULT true,
+  pay_method          TEXT NOT NULL DEFAULT 'bank' CHECK (pay_method IN ('bank', 'cheque', 'cash')),
+  bank_name           TEXT,
+  bank_branch         TEXT,
+  bank_account        TEXT,
+  bank_account_type   TEXT,
+  pension_ee_pct      NUMERIC(6,3) NOT NULL DEFAULT 0,
+  pension_er_pct      NUMERIC(6,3) NOT NULL DEFAULT 0,
+  pension_scheme      TEXT,
+  extra_threshold     NUMERIC(14,2) NOT NULL DEFAULT 0,    -- annual: e.g. a pensioner's extra allowance
+  paye_exempt         BOOLEAN NOT NULL DEFAULT false,
+  nis_exempt          BOOLEAN NOT NULL DEFAULT false,
+  nht_exempt          BOOLEAN NOT NULL DEFAULT false,
+  ed_exempt           BOOLEAN NOT NULL DEFAULT false,
+  vacation_days       NUMERIC(5,2),            -- blank: the shop's setting
+  sick_days           NUMERIC(5,2),
+  is_active           BOOLEAN NOT NULL DEFAULT true,
+  notes               TEXT,
+  created_at          TIMESTAMPTZ DEFAULT NOW(),
+  updated_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Recurring earnings / deductions per person. A loan stops when its balance is paid.
+CREATE TABLE IF NOT EXISTS payroll_employee_items (
+  id           SERIAL PRIMARY KEY,
+  employee_id  INTEGER NOT NULL REFERENCES payroll_employees(id) ON DELETE CASCADE,
+  code         TEXT NOT NULL REFERENCES payroll_items(code),
+  amount       NUMERIC(14,2) NOT NULL,           -- per pay period
+  balance      NUMERIC(14,2),                    -- loans / advances: still owed
+  note         TEXT,
+  is_active    BOOLEAN NOT NULL DEFAULT true,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_payroll_emp_items ON payroll_employee_items (employee_id);
+
+CREATE TABLE IF NOT EXISTS payroll_runs (
+  id            SERIAL PRIMARY KEY,
+  number        TEXT UNIQUE,                     -- PR-000001
+  frequency     TEXT NOT NULL CHECK (frequency IN ('weekly', 'fortnightly', 'monthly')),
+  period_start  DATE NOT NULL,
+  period_end    DATE NOT NULL,
+  pay_date      DATE NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'approved', 'paid', 'void')),
+  note          TEXT,
+  rates         JSONB,                           -- the statutory rates used (copy)
+  totals        JSONB,
+  post_gl       BOOLEAN NOT NULL DEFAULT true,
+  created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  approved_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  approved_at   TIMESTAMPTZ,
+  voided_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  voided_at     TIMESTAMPTZ,
+  void_reason   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_payroll_runs_pay ON payroll_runs (pay_date);
+
+CREATE TABLE IF NOT EXISTS payroll_slips (
+  id             SERIAL PRIMARY KEY,
+  run_id         INTEGER NOT NULL REFERENCES payroll_runs(id) ON DELETE CASCADE,
+  employee_id    INTEGER NOT NULL REFERENCES payroll_employees(id),
+  snapshot       JSONB NOT NULL,                 -- name, TRN, NIS no., title, pay type and rate as at the run
+  lines          JSONB NOT NULL DEFAULT '[]',    -- [{code, label, kind, qty, rate, amount, source}]
+  warnings       JSONB NOT NULL DEFAULT '[]',
+  edited         BOOLEAN NOT NULL DEFAULT false, -- lines changed by hand: a recalculation keeps them
+  gross          NUMERIC(14,2) NOT NULL DEFAULT 0,
+  statutory      NUMERIC(14,2) NOT NULL DEFAULT 0,   -- statutory income (PAYE base after NIS and pension)
+  nis_ee         NUMERIC(14,2) NOT NULL DEFAULT 0,
+  nis_er         NUMERIC(14,2) NOT NULL DEFAULT 0,
+  nht_ee         NUMERIC(14,2) NOT NULL DEFAULT 0,
+  nht_er         NUMERIC(14,2) NOT NULL DEFAULT 0,
+  ed_ee          NUMERIC(14,2) NOT NULL DEFAULT 0,
+  ed_er          NUMERIC(14,2) NOT NULL DEFAULT 0,
+  heart_er       NUMERIC(14,2) NOT NULL DEFAULT 0,
+  paye           NUMERIC(14,2) NOT NULL DEFAULT 0,
+  pension_ee     NUMERIC(14,2) NOT NULL DEFAULT 0,
+  pension_er     NUMERIC(14,2) NOT NULL DEFAULT 0,
+  other_ded      NUMERIC(14,2) NOT NULL DEFAULT 0,
+  net            NUMERIC(14,2) NOT NULL DEFAULT 0,
+  cheque_number  TEXT,
+  commission_ids INTEGER[] NOT NULL DEFAULT '{}',    -- commission statements paid on this slip
+  UNIQUE (run_id, employee_id)
+);
+CREATE INDEX IF NOT EXISTS idx_payroll_slips_emp ON payroll_slips (employee_id);
+
+CREATE TABLE IF NOT EXISTS payroll_payments (
+  id           SERIAL PRIMARY KEY,
+  run_id       INTEGER NOT NULL REFERENCES payroll_runs(id),
+  account_id   INTEGER NOT NULL REFERENCES gl_accounts(id),
+  pay_date     DATE NOT NULL,
+  per_person   BOOLEAN NOT NULL DEFAULT true,     -- one bank line per person (cheques) or one for the batch
+  reference    TEXT,
+  amount       NUMERIC(14,2) NOT NULL,
+  post_gl      BOOLEAN NOT NULL DEFAULT true,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  voided_at    TIMESTAMPTZ,
+  voided_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  void_reason  TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_payroll_payment_live ON payroll_payments (run_id) WHERE voided_at IS NULL;
+
+-- Statutory deductions paid to TAJ (S01, due the 14th of the next month).
+CREATE TABLE IF NOT EXISTS payroll_remittances (
+  id           SERIAL PRIMARY KEY,
+  month        DATE NOT NULL,                     -- first day of the month remitted for
+  paye         NUMERIC(14,2) NOT NULL DEFAULT 0,
+  nis          NUMERIC(14,2) NOT NULL DEFAULT 0,
+  nht          NUMERIC(14,2) NOT NULL DEFAULT 0,
+  ed           NUMERIC(14,2) NOT NULL DEFAULT 0,
+  heart        NUMERIC(14,2) NOT NULL DEFAULT 0,
+  pension      NUMERIC(14,2) NOT NULL DEFAULT 0,  -- to the pension scheme (not TAJ), optional
+  total        NUMERIC(14,2) NOT NULL,
+  account_id   INTEGER NOT NULL REFERENCES gl_accounts(id),
+  pay_date     DATE NOT NULL,
+  reference    TEXT,
+  post_gl      BOOLEAN NOT NULL DEFAULT true,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  voided_at    TIMESTAMPTZ,
+  voided_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  void_reason  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_payroll_remit_month ON payroll_remittances (month);
+
+ALTER TABLE commission_statements ADD COLUMN IF NOT EXISTS payroll_run_id INTEGER;
+
+-- Ledger accounts for payroll.
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('1170', 'Staff Loans and Advances',          'asset',     'Staff Loans and Advances',  'OCASSET', 'staff_loans'),
+  ('2310', 'Net Wages Payable',                 'liability', 'Net Wages Payable',         'OCLIAB',  'net_wages_payable'),
+  ('2320', 'PAYE Income Tax Payable',           'liability', 'PAYE Payable',              'OCLIAB',  'paye_payable'),
+  ('2330', 'NIS Payable',                       'liability', 'NIS Payable',               'OCLIAB',  'nis_payable'),
+  ('2340', 'NHT Payable',                       'liability', 'NHT Payable',               'OCLIAB',  'nht_payable'),
+  ('2350', 'Education Tax Payable',             'liability', 'Education Tax Payable',     'OCLIAB',  'edtax_payable'),
+  ('2360', 'HEART/NSTA Payable',                'liability', 'HEART NSTA Payable',        'OCLIAB',  'heart_payable'),
+  ('2370', 'Pension Contributions Payable',     'liability', 'Pension Payable',           'OCLIAB',  'pension_payable'),
+  ('2380', 'Other Payroll Deductions Payable',  'liability', 'Payroll Deductions Payable','OCLIAB',  'payroll_deductions_payable'),
+  ('6520', 'Employer Pension Contributions',    'expense',   'Employer Pension',          'EXP',     'pension_expense')
+ON CONFLICT (code) DO NOTHING;
+UPDATE gl_accounts SET system_key = 'wages' WHERE code = '6500' AND system_key IS NULL AND NOT EXISTS (SELECT 1 FROM gl_accounts WHERE system_key = 'wages');
+UPDATE gl_accounts SET system_key = 'payroll_taxes' WHERE code = '6510' AND system_key IS NULL AND NOT EXISTS (SELECT 1 FROM gl_accounts WHERE system_key = 'payroll_taxes');
+UPDATE payroll_items SET gl_account_id = (SELECT id FROM gl_accounts WHERE system_key = 'staff_loans') WHERE code IN ('loan', 'advance') AND gl_account_id IS NULL;
+
+-- =============================================================================
+--  Payroll (cont.) -- contractors, day workers, work / invoice pay, contracts,
+--  loans and advances, third-party deductions, contractor levy, withholding tax
+--
+--  Worker types: employee (statutory deductions), day_worker (an employee paid
+--  by the day: statutory deductions apply), contractor (self-employed: no PAYE,
+--  NIS, NHT, Education Tax or HEART; contractor levy 2% on construction,
+--  haulage and tillage work; withholding tax 3% on specified services when the
+--  business is a withholding agent -- per invoice of J$50,000 or more, or
+--  smaller invoices adding to J$100,000 in 30 days). Levy and WHT are paid to
+--  TAJ by the 14th of the next month with the payroll deductions.
+--  Pay by the work: payroll_work holds days worked, piece work, hours and
+--  invoices; a pay run picks up everything not yet paid up to its end date.
+-- =============================================================================
+ALTER TABLE payroll_employees ADD COLUMN IF NOT EXISTS worker_type     TEXT NOT NULL DEFAULT 'employee';
+ALTER TABLE payroll_employees ADD COLUMN IF NOT EXISTS day_rate        NUMERIC(12,2);
+ALTER TABLE payroll_employees ADD COLUMN IF NOT EXISTS fee_per_period  NUMERIC(14,2);    -- contractor retainer each pay
+ALTER TABLE payroll_employees ADD COLUMN IF NOT EXISTS business_name   TEXT;
+ALTER TABLE payroll_employees ADD COLUMN IF NOT EXISTS tcc_no          TEXT;             -- tax compliance certificate
+ALTER TABLE payroll_employees ADD COLUMN IF NOT EXISTS tcc_expiry      DATE;
+ALTER TABLE payroll_employees ADD COLUMN IF NOT EXISTS levy_applies    BOOLEAN NOT NULL DEFAULT false;   -- construction / haulage / tillage
+ALTER TABLE payroll_employees ADD COLUMN IF NOT EXISTS wht_applies     BOOLEAN NOT NULL DEFAULT false;   -- a specified service
+DO $$ BEGIN
+  ALTER TABLE payroll_employees DROP CONSTRAINT IF EXISTS payroll_employees_pay_type_check;
+  ALTER TABLE payroll_employees ADD CONSTRAINT payroll_employees_pay_type_check CHECK (pay_type IN ('salary', 'hourly', 'daily', 'piece', 'contract'));
+  ALTER TABLE payroll_employees DROP CONSTRAINT IF EXISTS payroll_employees_worker_type_check;
+  ALTER TABLE payroll_employees ADD CONSTRAINT payroll_employees_worker_type_check CHECK (worker_type IN ('employee', 'day_worker', 'contractor'));
+END $$;
+
+ALTER TABLE payroll_employee_items ADD COLUMN IF NOT EXISTS payee      TEXT;   -- who the deduction is paid to (court, insurer, union...)
+ALTER TABLE payroll_employee_items ADD COLUMN IF NOT EXISTS reference  TEXT;   -- policy / order / account number
+ALTER TABLE payroll_employee_items ADD COLUMN IF NOT EXISTS end_date   DATE;   -- stops after this date
+
+ALTER TABLE payroll_slips ADD COLUMN IF NOT EXISTS levy NUMERIC(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE payroll_slips ADD COLUMN IF NOT EXISTS wht  NUMERIC(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE payroll_remittances ADD COLUMN IF NOT EXISTS levy NUMERIC(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE payroll_remittances ADD COLUMN IF NOT EXISTS wht  NUMERIC(14,2) NOT NULL DEFAULT 0;
+
+ALTER TABLE payroll_rates ADD COLUMN IF NOT EXISTS levy_rate      NUMERIC(6,4)  NOT NULL DEFAULT 0.02;
+ALTER TABLE payroll_rates ADD COLUMN IF NOT EXISTS wht_rate       NUMERIC(6,4)  NOT NULL DEFAULT 0.03;
+ALTER TABLE payroll_rates ADD COLUMN IF NOT EXISTS wht_threshold  NUMERIC(14,2) NOT NULL DEFAULT 50000;    -- per invoice
+ALTER TABLE payroll_rates ADD COLUMN IF NOT EXISTS wht_aggregate  NUMERIC(14,2) NOT NULL DEFAULT 100000;   -- smaller invoices in 30 days
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('payroll_wht_agent', 'off')            -- on: the business is a withholding agent for specified services
+ON CONFLICT (key) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS payroll_contracts (
+  id           SERIAL PRIMARY KEY,
+  employee_id  INTEGER NOT NULL REFERENCES payroll_employees(id) ON DELETE CASCADE,
+  title        TEXT NOT NULL,
+  value        NUMERIC(14,2),                    -- agreed price (blank: open-ended)
+  start_date   DATE,
+  end_date     DATE,
+  status       TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done', 'cancelled')),
+  notes        TEXT,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Work to be paid: days, piece work, extra hours, invoices / contract stages.
+CREATE TABLE IF NOT EXISTS payroll_work (
+  id           SERIAL PRIMARY KEY,
+  employee_id  INTEGER NOT NULL REFERENCES payroll_employees(id) ON DELETE CASCADE,
+  kind         TEXT NOT NULL CHECK (kind IN ('days', 'piece', 'hours', 'invoice')),
+  work_date    DATE NOT NULL,
+  description  TEXT NOT NULL,
+  qty          NUMERIC(12,2) NOT NULL DEFAULT 1,
+  rate         NUMERIC(14,2) NOT NULL DEFAULT 0,
+  amount       NUMERIC(14,2) NOT NULL,
+  invoice_no   TEXT,
+  contract_id  INTEGER REFERENCES payroll_contracts(id) ON DELETE SET NULL,
+  slip_id      INTEGER REFERENCES payroll_slips(id) ON DELETE SET NULL,   -- the payslip paying it
+  wht          NUMERIC(14,2) NOT NULL DEFAULT 0,                         -- withholding tax taken on it
+  voided_at    TIMESTAMPTZ,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_payroll_work_emp ON payroll_work (employee_id, work_date);
+
+-- Loans and salary advances handed out (repaid through payroll_employee_items).
+CREATE TABLE IF NOT EXISTS payroll_loans (
+  id           SERIAL PRIMARY KEY,
+  employee_id  INTEGER NOT NULL REFERENCES payroll_employees(id) ON DELETE CASCADE,
+  kind         TEXT NOT NULL CHECK (kind IN ('loan', 'advance')),
+  amount       NUMERIC(14,2) NOT NULL,
+  issue_date   DATE NOT NULL,
+  method       TEXT NOT NULL CHECK (method IN ('bank', 'payslip')),   -- paid out now from an account, or on the next payslip
+  account_id   INTEGER REFERENCES gl_accounts(id),
+  item_id      INTEGER REFERENCES payroll_employee_items(id) ON DELETE SET NULL,
+  slip_id      INTEGER REFERENCES payroll_slips(id) ON DELETE SET NULL,
+  reference    TEXT,
+  note         TEXT,
+  post_gl      BOOLEAN NOT NULL DEFAULT true,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  voided_at    TIMESTAMPTZ,
+  voided_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  void_reason  TEXT
+);
+
+-- Deductions paid over to whoever they are for (insurer, union, court, credit union, NHT, SLB...).
+CREATE TABLE IF NOT EXISTS payroll_ded_payments (
+  id           SERIAL PRIMARY KEY,
+  month        DATE NOT NULL,
+  code         TEXT NOT NULL REFERENCES payroll_items(code),
+  payee        TEXT NOT NULL,
+  amount       NUMERIC(14,2) NOT NULL,
+  account_id   INTEGER NOT NULL REFERENCES gl_accounts(id),
+  pay_date     DATE NOT NULL,
+  reference    TEXT,
+  post_gl      BOOLEAN NOT NULL DEFAULT true,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  voided_at    TIMESTAMPTZ,
+  voided_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  void_reason  TEXT
+);
+
+UPDATE payroll_items SET label = 'Medical / health insurance' WHERE code = 'health_ins' AND label = 'Health insurance';
+INSERT INTO payroll_items (code, label, kind, paye, nis, nht, ed, heart, is_system, sort) VALUES
+  ('day_work',        'Days worked',                         'earning',   true,  true,  true,  true,  true,  true,  12),
+  ('piece_work',      'Piece / job work',                    'earning',   true,  true,  true,  true,  true,  true,  14),
+  ('extra_hours',     'Extra hours',                         'earning',   true,  true,  true,  true,  true,  true,  16),
+  ('contract_work',   'Contract work / invoice',             'earning',   true,  true,  true,  true,  true,  true,  17),
+  ('advance_paid',    'Loan / advance paid out (not pay)',   'earning',   false, false, false, false, false, true,  95),
+  ('gratuity',        'Gratuity / honorarium',               'earning',   true,  true,  true,  true,  true,  false, 56),
+  ('redundancy',      'Redundancy / severance (check tax)',  'earning',   false, false, false, false, false, false, 57),
+  ('salary_deduction','Salary deduction (agreed in writing)','deduction', false, false, false, false, false, false, 112),
+  ('child_maint',     'Child maintenance (court order)',     'deduction', false, false, false, false, false, false, 124),
+  ('life_ins',        'Life insurance',                      'deduction', false, false, false, false, false, false, 125),
+  ('pension_avc',     'Extra pension (voluntary)',           'deduction', false, false, false, false, false, false, 126),
+  ('nht_mortgage',    'NHT mortgage repayment',              'deduction', false, false, false, false, false, false, 127),
+  ('slb_loan',        'Student Loan Bureau',                 'deduction', false, false, false, false, false, false, 128),
+  ('staff_purchase',  'Staff purchase',                      'deduction', false, false, false, false, false, false, 129),
+  ('cash_shortage',   'Cash shortage (agreed in writing)',   'deduction', false, false, false, false, false, false, 131),
+  ('uniform',         'Uniform / tools',                     'deduction', false, false, false, false, false, false, 132)
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('2390', 'Contractor Levy Payable',  'liability', 'Contractor Levy Payable',  'OCLIAB', 'contractor_levy_payable'),
+  ('2395', 'Withholding Tax Payable',  'liability', 'Withholding Tax Payable',  'OCLIAB', 'wht_payable'),
+  ('6530', 'Contract Labour',          'expense',   'Contract Labour',          'EXP',    'contract_labour')
+ON CONFLICT (code) DO NOTHING;
+UPDATE payroll_items SET gl_account_id = (SELECT id FROM gl_accounts WHERE system_key = 'staff_loans') WHERE code = 'advance_paid' AND gl_account_id IS NULL;
+
+-- =============================================================================
+--  Payroll (cont.) -- employer contributions to insurance, pensions and other
+--  benefits, and percentage-of-pay items
+--
+--  payroll_items.kind 'employer': paid by the business for the person (group
+--  health, group life, extra pension, other). Not cash in hand: it does not
+--  change gross or net pay. Its PAYE / NIS / NHT / Ed / HEART ticks make it a
+--  taxable benefit (added to those bases) -- off by default; tick on advice.
+--  pension_relief: an employee deduction that counts toward the approved
+--  pension relief (with the employee pension %, up to the cap).
+--  payroll_employee_items.pct: the item is a percentage of the person's pay
+--  (pensionable / taxable pay) instead of a fixed amount.
+-- =============================================================================
+DO $$ BEGIN
+  ALTER TABLE payroll_items DROP CONSTRAINT IF EXISTS payroll_items_kind_check;
+  ALTER TABLE payroll_items ADD CONSTRAINT payroll_items_kind_check CHECK (kind IN ('earning', 'deduction', 'employer'));
+END $$;
+ALTER TABLE payroll_items ADD COLUMN IF NOT EXISTS pension_relief BOOLEAN NOT NULL DEFAULT false;
+UPDATE payroll_items SET pension_relief = true WHERE code = 'pension_avc';
+UPDATE payroll_items SET label = 'Extra pension (voluntary, approved scheme)' WHERE code = 'pension_avc' AND label = 'Extra pension (voluntary)';
+ALTER TABLE payroll_employee_items ADD COLUMN IF NOT EXISTS pct NUMERIC(6,3);
+ALTER TABLE payroll_slips ADD COLUMN IF NOT EXISTS er_benefits      NUMERIC(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE payroll_slips ADD COLUMN IF NOT EXISTS taxable_benefits NUMERIC(14,2) NOT NULL DEFAULT 0;
+
+INSERT INTO payroll_items (code, label, kind, paye, nis, nht, ed, heart, is_system, sort) VALUES
+  ('er_health',  'Health insurance (employer share)',        'employer', false, false, false, false, false, false, 200),
+  ('er_life',    'Group life insurance (employer)',          'employer', false, false, false, false, false, false, 201),
+  ('er_pension', 'Pension (extra employer contribution)',    'employer', false, false, false, false, false, false, 202),
+  ('er_dental',  'Dental / vision (employer share)',         'employer', false, false, false, false, false, false, 203),
+  ('er_other',   'Other employer contribution',              'employer', false, false, false, false, false, false, 209),
+  ('life_ins_ee','Group life insurance (employee share)',    'deduction', false, false, false, false, false, false, 125),
+  ('pension_ee2','Pension (second scheme, employee)',        'deduction', false, false, false, false, false, false, 126)
+ON CONFLICT (code) DO NOTHING;
+UPDATE payroll_items SET pension_relief = true WHERE code = 'pension_ee2';
+
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('6540', 'Employee Benefits (Insurance)', 'expense', 'Employee Benefits', 'EXP', 'benefits_expense')
+ON CONFLICT (code) DO NOTHING;
+
+-- =============================================================================
 --  DEPARTMENT STORE (Phase 3, 2026-10): store locations containing departments.
 --
 --  The business already has DEPARTMENTS (terminal.js): a department is a set of
