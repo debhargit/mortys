@@ -1,6 +1,7 @@
 // Phase 9 - one-shot data export: live PostgreSQL  ->  D1 (SQLite) seed files.
 //
 //   node tools/pg2d1.mjs --url "$DATABASE_URL" --out dist/d1-data
+//   node tools/pg2d1.mjs --url ... --tables a,b,c   # only these tables
 //   node tools/pg2d1.mjs --selftest      # parser + transforms, no DB needed
 //
 // For every table the D1 migrations define, it reads the matching Postgres
@@ -191,6 +192,9 @@ function splitTopLevel(s) {
 const toCents = (v) => (v == null || v === '' ? null : Math.round(Number(v) * 100));
 const toBit = (v) => (v == null ? null : (v ? 1 : 0));
 const toJsonText = (v) => (v == null ? null : (typeof v === 'string' ? v : JSON.stringify(v)));
+// A Postgres date arrives as local midnight: keep it a plain YYYY-MM-DD so D1
+// range filters (entry_date BETWEEN from AND to) include the last day.
+const toYmd = (v) => (v == null ? null : (v instanceof Date ? v.getFullYear() + '-' + String(v.getMonth() + 1).padStart(2, '0') + '-' + String(v.getDate()).padStart(2, '0') : String(v).slice(0, 10)));
 const toIso = (v) => (v == null ? null : (v instanceof Date ? v.toISOString() : String(v)));
 
 function sqlLiteral(v) {
@@ -211,6 +215,7 @@ function planColumn(name, dataType, d1cols) {
   if (d1cols.has(name)) {
     if (dt === 'boolean') return { target: name, fn: toBit };
     if (dt === 'json' || dt === 'jsonb') return { target: name, fn: toJsonText };
+    if (dt === 'date') return { target: name, fn: toYmd };
     if (dt.includes('timestamp') || dt === 'date') return { target: name, fn: toIso };
     return { target: name, fn: (x) => x };
   }
@@ -255,7 +260,8 @@ await client.connect();
 
 fs.mkdirSync(OUT, { recursive: true });
 const d1 = parseD1Schema();
-const ordered = [...d1.entries()].filter(([t]) => !SKIP.has(t)).sort((a, b) => a[1].order - b[1].order);
+const ONLY = opt('--tables', '') ? new Set(opt('--tables', '').split(',').map((x) => x.trim()).filter(Boolean)) : null;
+const ordered = [...d1.entries()].filter(([t]) => !SKIP.has(t)).filter(([t]) => !ONLY || ONLY.has(t)).sort((a, b) => a[1].order - b[1].order);
 
 const summary = [];
 const written = [];

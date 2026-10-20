@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vision Auto Ad</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@500;700;800&display=block" rel="stylesheet">
+<style>
+:root{--red:#d62828;--navy:#0b1b2b;--navy2:#13283d;--yellow:#ffc300;--white:#fff;--ink:#0f1720}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#05101b;height:100%;overflow:hidden;font-family:Inter,system-ui,sans-serif}
+#stage{position:absolute;left:0;top:0;transform-origin:0 0;overflow:hidden;background:var(--navy)}
+.bg{position:absolute;inset:0;background:radial-gradient(1200px 800px at 75% 40%,#1b3a5a 0%,var(--navy) 60%,#06121e 100%)}
+.stripe{position:absolute;top:-30%;height:160%;transform:skewX(-18deg)}
+.s1{background:var(--yellow);width:70px}
+.s2{background:var(--red);width:26px}
+.grain{position:absolute;inset:0;opacity:.06;background-image:repeating-linear-gradient(0deg,#fff 0 1px,transparent 1px 3px)}
+.scene{position:absolute;inset:0;visibility:hidden}
+.kicker{font:800 26px Inter;letter-spacing:.18em;color:var(--yellow);text-transform:uppercase}
+.h{font-family:'Bebas Neue',Impact,sans-serif;color:#fff;line-height:.92;letter-spacing:.01em}
+.h .y{color:var(--yellow)} .h .r{color:var(--red)}
+.line{display:block;overflow:hidden}
+.line>span{display:inline-block}
+.chip{display:inline-flex;align-items:center;gap:14px;background:#fff;color:var(--ink);font:800 30px Inter;border-radius:999px;padding:14px 28px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+.chip i{font-style:normal;display:grid;place-items:center;width:46px;height:46px;border-radius:50%;background:var(--red);color:#fff;font-size:24px}
+.chip.g i{background:#25d366}
+.device{position:absolute;overflow:hidden;background:#fff;box-shadow:0 30px 80px rgba(0,0,0,.55),0 0 0 2px rgba(255,255,255,.08)}
+.device .vp{position:absolute;left:0;right:0;bottom:0;overflow:hidden;background:#f5f6f8}
+.device img{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
+.browser{border-radius:16px}
+.browser .bar{position:absolute;left:0;right:0;top:0;height:46px;background:#e9ecf0;display:flex;align-items:center;gap:9px;padding:0 18px}
+.browser .bar b{width:13px;height:13px;border-radius:50%;background:#ff5f57}.browser .bar b:nth-child(2){background:#febc2e}.browser .bar b:nth-child(3){background:#28c840}
+.browser .bar span{margin-left:14px;flex:1;background:#fff;border-radius:8px;height:28px;font:600 15px Inter;color:#3a4652;display:flex;align-items:center;padding:0 14px}
+.phone{border-radius:56px;border:14px solid #0a0a0a;background:#0a0a0a}
+.phone .vp{border-radius:0 0 42px 42px}
+.phone .notch{position:absolute;top:10px;left:50%;width:120px;height:30px;margin-left:-60px;background:#0a0a0a;border-radius:20px;z-index:3}
+.sub{position:absolute;left:50%;transform:translateX(-50%);background:rgba(5,12,20,.82);color:#fff;font:700 34px/1.25 Inter;padding:12px 26px;border-radius:12px;text-align:center;max-width:88%;width:max-content;border-left:6px solid var(--red)}
+.wipe{position:absolute;top:-20%;height:140%;width:70%;background:var(--red);transform:skewX(-18deg);z-index:50;visibility:hidden}
+.wipe::after{content:"";position:absolute;right:-40px;top:0;bottom:0;width:40px;background:var(--yellow)}
+.logo{position:absolute;border-radius:50%;background:#fff;display:grid;place-items:center;box-shadow:0 20px 60px rgba(0,0,0,.45),0 0 0 8px var(--yellow)}
+.logo{overflow:hidden}.logo img{width:80%;height:80%;object-fit:contain}
+.brand{position:absolute;display:flex;align-items:center;gap:14px;color:#fff;font:800 22px Inter;letter-spacing:.08em;text-transform:uppercase;opacity:.9}
+.brand img{width:54px;height:54px;border-radius:50%;background:#fff;object-fit:contain;padding:3px}
+.cta-url{font:800 64px Inter;color:#fff;letter-spacing:-.01em}
+.cta-phone{display:inline-flex;align-items:center;gap:18px;background:var(--red);color:#fff;font:800 58px Inter;border-radius:999px;padding:16px 44px;box-shadow:0 14px 40px rgba(214,40,40,.45)}
+.cta-addr{color:#c9d4df;font:600 30px Inter}
+/* play mode UI */
+#ui{position:fixed;left:0;right:0;bottom:0;display:flex;gap:10px;justify-content:center;align-items:center;padding:10px 16px;background:rgba(0,0,0,.6);z-index:100;flex-wrap:wrap}
+#ui button,#ui a{font:700 14px Inter;color:#fff;background:#1d3550;border:0;border-radius:8px;padding:9px 14px;cursor:pointer;text-decoration:none}
+#ui button.primary{background:var(--red)}
+#ui .t{color:#9fb3c8;font:600 13px Inter;min-width:70px;text-align:center}
+#start{position:fixed;inset:0;display:grid;place-items:center;z-index:120;background:rgba(5,12,20,.55);cursor:pointer}
+#start div{background:var(--red);color:#fff;font:800 22px Inter;padding:18px 34px;border-radius:999px;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+body.render #ui,body.render #start{display:none}
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="start"><div>▶ Play the ad (with sound)</div></div>
+<div id="ui">
+  <button class="primary" id="pp">Pause</button>
+  <button id="rw">Replay</button>
+  <span class="t" id="tc">0.0 s</span>
+  <a id="sw" href="#">Switch to vertical</a>
+  <a href="Vision-Auto-Ad-16x9.mp4" download>MP4 16:9</a>
+  <a href="Vision-Auto-Ad-9x16.mp4" download>MP4 9:16</a>
+</div>
+<audio id="aud" src="ad-audio.m4a" preload="auto"></audio>
+<script>
+(function(){
+'use strict';
+var Q = new URLSearchParams(location.search);
+var V = Q.get('f') === 'v', RENDER = Q.get('render') === '1';
+var W = V ? 1080 : 1920, H = V ? 1920 : 1080, DUR = 30;
+if (RENDER) document.body.classList.add('render');
+var S = document.getElementById('stage');
+S.style.width = W + 'px'; S.style.height = H + 'px';
+
+// ---------- timeline (seconds) ----------
+// Scene boundaries follow the voice-over: each line starts ~0.1 s after its scene.
+var SC = [[0,2.0],[2.0,7.2],[7.2,10.8],[10.8,15.5],[15.5,19.3],[19.3,22.0],[22.0,30]];
+var SUBS = [
+  [0.3,1.9,'Need a car part, today?'],
+  [2.1,7.1,'Vision Auto Solutions has over 36,000 parts online, and 10,000 on the shelf right now.'],
+  [7.3,10.7,'Pick your make, model and year, and see what fits your car.'],
+  [10.9,15.4,'Engine, brakes, suspension, wheels — ask for a price in one tap.'],
+  [15.6,19.2,'Can’t find it? WhatsApp us your VIN, and we’ll source it.'],
+  [19.4,21.9,'Same-day pickup, and islandwide delivery.'],
+  [22.1,29.4,'Vision Auto Solutions, Waltham Park Road, Kingston. Call 876-728-4735.']
+];
+
+// ---------- helpers ----------
+function cl(x,a,b){return Math.max(a,Math.min(b,x));}
+function p(t,a,b){return cl((t-a)/(b-a),0,1);}
+function eo(x){return 1-Math.pow(1-x,3);}            // ease out cubic
+function eio(x){return x<.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;}
+function back(x){var c=1.7;return 1+(c+1)*Math.pow(x-1,3)+c*Math.pow(x-1,2);}
+function el(tag,cls,html,parent){var e=document.createElement(tag);if(cls)e.className=cls;if(html!=null)e.innerHTML=html;(parent||S).appendChild(e);return e;}
+function css(e,o){for(var k in o)e.style[k]=o[k];return e;}
+function lerp(a,b,x){return a+(b-a)*x;}
+
+// ---------- background ----------
+el('div','bg');
+var st1 = el('div','stripe s1'), st2 = el('div','stripe s2');
+el('div','grain');
+
+// ---------- device factory ----------
+var SHOT = {d:{w:1440,h:900}, m:{w:860,h:1864}};
+function device(parent, src, box){
+  var d = el('div','device '+(V?'phone':'browser'), '', parent);
+  css(d,{left:box.x+'px',top:box.y+'px',width:box.w+'px',height:box.h+'px'});
+  var top = 0;
+  if (!V){ el('div','bar','<b></b><b></b><b></b><span>visionautosolutions.com</span>',d); top = 46; }
+  else { el("div","notch","",d); top = 44; }
+  var vp = el('div','vp','',d); vp.style.top = top+'px';
+  var img = el('img','','',vp); img.src = 'shots/'+(V?'m_':'d_')+src+'.png';
+  var inner = {w: box.w-(V?28:0), h: box.h-top-(V?28:0)};
+  return {d:d, img:img, vw:inner.w, vh:inner.h};
+}
+// focus: {x,y} point in screenshot px to centre, s = zoom over "fit width"
+function focus(dev, f){
+  var sh = V?SHOT.m:SHOT.d, k = dev.vw/sh.w*f.s;
+  var tx = dev.vw/2 - f.x*k, ty = dev.vh/2 - f.y*k;
+  tx = cl(tx, dev.vw - sh.w*k, 0); ty = cl(ty, dev.vh - sh.h*k, 0);
+  dev.img.style.width = sh.w+'px';
+  dev.img.style.transform = 'translate('+tx+'px,'+ty+'px) scale('+k+')';
+}
+function fmix(a,b,x){return {x:lerp(a.x,b.x,x),y:lerp(a.y,b.y,x),s:lerp(a.s,b.s,x)};}
+
+// ---------- layout ----------
+var L = V ? {
+  head:{x:70,y:190,w:940}, hsize:130, dev:{x:230,y:720,w:620,h:880}, sub:1660
+} : {
+  head:{x:110,y:230,w:700}, hsize:124, dev:{x:850,y:150,w:960,h:646}, sub:950
+};
+
+function headline(parent, kicker, lines, extra){
+  var box = el('div','', '', parent);
+  css(box,{position:'absolute',left:L.head.x+'px',top:L.head.y+'px',width:L.head.w+'px'});
+  if (V) box.style.textAlign = 'center';
+  var k = kicker ? el('div','kicker',kicker,box) : null;
+  var h = el('div','h','',box); h.style.fontSize = L.hsize+'px'; h.style.marginTop = '14px';
+  var ls = lines.map(function(t){ var l = el('span','line','',h); return el('span','',t,l); });
+  var x = extra ? el('div','',extra,box) : null;
+  if (x) x.style.marginTop = '30px';
+  return {box:box,k:k,ls:ls,x:x};
+}
+function animHead(hd, t, t0){
+  if (hd.k){ var a = eo(p(t,t0,t0+.4)); hd.k.style.opacity = a; hd.k.style.transform = 'translateY('+(20*(1-a))+'px)'; }
+  hd.ls.forEach(function(s,i){ var a = eo(p(t,t0+.1+i*.14,t0+.55+i*.14)); s.style.transform = 'translateY('+(105*(1-a))+'%)'; });
+  if (hd.x){ var b = back(p(t,t0+.5,t0+.95)); hd.x.style.opacity = cl(b,0,1); hd.x.style.transform = 'scale('+(0.85+0.15*b)+')'; hd.x.style.transformOrigin = V?'50% 0':'0 0'; }
+}
+function animDev(dev, t, t0, t1, f0, f1){
+  var a = eo(p(t,t0,t0+.6));
+  var dx = V ? 0 : 140*(1-a), dy = V ? 260*(1-a) : 0;
+  dev.d.style.opacity = a; dev.d.style.transform = 'translate('+dx+'px,'+dy+'px) rotate('+((1-a)*(V?0:2))+'deg)';
+  focus(dev, fmix(f0, f1, eio(p(t,t0+.3,t1))));
+}
+
+var scenes = [];
+// 1 ---- hook
+(function(){
+  var g = el('div','scene'); var lg = el('div','logo','<img src="shots/vision_logo.jpg" alt="">',g);
+  var sz = V?420:360; css(lg,{width:sz+'px',height:sz+'px',left:(W-sz)/2+'px',top:(V?520:150)+'px'});
+  var h = el('div','h','',g); css(h,{position:'absolute',left:0,right:0,top:(V?1040:560)+'px',textAlign:'center',fontSize:(V?170:180)+'px'});
+  var l1 = el('span','',"NEED A CAR PART?",el('span','line','',h));
+  var l2 = el('span','y',"TODAY?",el('span','line','',h));
+  scenes.push({g:g, f:function(t){
+    var a = back(p(t,0.05,0.6)); lg.style.transform = 'scale('+a+') rotate('+(-12*(1-a))+'deg)'; lg.style.opacity = cl(a,0,1);
+    l1.style.transform = 'translateY('+(105*(1-eo(p(t,.35,.8))))+'%)';
+    l2.style.transform = 'translateY('+(105*(1-eo(p(t,.95,1.35))))+'%) scale('+(1+0.06*Math.sin(cl(t-1.35,0,1)*Math.PI))+')';
+  }});
+})();
+// 2 ---- catalogue size
+(function(){
+  var g = el('div','scene');
+  var hd = headline(g, 'Shop the catalogue', ['<span class="y" data-n="36500">0</span>+ PARTS', 'ONLINE.', '<span class="y" data-n="10800">0</span>+ ON', 'THE SHELF.']);
+  var nums = hd.box.querySelectorAll('[data-n]');
+  var dev = device(g,'home',L.dev);
+  scenes.push({g:g, f:function(t){
+    animHead(hd,t,2.05); animDev(dev,t,2.2,7.2,V?{x:430,y:700,s:1}:{x:420,y:430,s:1},V?{x:430,y:900,s:1}:{x:420,y:470,s:1.22});
+    [[0,2.3,3.6],[1,3.6,4.9]].forEach(function(n){ var e = nums[n[0]], v = Math.round(+e.dataset.n*eo(p(t,n[1],n[2]))/100)*100; e.textContent = v.toLocaleString('en-US'); });
+  }});
+})();
+// 3 ---- find by vehicle
+(function(){
+  var g = el('div','scene');
+  var hd = headline(g, 'Find parts by vehicle', ['MAKE.','MODEL.','<span class="y">YEAR.</span>'], '<span class="chip"><i>✔</i>See what fits your car</span>');
+  var dev = device(g,'finder',L.dev);
+  var f0 = V?{x:430,y:600,s:1}:{x:720,y:450,s:1}, f1 = V?{x:430,y:560,s:1.12}:{x:430,y:680,s:1.75};
+  scenes.push({g:g, f:function(t){ animHead(hd,t,7.25); animDev(dev,t,7.3,10.4,f0,f1); }});
+})();
+// 4 ---- shop online
+(function(){
+  var g = el('div','scene');
+  var hd = headline(g, 'Shop online, any time', ['ENGINE. BRAKES.','SUSPENSION.','<span class="y">WHEELS.</span>'], '<span class="chip"><i>$</i>Ask for a price in one tap</span>');
+  var dev = device(g,'instock',L.dev);
+  var f0 = V?{x:430,y:900,s:1}:{x:720,y:300,s:1.05}, f1 = V?{x:430,y:1500,s:1}:{x:720,y:620,s:1.2};
+  scenes.push({g:g, f:function(t){ animHead(hd,t,10.85); animDev(dev,t,10.9,15.4,f0,f1); }});
+})();
+// 5 ---- we'll source it
+(function(){
+  var g = el('div','scene');
+  var hd = headline(g, 'Can’t find it?', ['WE’LL', '<span class="y">SOURCE IT.</span>'], '<span class="chip g"><i>☎</i>WhatsApp your VIN: 876-553-4458</span>');
+  var dev = device(g,'contact',L.dev);
+  var f0 = V?{x:430,y:700,s:1}:{x:720,y:450,s:1}, f1 = V?{x:430,y:900,s:1.05}:{x:400,y:500,s:1.4};
+  scenes.push({g:g, f:function(t){ animHead(hd,t,15.55); animDev(dev,t,15.6,19.2,f0,f1); }});
+})();
+// 6 ---- pickup / delivery / track
+(function(){
+  var g = el('div','scene');
+  var hd = headline(g, 'Get it your way', ['SAME-DAY PICKUP.', '<span class="y">ISLANDWIDE</span>', '<span class="y">DELIVERY.</span>'], '<span class="chip"><i>→</i>Track your service online</span>');
+  var dev = device(g,'track',L.dev);
+  var f0 = V?{x:430,y:500,s:1}:{x:720,y:260,s:1.25}, f1 = V?{x:430,y:520,s:1.04}:{x:720,y:270,s:1.4};
+  scenes.push({g:g, f:function(t){ animHead(hd,t,19.35); animDev(dev,t,19.4,21.9,f0,f1); }});
+})();
+// 7 ---- end card
+(function(){
+  var g = el('div','scene');
+  var box = el('div','',null,g); css(box,{position:'absolute',left:0,right:0,top:(V?330:90)+'px',textAlign:'center'});
+  var lg = el('div','logo','<img src="shots/vision_logo.jpg" alt="">',box); var sz = V?380:290;
+  css(lg,{position:'relative',display:'inline-grid',width:sz+'px',height:sz+'px'});
+  var name = el('div','h','VISION AUTO <span class="r">SOLUTIONS</span>',box); css(name,{fontSize:(V?120:118)+'px',marginTop:'40px'});
+  var tag = el('div','kicker','Your auto parts visionary · Since 2017',box); tag.style.marginTop = '10px';
+  var url = el('div','cta-url','visionautosolutions.com',box); url.style.marginTop = (V?'70px':'30px');
+  var ph = el('div','',"<span class='cta-phone'>☎ (876) 728-4735</span>",box); ph.style.marginTop = '26px';
+  var ad = el('div','cta-addr','112C Waltham Park Road, Kingston, Jamaica',box); ad.style.marginTop = '26px';
+  var parts = [lg,name,tag,url,ph,ad];
+  scenes.push({g:g, f:function(t){
+    parts.forEach(function(e,i){ var a = (i===0||i===4) ? back(p(t,22.1+i*.22,22.6+i*.22)) : eo(p(t,22.1+i*.22,22.6+i*.22));
+      e.style.opacity = cl(a,0,1); e.style.transform = 'translateY('+(40*(1-a))+'px) scale('+(i===0? 0.6+0.4*a : 1)+')'; });
+    var pulse = 1+0.035*Math.max(0,Math.sin((t-24.2)*Math.PI*1.4)); ph.firstChild.style.transform = 'scale('+(t>24.2?pulse:1)+')';
+  }});
+})();
+
+// persistent brand bug (scenes 2-6)
+var bug = el('div','brand','<img src="shots/vision_logo.jpg" alt=""><span>Vision Auto Solutions</span>');
+css(bug, V ? {left:'50%',top:'70px',transform:'translateX(-50%)'} : {left:'110px',top:'70px'});
+var sub = el('div','sub',''); sub.style.top = L.sub+'px';
+var wipe = el('div','wipe');
+
+// ---------- render a frame ----------
+function seek(t){
+  t = cl(t,0,DUR);
+  var cur = 0; for (var i=0;i<SC.length;i++) if (t>=SC[i][0]) cur = i;
+  scenes.forEach(function(s,i){ s.g.style.visibility = i===cur ? 'visible':'hidden'; });
+  scenes[cur].f(t);
+  // wipe at each boundary (covers the cut)
+  var wv = false;
+  for (var b=1;b<SC.length;b++){ var x = p(t,SC[b][0]-.22,SC[b][0]+.22); if (x>0&&x<1){ wv = true; wipe.style.left = (lerp(-90,130,eio(x)))+'%'; } }
+  wipe.style.visibility = wv ? 'visible':'hidden';
+  // stripes drift
+  var sx = V ? 900 : 1560; st1.style.left = (sx + 40*Math.sin(t*.4))+'px'; st2.style.left = (sx+110 + 40*Math.sin(t*.4))+'px';
+  if (cur===0||cur===6){ st1.style.left = (V?-180:-240)+'px'; st2.style.left = (V?-90:-150)+'px'; }
+  bug.style.opacity = (cur>=1&&cur<=5) ? 1 : 0;
+  // subtitles
+  var s = null; SUBS.forEach(function(x){ if (t>=x[0]&&t<x[1]) s = x; });
+  if (s){ sub.textContent = s[2]; sub.style.visibility='visible'; sub.style.opacity = Math.min(p(t,s[0],s[0]+.15), 1-p(t,s[1]-.15,s[1])); }
+  else sub.style.visibility='hidden';
+}
+window.seek = seek;
+window.adReady = Promise.all([document.fonts.ready].concat([].map.call(document.images,function(i){return i.complete?1:new Promise(function(r){i.onload=i.onerror=r;});})));
+
+// ---------- play mode ----------
+function fit(){ var sc = RENDER?1:Math.min(innerWidth/W,(innerHeight-56)/H); S.style.transform='scale('+sc+')'; S.style.left=(RENDER?0:(innerWidth-W*sc)/2)+'px'; S.style.top=(RENDER?0:Math.max(0,(innerHeight-56-H*sc)/2))+'px'; }
+addEventListener('resize',fit); fit(); seek(0);
+if (RENDER) return;
+var aud = document.getElementById('aud'), pp = document.getElementById('pp'), tc = document.getElementById('tc'), sw = document.getElementById('sw');
+sw.textContent = V ? 'Switch to 16:9' : 'Switch to 9:16'; sw.href = V ? '?' : '?f=v';
+var clock0 = 0, paused = true, tPaused = 0, hasAudio = true;
+aud.addEventListener('error',function(){ hasAudio=false; });
+function now(){ if (paused) return tPaused; if (hasAudio && !aud.paused) return aud.currentTime; return (performance.now()-clock0)/1000; }
+function play(from){ paused=false; clock0 = performance.now()-from*1000; if (hasAudio){ aud.currentTime = from; aud.play().catch(function(){hasAudio=false;}); } pp.textContent='Pause'; }
+function pause(){ tPaused = now(); paused = true; aud.pause(); pp.textContent='Play'; }
+document.getElementById('start').onclick = function(){ this.remove(); play(0); };
+pp.onclick = function(){ paused ? play(tPaused>=DUR?0:tPaused) : pause(); };
+document.getElementById('rw').onclick = function(){ var s=document.getElementById('start'); if(s) s.remove(); play(0); };
+(function loop(){ var t = now(); if (!paused && t>=DUR){ pause(); tPaused = DUR; t = DUR; } seek(t); tc.textContent = t.toFixed(1)+' s'; requestAnimationFrame(loop); })();
+})();
+</script>
+</body>
+</html>

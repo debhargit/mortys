@@ -34,7 +34,10 @@ const RECLASSIFY_ALL = process.argv.includes('--reset-other') || process.argv.in
 // block first, then DATABASE_URL, then the hardcoded local default.
 function poolConfig() {
   try {
-    const c = JSON.parse(fs.readFileSync(path.join(ROOT, 'db-config.json'), 'utf8')).local;
+    // Strip a UTF-8 BOM (operator-edited file, often saved by Notepad /
+    // PowerShell) -- otherwise JSON.parse throws and we silently fall back to
+    // the wrong default port. Mirrors server.js's stripBom().
+    const c = JSON.parse(fs.readFileSync(path.join(ROOT, 'db-config.json'), 'utf8').replace(/^﻿/, '')).local;
     if (c && c.host) return { host: c.host, port: parseInt(c.port, 10) || 5432, database: c.database, user: c.user, password: c.password };
   } catch (_) {}
   if (process.env.DATABASE_URL) return { connectionString: process.env.DATABASE_URL };

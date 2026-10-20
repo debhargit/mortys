@@ -67,3 +67,11 @@ app/*.bak-*
 
 # ---- legacy system's scratch directory (8 GB of .TMP spool files)
 /WORK/
+config-backups/
+
+# ---- old homepage copies that must not sit in the served directory
+app/public/*.bak-*
+/.bak-public-homepages/
+
+# ---- deploy scratch (a dated copy of functions/ and tools/ before a port)
+app/deploy-backup-*/
