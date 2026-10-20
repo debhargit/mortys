@@ -2719,6 +2719,74 @@ BEGIN
 END $$;
 
 -- =============================================================================
+--  STOCK LEDGER + COST AT SALE (balancing report, 2026-10)
+--
+--  Stock changes in many places (POS sale, credit note, PO receive, Receive
+--  screen, stock adjust, count posting, product edit, voids). None of them
+--  kept a history, so no past opening stock or variance could be proven.
+--  This trigger records EVERY change to products.stock_count, whatever code
+--  made it, with the cost and price at that moment. From the day it starts,
+--  opening / closing stock at any date is exact, and changes that are not a
+--  sale, return or receipt show up as adjustments.
+--
+--  Code may label a change: SELECT set_config('vision.stock_reason','count',true).
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS stock_ledger (
+  id          BIGSERIAL PRIMARY KEY,
+  product_img TEXT NOT NULL,
+  delta       INTEGER NOT NULL,
+  qty_after   INTEGER,
+  unit_cost   NUMERIC(14,4),
+  unit_price  NUMERIC(14,2),
+  reason      TEXT,
+  db_user     TEXT DEFAULT current_user,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_stock_ledger_created ON stock_ledger (created_at);
+CREATE INDEX IF NOT EXISTS idx_stock_ledger_product ON stock_ledger (product_img, created_at);
+
+CREATE OR REPLACE FUNCTION products_stock_ledger() RETURNS trigger
+  LANGUAGE plpgsql AS
+$$
+DECLARE d INTEGER;
+BEGIN
+  d := COALESCE(NEW.stock_count, 0) - (CASE WHEN TG_OP = 'INSERT' THEN 0 ELSE COALESCE(OLD.stock_count, 0) END);
+  IF d <> 0 AND NEW.img IS NOT NULL THEN
+    INSERT INTO stock_ledger (product_img, delta, qty_after, unit_cost, unit_price, reason)
+    VALUES (NEW.img, d, NEW.stock_count, NEW.cost_usd, NEW.price_usd, NULLIF(current_setting('vision.stock_reason', true), ''));
+  END IF;
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS trg_products_stock_ledger ON products;
+CREATE TRIGGER trg_products_stock_ledger
+  AFTER INSERT OR UPDATE OF stock_count ON products
+  FOR EACH ROW EXECUTE FUNCTION products_stock_ledger();
+
+-- Cost of the part at the moment it was sold, so cost of sales stops moving
+-- when the average cost changes later. Old lines keep NULL (the report then
+-- uses today's cost and says so).
+ALTER TABLE pos_sale_items ADD COLUMN IF NOT EXISTS unit_cost NUMERIC(14,4);
+
+CREATE OR REPLACE FUNCTION pos_sale_items_cost() RETURNS trigger
+  LANGUAGE plpgsql AS
+$$
+BEGIN
+  IF NEW.unit_cost IS NULL AND NEW.product_img IS NOT NULL THEN
+    SELECT cost_usd INTO NEW.unit_cost FROM products WHERE img = NEW.product_img;
+  END IF;
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS trg_pos_sale_items_cost ON pos_sale_items;
+CREATE TRIGGER trg_pos_sale_items_cost
+  BEFORE INSERT ON pos_sale_items
+  FOR EACH ROW EXECUTE FUNCTION pos_sale_items_cost();
+
+INSERT INTO warehouse_settings (key, value) VALUES ('stock_ledger_started', NOW()::text)
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
 --  RECEIVE STOCK WITH THE SUPPLIER'S BILL (server.js /api/admin/receive-stock, 2026-10)
 --
 --  One screen receives a delivery (against a PO or without one) and, when the
