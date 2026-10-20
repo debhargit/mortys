@@ -2888,6 +2888,65 @@ INSERT INTO warehouse_settings (key, value) VALUES
 ON CONFLICT (key) DO NOTHING;
 
 -- =============================================================================
+--  STOCK COUNTS (Phase 4, 2026-10): bin counts by scan, blind, recount on
+--  variance by a second person, photos, manager approval, ABC cycle schedule.
+--
+--  A count covers a list of bins. Each bin is counted by scanning what is on
+--  the shelf; the expected quantity is never shown to the counter (blind).
+--  When a bin is finished, its lines are compared with stock_by_bin AT THAT
+--  MOMENT (sales keep running during a count). Differences over the tolerance
+--  need a recount by someone else; then a manager approves and posting moves
+--  stock_by_bin and products.stock_count by the difference (labelled 'count'
+--  in the stock ledger).
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS bin_counts (
+  id          SERIAL PRIMARY KEY,
+  number      TEXT UNIQUE,                       -- CNT-000012
+  kind        TEXT NOT NULL DEFAULT 'adhoc',     -- adhoc | cycle | full
+  status      TEXT NOT NULL DEFAULT 'counting',  -- counting | review | posted | cancelled
+  note        TEXT,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  posted_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  posted_at   TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS bin_count_bins (
+  count_id    INTEGER NOT NULL REFERENCES bin_counts(id) ON DELETE CASCADE,
+  bin_id      INTEGER NOT NULL REFERENCES bins(id),
+  status      TEXT NOT NULL DEFAULT 'open',      -- open | counted | recount | approved
+  counted_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  counted_at  TIMESTAMPTZ,
+  recount_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  recount_at  TIMESTAMPTZ,
+  photo       TEXT,
+  PRIMARY KEY (count_id, bin_id)
+);
+
+CREATE TABLE IF NOT EXISTS bin_count_lines (
+  id           SERIAL PRIMARY KEY,
+  count_id     INTEGER NOT NULL REFERENCES bin_counts(id) ON DELETE CASCADE,
+  bin_id       INTEGER NOT NULL REFERENCES bins(id),
+  product_img  TEXT NOT NULL REFERENCES products(img) ON UPDATE CASCADE ON DELETE CASCADE,
+  counted_qty  INTEGER NOT NULL DEFAULT 0,       -- first count
+  recount_qty  INTEGER,                          -- second person's count, when asked
+  system_qty   INTEGER,                          -- what the system held when the bin was finished
+  unit_cost    NUMERIC(14,4),
+  photo        TEXT,
+  note         TEXT,
+  UNIQUE (count_id, bin_id, product_img)
+);
+CREATE INDEX IF NOT EXISTS idx_bin_count_lines_count ON bin_count_lines (count_id, bin_id);
+
+ALTER TABLE products ADD COLUMN IF NOT EXISTS last_counted_at TIMESTAMPTZ;
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('count_tolerance_units', '0'),     -- a difference above this many units needs a recount
+  ('count_tolerance_value', '5000'),  -- ...or above this J$ value at cost
+  ('count_cycle_days_a', '30'), ('count_cycle_days_b', '90'), ('count_cycle_days_c', '365')
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
 --  Phase 8.2: departments and the terminal journal (terminal.js)
 --  A department is a set of product categories. Staff and cashier stations
 --  are given departments; a counter agent can only sell their departments'
