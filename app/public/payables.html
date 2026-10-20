@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Payables · Vision Auto Solutions</title>
+<link rel="stylesheet" href="/assets/books.css">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Suppliers &amp; payables</h1><nav><a href="/receivables.html">Receivables</a><a href="/banking.html">Banking</a><a href="/accounting.html">Ledger</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"><button data-t="sup" class="on">Supplier centre</button><button data-t="pay">Pay bills</button><button data-t="bill">Enter a bill</button><button data-t="credit">Enter a supplier credit</button><button data-t="aging">A/P aging</button><button data-t="loans">Loans</button><button data-t="rec">Recurring bills</button></div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<datalist id="suppliers"></datalist>
+<script src="/assets/books-common.js?v=20261019"></script>
+<script src="/assets/billing-ui.js?v=20261019"></script>
+<script src="/assets/doc-attach.js"></script>
+<script>
+(function () {
+  'use strict';
+  var B = window.Books, $ = B.$, all = B.all, esc = B.esc, J = B.J, api = B.api, toast = B.toast, modal = B.modal, close = B.close;
+  var tab = 'sup', suppliers = [], KIND = { receipt: 'Goods received', po: 'Purchase order', bill: 'Bill', credit: 'Credit' };
+
+  function supplierByName(v) { v = String(v || '').trim().toLowerCase(); return suppliers.find(function (s) { return s.name.toLowerCase() === v; }); }
+
+  // ------------------------------------------------------------ supplier centre --
+  function sup() {
+    return api('/api/ap/suppliers?q=' + encodeURIComponent(sup.q || '')).then(function (d) {
+      $('#out').innerHTML = '<div class="tiles"><div class="tile"><span class="k">Unpaid bills</span><b>' + J(d.totals.open) + '</b></div><div class="tile bad"><span class="k">Overdue</span><b>' + J(d.totals.overdue) + '</b></div><div class="tile"><span class="k">Supplier credits</span><b>' + J(d.totals.credits) + '</b></div></div>' +
+        '<div class="card"><div class="controls"><div style="flex:1"><label>Find a supplier</label><input id="q" value="' + esc(sup.q || '') + '" style="width:100%"></div></div><div class="scroll"><table><thead><tr><th>Supplier</th><th class="n">Bills</th><th class="n">Unpaid</th><th class="n">Overdue</th><th class="n">Credits</th><th>Next due</th></tr></thead><tbody>' +
+        (d.suppliers.length ? d.suppliers.map(function (s) { return '<tr data-s="' + s.id + '" class="click"><td><b>' + esc(s.name) + '</b></td><td class="n">' + s.bills + '</td><td class="n">' + J(s.open) + '</td><td class="n">' + (s.overdue ? '<span class="pill bad">' + J(s.overdue) + '</span>' : '') + '</td><td class="n">' + (s.credits ? J(s.credits) : '') + '</td><td>' + esc(s.next_due || '') + '</td></tr>'; }).join('') : '<tr><td colspan="6" class="empty">No unpaid bills. Search to open any supplier.</td></tr>') + '</tbody></table></div></div>';
+      $('#q').onkeydown = function (e) { if (e.key === 'Enter') { sup.q = this.value.trim(); sup(); } };
+      all('[data-s]').forEach(function (r) { r.onclick = function () { detail(+r.getAttribute('data-s')); }; });
+    });
+  }
+  function docRows(list, withPay) {
+    return list.map(function (b) { return '<tr><td>' + esc(KIND[b.kind]) + '</td><td>' + esc(b.number) + (b.kind === 'bill' || b.kind === 'credit' ? ' <a href="#" data-bv="' + b.id + '">view</a>' : '') + '</td><td>' + esc(b.day) + '</td><td>' + esc(b.due || '') + '</td><td class="n">' + J(b.amount) + '</td><td class="n">' + J(b.paid) + '</td><td class="n"><b>' + J(b.open) + '</b></td><td class="n">' + (b.days_overdue ? '<span class="pill bad">' + b.days_overdue + ' d</span>' : '') + '</td></tr>'; }).join('');
+  }
+  function detail(id) {
+    return api('/api/ap/suppliers/' + id).then(function (d) {
+      var s = d.supplier;
+      $('#out').innerHTML = '<div class="controls"><button id="bk">◀ All suppliers</button></div><div class="card"><h2>' + esc(s.name) + '</h2>' +
+        '<div class="controls"><button class="primary" id="pb">Pay bills</button><button id="eb">Enter a bill</button><button id="ec">Enter a credit</button><span style="margin-left:auto"></span>' +
+        '<div><label>Terms (days)</label><input id="tm" type="number" value="' + (s.payment_terms_days == null ? '' : s.payment_terms_days) + '" style="width:80px"></div><div><label>Usual expense account</label><select id="da">' + B.accountOptions('line', s.default_account_id) + '</select></div><div><label>Usual class</label><select id="dc">' + B.classOptions(s.default_class_id) + '</select></div><button id="sv">Save</button></div></div>' +
+        '<div class="card"><h2>Unpaid</h2><div class="scroll"><table><thead><tr><th>Type</th><th>Number</th><th>Date</th><th>Due</th><th class="n">Amount</th><th class="n">Paid</th><th class="n">Open</th><th class="n">Overdue</th></tr></thead><tbody>' + (d.open.length ? docRows(d.open) : '<tr><td colspan="8" class="empty">Nothing unpaid.</td></tr>') + '</tbody></table></div></div>' +
+        '<div class="card"><h2>Payments</h2><div class="scroll"><table><thead><tr><th>Date</th><th>Method</th><th>Cheque / ref</th><th>Paid from</th><th class="n">Amount</th><th></th></tr></thead><tbody>' +
+        (d.payments.length ? d.payments.map(function (p) { return '<tr style="' + (p.voided_at ? 'opacity:.5' : '') + '"><td>' + esc(p.day) + '</td><td>' + esc(p.method) + '</td><td>' + esc(p.cheque_number || p.reference || '') + '</td><td>' + esc(p.paid_from) + '</td><td class="n">' + J(p.amount) + '</td><td style="white-space:nowrap"><button class="sm" data-pp="' + p.id + '">Print</button> ' + (p.voided_at ? '<span class="pill bad">void</span> <small>' + esc(p.void_reason || '') + '</small>' : '<button class="sm" data-vp="' + p.id + '">Void</button>') + '</td></tr>'; }).join('') : '<tr><td colspan="6" class="empty">No payments.</td></tr>') + '</tbody></table></div></div>' +
+        (d.history.length ? '<div class="card"><h2>Paid bills</h2><div class="scroll"><table><tbody>' + docRows(d.history) + '</tbody></table></div></div>' : '');
+      $('#bk').onclick = show;
+      $('#pb').onclick = function () { tab = 'pay'; mark(); pay(id); };
+      $('#eb').onclick = function () { tab = 'bill'; mark(); billForm('bill', s); };
+      $('#ec').onclick = function () { tab = 'credit'; mark(); billForm('credit', s); };
+      $('#sv').onclick = function () { api('/api/ap/suppliers/' + id, 'PUT', { payment_terms_days: $('#tm').value, default_account_id: $('#da').value, default_class_id: $('#dc').value }).then(function () { toast('Saved'); return loadSuppliers(); }).catch(function (e) { toast(e.message); }); };
+      all('[data-vp]').forEach(function (b) { b.onclick = function () { var r = prompt('Why is this payment voided? (e.g. cheque lost, wrong amount)'); if (!r) return; api('/api/ap/payments/' + b.getAttribute('data-vp') + '/void', 'POST', { reason: r }).then(function () { toast('Voided: the bills are unpaid again'); detail(id); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-pp]').forEach(function (b) { b.onclick = function () { printPayment(+b.getAttribute('data-pp')); }; });
+      all('[data-bv]').forEach(function (a) { a.onclick = function (e) { e.preventDefault(); viewBill(+a.getAttribute('data-bv'), function () { detail(id); }); }; });
+    }).catch(function (e) { toast(e.message); });
+  }
+  function viewBill(id, after) {
+    api('/api/ap/bills/' + id).then(function (d) {
+      var b = d.bill;
+      modal('<h2>' + (b.kind === 'credit' ? 'Supplier credit' : 'Bill') + ' ' + esc(b.number || '#' + b.id) + ' · ' + esc(b.supplier) + (b.voided_at ? ' <span class="pill bad">void</span>' : '') + '</h2><p class="sub">' + esc(b.day) + (b.due ? ' · due ' + esc(b.due) : '') + (b.memo ? ' · ' + esc(b.memo) : '') + '</p>' +
+        '<table><tbody>' + d.lines.map(function (l) { return '<tr><td>' + esc(l.code + ' ' + l.account) + '</td><td>' + esc(l.description || '') + '</td><td class="n">' + J(l.amount) + '</td></tr>'; }).join('') + (b.gct_amount ? '<tr><td>GCT</td><td></td><td class="n">' + J(b.gct_amount) + '</td></tr>' : '') + '<tr><td><b>Total</b></td><td></td><td class="n"><b>' + J(b.total) + '</b></td></tr></tbody></table>' +
+        '<div id="billdocs"></div>' +
+        '<div class="controls" style="margin-top:10px">' + (b.voided_at ? '' : '<button id="vb">Void</button>') + '<button id="x">Close</button></div>');
+      $('#x').onclick = close;
+      // The supplier's invoice and anything else filed for this bill (document centre).
+      if (window.VADocs) window.VADocs.mount($('#billdocs'), 'bill', b.id, { category: 'payables' });
+      if ($('#vb')) $('#vb').onclick = function () { var r = prompt('Why is it voided?'); if (!r) return; api('/api/ap/bills/' + id + '/void', 'POST', { reason: r }).then(function () { close(); toast('Voided'); after && after(); }).catch(function (e) { toast(e.message); }); };
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // ------------------------------------------------------------ pay bills --
+  function pay(supplierId) {
+    var dueBy = pay.due || '';
+    return api('/api/ap/bills?due_by=' + dueBy + (supplierId ? '&supplier=' + supplierId : '')).then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>Pay bills</h2><p class="sub">Tick the bills to pay; change an amount to pay part of a bill. One payment (cheque or transfer) is made per supplier, using any credits you tick for that supplier.</p>' +
+        '<div class="controls"><div><label>Show bills due by</label><input type="date" id="db" value="' + esc(dueBy) + '"></div>' + (supplierId ? '<button id="allsup">All suppliers</button>' : '') + '</div>' +
+        '<div class="scroll"><table><thead><tr><th></th><th>Supplier</th><th>Type</th><th>Number</th><th>Due</th><th class="n">Open</th><th class="n">Pay</th></tr></thead><tbody>' +
+        (d.bills.length ? d.bills.map(function (b, i) { return '<tr><td><input type="checkbox" data-ck="' + i + '"></td><td>' + esc(b.supplier) + '</td><td>' + esc(KIND[b.kind]) + '</td><td>' + esc(b.number) + '</td><td>' + esc(b.due || b.day) + (b.days_overdue ? ' <span class="pill bad">' + b.days_overdue + ' d late</span>' : '') + '</td><td class="n">' + J(b.open) + '</td><td class="n"><input type="number" step="0.01" data-am="' + i + '" style="width:120px"></td></tr>'; }).join('') : '<tr><td colspan="7" class="empty">No unpaid bills.</td></tr>') +
+        '</tbody></table></div>' +
+        (d.credits.length ? '<h2 style="margin-top:12px">Supplier credits to use</h2><table><tbody>' + d.credits.map(function (c, i) { return '<tr><td><input type="checkbox" data-cc="' + i + '"></td><td>' + esc(c.supplier) + '</td><td>' + esc(c.number) + '</td><td class="n">' + J(c.open) + ' available</td><td class="n"><input type="number" step="0.01" data-ca="' + i + '" style="width:120px"></td></tr>'; }).join('') + '</tbody></table>' : '') +
+        '<div class="controls" style="margin-top:12px"><div><label>Pay from</label><select id="pf">' + B.accountOptions('bank') + '</select></div><div><label>Method</label><select id="pm"><option value="cheque">Cheque</option><option value="transfer">Bank transfer</option><option value="cash">Cash</option><option value="card">Card</option></select></div>' +
+        '<div><label>First cheque no.</label><input id="pc" style="width:110px"></div><div><label>Payment date</label><input type="date" id="pd" value="' + B.today() + '"></div><div><label>Memo</label><input id="pmemo"></div></div>' +
+        '<p id="sum" class="sub"></p><button class="primary" id="go">Pay selected bills</button></div>';
+      var bank = B.accounts().find(function (a) { return a.system_key === 'bank'; }); if (bank) $('#pf').value = bank.id;
+      $('#db').onchange = function () { pay.due = this.value; pay(supplierId); };
+      if ($('#allsup')) $('#allsup').onclick = function () { pay(); };
+      var summary = function () {
+        var by = {};
+        all('[data-am]').forEach(function (x) { var v = +x.value || 0; if (v > 0) { var b = d.bills[+x.getAttribute('data-am')]; by[b.supplier_id] = (by[b.supplier_id] || 0) + v; } });
+        all('[data-ca]').forEach(function (x) { var v = +x.value || 0; if (v > 0) { var c = d.credits[+x.getAttribute('data-ca')]; by[c.supplier_id] = (by[c.supplier_id] || 0) - v; } });
+        var ids = Object.keys(by), tot = ids.reduce(function (t, k) { return t + by[k]; }, 0);
+        $('#sum').textContent = ids.length ? ids.length + ' payment(s), total ' + J(tot) : 'Nothing selected';
+        return by;
+      };
+      all('[data-ck]').forEach(function (cb) { cb.onchange = function () { var x = $('[data-am="' + cb.getAttribute('data-ck') + '"]'); x.value = cb.checked ? d.bills[+cb.getAttribute('data-ck')].open.toFixed(2) : ''; summary(); }; });
+      all('[data-am]').forEach(function (x) { x.oninput = function () { $('[data-ck="' + x.getAttribute('data-am') + '"]').checked = +x.value > 0; summary(); }; });
+      all('[data-cc]').forEach(function (cb) { cb.onchange = function () { var x = $('[data-ca="' + cb.getAttribute('data-cc') + '"]'); x.value = cb.checked ? d.credits[+cb.getAttribute('data-cc')].open.toFixed(2) : ''; summary(); }; });
+      all('[data-ca]').forEach(function (x) { x.oninput = summary; });
+      summary();
+      $('#go').onclick = function () {
+        var by = {};
+        all('[data-am]').forEach(function (x) { var v = +x.value || 0; if (v > 0) { var b = d.bills[+x.getAttribute('data-am')]; (by[b.supplier_id] = by[b.supplier_id] || { bills: [], credits: [] }).bills.push({ kind: b.kind, id: b.id, amount: v }); } });
+        all('[data-ca]').forEach(function (x) { var v = +x.value || 0; if (v > 0) { var c = d.credits[+x.getAttribute('data-ca')]; (by[c.supplier_id] = by[c.supplier_id] || { bills: [], credits: [] }).credits.push({ id: c.id, amount: v }); } });
+        var sids = Object.keys(by).filter(function (k) { return by[k].bills.length; });
+        if (!sids.length) return toast('Tick the bills to pay');
+        var cheque = $('#pc').value.trim(), method = $('#pm').value, made = [];
+        if (method === 'cheque' && !/\d+$/.test(cheque)) return toast('First cheque number');
+        if (!confirm('Make ' + sids.length + ' payment(s)?')) return;
+        var nextCheque = function (i) { if (method !== 'cheque') return null; var m = /^(.*?)(\d+)$/.exec(cheque); return m[1] + String(+m[2] + i).padStart(m[2].length, '0'); };
+        var run = function (i) {
+          if (i >= sids.length) { toast(made.length + ' payment(s) made'); if (made.length) printPayment(made[0]); pay(supplierId); return; }
+          var s = by[sids[i]];
+          api('/api/ap/payments', 'POST', { supplier_id: +sids[i], pay_date: $('#pd').value, method: method, account_id: $('#pf').value, cheque_number: nextCheque(i), memo: $('#pmemo').value, bills: s.bills, credits: s.credits })
+            .then(function (r) { made.push(r.id); run(i + 1); }).catch(function (e) { toast(e.message + (made.length ? ' (' + made.length + ' made before this)' : '')); pay(supplierId); });
+        };
+        run(0);
+      };
+    });
+  }
+  // A cheque voucher: cheque on top, remittance stub below.
+  function printPayment(id) {
+    api('/api/ap/payments/' + id).then(function (d) {
+      var p = d.payment, w = window.open('', '_blank');
+      if (!w) return toast('Allow pop-ups to print');
+      w.document.write('<!doctype html><title>Payment ' + p.id + '</title><body style="font:14px system-ui;margin:30px;max-width:780px">' +
+        '<div style="border:1px solid #999;padding:18px;margin-bottom:24px"><div style="display:flex;justify-content:space-between"><b>' + esc(B.shopName()) + '</b><span>' + (p.cheque_number ? 'Cheque ' + esc(p.cheque_number) : esc(p.method)) + '</span></div>' +
+        '<p style="text-align:right">Date: ' + esc(p.day) + '</p><p>Pay to the order of <b>' + esc(p.supplier) + '</b><span style="float:right;border:1px solid #333;padding:2px 10px"><b>' + J(p.amount) + '</b></span></p><p>' + esc(B.words(p.amount)) + '</p><p style="margin-top:30px">Memo: ' + esc(p.memo || '') + '<span style="float:right">____________________ Signature</span></p></div>' +
+        '<h3>Remittance advice · ' + esc(p.supplier) + '</h3><p>Paid ' + esc(p.day) + ' from ' + esc(p.paid_from) + (p.voided_at ? ' · VOID' : '') + '</p><table style="width:100%;border-collapse:collapse" border="1" cellpadding="6"><tr><th>Bill</th><th>Date</th><th>Bill amount</th><th>Paid / used</th></tr>' +
+        d.lines.map(function (l) { return '<tr><td>' + esc((l.bill_kind === 'credit' ? 'Credit ' : '') + (l.number || '')) + '</td><td>' + esc(l.day || '') + '</td><td style="text-align:right">' + J(l.bill_amount) + '</td><td style="text-align:right">' + (l.bill_kind === 'credit' ? '-' : '') + J(l.amount) + '</td></tr>'; }).join('') +
+        '<tr><td colspan="3"><b>Total paid</b></td><td style="text-align:right"><b>' + J(p.amount) + '</b></td></tr></table><script>print()<\/script></body>');
+      w.document.close();
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // ------------------------------------------------------------ enter bill / credit --
+  function billForm(kind, pre) {
+    var isCredit = kind === 'credit';
+    $('#out').innerHTML = '<div class="card"><h2>' + (isCredit ? 'Supplier credit' : 'Enter a bill') + '</h2><p class="sub">' + (isCredit ? 'A credit note from a supplier (a refund owed to you, or a discount). Use it in Pay Bills to reduce a payment.' : 'For bills that did not come through a purchase order: rent, light, phone, repairs, services. Stock bought on a purchase order comes in through receiving.') + '</p>' +
+      '<div class="controls"><div style="flex:1;min-width:220px"><label>Supplier</label><input id="bs" list="suppliers" style="width:100%" value="' + esc(pre ? pre.name : '') + '"></div><div><label>' + (isCredit ? 'Credit note no.' : 'Supplier invoice no.') + '</label><input id="bn" style="width:150px"></div>' +
+      '<div><label>Date</label><input type="date" id="bd" value="' + B.today() + '"></div>' + (isCredit ? '' : '<div><label>Due (blank = from terms)</label><input type="date" id="bdu"></div>') + '</div>' +
+      '<table class="lines"><thead><tr><th style="width:32%">Category (account)</th><th style="width:15%">Class</th><th>Description</th><th class="n" style="width:150px">Amount</th><th style="width:40px"></th></tr></thead><tbody id="bl"></tbody></table>' +
+      '<div class="controls" style="margin-top:6px"><button class="sm" id="add">Add a line</button></div>' +
+      '<div class="controls"><div><label>GCT on the bill (J$)</label><input id="bg" type="number" step="0.01" style="width:130px"></div><button class="sm" id="g15">Add 15% GCT</button><div style="flex:1"><label>Memo</label><input id="bm" style="width:100%"></div></div>' +
+      '<h3 id="bt" style="text-align:right"></h3><div class="controls"><button class="primary" id="bsv">Save ' + (isCredit ? 'credit' : 'bill') + '</button></div></div>';
+    var addLine = function (acct, cls) {
+      var tr = document.createElement('tr');
+      if (acct === undefined || cls === undefined) { var sd = supNow && supNow(); if (acct === undefined) acct = sd && sd.default_account_id; if (cls === undefined) cls = sd && sd.default_class_id; }
+      tr.innerHTML = '<td><select data-la>' + B.accountOptions('line', acct) + '</select></td><td><select data-lc>' + B.classOptions(cls) + '</select></td><td><input data-ld></td><td><input data-lm type="number" step="0.01" style="text-align:right"></td><td><button class="sm" data-lx>✕</button></td>';
+      $('#bl').appendChild(tr);
+      tr.querySelector('[data-lx]').onclick = function () { tr.remove(); total(); };
+      tr.querySelector('[data-lm]').oninput = total;
+    };
+    var sub = function () { return all('[data-lm]').reduce(function (t, x) { return t + (+x.value || 0); }, 0); };
+    var total = function () { $('#bt').textContent = 'Total ' + J(sub() + (+$('#bg').value || 0)); };
+    var supNow = function () { return supplierByName($('#bs').value); };
+    addLine(pre ? pre.default_account_id : null, pre ? pre.default_class_id : null);
+    // The supplier's default category and class fill the first line if it is still blank.
+    $('#bs').onchange = function () { var s = supNow(); if (!s) return; var first = $('[data-la]'), fc = $('[data-lc]'); if (first && !first.value && s.default_account_id) first.value = s.default_account_id; if (fc && !fc.value && s.default_class_id) fc.value = s.default_class_id; };
+    $('#add').onclick = function () { addLine(); };
+    $('#bg').oninput = total;
+    $('#g15').onclick = function () { $('#bg').value = (Math.round(sub() * 0.15 * 100) / 100).toFixed(2); total(); };
+    total();
+    $('#bsv').onclick = function () {
+      var s = supNow();
+      if (!s) return toast('Choose the supplier from the list');
+      var lines = all('#bl tr').map(function (tr) { return { account_id: tr.querySelector('[data-la]').value, class_id: tr.querySelector('[data-lc]').value, description: tr.querySelector('[data-ld]').value, amount: tr.querySelector('[data-lm]').value }; }).filter(function (l) { return +l.amount > 0; });
+      api('/api/ap/bills', 'POST', { kind: kind, supplier_id: s.id, number: $('#bn').value, bill_date: $('#bd').value, due_date: $('#bdu') ? $('#bdu').value : '', gct_amount: $('#bg').value, memo: $('#bm').value, lines: lines })
+        .then(function (r) { toast((isCredit ? 'Credit' : 'Bill') + ' saved: ' + J(r.total) + (r.due_date ? ', due ' + r.due_date : '')); billForm(kind); })
+        .catch(function (e) { toast(e.message); });
+    };
+  }
+
+  function aging() {
+    return api('/api/ap/aging').then(function (d) {
+      var t = d.totals;
+      $('#out').innerHTML = '<div class="card"><h2>A/P aging summary · ' + esc(d.as_of) + ' <button class="sm" id="csv">Download CSV</button></h2><p class="sub">Aged from each bill\'s due date.</p><div class="scroll"><table><thead><tr><th>Supplier</th><th class="n">Current</th><th class="n">1-30</th><th class="n">31-60</th><th class="n">61-90</th><th class="n">Over 90</th><th class="n">Total</th></tr></thead><tbody>' +
+        d.rows.map(function (r) { return '<tr data-s="' + r.supplier_id + '" class="click"><td>' + esc(r.name) + '</td><td class="n">' + J(r.current) + '</td><td class="n">' + J(r.d30) + '</td><td class="n">' + J(r.d60) + '</td><td class="n">' + J(r.d90) + '</td><td class="n">' + J(r.over90) + '</td><td class="n"><b>' + J(r.total) + '</b></td></tr>'; }).join('') +
+        '<tr><td><b>Total</b></td><td class="n"><b>' + J(t.current) + '</b></td><td class="n"><b>' + J(t.d30) + '</b></td><td class="n"><b>' + J(t.d60) + '</b></td><td class="n"><b>' + J(t.d90) + '</b></td><td class="n"><b>' + J(t.over90) + '</b></td><td class="n"><b>' + J(t.total) + '</b></td></tr></tbody></table></div></div>';
+      all('[data-s]').forEach(function (r) { r.onclick = function () { tab = 'sup'; mark(); detail(+r.getAttribute('data-s')); }; });
+      $('#csv').onclick = function () { B.csv('ap-aging-' + d.as_of + '.csv', [['supplier', 'current', '1-30', '31-60', '61-90', 'over 90', 'total']].concat(d.rows.map(function (r) { return [r.name, r.current, r.d30, r.d60, r.d90, r.over90, r.total]; }))); };
+    });
+  }
+
+  // ------------------------------------------------------- loans and recurring bills --
+  function loans() { return window.BillingUI.loans($('#out'), supplierByName); }
+  function rec() {
+    $('#out').innerHTML = '<div class="card"><h2>Recurring bills <button class="sm primary" id="np">New recurring bill</button></h2><p class="sub">Standing orders and fixed monthly costs. Each period&#39;s bill is raised on its date; pay it with Pay bills (for a standing order, when it shows on the bank statement). Bills we pay ourselves are emailed to the accounts address a few days ahead.</p><div id="plans"></div></div>' +
+      '<div class="card"><h2>Coming up (30 days)</h2><div id="up"></div></div>';
+    var again = function () { rec(); };
+    $('#np').onclick = function () { window.BillingUI.planEditor('ap', null, supplierByName, again); };
+    window.BillingUI.upcoming($('#up'), ['ap', 'loan']);
+    return window.BillingUI.planList($('#plans'), { side: 'ap' });
+  }
+  function loadSuppliers() { return api('/api/ap/supplier-list').then(function (d) { suppliers = d.suppliers; $('#suppliers').innerHTML = suppliers.map(function (s) { return '<option value="' + esc(s.name) + '">'; }).join(''); }); }
+  function mark() { all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); }); }
+  function show() {
+    mark();
+    var f = { sup: sup, pay: function () { return pay(); }, bill: function () { billForm('bill'); return Promise.resolve(); }, credit: function () { billForm('credit'); return Promise.resolve(); }, aging: aging, loans: loans, rec: rec }[tab];
+    f().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
+  Promise.all([B.loadAccounts(), loadSuppliers()]).then(show).catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+})();
+</script>
+</body>
+</html>

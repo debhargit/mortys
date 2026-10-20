@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Receivables · Vision Auto Solutions</title>
+<link rel="stylesheet" href="/assets/books.css">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Customers &amp; receivables</h1><nav><a href="/payables.html">Payables</a><a href="/banking.html">Banking</a><a href="/accounting.html">Ledger</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"><button data-t="cust" class="on">Customer centre</button><button data-t="coll">Collections</button><button data-t="aging">A/R aging</button><button data-t="rec">Recurring invoices</button></div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<script src="/assets/books-common.js?v=20261019"></script>
+<script src="/assets/billing-ui.js?v=20261019"></script>
+<script>
+(function () {
+  'use strict';
+  var B = window.Books, $ = B.$, all = B.all, esc = B.esc, J = B.J, api = B.api, toast = B.toast, modal = B.modal, close = B.close, BU = window.BillingUI;
+  var tab = 'cust', state = { q: '', filter: '' }, accounts = [];
+
+  // ------------------------------------------------------------ customer centre --
+  function cust() {
+    return api('/api/ar/customers?q=' + encodeURIComponent(state.q) + '&filter=' + state.filter).then(function (d) {
+      $('#out').innerHTML = '<div class="tiles"><div class="tile"><span class="k">Open invoices</span><b>' + J(d.totals.open) + '</b></div><div class="tile bad"><span class="k">Overdue</span><b>' + J(d.totals.overdue) + '</b></div><div class="tile"><span class="k">Unapplied credits</span><b>' + J(d.totals.credit) + '</b></div></div>' +
+        '<div class="card"><div class="controls"><div style="flex:1"><label>Find a customer (name, account no. or phone)</label><input id="q" value="' + esc(state.q) + '" style="width:100%"></div>' +
+        '<div><label>Show</label><select id="f"><option value="">Everyone who owes or has credit</option><option value="overdue">Overdue</option><option value="over_limit">Over credit limit</option><option value="hold">On credit hold</option><option value="credit">With unapplied credit</option></select></div></div>' +
+        '<div class="scroll"><table><thead><tr><th>Customer</th><th class="n">Open</th><th class="n">Overdue</th><th class="n">Oldest</th><th class="n">Credit</th><th class="n">Balance</th><th class="n">Limit</th><th></th></tr></thead><tbody>' +
+        (d.customers.length ? d.customers.map(function (c) {
+          return '<tr data-c="' + c.id + '" class="click"><td><b>' + esc(c.name) + '</b><br><small>' + esc(c.account_number || '') + (c.phone ? ' · ' + esc(c.phone) : '') + '</small></td><td class="n">' + J(c.open) + '</td><td class="n">' + (c.overdue ? '<span class="pill bad">' + J(c.overdue) + '</span>' : '') + '</td>' +
+            '<td class="n">' + (c.oldest_days ? c.oldest_days + ' d' : '') + '</td><td class="n">' + (c.credit ? J(c.credit) : '') + '</td><td class="n"><b>' + J(c.balance) + '</b></td><td class="n">' + (c.credit_limit != null ? J(c.credit_limit) : '') + '</td>' +
+            '<td>' + (c.credit_hold ? '<span class="pill bad">hold</span>' : '') + (c.credit_limit != null && c.balance > c.credit_limit ? ' <span class="pill warn">over limit</span>' : '') + '</td></tr>';
+        }).join('') : '<tr><td colspan="8" class="empty">Nobody here.</td></tr>') + '</tbody></table></div></div>';
+      $('#f').value = state.filter;
+      $('#f').onchange = function () { state.filter = this.value; cust(); };
+      $('#q').onkeydown = function (e) { if (e.key === 'Enter') { state.q = this.value.trim(); cust(); } };
+      all('[data-c]').forEach(function (r) { r.onclick = function () { detail(+r.getAttribute('data-c')); }; });
+    });
+  }
+
+  function detail(id) {
+    return api('/api/ar/customers/' + id).then(function (d) {
+      var c = d.customer, a = d.aging;
+      $('#out').innerHTML = '<div class="controls"><button id="bk">◀ All customers</button></div>' +
+        '<div class="card"><h2>' + esc(c.name) + (c.credit_hold ? ' <span class="pill bad">on credit hold</span>' : '') + '</h2><p class="sub">' + esc([c.account_number, c.phone, c.email && !/\.local$/.test(c.email) ? c.email : null].filter(Boolean).join(' · ')) + '</p>' +
+        (c.credit_hold ? '<div class="note bad">Hold: ' + esc(c.credit_hold_reason || '') + '. The till will not charge sales to this account.</div>' : '') +
+        '<div class="tiles"><div class="tile"><span class="k">Balance</span><b>' + J(d.balance) + '</b></div><div class="tile"><span class="k">Current</span><b>' + J(a.current) + '</b></div><div class="tile"><span class="k">1-30</span><b>' + J(a.d30) + '</b></div><div class="tile"><span class="k">31-60</span><b>' + J(a.d60) + '</b></div><div class="tile"><span class="k">61-90</span><b>' + J(a.d90) + '</b></div><div class="tile bad"><span class="k">Over 90</span><b>' + J(a.over90) + '</b></div><div class="tile"><span class="k">Unapplied credit</span><b>' + J(d.credit) + '</b></div></div>' +
+        '<div class="controls"><button class="primary" id="rp">Receive payment</button><button id="ni">New invoice</button><button id="st">Statement</button><button id="rm">Email a reminder</button><button id="bs">Reminders &amp; late fees</button><button id="hd">' + (c.credit_hold ? 'Lift credit hold' : 'Put on credit hold') + '</button>' +
+        '<span style="margin-left:auto"></span><div><label>Terms (days)</label><input id="tm" type="number" value="' + (c.payment_terms_days == null ? '' : c.payment_terms_days) + '" style="width:80px"></div><div><label>Credit limit (J$)</label><input id="cl" type="number" value="' + (c.credit_limit == null ? '' : c.credit_limit) + '" style="width:120px"></div><button id="sv">Save terms</button></div>' +
+        '<div class="controls"><span class="sub">Accounting defaults for new invoice lines:</span><div><label>Category</label><select id="dca"><option value="">Rental Income (standard)</option>' + accounts.filter(function (a) { return ['income', 'other_income'].indexOf(a.type) >= 0; }).map(function (a) { return '<option value="' + a.id + '"' + (String(c.default_income_account_id) === String(a.id) ? ' selected' : '') + '>' + esc(a.code + ' ' + a.name) + '</option>'; }).join('') + '</select></div>' +
+        '<div><label>Class</label><select id="dcl">' + B.classOptions(c.default_class_id) + '</select></div><button id="dsv">Save defaults</button></div></div>' +
+        '<div class="card"><h2>Open invoices</h2><div class="scroll"><table><thead><tr><th>Invoice</th><th>Date</th><th>Due</th><th class="n">Total</th><th class="n">Paid</th><th class="n">Open</th><th class="n">Overdue</th></tr></thead><tbody>' +
+        (d.invoices.length ? d.invoices.map(function (i) { return '<tr><td>' + esc(i.receipt_number) + (i.invoice_kind === 'late_fee' ? ' <span class="pill warn">late fee</span>' : '') + (i.doc === 'invoice' && !i.paid ? ' <button class="sm" data-vi="' + i.id + '" data-fee="' + (i.invoice_kind === 'late_fee' ? 1 : 0) + '">' + (i.invoice_kind === 'late_fee' ? 'Waive' : 'Void') + '</button>' : '') + '</td><td>' + esc(i.day) + '</td><td>' + esc(i.due || i.day) + '</td><td class="n">' + J(i.total) + '</td><td class="n">' + J(i.paid) + '</td><td class="n"><b>' + J(i.open) + '</b></td><td class="n">' + (i.days_overdue ? '<span class="pill ' + (i.days_overdue > 45 ? 'bad' : 'warn') + '">' + i.days_overdue + ' d</span>' : '') + '</td></tr>'; }).join('') : '<tr><td colspan="7" class="empty">Nothing open.</td></tr>') + '</tbody></table></div></div>' +
+        '<div class="card"><h2>Recurring invoices <button class="sm" id="np">New recurring invoice</button></h2><div id="cplans"></div></div>' +
+        '<div class="card"><h2>Payments received</h2><div class="scroll"><table><thead><tr><th>Date</th><th>Method</th><th>Ref</th><th class="n">Amount</th><th>Applied to</th><th class="n">Unapplied</th><th>Deposited to</th><th></th></tr></thead><tbody>' +
+        (d.payments.length ? d.payments.map(function (p) {
+          return '<tr style="' + (p.voided_at ? 'opacity:.5' : '') + '"><td>' + esc(p.day) + '</td><td>' + esc(p.method) + '</td><td>' + esc(p.reference || '') + '</td><td class="n">' + J(p.amount) + '</td><td><small>' + (p.applied_to || []).map(function (x) { return esc(x.receipt) + ' ' + J(x.amount); }).join('<br>') + '</small></td>' +
+            '<td class="n">' + (p.voided_at ? '<span class="pill bad">void</span>' : p.unapplied ? '<b>' + J(p.unapplied) + '</b>' : '') + '</td><td><small>' + esc(p.deposit_to || '') + '</small></td>' +
+            '<td style="white-space:nowrap">' + (!p.voided_at && p.unapplied > 0.005 && d.invoices.length ? '<button class="sm" data-ap="' + p.id + '" data-u="' + p.unapplied + '">Apply credit</button> ' : '') + (!p.voided_at ? '<button class="sm" data-vd="' + p.id + '">Void</button>' : '<small>' + esc(p.void_reason || '') + '</small>') + '</td></tr>';
+        }).join('') : '<tr><td colspan="8" class="empty">No payments.</td></tr>') + '</tbody></table></div></div>' +
+        '<div class="card"><h2>Collections notes</h2><div class="controls"><div><label>Kind</label><select id="nk"><option value="call">Phone call</option><option value="note">Note</option><option value="email">Email</option><option value="promise">Promise to pay</option></select></div>' +
+        '<div style="flex:1"><label>What happened</label><input id="nt" style="width:100%"></div><div id="pp" style="display:none"><label>Pay by</label><input id="pd" type="date"> <input id="pa" type="number" placeholder="J$" style="width:110px"></div><button id="na">Add</button></div>' +
+        (d.notes.length ? '<table><tbody>' + d.notes.map(function (x) { return '<tr><td style="white-space:nowrap">' + esc(B.dt(x.created_at)) + '</td><td><span class="pill">' + esc(x.kind) + '</span></td><td>' + esc(x.note) + (x.promise_day ? ' <b>(promised ' + esc(x.promise_day) + (x.promise_amount ? ', ' + J(x.promise_amount) : '') + ')</b>' : '') + '</td><td><small>' + esc(x.by_name || '') + '</small></td></tr>'; }).join('') + '</tbody></table>' : '<p class="sub">No notes yet.</p>') + '</div>';
+      $('#bk').onclick = show;
+      $('#rp').onclick = function () { receive(c, d.invoices); };
+      var again = function () { detail(id); };
+      $('#ni').onclick = function () { BU.newInvoice(c, again); };
+      $('#bs').onclick = function () { BU.billingSettings(c, again); };
+      $('#np').onclick = function () { BU.planEditor('ar', null, c, again); };
+      BU.planList($('#cplans'), { side: 'ar', customer_id: id });
+      all('[data-vi]').forEach(function (b) { b.onclick = function () { BU.voidInvoice(+b.getAttribute('data-vi'), b.getAttribute('data-fee') === '1', again); }; });
+      $('#st').onclick = function () { statement(c, d); };
+      $('#rm').onclick = function () { api('/api/ar/customers/' + id + '/reminder', 'POST').then(function (r) { toast('Reminder sent: ' + r.invoices + ' invoice(s), ' + J(r.total)); detail(id); }).catch(function (e) { toast(e.message); }); };
+      $('#hd').onclick = function () { var reason = c.credit_hold ? (prompt('Why is the hold lifted? (optional)', '') || '') : prompt('Why put the account on hold?', 'Overdue over 45 days'); if (reason === null) return; api('/api/ar/customers/' + id + '/hold', 'POST', { hold: !c.credit_hold, reason: reason }).then(function () { detail(id); }).catch(function (e) { toast(e.message); }); };
+      $('#dsv').onclick = function () { api('/api/ar/customers/' + id + '/defaults', 'PUT', { default_income_account_id: $('#dca').value, default_class_id: $('#dcl').value }).then(function () { toast('Defaults saved'); detail(id); }).catch(function (e) { toast(e.message); }); };
+      $('#sv').onclick = function () { api('/api/ar/customers/' + id + '/terms', 'PUT', { payment_terms_days: $('#tm').value, credit_limit: $('#cl').value }).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); }); };
+      $('#nk').onchange = function () { $('#pp').style.display = this.value === 'promise' ? '' : 'none'; };
+      $('#na').onclick = function () { api('/api/ar/customers/' + id + '/notes', 'POST', { kind: $('#nk').value, note: $('#nt').value, promise_date: $('#pd').value, promise_amount: $('#pa').value }).then(function () { detail(id); }).catch(function (e) { toast(e.message); }); };
+      all('[data-vd]').forEach(function (b) { b.onclick = function () { var r = prompt('Why is this payment voided? (e.g. cheque returned)'); if (!r) return; api('/api/ar/payments/' + b.getAttribute('data-vd') + '/void', 'POST', { reason: r }).then(function () { toast('Voided'); detail(id); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-ap]').forEach(function (b) { b.onclick = function () { applyCredit(c, d.invoices, +b.getAttribute('data-ap'), +b.getAttribute('data-u')); }; });
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // Invoice list with amounts to apply; "oldest first" fills them in order.
+  function invoiceRows(invoices) {
+    return '<table><thead><tr><th></th><th>Invoice</th><th>Due</th><th class="n">Open</th><th class="n">Apply</th></tr></thead><tbody>' +
+      invoices.map(function (i) { var k = i.doc + ':' + i.id; return '<tr><td><input type="checkbox" data-ck="' + k + '"></td><td>' + esc(i.receipt_number) + '<br><small>' + esc(i.day) + '</small></td><td>' + esc(i.due || i.day) + '</td><td class="n">' + J(i.open) + '</td><td class="n"><input type="number" step="0.01" data-amt="' + k + '" data-open="' + i.open + '" style="width:120px"></td></tr>'; }).join('') + '</tbody></table>';
+  }
+  function wireApply(get) {
+    var sum = function () { return all('[data-amt]').reduce(function (t, x) { return t + (+x.value || 0); }, 0); };
+    var upd = function () { var avail = get(), used = Math.round(sum() * 100) / 100; $('#used').textContent = J(used); $('#left').textContent = J(Math.round((avail - used) * 100) / 100); $('#left').parentNode.className = avail - used < -0.005 ? 'bad' : ''; };
+    all('[data-ck]').forEach(function (cb) { cb.onchange = function () { var inp = $('[data-amt="' + cb.getAttribute('data-ck') + '"]'); if (cb.checked) { var left = get() - sum(); inp.value = Math.max(0, Math.min(+inp.getAttribute('data-open'), Math.round(left * 100) / 100)).toFixed(2); } else inp.value = ''; upd(); }; });
+    all('[data-amt]').forEach(function (x) { x.oninput = function () { $('[data-ck="' + x.getAttribute('data-amt') + '"]').checked = +x.value > 0; upd(); }; });
+    $('#auto').onclick = function () { var left = get(); all('[data-amt]').forEach(function (x) { var v = Math.max(0, Math.min(+x.getAttribute('data-open'), Math.round(left * 100) / 100)); x.value = v ? v.toFixed(2) : ''; left -= v; $('[data-ck="' + x.getAttribute('data-amt') + '"]').checked = v > 0; }); upd(); };
+    upd();
+    return function () { return all('[data-amt]').filter(function (x) { return +x.value > 0; }).map(function (x) { var k = x.getAttribute('data-amt').split(':'); return k[0] === 'invoice' ? { invoice_id: +k[1], amount: +x.value } : { sale_id: +k[1], amount: +x.value }; }); };
+  }
+  var DEPOSIT_FOR = { cash: 'cash_safe', cheque: 'cheques', card: 'card_clearing', bank: 'bank' };
+  function receive(c, invoices) {
+    var banks = accounts.filter(function (a) { return a.bank && a.system_key !== 'cash_drawers'; });
+    modal('<h2>Receive payment · ' + esc(c.name) + '</h2><div class="controls"><div><label>Amount received (J$)</label><input id="ra" type="number" step="0.01" style="width:140px"></div><div><label>Date</label><input id="rd" type="date" value="' + B.today() + '"></div>' +
+      '<div><label>Method</label><select id="rmth"><option value="cheque">Cheque</option><option value="cash">Cash</option><option value="bank">Bank transfer</option><option value="card">Card</option></select></div><div><label>Cheque / reference no.</label><input id="rr" style="width:130px"></div>' +
+      '<div><label>Deposit to</label><select id="rdep">' + banks.map(function (a) { return '<option value="' + a.id + '" data-k="' + esc(a.system_key || '') + '">' + esc(a.code + ' ' + a.name) + '</option>'; }).join('') + '</select></div></div>' +
+      '<input id="rmemo" placeholder="Memo" style="width:100%;margin-bottom:8px">' +
+      (invoices.length ? '<div class="controls"><button class="sm" id="auto">Apply oldest first</button><span class="sub">Applied <b id="used"></b> · left as credit <span><b id="left"></b></span></span></div><div class="scroll" style="max-height:40vh">' + invoiceRows(invoices) + '</div>' : '<p class="sub">No open invoices: the whole payment stays as a credit on the account.</p><span id="used" hidden></span><span hidden><b id="left"></b></span><button id="auto" hidden></button>') +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="rgo">Save payment</button><button id="rx">Cancel</button></div>');
+    var setDep = function () { var want = DEPOSIT_FOR[$('#rmth').value]; var o = all('#rdep option').find(function (x) { return x.getAttribute('data-k') === want; }); if (o) $('#rdep').value = o.value; };
+    $('#rmth').onchange = setDep; setDep();
+    var apps = wireApply(function () { return +$('#ra').value || 0; });
+    $('#ra').oninput = function () { $('#auto').onclick && all('[data-amt]').length && $('#auto').onclick(); };
+    $('#rx').onclick = close;
+    $('#rgo').onclick = function () {
+      api('/api/ar/payments', 'POST', { customer_id: c.id, amount: $('#ra').value, paid_on: $('#rd').value, method: $('#rmth').value, reference: $('#rr').value, deposit_account_id: $('#rdep').value, memo: $('#rmemo').value, applications: apps() })
+        .then(function (r) { close(); toast('Payment saved' + (r.credit > 0 ? '; ' + J(r.credit) + ' left as credit' : '')); detail(c.id); }).catch(function (e) { toast(e.message); });
+    };
+  }
+  function applyCredit(c, invoices, pid, unapplied) {
+    modal('<h2>Apply credit · ' + esc(c.name) + '</h2><p class="sub">' + J(unapplied) + ' of this payment is not used on any invoice yet.</p><div class="controls"><button class="sm" id="auto">Apply oldest first</button><span class="sub">Applied <b id="used"></b> · still credit <span><b id="left"></b></span></span></div>' +
+      '<div class="scroll" style="max-height:45vh">' + invoiceRows(invoices) + '</div><div class="controls" style="margin-top:10px"><button class="primary" id="go">Apply</button><button id="x">Cancel</button></div>');
+    var apps = wireApply(function () { return unapplied; });
+    $('#x').onclick = close;
+    $('#go').onclick = function () { api('/api/ar/payments/' + pid + '/apply', 'POST', { applications: apps() }).then(function () { close(); toast('Applied'); detail(c.id); }).catch(function (e) { toast(e.message); }); };
+  }
+  function statement(c, d) {
+    var w = window.open('', '_blank');
+    if (!w) return toast('Allow pop-ups to print the statement');
+    var rows = d.invoices.map(function (i) { return '<tr><td>' + esc(i.day) + '</td><td>' + esc(i.receipt_number) + '</td><td>' + esc(i.due || i.day) + '</td><td style="text-align:right">' + J(i.total) + '</td><td style="text-align:right">' + J(i.paid) + '</td><td style="text-align:right">' + J(i.open) + '</td></tr>'; }).join('');
+    w.document.write('<!doctype html><title>Statement</title><body style="font:14px system-ui;margin:30px"><h2>' + esc(B.shopName()) + '</h2><h3>Statement of account · ' + esc(c.name) + '</h3><p>' + esc(c.account_number || '') + ' · as of ' + B.today() + '</p>' +
+      '<table style="width:100%;border-collapse:collapse" border="1" cellpadding="6"><tr><th>Date</th><th>Invoice</th><th>Due</th><th>Amount</th><th>Paid</th><th>Open</th></tr>' + rows + '</table>' +
+      '<p><b>Current ' + J(d.aging.current) + ' · 1-30 ' + J(d.aging.d30) + ' · 31-60 ' + J(d.aging.d60) + ' · 61-90 ' + J(d.aging.d90) + ' · Over 90 ' + J(d.aging.over90) + '</b></p>' +
+      (d.credit ? '<p>Less unapplied credit: ' + J(d.credit) + '</p>' : '') + '<h3>Amount due: ' + J(d.balance) + '</h3><script>print()<\/script></body>');
+    w.document.close();
+  }
+
+  // ------------------------------------------------------------ collections --
+  function coll() {
+    return api('/api/ar/collections').then(function (d) {
+      var STEP = { remind: ['Email a reminder', ''], call: ['Phone them', 'warn'], hold: ['Put on credit hold', 'bad'], promised: ['Promised to pay', 'ok'] };
+      $('#out').innerHTML = '<div class="card"><h2>Collections worklist</h2><p class="sub">Following the credit procedure: a reminder from the first day overdue, a phone call from day 15, credit hold at day 45. A promise to pay (logged as a note) holds the account until its date.</p><div class="scroll"><table><thead><tr><th>Customer</th><th class="n">Overdue</th><th class="n">Oldest</th><th>Next step</th><th>Last note</th></tr></thead><tbody>' +
+        (d.rows.length ? d.rows.map(function (r) { var s = STEP[r.step]; return '<tr data-c="' + r.id + '" class="click"><td><b>' + esc(r.name) + '</b>' + (r.phone ? '<br><small>' + esc(r.phone) + '</small>' : '') + '</td><td class="n">' + J(r.overdue) + '</td><td class="n">' + r.oldest_days + ' d</td><td><span class="pill ' + s[1] + '">' + s[0] + '</span>' + (r.credit_hold ? ' <span class="pill bad">on hold</span>' : '') + '</td><td><small>' + (r.last ? esc(r.last.kind + ': ' + r.last.note).slice(0, 90) : '') + '</small></td></tr>'; }).join('') : '<tr><td colspan="5" class="empty">Nothing overdue.</td></tr>') + '</tbody></table></div></div>';
+      all('[data-c]').forEach(function (r) { r.onclick = function () { tab = 'cust'; mark(); detail(+r.getAttribute('data-c')); }; });
+    });
+  }
+  function aging() {
+    return api('/api/ar/aging').then(function (d) {
+      var t = d.totals;
+      $('#out').innerHTML = '<div class="card"><h2>A/R aging summary · ' + esc(d.as_of) + ' <button class="sm" id="csv">Download CSV</button></h2><p class="sub">Aged from each invoice\'s due date (or its date when it has no terms).</p><div class="scroll"><table><thead><tr><th>Customer</th><th class="n">Current</th><th class="n">1-30</th><th class="n">31-60</th><th class="n">61-90</th><th class="n">Over 90</th><th class="n">Total</th></tr></thead><tbody>' +
+        d.rows.map(function (r) { return '<tr data-c="' + (r.customer_id || '') + '" class="click"><td>' + esc(r.name) + '</td><td class="n">' + J(r.current) + '</td><td class="n">' + J(r.d30) + '</td><td class="n">' + J(r.d60) + '</td><td class="n">' + J(r.d90) + '</td><td class="n">' + J(r.over90) + '</td><td class="n"><b>' + J(r.total) + '</b></td></tr>'; }).join('') +
+        '<tr><td><b>Total</b></td><td class="n"><b>' + J(t.current) + '</b></td><td class="n"><b>' + J(t.d30) + '</b></td><td class="n"><b>' + J(t.d60) + '</b></td><td class="n"><b>' + J(t.d90) + '</b></td><td class="n"><b>' + J(t.over90) + '</b></td><td class="n"><b>' + J(t.total) + '</b></td></tr></tbody></table></div></div>';
+      all('[data-c]').forEach(function (r) { if (r.getAttribute('data-c')) r.onclick = function () { tab = 'cust'; mark(); detail(+r.getAttribute('data-c')); }; });
+      $('#csv').onclick = function () { B.csv('ar-aging-' + d.as_of + '.csv', [['customer', 'current', '1-30', '31-60', '61-90', 'over 90', 'total']].concat(d.rows.map(function (r) { return [r.name, r.current, r.d30, r.d60, r.d90, r.over90, r.total]; }))); };
+    });
+  }
+
+  // ------------------------------------------------------------ recurring --
+  function rec() {
+    $('#out').innerHTML = '<div class="card"><h2>Recurring invoices</h2><p class="sub">Rent and other regular charges. Each period&#39;s invoice is raised on its date and goes on the customer&#39;s account. To set one up, open the customer and choose New recurring invoice.</p><div id="plans"></div></div>' +
+      '<div class="card"><h2>Coming up (30 days)</h2><div id="up"></div></div>';
+    BU.upcoming($('#up'), ['ar']);
+    return BU.planList($('#plans'), { side: 'ar' });
+  }
+
+  function mark() { all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); }); }
+  function show() { mark(); ({ cust: cust, coll: coll, aging: aging, rec: rec }[tab])().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; }); }
+  all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
+  B.loadAccounts().then(function (a) { accounts = a; show(); }).catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+})();
+</script>
+</body>
+</html>

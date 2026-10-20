@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Banking · Vision Auto Solutions</title>
+<link rel="stylesheet" href="/assets/books.css">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Banking</h1><nav><a href="/receivables.html">Receivables</a><a href="/payables.html">Payables</a><a href="/accounting.html">Ledger</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"><button data-t="home" class="on">Accounts</button><button data-t="reg">Register</button><button data-t="spend">Write cheque / spend</button><button data-t="recv">Receive money</button><button data-t="xfer">Transfer</button><button data-t="dep">Make deposits</button><button data-t="rec">Reconcile</button><button data-t="feed">Bank statement</button></div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<script src="/assets/books-common.js?v=20261019"></script>
+<script>
+(function () {
+  'use strict';
+  var B = window.Books, $ = B.$, all = B.all, esc = B.esc, J = B.J, api = B.api, toast = B.toast, modal = B.modal, close = B.close;
+  var tab = 'home', acct = null, banks = [];
+  try { acct = +localStorage.getItem('vision.bankAcct') || null; } catch (_) {}
+  var SRC = { bank_txn: 'Banking', ap_payment: 'Bill payment', account_payment: 'Customer payment', till_close: 'Till', manual: 'Journal', opening: 'Opening' };
+  function pick(id) { acct = id; try { localStorage.setItem('vision.bankAcct', id); } catch (_) {} }
+  function accountSelect(id, onlyBank) { return '<select id="' + id + '">' + banks.filter(function (a) { return !onlyBank || a.qb_type === 'BANK'; }).map(function (a) { return '<option value="' + a.id + '"' + (a.id === acct ? ' selected' : '') + '>' + esc(a.code + ' ' + a.name) + '</option>'; }).join('') + '</select>'; }
+
+  // ------------------------------------------------------------ accounts --
+  function home() {
+    return api('/api/bank/accounts').then(function (d) {
+      banks = d.accounts;
+      if (!acct || !banks.some(function (a) { return a.id === acct; })) pick((banks.find(function (a) { return a.qb_type === 'BANK'; }) || banks[0] || {}).id);
+      $('#out').innerHTML = (d.ledger_started ? '' : '<div class="note warn">The general ledger has not been started (Accounting page). Registers and reconciliation read the ledger, so start it first.</div>') +
+        '<div class="tiles">' + banks.map(function (a) { return '<div class="tile click' + (a.id === acct ? ' on' : '') + '" data-a="' + a.id + '"><span class="k">' + esc(a.code + ' ' + a.name) + '</span><b>' + J(a.balance) + '</b><small>' + (a.qb_type === 'BANK' ? 'reconciled ' + (a.last_reconciled ? 'to ' + esc(a.last_reconciled) + ': ' + J(a.reconciled) : 'never') : 'cash / clearing') + (a.to_review ? ' · <b>' + a.to_review + ' statement lines to review</b>' : '') + '</small></div>'; }).join('') + '</div>' +
+        '<div class="card"><h2>Add a bank account</h2><p class="sub">One ledger account per real bank account (e.g. "NCB current", "Scotia savings").</p><div class="controls"><div><label>Account no. (ledger)</label><input id="nc" placeholder="1025" style="width:100px"></div><div style="flex:1"><label>Name</label><input id="nn" placeholder="NCB current account" style="width:100%"></div><button id="na">Add</button></div></div>';
+      all('[data-a]').forEach(function (t) { t.onclick = function () { pick(+t.getAttribute('data-a')); tab = 'reg'; show(); }; });
+      $('#na').onclick = function () { api('/api/bank/accounts', 'POST', { code: $('#nc').value, name: $('#nn').value }).then(function () { toast('Added'); return B.loadAccounts(); }).then(home).catch(function (e) { toast(e.message); }); };
+    });
+  }
+
+  // ------------------------------------------------------------ register --
+  function reg() {
+    var p = reg.p = reg.p || { from: '', to: '', q: '' };
+    return api('/api/bank/register/' + acct + '?from=' + p.from + '&to=' + p.to + '&q=' + encodeURIComponent(p.q)).then(function (d) {
+      $('#out').innerHTML = '<div class="card"><div class="controls"><div><label>Account</label>' + accountSelect('ra') + '</div><div><label>From</label><input type="date" id="rf" value="' + esc(p.from) + '"></div><div><label>To</label><input type="date" id="rt" value="' + esc(p.to) + '"></div><div><label>Find</label><input id="rq" value="' + esc(p.q) + '" placeholder="payee, ref, amount"></div><button id="rgo">Show</button><button id="rcsv">CSV</button></div>' +
+        '<p class="sub">Every ledger line on this account, newest first. C = ticked in the open reconciliation, R = reconciled.' + (d.more ? ' Showing the latest 1,000: narrow the dates to see older ones.' : '') + '</p>' +
+        '<div class="scroll"><table><thead><tr><th>Date</th><th>Entry</th><th>Payee / memo</th><th>From</th><th class="n">Payment</th><th class="n">Deposit</th><th>✓</th><th class="n">Balance</th><th></th></tr></thead><tbody>' +
+        (d.lines.length ? d.lines.map(function (l) {
+          var voidable = !l.voided && (l.source_kind === 'bank_txn' || l.source_kind === 'ap_payment' || l.source_kind === 'account_payment') && l.cleared !== 'R';
+          return '<tr style="' + (l.voided ? 'opacity:.55' : '') + '"><td>' + esc(l.day) + '</td><td>' + esc(l.number) + (l.ref ? '<br><small>' + esc(l.ref) + '</small>' : '') + '</td><td>' + esc(l.party || '') + '<br><small>' + esc(l.memo || '') + '</small></td><td><small>' + esc(SRC[l.source_kind] || l.source_kind) + '</small></td>' +
+            '<td class="n">' + (l.amount < 0 ? J(-l.amount) : '') + '</td><td class="n">' + (l.amount > 0 ? J(l.amount) : '') + '</td><td>' + esc(l.cleared) + '</td><td class="n">' + (l.balance != null ? J(l.balance) : '') + '</td>' +
+            '<td>' + (l.source_kind === 'bank_txn' ? '<button class="sm" data-tv="' + l.source_id + '">Open</button> ' : '') + (voidable ? '<button class="sm" data-void="' + l.source_kind + ':' + l.source_id + '">Void</button>' : '') + '</td></tr>';
+        }).join('') : '<tr><td colspan="9" class="empty">Nothing on this account' + (p.from || p.q ? ' for these filters' : '') + '.</td></tr>') + '</tbody></table></div></div>';
+      $('#ra').onchange = function () { pick(+this.value); reg(); };
+      $('#rgo').onclick = function () { p.from = $('#rf').value; p.to = $('#rt').value; p.q = $('#rq').value.trim(); reg(); };
+      $('#rcsv').onclick = function () { B.csv('register-' + d.account.code + '.csv', [['date', 'entry', 'ref', 'payee', 'memo', 'payment', 'deposit', 'cleared', 'balance']].concat(d.lines.map(function (l) { return [l.day, l.number, l.ref, l.party, l.memo, l.amount < 0 ? -l.amount : '', l.amount > 0 ? l.amount : '', l.cleared, l.balance]; }))); };
+      all('[data-tv]').forEach(function (b) { b.onclick = function () { viewTxn(+b.getAttribute('data-tv')); }; });
+      all('[data-void]').forEach(function (b) {
+        b.onclick = function () {
+          var k = b.getAttribute('data-void').split(':'), r = prompt('Why is it voided? (e.g. cheque lost, entered twice)'); if (!r) return;
+          var url = k[0] === 'bank_txn' ? '/api/bank/txns/' + k[1] + '/void' : k[0] === 'ap_payment' ? '/api/ap/payments/' + k[1] + '/void' : '/api/ar/payments/' + k[1] + '/void';
+          api(url, 'POST', { reason: r }).then(function () { toast('Voided: a reversing entry is posted'); setTimeout(reg, 600); }).catch(function (e) { toast(e.message); });
+        };
+      });
+    });
+  }
+  function viewTxn(id) {
+    api('/api/bank/txns/' + id).then(function (d) {
+      var t = d.txn, what = { expense: 'Payment', deposit: 'Deposit', transfer: 'Transfer' }[t.kind];
+      modal('<h2>' + what + ' · ' + esc(t.account) + (t.voided_at ? ' <span class="pill bad">void</span>' : '') + '</h2><p class="sub">' + esc(t.day) + (t.payee ? ' · ' + esc(t.payee) : '') + (t.cheque_number ? ' · cheque ' + esc(t.cheque_number) : '') + (t.memo ? ' · ' + esc(t.memo) : '') + '</p>' +
+        '<table><tbody>' + d.lines.map(function (l) { return '<tr><td>' + esc(l.code + ' ' + l.account) + '</td><td>' + esc(l.memo || '') + '</td><td class="n">' + J(l.amount) + '</td></tr>'; }).join('') + '<tr><td><b>Total</b></td><td></td><td class="n"><b>' + J(t.amount) + '</b></td></tr></tbody></table>' +
+        '<div class="controls" style="margin-top:10px">' + (t.kind === 'expense' && t.cheque_number ? '<button id="pc">Print cheque</button>' : '') + (t.kind === 'deposit' ? '<button id="ps">Print deposit slip</button>' : '') + '<button id="x">Close</button></div>');
+      $('#x').onclick = close;
+      if ($('#pc')) $('#pc').onclick = function () { printCheque(t, d.lines); };
+      if ($('#ps')) $('#ps').onclick = function () { printSlip(t, d.lines); };
+    }).catch(function (e) { toast(e.message); });
+  }
+  function printCheque(t, lines) {
+    var w = window.open('', '_blank'); if (!w) return toast('Allow pop-ups to print');
+    w.document.write('<!doctype html><title>Cheque ' + esc(t.cheque_number) + '</title><body style="font:14px system-ui;margin:30px;max-width:780px"><div style="border:1px solid #999;padding:18px;margin-bottom:24px"><div style="display:flex;justify-content:space-between"><b>' + esc(B.shopName()) + '</b><span>Cheque ' + esc(t.cheque_number) + '</span></div>' +
+      '<p style="text-align:right">Date: ' + esc(t.day) + '</p><p>Pay to the order of <b>' + esc(t.payee || '') + '</b><span style="float:right;border:1px solid #333;padding:2px 10px"><b>' + J(t.amount) + '</b></span></p><p>' + esc(B.words(t.amount)) + '</p><p style="margin-top:30px">Memo: ' + esc(t.memo || '') + '<span style="float:right">____________________ Signature</span></p></div>' +
+      '<h3>Voucher</h3><table style="width:100%;border-collapse:collapse" border="1" cellpadding="6">' + lines.map(function (l) { return '<tr><td>' + esc(l.code + ' ' + l.account) + '</td><td>' + esc(l.memo || '') + '</td><td style="text-align:right">' + J(l.amount) + '</td></tr>'; }).join('') + '</table><script>print()<\/script></body>');
+    w.document.close();
+  }
+  function printSlip(t, lines) {
+    var w = window.open('', '_blank'); if (!w) return toast('Allow pop-ups to print');
+    w.document.write('<!doctype html><title>Deposit</title><body style="font:14px system-ui;margin:30px"><h2>' + esc(B.shopName()) + ' · deposit to ' + esc(t.account) + '</h2><p>' + esc(t.day) + (t.reference ? ' · ref ' + esc(t.reference) : '') + '</p><table style="width:100%;border-collapse:collapse" border="1" cellpadding="6"><tr><th>From</th><th>Item</th><th>Amount</th></tr>' +
+      lines.map(function (l) { return '<tr><td>' + esc(l.account) + '</td><td>' + esc(l.memo || '') + '</td><td style="text-align:right">' + J(l.amount) + '</td></tr>'; }).join('') + '<tr><td colspan="2"><b>Total deposit</b></td><td style="text-align:right"><b>' + J(t.amount) + '</b></td></tr></table><script>print()<\/script></body>');
+    w.document.close();
+  }
+
+  // ------------------------------------------------------------ spend / receive / transfer --
+  function txnForm(kind) {
+    var spend = kind === 'expense';
+    $('#out').innerHTML = '<div class="card"><h2>' + (spend ? 'Write a cheque / spend money' : 'Receive money (not from a customer invoice)') + '</h2><p class="sub">' + (spend ? 'Money out that is not a supplier bill: bank charges, a direct expense, a loan repayment. Supplier bills are paid in Payables, so the supplier balance stays right.' : 'Money in that is not a customer payment: a loan, interest, a refund, owner\'s money. Customer payments go in Receivables.') + '</p>' +
+      '<div class="controls"><div><label>' + (spend ? 'Pay from' : 'Deposit to') + '</label>' + accountSelect('ta') + '</div><div style="flex:1;min-width:200px"><label>' + (spend ? 'Pay to' : 'Received from') + '</label><input id="tp" style="width:100%"></div>' +
+      (spend ? '<div><label>Cheque no. (blank if not a cheque)</label><input id="tc" style="width:130px"></div>' : '') + '<div><label>Date</label><input type="date" id="td" value="' + B.today() + '"></div></div>' +
+      '<table class="lines"><thead><tr><th style="width:34%">Category (account)</th><th style="width:15%">Class</th><th>Memo</th><th class="n" style="width:150px">Amount</th><th style="width:40px"></th></tr></thead><tbody id="tl"></tbody></table>' +
+      '<div class="controls" style="margin-top:6px"><button class="sm" id="add">Add a line</button><div style="flex:1"><label>Memo</label><input id="tm" style="width:100%"></div></div>' +
+      '<h3 id="tt" style="text-align:right"></h3><div class="controls"><button class="primary" id="tgo">Save</button></div></div>';
+    var add = function () { var tr = document.createElement('tr'); tr.innerHTML = '<td><select data-la>' + B.accountOptions('line') + '</select></td><td><select data-lc>' + B.classOptions() + '</select></td><td><input data-ld></td><td><input data-lm type="number" step="0.01" style="text-align:right"></td><td><button class="sm" data-lx>✕</button></td>'; $('#tl').appendChild(tr); tr.querySelector('[data-lx]').onclick = function () { tr.remove(); tot(); }; tr.querySelector('[data-lm]').oninput = tot; };
+    var tot = function () { $('#tt').textContent = 'Total ' + J(all('[data-lm]').reduce(function (t, x) { return t + (+x.value || 0); }, 0)); };
+    add(); tot(); $('#add').onclick = add;
+    $('#tgo').onclick = function () {
+      var lines = all('#tl tr').map(function (tr) { return { account_id: tr.querySelector('[data-la]').value, class_id: tr.querySelector('[data-lc]').value, memo: tr.querySelector('[data-ld]').value, amount: tr.querySelector('[data-lm]').value }; }).filter(function (l) { return +l.amount > 0; });
+      api('/api/bank/txns', 'POST', { kind: kind, account_id: $('#ta').value, payee: $('#tp').value, cheque_number: $('#tc') ? $('#tc').value : '', txn_date: $('#td').value, memo: $('#tm').value, lines: lines })
+        .then(function (r) { toast('Saved: ' + J(r.amount)); if (spend && $('#tc').value) viewTxn(r.id); txnForm(kind); }).catch(function (e) { toast(e.message); });
+    };
+  }
+  function xfer() {
+    $('#out').innerHTML = '<div class="card"><h2>Transfer between accounts</h2><p class="sub">E.g. cash from the safe to the bank, or between two bank accounts.</p><div class="controls"><div><label>From</label>' + accountSelect('xf') + '</div><div><label>To</label>' + accountSelect('xt') + '</div><div><label>Amount (J$)</label><input id="xa" type="number" step="0.01" style="width:140px"></div><div><label>Date</label><input type="date" id="xd" value="' + B.today() + '"></div><div style="flex:1"><label>Memo</label><input id="xm" style="width:100%"></div></div><button class="primary" id="xgo">Transfer</button></div>';
+    $('#xgo').onclick = function () { api('/api/bank/txns', 'POST', { kind: 'transfer', account_id: $('#xf').value, to_account_id: $('#xt').value, amount: $('#xa').value, txn_date: $('#xd').value, memo: $('#xm').value }).then(function (r) { toast('Transferred ' + J(r.amount)); xfer(); }).catch(function (e) { toast(e.message); }); };
+  }
+
+  // ------------------------------------------------------------ make deposits --
+  function dep() {
+    return api('/api/bank/undeposited').then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>Make deposits</h2><p class="sub">Money received but not yet banked: cash put in the safe at till close, customer cheques, card settlements. Tick what goes on the deposit slip.</p>' +
+        '<div class="scroll" style="max-height:55vh"><table><thead><tr><th><input type="checkbox" id="ca"></th><th>Date</th><th>Held in</th><th>From</th><th>Ref</th><th class="n">Amount</th></tr></thead><tbody>' +
+        (d.items.length ? d.items.map(function (i, k) { return '<tr><td><input type="checkbox" data-i="' + k + '"></td><td>' + esc(i.day) + '</td><td>' + esc(i.account) + '</td><td>' + esc(i.party || i.memo || '') + '</td><td>' + esc(i.ref || i.number) + '</td><td class="n">' + J(i.amount) + '</td></tr>'; }).join('') : '<tr><td colspan="6" class="empty">Nothing waiting to be deposited.</td></tr>') + '</tbody></table></div>' +
+        '<div class="controls" style="margin-top:10px"><div><label>Deposit to</label>' + accountSelect('dt', true) + '</div><div><label>Date</label><input type="date" id="dd" value="' + B.today() + '"></div><div><label>Deposit slip ref</label><input id="dr" style="width:140px"></div><h3 id="dtot" style="margin:0 0 0 auto"></h3></div><button class="primary" id="dgo">Record deposit</button></div>';
+      var tot = function () { $('#dtot').textContent = 'Deposit total ' + J(all('[data-i]:checked').reduce(function (t, x) { return t + d.items[+x.getAttribute('data-i')].amount; }, 0)); };
+      all('[data-i]').forEach(function (x) { x.onchange = tot; });
+      if ($('#ca')) $('#ca').onchange = function () { var on = this.checked; all('[data-i]').forEach(function (x) { x.checked = on; }); tot(); };
+      tot();
+      $('#dgo').onclick = function () {
+        var ids = all('[data-i]:checked').map(function (x) { return d.items[+x.getAttribute('data-i')].id; });
+        api('/api/bank/deposits', 'POST', { account_id: $('#dt').value, txn_date: $('#dd').value, reference: $('#dr').value, items: ids }).then(function (r) { toast('Deposit recorded: ' + J(r.amount)); viewTxn(r.id); dep(); }).catch(function (e) { toast(e.message); });
+      };
+    });
+  }
+
+  // ------------------------------------------------------------ reconcile --
+  function rec() {
+    return api('/api/bank/reconcile/' + acct).then(function (d) {
+      if (!d.recon) {
+        $('#out').innerHTML = '<div class="card"><h2>Reconcile · ' + esc(d.account.name) + '</h2><div class="controls"><div><label>Account</label>' + accountSelect('ra', true) + '</div></div>' +
+          '<p class="sub">From your bank statement: the date it ends and its closing balance. Then tick every item that appears on the statement.</p><div class="controls"><div><label>Statement end date</label><input type="date" id="sd"></div><div><label>Statement ending balance (J$)</label><input id="sb" type="number" step="0.01" style="width:160px"></div><button class="primary" id="go">Start reconciling</button></div></div>' +
+          (d.history.length ? '<div class="card"><h2>Past reconciliations <button class="sm" id="undo">Undo the last one</button></h2><table><tbody>' + d.history.map(function (h) { return '<tr><td>' + esc(h.statement_date) + '</td><td class="n">' + J(h.statement_balance) + '</td><td><small>' + esc(h.by_name || '') + ' ' + esc(B.dt(h.finished_at)) + '</small></td></tr>'; }).join('') + '</tbody></table></div>' : '');
+        $('#ra').onchange = function () { pick(+this.value); rec(); };
+        $('#go').onclick = function () { api('/api/bank/reconcile/' + acct + '/start', 'POST', { statement_date: $('#sd').value, statement_balance: $('#sb').value }).then(rec).catch(function (e) { toast(e.message); }); };
+        if ($('#undo')) $('#undo').onclick = function () { if (!confirm('Undo the most recent reconciliation? Its items become unticked.')) return; api('/api/bank/reconcile/' + acct + '/undo-last', 'POST').then(function () { toast('Undone'); rec(); }).catch(function (e) { toast(e.message); }); };
+        return;
+      }
+      drawRec(d);
+    });
+  }
+  function drawRec(d) {
+    var r = d.recon, pays = d.lines.filter(function (l) { return l.amount < 0; }), deps = d.lines.filter(function (l) { return l.amount > 0; });
+    var list = function (rows, id) { return '<table><thead><tr><th>✓</th><th>Date</th><th>Ref</th><th>Payee / memo</th><th class="n">Amount</th></tr></thead><tbody>' + (rows.length ? rows.map(function (l) { return '<tr><td><input type="checkbox" data-l="' + l.id + '"' + (l.ticked ? ' checked' : '') + '></td><td>' + esc(l.day) + '</td><td>' + esc(l.ref || l.number) + (l.on_statement ? ' <span class="pill ok">on statement</span>' : '') + '</td><td>' + esc(l.party || l.memo || '') + '</td><td class="n">' + J(Math.abs(l.amount)) + '</td></tr>'; }).join('') : '<tr><td colspan="5" class="empty">None</td></tr>') + '</tbody></table>'; };
+    $('#out').innerHTML = '<div class="card"><h2>Reconciling ' + esc(banks.find(function (a) { return a.id === acct; }).name) + ' to ' + esc(r.statement_date) + '</h2>' +
+      '<div class="tiles"><div class="tile"><span class="k">Statement balance</span><b>' + J(r.statement_balance) + '</b></div><div class="tile"><span class="k">Opening (last reconciled)</span><b>' + J(r.opening_balance) + '</b></div><div class="tile"><span class="k">Cleared balance</span><b>' + J(d.cleared_balance) + '</b></div><div class="tile' + (Math.abs(d.difference) > 0.005 ? ' bad' : '') + '"><span class="k">Difference</span><b>' + J(d.difference) + '</b></div></div>' +
+      '<div class="controls"><button id="tm">Tick everything matched to the imported statement</button><button id="ta">Tick all</button><button id="tn">Untick all</button><button id="adj">Bank charges / interest</button><button id="dif">Adjust the difference</button><span style="margin-left:auto"></span><button id="cx">Cancel</button><button class="primary" id="fin"' + (Math.abs(d.difference) > 0.005 ? ' disabled' : '') + '>Finish</button></div></div>' +
+      '<div class="tiles" style="grid-template-columns:1fr 1fr"><div class="card"><h2>Cheques and payments</h2>' + list(pays) + '</div><div class="card"><h2>Deposits and other credits</h2>' + list(deps) + '</div></div>';
+    var tick = function (ids, on, extra) { return api('/api/bank/reconcile/r/' + r.id + '/tick', 'POST', Object.assign({ lines: ids, clear: on }, extra || {})).then(drawRec).catch(function (e) { toast(e.message); }); };
+    all('[data-l]').forEach(function (x) { x.onchange = function () { tick([+x.getAttribute('data-l')], x.checked); }; });
+    $('#tm').onclick = function () { tick([], true, { matched: true }); };
+    $('#ta').onclick = function () { tick(d.lines.map(function (l) { return l.id; }), true); };
+    $('#tn').onclick = function () { tick(d.lines.filter(function (l) { return l.ticked; }).map(function (l) { return l.id; }), false); };
+    var adjust = function (kind) { var a = prompt(kind === 'difference' ? 'Adjustment amount (minus for money out). Use this only when you cannot find the difference.' : 'Amount from the statement: minus for bank charges, plus for interest', kind === 'difference' ? String(d.difference) : ''); if (!a) return; api('/api/bank/reconcile/r/' + r.id + '/adjust', 'POST', { amount: a, kind: kind }).then(function (x) { if (!x.posted) toast('Saved; it will appear once the ledger posts it'); drawRec(x); }).catch(function (e) { toast(e.message); }); };
+    $('#adj').onclick = function () { adjust('charges'); };
+    $('#dif').onclick = function () { adjust('difference'); };
+    $('#cx').onclick = function () { if (!confirm('Cancel this reconciliation? Ticks are lost.')) return; api('/api/bank/reconcile/r/' + r.id + '/cancel', 'POST').then(rec).catch(function (e) { toast(e.message); }); };
+    $('#fin').onclick = function () { api('/api/bank/reconcile/r/' + r.id + '/finish', 'POST').then(function () { toast('Reconciled to ' + r.statement_date); rec(); }).catch(function (e) { toast(e.message); }); };
+  }
+
+  // ------------------------------------------------------------ statement import --
+  function feed() {
+    var st = feed.st || 'new';
+    return api('/api/bank/feed/' + acct + '?status=' + st).then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>Bank statement · import and match</h2><div class="controls"><div><label>Account</label>' + accountSelect('fa', true) + '</div><div><label>CSV file from the bank</label><input type="file" id="ff" accept=".csv,text/csv"></div><div><label>Dates are</label><select id="fo"><option value="dmy">day/month/year</option><option value="mdy">month/day/year</option></select></div><button id="fi">Import</button></div>' +
+        '<p class="sub">The file needs a heading row with Date, Description, and Amount (or Debit and Credit). Lines already imported are skipped. Then each line is matched to what is already in the books, or added as a new transaction.</p></div>' +
+        '<div class="card"><div class="tabs"><button data-s="new"' + (st === 'new' ? ' class="on"' : '') + '>To review</button><button data-s="matched"' + (st === 'matched' ? ' class="on"' : '') + '>Matched</button><button data-s="ignored"' + (st === 'ignored' ? ' class="on"' : '') + '>Ignored</button></div>' +
+        '<div class="scroll"><table><thead><tr><th>Date</th><th>Description</th><th class="n">Amount</th><th>' + (st === 'new' ? 'Match or add' : '') + '</th></tr></thead><tbody>' +
+        (d.lines.length ? d.lines.map(function (f, i) {
+          var act = '';
+          if (st === 'new') {
+            act = (f.matches.length ? f.matches.map(function (m) { return '<button class="sm primary" data-m="' + f.id + ':' + m.id + '">Match ' + esc(m.day) + ' ' + esc((m.what || m.ref || m.number || '').slice(0, 30)) + '</button>'; }).join(' ') + '<br>' : '') +
+              (f.rule && f.rule.split ? '<div class="note">Rule splits this: ' + f.rule.split.map(function (x) { var a = B.accounts().find(function (y) { return y.id === x.account_id; }); return J(x.amount) + ' to ' + esc(a ? a.code + ' ' + a.name : x.account_id); }).join(' · ') + ' <button class="sm primary" data-sp="' + i + '">Add as split</button><br><small>Or use one account instead:</small></div>' : '') +
+              (f.rule && f.rule.split_error ? '<div class="note bad">Rule cannot split this line: ' + esc(f.rule.split_error) + '. Use one account:</div>' : '') +
+              '<select data-acc="' + i + '" style="max-width:240px">' + B.accountOptions('line', f.rule && f.rule.account_id) + '</select> <select data-cls="' + i + '" style="max-width:130px">' + B.classOptions() + '</select> <input data-py="' + i + '" placeholder="Payee" value="' + esc(f.rule && f.rule.payee || '') + '" style="width:120px"> <label style="display:inline;font-size:12px"><input type="checkbox" data-rl="' + i + '"> remember</label> <button class="sm" data-add="' + i + '">Add</button> <button class="sm" data-ig="' + f.id + '">Ignore</button>';
+          } else if (st === 'ignored') act = '<button class="sm" data-un="' + f.id + '">Back to review</button>';
+          return '<tr><td>' + esc(f.day) + '</td><td>' + esc(f.description) + (f.rule ? ' <span class="pill">rule</span>' : '') + '</td><td class="n ' + (f.amount < 0 ? 'bad' : '') + '">' + J(f.amount) + '</td><td>' + act + '</td></tr>';
+        }).join('') : '<tr><td colspan="4" class="empty">Nothing here.</td></tr>') + '</tbody></table></div></div>';
+      $('#fa').onchange = function () { pick(+this.value); feed(); };
+      all('[data-s]').forEach(function (b) { b.onclick = function () { feed.st = b.getAttribute('data-s'); feed(); }; });
+      $('#fi').onclick = function () {
+        var f = $('#ff').files[0]; if (!f) return toast('Choose the CSV file');
+        f.text().then(function (txt) { return api('/api/bank/import/' + acct, 'POST', { csv: txt, date_order: $('#fo').value }); })
+          .then(function (r) { toast(r.added + ' new line(s)' + (r.duplicates ? ', ' + r.duplicates + ' already imported' : '') + (r.skipped ? ', ' + r.skipped + ' skipped' : '')); feed.st = 'new'; feed(); }).catch(function (e) { toast(e.message); });
+      };
+      all('[data-m]').forEach(function (b) { b.onclick = function () { var k = b.getAttribute('data-m').split(':'); api('/api/bank/feed/' + k[0] + '/match', 'POST', { gl_line_id: +k[1] }).then(feed).catch(function (e) { toast(e.message); }); }; });
+      all('[data-ig]').forEach(function (b) { b.onclick = function () { api('/api/bank/feed/' + b.getAttribute('data-ig') + '/ignore', 'POST').then(feed).catch(function (e) { toast(e.message); }); }; });
+      all('[data-un]').forEach(function (b) { b.onclick = function () { api('/api/bank/feed/' + b.getAttribute('data-un') + '/ignore', 'POST', { undo: true }).then(feed).catch(function (e) { toast(e.message); }); }; });
+      all('[data-sp]').forEach(function (b) {
+        b.onclick = function () { var f = d.lines[+b.getAttribute('data-sp')]; api('/api/bank/feed/' + f.id + '/add', 'POST', { use_split: true, rule_id: f.rule.id, payee: $('[data-py="' + b.getAttribute('data-sp') + '"]').value }).then(function () { toast('Added as a split'); feed(); }).catch(function (e) { toast(e.message); }); };
+      });
+      rulesCard();
+      all('[data-add]').forEach(function (b) {
+        b.onclick = function () {
+          var i = +b.getAttribute('data-add'), f = d.lines[i], rule = $('[data-rl="' + i + '"]').checked;
+          var text = rule ? prompt('Use this account whenever the description contains:', f.description.split(/\s+/).slice(0, 2).join(' ')) : '';
+          if (rule && !text) return;
+          api('/api/bank/feed/' + f.id + '/add', 'POST', { account_id: $('[data-acc="' + i + '"]').value, class_id: $('[data-cls="' + i + '"]').value, payee: $('[data-py="' + i + '"]').value, make_rule: rule, rule_text: text }).then(function () { toast('Added'); feed(); }).catch(function (e) { toast(e.message); });
+        };
+      });
+    });
+  }
+
+  // ------------------------------------------------------------ statement rules --
+  // Text in the description -> one account (as before), or a split across
+  // several categories and classes: fixed amounts, percentages and "the rest".
+  var KINDS = { amount: 'Fixed J$', percent: '% of the line', rest: 'The rest' };
+  function rulesCard() {
+    var el = document.createElement('div'); el.className = 'card'; $('#out').appendChild(el);
+    api('/api/bank/rules').then(function (d) {
+      el.innerHTML = '<h2>Statement rules <button class="sm" id="rnew">New rule</button></h2><p class="sub">A rule fills in the account for statement lines whose description contains its text. A split rule spreads one line across several categories (e.g. a loan debit into interest and principal); each line can still go to one account instead.</p>' +
+        '<table><thead><tr><th>When the description contains</th><th>Goes to</th><th>Payee</th><th></th></tr></thead><tbody>' +
+        (d.rules.length ? d.rules.map(function (r) { return '<tr><td><b>' + esc(r.contains) + '</b></td><td>' + (r.mode === 'split' ? '<span class="pill">split</span> ' + r.splits.map(function (x) { return esc((x.kind === 'amount' ? J(x.value) : x.kind === 'percent' ? x.value + '%' : 'rest') + ' → ' + x.account + (x.class ? ' (' + x.class + ')' : '')); }).join('<br>') : esc(r.code + ' ' + r.account)) + '</td><td>' + esc(r.payee || '') + '</td><td><button class="sm" data-re="' + r.id + '">Change</button> <button class="sm" data-rd="' + r.id + '">Delete</button></td></tr>'; }).join('') : '<tr><td colspan="4" class="empty">No rules yet.</td></tr>') + '</tbody></table>';
+      $('#rnew').onclick = function () { ruleEditor(null); };
+      all('[data-re]', el).forEach(function (b) { b.onclick = function () { ruleEditor(d.rules.find(function (r) { return r.id === +b.getAttribute('data-re'); })); }; });
+      all('[data-rd]', el).forEach(function (b) { b.onclick = function () { if (!confirm('Delete this rule?')) return; api('/api/bank/rules/' + b.getAttribute('data-rd'), 'DELETE').then(feed).catch(function (e) { toast(e.message); }); }; });
+    }).catch(function (e) { el.innerHTML = '<p class="sub">' + esc(e.message) + '</p>'; });
+  }
+  function ruleEditor(r) {
+    r = r || { contains: '', payee: '', mode: 'single', gl_account_id: '', splits: [] };
+    var rows = r.splits.length ? r.splits.map(function (x) { return { account_id: x.account_id, class_id: x.class_id || '', kind: x.kind, value: x.value, memo: x.memo || '' }; }) : [{ account_id: '', class_id: '', kind: 'amount', value: '', memo: '' }, { account_id: '', class_id: '', kind: 'rest', value: '', memo: '' }];
+    B.modal('<h2>' + (r.id ? 'Change rule' : 'New statement rule') + '</h2><div class="controls"><div style="flex:1"><label>When the description contains</label><input id="rc" value="' + esc(r.contains) + '" style="width:100%"></div><div><label>Payee</label><input id="rp" value="' + esc(r.payee || '') + '"></div></div>' +
+      '<div class="controls"><label><input type="radio" name="rm" value="single"' + (r.mode !== 'split' ? ' checked' : '') + '> One account</label><label><input type="radio" name="rm" value="split"' + (r.mode === 'split' ? ' checked' : '') + '> Split across categories</label>' +
+      '<div><label>Account (also used for "one account instead")</label><select id="ra1">' + B.accountOptions('line', r.gl_account_id) + '</select></div></div><div id="rsw"></div>' +
+      '<div class="controls"><button class="primary" id="rsave">Save</button><button id="rx">Cancel</button></div>');
+    var draw = function () {
+      var split = all('[name=rm]').find(function (x) { return x.checked; }).value === 'split';
+      $('#rsw').innerHTML = !split ? '' : '<table><thead><tr><th>Category (account)</th><th>Class</th><th>How much</th><th>Memo</th><th></th></tr></thead><tbody>' + rows.map(function (x, i) {
+        return '<tr><td><select data-sa="' + i + '">' + B.accountOptions('line', x.account_id) + '</select></td><td><select data-sc="' + i + '">' + B.classOptions(x.class_id) + '</select></td><td><select data-sk="' + i + '">' + Object.keys(KINDS).map(function (k) { return '<option value="' + k + '"' + (x.kind === k ? ' selected' : '') + '>' + KINDS[k] + '</option>'; }).join('') + '</select> <input data-sv="' + i + '" type="number" step="0.01" value="' + (x.value == null ? '' : x.value) + '" style="width:100px' + (x.kind === 'rest' ? ';display:none' : '') + '"></td><td><input data-sm="' + i + '" value="' + esc(x.memo) + '"></td><td><button class="sm" data-sx="' + i + '">✕</button></td></tr>';
+      }).join('') + '</tbody></table><div class="controls"><button class="sm" id="sadd">+ Line</button><div><label>Try it on an amount (J$)</label><input id="spa" type="number" value="100000" style="width:120px"></div><button class="sm" id="spv">Preview</button><span id="spo" class="sub"></span></div>';
+      if (!split) return;
+      var bind = function (attr, key) { all('[' + attr + ']').forEach(function (el) { el.onchange = el.oninput = function () { rows[+el.getAttribute(attr)][key] = el.value; if (key === 'kind') draw(); }; }); };
+      bind('data-sa', 'account_id'); bind('data-sc', 'class_id'); bind('data-sk', 'kind'); bind('data-sv', 'value'); bind('data-sm', 'memo');
+      all('[data-sx]').forEach(function (b) { b.onclick = function () { rows.splice(+b.getAttribute('data-sx'), 1); draw(); }; });
+      $('#sadd').onclick = function () { rows.push({ account_id: '', class_id: '', kind: 'amount', value: '', memo: '' }); draw(); };
+      $('#spv').onclick = function () {
+        api('/api/bank/rules/preview', 'POST', { contains: $('#rc').value || 'preview', splits: rows, amount: $('#spa').value }).then(function (p) {
+          $('#spo').textContent = p.lines.map(function (x) { var a = B.accounts().find(function (y) { return y.id === x.account_id; }); return J(x.amount) + ' to ' + (a ? a.code : x.account_id); }).join(' · ');
+        }).catch(function (e) { $('#spo').textContent = e.message; });
+      };
+    };
+    all('[name=rm]').forEach(function (x) { x.onchange = draw; });
+    draw();
+    $('#rx').onclick = B.close;
+    $('#rsave').onclick = function () {
+      var mode = all('[name=rm]').find(function (x) { return x.checked; }).value;
+      api(r.id ? '/api/bank/rules/' + r.id : '/api/bank/rules', r.id ? 'PUT' : 'POST', { contains: $('#rc').value, payee: $('#rp').value, mode: mode, account_id: $('#ra1').value, splits: mode === 'split' ? rows : [] })
+        .then(function () { B.close(); toast('Rule saved'); feed(); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  function mark() { all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); }); }
+  function show() {
+    mark();
+    var f = { home: home, reg: reg, spend: function () { txnForm('expense'); return Promise.resolve(); }, recv: function () { txnForm('deposit'); return Promise.resolve(); }, xfer: function () { xfer(); return Promise.resolve(); }, dep: dep, rec: rec, feed: feed }[tab];
+    f().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
+  Promise.all([B.loadAccounts(), api('/api/bank/accounts')]).then(function (r) { banks = r[1].accounts; if (!acct || !banks.some(function (a) { return a.id === acct; })) pick((banks.find(function (a) { return a.qb_type === 'BANK'; }) || banks[0] || {}).id); show(); })
+    .catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+})();
+</script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+</body>
+</html>

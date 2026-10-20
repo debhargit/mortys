@@ -3060,6 +3060,167 @@ INSERT INTO notify_templates (event, channel, enabled, subject, body) VALUES
 ON CONFLICT (event, channel) DO NOTHING;
 
 -- =============================================================================
+--  Phase 7: accounting backbone (general ledger)
+--  gl.js posts finished documents (sales, payments, returns, receipts, bills,
+--  supplier payments, drawer shifts, stock adjustments) as balanced journal
+--  entries from the ledger start date on. Entries never change: corrections
+--  are reversing entries, and a closed month takes no new entries.
+--  Amounts are J$; a line's amount is + for a debit and - for a credit.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS gl_accounts (
+  id          SERIAL PRIMARY KEY,
+  code        TEXT NOT NULL UNIQUE,
+  name        TEXT NOT NULL,
+  type        TEXT NOT NULL CHECK (type IN ('asset','liability','equity','income','cogs','expense','other_income','other_expense')),
+  qb_name     TEXT,                       -- the account's exact name in QuickBooks (Parent:Child), used in the IIF export
+  qb_type     TEXT,                       -- BANK | AR | OCASSET | FIXASSET | AP | OCLIAB | LTLIAB | EQUITY | INC | COGS | EXP | EXINC | EXEXP
+  system_key  TEXT UNIQUE,                -- what the posting rules look for
+  is_active   BOOLEAN NOT NULL DEFAULT true,
+  notes       TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Mapping rules: which account a payment method, product category or stock
+-- reason posts to. Missing rules fall back to the system default account.
+CREATE TABLE IF NOT EXISTS gl_map (
+  kind        TEXT NOT NULL,              -- pay_method | revenue_category | cogs_category | stock_reason | till_payout
+  key         TEXT NOT NULL,
+  account_id  INTEGER NOT NULL REFERENCES gl_accounts(id),
+  PRIMARY KEY (kind, key)
+);
+
+CREATE TABLE IF NOT EXISTS gl_entries (
+  id           BIGSERIAL PRIMARY KEY,
+  number       TEXT UNIQUE,                -- JE-000001
+  entry_date   DATE NOT NULL,              -- Jamaica date the books show it
+  book         TEXT NOT NULL,              -- sales | purchases | cash | stock | opening | manual
+  source_kind  TEXT NOT NULL,              -- sale | sale_payment | sale_void | return | account_payment | receipt | bill | po_payment | po_invoice | till_open | till_movement | till_close | stock_day | gift_card | commission | opening | manual | reversal
+  source_id    BIGINT NOT NULL,
+  source_ref   TEXT,                       -- receipt / document number shown to people
+  memo         TEXT,
+  reverses_id  BIGINT REFERENCES gl_entries(id),
+  reversed_by  BIGINT REFERENCES gl_entries(id),
+  posted_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  posted_at    TIMESTAMPTZ DEFAULT NOW(),
+  export_id    INTEGER,
+  UNIQUE (source_kind, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_gl_entries_date ON gl_entries (entry_date);
+
+CREATE TABLE IF NOT EXISTS gl_lines (
+  id          BIGSERIAL PRIMARY KEY,
+  entry_id    BIGINT NOT NULL REFERENCES gl_entries(id),
+  account_id  INTEGER NOT NULL REFERENCES gl_accounts(id),
+  amount      NUMERIC(14,2) NOT NULL,     -- + debit, - credit
+  party       TEXT,                       -- customer / supplier name (QuickBooks needs it on A/R and A/P lines)
+  memo        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_gl_lines_entry ON gl_lines (entry_id);
+CREATE INDEX IF NOT EXISTS idx_gl_lines_account ON gl_lines (account_id);
+
+CREATE TABLE IF NOT EXISTS gl_periods (
+  month      DATE PRIMARY KEY,            -- first day of the month
+  closed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  closed_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  note       TEXT
+);
+
+CREATE TABLE IF NOT EXISTS gl_exports (
+  id          SERIAL PRIMARY KEY,
+  kind        TEXT NOT NULL,              -- iif | csv
+  from_date   DATE NOT NULL,
+  to_date     DATE NOT NULL,
+  entries     INTEGER NOT NULL DEFAULT 0,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Guards: lines never change; entries change only to record a reversal or an export.
+CREATE OR REPLACE FUNCTION gl_lines_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'Journal lines cannot be changed or deleted: post a reversing entry'; END $$;
+DROP TRIGGER IF EXISTS gl_lines_no_change ON gl_lines;
+CREATE TRIGGER gl_lines_no_change BEFORE UPDATE OR DELETE ON gl_lines FOR EACH ROW EXECUTE FUNCTION gl_lines_immutable();
+
+CREATE OR REPLACE FUNCTION gl_entries_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'Journal entries cannot be deleted: post a reversing entry'; END IF;
+  IF TG_OP = 'UPDATE' THEN
+    IF (NEW.entry_date, NEW.book, NEW.source_kind, NEW.source_id, NEW.memo, NEW.reverses_id, NEW.posted_at)
+       IS DISTINCT FROM (OLD.entry_date, OLD.book, OLD.source_kind, OLD.source_id, OLD.memo, OLD.reverses_id, OLD.posted_at)
+       OR (OLD.number IS NOT NULL AND NEW.number IS DISTINCT FROM OLD.number) THEN
+      RAISE EXCEPTION 'Journal entries cannot be changed: post a reversing entry';
+    END IF;
+    RETURN NEW;
+  END IF;
+  -- INSERT: not into a closed month
+  IF EXISTS (SELECT 1 FROM gl_periods WHERE month = date_trunc('month', NEW.entry_date)::date) THEN
+    RAISE EXCEPTION 'The books for % are closed', to_char(NEW.entry_date, 'Mon YYYY');
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS gl_entries_guard ON gl_entries;
+CREATE TRIGGER gl_entries_guard BEFORE INSERT OR UPDATE OR DELETE ON gl_entries FOR EACH ROW EXECUTE FUNCTION gl_entries_guard();
+
+-- Every entry must balance, checked when the transaction commits.
+CREATE OR REPLACE FUNCTION gl_check_balance() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE d NUMERIC; n INTEGER;
+BEGIN
+  SELECT COALESCE(SUM(amount), 0), COUNT(*) INTO d, n FROM gl_lines WHERE entry_id = NEW.entry_id;
+  IF d <> 0 THEN RAISE EXCEPTION 'Journal entry % does not balance (off by %)', NEW.entry_id, d; END IF;
+  IF n < 2 THEN RAISE EXCEPTION 'Journal entry % needs at least two lines', NEW.entry_id; END IF;
+  RETURN NULL;
+END $$;
+DROP TRIGGER IF EXISTS gl_lines_balance ON gl_lines;
+CREATE CONSTRAINT TRIGGER gl_lines_balance AFTER INSERT ON gl_lines DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION gl_check_balance();
+
+-- Starting chart. Names follow common QuickBooks naming; set qb_name to your
+-- own QuickBooks account names (or import your chart) before exporting.
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('1000', 'Cash Drawers',                       'asset',     'Cash Drawers',                       'OCASSET', 'cash_drawers'),
+  ('1010', 'Undeposited Funds (Safe)',           'asset',     'Undeposited Funds',                  'OCASSET', 'cash_safe'),
+  ('1020', 'Bank - Operating',                   'asset',     'Bank - Operating',                   'BANK',    'bank'),
+  ('1030', 'Cheques to Deposit',                 'asset',     'Cheques to Deposit',                 'OCASSET', 'cheques'),
+  ('1040', 'Card Settlements Clearing',          'asset',     'Card Settlements Clearing',          'OCASSET', 'card_clearing'),
+  ('1100', 'Accounts Receivable',                'asset',     'Accounts Receivable',                'AR',      'ar'),
+  ('1150', 'Supplier Claims Receivable',         'asset',     'Supplier Claims Receivable',         'OCASSET', 'supplier_claims'),
+  ('1200', 'Inventory Asset',                    'asset',     'Inventory Asset',                    'OCASSET', 'inventory'),
+  ('2000', 'Accounts Payable',                   'liability', 'Accounts Payable',                   'AP',      'ap'),
+  ('2050', 'Goods Received Not Invoiced',        'liability', 'Goods Received Not Invoiced',        'OCLIAB',  'grni'),
+  ('2060', 'Landed Cost Accrual',                'liability', 'Landed Cost Accrual',                'OCLIAB',  'landed_accrual'),
+  ('2100', 'GCT Payable',                        'liability', 'GCT Payable',                        'OCLIAB',  'gct'),
+  ('2150', 'Gift Cards and Store Credit',        'liability', 'Gift Cards and Store Credit',        'OCLIAB',  'gift_cards'),
+  ('3000', 'Opening Balance Equity',             'equity',    'Opening Balance Equity',             'EQUITY',  'opening_equity'),
+  ('4000', 'Sales - Parts',                      'income',    'Sales - Parts',                      'INC',     'sales'),
+  ('4050', 'Sales - Labour and Services',        'income',    'Sales - Labour and Services',        'INC',     'sales_services'),
+  ('4090', 'Sales Returns',                      'income',    'Sales Returns',                      'INC',     'sales_returns'),
+  ('4100', 'Sales Discounts',                    'income',    'Sales Discounts',                    'INC',     'sales_discounts'),
+  ('4200', 'Delivery and Shipping Income',       'income',    'Delivery and Shipping Income',       'INC',     'delivery_income'),
+  ('5000', 'Cost of Goods Sold',                 'cogs',      'Cost of Goods Sold',                 'COGS',    'cogs'),
+  ('5050', 'Purchase Price Variance',            'cogs',      'Purchase Price Variance',            'COGS',    'ppv'),
+  ('5100', 'Inventory Adjustments and Shrinkage','cogs',      'Inventory Adjustments and Shrinkage','COGS',    'inv_adjust'),
+  ('5150', 'Parts Used in Workshop',             'cogs',      'Parts Used in Workshop',             'COGS',    'workshop_parts'),
+  ('6000', 'Cash Over and Short',                'expense',   'Cash Over and Short',                'EXP',     'cash_over_short'),
+  ('6100', 'Till Payouts and Petty Expenses',    'expense',   'Petty Cash Expenses',                'EXP',     'petty_expense'),
+  ('6200', 'Commissions',                        'expense',   'Commissions',                        'EXP',     'commissions'),
+  ('6300', 'Loyalty Rewards',                    'expense',   'Loyalty Rewards',                    'EXP',     'loyalty'),
+  ('6900', 'Suspense (to be reviewed)',          'expense',   'Ask My Accountant',                  'EXP',     'suspense')
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO gl_map (kind, key, account_id)
+SELECT m.kind, m.key, a.id FROM (VALUES
+  ('pay_method', 'cash', 'cash_drawers'), ('pay_method', 'cheque', 'cheques'), ('pay_method', 'card', 'card_clearing'),
+  ('pay_method', 'bank', 'bank'), ('pay_method', 'transfer', 'bank'), ('pay_method', 'gift_card', 'gift_cards'),
+  ('pay_method', 'store_credit', 'gift_cards'), ('pay_method', 'loyalty', 'loyalty'), ('pay_method', 'credit_note', 'ar'),
+  ('pay_method', 'charge', 'ar'), ('pay_method', 'account', 'ar'),
+  ('stock_reason', 'count', 'inv_adjust'), ('stock_reason', 'requisition', 'workshop_parts'), ('stock_reason', 'other', 'inv_adjust'),
+  ('stock_reason', 'po_quick_receive', 'grni')
+) m(kind, key, sk) JOIN gl_accounts a ON a.system_key = m.sk
+ON CONFLICT (kind, key) DO NOTHING;
+
+INSERT INTO warehouse_settings (key, value) VALUES ('gl_auto_post', 'on') ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
 --  Phase 8.2: departments and the terminal journal (terminal.js)
 --  A department is a set of product categories. Staff and cashier stations
 --  are given departments; a counter agent can only sell their departments'
@@ -3118,6 +3279,217 @@ INSERT INTO warehouse_settings (key, value) VALUES
   ('tj_nosale_per_day', '5'),         -- no-sale drawer opens per person per day above this
   ('tj_removed_per_day', '15')        -- items taken back off carts per person per day above this
 ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Receivables, payables and banking (QuickBooks-style)
+--
+--  Receivables: a payment is applied to the invoices it pays (ar_applications);
+--  what is not applied stays as a credit on the account. Payments can be
+--  voided: every payment lives in account_payments_all, and account_payments
+--  becomes a view of the ones not voided, so every existing balance, statement
+--  and report leaves voided payments out without being rewritten.
+--  NOTE: the view is SELECT * -- after adding a column to account_payments_all,
+--  re-create the view (this block does it on every boot).
+--
+--  Payables: bills are confirmed goods receipts, PO invoices, and expense bills
+--  entered here (ap_bills, coded to accounts, with GCT); vendor credits are
+--  ap_bills of kind 'credit'. One payment can pay several bills and use credits
+--  (ap_applications).
+--
+--  Banking: cheques / spend money, receive money, transfers and deposits of
+--  undeposited funds (bank_txns); reconciliations tick off ledger lines on a
+--  bank account (bank_cleared); imported statement lines are matched to the
+--  ledger or added as transactions (bank_feed_lines, bank_rules).
+--  Everything posts to the general ledger (gl.js); voids post a reversal.
+-- =============================================================================
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'account_payments' AND c.relkind = 'r' AND n.nspname = current_schema()) THEN
+    ALTER TABLE account_payments RENAME TO account_payments_all;
+  END IF;
+END $$;
+ALTER TABLE account_payments_all ADD COLUMN IF NOT EXISTS paid_on            DATE;
+ALTER TABLE account_payments_all ADD COLUMN IF NOT EXISTS deposit_account_id INTEGER REFERENCES gl_accounts(id);
+ALTER TABLE account_payments_all ADD COLUMN IF NOT EXISTS voided_at          TIMESTAMPTZ;
+ALTER TABLE account_payments_all ADD COLUMN IF NOT EXISTS voided_by          INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE account_payments_all ADD COLUMN IF NOT EXISTS void_reason        TEXT;
+CREATE OR REPLACE VIEW account_payments AS SELECT * FROM account_payments_all WHERE voided_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS ar_applications (
+  id          SERIAL PRIMARY KEY,
+  payment_id  INTEGER NOT NULL REFERENCES account_payments_all(id) ON DELETE CASCADE,
+  sale_id     INTEGER NOT NULL REFERENCES pos_sales(id) ON DELETE CASCADE,
+  amount      NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+  applied_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  applied_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ar_app_payment ON ar_applications (payment_id);
+CREATE INDEX IF NOT EXISTS idx_ar_app_sale    ON ar_applications (sale_id);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS credit_hold        BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS credit_hold_reason TEXT;
+
+CREATE TABLE IF NOT EXISTS ar_notes (
+  id             SERIAL PRIMARY KEY,
+  customer_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL DEFAULT 'note',      -- note | call | email | promise | reminder | hold
+  note           TEXT NOT NULL,
+  promise_date   DATE,
+  promise_amount NUMERIC(14,2),
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ar_notes_customer ON ar_notes (customer_id, created_at DESC);
+
+-- ----------------------------------------------------------------- payables --
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS payment_terms_days INTEGER;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS default_account_id INTEGER REFERENCES gl_accounts(id);
+
+CREATE TABLE IF NOT EXISTS ap_bills (
+  id           SERIAL PRIMARY KEY,
+  kind         TEXT NOT NULL DEFAULT 'bill',       -- bill | credit
+  supplier_id  INTEGER NOT NULL REFERENCES suppliers(id),
+  number       TEXT,                               -- the supplier's invoice / credit note number
+  bill_date    DATE NOT NULL,
+  due_date     DATE,
+  memo         TEXT,
+  gct_amount   NUMERIC(14,2) NOT NULL DEFAULT 0,    -- GCT on the bill (claimable input tax)
+  total        NUMERIC(14,2) NOT NULL CHECK (total > 0),
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  voided_at    TIMESTAMPTZ,
+  voided_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  void_reason  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ap_bills_supplier ON ap_bills (supplier_id, bill_date DESC);
+CREATE TABLE IF NOT EXISTS ap_bill_lines (
+  id          SERIAL PRIMARY KEY,
+  bill_id     INTEGER NOT NULL REFERENCES ap_bills(id) ON DELETE CASCADE,
+  account_id  INTEGER NOT NULL REFERENCES gl_accounts(id),
+  description TEXT,
+  amount      NUMERIC(14,2) NOT NULL CHECK (amount > 0)
+);
+
+CREATE TABLE IF NOT EXISTS ap_payments (
+  id             SERIAL PRIMARY KEY,
+  supplier_id    INTEGER NOT NULL REFERENCES suppliers(id),
+  pay_date       DATE NOT NULL,
+  method         TEXT NOT NULL,                    -- cheque | transfer | cash | card
+  account_id     INTEGER NOT NULL REFERENCES gl_accounts(id),   -- paid from
+  cheque_number  TEXT,
+  reference      TEXT,
+  amount         NUMERIC(14,2) NOT NULL CHECK (amount >= 0),     -- 0 when credits cover the bills
+  memo           TEXT,
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  voided_at      TIMESTAMPTZ,
+  voided_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  void_reason    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ap_payments_supplier ON ap_payments (supplier_id, pay_date DESC);
+CREATE TABLE IF NOT EXISTS ap_applications (
+  id          SERIAL PRIMARY KEY,
+  payment_id  INTEGER NOT NULL REFERENCES ap_payments(id) ON DELETE CASCADE,
+  bill_kind   TEXT NOT NULL,                       -- receipt | po | bill | credit
+  bill_id     INTEGER NOT NULL,
+  amount      NUMERIC(14,2) NOT NULL CHECK (amount > 0)
+);
+CREATE INDEX IF NOT EXISTS idx_ap_app_bill ON ap_applications (bill_kind, bill_id);
+
+-- ------------------------------------------------------------------ banking --
+CREATE TABLE IF NOT EXISTS bank_txns (
+  id             SERIAL PRIMARY KEY,
+  kind           TEXT NOT NULL,                    -- expense | deposit | transfer
+  account_id     INTEGER NOT NULL REFERENCES gl_accounts(id),   -- the bank / cash account
+  txn_date       DATE NOT NULL,
+  payee          TEXT,
+  supplier_id    INTEGER REFERENCES suppliers(id),
+  cheque_number  TEXT,
+  reference      TEXT,
+  memo           TEXT,
+  amount         NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  voided_at      TIMESTAMPTZ,
+  voided_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  void_reason    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_bank_txns_account ON bank_txns (account_id, txn_date DESC);
+CREATE TABLE IF NOT EXISTS bank_txn_lines (
+  id          SERIAL PRIMARY KEY,
+  txn_id      INTEGER NOT NULL REFERENCES bank_txns(id) ON DELETE CASCADE,
+  account_id  INTEGER NOT NULL REFERENCES gl_accounts(id),
+  amount      NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+  memo        TEXT,
+  gl_line_id  BIGINT REFERENCES gl_lines(id)          -- a deposit: the undeposited item it banks
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_bank_txn_lines_glline ON bank_txn_lines (gl_line_id) WHERE gl_line_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS bank_recons (
+  id                SERIAL PRIMARY KEY,
+  account_id        INTEGER NOT NULL REFERENCES gl_accounts(id),
+  statement_date    DATE NOT NULL,
+  statement_balance NUMERIC(14,2) NOT NULL,
+  opening_balance   NUMERIC(14,2) NOT NULL,
+  status            TEXT NOT NULL DEFAULT 'open',   -- open | done
+  created_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at        TIMESTAMPTZ DEFAULT NOW(),
+  finished_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  finished_at       TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_bank_recons_open ON bank_recons (account_id) WHERE status = 'open';
+CREATE TABLE IF NOT EXISTS bank_cleared (
+  gl_line_id  BIGINT PRIMARY KEY REFERENCES gl_lines(id),
+  recon_id    INTEGER NOT NULL REFERENCES bank_recons(id) ON DELETE CASCADE,
+  cleared_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  cleared_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS bank_feed_lines (
+  id           SERIAL PRIMARY KEY,
+  account_id   INTEGER NOT NULL REFERENCES gl_accounts(id),
+  import_ref   TEXT,
+  txn_date     DATE NOT NULL,
+  description  TEXT NOT NULL,
+  amount       NUMERIC(14,2) NOT NULL,             -- + money in, - money out
+  line_hash    TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'new',        -- new | matched | added | ignored
+  gl_line_id   BIGINT REFERENCES gl_lines(id),
+  bank_txn_id  INTEGER REFERENCES bank_txns(id),
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (account_id, line_hash)
+);
+CREATE TABLE IF NOT EXISTS bank_rules (
+  id             SERIAL PRIMARY KEY,
+  contains       TEXT NOT NULL,                    -- text in the statement description
+  gl_account_id  INTEGER NOT NULL REFERENCES gl_accounts(id),
+  payee          TEXT,
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Accounts the new screens need, and the usual expense accounts for a shop in Jamaica.
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('1160', 'GCT Recoverable (Input Tax)', 'asset',   'GCT Recoverable',             'OCASSET', 'gct_input'),
+  ('6950', 'Bank Charges and Interest',   'expense', 'Bank Service Charges',        'EXP',     'bank_charges'),
+  ('6960', 'Reconciliation Discrepancies','expense', 'Reconciliation Discrepancies','EXP',     'recon_diff')
+ON CONFLICT (code) DO NOTHING;
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type) VALUES
+  ('6400', 'Rent',                                  'expense', 'Rent',                        'EXP'),
+  ('6410', 'Electricity',                           'expense', 'Electricity',                 'EXP'),
+  ('6420', 'Water',                                 'expense', 'Water',                       'EXP'),
+  ('6430', 'Telephone and Internet',                'expense', 'Telephone and Internet',      'EXP'),
+  ('6500', 'Salaries and Wages',                    'expense', 'Salaries and Wages',          'EXP'),
+  ('6510', 'Statutory Contributions (NIS, NHT, Education Tax, HEART)', 'expense', 'Statutory Contributions', 'EXP'),
+  ('6600', 'Repairs and Maintenance',               'expense', 'Repairs and Maintenance',     'EXP'),
+  ('6700', 'Insurance',                             'expense', 'Insurance',                   'EXP'),
+  ('6800', 'Professional Fees',                     'expense', 'Professional Fees',           'EXP'),
+  ('6850', 'Fuel and Motor Vehicle',                'expense', 'Fuel and Motor Vehicle',      'EXP'),
+  ('6870', 'Advertising and Promotion',             'expense', 'Advertising and Promotion',   'EXP'),
+  ('6880', 'Office Supplies and Stationery',        'expense', 'Office Supplies',             'EXP'),
+  ('6890', 'Security',                              'expense', 'Security',                    'EXP')
+ON CONFLICT (code) DO NOTHING;
 
 -- =============================================================================
 --  DEPARTMENT STORE (Phase 3, 2026-10): store locations containing departments.
@@ -3339,6 +3711,87 @@ INSERT INTO departments (code, name, categories, kind, location_id, sort)
                               SELECT unnest(d.categories) FROM departments d WHERE d.kind <> 'general')) t), '{}'::text[]),
          'parts', (SELECT id FROM store_locations WHERE is_default ORDER BY sort, id LIMIT 1), 10
    WHERE NOT EXISTS (SELECT 1 FROM departments WHERE code = 'AUTOPARTS');
+
+-- =============================================================================
+--  CHART OF ACCOUNTS: sub-accounts (2026-10).
+--  A sub-account hangs off a parent account (parent_id). Its code is the
+--  parent's code + "-" + a 1-4 digit number (6400-1, 6400-0012), its type is
+--  the parent's, and its QuickBooks name is Parent:Child. Sub-accounts can
+--  have sub-accounts. A parent with sub-accounts keeps its code and type.
+-- =============================================================================
+ALTER TABLE gl_accounts ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES gl_accounts(id) ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_gl_accounts_parent ON gl_accounts (parent_id);
+
+-- =============================================================================
+--  CATEGORIES AND CLASSES, QuickBooks style (gl.js, books.js, billing.js, 2026-10)
+--
+--  A "category" is an account in the chart (sub-accounts for detail), as in
+--  QuickBooks, so the IIF export needs nothing new for it. What this adds:
+--    products     their own income / cost account, before their category's rule
+--    customers    a default income category and class for new invoice lines
+--    suppliers    a default class (they already have a default account)
+--    classes      QuickBooks classes: one per store location (kept in step by a
+--                 trigger) plus custom ones; every ledger line can carry one
+--    bank rules   one account (as before) or a split across several categories
+--  The product-category posting rules are filled with the current defaults
+--  (Sales / Cost of sales) for every category, so the Posting rules screen
+--  lists them ready to change; a rule already set is left alone.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS gl_classes (
+  id          SERIAL PRIMARY KEY,
+  name        TEXT NOT NULL UNIQUE,
+  location_id INTEGER UNIQUE REFERENCES store_locations(id) ON DELETE SET NULL,   -- NULL: a custom class
+  is_active   BOOLEAN NOT NULL DEFAULT true,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+INSERT INTO gl_classes (name, location_id)
+  SELECT sl.name, sl.id FROM store_locations sl
+   WHERE NOT EXISTS (SELECT 1 FROM gl_classes c WHERE c.location_id = sl.id)
+     AND NOT EXISTS (SELECT 1 FROM gl_classes c WHERE lower(c.name) = lower(sl.name))
+ON CONFLICT DO NOTHING;
+CREATE OR REPLACE FUNCTION gl_class_for_location() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM gl_classes WHERE location_id = NEW.id) THEN
+    INSERT INTO gl_classes (name, location_id)
+      VALUES (CASE WHEN EXISTS (SELECT 1 FROM gl_classes WHERE lower(name) = lower(NEW.name)) THEN NEW.name || ' (' || NEW.code || ')' ELSE NEW.name END, NEW.id)
+    ON CONFLICT DO NOTHING;
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS store_locations_class ON store_locations;
+CREATE TRIGGER store_locations_class AFTER INSERT ON store_locations FOR EACH ROW EXECUTE FUNCTION gl_class_for_location();
+
+ALTER TABLE gl_lines         ADD COLUMN IF NOT EXISTS class_id INTEGER REFERENCES gl_classes(id);
+ALTER TABLE ap_bill_lines    ADD COLUMN IF NOT EXISTS class_id INTEGER REFERENCES gl_classes(id);
+ALTER TABLE ar_invoice_lines ADD COLUMN IF NOT EXISTS class_id INTEGER REFERENCES gl_classes(id);
+ALTER TABLE bank_txn_lines   ADD COLUMN IF NOT EXISTS class_id INTEGER REFERENCES gl_classes(id);
+CREATE INDEX IF NOT EXISTS idx_gl_lines_class ON gl_lines (class_id) WHERE class_id IS NOT NULL;
+
+ALTER TABLE users     ADD COLUMN IF NOT EXISTS default_income_account_id INTEGER REFERENCES gl_accounts(id);
+ALTER TABLE users     ADD COLUMN IF NOT EXISTS default_class_id          INTEGER REFERENCES gl_classes(id);
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS default_class_id          INTEGER REFERENCES gl_classes(id);
+ALTER TABLE products  ADD COLUMN IF NOT EXISTS income_account_id         INTEGER REFERENCES gl_accounts(id);
+ALTER TABLE products  ADD COLUMN IF NOT EXISTS cogs_account_id           INTEGER REFERENCES gl_accounts(id);
+
+ALTER TABLE bank_rules ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'single';   -- single | split
+CREATE TABLE IF NOT EXISTS bank_rule_splits (
+  id         SERIAL PRIMARY KEY,
+  rule_id    INTEGER NOT NULL REFERENCES bank_rules(id) ON DELETE CASCADE,
+  sort       INTEGER NOT NULL DEFAULT 0,
+  account_id INTEGER NOT NULL REFERENCES gl_accounts(id),
+  class_id   INTEGER REFERENCES gl_classes(id),
+  kind       TEXT NOT NULL CHECK (kind IN ('amount', 'percent', 'rest')),   -- rest: whatever the others leave
+  value      NUMERIC(14,4),
+  memo       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_bank_rule_splits_rule ON bank_rule_splits (rule_id, sort);
+
+INSERT INTO gl_map (kind, key, account_id)
+  SELECT k.kind, k.key, a.id
+    FROM (SELECT DISTINCT 'revenue_category' AS kind, lower(category) AS key, 'sales' AS sk FROM products WHERE COALESCE(category, '') <> ''
+          UNION SELECT DISTINCT 'cogs_category', lower(category), 'cogs' FROM products WHERE COALESCE(category, '') <> '') k
+    JOIN gl_accounts a ON a.system_key = k.sk
+ON CONFLICT (kind, key) DO NOTHING;
 
 -- =============================================================================
 --  RECEIVE STOCK WITH THE SUPPLIER'S BILL (server.js /api/admin/receive-stock, 2026-10)
