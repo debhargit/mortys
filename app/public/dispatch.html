@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dispatch · Vision Auto Solutions</title>
+<link rel="stylesheet" href="/assets/books.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<style>
+  header{background:#0f172a}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px 12px}
+  .grid label{display:block;font-size:12px;color:var(--muted);margin-bottom:2px} .grid input,.grid select,.grid textarea{width:100%}
+  .board{display:grid;grid-template-columns:360px minmax(0,1fr) 320px;gap:12px;align-items:start}
+  @media(max-width:1200px){.board{grid-template-columns:1fr 1fr}.board .mapcol{grid-column:1/-1;order:-1}}
+  @media(max-width:760px){.board{grid-template-columns:1fr}}
+  #map{height:620px;border-radius:12px;border:1px solid var(--line)} #pickmap{height:260px;border-radius:10px;border:1px solid var(--line);margin-top:6px}
+  .job{border:1px solid var(--line);border-left:5px solid #9ca3af;border-radius:10px;padding:8px 10px;margin-bottom:6px;background:var(--card);cursor:pointer;font-size:13px}
+  .job.p1{border-left-color:var(--red)} .job:hover{box-shadow:0 2px 10px rgba(0,0,0,.08)} .job b{font-size:13.5px}
+  .job .m{color:var(--muted);font-size:12px;margin-top:2px}
+  .drv{border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:8px;background:var(--card)}
+  .drv h3{margin:0;font-size:14px;display:flex;gap:6px;align-items:center} .dot{width:12px;height:12px;border-radius:50%;display:inline-block;border:2px solid #fff;box-shadow:0 0 0 1px #0003}
+  .drv .m{font-size:12px;color:var(--muted);margin-top:3px}
+  .alert{border-radius:10px;padding:9px 12px;margin-bottom:8px;display:flex;gap:10px;align-items:center;font-size:13.5px}
+  .alert.sos{background:#dc2626;color:#fff;font-weight:700;animation:blink 1s infinite} .alert.other{background:#fef3c7;color:#92400e}
+  @keyframes blink{50%{opacity:.75}}
+  .numicon{color:#fff;border:2px solid #fff;border-radius:50%;display:grid;place-items:center;font:700 12px system-ui;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+  .caricon{border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 2px rgba(0,0,0,.3),0 2px 8px rgba(0,0,0,.4);display:grid;place-items:center;font-size:14px}
+  .proof img{max-width:48%;border:1px solid var(--line);border-radius:8px;margin:4px 4px 0 0;background:#fff}
+  .kv{display:grid;grid-template-columns:130px 1fr;gap:3px 10px;font-size:13px} .kv b{color:var(--muted);font-weight:600}
+  .btn{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:6px 13px;font-size:13px;background:var(--card);color:inherit;text-decoration:none}
+  .modal .card{max-width:820px}
+</style>
+</head>
+<body>
+<header><h1>🚚 Dispatch</h1><nav><a href="#" id="wallLink">Security screen ↗</a><a href="/documents.html">Documents</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"><button data-t="board" class="on">Live board</button><button data-t="history">History</button><button data-t="settings">Settings</button></div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/assets/books-common.js?v=20261019"></script>
+<script>
+(function () {
+  'use strict';
+  var B = window.Books, $ = B.$, all = B.all, esc = B.esc, api = B.api, toast = B.toast, modal = B.modal, close = B.close, dt = B.dt;
+  var tab = 'board', board = null, map = null, layers = {}, timer = null, focusDriver = null, fitted = false;
+  var COLORS = ['#2563eb', '#16a34a', '#9333ea', '#ea580c', '#0891b2', '#be185d', '#4d7c0f', '#b45309'];
+  var ICON = { delivery: '📦', parts_pickup: '🔩', bank_drop: '🏦', document: '📄', cheque: '🧾', collection: '💵', errand: '🧭', other: '📍' };
+  var ST = { queued: ['Queued', 'warn'], assigned: ['Assigned', ''], en_route: ['On the way', 'ok'], arrived: ['Arrived', 'ok'], done: ['Done', 'ok'], failed: ['Not done', 'bad'], cancelled: ['Cancelled', ''] };
+  var val = function (id) { var el = $('#' + id); return el ? (el.type === 'checkbox' ? el.checked : el.value) : undefined; };
+  var fail = function (e) { toast(e.message || String(e)); };
+  var ago = function (t) { if (!t) return 'never'; var s = Math.round((Date.now() - new Date(t)) / 1000); return s < 60 ? s + ' s ago' : s < 3600 ? Math.round(s / 60) + ' min ago' : Math.round(s / 3600) + ' h ago'; };
+  var colorOf = function (id) { var i = board ? board.drivers.findIndex(function (d) { return d.id === id; }) : -1; return i < 0 ? '#6b7280' : COLORS[i % COLORS.length]; };
+  var pill = function (s) { var x = ST[s] || [s, '']; return '<span class="pill ' + x[1] + '">' + x[0] + '</span>'; };
+  function field(id, label, value, type, extra) { return '<div><label for="' + id + '">' + label + '</label><input id="' + id + '" type="' + (type || 'text') + '" value="' + esc(value == null ? '' : value) + '" ' + (extra || '') + '></div>'; }
+  function sel(id, label, opts, value) { return '<div><label for="' + id + '">' + label + '</label><select id="' + id + '">' + opts.map(function (o) { o = Array.isArray(o) ? o : [o, o]; return '<option value="' + esc(o[0]) + '"' + (String(o[0]) === String(value == null ? '' : value) ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select></div>'; }
+  var driverOpts = function (blank) { return [['', blank || '— not assigned —']].concat((board ? board.drivers : []).map(function (d) { return [d.id, d.name + (d.shift ? ' (on shift)' : '')]; })); };
+
+  all('[data-t]').forEach(function (b) { b.onclick = function () { tab = b.dataset.t; all('[data-t]').forEach(function (x) { x.classList.toggle('on', x === b); }); show(); }; });
+  $('#wallLink').onclick = function (e) { e.preventDefault(); window.open('/fleet-wall.html', '_blank'); };
+  function show() { clearInterval(timer); map = null; fitted = false; if (tab === 'board') boardTab(); else if (tab === 'history') history(); else settings(); }
+
+  // ----------------------------------------------------------------- board --
+  function boardTab() {
+    $('#out').innerHTML = '<div id="alerts"></div><div class="tiles" id="tiles"></div><div class="board"><div id="queue"></div><div class="mapcol"><div id="map"></div><p class="sub" style="margin-top:6px">Numbers are each driver\'s route order. Grey pins are not yet assigned. Lines show the planned route; faint lines are the last 30 minutes driven. Refreshes every 15 seconds.</p></div><div id="drivers"></div></div>';
+    load(); timer = setInterval(load, 15000);
+  }
+  function load() {
+    return api('/api/fleet/board').then(function (b) { board = b; paint(); }).catch(fail);
+  }
+  function paint() {
+    var b = board, q = b.jobs.filter(function (j) { return !j.driver_id; }), on = b.drivers.filter(function (d) { return d.shift; });
+    $('#alerts').innerHTML = b.alerts.map(function (a) { return '<div class="alert ' + (a.kind === 'sos' ? 'sos' : 'other') + '"><span>' + (a.kind === 'sos' ? '🚨' : '⚠') + '</span><span style="flex:1">' + esc(a.message) + ' <small>' + dt(a.created_at) + '</small></span>' +
+      (a.lat ? '<a class="btn" target="_blank" rel="noopener" href="https://maps.google.com/?q=' + a.lat + ',' + a.lng + '">Map</a>' : '') + (b.perms.dispatch ? '<button data-clear="' + a.id + '">Clear</button>' : '') + '</div>'; }).join('');
+    all('[data-clear]').forEach(function (x) { x.onclick = function () { api('/api/fleet/alerts/' + x.dataset.clear + '/clear', 'POST', {}).then(load).catch(fail); }; });
+    var doneToday = b.drivers.reduce(function (t, d) { return t + d.done_today; }, 0);
+    $('#tiles').innerHTML = '<div class="tile' + (q.length ? ' bad' : '') + '"><span>In the queue</span><b>' + q.length + '</b></div><div class="tile"><span>Assigned / on the road</span><b>' + (b.jobs.length - q.length) + '</b></div>' +
+      '<div class="tile"><span>Drivers on shift</span><b>' + on.length + ' / ' + b.drivers.length + '</b></div><div class="tile"><span>Done today</span><b>' + doneToday + '</b></div><div class="tile' + (b.alerts.length ? ' bad' : '') + '"><span>Alerts</span><b>' + b.alerts.length + '</b></div>';
+    // Queue
+    var dsel = '<select id="bulkDrv">' + driverOpts('Assign ticked to…').map(function (o) { return '<option value="' + o[0] + '">' + esc(o[1]) + '</option>'; }).join('') + '</select>';
+    $('#queue').innerHTML = '<div class="card"><h2>Queue <span class="pill">' + q.length + '</span>' + (b.perms.dispatch ? ' <button class="primary" id="newJob" style="margin-left:auto">＋ New job</button>' : '') + '</h2>' +
+      '<p class="sub">Customer deliveries arrive here by themselves; add bank drops, pick-ups, documents and cheques with ＋ New job.</p>' +
+      (q.length && b.perms.dispatch ? '<div class="controls"><label><input type="checkbox" id="tickAll"> all</label>' + dsel + '<button id="bulkGo">Assign</button></div>' : '') +
+      (q.length ? q.map(jobCard).join('') : '<div class="empty">Nothing waiting.</div>') + '</div>';
+    if ($('#newJob')) $('#newJob').onclick = function () { jobForm(null); };
+    if ($('#tickAll')) $('#tickAll').onchange = function () { all('[data-tick]').forEach(function (c) { c.checked = $('#tickAll').checked; }); };
+    if ($('#bulkGo')) $('#bulkGo').onclick = function () {
+      var ids = all('[data-tick]').filter(function (c) { return c.checked; }).map(function (c) { return Number(c.dataset.tick); });
+      if (!ids.length) return toast('Tick the jobs to assign'); if (!val('bulkDrv')) return toast('Choose a driver');
+      api('/api/fleet/assign', 'POST', { job_ids: ids, driver_id: val('bulkDrv') }).then(function () { toast('Assigned and route ordered'); load(); }).catch(fail);
+    };
+    // Drivers
+    $('#drivers').innerHTML = '<div class="card"><h2>Drivers</h2>' + (b.drivers.length ? b.drivers.map(function (d) {
+      var mine = b.jobs.filter(function (j) { return j.driver_id === d.id; }), p = d.position;
+      return '<div class="drv" style="border-left:5px solid ' + colorOf(d.id) + '"><h3><span class="dot" style="background:' + colorOf(d.id) + '"></span>' + esc(d.name) +
+        (d.shift ? ' <span class="pill ' + (d.stale ? 'bad' : 'ok') + '">' + (d.stale ? 'no signal' : 'on shift') + '</span>' : ' <span class="pill">off shift</span>') + '</h3>' +
+        (d.shift ? '<div class="m">' + esc(d.shift.vehicle || 'vehicle?') + ' · since ' + dt(d.shift.started_at) + '</div>' : '') +
+        (p ? '<div class="m">Seen ' + ago(p.at) + (p.speed != null ? ' · ' + Math.round(p.speed * 3.6) + ' km/h' : '') + (p.battery != null ? ' · 🔋' + Math.round(p.battery * 100) + '%' : '') + '</div>' : '') +
+        (d.current ? '<div class="m">Now: <b>' + esc(d.current.title) + '</b> ' + pill(d.current.status) + '</div>' : '') +
+        '<div class="m">' + mine.length + ' open · ' + d.route.km_with_return + ' km · ~' + d.route.minutes + ' min · done today ' + d.done_today + (d.failed_today ? ' · not done ' + d.failed_today : '') + '</div>' +
+        '<div class="controls" style="margin:6px 0 0"><button data-route="' + d.id + '">Route (' + mine.length + ')</button>' + (b.perms.dispatch && mine.length ? '<button data-opt="' + d.id + '">↻ Re-order</button>' : '') + '<button data-trail="' + d.id + '">Today\'s trail</button>' + (p ? '<button data-focus="' + d.id + '">Find</button>' : '') + '</div></div>';
+    }).join('') : '<div class="empty">No drivers yet. Give staff the “Driver app” permission (Admin › Roles & permissions › Deliveries & drivers).</div>') + '</div>';
+    all('[data-route]').forEach(function (x) { x.onclick = function () { routeBox(Number(x.dataset.route)); }; });
+    all('[data-opt]').forEach(function (x) { x.onclick = function () { api('/api/fleet/drivers/' + x.dataset.opt + '/optimise', 'POST', {}).then(function (r) { toast('Route re-ordered: ' + r.km_with_return + ' km, ~' + r.minutes + ' min'); load(); }).catch(fail); }; });
+    all('[data-trail]').forEach(function (x) { x.onclick = function () { trail(Number(x.dataset.trail)); }; });
+    all('[data-focus]').forEach(function (x) { x.onclick = function () { var d = b.drivers.find(function (y) { return y.id === Number(x.dataset.focus); }); if (d && d.position && map) map.setView([d.position.lat, d.position.lng], 16); }; });
+    all('#queue [data-job]').forEach(function (x) { x.onclick = function (e) { if (e.target.dataset.tick !== undefined) return; openJob(Number(x.dataset.job)); }; });
+    drawMap();
+  }
+  function jobCard(j) {
+    return '<div class="job' + (j.priority === 1 ? ' p1' : '') + '" data-job="' + j.id + '">' + (board.perms.dispatch && !j.driver_id ? '<input type="checkbox" data-tick="' + j.id + '" style="float:right">' : '') +
+      '<b>' + (ICON[j.kind] || '📍') + ' ' + esc(j.title) + '</b> ' + (j.priority === 1 ? '<span class="pill bad">urgent</span>' : '') +
+      '<div class="m">' + esc(j.address || 'no address') + (j.lat == null ? ' · <span class="bad">not on the map</span>' : '') + '</div>' +
+      '<div class="m">' + esc(j.number) + ' · ' + esc(j.kind_label) + (j.amount ? ' · ' + B.J(j.amount) : '') + (j.due_date ? ' · due ' + String(j.due_date).slice(0, 10) : '') + '</div></div>';
+  }
+  function drawMap() {
+    if (!window.L) { $('#map').innerHTML = '<div class="empty">The map needs internet.</div>'; return; }
+    if (!map) { map = L.map('map'); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map); layers.g = L.layerGroup().addTo(map); }
+    layers.g.clearLayers();
+    var b = board, pts = [[b.shop.lat, b.shop.lng]];
+    L.marker([b.shop.lat, b.shop.lng], { icon: L.divIcon({ className: 'numicon', html: '🏪', iconSize: [28, 28] }) }).addTo(layers.g).bindPopup('Shop');
+    b.drivers.forEach(function (d) {
+      var c = colorOf(d.id), mine = b.jobs.filter(function (j) { return j.driver_id === d.id; });
+      var start = d.shift && d.position ? [d.position.lat, d.position.lng] : [b.shop.lat, b.shop.lng], line = [start];
+      mine.forEach(function (j) { if (j.lat != null) line.push([j.lat, j.lng]); });
+      if (line.length > 1) L.polyline(line, { color: c, weight: 4, opacity: .7, dashArray: '8 6' }).addTo(layers.g);
+      if (d.shift && d.position) {
+        L.marker([d.position.lat, d.position.lng], { icon: L.divIcon({ className: 'caricon', html: '🚚', iconSize: [30, 30] }), zIndexOffset: 1000 }).addTo(layers.g)
+          .bindPopup('<b>' + esc(d.name) + '</b><br>' + esc((d.shift && d.shift.vehicle) || '') + '<br>Seen ' + ago(d.position.at) + (d.current ? '<br>Now: ' + esc(d.current.title) : ''));
+        L.circleMarker([d.position.lat, d.position.lng], { radius: 18, color: d.stale ? '#dc2626' : c, weight: 3, fill: false }).addTo(layers.g);
+        pts.push([d.position.lat, d.position.lng]);
+      }
+    });
+    b.jobs.forEach(function (j) {
+      if (j.lat == null) return;
+      var c = j.driver_id ? colorOf(j.driver_id) : '#6b7280';
+      L.marker([j.lat, j.lng], { icon: L.divIcon({ className: 'numicon', html: '<span style="background:' + c + ';width:24px;height:24px;border-radius:50%;display:grid;place-items:center">' + (j.seq || (ICON[j.kind] || '•')) + '</span>', iconSize: [24, 24] }) })
+        .addTo(layers.g).on('click', function () { openJob(j.id); });
+      pts.push([j.lat, j.lng]);
+    });
+    if (!fitted) { fitted = true; if (pts.length > 1) map.fitBounds(pts, { padding: [30, 30], maxZoom: 15 }); else map.setView(pts[0], 13); }
+  }
+  function trail(id) {
+    api('/api/fleet/track/' + id).then(function (t) {
+      if (!t.points.length) return toast('No positions today');
+      var line = t.points.map(function (p) { return [p.lat, p.lng]; });
+      var pl = L.polyline(line, { color: colorOf(id), weight: 3, opacity: .9 }).addTo(layers.g);
+      map.fitBounds(pl.getBounds(), { padding: [30, 30] });
+      toast('Today: ' + t.km + ' km driven (' + t.points.length + ' positions)');
+    }).catch(fail);
+  }
+  function routeBox(id) {
+    api('/api/fleet/drivers/' + id + '/route').then(function (r) {
+      var d = board.drivers.find(function (x) { return x.id === id; });
+      modal('<h2><span class="dot" style="background:' + colorOf(id) + '"></span> ' + esc(d ? d.name : '') + ': route</h2><p class="sub">' + r.stats.stops + ' stops · ' + r.stats.km_with_return + ' km with the return · about ' + r.stats.minutes + ' min · from the ' + r.start + '</p>' +
+        (r.jobs.length ? '<table><tbody>' + r.jobs.map(function (j, i) { return '<tr><td><b>' + (i + 1) + '</b></td><td>' + (ICON[j.kind] || '') + ' ' + esc(j.title) + '<div class="sub" style="margin:0">' + esc(j.address || '') + '</div></td><td>' + pill(j.status) + '</td>' +
+          (board.perms.dispatch ? '<td><button data-un="' + j.id + '">Unassign</button></td>' : '') + '</tr>'; }).join('') + '</tbody></table>' : '<div class="empty">No open jobs.</div>') +
+        '<div class="controls" style="margin-top:10px"><button id="x">Close</button></div>');
+      $('#x').onclick = close;
+      all('[data-un]').forEach(function (x) { x.onclick = function () { api('/api/fleet/jobs/' + x.dataset.un + '/assign', 'POST', { driver_id: null }).then(function () { routeBox(id); load(); }).catch(fail); }; });
+    }).catch(fail);
+  }
+
+  // -------------------------------------------------------------- one job --
+  function openJob(id) {
+    api('/api/fleet/jobs/' + id).then(function (r) {
+      var j = r.job, open = ['queued', 'assigned', 'en_route', 'arrived'].indexOf(j.status) >= 0, can = board && board.perms.dispatch;
+      modal('<h2>' + (ICON[j.kind] || '') + ' ' + esc(j.title) + ' ' + pill(j.status) + (j.priority === 1 ? ' <span class="pill bad">urgent</span>' : '') + '</h2>' +
+        '<div class="kv"><b>Number</b><span>' + esc(j.number) + (j.delivery_id ? ' · from delivery #' + j.delivery_id : '') + '</span><b>Kind</b><span>' + esc(j.kind_label) + '</span>' +
+        '<b>Address</b><span>' + esc(j.address || '') + (j.lat != null ? ' <a target="_blank" rel="noopener" href="https://maps.google.com/?q=' + j.lat + ',' + j.lng + '">map ↗</a> <small>(' + esc(j.geo_source || '') + ')</small>' : ' <span class="bad">not on the map</span>') + '</span>' +
+        (j.contact_name || j.contact_phone ? '<b>Contact</b><span>' + esc(j.contact_name || '') + ' ' + esc(j.contact_phone || '') + '</span>' : '') +
+        (j.amount ? '<b>Amount</b><span>' + B.J(j.amount) + '</span>' : '') + (j.details ? '<b>Details</b><span style="white-space:pre-wrap">' + esc(j.details) + '</span>' : '') +
+        '<b>Driver</b><span>' + esc(j.driver_name || '—') + (j.seq ? ' · stop ' + j.seq : '') + '</span><b>Created</b><span>' + dt(j.created_at) + (j.created_by_name ? ' by ' + esc(j.created_by_name) : '') + '</span>' +
+        (j.started_at ? '<b>Started</b><span>' + dt(j.started_at) + '</span>' : '') + (j.arrived_at ? '<b>Arrived</b><span>' + dt(j.arrived_at) + '</span>' : '') +
+        (j.done_at ? '<b>Finished</b><span>' + dt(j.done_at) + (j.recipient_name ? ' · received by ' + esc(j.recipient_name) : '') + '</span>' : '') +
+        (j.fail_reason ? '<b>Reason</b><span class="bad">' + esc(j.fail_reason) + '</span>' : '') + (j.done_note ? '<b>Driver note</b><span>' + esc(j.done_note) + '</span>' : '') + '</div>' +
+        (j.has_signature || j.has_photo ? '<div class="proof">' + (j.has_signature ? '<img alt="signature" src="/api/fleet/jobs/' + j.id + '/proof/signature">' : '') + (j.has_photo ? '<a target="_blank" href="/api/fleet/jobs/' + j.id + '/proof/photo"><img alt="photo" src="/api/fleet/jobs/' + j.id + '/proof/photo"></a>' : '') + '</div>' : '') +
+        (open && can ? '<div class="controls" style="margin-top:10px">' + sel('as', 'Driver', driverOpts(), j.driver_id || '') + '<div><label>&nbsp;</label><button class="primary" id="asGo">Assign</button></div>' +
+          '<div><label>&nbsp;</label><button id="edit">Edit / move pin</button></div><div><label>&nbsp;</label><button id="cancel">Cancel job</button></div></div>' : '') +
+        '<div class="controls" style="margin-top:8px"><button id="x">Close</button></div>');
+      $('#x').onclick = close;
+      if ($('#asGo')) $('#asGo').onclick = function () { api('/api/fleet/jobs/' + j.id + '/assign', 'POST', { driver_id: val('as') || null }).then(function () { close(); toast('Assigned and route ordered'); load(); }).catch(fail); };
+      if ($('#edit')) $('#edit').onclick = function () { jobForm(j); };
+      if ($('#cancel')) $('#cancel').onclick = function () {
+        modal('<h2>Cancel ' + esc(j.number) + '</h2><input id="why" placeholder="Why" style="width:100%"><div class="controls" style="margin-top:8px"><button class="primary" id="y">Cancel the job</button><button id="n">Back</button></div>');
+        $('#n').onclick = function () { openJob(j.id); };
+        $('#y').onclick = function () { api('/api/fleet/jobs/' + j.id + '/cancel', 'POST', { reason: val('why') }).then(function () { close(); toast('Cancelled'); load(); }).catch(fail); };
+      };
+    }).catch(fail);
+  }
+  function jobForm(j) {
+    var kinds = board.kinds, pin = j && j.lat != null ? { lat: j.lat, lng: j.lng } : null;
+    modal('<h2>' + (j ? 'Edit ' + esc(j.number) : 'New job') + '</h2><div class="grid">' +
+      sel('k', 'Kind', Object.keys(kinds).map(function (k) { return [k, kinds[k]]; }), j ? j.kind : 'bank_drop') + field('t', 'What (e.g. Deposit to NCB Half Way Tree)', j ? j.title : '') +
+      field('cn', 'Contact name', j ? j.contact_name : '') + field('cp', 'Contact phone', j ? j.contact_phone : '') +
+      '<div style="grid-column:1/-1"><label for="ad">Address</label><div style="display:flex;gap:6px"><input id="ad" style="flex:1" value="' + esc(j ? j.address || '' : '') + '"><button id="find">Find on map</button></div><div id="pickmap"></div><p class="sub" id="pinNote">Click the map to set the exact spot.</p></div>' +
+      sel('pr', 'Priority', [[1, 'Urgent'], [2, 'Normal'], [3, 'When convenient']], j ? j.priority : 2) + field('due', 'Due date', j && j.due_date ? String(j.due_date).slice(0, 10) : B.today(), 'date') +
+      field('wf', 'From (time)', j && j.window_from ? String(j.window_from).slice(0, 5) : '', 'time') + field('wt', 'Until (time)', j && j.window_to ? String(j.window_to).slice(0, 5) : '', 'time') +
+      field('am', 'Amount J$ (bank drop, cheque, collection)', j ? j.amount : '', 'number', 'step="0.01"') +
+      '<div><label><input type="checkbox" id="ns"' + (!j || j.needs_signature ? ' checked' : '') + '> Signature needed</label><label><input type="checkbox" id="np"' + (j ? (j.needs_photo ? ' checked' : '') : ' checked') + '> Photo needed</label></div>' +
+      (j ? '' : sel('dv', 'Assign to', driverOpts('Leave in the queue'), '')) +
+      '<div style="grid-column:1/-1"><label for="de">Details for the driver</label><textarea id="de" rows="2">' + esc(j ? j.details || '' : '') + '</textarea></div></div>' +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="save">' + (j ? 'Save' : 'Add job') + '</button><button id="x">Cancel</button></div>');
+    $('#x').onclick = function () { if (j) openJob(j.id); else close(); };
+    var pm = L.map('pickmap'); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(pm);
+    var mk = null;
+    var setPin = function (ll, note) { pin = { lat: ll.lat, lng: ll.lng }; if (mk) mk.setLatLng(ll); else mk = L.marker(ll, { draggable: true }).addTo(pm).on('dragend', function () { setPin(mk.getLatLng(), 'Pin moved'); }); $('#pinNote').textContent = (note || 'Pin set') + ': ' + pin.lat.toFixed(5) + ', ' + pin.lng.toFixed(5); };
+    if (pin) { pm.setView([pin.lat, pin.lng], 16); setPin(pin, 'Current pin'); } else pm.setView([board.shop.lat, board.shop.lng], 12);
+    pm.on('click', function (e) { setPin(e.latlng); });
+    setTimeout(function () { pm.invalidateSize(); }, 200);
+    $('#find').onclick = function () { api('/api/fleet/geocode', 'POST', { address: val('ad') }).then(function (g) { if (!g.found) return toast('Not found: click the map to set it'); pm.setView([g.lat, g.lng], 16); setPin({ lat: g.lat, lng: g.lng }, 'Found'); }).catch(fail); };
+    var kindSel = $('#k'); kindSel.onchange = function () { $('#np').checked = ['bank_drop', 'cheque', 'collection'].indexOf(kindSel.value) >= 0; };
+    $('#save').onclick = function () {
+      var body = { kind: val('k'), title: val('t'), contact_name: val('cn'), contact_phone: val('cp'), address: val('ad'), priority: val('pr'), due_date: val('due'), window_from: val('wf'), window_to: val('wt'),
+        amount: val('am'), needs_signature: val('ns'), needs_photo: val('np'), details: val('de') };
+      if (pin) { body.lat = pin.lat; body.lng = pin.lng; }
+      if (!j) body.driver_id = val('dv') || null;
+      (j ? api('/api/fleet/jobs/' + j.id, 'PUT', body) : api('/api/fleet/jobs', 'POST', body)).then(function (x) { close(); toast(j ? 'Saved' : 'Added ' + x.number + (x.placed ? '' : ' (not on the map yet)')); load(); }).catch(fail);
+    };
+  }
+
+  // --------------------------------------------------------------- history --
+  function history(day) {
+    day = day || B.today();
+    api('/api/fleet/history?date=' + day).then(function (h) {
+      $('#out').innerHTML = '<div class="card"><h2>History</h2><div class="controls"><div><label>Day</label><input type="date" id="hd" value="' + esc(h.date) + '"></div></div>' +
+        '<h3>Shifts</h3><table><thead><tr><th>Driver</th><th>Vehicle</th><th>Start</th><th>End</th><th>Odometer km</th><th></th></tr></thead><tbody>' + (h.shifts.length ? h.shifts.map(function (s) {
+          return '<tr><td>' + esc(s.name) + '</td><td>' + esc(s.vehicle || '') + '</td><td>' + dt(s.started_at) + '</td><td>' + (s.ended_at ? dt(s.ended_at) : '<span class="pill ok">on shift</span>') + '</td><td>' + (s.end_odometer != null && s.start_odometer != null ? s.end_odometer - s.start_odometer : '') + '</td><td><button data-km="' + s.user_id + '">GPS km</button></td></tr>';
+        }).join('') : '<tr><td colspan="6" class="empty">No shifts.</td></tr>') + '</tbody></table>' +
+        '<h3 style="margin-top:12px">Jobs finished</h3><table><thead><tr><th>Job</th><th>Driver</th><th>Finished</th><th>Result</th><th>Proof</th></tr></thead><tbody>' + (h.jobs.length ? h.jobs.map(function (j) {
+          return '<tr class="doc-row" data-job="' + j.id + '" style="cursor:pointer"><td>' + (ICON[j.kind] || '') + ' ' + esc(j.title) + '<div class="sub" style="margin:0">' + esc(j.number) + ' · ' + esc(j.address || '') + '</div></td><td>' + esc(j.driver_name || '') + '</td><td>' + dt(j.done_at) + '</td><td>' + pill(j.status) + (j.fail_reason ? ' ' + esc(j.fail_reason) : '') + '</td><td>' + (j.has_signature ? '✍' : '') + (j.has_photo ? ' 📷' : '') + (j.recipient_name ? ' ' + esc(j.recipient_name) : '') + '</td></tr>';
+        }).join('') : '<tr><td colspan="5" class="empty">Nothing finished.</td></tr>') + '</tbody></table></div>';
+      $('#hd').onchange = function () { history(val('hd')); };
+      all('[data-job]').forEach(function (x) { x.onclick = function () { if (!board) return api('/api/fleet/board').then(function (b) { board = b; openJob(Number(x.dataset.job)); }); openJob(Number(x.dataset.job)); }; });
+      all('[data-km]').forEach(function (x) { x.onclick = function () { api('/api/fleet/track/' + x.dataset.km + '?date=' + h.date).then(function (t) { x.textContent = t.km + ' km'; }).catch(fail); }; });
+    }).catch(fail);
+  }
+
+  // -------------------------------------------------------------- settings --
+  function settings() {
+    Promise.all([api('/api/fleet/settings'), api('/api/fleet/screens').catch(function () { return { screens: null }; })]).then(function (r) {
+      var s = r[0], sc = r[1].screens;
+      $('#out').innerHTML = '<div class="card"><h2>Shop location</h2><p class="sub">Routes start and end here. Click the map or drag the pin to the shop\'s gate.</p><div id="pickmap" style="height:300px"></div><div class="controls" style="margin-top:8px"><button class="primary" id="shopSave">Save shop location</button><span class="sub" id="shopTxt"></span></div></div>' +
+        '<div class="card"><h2>Tracking</h2><div class="grid">' + field('ps', 'Phone reports every (seconds)', s.ping_seconds, 'number') + field('qm', 'Alert if no position for (minutes)', s.quiet_minutes, 'number') +
+        field('sm', 'Alert if stopped away from stops for (minutes)', s.stop_minutes, 'number') + field('sk', 'Speeding alert above (km/h)', s.speed_kmh, 'number') + field('am', 'Mark arrived within (metres)', s.arrive_metres, 'number') + '</div>' +
+        '<div class="controls" style="margin-top:8px"><button class="primary" id="tSave">Save</button></div></div>' +
+        (sc ? '<div class="card"><h2>Security screens</h2><p class="sub">A link for the monitor at the security desk: it shows the live map, drivers and alerts, read-only, without anyone signing in. Treat the link like a key; switch it off here if it leaks.</p>' +
+          '<div class="controls"><input id="scn" placeholder="Screen name, e.g. Security desk"><button class="primary" id="scAdd">Make a screen link</button></div><div id="scLink"></div>' +
+          '<table><thead><tr><th>Screen</th><th>Made</th><th>Last seen</th><th></th></tr></thead><tbody>' + (sc.length ? sc.map(function (x) {
+            return '<tr><td>' + esc(x.name) + '</td><td>' + dt(x.created_at) + ' ' + esc(x.created_by_name || '') + '</td><td>' + (x.last_seen_at ? dt(x.last_seen_at) + ' <span class="sub">' + esc(x.last_ip || '') + '</span>' : 'never') + '</td><td>' + (x.revoked_at ? '<span class="pill">off</span>' : '<button data-rev="' + x.id + '">Switch off</button>') + '</td></tr>';
+          }).join('') : '<tr><td colspan="4" class="empty">None yet.</td></tr>') + '</tbody></table></div>' : '') +
+        '<div class="card"><h2>Phones out on the road</h2><p class="sub">Drivers\' phones must reach this computer from anywhere. The safe way: install <b>Tailscale</b> on the driver\'s phone and sign in to the shop\'s Tailscale account. The phone then opens <b>https://&lt;this PC\'s Tailscale address&gt;:' + (Number(location.port || 3056) + (location.protocol === 'https:' ? 0 : 1)) + '/driver.html</b>. The till is never exposed to the open internet. Accept the certificate warning once.</p></div>';
+      var shop = { lat: s.shop.lat, lng: s.shop.lng };
+      var pm = L.map('pickmap').setView([shop.lat, shop.lng], 16); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(pm);
+      var mk = L.marker([shop.lat, shop.lng], { draggable: true }).addTo(pm);
+      var txt = function () { $('#shopTxt').textContent = shop.lat.toFixed(5) + ', ' + shop.lng.toFixed(5); }; txt();
+      mk.on('dragend', function () { var ll = mk.getLatLng(); shop = { lat: ll.lat, lng: ll.lng }; txt(); });
+      pm.on('click', function (e) { mk.setLatLng(e.latlng); shop = { lat: e.latlng.lat, lng: e.latlng.lng }; txt(); });
+      $('#shopSave').onclick = function () { api('/api/fleet/settings', 'PUT', { shop_lat: shop.lat, shop_lng: shop.lng }).then(function () { toast('Shop location saved'); }).catch(fail); };
+      $('#tSave').onclick = function () { api('/api/fleet/settings', 'PUT', { ping_seconds: val('ps'), quiet_minutes: val('qm'), stop_minutes: val('sm'), speed_kmh: val('sk'), arrive_metres: val('am') }).then(function () { toast('Saved'); }).catch(fail); };
+      if ($('#scAdd')) $('#scAdd').onclick = function () {
+        api('/api/fleet/screens', 'POST', { name: val('scn') }).then(function (x) {
+          var url = location.origin + x.link;
+          $('#scLink').innerHTML = '<div class="note warn">Open this on the security monitor (shown once; copy it now):<br><input style="width:100%" readonly value="' + esc(url) + '"></div>';
+          $('#scLink input').select();
+        }).catch(fail);
+      };
+      all('[data-rev]').forEach(function (x) { x.onclick = function () { api('/api/fleet/screens/' + x.dataset.rev + '/revoke', 'POST', {}).then(settings).catch(fail); }; });
+    }).catch(fail);
+  }
+
+  api('/api/fleet/board').then(function (b) { board = b; if (!b.perms.dispatch) all('[data-t="settings"]').forEach(function (x) { x.style.display = 'none'; }); show(); }).catch(function (e) { $('#out').innerHTML = '<div class="card bad">' + esc(e.message) + '</div>'; });
+})();
+</script>
+</body>
+</html>

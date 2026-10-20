@@ -2604,6 +2604,121 @@ BEGIN
 END $$;
 
 -- =============================================================================
+--  OUTBOUND (Phase 3, 2026-10): fulfilment orders, picking, packing,
+--  manifests, pickup codes, holds, tracking events.
+--
+--  A fulfilment is the warehouse's job for one sale: pick it, pack it, then
+--  hand it over (counter pickup) or send it (delivery / shipping). It sits
+--  beside the POS: sales are made exactly as before, and a sweep in
+--  outbound.js creates the fulfilment from new pos_sales / web orders.
+--  Stock was already taken off at the sale (trigger), so picking moves no
+--  stock; it records who took what from which bin, and shortages.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS fulfilments (
+  id              SERIAL PRIMARY KEY,
+  number          TEXT UNIQUE,                          -- F-000123
+  source_kind     TEXT NOT NULL,                        -- pos_sale | web_order | manual
+  source_id       INTEGER,
+  source_ref      TEXT,                                 -- receipt / order number shown to staff
+  customer_name   TEXT,
+  customer_phone  TEXT,
+  customer_email  TEXT,
+  method          TEXT NOT NULL DEFAULT 'pickup',       -- pickup | delivery | shipping
+  ship_to         JSONB,                                -- {name, phone, line1, line2, city, parish, country}
+  status          TEXT NOT NULL DEFAULT 'new',          -- new | picking | picked | packed | ready | dispatched | delivered | collected | cancelled
+  priority        INTEGER NOT NULL DEFAULT 0,           -- higher first
+  on_hold         BOOLEAN NOT NULL DEFAULT false,
+  hold_reason     TEXT,
+  held_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  held_at         TIMESTAMPTZ,
+  picker_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  pick_started_at TIMESTAMPTZ,
+  picked_at       TIMESTAMPTZ,
+  packer_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  packed_at       TIMESTAMPTZ,
+  ready_at        TIMESTAMPTZ,
+  pickup_code     TEXT,                                 -- 6 digits, given to the customer only
+  pickup_attempts INTEGER NOT NULL DEFAULT 0,
+  manifest_id     INTEGER,
+  carrier         TEXT,
+  tracking_number TEXT,
+  dispatched_at   TIMESTAMPTZ,
+  completed_at    TIMESTAMPTZ,                          -- delivered or collected
+  completed_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  received_by_name TEXT,                                -- who signed / collected
+  track_token     TEXT UNIQUE,                          -- random, for the customer's tracking page
+  notes           TEXT,
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (source_kind, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_fulfilments_status ON fulfilments (status, created_at);
+
+CREATE TABLE IF NOT EXISTS fulfilment_lines (
+  id             SERIAL PRIMARY KEY,
+  fulfilment_id  INTEGER NOT NULL REFERENCES fulfilments(id) ON DELETE CASCADE,
+  product_img    TEXT REFERENCES products(img) ON DELETE SET NULL ON UPDATE CASCADE,
+  sku            TEXT,
+  description    TEXT,
+  qty            INTEGER NOT NULL,
+  qty_picked     INTEGER NOT NULL DEFAULT 0,
+  qty_short      INTEGER NOT NULL DEFAULT 0,
+  short_reason   TEXT,                                 -- not_found | damaged | wrong_part | other
+  bin_id         INTEGER REFERENCES bins(id),           -- where the picker took it from
+  picked_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  picked_at      TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_fulfilment_lines_f ON fulfilment_lines (fulfilment_id);
+
+CREATE TABLE IF NOT EXISTS fulfilment_packages (
+  id             SERIAL PRIMARY KEY,
+  fulfilment_id  INTEGER NOT NULL REFERENCES fulfilments(id) ON DELETE CASCADE,
+  seq            INTEGER NOT NULL,                     -- 1, 2, 3 ... of this order
+  kind           TEXT NOT NULL DEFAULT 'box',           -- bag | box | tyre | pallet | envelope
+  weight_kg      NUMERIC(8,2),
+  contents       TEXT,
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (fulfilment_id, seq)
+);
+
+CREATE TABLE IF NOT EXISTS manifests (
+  id           SERIAL PRIMARY KEY,
+  number       TEXT UNIQUE,                            -- M-000045
+  kind         TEXT NOT NULL DEFAULT 'delivery',       -- delivery (own driver) | carrier
+  carrier      TEXT,
+  driver_name  TEXT,
+  vehicle      TEXT,
+  status       TEXT NOT NULL DEFAULT 'open',           -- open | dispatched | closed
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  dispatched_at TIMESTAMPTZ,
+  closed_at    TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS fulfilment_events (
+  id             SERIAL PRIMARY KEY,
+  fulfilment_id  INTEGER NOT NULL REFERENCES fulfilments(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL,                        -- created | hold | release | pick_start | picked | short | packed | ready | notified | dispatched | delivered | collected | pickup_failed | cancelled
+  note           TEXT,
+  by_user        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  terminal       TEXT,
+  public         BOOLEAN NOT NULL DEFAULT false,       -- shown on the customer's tracking page
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fulfilment_events_f ON fulfilment_events (fulfilment_id, created_at);
+
+DO $$
+BEGIN
+  INSERT INTO warehouse_settings (key, value) VALUES
+    ('fulfil_auto', 'off'),          -- off | delivery | all : which new POS sales become pick orders
+    ('fulfil_sweep_from', NULL),     -- pos_sales.id to start the sweep after (set when auto is switched on)
+    ('fulfil_sla_minutes', '15'),    -- counter orders older than this turn red on the board
+    ('fulfil_notify', 'on')          -- send SMS/email when an order is ready
+  ON CONFLICT (key) DO NOTHING;
+END $$;
+
+-- =============================================================================
 --  RECEIVE STOCK WITH THE SUPPLIER'S BILL (server.js /api/admin/receive-stock, 2026-10)
 --
 --  One screen receives a delivery (against a PO or without one) and, when the
