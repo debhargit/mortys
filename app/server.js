@@ -760,6 +760,45 @@ app.post(
 // response carrying `Cache-Control: no-transform`.
 app.use(compression());
 
+// ---- Security response headers ---------------------------------------------
+// There were none at all: the admin panel could be framed by any site on the
+// internet, nothing stopped a browser from MIME-sniffing an upload into
+// script, and HTTPS was never pinned even though the public site is only ever
+// reached over it. One middleware, mounted before the static mounts and every
+// route so it covers page shells, uploads and JSON alike.
+//
+// The CSP here is deliberately partial. admin.html is 16,000 lines with inline
+// script and inline event handlers throughout, and the pages legitimately load
+// Google Fonts, the Google Sign-In client, Leaflet from unpkg and Google Maps
+// in an iframe -- a script-src/img-src/connect-src policy tight enough to be
+// worth having would break the panel, and a loose one with 'unsafe-inline'
+// buys nothing. So only the three directives that cannot break a resource load
+// are set: frame-ancestors (clickjacking, the real exposure here), object-src
+// (no plugin content is used anywhere) and base-uri (stops injected markup
+// from repointing every relative URL on the page). A full script-src needs
+// admin.html's inline script extracted first and is a separate job.
+//
+// Referrer-Policy is strict-origin-when-cross-origin rather than the
+// same-origin the audit suggested: it is already every current browser's
+// default, so it provably changes nothing staff-facing, while still keeping
+// work-order numbers and invoice query strings out of the Referer sent to
+// wa.me, maps.google.com and the other outbound links on the storefront.
+//
+// HSTS is only sent on requests that actually arrived over TLS (req.secure is
+// accurate here because trust proxy is set, so the tunnel's
+// X-Forwarded-Proto is honoured). Tills talking plain HTTP to this box on the
+// LAN never receive it and so are never forced onto https. No
+// includeSubDomains and no preload on purpose -- till. and app. are separate
+// hostnames on this domain and must not be dragged along by this server.
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'self'; object-src 'none'; base-uri 'self'");
+  if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+  next();
+});
+
 app.use(express.json({ limit: '1mb' }));
 app.use(
   cookieSession({
