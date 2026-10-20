@@ -320,6 +320,32 @@ CREATE INDEX IF NOT EXISTS idx_work_orders_mech ON work_orders (assigned_mechani
 ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS service_advisor_id INTEGER REFERENCES mechanics(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_work_orders_advisor ON work_orders (service_advisor_id);
 
+-- Customer phone reduced to digits, stored, so the public work-order lookup
+-- and the customer path of the invoice route can be indexed (audit M7).
+--
+-- Those two routes match on the last 7 digits a customer types. They did it
+-- with regexp_replace(customer_phone, '[^0-9]', '', 'g') LIKE '%' || $2 --
+-- computing that regexp for every row of work_orders on every call, and a
+-- sequential scan regardless, since no index can serve a leading-wildcard
+-- LIKE. The lookup is unauthenticated, so that was both a cheap way to load
+-- the database from outside and an oracle for guessing a phone number against
+-- a known WO number.
+--
+-- Same trick as products.search_text below: do the normalising once, on write.
+-- The index is on right(...,7) rather than on the column itself, because the
+-- match is a SUFFIX comparison -- a b-tree on the whole digit string cannot
+-- answer one, which is why the stored column on its own would not have been
+-- enough and why this departs from the audit's sketch. With 7 digits in hand
+-- the routes compare right(customer_phone_digits,7) = $2, an equality the
+-- index answers directly. A customer who types fewer than 7 digits still
+-- falls back to a LIKE, now at least free of the per-row regexp and sitting
+-- behind a throttle; keeping that path means a partial number still matches
+-- exactly as it always did.
+ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS customer_phone_digits TEXT GENERATED ALWAYS AS (
+  regexp_replace(coalesce(customer_phone,''), '[^0-9]', '', 'g')
+) STORED;
+CREATE INDEX IF NOT EXISTS idx_work_orders_phone_last7 ON work_orders (right(customer_phone_digits, 7));
+
 -- Labor lines (one per task the mechanic did)
 CREATE TABLE IF NOT EXISTS work_order_labor (
   id              SERIAL PRIMARY KEY,

@@ -1066,6 +1066,25 @@ async function requireAdmin(req, res, next) {
   next();
 }
 
+// Is this signed-in account one of the shop's own people, as opposed to a
+// storefront customer who registered on the website? Used where a route wants
+// to widen what a session can see rather than refuse it outright, so "any
+// session at all" is not a strong enough test (audit M6).
+//
+// is_admin is accepted alongside is_staff on purpose, matching the user-list
+// query further down: accounts that predate the is_staff column -- the seeded
+// owner among them -- have a panel login and no staff flag, so testing
+// is_staff alone would lock the owner out of staff-only behaviour.
+async function isStaffUser(userId) {
+  if (!userId) return false;
+  const { rows } = await query(
+    'SELECT is_staff, is_admin, disabled FROM users WHERE id = $1',
+    [userId]
+  );
+  if (!rows.length || rows[0].disabled) return false;
+  return !!(rows[0].is_staff || rows[0].is_admin);
+}
+
 // Stricter than requireAdmin: owner/manager only, not cashier. Use this on
 // endpoints a counter cashier shouldn't reach -- staff/supplier/pricing
 // management, purchase orders, coupons, marketing, voids, and anything that
@@ -8959,6 +8978,29 @@ app.get('/api/pickslip', requireAdmin, async (req, res) => {
   }
 });
 
+// How the public routes match a customer's phone against a work order.
+//
+// Both callers pass the last 7 digits of whatever the customer typed. The old
+// form, repeated in both places, was
+//   regexp_replace(customer_phone, '[^0-9]', '', 'g') LIKE '%' || $n
+// which ran a regexp per row and could not use an index either way, so every
+// call sequentially scanned work_orders (audit M7).
+//
+// customer_phone_digits is now a stored generated column (schema.sql), and
+// there is an index on right(customer_phone_digits, 7). The usual case -- a
+// customer typing a full number, so 7 digits survive the slice -- becomes an
+// equality that index answers. Anything shorter keeps the suffix LIKE so a
+// partial number still matches what it always matched; that path is rare,
+// reads a stored column instead of recomputing a regexp, and both callers put
+// a throttle in front of it.
+//
+// `idx` is the 1-based placeholder number the caller has bound the phone to.
+function woPhoneClause(phone, idx) {
+  return String(phone || '').length >= 7
+    ? `right(customer_phone_digits, 7) = $${idx}`
+    : `customer_phone_digits LIKE '%' || $${idx}`;
+}
+
 // =============================================================================
 //  INVOICE — generate a printable, branded invoice for any work order
 //  (Public if the customer has the WO number + matching phone — uses the same
@@ -8967,12 +9009,29 @@ app.get('/api/pickslip', requireAdmin, async (req, res) => {
 app.get('/api/invoice/:wo_number', async (req, res) => {
   const woNumber = (req.params.wo_number || '').toUpperCase();
   const phone = ((req.query.phone || '').replace(/[^\d]/g, '')).slice(-7);
-  const adminBypass = req.session && req.session.userId;
-  let allowed = !!adminBypass;
+  // The bypass that drops the phone check is for the shop's own people only.
+  // It used to be `req.session && req.session.userId`, i.e. ANY signed-in
+  // session -- including a storefront customer who registered thirty seconds
+  // earlier. With the phone clause dropped, and work-order numbers running
+  // WO-<year>-0001 upwards, that account could walk the sequence and read
+  // every other customer's name, vehicle, complaint, work performed, parts,
+  // labour and payments (audit M6). Customers now fall through to the phone
+  // check like any other member of the public.
+  const allowed = await isStaffUser(req.session && req.session.userId);
+  // Same throttle shape as the public lookup below, and for the same reason:
+  // without the staff bypass this is a guess-the-last-7-digits oracle against
+  // a known WO number. Counted only on a miss, and cleared on a hit, so a
+  // customer reloading their own invoice is never locked out.
+  const gateKey = 'invoice:' + (req.ip || '');
+  let gate = null;
   if (!allowed) {
     if (!phone) return res.status(401).json({ error: 'Phone required for customer access' });
+    gate = pinGate(gateKey);
+    if (gate.blocked) {
+      return res.status(429).json({ error: 'Too many attempts. Try again in ' + gate.waitS + 's.' });
+    }
   }
-  const phoneClause = !allowed ? ` AND regexp_replace(customer_phone, '[^0-9]', '', 'g') LIKE '%' || $2` : '';
+  const phoneClause = !allowed ? ' AND ' + woPhoneClause(phone, 2) : '';
   const params = [woNumber];
   if (!allowed) params.push(phone);
   const { rows: ws } = await query(
@@ -8982,7 +9041,11 @@ app.get('/api/invoice/:wo_number', async (req, res) => {
        LEFT JOIN mechanics sa ON sa.id = w.service_advisor_id
        WHERE wo_number = $1 ${phoneClause}`, params
   );
-  if (!ws.length) return res.status(404).json({ error: 'Invoice not found' });
+  if (!ws.length) {
+    if (gate) pinFail(gateKey, gate.rec);
+    return res.status(404).json({ error: 'Invoice not found' });
+  }
+  if (gate) PIN_ATTEMPTS.delete(gateKey);
   const w = ws[0];
   const [labor, parts, payments] = await Promise.all([
     query('SELECT description, hours::float AS hours, rate_usd::float AS rate, total_usd::float AS total FROM work_order_labor WHERE work_order_id = $1 ORDER BY id', [w.id]),
@@ -9517,12 +9580,42 @@ app.post('/api/admin/time-entries/:id/clock-out', requireAdmin, async (req, res)
   finally { client.release(); }
 });
 
+// Unauthenticated on purpose -- this is the "track my repair" box on
+// track.html, and a customer has no account. What it needed was a throttle and
+// an index, not a login (audit M7).
+//
+// Before: no rate limiting of any kind in front of a query that sequentially
+// scanned work_orders, recomputing a regexp per row. That made it a cheap way
+// for anyone on the internet to load the shop's database, and a workable
+// oracle for guessing the last 7 digits of a customer's phone against a
+// sequential WO number. Now it is keyed on req.ip through the same pinGate
+// used by PIN sign-in, counted only on a miss and cleared on a hit, so a
+// customer checking their own repair is never locked out while a guesser gets
+// 10 tries a minute. The match itself goes through woPhoneClause, which uses
+// the indexed last-7-digits comparison.
 app.post('/api/work-order-lookup', async (req, res) => {
   const wo_number = ((req.body && req.body.wo_number) || '').trim().toUpperCase();
   const phone = ((req.body && req.body.phone) || '').replace(/[^\d]/g, '').slice(-7);
   if (!wo_number || !phone) return res.status(400).json({ error: 'WO number and phone required' });
-  const { rows } = await query(`SELECT id, wo_number, customer_name, vehicle_year, vehicle_make, vehicle_model, status, priority, intake_date, promised_date, completed_at, paid_at, labor_total_usd::float AS labor_total_usd, parts_total_usd::float AS parts_total_usd, tax_usd::float AS tax_usd, total_usd::float AS total_usd, complaint, work_performed FROM work_orders WHERE wo_number = $1 AND regexp_replace(customer_phone, '[^0-9]', '', 'g') LIKE $2`, [wo_number, '%' + phone]);
-  if (!rows.length) return res.status(404).json({ error: 'No work order found.' });
+  const gateKey = 'wolookup:' + (req.ip || '');
+  const gate = pinGate(gateKey);
+  if (gate.blocked) {
+    return res.status(429).json({ error: 'Too many lookups. Try again in ' + gate.waitS + 's.' });
+  }
+  const { rows } = await query(
+    `SELECT id, wo_number, customer_name, vehicle_year, vehicle_make, vehicle_model, status, priority,
+            intake_date, promised_date, completed_at, paid_at,
+            labor_total_usd::float AS labor_total_usd, parts_total_usd::float AS parts_total_usd,
+            tax_usd::float AS tax_usd, total_usd::float AS total_usd, complaint, work_performed
+       FROM work_orders
+      WHERE wo_number = $1 AND ${woPhoneClause(phone, 2)}`,
+    [wo_number, phone]
+  );
+  if (!rows.length) {
+    pinFail(gateKey, gate.rec);
+    return res.status(404).json({ error: 'No work order found.' });
+  }
+  PIN_ATTEMPTS.delete(gateKey);
   res.json({ work_order: rows[0] });
 });
 
