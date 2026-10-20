@@ -2471,3 +2471,170 @@ BEGIN
   END IF;
 END $$;
 
+-- =============================================================================
+--  INBOUND (Phase 2, 2026-10): exchange rates, receipts with batches, landed
+--  cost, average cost, pricing rules, supplier bills, backorders.
+--
+--  Base currency is J$. The product money columns are named *_usd for
+--  historical reasons but hold J$ (the legacy import kept the names), so
+--  cost_usd / price_usd stay as the J$ figures every screen already shows.
+--  A PO and its lines are in the SUPPLIER's currency (purchase_orders.currency);
+--  receipts convert to J$ at the receipt's fx_rate.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS exchange_rates (
+  id         SERIAL PRIMARY KEY,
+  currency   TEXT NOT NULL,                 -- USD, CAD, ...  (J$ per 1 unit)
+  rate_date  DATE NOT NULL,
+  buy        NUMERIC(14,5),
+  sell       NUMERIC(14,5),
+  rate       NUMERIC(14,5) NOT NULL,        -- the figure used for costing
+  source     TEXT NOT NULL DEFAULT 'boj',   -- boj | manual
+  set_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  note       TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (currency, rate_date, source)
+);
+
+ALTER TABLE suppliers            ADD COLUMN IF NOT EXISTS currency      TEXT NOT NULL DEFAULT 'JMD';
+ALTER TABLE purchase_orders      ADD COLUMN IF NOT EXISTS currency      TEXT NOT NULL DEFAULT 'JMD';
+ALTER TABLE purchase_orders      ADD COLUMN IF NOT EXISTS ordered_at    TIMESTAMPTZ;   -- sent to supplier: start of the real lead time
+ALTER TABLE purchase_orders      ADD COLUMN IF NOT EXISTS origin        TEXT;          -- reorder = drafted from suggestions
+ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS qty_cancelled INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS receipts (
+  id                      SERIAL PRIMARY KEY,
+  receipt_number          TEXT UNIQUE,
+  po_id                   INTEGER REFERENCES purchase_orders(id) ON DELETE SET NULL,
+  supplier_id             INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+  status                  TEXT NOT NULL DEFAULT 'open',      -- open | posted | void
+  currency                TEXT NOT NULL DEFAULT 'JMD',
+  fx_rate                 NUMERIC(14,5) NOT NULL DEFAULT 1,  -- J$ per 1 unit of currency
+  fx_source               TEXT,
+  freight                 NUMERIC(14,2) NOT NULL DEFAULT 0,  -- landed-cost extras, all in J$
+  duty                    NUMERIC(14,2) NOT NULL DEFAULT 0,
+  customs                 NUMERIC(14,2) NOT NULL DEFAULT 0,
+  brokerage               NUMERIC(14,2) NOT NULL DEFAULT 0,
+  other_costs             NUMERIC(14,2) NOT NULL DEFAULT 0,
+  allocation_method       TEXT NOT NULL DEFAULT 'value',     -- value | qty
+  supplier_invoice_number TEXT,
+  supplier_invoice_date   DATE,
+  supplier_invoice_total  NUMERIC(14,2),                     -- in the receipt currency
+  payment_terms_days      INTEGER,
+  bill_status             TEXT NOT NULL DEFAULT 'pending',   -- pending | confirmed | disputed
+  bill_amount_jmd         NUMERIC(14,2),
+  bill_variance_note      TEXT,
+  bill_confirmed_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  bill_confirmed_at       TIMESTAMPTZ,
+  due_date                DATE,
+  receiving_bin_id        INTEGER REFERENCES bins(id),
+  received_by             INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  received_at             TIMESTAMPTZ DEFAULT NOW(),
+  posted_by               INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  posted_at               TIMESTAMPTZ,
+  notes                   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_receipts_po     ON receipts (po_id);
+CREATE INDEX IF NOT EXISTS idx_receipts_status ON receipts (status, bill_status);
+
+CREATE TABLE IF NOT EXISTS receipt_lines (
+  id               SERIAL PRIMARY KEY,
+  receipt_id       INTEGER NOT NULL REFERENCES receipts(id) ON DELETE CASCADE,
+  po_item_id       INTEGER REFERENCES purchase_order_items(id) ON DELETE SET NULL,
+  product_img      TEXT REFERENCES products(img) ON DELETE SET NULL ON UPDATE CASCADE,
+  batch_code       TEXT UNIQUE,                     -- printed as BATCH:<code>
+  qty_received     INTEGER NOT NULL DEFAULT 0,      -- good units
+  qty_damaged      INTEGER NOT NULL DEFAULT 0,      -- arrived damaged: not stocked, claim from supplier
+  unit_cost        NUMERIC(14,4),                   -- receipt currency
+  landed_unit_cost NUMERIC(14,4),                   -- J$, incl. allocated extras
+  old_avg_cost     NUMERIC(14,4),
+  new_avg_cost     NUMERIC(14,4),
+  old_price        NUMERIC(14,2),
+  suggested_price  NUMERIC(14,2),
+  new_price        NUMERIC(14,2),
+  price_action     TEXT,                            -- kept | updated
+  qty_putaway      INTEGER NOT NULL DEFAULT 0,
+  notes            TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_receipt_lines_receipt ON receipt_lines (receipt_id);
+CREATE INDEX IF NOT EXISTS idx_receipt_lines_product ON receipt_lines (product_img);
+
+CREATE TABLE IF NOT EXISTS pricing_rules (
+  id             SERIAL PRIMARY KEY,
+  category       TEXT,                              -- NULL = default for every category without its own rule
+  markup_pct     NUMERIC(8,2) NOT NULL,             -- on cost
+  round_to       NUMERIC(10,2) NOT NULL DEFAULT 10, -- round the price UP to a multiple of this (J$)
+  min_margin_pct NUMERIC(8,2),                      -- never suggest below this gross margin
+  never_lower    BOOLEAN NOT NULL DEFAULT true,     -- keep the current price if the rule would cut it
+  is_active      BOOLEAN NOT NULL DEFAULT true,
+  updated_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pricing_rules_category ON pricing_rules (COALESCE(lower(category), ''));
+
+-- Sales-history lookups for reorder suggestions.
+CREATE INDEX IF NOT EXISTS idx_pos_sales_created      ON pos_sales (created_at);
+CREATE INDEX IF NOT EXISTS idx_pos_sale_items_sale    ON pos_sale_items (sale_id);
+CREATE INDEX IF NOT EXISTS idx_pos_sale_items_product ON pos_sale_items (product_img);
+CREATE INDEX IF NOT EXISTS idx_po_items_product       ON purchase_order_items (product_img);
+
+-- Receiving and damaged areas; reorder settings; starting pricing rules taken
+-- from the shop's own current markups (median price/cost per category).
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM bins WHERE upper(code) = 'RECEIVING') THEN
+    INSERT INTO bins (code, kind, notes) VALUES ('RECEIVING', 'receiving', 'Goods received, waiting to be put away');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM bins WHERE upper(code) = 'DAMAGED') THEN
+    INSERT INTO bins (code, kind, notes) VALUES ('DAMAGED', 'damaged', 'Damaged stock, not for sale');
+  END IF;
+  INSERT INTO warehouse_settings (key, value) VALUES
+    ('reorder_review_days', '14'), ('reorder_service_z', '1.65'), ('fx_use', 'sell'), ('bill_tolerance_pct', '1')
+  ON CONFLICT (key) DO NOTHING;
+
+  IF NOT EXISTS (SELECT 1 FROM warehouse_settings WHERE key = 'pricing_rules_seeded') THEN
+    INSERT INTO pricing_rules (category, markup_pct, round_to)
+    SELECT NULL, ROUND(((percentile_cont(0.5) WITHIN GROUP (ORDER BY price_usd / cost_usd)) - 1)::numeric * 100, 1), 10
+      FROM products WHERE cost_usd > 0 AND price_usd > cost_usd;
+    INSERT INTO pricing_rules (category, markup_pct, round_to)
+    SELECT category, ROUND(((percentile_cont(0.5) WITHIN GROUP (ORDER BY price_usd / cost_usd)) - 1)::numeric * 100, 1), 10
+      FROM products WHERE cost_usd > 0 AND price_usd > cost_usd AND COALESCE(category, '') <> ''
+     GROUP BY category HAVING COUNT(*) >= 20;
+    INSERT INTO warehouse_settings (key, value) VALUES ('pricing_rules_seeded', NOW()::text);
+  END IF;
+END $$;
+
+-- =============================================================================
+--  RECEIVE STOCK WITH THE SUPPLIER'S BILL (server.js /api/admin/receive-stock, 2026-10)
+--
+--  One screen receives a delivery (against a PO or without one) and, when the
+--  bill came with it, records that bill in Payables in the same step: Dr Goods
+--  Received Not Invoiced for what arrived, Dr GCT Recoverable, Dr Freight and
+--  Duty In, Cr Accounts Payable. When the bill's subtotal and the value received
+--  differ, staff say why and the difference goes to: back order (stays in Goods
+--  Received Not Invoiced until the rest arrives; with no PO a back-order PO is
+--  opened), bill adjustment (Purchase Price Variance), supplier credit due
+--  (Supplier Claims Receivable) or another account with a reason. ap_bills.po_id
+--  ties the bill to its PO; such a PO is not also billed through its own invoice
+--  total (that would count it twice in Payables).
+--  A bill line may now be negative (a price adjustment in our favour); every
+--  other screen still enters positive lines.
+-- =============================================================================
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('5060', 'Freight and Duty In', 'cogs', 'Freight and Duty In', 'COGS', 'freight_in')
+ON CONFLICT DO NOTHING;
+ALTER TABLE ap_bills ADD COLUMN IF NOT EXISTS po_id           INTEGER REFERENCES purchase_orders(id);
+ALTER TABLE ap_bills ADD COLUMN IF NOT EXISTS variance_kind   TEXT;            -- rounding | back_order | adjustment | credit | other
+ALTER TABLE ap_bills ADD COLUMN IF NOT EXISTS variance_amount NUMERIC(14,2);   -- bill subtotal less the value received
+ALTER TABLE ap_bills ADD COLUMN IF NOT EXISTS variance_reason TEXT;
+CREATE INDEX IF NOT EXISTS idx_ap_bills_po ON ap_bills (po_id) WHERE po_id IS NOT NULL;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ap_bill_lines_amount_check') THEN
+    ALTER TABLE ap_bill_lines DROP CONSTRAINT ap_bill_lines_amount_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ap_bill_lines_amount_nonzero') THEN
+    ALTER TABLE ap_bill_lines ADD CONSTRAINT ap_bill_lines_amount_nonzero CHECK (amount <> 0);
+  END IF;
+END $$;
+
+
