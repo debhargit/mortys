@@ -8620,7 +8620,7 @@ function posDocLabel(d){
 // Receipt-style/Invoice-style quote buttons use), so this reuses it
 // instead of fixing a fourth copy of the same conversion by hand.
 function posPrintQuote(q, shop){
-  var d = posQuoteToDocData(q, shop || { name:'Vision Auto Solutions', address:'112C Waltham Park Road, Kingston', country:'Jamaica', phone:'(876) 758-5590' });
+  var d = posQuoteToDocData(q, shop || { name:'Vision Auto Solutions', address:'112C Waltham Park Road, Kingston', country:'Jamaica', phone:'(876) 728-4735' });
   var s = d.sale;
   var unpriced = d.items.filter(function(it){ return !(it.unit_price_cents > 0); }).length;
   posPrintWindow('Quote ' + s.receipt_number, POS_A4_CSS,
@@ -8656,7 +8656,7 @@ function posPrintQuote(q, shop){
         '<b>' + unpriced + ' item' + (unpriced === 1 ? '' : 's') + ' still to be priced.</b> We will confirm those prices and availability before the order is placed.</div>' : '') +
       (s.notes ? '<div style="margin-top:12px;font-size:10.5px"><b>Notes:</b> ' + esc(s.notes) + '</div>' : '') +
       '<div class="foot">This is a quotation, not an invoice. Prices hold until ' + esc(s.valid_until || 'the date above') +
-        ' and are subject to stock being available at the time of order. — ' + esc((d.shop && d.shop.phone) || '(876) 758-5590') + '</div>' +
+        ' and are subject to stock being available at the time of order. — ' + esc((d.shop && d.shop.phone) || '(876) 728-4735') + '</div>' +
     '</div>'
   );
 }
@@ -8983,7 +8983,7 @@ function posQuoteToDocData(q, shop){
 // shop_settings row every server-side print endpoint reads (see
 // getShopSettings()/shopSettingsToShop() in server.js) so the two can't
 // drift the way the four independent hardcoded copies used to.
-var POS_SHOP = { name: 'Vision Auto Solutions', address: '112C Waltham Park Road, Kingston', country: 'Jamaica', phone: '(876) 758-5590',
+var POS_SHOP = { name: 'Vision Auto Solutions', address: '112C Waltham Park Road, Kingston', country: 'Jamaica', phone: '(876) 728-4735',
   email: null, website: null, logo_url: null, print_logo: true, default_print_template: 'receipt',
   invoice_notice: null, receipt_notice: null, statement_notice: null };
 function loadShopSettingsIntoPosShop(){

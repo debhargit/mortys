@@ -1120,7 +1120,7 @@ async function getShopSettings() {
   // until the table exists.
   return {
     company_name: 'Vision Auto Solutions', address: '112C Waltham Park Road, Kingston',
-    country: 'Jamaica', phone: '(876) 758-5590', email: null, website: null, logo_url: null,
+    country: 'Jamaica', phone: '(876) 728-4735', email: null, website: null, logo_url: null,
     print_logo_on_invoice: true, default_print_template: 'receipt', quote_valid_days: 14,
     invoice_notice: 'Goods remain the property of the company until paid in full. Returns accepted within 14 days with the original invoice, in original condition. Electrical parts are non-returnable.',
     receipt_notice: 'Returns within 14 days with this receipt. Electrical parts non-returnable.',

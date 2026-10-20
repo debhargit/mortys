@@ -6,7 +6,7 @@ const FALLBACK = {
   company_name: 'Vision Auto Solutions',
   address: '112C Waltham Park Road, Kingston',
   country: 'Jamaica',
-  phone: '(876) 758-5590',
+  phone: '(876) 728-4735',
   email: null, website: null, logo_url: null,
   print_logo_on_invoice: true,
   default_print_template: 'receipt',

@@ -1380,7 +1380,7 @@ CREATE TABLE IF NOT EXISTS shop_settings (
   company_name           TEXT NOT NULL DEFAULT 'Vision Auto Solutions',
   address                TEXT NOT NULL DEFAULT '112C Waltham Park Road, Kingston',
   country                TEXT NOT NULL DEFAULT 'Jamaica',
-  phone                  TEXT NOT NULL DEFAULT '(876) 758-5590',
+  phone                  TEXT NOT NULL DEFAULT '(876) 728-4735',
   email                  TEXT,
   website                TEXT,
   logo_url               TEXT,
@@ -1410,7 +1410,7 @@ UPDATE shop_settings SET website = 'https://visionautosolutions.com'
   WHERE website IN ('https://melthahonda.miamimistress.com', 'https://melthahonda.com');
 UPDATE shop_settings SET address = '112C Waltham Park Road, Kingston'
   WHERE address = '127 Hagley Park Road, Kingston 11';
-UPDATE shop_settings SET phone = '(876) 758-5590'
+UPDATE shop_settings SET phone = '(876) 728-4735'
   WHERE phone = '(876) 758-8503';
 
 -- Rebrand (2026): the synthetic walk-in / no-email customer domain moved from
@@ -1437,6 +1437,10 @@ UPDATE users SET email = 'walkin@visionautosolutions.local'
 --  while wiring the Recall modal's new Quote/Invoice tabs alongside it.
 --  items_json here matches posCartPayload()'s shape exactly
 --  (unit_price_usd/discount_usd in dollars, not cents) -- same convention
+-- The number changed again in Oct 2026. Same rule as above: only a till still
+-- holding the previous number is moved, so an operator-edited phone stays.
+UPDATE shop_settings SET phone = '(876) 728-4735'
+  WHERE phone IN ('(876) 758-5590', '876-758-5590');
 --  pos_quotes.items_json already uses.
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS pos_holds (
