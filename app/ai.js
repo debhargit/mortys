@@ -406,7 +406,11 @@ function register(app, deps) {
       const channel = b.channel === 'kiosk' ? 'kiosk' : 'web';
       if (channel === 'kiosk' && !isLocal(req)) throw httpError(403, 'The counter assistant only runs on shop devices');
       const c = getClient();
-      if (!s.enabled || !s.channels.includes(channel) || !c) return res.json({ offline: true, reply: OFFLINE(sh) });
+      if (!s.enabled || !s.channels.includes(channel)) return res.json({ offline: true, reply: OFFLINE(sh) });
+      // With no Claude client the chat still runs, staff-only: the conversation
+      // is put on the handoff path below, so every message reaches a person and
+      // nothing reaches a model. That is live chat at no token cost.
+      const staffOnly = !c;
       const ip = ipOf(req);
       if (!rateLimit(channel + ':' + ip, channel === 'kiosk' ? 120 : 20, 300000)) throw httpError(429, 'Too many messages. Please wait a few minutes or call us.');
       let text = String(b.message || '').trim().slice(0, 1500);
@@ -421,7 +425,14 @@ function register(app, deps) {
         conv = rows[0];
       }
       if (conv.status === 'closed') return res.json({ token, closed: true, reply: 'This chat has been closed. Start a new one if you need anything else.' });
-      if (conv.turns >= s.maxTurns) { await handoff(conv, 'Long conversation (turn limit)'); return res.json({ token, handoff: true, reply: 'Let me get a team member to help you from here. Someone will reply shortly, or call ' + (sh.phone || 'the shop') + '.' }); }
+      // The turn cap is a spend guard, and it ends the conversation by handing
+      // it to a person. A staff-only chat is already with a person and costs
+      // nothing, so capping it there would just stop delivering the customer's
+      // messages to staff mid-conversation.
+      if (conv.turns >= s.maxTurns && !staffOnly) { await handoff(conv, 'Long conversation (turn limit)'); return res.json({ token, handoff: true, reply: 'Let me get a team member to help you from here. Someone will reply shortly, or call ' + (sh.phone || 'the shop') + '.' }); }
+      // Staff-only: hand it over on the first message, so the branch below
+      // routes this and every later message to staff instead of the model.
+      if (staffOnly && conv.status !== 'handoff') await handoff(conv, 'Staff-only chat (no assistant configured)');
 
       const red = redactCards(text);
       text = red.text;
@@ -456,10 +467,20 @@ function register(app, deps) {
       res.json({ status: rows[0].status, messages: m.map((x) => ({ id: Number(x.id), from: x.role === 'user' ? 'you' : x.role === 'staff' ? 'staff' : 'assistant', text: x.shown_text })) });
     } catch (e) { fail(res, e); }
   });
+  // Whether the chat opens at all, and whether a model is behind it. With no
+  // Claude client configured the chat still opens as STAFF-ONLY: every message
+  // goes straight to a person on the handoff path (see POST /api/ai/chat), so
+  // the shop gets live chat without an API key and without token spend. The
+  // widget reads staff_only to promise a person rather than an assistant.
   app.get('/api/ai/status', async (req, res) => {
     try {
       const s = await settings();
-      res.json({ web: s.enabled && s.channels.includes('web') && !!getClient(), kiosk: s.enabled && s.channels.includes('kiosk') && !!getClient() });
+      const live = !!getClient();
+      res.json({
+        web: s.enabled && s.channels.includes('web'),
+        kiosk: s.enabled && s.channels.includes('kiosk'),
+        staff_only: s.enabled && !live,
+      });
     } catch (e) { fail(res, e); }
   });
 

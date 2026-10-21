@@ -1,8 +1,11 @@
 /* =============================================================================
    Vision Auto Solutions -- parts assistant chat (Phase 10a)
-   On the website: a "Ask about a part" button that opens a chat, shown only
-   when the assistant is switched on. On the counter kiosk (ai-counter.html) it
-   runs full screen with data-ai-mode="kiosk" on the script tag.
+   On the website: a button that opens a chat, shown whenever the chat is
+   switched on. With an assistant configured it answers; with none (no API key)
+   /api/ai/status reports staff_only and the same chat becomes a live chat with
+   the counter -- a person answers every message and no tokens are spent.
+   On the counter kiosk (ai-counter.html) it runs full screen with
+   data-ai-mode="kiosk" on the script tag.
    The chat key is kept in this browser only; a kiosk forgets it after 3 idle minutes.
    ============================================================================= */
 (function () {
@@ -13,6 +16,10 @@
   var kiosk = me && me.getAttribute('data-ai-mode') === 'kiosk';
   var KEY = kiosk ? 'vision.aiKiosk' : 'vision.aiChat';
   var token = null, lastId = 0, busy = false, poll = null, idle = null;
+  // Set from /api/ai/status: true when the chat is on but no assistant is
+  // configured, so a person answers every message. The copy then promises staff
+  // rather than an assistant, instead of advertising something that cannot answer.
+  var staffOnly = false;
   try { token = localStorage.getItem(KEY); } catch (_) {}
   var css = '.vac-btn{position:fixed;right:16px;bottom:16px;z-index:9990;background:#d62828;color:#fff;border:0;border-radius:999px;padding:12px 18px;font:700 15px system-ui,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.3);cursor:pointer}' +
     '.vac{position:fixed;right:16px;bottom:16px;z-index:9991;width:min(380px,calc(100vw - 32px));height:min(560px,calc(100vh - 32px));background:#fff;color:#0f1720;border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,.35);display:flex;flex-direction:column;overflow:hidden;font:15px/1.45 system-ui,sans-serif}' +
@@ -31,8 +38,14 @@
     var d = document.createElement('div'); d.className = 'm ' + from; d.textContent = text; log.appendChild(d); log.scrollTop = log.scrollHeight;
   }
   function build() {
-    box = el('<div class="vac' + (kiosk ? ' k' : '') + '"><header><b>' + (kiosk ? 'Parts assistant - ask me what you need' : 'Parts assistant') + '</b>' + (kiosk ? '<button title="Start over" data-x="new">⟲</button>' : '<button title="Close" data-x="close">✕</button>') + '</header>' +
-      '<div class="log"><div class="m sys">An automated assistant. It can find parts, quote prices and put an order in for you. Please do not type card numbers.</div></div>' +
+    var title = staffOnly
+      ? (kiosk ? 'Ask the counter - tell us what you need' : 'Chat with the counter')
+      : (kiosk ? 'Parts assistant - ask me what you need' : 'Parts assistant');
+    var intro = staffOnly
+      ? 'You are chatting with the parts counter. A member of staff replies here during opening hours. Please do not type card numbers.'
+      : 'An automated assistant. It can find parts, quote prices and put an order in for you. Please do not type card numbers.';
+    box = el('<div class="vac' + (kiosk ? ' k' : '') + '"><header><b>' + title + '</b>' + (kiosk ? '<button title="Start over" data-x="new">⟲</button>' : '<button title="Close" data-x="close">✕</button>') + '</header>' +
+      '<div class="log"><div class="m sys">' + intro + '</div></div>' +
       '<form><input placeholder="e.g. front brake pads for a 2012 Corolla" maxlength="1500" aria-label="Your message"><button>Send</button></form></div>');
     document.body.appendChild(box);
     log = box.querySelector('.log');
@@ -76,8 +89,9 @@
   function start() {
     fetch('/api/ai/status').then(function (r) { return r.json(); }).then(function (s) {
       if (!(kiosk ? s.kiosk : s.web)) { if (kiosk) document.body.insertAdjacentHTML('beforeend', '<p style="text-align:center;font:18px system-ui;margin-top:30vh">The parts assistant is switched off. Please ask at the counter.</p>'); return; }
+      staffOnly = !!s.staff_only;
       if (kiosk) { build(); return; }
-      btn = el('<button class="vac-btn">💬 Ask about a part</button>');
+      btn = el('<button class="vac-btn">💬 ' + (staffOnly ? 'Chat with us' : 'Ask about a part') + '</button>');
       document.body.appendChild(btn);
       btn.onclick = function () { btn.style.display = 'none'; if (!box) build(); else box.style.display = ''; setTimeout(function () { box.querySelector('input').focus(); }, 50); };
     }).catch(function () {});
