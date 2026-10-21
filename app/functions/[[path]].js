@@ -31,6 +31,7 @@ import mountReports from './_routes/reports.js';   // Phase 15 (analytics + repo
 import mountAdminMisc from './_routes/admin_misc.js'; // Phase 15 (settings, marketing, schedule, misc)
 import mountStoreOps from './_routes/storeops.js'; // departments, store locations, cashier (migration 0064)
 import mountGl from './_routes/gl.js'; // general ledger: chart, journal, reports, exports (migration 0064)
+import mountAi from './_routes/ai.js'; // customer chat, answered by staff (migration 0066)
 import { isTillHistoryRead, fromTill } from './_lib/till_gateway.js'; // full-history reads from the till
 
 const app = new Hono();
@@ -59,6 +60,7 @@ mountReports(app);
 mountAdminMisc(app);
 mountStoreOps(app);
 mountGl(app);
+mountAi(app);
 
 // admin.html's checkDbUp() shows a "database is not running" banner unless this
 // reports db:'up', so it must actually probe D1 (a one-row read). D1 has no
@@ -70,7 +72,7 @@ app.get('/api/health', async (c) => {
     await d1(c.env).one("SELECT 1 AS ok");
     db = 'up';
   } catch { db = 'down'; }
-  return c.json({ ok: db === 'up', db, runtime: 'cloudflare-pages', ported_phases: [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15], store_ops: true, gl: true }, db === 'up' ? 200 : 503);
+  return c.json({ ok: db === 'up', db, runtime: 'cloudflare-pages', ported_phases: [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15], store_ops: true, gl: true, ai_chat: 'staff' }, db === 'up' ? 200 : 503);
 });
 
 // D1's free tier stops answering once the daily row-read allowance is used up
