@@ -19,6 +19,14 @@ export default function mount(app) {
     if (!order) return c.json({ ok: true, ignored: 'unknown order' });
 
     if (result.paid) {
+      // Audit H1: a signed "paid" is only good for the amount and currency the
+      // order was raised for. Anything else leaves the order untouched.
+      if (result.amount == null || Math.round(result.amount * 100) !== Number(order.total_cents)) {
+        return c.json({ error: 'amount mismatch' }, 400);
+      }
+      if (result.currency && result.currency !== result.expectedCurrency) {
+        return c.json({ error: 'currency mismatch' }, 400);
+      }
       // Only advance an unpaid order; a replayed webhook is a no-op.
       if (order.payment_status !== 'paid') {
         await db.run(

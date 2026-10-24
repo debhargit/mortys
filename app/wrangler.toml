@@ -94,6 +94,9 @@ TILL_ORIGIN = "https://till.visionautosolutions.com"
 # UUID, display currency and on/off live in shop_settings (Admin -> Settings).
 # The JWT signing secret is a wrangler secret:
 #   npx wrangler pages secret put FYGARO_JWT_SECRET --project-name visionautosolutions
+# The webhook is verified with a second, different secret (the one Fygaro signs
+# its callback with). The webhook rejects everything until this is set:
+#   npx wrangler pages secret put FYGARO_WEBHOOK_SECRET --project-name visionautosolutions
 # In the Fygaro dashboard, set the button's webhook URL to
 #   https://<site>/api/webhooks/fygaro
 # and its return URL to https://<site>/order-success.html (the checkout also

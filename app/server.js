@@ -11626,7 +11626,8 @@ app.get('/api/admin/reports/setup-config', requireAdmin, async (_req, res) => {
         flat_fee: Number(s.ship_local_flat_usd) || 0 },
     },
     card_payment: { fygaro_enabled: !!s.fygaro_enabled, button_configured: has(s.fygaro_button_id),
-      secret: has(process.env.FYGARO_JWT_SECRET), currency: s.fygaro_currency || 'JMD' },
+      secret: has(process.env.FYGARO_JWT_SECRET), webhook_secret: has(process.env.FYGARO_WEBHOOK_SECRET),
+      currency: s.fygaro_currency || 'JMD' },
     counts: counts.rows[0], roles: roles.rows,
   });
 });
