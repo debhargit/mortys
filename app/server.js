@@ -7051,7 +7051,8 @@ app.get('/api/admin/suppliers', requireAdmin, async (req, res) => {
   const { rows } = await query(
     `SELECT id, code, name, contact_name, phone, email, address, website,
             payment_terms, account_number, lead_time_days, notes, is_active, created_at,
-            portal_enabled, web_retail_enabled, credit_limit, credit_set_by
+            portal_enabled, web_retail_enabled, credit_limit, credit_set_by,
+            tax_id, remit_address, payment_terms_days
        FROM suppliers ${where} ORDER BY is_active DESC, name ASC`
   );
   res.json({ suppliers: rows });
@@ -7062,11 +7063,14 @@ app.post('/api/admin/suppliers', requireManager, async (req, res) => {
   if (!b.name) return res.status(400).json({ error: 'name required' });
   try {
     const { rows } = await query(
-      `INSERT INTO suppliers (code, name, contact_name, phone, email, address, website, payment_terms, account_number, lead_time_days, notes, is_active)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+      `INSERT INTO suppliers (code, name, contact_name, phone, email, address, website, payment_terms, account_number, lead_time_days, notes, is_active,
+                              tax_id, remit_address, payment_terms_days)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
       [b.code || null, b.name, b.contact_name || null, b.phone || null, b.email || null,
        b.address || null, b.website || null, b.payment_terms || null, b.account_number || null,
-       b.lead_time_days ? parseInt(b.lead_time_days, 10) : 7, b.notes || null, b.is_active !== false]
+       b.lead_time_days ? parseInt(b.lead_time_days, 10) : 7, b.notes || null, b.is_active !== false,
+       b.tax_id || null, b.remit_address || null,
+       b.payment_terms_days === '' || b.payment_terms_days == null ? null : parseInt(b.payment_terms_days, 10)]
     );
     res.json({ ok: true, id: rows[0].id });
   } catch (e) {
@@ -7076,9 +7080,16 @@ app.post('/api/admin/suppliers', requireManager, async (req, res) => {
 });
 
 app.patch('/api/admin/suppliers/:id', requireManager, async (req, res) => {
-  const fields = ['code','name','contact_name','phone','email','address','website','payment_terms','account_number','lead_time_days','notes','is_active'];
+  const fields = ['code','name','contact_name','phone','email','address','website','payment_terms','account_number','lead_time_days','notes','is_active',
+    'tax_id','remit_address','payment_terms_days'];
+  const ints = ['lead_time_days', 'payment_terms_days'];
   const sets = []; const vals = [];
-  for (const f of fields) if (req.body && req.body[f] !== undefined) { sets.push(`${f} = $${sets.length+1}`); vals.push(req.body[f]); }
+  for (const f of fields) if (req.body && req.body[f] !== undefined) {
+    let v = req.body[f];
+    // A cleared number box sends '', which an INTEGER column refuses.
+    if (ints.includes(f)) v = v === '' || v == null ? null : parseInt(v, 10);
+    sets.push(`${f} = $${sets.length+1}`); vals.push(v);
+  }
   if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
   vals.push(req.params.id);
   await query(`UPDATE suppliers SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
@@ -7088,6 +7099,43 @@ app.patch('/api/admin/suppliers/:id', requireManager, async (req, res) => {
 app.delete('/api/admin/suppliers/:id', requireManager, async (req, res) => {
   await query('UPDATE suppliers SET is_active = false WHERE id = $1', [req.params.id]);
   res.json({ ok: true });
+});
+
+// Items purchased from one supplier, for the supplier record's "Items
+// purchased" tab: every line on a purchase order that was actually placed (not
+// a draft, not cancelled), with ordered and received quantities, plus lines
+// on stock receipts taken in without a PO -- a receipt against a PO is already
+// its PO's lines, so counting it again would double the quantity.
+// The bills tab is /api/admin/suppliers/:id/bills in books.js, beside apDocs.
+app.get('/api/admin/suppliers/:id/items', requireManager, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: 'Bad supplier id' });
+  try {
+    const { rows: po } = await query(
+      `SELECT 'po' AS source, po.id AS po_id, po.po_number AS ref, po.status, po.currency,
+              to_char(COALESCE(po.received_date, po.ordered_at, po.created_at), 'YYYY-MM-DD') AS day,
+              poi.product_img, poi.sku, COALESCE(p.name, poi.description) AS item,
+              COALESCE(poi.qty_ordered, poi.qty)::int AS qty, COALESCE(poi.qty_received, 0)::int AS qty_received,
+              poi.unit_cost_usd::float AS unit_cost,
+              (COALESCE(poi.qty_ordered, poi.qty) * COALESCE(poi.unit_cost_usd, 0))::float AS total
+         FROM purchase_order_items poi
+         JOIN purchase_orders po ON po.id = poi.po_id
+         LEFT JOIN products p ON p.img = poi.product_img
+        WHERE po.supplier_id = $1 AND po.status NOT IN ('cancelled', 'draft')`, [id]);
+    const { rows: rc } = await query(
+      `SELECT 'receipt' AS source, NULL::int AS po_id, r.receipt_number AS ref, r.status, r.currency,
+              to_char(r.received_at, 'YYYY-MM-DD') AS day,
+              rl.product_img, p.sku, COALESCE(p.name, rl.product_img) AS item,
+              (rl.qty_received + rl.qty_damaged)::int AS qty, rl.qty_received::int AS qty_received,
+              rl.unit_cost::float AS unit_cost,
+              ((rl.qty_received + rl.qty_damaged) * COALESCE(rl.unit_cost, 0))::float AS total
+         FROM receipt_lines rl
+         JOIN receipts r ON r.id = rl.receipt_id
+         LEFT JOIN products p ON p.img = rl.product_img
+        WHERE r.supplier_id = $1 AND r.po_id IS NULL AND r.status = 'posted'`, [id]);
+    const items = po.concat(rc).sort((a, b) => String(b.day || '').localeCompare(String(a.day || '')));
+    res.json({ items: items.slice(0, 500) });
+  } catch (e) { console.error('[supplier items]', e); res.status(500).json({ error: e.message }); }
 });
 
 // Extended product PATCH (the existing endpoint only handles a few fields)

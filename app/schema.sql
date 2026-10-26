@@ -1063,6 +1063,9 @@ ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS website          TEXT;
 ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS payment_terms    TEXT;
 ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS account_number   TEXT;
 ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS lead_time_days   INTEGER DEFAULT 7;
+-- QuickBooks-style vendor record: the supplier's TRN and a remit-to address.
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS tax_id           TEXT;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS remit_address    TEXT;
 
 ALTER TABLE services ADD COLUMN IF NOT EXISTS default_labor_usd NUMERIC(10,2);
 ALTER TABLE services ADD COLUMN IF NOT EXISTS default_parts_usd NUMERIC(10,2);

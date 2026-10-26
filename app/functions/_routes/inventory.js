@@ -614,7 +614,8 @@ export default function mount(app) {
   //  SUPPLIERS / VENDORS
   // =====================================================================
   const SUPPLIER_COLS = `id, code, name, contact_name, phone, email, address, website,
-    payment_terms, account_number, lead_time_days, notes, is_active, created_at`;
+    payment_terms, account_number, lead_time_days, notes, is_active, created_at,
+    tax_id, remit_address, payment_terms_days`;
 
   app.get('/api/admin/suppliers', adminMw, async (c) => {
     const where = c.req.query('active') === 'true' ? 'WHERE is_active = 1' : '';
@@ -629,11 +630,14 @@ export default function mount(app) {
     if (!b.name) return c.json({ error: 'name required' }, 400);
     try {
       const r = await db.run(
-        `INSERT INTO suppliers (code, name, contact_name, phone, email, address, website, payment_terms, account_number, lead_time_days, notes, is_active)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO suppliers (code, name, contact_name, phone, email, address, website, payment_terms, account_number, lead_time_days, notes, is_active,
+                                tax_id, remit_address, payment_terms_days)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         b.code || null, b.name, b.contact_name || null, b.phone || null, b.email || null,
         b.address || null, b.website || null, b.payment_terms || null, b.account_number || null,
         b.lead_time_days ? parseInt(b.lead_time_days, 10) : 7, b.notes || null, b.is_active === false ? 0 : 1,
+        b.tax_id || null, b.remit_address || null,
+        b.payment_terms_days === '' || b.payment_terms_days == null ? null : parseInt(b.payment_terms_days, 10),
       );
       return c.json({ ok: true, id: r.meta ? r.meta.last_row_id : undefined });
     } catch (e) {
@@ -645,13 +649,14 @@ export default function mount(app) {
 
   app.patch('/api/admin/suppliers/:id', managerMw, async (c) => {
     const fields = ['code', 'name', 'contact_name', 'phone', 'email', 'address', 'website',
-      'payment_terms', 'account_number', 'lead_time_days', 'notes', 'is_active'];
+      'payment_terms', 'account_number', 'lead_time_days', 'notes', 'is_active',
+      'tax_id', 'remit_address', 'payment_terms_days'];
     const b = await c.req.json().catch(() => ({}));
     const sets = []; const vals = [];
     for (const f of fields) {
       if (b[f] === undefined) continue;
       if (f === 'is_active') { sets.push('is_active = ?'); vals.push(toBit(b[f])); }
-      else if (f === 'lead_time_days') { sets.push('lead_time_days = ?'); vals.push(b[f] == null ? null : parseInt(b[f], 10)); }
+      else if (f === 'lead_time_days' || f === 'payment_terms_days') { sets.push(`${f} = ?`); vals.push(b[f] == null || b[f] === '' ? null : parseInt(b[f], 10)); }
       else { sets.push(`${f} = ?`); vals.push(b[f]); }
     }
     if (!sets.length) return c.json({ error: 'Nothing to update' }, 400);
@@ -663,6 +668,46 @@ export default function mount(app) {
   app.delete('/api/admin/suppliers/:id', managerMw, async (c) => {
     await d1(c.env).run('UPDATE suppliers SET is_active = 0 WHERE id = ?', c.req.param('id'));
     return c.json({ ok: true });
+  });
+
+  // The supplier record's Bills tab. The website has no payables ledger
+  // (bills and supplier payments are kept on the till), so its bills are the
+  // supplier invoices recorded on purchase orders: a PO counts once it has an
+  // invoice number or has been received. paid/open are null rather than 0,
+  // because nothing here knows what has been paid.
+  app.get('/api/admin/suppliers/:id/bills', managerMw, async (c) => {
+    const id = parseInt(c.req.param('id'), 10);
+    if (!id) return c.json({ error: 'Bad supplier id' }, 400);
+    const rows = await d1(c.env).many(
+      `SELECT 'po' AS kind, po.id, po.id AS po_id, COALESCE(po.invoice_number, po.po_number) AS number,
+              substr(COALESCE(po.received_date, po.created_at), 1, 10) AS day, NULL AS due,
+              COALESCE(po.total_cents, 0) / 100.0 AS amount, NULL AS paid, NULL AS open, po.status
+         FROM purchase_orders po
+        WHERE po.supplier_id = ? AND po.status <> 'cancelled'
+          AND (po.invoice_number IS NOT NULL OR po.status IN ('received', 'partial'))
+        ORDER BY day DESC, po.id DESC`, id);
+    const billed = Math.round(rows.reduce((t, r) => t + Number(r.amount || 0), 0) * 100) / 100;
+    return c.json({ bills: rows, totals: { billed, paid: null, open: null }, payments_tracked: false });
+  });
+
+  // Items purchased from one supplier: every line on its purchase orders,
+  // leaving out drafts (not ordered yet) and cancelled ones.
+  app.get('/api/admin/suppliers/:id/items', managerMw, async (c) => {
+    const id = parseInt(c.req.param('id'), 10);
+    if (!id) return c.json({ error: 'Bad supplier id' }, 400);
+    const rows = await d1(c.env).many(
+      `SELECT 'po' AS source, po.id AS po_id, po.po_number AS ref, po.status, 'USD' AS currency,
+              substr(COALESCE(po.received_date, po.created_at), 1, 10) AS day,
+              poi.product_img, poi.sku, COALESCE(p.name, poi.description) AS item,
+              poi.qty_ordered AS qty, COALESCE(poi.qty_received, 0) AS qty_received,
+              poi.unit_cost_cents / 100.0 AS unit_cost,
+              COALESCE(poi.total_cents, poi.qty_ordered * COALESCE(poi.unit_cost_cents, 0)) / 100.0 AS total
+         FROM purchase_order_items poi
+         JOIN purchase_orders po ON po.id = poi.po_id
+         LEFT JOIN products p ON p.img = poi.product_img
+        WHERE po.supplier_id = ? AND po.status NOT IN ('cancelled', 'draft')
+        ORDER BY day DESC, poi.id DESC LIMIT 500`, id);
+    return c.json({ items: rows });
   });
 
   // =====================================================================

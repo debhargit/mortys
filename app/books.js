@@ -435,6 +435,21 @@ function register(app, deps) {
       res.json({ ok: true });
     } catch (e) { fail(res, e); }
   });
+  // The supplier record's Bills tab: every bill and credit from this supplier,
+  // paid or not, newest first. Same apDocs as the Payables screen, so the
+  // paid and balance figures cannot disagree with it.
+  app.get('/api/admin/suppliers/:id/bills', ...AP, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!id) throw httpError(400, 'Bad supplier id');
+      const docs = (await apDocs(id)).reverse();
+      const bills = docs.filter((d) => d.kind !== 'credit');
+      res.json({
+        bills: docs,
+        totals: { billed: r2(bills.reduce((t, d) => t + n(d.amount), 0)), paid: r2(bills.reduce((t, d) => t + d.paid, 0)), open: r2(bills.reduce((t, d) => t + d.open, 0)) },
+      });
+    } catch (e) { fail(res, e); }
+  });
   app.get('/api/ap/bills', ...AP, async (req, res) => {
     try {
       let docs = (await apDocs(parseInt(req.query.supplier, 10) || null)).filter((d) => d.open > 0.005);

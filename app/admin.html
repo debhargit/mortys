@@ -10973,7 +10973,58 @@ async function renderLowStock(panel){
 }
 
 // ============= SUPPLIERS =============
+// QuickBooks-style vendor screens. The add form and the supplier record share
+// supplierTabs() for the editable tabs, so the two cannot drift apart; the
+// record adds read-only Bills and Items purchased tabs.
+var SUP_VIEW_ID = null; // set when drilled into one supplier's record
+var SUP_TAB = { id: null, key: null };
+function supplierTabs(p, s){
+  s = s || {};
+  var v = function(k){ return esc(s[k] == null ? '' : s[k]); };
+  var f = function(label, id, k, attrs, tipText){
+    return '<div>' + flbl(label, tipText) + '<input id="' + p + id + '" class="fld" value="' + v(k) + '"' + (attrs ? ' ' + attrs : '') + '/></div>';
+  };
+  return [
+    { key: 'company', label: 'Company & contact', req: true, html:
+      '<div>' + flbl('Company name', 'As it appears on their invoices.', true) + '<input id="' + p + 'Name" class="fld" value="' + v('name') + '"/></div>' +
+      f('Code', 'Code', 'code', 'placeholder="e.g. NAPA"', 'A short code of your own for this supplier. Must be unique.') +
+      f('Contact name', 'Contact', 'contact_name') +
+      f('Phone', 'Phone', 'phone') +
+      f('Email', 'Email', 'email', 'type="email"') +
+      f('Website', 'Website', 'website', 'placeholder="https://"') +
+      f('Lead time (days)', 'Lead', 'lead_time_days', 'type="number" min="0"', 'Days from ordering to delivery. Reorder suggestions use it.') },
+    { key: 'addr', label: 'Addresses', html:
+      '<div>' + flbl('Address', 'Where they are: the mailing or ship-from address.') + '<textarea id="' + p + 'Address" class="fld" rows="4">' + v('address') + '</textarea></div>' +
+      '<div>' + flbl('Remit-to address', 'Where payments go, if different. Blank = the address beside it.') + '<textarea id="' + p + 'Remit" class="fld" rows="4">' + v('remit_address') + '</textarea></div>' },
+    { key: 'pay', label: 'Payment terms', html:
+      f('Payment terms (days)', 'TermsDays', 'payment_terms_days', 'type="number" min="0" max="365" placeholder="blank = due on receipt"', 'Bills from this supplier fall due this many days after the bill date.') +
+      f('Terms as printed', 'Terms', 'payment_terms', 'placeholder="e.g. Net 30, 2% 10"', 'The terms as the supplier writes them, for reference.') +
+      f('Our account # with them', 'Acct', 'account_number', '', 'The account number the supplier knows you by. Goes on payments and remittances.') +
+      (s.credit_limit != null ? '<div><label class="lbl">Credit limit</label><input class="fld" disabled value="' + esc(fmtMoney(s.credit_limit)) + (s.credit_set_by ? ' (set by ' + esc(s.credit_set_by) + ')' : '') + '"/></div>' : '') },
+    { key: 'tax', label: 'Tax info', html:
+      f('Tax ID (TRN)', 'Tax', 'tax_id', 'placeholder="123-456-789"', 'The supplier\'s Taxpayer Registration Number, as on their GCT invoices.') },
+    { key: 'notes', label: 'Notes', html:
+      '<div class="full">' + flbl('Notes') + '<textarea id="' + p + 'Notes" class="fld" rows="5">' + v('notes') + '</textarea></div>' },
+  ];
+}
+function supplierBody(p){
+  var g = function(id){ var e = document.getElementById(p + id); return e ? e.value.trim() : ''; };
+  return {
+    name: g('Name'), code: g('Code') || null, contact_name: g('Contact') || null,
+    phone: g('Phone') || null, email: g('Email') || null, website: g('Website') || null,
+    lead_time_days: g('Lead') || 7, address: g('Address') || null, remit_address: g('Remit') || null,
+    payment_terms_days: g('TermsDays') === '' ? null : g('TermsDays'), payment_terms: g('Terms') || null,
+    account_number: g('Acct') || null, tax_id: g('Tax') || null, notes: g('Notes') || null,
+  };
+}
+function supMsg(el, kind, text){
+  el.style.display = 'block';
+  el.style.background = kind === 'bad' ? '#fee2e2' : kind === 'ok' ? '#dcfce7' : '#dbeafe';
+  el.style.color = kind === 'bad' ? '#b91c1c' : kind === 'ok' ? '#166534' : '#1e40af';
+  el.textContent = text;
+}
 async function renderSuppliers(panel){
+  if (SUP_VIEW_ID) return renderSupplierDetail(panel, SUP_VIEW_ID);
   panel.innerHTML = '<div class="empty">Loading…</div>';
   var r;
   try { r = await api('/api/admin/suppliers'); }
@@ -10981,36 +11032,39 @@ async function renderSuppliers(panel){
   panel.innerHTML =
     '<details style="border-bottom:1px solid var(--line);background:var(--card-soft)">' +
       '<summary style="padding:12px 16px;cursor:pointer;font-weight:700;color:var(--heading)">+ New supplier</summary>' +
-      '<form id="newSupplier" style="padding:14px 18px;display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:760px" onsubmit="event.preventDefault();submitSupplier();">' +
-        '<div><label class="lbl">Name *</label><input id="supName" required class="fld"/></div>' +
-        '<div><label class="lbl">Code</label><input id="supCode" class="fld" placeholder="e.g. NAPA"/></div>' +
-        '<div><label class="lbl">Contact name</label><input id="supContact" class="fld"/></div>' +
-        '<div><label class="lbl">Phone</label><input id="supPhone" class="fld"/></div>' +
-        '<div><label class="lbl">Email</label><input id="supEmail" type="email" class="fld"/></div>' +
-        '<div><label class="lbl">Lead time (days)</label><input id="supLead" type="number" min="0" class="fld" value="7"/></div>' +
-        '<div style="grid-column:1/-1"><label class="lbl">Address</label><input id="supAddress" class="fld"/></div>' +
-        '<div id="supMsg" style="grid-column:1/-1;display:none;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
-        '<button type="submit" style="grid-column:1/-1;background:var(--red);color:#fff;border:0;padding:11px 22px;border-radius:7px;font-weight:700;cursor:pointer">Save supplier</button>' +
+      '<form id="newSupplier" novalidate style="padding:14px 18px;max-width:820px" onsubmit="event.preventDefault();submitSupplier();">' +
+        formTabs(supplierTabs('sup', { lead_time_days: 7 })) +
+        '<div id="supMsg" style="display:none;margin-top:10px;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
+        '<div class="fnav">' + FNAV +
+          '<button type="submit" style="margin-left:auto;background:var(--red);color:#fff;border:0;padding:11px 22px;border-radius:7px;font-weight:700;cursor:pointer">Save supplier</button>' +
+        '</div>' +
       '</form>' +
     '</details>' +
     (r.suppliers.length
-      ? '<table><thead><tr><th>Name</th><th>Code</th><th>Contact</th><th>Phone / Email</th><th>Lead time</th><th>Status</th><th></th></tr></thead><tbody>' +
+      ? '<table><thead><tr><th>Name</th><th>Code</th><th>Contact</th><th>Phone / Email</th><th>Terms</th><th>Lead time</th><th>Status</th><th></th></tr></thead><tbody>' +
         r.suppliers.map(function(s){
           return '<tr' + (!s.is_active ? ' style="opacity:.55"' : '') + '>' +
             '<td><b>' + esc(s.name) + '</b></td>' +
             '<td>' + esc(s.code || '—') + '</td>' +
             '<td>' + esc(s.contact_name || '—') + '</td>' +
             '<td>' + esc(s.phone || '') + (s.email ? '<br/><small>' + esc(s.email) + '</small>' : '') + '</td>' +
+            '<td>' + (s.payment_terms_days != null ? 'Net ' + s.payment_terms_days : esc(s.payment_terms || '—')) + '</td>' +
             '<td>' + (s.lead_time_days != null ? s.lead_time_days + ' days' : '—') + '</td>' +
             '<td>' + badge(s.is_active ? 'active' : 'inactive', s.is_active ? 'ok' : 'bad') + '</td>' +
-            '<td class="actions"><button class="btn" data-toggle="' + s.id + '" data-active="' + s.is_active + '">' + (s.is_active ? 'Deactivate' : 'Reactivate') + '</button></td>' +
+            '<td class="actions"><button class="btn" data-open="' + s.id + '">Open</button> ' +
+              '<button class="btn" data-toggle="' + s.id + '" data-active="' + s.is_active + '">' + (s.is_active ? 'Deactivate' : 'Reactivate') + '</button></td>' +
           '</tr>';
         }).join('') + '</tbody></table>'
       : '<div class="empty">No suppliers yet — add one above.</div>');
 
+  wireFormTabs(document.getElementById('newSupplier'));
+  panel.querySelectorAll('[data-open]').forEach(function(b){
+    b.addEventListener('click', function(){ SUP_VIEW_ID = b.getAttribute('data-open'); renderSuppliers(panel); });
+  });
   panel.querySelectorAll('[data-toggle]').forEach(function(b){
     b.addEventListener('click', async function(){
       var id = b.getAttribute('data-toggle');
+      // D1 returns is_active as a real boolean, Postgres too; both print as 'true'.
       var wasActive = b.getAttribute('data-active') === 'true';
       try { await api('/api/admin/suppliers/' + id, { method:'PATCH', body: { is_active: !wasActive } }); show('suppliers'); }
       catch (e) { alert(e.message); }
@@ -11019,21 +11073,116 @@ async function renderSuppliers(panel){
 }
 async function submitSupplier(){
   var msg = document.getElementById('supMsg');
-  msg.style.display = 'block'; msg.style.background = '#dbeafe'; msg.style.color = '#1e40af'; msg.textContent = 'Saving…';
+  var body = supplierBody('sup');
+  var bad = formTabsCheck(document.getElementById('newSupplier'), [{ id: 'supName', ok: !!body.name, msg: 'Enter the supplier\'s name.' }]);
+  if (bad) { supMsg(msg, 'bad', bad); return; }
+  supMsg(msg, 'info', 'Saving…');
   try {
-    await api('/api/admin/suppliers', { method:'POST', body: {
-      name: document.getElementById('supName').value.trim(),
-      code: document.getElementById('supCode').value.trim() || null,
-      contact_name: document.getElementById('supContact').value.trim() || null,
-      phone: document.getElementById('supPhone').value.trim() || null,
-      email: document.getElementById('supEmail').value.trim() || null,
-      lead_time_days: document.getElementById('supLead').value || 7,
-      address: document.getElementById('supAddress').value.trim() || null,
-    }});
+    await api('/api/admin/suppliers', { method:'POST', body: body });
     show('suppliers');
-  } catch (e) {
-    msg.style.background = '#fee2e2'; msg.style.color = '#b91c1c'; msg.textContent = e.message;
+  } catch (e) { supMsg(msg, 'bad', e.message); }
+}
+
+async function renderSupplierDetail(panel, id){
+  panel.innerHTML = '<div class="empty">Loading…</div>';
+  var s;
+  try { s = ((await api('/api/admin/suppliers')).suppliers || []).find(function(x){ return String(x.id) === String(id); }); }
+  catch (e) { panel.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return; }
+  if (!s) { SUP_VIEW_ID = null; return renderSuppliers(panel); }
+  panel.innerHTML =
+    '<div style="padding:11px 14px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+      '<button class="btn" id="supBack">‹ All suppliers</button>' +
+      '<div style="font-weight:800;font-size:15px;color:var(--heading)">' + esc(s.name) +
+        (s.code ? ' <small style="color:var(--muted);font-weight:600">' + esc(s.code) + '</small>' : '') + '</div>' +
+      badge(s.is_active ? 'active' : 'inactive', s.is_active ? 'ok' : 'bad') +
+      '<span style="margin-left:auto;display:flex;gap:8px;align-items:center">' +
+        '<span id="sedMsg" style="display:none;padding:7px 10px;border-radius:6px;font-size:12.5px"></span>' +
+        '<button type="button" id="sedSave" style="background:var(--red);color:#fff;border:0;padding:9px 20px;border-radius:7px;font-weight:700;cursor:pointer">Save supplier</button>' +
+      '</span>' +
+    '</div>' +
+    '<div id="supTabsRoot" style="padding:14px 16px 16px">' +
+      formTabs(supplierTabs('sed', s).concat([
+        { key: 'bills', label: 'Bills', html: '<div class="full" id="supBills"><small style="color:var(--muted)">Loading…</small></div>' },
+        { key: 'items', label: 'Items purchased', html: '<div class="full" id="supItems"><small style="color:var(--muted)">Loading…</small></div>' },
+      ])) +
+    '</div>';
+
+  document.getElementById('supBack').addEventListener('click', function(){ SUP_VIEW_ID = null; renderSuppliers(panel); });
+  var root = document.getElementById('supTabsRoot');
+  wireFormTabs(root, function(k){ SUP_TAB = { id: String(id), key: k }; });
+  if (SUP_TAB.id === String(id) && SUP_TAB.key) openFormTab(root, SUP_TAB.key);
+  async function save(){
+    var msg = document.getElementById('sedMsg');
+    var body = supplierBody('sed');
+    var bad = formTabsCheck(root, [{ id: 'sedName', ok: !!body.name, msg: 'The supplier needs a name.' }]);
+    if (bad) { supMsg(msg, 'bad', bad); return; }
+    supMsg(msg, 'info', 'Saving…');
+    try { await api('/api/admin/suppliers/' + id, { method: 'PATCH', body: body }); supMsg(msg, 'ok', 'Saved'); }
+    catch (e) { supMsg(msg, 'bad', e.message); }
   }
+  document.getElementById('sedSave').addEventListener('click', save);
+  root.addEventListener('keydown', function(e){
+    if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT' && /^sed/.test(e.target.id || '')) { e.preventDefault(); save(); }
+  });
+
+  // ---- Bills: the supplier's invoices and credits, with what is still owed ----
+  (async function(){
+    var box = document.getElementById('supBills');
+    var r;
+    try { r = await api('/api/admin/suppliers/' + id + '/bills'); }
+    catch (e) { box.innerHTML = '<small style="color:var(--red)">' + esc(e.message) + '</small>'; return; }
+    var b = r.bills || [], t = r.totals || {};
+    var KIND = { bill: 'Bill', credit: 'Credit', receipt: 'Stock receipt', po: 'PO invoice' };
+    box.innerHTML =
+      '<div style="display:flex;gap:22px;flex-wrap:wrap;font-size:12.5px;margin-bottom:10px">' +
+        '<div><div class="lbl">Billed</div><b style="font-size:15px">' + fmtMoney(t.billed) + '</b></div>' +
+        (r.payments_tracked === false ? '' :
+          '<div><div class="lbl">Paid</div><b style="font-size:15px">' + fmtMoney(t.paid) + '</b></div>' +
+          '<div><div class="lbl">Balance owed</div><b style="font-size:15px;color:' + (t.open > 0.005 ? '#b91c1c' : 'var(--ink)') + '">' + fmtMoney(t.open) + '</b></div>') +
+        '<a class="btn" href="/payables.html" style="margin-left:auto;align-self:center;text-decoration:none;font-size:12px">Open Payables ›</a>' +
+      '</div>' +
+      (r.payments_tracked === false ? '<small style="color:var(--muted);display:block;margin-bottom:8px">Supplier payments are recorded on the till, so paid and balance show there.</small>' : '') +
+      (b.length
+        ? '<table style="width:100%;font-size:12.5px"><thead><tr><th align="left">Date</th><th align="left">Number</th><th align="left">Type</th><th align="left">Due</th>' +
+            '<th align="right">Amount</th><th align="right">Paid</th><th align="right">Balance</th></tr></thead><tbody>' +
+            b.map(function(x){
+              var credit = x.kind === 'credit', overdue = x.days_overdue > 0 && x.open > 0.005;
+              return '<tr><td>' + esc(x.day || '—') + '</td>' +
+                '<td><b>' + esc(x.number || '—') + '</b>' + (x.memo ? '<br/><small style="color:var(--muted)">' + esc(x.memo) + '</small>' : '') + '</td>' +
+                '<td>' + esc(KIND[x.kind] || x.kind) + '</td>' +
+                '<td' + (overdue ? ' style="color:#b91c1c;font-weight:700" title="' + x.days_overdue + ' days overdue"' : '') + '>' + esc(x.due || '—') + '</td>' +
+                '<td align="right">' + (credit ? '−' : '') + fmtMoney(x.amount) + '</td>' +
+                '<td align="right">' + fmtMoney(x.paid) + '</td>' +
+                '<td align="right"><b>' + (x.open == null ? '—' : x.open > 0.005 ? (credit ? '−' : '') + fmtMoney(x.open) : badge('paid', 'ok')) + '</b></td></tr>';
+            }).join('') + '</tbody></table>'
+        : '<div class="empty" style="padding:14px 0">No bills from this supplier yet.</div>');
+  })();
+
+  // ---- Items purchased: every PO line, and stock taken in without a PO ----
+  (async function(){
+    var box = document.getElementById('supItems');
+    var r;
+    try { r = await api('/api/admin/suppliers/' + id + '/items'); }
+    catch (e) { box.innerHTML = '<small style="color:var(--red)">' + esc(e.message) + '</small>'; return; }
+    var it = r.items || [];
+    box.innerHTML = it.length
+      ? '<table style="width:100%;font-size:12.5px"><thead><tr><th align="left">Date</th><th align="left">Item</th><th align="left">PO / receipt</th>' +
+          '<th align="right">Qty</th><th align="right">Received</th><th align="right">Unit cost</th><th align="right">Total</th></tr></thead><tbody>' +
+          it.map(function(x){
+            return '<tr><td>' + esc(x.day || '—') + '</td>' +
+              '<td><b>' + esc(x.item || '—') + '</b>' + (x.sku ? '<br/><small style="color:var(--muted)">' + esc(x.sku) + '</small>' : '') + '</td>' +
+              '<td>' + (x.po_id ? '<a href="#" data-po="' + x.po_id + '">' + esc(x.ref || '') + '</a>' : esc(x.ref || '—')) +
+                (x.status ? ' <small style="color:var(--muted)">' + esc(x.status) + '</small>' : '') + '</td>' +
+              '<td align="right">' + rNum(x.qty) + '</td>' +
+              '<td align="right">' + rNum(x.qty_received) + '</td>' +
+              '<td align="right">' + fmtMoney(x.unit_cost) + '</td>' +
+              '<td align="right">' + fmtMoney(x.total) + '</td></tr>';
+          }).join('') + '</tbody></table>'
+      : '<div class="empty" style="padding:14px 0">Nothing bought from this supplier yet.</div>';
+    box.querySelectorAll('[data-po]').forEach(function(a){
+      a.addEventListener('click', function(e){ e.preventDefault(); PO_VIEW_ID = a.getAttribute('data-po'); show('purchaseorders'); });
+    });
+  })();
 }
 
 // ============= PURCHASE ORDERS =============
@@ -12041,6 +12190,10 @@ async function renderMaintDue(panel){
 
 // ============= CUSTOMERS (CRM) =============
 var CUST_VIEW_ID = null;
+// The customer record's open tab, kept across the re-render that follows
+// saving an address, reminder or payment -- otherwise every save would jump
+// back to the first tab.
+var CUST_TAB = { id: null, key: null };
 var CUST_Q = '';
 // Which slice of the customer file is on screen. Online customers signed
 // themselves up on the storefront; counter customers were created for them at
@@ -12084,21 +12237,37 @@ async function renderCustomers(panel){
     // along and this screen could only edit people who already existed.
     '<details style="border-bottom:1px solid var(--line);background:var(--card-soft)">' +
       '<summary style="padding:12px 16px;cursor:pointer;font-weight:700;color:var(--heading)">+ New customer</summary>' +
-      '<form style="padding:14px 18px;display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:820px" onsubmit="event.preventDefault();submitNewCustomer();">' +
-        '<div><label class="lbl">Name *</label><input id="ncName" required class="fld"/></div>' +
-        '<div><label class="lbl">Phone</label><input id="ncPhone" class="fld"/></div>' +
-        '<div><label class="lbl">Email <small style="color:var(--muted)">optional</small></label><input id="ncEmail" type="email" class="fld" placeholder="blank = counter customer"/></div>' +
-        '<div><label class="lbl">Company</label><input id="ncCompany" class="fld"/></div>' +
-        '<div><label class="lbl">Category</label><select id="ncType" class="fld"><option value="">—</option>' +
-          CUST_TYPE_OPTS.map(function(t){ return '<option value="' + t + '">' + t + '</option>'; }).join('') + '</select></div>' +
-        '<div><label class="lbl">Price tier</label><select id="ncTier" class="fld">' +
-          CUST_TYPE_OPTS.map(function(t){ return '<option value="' + t + '"' + (t === 'retail' ? ' selected' : '') + '>' + t + '</option>'; }).join('') + '</select></div>' +
-        '<div><label class="lbl">Credit type</label><select id="ncCreditType" class="fld"><option value="">—</option>' +
-          CREDIT_TYPE_OPTS.map(function(o){ return '<option value="' + o[0] + '">' + o[1] + '</option>'; }).join('') + '</select></div>' +
-        '<div><label class="lbl">Credit limit (USD)</label><input id="ncCredit" type="number" min="0" step="0.01" class="fld"/></div>' +
-        '<div style="grid-column:1/-1"><label class="lbl">Notes</label><input id="ncNotes" class="fld"/></div>' +
-        '<div id="ncMsg" style="grid-column:1/-1;display:none;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
-        '<button type="submit" style="grid-column:1/-1;background:var(--red);color:#fff;border:0;padding:11px 22px;border-radius:7px;font-weight:700;cursor:pointer">Create customer</button>' +
+      // Tabbed like the customer record it opens into. Addresses and contacts
+      // need the record to exist first, so they are added on the record.
+      '<form id="newCustForm" novalidate style="padding:14px 18px;max-width:820px" onsubmit="event.preventDefault();submitNewCustomer();">' +
+        formTabs([
+          { key: 'info', label: 'Customer info', req: true, html:
+            '<div><label class="lbl">Name *</label><input id="ncName" class="fld"/></div>' +
+            '<div><label class="lbl">Phone</label><input id="ncPhone" class="fld"/></div>' +
+            '<div><label class="lbl">Email <small style="color:var(--muted)">optional</small></label><input id="ncEmail" type="email" class="fld" placeholder="blank = counter customer"/></div>' +
+            '<div><label class="lbl">Company</label><input id="ncCompany" class="fld"/></div>' +
+            '<div><label class="lbl">Category</label><select id="ncType" class="fld"><option value="">—</option>' +
+              CUST_TYPE_OPTS.map(function(t){ return '<option value="' + t + '">' + t + '</option>'; }).join('') + '</select></div>' +
+            '<div><label class="lbl">Account #</label><input id="ncAcct" class="fld" placeholder="blank = auto-assigned"/></div>' },
+          { key: 'pay', label: 'Payment & billing', html:
+            '<div><label class="lbl">Price tier</label><select id="ncTier" class="fld">' +
+              CUST_TYPE_OPTS.map(function(t){ return '<option value="' + t + '"' + (t === 'retail' ? ' selected' : '') + '>' + t + '</option>'; }).join('') + '</select></div>' +
+            '<div><label class="lbl">Discount %</label><input id="ncDisc" type="number" min="0" max="100" step="0.1" class="fld"/></div>' +
+            '<div><label class="lbl">Credit type</label><select id="ncCreditType" class="fld"><option value="">—</option>' +
+              CREDIT_TYPE_OPTS.map(function(o){ return '<option value="' + o[0] + '">' + o[1] + '</option>'; }).join('') + '</select></div>' +
+            '<div><label class="lbl">Credit limit (USD)</label><input id="ncCredit" type="number" min="0" step="0.01" class="fld"/></div>' +
+            '<div><label class="lbl">Credit length (months)</label><input id="ncCreditLen" type="number" min="0" step="1" class="fld" placeholder="blank = open-ended"/></div>' +
+            '<div><label class="lbl">Payment terms (days)</label><input id="ncTerms" type="number" min="0" step="1" class="fld" placeholder="blank = no credit"/></div>' },
+          { key: 'tax', label: 'Tax info', html:
+            '<div><label class="lbl">Tax status</label><select id="ncTaxExempt" class="fld"><option value="0">Taxable (GCT applies)</option><option value="1">Tax exempt (no GCT)</option></select></div>' +
+            '<div><label class="lbl">Tax ID</label><input id="ncTax" class="fld" placeholder="TRN / exemption cert #"/></div>' },
+          { key: 'notes', label: 'Notes', html:
+            '<div class="full"><label class="lbl">Notes</label><textarea id="ncNotes" class="fld" rows="3"></textarea></div>' },
+        ]) +
+        '<div id="ncMsg" style="display:none;margin-top:10px;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
+        '<div class="fnav">' + FNAV +
+          '<button type="submit" style="margin-left:auto;background:var(--red);color:#fff;border:0;padding:11px 22px;border-radius:7px;font-weight:700;cursor:pointer">Create customer</button>' +
+        '</div>' +
       '</form>' +
     '</details>' +
     '<div id="custList"><div class="empty">Loading…</div></div>';
@@ -12188,6 +12357,7 @@ async function renderCustomers(panel){
       renderCustomers(panel);
     });
   });
+  wireFormTabs(document.getElementById('newCustForm'));
   document.getElementById('custGo').addEventListener('click', load);
   document.getElementById('custType').addEventListener('change', load);
   document.getElementById('custQ').addEventListener('keydown', function(e){ if (e.key === 'Enter') load(); });
@@ -12538,260 +12708,325 @@ async function renderCustomerDetail(panel, id){
   var u = d.user;
 
   panel.innerHTML =
-    '<div style="padding:11px 14px;border-bottom:1px solid var(--line)"><button class="btn" id="custBack">‹ All customers</button></div>' +
-    '<div style="display:grid;grid-template-columns:1.2fr 1fr;gap:16px;padding:16px">' +
-      '<div class="panel">' +
-        '<div style="padding:12px 16px;border-bottom:1px solid var(--line);font-weight:700;font-size:13px">👤 Profile</div>' +
-        '<form id="custProfile" style="padding:14px 16px;display:grid;grid-template-columns:1fr 1fr;gap:9px" onsubmit="event.preventDefault();submitCustProfile(' + id + ');">' +
-          '<div><label class="lbl">Name</label><input id="cpName" class="fld" value="' + esc(u.name || '') + '"/></div>' +
-          '<div><label class="lbl">Phone</label><input id="cpPhone" class="fld" value="' + esc(u.phone || '') + '"/></div>' +
-          '<div><label class="lbl">Email (read-only)</label><input class="fld" value="' + esc(u.email) + '" disabled/></div>' +
-          '<div><label class="lbl">Account #</label><input id="cpAcct" class="fld" value="' + esc(u.account_number || '') + '" placeholder="auto-assigned"/></div>' +
-          '<div><label class="lbl">Company</label><input id="cpCompany" class="fld" value="' + esc(u.company_name || '') + '"/></div>' +
-          '<div><label class="lbl">Type</label><select id="cpType" class="fld"><option value="">—</option>' +
-            CUST_TYPE_OPTS.map(function(t){ return '<option value="' + t + '"' + (t===u.customer_type?' selected':'') + '>' + t + '</option>'; }).join('') + '</select></div>' +
-          '<div><label class="lbl">Price tier</label><input id="cpTier" class="fld" value="' + esc(u.price_tier || '') + '" placeholder="retail/trade/fleet/dealer"/></div>' +
-          '<div><label class="lbl">Discount %</label><input id="cpDisc" type="number" min="0" max="100" step="0.1" class="fld" value="' + (u.discount_pct != null ? u.discount_pct : '') + '"/></div>' +
-          // The mirror of Discount %: what this account is charged ABOVE list.
-          // The POS marks every non-manually-priced line up by this, so the
-          // invoice prints the increased unit price rather than list plus a
-          // surcharge. Blank or 0 = charge list.
-          '<div><label class="lbl">Markup % (charge above list)</label><input id="cpMarkup" type="number" min="0" max="100" step="0.1" class="fld" placeholder="blank = list price" value="' + (u.markup_pct != null ? u.markup_pct : '') + '"/></div>' +
-          // The four credit presets the counter quotes from, kept together:
-          // type (how it settles), limit (how much), length (how long before
-          // review), term (how many days to pay).
-          '<div><label class="lbl">Credit type</label><select id="cpCreditType" class="fld"><option value="">—</option>' +
-            CREDIT_TYPE_OPTS.map(function(o){
-              return '<option value="' + o[0] + '"' + (o[0] === u.credit_type ? ' selected' : '') + '>' + o[1] + '</option>';
-            }).join('') + '</select></div>' +
-          '<div><label class="lbl">Credit limit (USD)</label><input id="cpCredit" type="number" min="0" step="0.01" class="fld" value="' + (u.credit_limit_usd != null ? u.credit_limit_usd : '') + '"/></div>' +
-          '<div><label class="lbl">Credit length (months)</label><input id="cpCreditLen" type="number" min="0" step="1" class="fld" placeholder="blank = open-ended" value="' + (u.credit_length_months != null ? u.credit_length_months : '') + '"/></div>' +
-          '<div><label class="lbl">Payment terms (days)</label><input id="cpTerms" type="number" min="0" step="1" class="fld" placeholder="blank = no credit" value="' + (u.payment_terms_days != null ? u.payment_terms_days : '') + '"/></div>' +
-          '<div><label class="lbl">Discount limit (cashier ceiling, %)</label><input id="cpDiscLimit" type="number" min="0" max="100" step="0.1" class="fld" placeholder="blank = no ceiling" value="' + (u.discount_limit_pct != null ? u.discount_limit_pct : '') + '"/></div>' +
-          '<div><label class="lbl">Tax status</label><select id="cpTaxExempt" class="fld"><option value="0"' + (!u.tax_exempt ? ' selected' : '') + '>Taxable (GCT applies)</option><option value="1"' + (u.tax_exempt ? ' selected' : '') + '>Tax exempt (no GCT)</option></select></div>' +
-          '<div><label class="lbl">Tax ID</label><input id="cpTax" class="fld" value="' + esc(u.tax_id || '') + '" placeholder="TRN / exemption cert #"/></div>' +
-          '<div><label class="lbl">Rating</label><input id="cpRating" type="number" min="1" max="5" class="fld" value="' + (u.rating != null ? u.rating : '') + '"/></div>' +
-          '<div style="grid-column:1/-1"><label class="lbl">Internal notes</label><textarea id="cpNotes" class="fld" rows="2">' + esc(u.internal_notes || '') + '</textarea></div>' +
-          '<div id="cpMsg" style="grid-column:1/-1;display:none;padding:9px 11px;border-radius:6px;font-size:12.5px"></div>' +
-          '<button type="submit" style="grid-column:1/-1;background:var(--red);color:#fff;border:0;padding:10px 20px;border-radius:7px;font-weight:700;cursor:pointer">Save profile</button>' +
-        '</form>' +
-      '</div>' +
-      '<div style="display:flex;flex-direction:column;gap:16px">' +
-        '<div class="panel">' +
-          '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">💳 Account</div>' +
-          '<div style="padding:12px 14px;font-size:12.5px;display:flex;gap:20px;flex-wrap:wrap">' +
-            '<div><div class="lbl">Loyalty points</div><b style="font-size:16px">' + d.points_balance + '</b></div>' +
-            '<div><div class="lbl">Orders</div><b>' + d.orders.length + '</b></div>' +
-            '<div><div class="lbl">Since</div>' + fmtDate(u.created_at) + '</div>' +
-            (d.account_balance_usd > 0
-              ? '<div><div class="lbl">On account</div><b style="color:' + (u.credit_limit_usd != null && d.account_balance_usd > u.credit_limit_usd ? '#b91c1c' : 'var(--ink)') + '">' + fmtMoney(d.account_balance_usd) +
-                  (u.credit_limit_usd != null ? ' <small style="color:var(--muted);font-weight:400">/ ' + fmtMoney(u.credit_limit_usd) + ' limit</small>' : '') + '</b></div>'
-              : '') +
-            (u.payment_terms_days != null ? '<div><div class="lbl">Terms</div><b>Net ' + u.payment_terms_days + '</b></div>' : '') +
+    // QuickBooks-style customer record: one header with the save button, and
+    // the record split into tabs. The profile fields keep their ids, so
+    // submitCustProfile() reads them wherever they sit; the panels with their
+    // own forms (addresses, contacts, reminders, payments...) sit in the tab
+    // they belong to, unchanged. formTabs() is the helper "Add new part" uses.
+    '<div style="padding:11px 14px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+      '<button class="btn" id="custBack">‹ All customers</button>' +
+      '<div style="font-weight:800;font-size:15px;color:var(--heading)">' + esc(u.name || u.email) +
+        (u.account_number ? ' <small style="color:var(--muted);font-weight:600">' + esc(u.account_number) + '</small>' : '') + '</div>' +
+      '<span style="margin-left:auto;display:flex;gap:8px;align-items:center">' +
+        '<span id="cpMsg" style="display:none;padding:7px 10px;border-radius:6px;font-size:12.5px"></span>' +
+        '<button type="button" id="cpSave" style="background:var(--red);color:#fff;border:0;padding:9px 20px;border-radius:7px;font-weight:700;cursor:pointer">Save profile</button>' +
+      '</span>' +
+    '</div>' +
+    '<div id="custTabsRoot" style="padding:14px 16px 16px">' +
+      formTabs([
+        { key: 'info', label: 'Customer info', html:
+            '<div><label class="lbl">Name</label><input id="cpName" class="fld" value="' + esc(u.name || '') + '"/></div>' +
+            '<div><label class="lbl">Phone</label><input id="cpPhone" class="fld" value="' + esc(u.phone || '') + '"/></div>' +
+            '<div><label class="lbl">Email (read-only)</label><input class="fld" value="' + esc(u.email) + '" disabled/></div>' +
+            '<div><label class="lbl">Account #</label><input id="cpAcct" class="fld" value="' + esc(u.account_number || '') + '" placeholder="auto-assigned"/></div>' +
+            '<div><label class="lbl">Company</label><input id="cpCompany" class="fld" value="' + esc(u.company_name || '') + '"/></div>' +
+            '<div><label class="lbl">Type</label><select id="cpType" class="fld"><option value="">—</option>' +
+              CUST_TYPE_OPTS.map(function(t){ return '<option value="' + t + '"' + (t===u.customer_type?' selected':'') + '>' + t + '</option>'; }).join('') + '</select></div>' +
+            '<div><label class="lbl">Rating</label><input id="cpRating" type="number" min="1" max="5" class="fld" value="' + (u.rating != null ? u.rating : '') + '"/></div>' +
+          '<div class="full">' +
+          '<div class="panel">' +
+            '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">💳 Account</div>' +
+            '<div style="padding:12px 14px;font-size:12.5px;display:flex;gap:20px;flex-wrap:wrap">' +
+              '<div><div class="lbl">Loyalty points</div><b style="font-size:16px">' + d.points_balance + '</b></div>' +
+              '<div><div class="lbl">Orders</div><b>' + d.orders.length + '</b></div>' +
+              '<div><div class="lbl">Since</div>' + fmtDate(u.created_at) + '</div>' +
+              (d.account_balance_usd > 0
+                ? '<div><div class="lbl">On account</div><b style="color:' + (u.credit_limit_usd != null && d.account_balance_usd > u.credit_limit_usd ? '#b91c1c' : 'var(--ink)') + '">' + fmtMoney(d.account_balance_usd) +
+                    (u.credit_limit_usd != null ? ' <small style="color:var(--muted);font-weight:400">/ ' + fmtMoney(u.credit_limit_usd) + ' limit</small>' : '') + '</b></div>'
+                : '') +
+              (u.payment_terms_days != null ? '<div><div class="lbl">Terms</div><b>Net ' + u.payment_terms_days + '</b></div>' : '') +
+            '</div>' +
           '</div>' +
-        '</div>' +
-        (['owner', 'manager'].includes(CURRENT_ADMIN_ROLE)
-          ? '<div class="panel">' +
-              '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">🔑 Staff Access</div>' +
-              '<div style="padding:12px 14px;font-size:12.5px">' +
-                (u.is_admin
-                  ? '<div style="margin-bottom:10px">' + badge('staff — ' + (u.admin_role || 'manager'), 'ok') + '</div>' +
-                    '<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">' +
-                      '<div><label class="lbl">Role</label><select id="custRoleSel" class="fld">' +
-                        (CURRENT_ADMIN_ROLE === 'owner' ? '<option value="owner"' + (u.admin_role === 'owner' ? ' selected' : '') + '>owner</option>' : '') +
-                        '<option value="manager"' + (u.admin_role === 'manager' ? ' selected' : '') + '>manager</option>' +
-                        '<option value="cashier"' + (u.admin_role === 'cashier' ? ' selected' : '') + '>cashier</option>' +
+          '</div>' },
+        { key: 'addr', label: 'Address info', html:
+          '<div>' +
+          '<div class="panel">' +
+            '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">📍 Addresses</div>' +
+            '<div style="padding:10px 14px">' +
+              // Shipping and billing are separate kinds on the same table, and the
+              // storefront picks the default shipping one at checkout -- so both
+              // the kind and the default flag have to be settable here. The old
+              // form wrote line1/city/phone only, leaving kind at its 'shipping'
+              // default and every other column permanently null.
+              (addr.length ? addr.map(function(a){
+                return '<div id="adRow' + a.id + '" style="font-size:12.5px;padding:6px 0;border-bottom:1px solid var(--line)">' +
+                  '<div>' + (a.is_default ? badge('default','ok') + ' ' : '') +
+                    badge(a.kind || 'shipping', a.kind === 'billing' ? 'info' : 'ok') + ' ' +
+                    '<b>' + esc(a.label || '') + '</b>' +
+                    '<span style="float:right">' +
+                      '<button class="btn" data-aedit="' + a.id + '" style="padding:1px 7px;font-size:11px">Edit</button> ' +
+                      '<button class="btn" data-adel="' + a.id + '" style="padding:1px 7px;font-size:11px">Delete</button>' +
+                    '</span></div>' +
+                  esc([a.recipient, a.line1, a.line2, a.city, a.parish, a.postal_code, a.country].filter(Boolean).join(', ')) +
+                  (a.phone ? '<br/><small>' + esc(a.phone) + '</small>' : '') +
+                  '<div id="adEd' + a.id + '" style="display:none;margin-top:6px">' + addressForm('e' + a.id, a) +
+                    '<button class="btn ok" data-asave="' + a.id + '" style="margin-top:6px">Save</button> ' +
+                    '<span id="adMsg' + a.id + '" style="font-size:11.5px"></span>' +
+                  '</div>' +
+                '</div>';
+              }).join('') : '<div class="empty" style="padding:14px 0">No addresses on file.</div>') +
+              '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--sky-dark);font-weight:700">+ Add address</summary>' +
+                '<form style="margin-top:8px" onsubmit="event.preventDefault();submitAddress(' + id + ');">' +
+                  addressForm('n', {}) +
+                  '<button type="submit" class="btn ok" style="width:fit-content;margin-top:6px">Save</button>' +
+                '</form></details>' +
+            '</div>' +
+          '</div>' +
+          '</div><div>' +
+          '<div class="panel">' +
+            '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">👥 Contacts</div>' +
+            '<div style="padding:10px 14px">' +
+              (contacts.length ? contacts.map(function(c){
+                return '<div style="font-size:12.5px;padding:6px 0;border-bottom:1px solid var(--line)">' +
+                  (c.is_primary ? badge('primary','ok') + ' ' : '') + '<b>' + esc(c.name) + '</b>' + (c.title ? ' — ' + esc(c.title) : '') +
+                  (c.phone ? '<br/><small>' + esc(c.phone) + '</small>' : '') + (c.email ? ' <small>' + esc(c.email) + '</small>' : '') + '</div>';
+              }).join('') : '<div class="empty" style="padding:14px 0">No extra contacts.</div>') +
+              '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--sky-dark);font-weight:700">+ Add contact</summary>' +
+                '<form style="margin-top:8px;display:grid;gap:6px" onsubmit="event.preventDefault();submitContact(' + id + ');">' +
+                  '<input id="ctName" class="fld" placeholder="Name *" required/>' +
+                  '<input id="ctTitle" class="fld" placeholder="Title"/>' +
+                  '<input id="ctPhone" class="fld" placeholder="Phone"/>' +
+                  '<button type="submit" class="btn ok" style="width:fit-content">Save</button>' +
+                '</form></details>' +
+            '</div>' +
+          '</div>' +
+          '</div>' },
+        { key: 'pay', label: 'Payment & billing', html:
+            '<div><label class="lbl">Price tier</label><input id="cpTier" class="fld" value="' + esc(u.price_tier || '') + '" placeholder="retail/trade/fleet/dealer"/></div>' +
+            '<div><label class="lbl">Discount %</label><input id="cpDisc" type="number" min="0" max="100" step="0.1" class="fld" value="' + (u.discount_pct != null ? u.discount_pct : '') + '"/></div>' +
+            // The mirror of Discount %: what this account is charged ABOVE list.
+            // The POS marks every non-manually-priced line up by this, so the
+            // invoice prints the increased unit price rather than list plus a
+            // surcharge. Blank or 0 = charge list.
+            '<div><label class="lbl">Markup % (charge above list)</label><input id="cpMarkup" type="number" min="0" max="100" step="0.1" class="fld" placeholder="blank = list price" value="' + (u.markup_pct != null ? u.markup_pct : '') + '"/></div>' +
+            // The four credit presets the counter quotes from, kept together:
+            // type (how it settles), limit (how much), length (how long before
+            // review), term (how many days to pay).
+            '<div><label class="lbl">Credit type</label><select id="cpCreditType" class="fld"><option value="">—</option>' +
+              CREDIT_TYPE_OPTS.map(function(o){
+                return '<option value="' + o[0] + '"' + (o[0] === u.credit_type ? ' selected' : '') + '>' + o[1] + '</option>';
+              }).join('') + '</select></div>' +
+            '<div><label class="lbl">Credit limit (USD)</label><input id="cpCredit" type="number" min="0" step="0.01" class="fld" value="' + (u.credit_limit_usd != null ? u.credit_limit_usd : '') + '"/></div>' +
+            '<div><label class="lbl">Credit length (months)</label><input id="cpCreditLen" type="number" min="0" step="1" class="fld" placeholder="blank = open-ended" value="' + (u.credit_length_months != null ? u.credit_length_months : '') + '"/></div>' +
+            '<div><label class="lbl">Payment terms (days)</label><input id="cpTerms" type="number" min="0" step="1" class="fld" placeholder="blank = no credit" value="' + (u.payment_terms_days != null ? u.payment_terms_days : '') + '"/></div>' +
+            '<div><label class="lbl">Discount limit (cashier ceiling, %)</label><input id="cpDiscLimit" type="number" min="0" max="100" step="0.1" class="fld" placeholder="blank = no ceiling" value="' + (u.discount_limit_pct != null ? u.discount_limit_pct : '') + '"/></div>' +
+          '<div class="full">' +
+          '<div class="panel">' +
+            '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px;display:flex;align-items:center;gap:10px">' +
+              '<span>💰 Settle Balance</span>' +
+              '<span style="font-size:11.5px;font-weight:400;color:' + (d.account_balance_usd > 0 ? '#b91c1c' : 'var(--muted)') + '">' +
+                'Currently owes <b>' + fmtMoney(d.account_balance_usd) + '</b>' +
+                (u.credit_limit_usd != null ? ' of ' + fmtMoney(u.credit_limit_usd) + ' limit' : '') +
+              '</span>' +
+            '</div>' +
+            '<div style="padding:10px 14px">' +
+              (acctPayments.length ? '<table style="width:100%;font-size:12.5px"><thead><tr><th align="left">Date</th><th align="left">Method</th><th align="left">Reference</th><th align="right">Amount</th><th align="left">By</th></tr></thead><tbody>' +
+                acctPayments.map(function(p){
+                  return '<tr><td>' + fmtDate(p.created_at) + '</td><td>' + esc(posMethodLabel(p.method)) + '</td>' +
+                    '<td>' + esc(p.reference || '—') + '</td><td align="right"><b>' + fmtMoney(p.amount_usd) + '</b></td>' +
+                    '<td>' + esc(p.received_by_name || '—') + '</td></tr>';
+                }).join('') + '</tbody></table>'
+                : '<div class="empty" style="padding:14px 0">No payments recorded against this account yet.</div>') +
+              (['owner', 'manager'].includes(CURRENT_ADMIN_ROLE)
+                ? '<details style="margin-top:8px"' + (d.account_balance_usd > 0 ? ' open' : '') + '><summary style="cursor:pointer;font-size:12px;color:var(--sky-dark);font-weight:700">+ Record a payment</summary>' +
+                    '<form style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:8px" onsubmit="event.preventDefault();submitAccountPayment(' + id + ');">' +
+                      '<div><label class="lbl">Amount (USD) *</label><input id="apAmount" type="number" min="0.01" step="0.01" required class="fld" placeholder="' + (d.account_balance_usd > 0 ? Number(d.account_balance_usd).toFixed(2) : '') + '"/></div>' +
+                      '<div><label class="lbl">Method *</label><select id="apMethod" class="fld" required>' +
+                        '<option value="cash">Cash</option><option value="card">Card</option><option value="cheque">Cheque</option><option value="bank">Bank transfer</option>' +
                       '</select></div>' +
-                      '<button class="btn" id="custRoleSave">Save role</button>' +
-                      (Number(id) !== CURRENT_ADMIN_ID
-                        ? '<button class="btn" id="custRoleRevoke" style="background:#fee2e2;color:#b91c1c">Revoke admin access</button>'
-                        : '<small style="color:var(--muted)">Can\'t change your own admin access here.</small>') +
-                    '</div>'
-                  : '<button class="btn ok" id="custRoleGrant">Grant staff (cashier) access</button>') +
-                '<div id="custRoleMsg" style="display:none;margin-top:8px;padding:9px 11px;border-radius:6px;font-size:12.5px"></div>' +
-              '</div>' +
-            '</div>'
-          : '') +
-      '</div>' +
-    '</div>' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:0 16px 16px">' +
-      '<div class="panel">' +
-        '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">📍 Addresses</div>' +
-        '<div style="padding:10px 14px">' +
-          // Shipping and billing are separate kinds on the same table, and the
-          // storefront picks the default shipping one at checkout -- so both
-          // the kind and the default flag have to be settable here. The old
-          // form wrote line1/city/phone only, leaving kind at its 'shipping'
-          // default and every other column permanently null.
-          (addr.length ? addr.map(function(a){
-            return '<div id="adRow' + a.id + '" style="font-size:12.5px;padding:6px 0;border-bottom:1px solid var(--line)">' +
-              '<div>' + (a.is_default ? badge('default','ok') + ' ' : '') +
-                badge(a.kind || 'shipping', a.kind === 'billing' ? 'info' : 'ok') + ' ' +
-                '<b>' + esc(a.label || '') + '</b>' +
-                '<span style="float:right">' +
-                  '<button class="btn" data-aedit="' + a.id + '" style="padding:1px 7px;font-size:11px">Edit</button> ' +
-                  '<button class="btn" data-adel="' + a.id + '" style="padding:1px 7px;font-size:11px">Delete</button>' +
-                '</span></div>' +
-              esc([a.recipient, a.line1, a.line2, a.city, a.parish, a.postal_code, a.country].filter(Boolean).join(', ')) +
-              (a.phone ? '<br/><small>' + esc(a.phone) + '</small>' : '') +
-              '<div id="adEd' + a.id + '" style="display:none;margin-top:6px">' + addressForm('e' + a.id, a) +
-                '<button class="btn ok" data-asave="' + a.id + '" style="margin-top:6px">Save</button> ' +
-                '<span id="adMsg' + a.id + '" style="font-size:11.5px"></span>' +
-              '</div>' +
-            '</div>';
-          }).join('') : '<div class="empty" style="padding:14px 0">No addresses on file.</div>') +
-          '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--sky-dark);font-weight:700">+ Add address</summary>' +
-            '<form style="margin-top:8px" onsubmit="event.preventDefault();submitAddress(' + id + ');">' +
-              addressForm('n', {}) +
-              '<button type="submit" class="btn ok" style="width:fit-content;margin-top:6px">Save</button>' +
-            '</form></details>' +
-        '</div>' +
-      '</div>' +
-      '<div class="panel">' +
-        '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">👥 Contacts</div>' +
-        '<div style="padding:10px 14px">' +
-          (contacts.length ? contacts.map(function(c){
-            return '<div style="font-size:12.5px;padding:6px 0;border-bottom:1px solid var(--line)">' +
-              (c.is_primary ? badge('primary','ok') + ' ' : '') + '<b>' + esc(c.name) + '</b>' + (c.title ? ' — ' + esc(c.title) : '') +
-              (c.phone ? '<br/><small>' + esc(c.phone) + '</small>' : '') + (c.email ? ' <small>' + esc(c.email) + '</small>' : '') + '</div>';
-          }).join('') : '<div class="empty" style="padding:14px 0">No extra contacts.</div>') +
-          '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--sky-dark);font-weight:700">+ Add contact</summary>' +
-            '<form style="margin-top:8px;display:grid;gap:6px" onsubmit="event.preventDefault();submitContact(' + id + ');">' +
-              '<input id="ctName" class="fld" placeholder="Name *" required/>' +
-              '<input id="ctTitle" class="fld" placeholder="Title"/>' +
-              '<input id="ctPhone" class="fld" placeholder="Phone"/>' +
-              '<button type="submit" class="btn ok" style="width:fit-content">Save</button>' +
-            '</form></details>' +
-        '</div>' +
-      '</div>' +
-    '</div>' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:0 16px 16px">' +
-      '<div class="panel">' +
-        '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">⏰ Reminders</div>' +
-        '<div style="padding:10px 14px">' +
-          (reminders.length ? reminders.map(function(r){
-            return '<div style="font-size:12.5px;padding:6px 0;border-bottom:1px solid var(--line);' + (r.status==='done'?'opacity:.5':'') + '">' +
-              badge(r.status, r.status==='done'?'ok':'pending') + ' <b>' + esc(r.subject) + '</b> — due ' + esc(r.due_date) +
-              (r.status !== 'done' ? ' <button class="btn" data-done="' + r.id + '" style="padding:2px 8px;font-size:10.5px">Mark done</button>' : '') + '</div>';
-          }).join('') : '<div class="empty" style="padding:14px 0">No reminders set.</div>') +
-          '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--sky-dark);font-weight:700">+ Add reminder</summary>' +
-            '<form style="margin-top:8px;display:grid;gap:6px" onsubmit="event.preventDefault();submitReminder(' + id + ');">' +
-              '<input id="rmSubject" class="fld" placeholder="Subject *" required/>' +
-              '<input id="rmDue" type="date" class="fld" required/>' +
-              '<button type="submit" class="btn ok" style="width:fit-content">Save</button>' +
-            '</form></details>' +
-        '</div>' +
-      '</div>' +
-      '<div class="panel">' +
-        '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">💬 Messages</div>' +
-        '<div style="padding:10px 14px;max-height:220px;overflow-y:auto">' +
-          (msgs.length ? msgs.map(function(m){
-            return '<div style="font-size:12.5px;padding:5px 0;text-align:' + (m.sender==='staff'?'right':'left') + '">' +
-              '<span style="display:inline-block;max-width:80%;padding:6px 10px;border-radius:8px;background:' + (m.sender==='staff'?'#dbeafe':'var(--card-soft2)') + '">' + esc(m.body) + '</span>' +
-              '<br/><small style="color:var(--muted)">' + fmtDate(m.created_at) + '</small></div>';
-          }).join('') : '<div class="empty" style="padding:14px 0">No messages yet.</div>') +
-        '</div>' +
-        '<form style="padding:10px 14px;border-top:1px solid var(--line);display:flex;gap:6px" onsubmit="event.preventDefault();submitCustMessage(' + id + ');">' +
-          '<input id="msgBody" class="fld" placeholder="Reply to customer…" style="flex:1"/>' +
-          '<button type="submit" class="btn ok">Send</button>' +
-        '</form>' +
-      '</div>' +
-    '</div>' +
-    '<div style="padding:0 16px 16px">' +
-      '<div class="panel">' +
-        '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">🔔 Notices</div>' +
-        '<div style="padding:10px 14px">' +
-          (notices.length ? notices.map(function(n){
-            return '<div style="font-size:12.5px;padding:6px 0;border-bottom:1px solid var(--line)">' +
-              badge(n.kind, n.kind === 'dunning' ? 'bad' : 'pending') + ' ' + esc(n.body) +
-              '<br/><small style="color:var(--muted)">' + fmtDate(n.sent_at) + '</small></div>';
-          }).join('') : '<div class="empty" style="padding:14px 0">No notices sent yet.</div>') +
-          '<details style="margin-top:8px"' + (d.account_balance_usd > 0 ? ' open' : '') + '><summary style="cursor:pointer;font-size:12px;color:var(--sky-dark);font-weight:700">+ Send a notice</summary>' +
-            '<form style="margin-top:8px;display:grid;gap:6px" onsubmit="event.preventDefault();submitNotice(' + id + ');">' +
-              '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
-                '<select id="ntKind" class="fld" style="width:auto">' +
-                  '<option value="dunning">Dunning (overdue balance)</option>' +
-                  '<option value="reminder">Reminder</option>' +
-                  '<option value="general">General</option>' +
-                  '<option value="other">Other</option>' +
-                '</select>' +
-                (d.account_balance_usd > 0
-                  ? '<button type="button" id="ntFillDunning" class="btn" style="font-size:11px;padding:5px 8px">Fill dunning template (owes ' + fmtMoney(d.account_balance_usd) + ')</button>'
-                  : '') +
-              '</div>' +
-              '<textarea id="ntBody" class="fld" rows="3" placeholder="Message…" required></textarea>' +
-              '<div id="ntMsg" style="display:none;padding:8px 10px;border-radius:6px;font-size:12.5px"></div>' +
-              '<button type="submit" class="btn ok" style="width:fit-content">Send notice</button>' +
-            '</form></details>' +
-        '</div>' +
-      '</div>' +
-    '</div>' +
-    '<div style="padding:0 16px 16px">' +
-      '<div class="panel">' +
-        '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px;display:flex;align-items:center;gap:10px">' +
-          '<span>💰 Settle Balance</span>' +
-          '<span style="font-size:11.5px;font-weight:400;color:' + (d.account_balance_usd > 0 ? '#b91c1c' : 'var(--muted)') + '">' +
-            'Currently owes <b>' + fmtMoney(d.account_balance_usd) + '</b>' +
-            (u.credit_limit_usd != null ? ' of ' + fmtMoney(u.credit_limit_usd) + ' limit' : '') +
-          '</span>' +
-        '</div>' +
-        '<div style="padding:10px 14px">' +
-          (acctPayments.length ? '<table style="width:100%;font-size:12.5px"><thead><tr><th align="left">Date</th><th align="left">Method</th><th align="left">Reference</th><th align="right">Amount</th><th align="left">By</th></tr></thead><tbody>' +
-            acctPayments.map(function(p){
-              return '<tr><td>' + fmtDate(p.created_at) + '</td><td>' + esc(posMethodLabel(p.method)) + '</td>' +
-                '<td>' + esc(p.reference || '—') + '</td><td align="right"><b>' + fmtMoney(p.amount_usd) + '</b></td>' +
-                '<td>' + esc(p.received_by_name || '—') + '</td></tr>';
-            }).join('') + '</tbody></table>'
-            : '<div class="empty" style="padding:14px 0">No payments recorded against this account yet.</div>') +
-          (['owner', 'manager'].includes(CURRENT_ADMIN_ROLE)
-            ? '<details style="margin-top:8px"' + (d.account_balance_usd > 0 ? ' open' : '') + '><summary style="cursor:pointer;font-size:12px;color:var(--sky-dark);font-weight:700">+ Record a payment</summary>' +
-                '<form style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:8px" onsubmit="event.preventDefault();submitAccountPayment(' + id + ');">' +
-                  '<div><label class="lbl">Amount (USD) *</label><input id="apAmount" type="number" min="0.01" step="0.01" required class="fld" placeholder="' + (d.account_balance_usd > 0 ? Number(d.account_balance_usd).toFixed(2) : '') + '"/></div>' +
-                  '<div><label class="lbl">Method *</label><select id="apMethod" class="fld" required>' +
-                    '<option value="cash">Cash</option><option value="card">Card</option><option value="cheque">Cheque</option><option value="bank">Bank transfer</option>' +
-                  '</select></div>' +
-                  '<div><label class="lbl">Reference</label><input id="apRef" class="fld" placeholder="cheque #, txn id…"/></div>' +
-                  '<div><label class="lbl">Notes</label><input id="apNotes" class="fld"/></div>' +
-                  '<div id="apMsg" style="grid-column:1/-1;display:none;padding:8px 10px;border-radius:6px;font-size:12.5px"></div>' +
-                  '<button type="submit" class="btn ok" style="grid-column:1/-1;width:fit-content">Record payment</button>' +
-                '</form></details>'
-            : '') +
-        '</div>' +
-      '</div>' +
-    '</div>' +
-    // Statement of account, on the customer record itself. It was only
-    // reachable from Reports, where you had to know the customer's name and
-    // pick them out of a list of 400 -- while standing on their record.
-    '<div style="padding:0 16px 16px">' +
-      '<div class="panel">' +
-        '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
-          '<span>📄 Statement of Account</span>' +
-          '<span style="margin-left:auto;display:flex;gap:6px;align-items:center">' +
-            '<label class="lbl" style="margin:0">From</label>' +
-            '<input type="date" id="stFrom" class="fld" style="width:140px" value="' + esc(stmtDefaultFrom()) + '"/>' +
-            '<label class="lbl" style="margin:0">To</label>' +
-            '<input type="date" id="stTo" class="fld" style="width:140px" value="' + esc(todayStr()) + '"/>' +
-            '<button class="btn" id="stRun" style="font-size:12px">Run</button>' +
-            '<button class="btn" id="stPrint" style="font-size:12px">🖨 Print</button>' +
-          '</span>' +
-        '</div>' +
-        '<div id="stBody" style="padding:12px 14px"><small style="color:var(--muted)">Loading statement…</small></div>' +
-      '</div>' +
-    '</div>' +
-    // Duplicate records: the same business entered twice at a counter ends up
-    // with half its history on each copy, so no screen shows what it really
-    // owes or has spent.
-    '<div style="padding:0 16px 16px">' +
-      '<div class="panel">' +
-        '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">' +
-          '🔗 Possible duplicates' +
-          '<span style="font-weight:600;color:var(--muted);margin-left:8px">— same name, phone or account number</span>' +
-        '</div>' +
-        '<div id="dupBody" style="padding:12px 14px"><small style="color:var(--muted)">Checking…</small></div>' +
-      '</div>' +
+                      '<div><label class="lbl">Reference</label><input id="apRef" class="fld" placeholder="cheque #, txn id…"/></div>' +
+                      '<div><label class="lbl">Notes</label><input id="apNotes" class="fld"/></div>' +
+                      '<div id="apMsg" style="grid-column:1/-1;display:none;padding:8px 10px;border-radius:6px;font-size:12.5px"></div>' +
+                      '<button type="submit" class="btn ok" style="grid-column:1/-1;width:fit-content">Record payment</button>' +
+                    '</form></details>'
+                : '') +
+            '</div>' +
+          '</div>' +
+          '</div>' +
+        // Statement of account, on the customer record itself. It was only
+        // reachable from Reports, where you had to know the customer's name and
+        // pick them out of a list of 400 -- while standing on their record.
+          '<div class="full">' +
+          '<div class="panel">' +
+            '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+              '<span>📄 Statement of Account</span>' +
+              '<span style="margin-left:auto;display:flex;gap:6px;align-items:center">' +
+                '<label class="lbl" style="margin:0">From</label>' +
+                '<input type="date" id="stFrom" class="fld" style="width:140px" value="' + esc(stmtDefaultFrom()) + '"/>' +
+                '<label class="lbl" style="margin:0">To</label>' +
+                '<input type="date" id="stTo" class="fld" style="width:140px" value="' + esc(todayStr()) + '"/>' +
+                '<button class="btn" id="stRun" style="font-size:12px">Run</button>' +
+                '<button class="btn" id="stPrint" style="font-size:12px">🖨 Print</button>' +
+              '</span>' +
+            '</div>' +
+            '<div id="stBody" style="padding:12px 14px"><small style="color:var(--muted)">Loading statement…</small></div>' +
+          '</div>' +
+          '</div>' },
+        { key: 'tax', label: 'Tax info', html:
+            '<div><label class="lbl">Tax status</label><select id="cpTaxExempt" class="fld"><option value="0"' + (!u.tax_exempt ? ' selected' : '') + '>Taxable (GCT applies)</option><option value="1"' + (u.tax_exempt ? ' selected' : '') + '>Tax exempt (no GCT)</option></select></div>' +
+            '<div><label class="lbl">Tax ID</label><input id="cpTax" class="fld" value="' + esc(u.tax_id || '') + '" placeholder="TRN / exemption cert #"/></div>' +
+          '<div class="full" style="font-size:12px;color:var(--muted)">Tax exempt customers are charged no GCT at the till. Keep the exemption certificate number in Tax ID, and the certificate itself under Notes &amp; attachments.</div>' },
+        { key: 'more', label: 'Additional info', html:
+          '<div><label class="lbl">Preferred contact</label><select id="cpPrefContact" class="fld"><option value="">—</option>' +
+            [['phone', 'Phone call'], ['whatsapp', 'WhatsApp'], ['sms', 'Text (SMS)'], ['email', 'Email']].map(function(o){
+              return '<option value="' + o[0] + '"' + (o[0] === u.preferred_contact ? ' selected' : '') + '>' + o[1] + '</option>';
+            }).join('') + '</select></div>' +
+          '<div><label class="lbl">How they heard of us</label><input id="cpHowHeard" class="fld" value="' + esc(u.how_heard || '') + '" placeholder="referral, radio, Google…"/></div>' +
+          '<div><label class="lbl">Email offers</label><select id="cpEmailOpt" class="fld"><option value="1"' + (u.email_opt_in ? ' selected' : '') + '>Yes — send offers by email</option><option value="0"' + (!u.email_opt_in ? ' selected' : '') + '>No</option></select></div>' +
+          '<div><label class="lbl">Text offers</label><select id="cpSmsOpt" class="fld"><option value="1"' + (u.sms_opt_in ? ' selected' : '') + '>Yes — send offers by text</option><option value="0"' + (!u.sms_opt_in ? ' selected' : '') + '>No</option></select></div>' +
+          '<div>' +
+          '<div class="panel">' +
+            '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">⏰ Reminders</div>' +
+            '<div style="padding:10px 14px">' +
+              (reminders.length ? reminders.map(function(r){
+                return '<div style="font-size:12.5px;padding:6px 0;border-bottom:1px solid var(--line);' + (r.status==='done'?'opacity:.5':'') + '">' +
+                  badge(r.status, r.status==='done'?'ok':'pending') + ' <b>' + esc(r.subject) + '</b> — due ' + esc(r.due_date) +
+                  (r.status !== 'done' ? ' <button class="btn" data-done="' + r.id + '" style="padding:2px 8px;font-size:10.5px">Mark done</button>' : '') + '</div>';
+              }).join('') : '<div class="empty" style="padding:14px 0">No reminders set.</div>') +
+              '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--sky-dark);font-weight:700">+ Add reminder</summary>' +
+                '<form style="margin-top:8px;display:grid;gap:6px" onsubmit="event.preventDefault();submitReminder(' + id + ');">' +
+                  '<input id="rmSubject" class="fld" placeholder="Subject *" required/>' +
+                  '<input id="rmDue" type="date" class="fld" required/>' +
+                  '<button type="submit" class="btn ok" style="width:fit-content">Save</button>' +
+                '</form></details>' +
+            '</div>' +
+          '</div>' +
+          '</div><div>' +
+            (['owner', 'manager'].includes(CURRENT_ADMIN_ROLE)
+              ? '<div class="panel">' +
+                  '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">🔑 Staff Access</div>' +
+                  '<div style="padding:12px 14px;font-size:12.5px">' +
+                    (u.is_admin
+                      ? '<div style="margin-bottom:10px">' + badge('staff — ' + (u.admin_role || 'manager'), 'ok') + '</div>' +
+                        '<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">' +
+                          '<div><label class="lbl">Role</label><select id="custRoleSel" class="fld">' +
+                            (CURRENT_ADMIN_ROLE === 'owner' ? '<option value="owner"' + (u.admin_role === 'owner' ? ' selected' : '') + '>owner</option>' : '') +
+                            '<option value="manager"' + (u.admin_role === 'manager' ? ' selected' : '') + '>manager</option>' +
+                            '<option value="cashier"' + (u.admin_role === 'cashier' ? ' selected' : '') + '>cashier</option>' +
+                          '</select></div>' +
+                          '<button class="btn" id="custRoleSave">Save role</button>' +
+                          (Number(id) !== CURRENT_ADMIN_ID
+                            ? '<button class="btn" id="custRoleRevoke" style="background:#fee2e2;color:#b91c1c">Revoke admin access</button>'
+                            : '<small style="color:var(--muted)">Can\'t change your own admin access here.</small>') +
+                        '</div>'
+                      : '<button class="btn ok" id="custRoleGrant">Grant staff (cashier) access</button>') +
+                    '<div id="custRoleMsg" style="display:none;margin-top:8px;padding:9px 11px;border-radius:6px;font-size:12.5px"></div>' +
+                  '</div>' +
+                '</div>'
+              : '') +
+          '</div>' +
+        // Duplicate records: the same business entered twice at a counter ends up
+        // with half its history on each copy, so no screen shows what it really
+        // owes or has spent.
+          '<div class="full">' +
+          '<div class="panel">' +
+            '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">' +
+              '🔗 Possible duplicates' +
+              '<span style="font-weight:600;color:var(--muted);margin-left:8px">— same name, phone or account number</span>' +
+            '</div>' +
+            '<div id="dupBody" style="padding:12px 14px"><small style="color:var(--muted)">Checking…</small></div>' +
+          '</div>' +
+          '</div>' },
+        { key: 'notes', label: 'Notes & attachments', html:
+            '<div style="grid-column:1/-1"><label class="lbl">Internal notes</label><textarea id="cpNotes" class="fld" rows="5">' + esc(u.internal_notes || '') + '</textarea></div>' +
+          '<div class="full"><div class="panel">' +
+            '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px;display:flex;align-items:center;gap:10px">' +
+              '<span>📎 Attachments</span>' +
+              '<a class="btn" href="/documents.html" target="_blank" rel="noopener" style="margin-left:auto;font-size:11.5px;text-decoration:none">Document Centre ›</a>' +
+            '</div>' +
+            '<div id="custDocs" style="padding:10px 14px"><small style="color:var(--muted)">Loading…</small></div>' +
+          '</div></div>' +
+          '<div>' +
+          '<div class="panel">' +
+            '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">💬 Messages</div>' +
+            '<div style="padding:10px 14px;max-height:220px;overflow-y:auto">' +
+              (msgs.length ? msgs.map(function(m){
+                return '<div style="font-size:12.5px;padding:5px 0;text-align:' + (m.sender==='staff'?'right':'left') + '">' +
+                  '<span style="display:inline-block;max-width:80%;padding:6px 10px;border-radius:8px;background:' + (m.sender==='staff'?'#dbeafe':'var(--card-soft2)') + '">' + esc(m.body) + '</span>' +
+                  '<br/><small style="color:var(--muted)">' + fmtDate(m.created_at) + '</small></div>';
+              }).join('') : '<div class="empty" style="padding:14px 0">No messages yet.</div>') +
+            '</div>' +
+            '<form style="padding:10px 14px;border-top:1px solid var(--line);display:flex;gap:6px" onsubmit="event.preventDefault();submitCustMessage(' + id + ');">' +
+              '<input id="msgBody" class="fld" placeholder="Reply to customer…" style="flex:1"/>' +
+              '<button type="submit" class="btn ok">Send</button>' +
+            '</form>' +
+          '</div>' +
+          '</div><div>' +
+          '<div class="panel">' +
+            '<div style="padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px">🔔 Notices</div>' +
+            '<div style="padding:10px 14px">' +
+              (notices.length ? notices.map(function(n){
+                return '<div style="font-size:12.5px;padding:6px 0;border-bottom:1px solid var(--line)">' +
+                  badge(n.kind, n.kind === 'dunning' ? 'bad' : 'pending') + ' ' + esc(n.body) +
+                  '<br/><small style="color:var(--muted)">' + fmtDate(n.sent_at) + '</small></div>';
+              }).join('') : '<div class="empty" style="padding:14px 0">No notices sent yet.</div>') +
+              '<details style="margin-top:8px"' + (d.account_balance_usd > 0 ? ' open' : '') + '><summary style="cursor:pointer;font-size:12px;color:var(--sky-dark);font-weight:700">+ Send a notice</summary>' +
+                '<form style="margin-top:8px;display:grid;gap:6px" onsubmit="event.preventDefault();submitNotice(' + id + ');">' +
+                  '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
+                    '<select id="ntKind" class="fld" style="width:auto">' +
+                      '<option value="dunning">Dunning (overdue balance)</option>' +
+                      '<option value="reminder">Reminder</option>' +
+                      '<option value="general">General</option>' +
+                      '<option value="other">Other</option>' +
+                    '</select>' +
+                    (d.account_balance_usd > 0
+                      ? '<button type="button" id="ntFillDunning" class="btn" style="font-size:11px;padding:5px 8px">Fill dunning template (owes ' + fmtMoney(d.account_balance_usd) + ')</button>'
+                      : '') +
+                  '</div>' +
+                  '<textarea id="ntBody" class="fld" rows="3" placeholder="Message…" required></textarea>' +
+                  '<div id="ntMsg" style="display:none;padding:8px 10px;border-radius:6px;font-size:12.5px"></div>' +
+                  '<button type="submit" class="btn ok" style="width:fit-content">Send notice</button>' +
+                '</form></details>' +
+            '</div>' +
+          '</div>' +
+          '</div>' },
+      ]) +
     '</div>';
 
   document.getElementById('custBack').addEventListener('click', function(){ CUST_VIEW_ID = null; renderCustomers(panel); });
+
+  // ---- tabs + save ----
+  var tabsRoot = document.getElementById('custTabsRoot');
+  wireFormTabs(tabsRoot, function(k){ CUST_TAB = { id: String(id), key: k }; });
+  if (CUST_TAB.id === String(id) && CUST_TAB.key) openFormTab(tabsRoot, CUST_TAB.key);
+  document.getElementById('cpSave').addEventListener('click', function(){ submitCustProfile(id); });
+  // Enter in a profile field saves, as it did when they were one form.
+  tabsRoot.addEventListener('keydown', function(e){
+    var t = e.target;
+    if (e.key === 'Enter' && t && t.tagName === 'INPUT' && /^cp/.test(t.id || '')) { e.preventDefault(); submitCustProfile(id); }
+  });
+
+  // ---- attachments: documents linked to this customer ----
+  (async function(){
+    var box = document.getElementById('custDocs');
+    var r;
+    try { r = await api('/api/docs/search?entity_type=customer&entity_id=' + encodeURIComponent(id) + '&limit=50'); }
+    catch (e) {
+      box.innerHTML = '<small style="color:var(--muted)">' +
+        (/not allowed/i.test(e.message) ? esc(e.message) : 'Attachments are kept in the Document Centre on the till.') + '</small>';
+      return;
+    }
+    var docs = r.documents || [];
+    box.innerHTML = docs.length
+      ? '<table style="width:100%;font-size:12.5px"><thead><tr><th align="left">Document</th><th align="left">Type</th><th align="left">Added</th><th></th></tr></thead><tbody>' +
+          docs.map(function(x){
+            return '<tr><td><b>' + esc(x.title || x.file_name || ('#' + x.id)) + '</b>' + (x.number ? ' <small style="color:var(--muted)">' + esc(x.number) + '</small>' : '') + '</td>' +
+              '<td>' + esc(x.category || '—') + '</td>' +
+              '<td>' + (x.created_at ? fmtDate(x.created_at) : '—') + '</td>' +
+              '<td align="right"><a class="btn" style="font-size:11px;text-decoration:none" target="_blank" rel="noopener" href="/api/docs/' + x.id + '/file">Open</a></td></tr>';
+          }).join('') + '</tbody></table>'
+      : '<small style="color:var(--muted)">Nothing attached yet. Upload in the Document Centre and link it to this customer.</small>';
+  })();
 
   // ---- statement of account ----
   var LAST_STMT = null;
@@ -12947,6 +13182,10 @@ async function submitCustProfile(id){
       tax_id: document.getElementById('cpTax').value.trim() || null,
       rating: document.getElementById('cpRating').value || null,
       internal_notes: document.getElementById('cpNotes').value.trim() || null,
+      preferred_contact: document.getElementById('cpPrefContact').value || null,
+      how_heard: document.getElementById('cpHowHeard').value.trim() || null,
+      email_opt_in: document.getElementById('cpEmailOpt').value === '1',
+      sms_opt_in: document.getElementById('cpSmsOpt').value === '1',
     }});
     msg.style.background='#dcfce7'; msg.style.color='#166534'; msg.textContent='Saved';
   } catch (e) { msg.style.background='#fee2e2'; msg.style.color='#b91c1c'; msg.textContent=e.message; }
@@ -12954,7 +13193,13 @@ async function submitCustProfile(id){
 async function submitNewCustomer(){
   var msg = document.getElementById('ncMsg');
   var g = function(id){ var e = document.getElementById(id); return e ? e.value.trim() : ''; };
-  if (!g('ncName')) { return; }
+  // The name sits on the first tab; with the form split up, a bare return
+  // would leave someone on another tab wondering why nothing happened.
+  var bad = formTabsCheck(document.getElementById('newCustForm'), [{ id: 'ncName', ok: !!g('ncName'), msg: 'Enter the customer\'s name.' }]);
+  if (bad) {
+    msg.style.display = 'block'; msg.textContent = bad; msg.style.background = '#fee2e2'; msg.style.color = '#991b1b';
+    return;
+  }
   msg.style.display = 'block'; msg.textContent = 'Creating…';
   msg.style.background = 'var(--card-soft)'; msg.style.color = 'var(--muted)';
   try {
@@ -12963,6 +13208,9 @@ async function submitNewCustomer(){
       company_name: g('ncCompany') || null, customer_type: g('ncType') || null,
       price_tier: g('ncTier') || 'retail', credit_type: g('ncCreditType') || null,
       credit_limit_usd: g('ncCredit') || null, internal_notes: g('ncNotes') || null,
+      account_number: g('ncAcct') || null, discount_pct: g('ncDisc') || null,
+      credit_length_months: g('ncCreditLen') || null, payment_terms_days: g('ncTerms') || null,
+      tax_exempt: g('ncTaxExempt') === '1', tax_id: g('ncTax') || null,
     }});
     // Straight into the new record -- the next thing anyone does is add an
     // address or a credit preset.
