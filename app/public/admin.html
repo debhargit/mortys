@@ -337,6 +337,7 @@
   .fpane.on{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .fpane .full{grid-column:1/-1}
   .fnav{display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap}
+  .fnav button[data-fprev]:disabled,.fnav button[data-fnext]:disabled{opacity:.4;cursor:default}
   .fld.bad{border-color:var(--red);box-shadow:0 0 0 2px rgba(214,40,40,.15)}
   @media (max-width:640px){ .fpane.on{grid-template-columns:1fr} }
   /* ⓘ tips: hover, or tap / keyboard focus on touch tills. */
@@ -2029,7 +2030,16 @@ function formTabs(tabs){
 function openFormTab(root, key){
   root.querySelectorAll('[data-ft]').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-ft') === key); });
   root.querySelectorAll('[data-fp]').forEach(function(p){ p.classList.toggle('on', p.getAttribute('data-fp') === key); });
+  fnavState(root);
   if (root.__onTab) root.__onTab(key);
+}
+// Back is disabled on the first tab and Next on the last.
+function fnavState(root){
+  var tabs = root.querySelectorAll('.ftabs [data-ft]');
+  if (!tabs.length) return;
+  var on = root.querySelector('.ftabs .on');
+  root.querySelectorAll('[data-fprev]').forEach(function(b){ b.disabled = !on || on === tabs[0]; });
+  root.querySelectorAll('[data-fnext]').forEach(function(b){ b.disabled = !on || on === tabs[tabs.length - 1]; });
 }
 function wireFormTabs(root, onTab){
   if (!root) return;
@@ -2038,8 +2048,17 @@ function wireFormTabs(root, onTab){
   var cur = function(){ var on = root.querySelector('.ftabs .on'); return on ? on.getAttribute('data-ft') : keys()[0]; };
   root.querySelectorAll('.ftabs [data-ft]').forEach(function(b){ b.addEventListener('click', function(){ openFormTab(root, b.getAttribute('data-ft')); }); });
   root.querySelectorAll('[data-fnext],[data-fprev]').forEach(function(b){
-    b.addEventListener('click', function(){ var k = keys(), i = k.indexOf(cur()) + (b.hasAttribute('data-fnext') ? 1 : -1); if (i >= 0 && i < k.length) openFormTab(root, k[i]); });
+    b.addEventListener('click', function(){
+      var k = keys(), i = k.indexOf(cur()) + (b.hasAttribute('data-fnext') ? 1 : -1);
+      if (i < 0 || i >= k.length) return;
+      openFormTab(root, k[i]);
+      // On a long tab the buttons sit far below the tab bar; bring the bar
+      // back into view so the new tab is seen from its top.
+      var bar = root.querySelector('.ftabs');
+      if (bar && bar.getBoundingClientRect().top < 0 && bar.scrollIntoView) bar.scrollIntoView({ block: 'start' });
+    });
   });
+  fnavState(root);
 }
 // checks: [{ id: field id, ok: true/false, msg }]
 function formTabsCheck(root, checks){
@@ -6871,6 +6890,7 @@ function posNewCustomerModal(after, prefillName){
         { key: 'notes', label: 'Notes', html:
           '<div class="full"><label class="lbl">Notes</label><textarea id="pncNotes" class="fld" rows="3"></textarea></div>' },
       ]) +
+      '<div class="fnav">' + FNAV + '</div>' +
       '<div id="pncMsg" style="display:none;margin-top:10px;padding:8px 10px;border-radius:6px;font-size:12.5px"></div>' +
       '<button type="button" id="pncSave" style="width:100%;margin-top:12px;background:var(--red);color:#fff;border:0;padding:11px;border-radius:7px;font-weight:800;cursor:pointer;font-size:13.5px">Create &amp; attach</button>' +
     '</div>'
@@ -11119,6 +11139,7 @@ async function renderSupplierDetail(panel, id){
         { key: 'bills', label: 'Bills', html: '<div class="full" id="supBills"><small style="color:var(--muted)">Loading…</small></div>' },
         { key: 'items', label: 'Items purchased', html: '<div class="full" id="supItems"><small style="color:var(--muted)">Loading…</small></div>' },
       ])) +
+      '<div class="fnav">' + FNAV + '</div>' +
     '</div>';
 
   document.getElementById('supBack').addEventListener('click', function(){ SUP_VIEW_ID = null; renderSuppliers(panel); });
@@ -13005,6 +13026,8 @@ async function renderCustomerDetail(panel, id){
           '</div>' +
           '</div>' },
       ]) +
+      // Step through the tabs from the bottom of a long one.
+      '<div class="fnav">' + FNAV + '</div>' +
     '</div>';
 
   document.getElementById('custBack').addEventListener('click', function(){ CUST_VIEW_ID = null; renderCustomers(panel); });
