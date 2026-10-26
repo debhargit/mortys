@@ -12202,7 +12202,10 @@ function posPinPrompt(opts){
   return new Promise(function(resolve){
     var wrap = document.createElement('div');
     wrap.setAttribute('data-pin-prompt', '');
-    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(2,6,23,.72);z-index:9999;display:flex;align-items:center;justify-content:center';
+    // Above the sign-in screen, which api() lifts to 10050 when a session ends.
+    // Underneath it the keypad was invisible but still swallowed every digit
+    // typed into the email and password boxes.
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(2,6,23,.72);z-index:10100;display:flex;align-items:center;justify-content:center';
     var digits = '';
     wrap.innerHTML =
       '<div style="background:var(--card);border-radius:14px;padding:22px;width:320px;max-width:calc(100vw - 24px);box-shadow:0 24px 60px rgba(0,0,0,.45)">' +
