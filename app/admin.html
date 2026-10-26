@@ -358,6 +358,11 @@
   .signin-card input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;margin-bottom:12px;font-family:inherit}
   .signin-card button{width:100%;background:var(--red);color:#fff;border:none;padding:12px;border-radius:8px;font-weight:700;cursor:pointer;font-size:14px;font-family:inherit}
   .signin-card button:hover{background:var(--red-dark)}
+  .signin-card{position:relative}
+  .signin-card button.signin-close{position:absolute;top:10px;right:10px;width:34px;height:34px;padding:0;background:none;color:var(--muted);font-size:24px;line-height:1;border-radius:8px}
+  .signin-card button.signin-close:hover{background:var(--line);color:var(--ink)}
+  .signin-card button.signin-cancel{margin-top:8px;background:none;color:var(--muted);font-weight:600}
+  .signin-card button.signin-cancel:hover{background:none;color:var(--ink);text-decoration:underline}
   .signin-card .err{color:var(--red);font-size:12px;margin-bottom:10px;display:none}
   .signin-card .err.show{display:block}
   .signin-card .hint{font-size:11px;color:var(--muted);margin-top:14px;text-align:center;line-height:1.5}
@@ -532,6 +537,7 @@
 <!-- SIGN-IN -->
 <div class="signin-bg" id="signinBg">
   <form class="signin-card" id="signinForm" onsubmit="event.preventDefault(); doSignIn();">
+    <button type="button" id="signinClose" class="signin-close" title="Close" aria-label="Close sign-in">×</button>
     <h2>Admin sign-in</h2>
     <p class="sub">Restricted area. Use your admin account.</p>
     <!-- Shown before anyone types, when /api/health reports the database is
@@ -554,15 +560,7 @@
          email and password each time is how one account ends up signed in for
          the whole shift. -->
     <button type="button" id="pinSignInBtn" style="margin-top:8px;background:transparent;border:1px solid var(--line);color:var(--ink)">🔑 Sign in with PIN</button>
-    <div class="hint">
-      <!-- The seeded credentials used to be printed here, next to a button that
-           typed them into the form. Anyone who could reach this page could read
-           them, so the page was handing out the admin account to the whole LAN.
-           The recovery path stays (an operator who forgets the password still
-           needs a way back in) but it is now a plain link that says what it
-           does only once you click it. -->
-      <button type="button" id="resetDefaultLink" style="background:none;border:0;color:var(--muted);font-size:11.5px;cursor:pointer;padding:4px;font-family:inherit;text-decoration:underline">Locked out? Recover admin access</button>
-    </div>
+    <button type="button" id="signinCancel" class="signin-cancel">Cancel</button>
   </form>
 </div>
 
@@ -766,26 +764,22 @@ document.addEventListener('DOMContentLoaded', function(){
       else { inp.type = 'password'; tog.textContent = '👁'; tog.title = 'Show password'; }
     });
   }
-  // "Reset password on server" — calls the endpoint; gracefully degrades if not registered yet.
-  var reset = document.getElementById('resetDefaultLink');
-  if (reset) reset.addEventListener('click', async function(e){
-    e.preventDefault();
-    if (!confirm('Reset the password for admin@visionautosolutions.com?\n\nA new random password will be shown once. This only works on the shop PC (the till) itself.')) return;
-    try {
-      var r = await fetch('/api/auth/reset-default-admin', { method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json'}, body:'{}' });
-      var text = await r.text();
-      var d = null;
-      try { d = JSON.parse(text); } catch (_) {
-        // Not JSON — most likely the server hasn't been restarted since this endpoint was added.
-        alert('⚠ The reset endpoint is not yet available on the server.\n\nThis means the server hasn\'t been restarted since the latest code update.\n\nRestart the admin server and try again, or sign in with the account the shop was set up with.');
-        return;
-      }
-      if (r.status === 404) { alert('Password reset only works on the shop PC (the till).\n\nOpen the admin page on that computer and try again.'); return; }
-      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
-      document.getElementById('adEmail').value = d.email;
-      document.getElementById('adPass').value = d.password;
-      alert('✓ Reset complete.\n\nEmail: ' + d.email + '\nPassword: ' + d.password + '\n\nClick Sign In to log in now.');
-    } catch(err){ alert('Reset failed: ' + err.message); }
+  // Cancel / × / Esc: nothing in the admin works signed out, and a browser tab
+  // can't close itself, so leave the page: back where they came from on this
+  // site, otherwise the shop's home page.
+  function leaveSignIn(){
+    var fromHere = false;
+    try { fromHere = !!document.referrer && new URL(document.referrer).origin === location.origin && history.length > 1; } catch (_) {}
+    if (fromHere) history.back(); else location.href = '/';
+  }
+  ['signinCancel', 'signinClose'].forEach(function(id){
+    var b = document.getElementById(id);
+    if (b) b.addEventListener('click', function(e){ e.preventDefault(); leaveSignIn(); });
+  });
+  document.addEventListener('keydown', function(e){
+    var bg = document.getElementById('signinBg');
+    // Esc on the PIN keypad closes the keypad only, not the page.
+    if (e.key === 'Escape' && bg && bg.classList.contains('show') && !document.querySelector('[data-pin-prompt]')) leaveSignIn();
   });
 });
 
@@ -12220,6 +12214,7 @@ function posPinPrompt(opts){
   var o = opts || {};
   return new Promise(function(resolve){
     var wrap = document.createElement('div');
+    wrap.setAttribute('data-pin-prompt', '');
     wrap.style.cssText = 'position:fixed;inset:0;background:rgba(2,6,23,.72);z-index:9999;display:flex;align-items:center;justify-content:center';
     var digits = '';
     wrap.innerHTML =
