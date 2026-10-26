@@ -337,6 +337,7 @@
   .fpane.on{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .fpane .full{grid-column:1/-1}
   .fnav{display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap}
+  .fnav.top{justify-content:flex-end;margin:0 0 6px}
   .fnav button[data-fprev]:disabled,.fnav button[data-fnext]:disabled{opacity:.4;cursor:default}
   .fld.bad{border-color:var(--red);box-shadow:0 0 0 2px rgba(214,40,40,.15)}
   @media (max-width:640px){ .fpane.on{grid-template-columns:1fr} }
@@ -2022,7 +2023,8 @@ function tip(text){ return '<span class="tip" tabindex="0" role="note" aria-labe
 function flbl(text, tipText, req){ return '<label class="lbl">' + text + (req ? ' *' : '') + (tipText ? tip(tipText) : '') + '</label>'; }
 function formTabs(tabs){
   tabs = tabs.filter(function(t){ return !t.hidden; });
-  return '<div class="ftabs" role="tablist">' + tabs.map(function(t, i){
+  return '<div class="fnav top">' + FNAV + '</div>' +
+    '<div class="ftabs" role="tablist">' + tabs.map(function(t, i){
       return '<button type="button" role="tab" data-ft="' + t.key + '"' + (i ? '' : ' class="on"') + '>' + esc(t.label) + (t.req ? '<span class="req">*</span>' : '') + '</button>';
     }).join('') + '</div>' +
     tabs.map(function(t, i){ return '<div class="fpane' + (i ? '' : ' on') + '" data-fp="' + t.key + '" role="tabpanel">' + t.html + '</div>'; }).join('');
@@ -2052,8 +2054,8 @@ function wireFormTabs(root, onTab){
       var k = keys(), i = k.indexOf(cur()) + (b.hasAttribute('data-fnext') ? 1 : -1);
       if (i < 0 || i >= k.length) return;
       openFormTab(root, k[i]);
-      // On a long tab the buttons sit far below the tab bar; bring the bar
-      // back into view so the new tab is seen from its top.
+      // If the user has scrolled down a long tab, bring the bar back into
+      // view so the new tab is seen from its top.
       var bar = root.querySelector('.ftabs');
       if (bar && bar.getBoundingClientRect().top < 0 && bar.scrollIntoView) bar.scrollIntoView({ block: 'start' });
     });
@@ -2159,7 +2161,7 @@ async function renderProducts(panel){
                 '<input type="file" id="npMorePhotos" accept="image/*" multiple style="width:100%;font-size:13px"/></div>' },
           ]) +
           '<div id="npMsg" style="display:none;margin-top:10px;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
-          '<div class="fnav">' + FNAV + '<span style="flex:1"></span>' +
+          '<div class="fnav"><span style="flex:1"></span>' +
             '<button type="submit" id="npSubmit" style="background:var(--red);color:#fff;border:0;border-radius:7px;padding:11px 22px;font-weight:700;cursor:pointer;font-size:14px;font-family:inherit">Add Part to Inventory</button></div>' +
         '</form>' +
       '</div>' +
@@ -6890,7 +6892,6 @@ function posNewCustomerModal(after, prefillName){
         { key: 'notes', label: 'Notes', html:
           '<div class="full"><label class="lbl">Notes</label><textarea id="pncNotes" class="fld" rows="3"></textarea></div>' },
       ]) +
-      '<div class="fnav">' + FNAV + '</div>' +
       '<div id="pncMsg" style="display:none;margin-top:10px;padding:8px 10px;border-radius:6px;font-size:12.5px"></div>' +
       '<button type="button" id="pncSave" style="width:100%;margin-top:12px;background:var(--red);color:#fff;border:0;padding:11px;border-radius:7px;font-weight:800;cursor:pointer;font-size:13.5px">Create &amp; attach</button>' +
     '</div>'
@@ -11082,7 +11083,7 @@ async function renderSuppliers(panel){
       '<form id="newSupplier" novalidate style="padding:14px 18px;max-width:820px" onsubmit="event.preventDefault();submitSupplier();">' +
         formTabs(supplierTabs('sup', { lead_time_days: 7 })) +
         '<div id="supMsg" style="display:none;margin-top:10px;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
-        '<div class="fnav">' + FNAV +
+        '<div class="fnav">' +
           '<button type="submit" style="margin-left:auto;background:var(--red);color:#fff;border:0;padding:11px 22px;border-radius:7px;font-weight:700;cursor:pointer">Save supplier</button>' +
         '</div>' +
       '</form>' +
@@ -11152,7 +11153,6 @@ async function renderSupplierDetail(panel, id){
         { key: 'bills', label: 'Bills', html: '<div class="full" id="supBills"><small style="color:var(--muted)">Loading…</small></div>' },
         { key: 'items', label: 'Items purchased', html: '<div class="full" id="supItems"><small style="color:var(--muted)">Loading…</small></div>' },
       ])) +
-      '<div class="fnav">' + FNAV + '</div>' +
     '</div>';
 
   document.getElementById('supBack').addEventListener('click', function(){ SUP_VIEW_ID = null; renderSuppliers(panel); });
@@ -11285,7 +11285,7 @@ async function renderPurchaseOrders(panel){
             '<div class="full">' + flbl('Notes', 'Anything about the order: delivery instructions, who asked for it, a quote number.') + '<textarea id="poNotes" rows="3" class="fld"></textarea></div>' },
         ]) +
         '<div id="poMsg" style="display:none;margin-top:10px;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
-        '<div class="fnav">' + FNAV + '<span style="flex:1"></span><b id="poLnTotal" style="font-size:13px"></b>' +
+        '<div class="fnav"><span style="flex:1"></span><b id="poLnTotal" style="font-size:13px"></b>' +
           '<button type="submit" id="poSubmit" style="background:var(--red);color:#fff;border:0;padding:11px 22px;border-radius:7px;font-weight:700;cursor:pointer">Create PO</button></div>' +
       '</form>' +
     '</details>' +
@@ -11451,7 +11451,6 @@ async function renderReceiveStock(panel){
         { key: 'tally', label: 'Tally & post', html: '<div class="full" id="rsTally"></div>' +
           '<div class="full" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px"><button type="button" class="btn ok" id="rsGo">Receive stock</button><span id="rsMsg" style="font-size:12.5px"></span></div>' },
       ]) +
-      '<div class="fnav">' + FNAV + '</div>' +
     '</div>';
   var form = document.getElementById('rsForm');
 
@@ -12313,7 +12312,7 @@ async function renderCustomers(panel){
             '<div class="full"><label class="lbl">Notes</label><textarea id="ncNotes" class="fld" rows="3"></textarea></div>' },
         ]) +
         '<div id="ncMsg" style="display:none;margin-top:10px;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
-        '<div class="fnav">' + FNAV +
+        '<div class="fnav">' +
           '<button type="submit" style="margin-left:auto;background:var(--red);color:#fff;border:0;padding:11px 22px;border-radius:7px;font-weight:700;cursor:pointer">Create customer</button>' +
         '</div>' +
       '</form>' +
@@ -13039,8 +13038,6 @@ async function renderCustomerDetail(panel, id){
           '</div>' +
           '</div>' },
       ]) +
-      // Step through the tabs from the bottom of a long one.
-      '<div class="fnav">' + FNAV + '</div>' +
     '</div>';
 
   document.getElementById('custBack').addEventListener('click', function(){ CUST_VIEW_ID = null; renderCustomers(panel); });
