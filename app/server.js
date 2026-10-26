@@ -8478,11 +8478,17 @@ app.post('/api/admin/pos/customer', requireAdmin, requireCap('pos.add_customer')
     const email = (b.email || '').trim().toLowerCase() || `${acctNo.toLowerCase()}@walkin.visionautosolutions.local`;
     const randomPassword = require('crypto').randomBytes(24).toString('hex');
     const hash = await bcrypt.hash(randomPassword, 10);
+    // Company, category, tax status and notes come from the till's tabbed
+    // "New customer" form. Credit and terms are not taken here: they are set
+    // on the customer record, under its own permission.
     const { rows } = await query(
-      `INSERT INTO users (email, name, password_hash, phone, via, is_admin, price_tier, account_number)
-         VALUES ($1, $2, $3, $4, 'pos', false, $5, $6)
+      `INSERT INTO users (email, name, password_hash, phone, via, is_admin, price_tier, account_number,
+                          company_name, customer_type, tax_exempt, tax_id, internal_notes)
+         VALUES ($1, $2, $3, $4, 'pos', false, $5, $6, $7, $8, $9, $10, $11)
          RETURNING id, email, name, phone, account_number`,
-      [email, name, hash, phone, priceTier, acctNo]
+      [email, name, hash, phone, priceTier, acctNo,
+       (b.company_name || '').trim() || null, b.customer_type || null, !!b.tax_exempt,
+       (b.tax_id || '').trim() || null, (b.internal_notes || '').trim() || null]
     );
     res.json({ ok: true, id: rows[0].id, email: rows[0].email, account_number: rows[0].account_number });
   } catch (e) {

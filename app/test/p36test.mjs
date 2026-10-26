@@ -86,3 +86,17 @@ A('items: newest first', r.items[0].item === 'Air filter' && r.items.length === 
 
 r = await call('GET', '/api/admin/suppliers/:id/items', { params: { id: 'x' } });
 A('bad id -> 400', st === 400);
+
+// ---- the till's tabbed "New customer" pop-up: POST /api/admin/pos/customer ----
+const misc = [];
+const app2 = { get: (p, ...h) => misc.push({ m: 'GET', p, h: h[h.length - 1] }), post: (p, ...h) => misc.push({ m: 'POST', p, h: h[h.length - 1] }),
+  patch: () => {}, delete: () => {}, put: () => {}, all: () => {} };
+(await import(APP + 'functions/_routes/admin_misc.js')).default(app2);
+const posCust = misc.find((x) => x.m === 'POST' && x.p === '/api/admin/pos/customer').h;
+st = 200;
+r = await posCust({ env: ENV, get: () => ({ id: 1 }), req: { json: async () => ({
+  name: 'Harbour Taxi Co', phone: '876-555-0123', price_tier: 'fleet', company_name: 'Harbour Taxi Co',
+  customer_type: 'fleet', tax_exempt: true, tax_id: 'EX-4411', internal_notes: 'Pays monthly' }) }, json: (o, s) => { if (s) st = s; return o; } });
+const pc = sdb.prepare('SELECT price_tier, company_name, customer_type, tax_exempt, tax_id, internal_notes FROM users WHERE id = ?').get(r.id);
+A('POS new customer saves company, category, tax status, tax ID, notes',
+  st === 200 && pc.price_tier === 'fleet' && pc.company_name === 'Harbour Taxi Co' && pc.customer_type === 'fleet' && pc.tax_exempt === 1 && pc.tax_id === 'EX-4411' && pc.internal_notes === 'Pays monthly');

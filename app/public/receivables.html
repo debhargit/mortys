@@ -48,7 +48,7 @@
   function detail(id) {
     return api('/api/ar/customers/' + id).then(function (d) {
       var c = d.customer, a = d.aging;
-      $('#out').innerHTML = '<div class="controls"><button id="bk">◀ All customers</button></div>' +
+      $('#out').innerHTML = '<div class="controls"><button id="bk">◀ All customers</button><button id="er" title="Contact, addresses, tax and the rest of the customer record">Edit customer record ›</button></div>' +
         '<div class="card"><h2>' + esc(c.name) + (c.credit_hold ? ' <span class="pill bad">on credit hold</span>' : '') + '</h2><p class="sub">' + esc([c.account_number, c.phone, c.email && !/\.local$/.test(c.email) ? c.email : null].filter(Boolean).join(' · ')) + '</p>' +
         (c.credit_hold ? '<div class="note bad">Hold: ' + esc(c.credit_hold_reason || '') + '. The till will not charge sales to this account.</div>' : '') +
         '<div class="tiles"><div class="tile"><span class="k">Balance</span><b>' + J(d.balance) + '</b></div><div class="tile"><span class="k">Current</span><b>' + J(a.current) + '</b></div><div class="tile"><span class="k">1-30</span><b>' + J(a.d30) + '</b></div><div class="tile"><span class="k">31-60</span><b>' + J(a.d60) + '</b></div><div class="tile"><span class="k">61-90</span><b>' + J(a.d90) + '</b></div><div class="tile bad"><span class="k">Over 90</span><b>' + J(a.over90) + '</b></div><div class="tile"><span class="k">Unapplied credit</span><b>' + J(d.credit) + '</b></div></div>' +
@@ -69,6 +69,7 @@
         '<div style="flex:1"><label>What happened</label><input id="nt" style="width:100%"></div><div id="pp" style="display:none"><label>Pay by</label><input id="pd" type="date"> <input id="pa" type="number" placeholder="J$" style="width:110px"></div><button id="na">Add</button></div>' +
         (d.notes.length ? '<table><tbody>' + d.notes.map(function (x) { return '<tr><td style="white-space:nowrap">' + esc(B.dt(x.created_at)) + '</td><td><span class="pill">' + esc(x.kind) + '</span></td><td>' + esc(x.note) + (x.promise_day ? ' <b>(promised ' + esc(x.promise_day) + (x.promise_amount ? ', ' + J(x.promise_amount) : '') + ')</b>' : '') + '</td><td><small>' + esc(x.by_name || '') + '</small></td></tr>'; }).join('') + '</tbody></table>' : '<p class="sub">No notes yet.</p>') + '</div>';
       $('#bk').onclick = show;
+      $('#er').onclick = function () { location.href = '/admin.html#tab=customers&id=' + id; };
       $('#rp').onclick = function () { receive(c, d.invoices); };
       var again = function () { detail(id); };
       $('#ni').onclick = function () { BU.newInvoice(c, again); };

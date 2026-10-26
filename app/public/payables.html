@@ -46,7 +46,7 @@
   function detail(id) {
     return api('/api/ap/suppliers/' + id).then(function (d) {
       var s = d.supplier;
-      $('#out').innerHTML = '<div class="controls"><button id="bk">◀ All suppliers</button></div><div class="card"><h2>' + esc(s.name) + '</h2>' +
+      $('#out').innerHTML = '<div class="controls"><button id="bk">◀ All suppliers</button><button id="er" title="Company, addresses, tax ID, bills and items purchased">Edit supplier record ›</button></div><div class="card"><h2>' + esc(s.name) + '</h2>' +
         '<div class="controls"><button class="primary" id="pb">Pay bills</button><button id="eb">Enter a bill</button><button id="ec">Enter a credit</button><span style="margin-left:auto"></span>' +
         '<div><label>Terms (days)</label><input id="tm" type="number" value="' + (s.payment_terms_days == null ? '' : s.payment_terms_days) + '" style="width:80px"></div><div><label>Usual expense account</label><select id="da">' + B.accountOptions('line', s.default_account_id) + '</select></div><div><label>Usual class</label><select id="dc">' + B.classOptions(s.default_class_id) + '</select></div><button id="sv">Save</button></div></div>' +
         '<div class="card"><h2>Unpaid</h2><div class="scroll"><table><thead><tr><th>Type</th><th>Number</th><th>Date</th><th>Due</th><th class="n">Amount</th><th class="n">Paid</th><th class="n">Open</th><th class="n">Overdue</th></tr></thead><tbody>' + (d.open.length ? docRows(d.open) : '<tr><td colspan="8" class="empty">Nothing unpaid.</td></tr>') + '</tbody></table></div></div>' +
@@ -54,6 +54,7 @@
         (d.payments.length ? d.payments.map(function (p) { return '<tr style="' + (p.voided_at ? 'opacity:.5' : '') + '"><td>' + esc(p.day) + '</td><td>' + esc(p.method) + '</td><td>' + esc(p.cheque_number || p.reference || '') + '</td><td>' + esc(p.paid_from) + '</td><td class="n">' + J(p.amount) + '</td><td style="white-space:nowrap"><button class="sm" data-pp="' + p.id + '">Print</button> ' + (p.voided_at ? '<span class="pill bad">void</span> <small>' + esc(p.void_reason || '') + '</small>' : '<button class="sm" data-vp="' + p.id + '">Void</button>') + '</td></tr>'; }).join('') : '<tr><td colspan="6" class="empty">No payments.</td></tr>') + '</tbody></table></div></div>' +
         (d.history.length ? '<div class="card"><h2>Paid bills</h2><div class="scroll"><table><tbody>' + docRows(d.history) + '</tbody></table></div></div>' : '');
       $('#bk').onclick = show;
+      $('#er').onclick = function () { location.href = '/admin.html#tab=suppliers&id=' + id; };
       $('#pb').onclick = function () { tab = 'pay'; mark(); pay(id); };
       $('#eb').onclick = function () { tab = 'bill'; mark(); billForm('bill', s); };
       $('#ec').onclick = function () { tab = 'credit'; mark(); billForm('credit', s); };

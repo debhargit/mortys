@@ -43,9 +43,10 @@
       var paint = function () {
         var q = (val('sq') || '').toLowerCase();
         $('#srows').innerHTML = list.filter(function (s) { return !q || s.name.toLowerCase().indexOf(q) >= 0; }).map(function (s) {
-          return '<tr><td><b>' + esc(s.name) + '</b></td><td>' + (s.portal_enabled ? '<span class="pill ok">on</span>' : '<span class="pill">off</span>') + '</td><td>' + (s.web_retail_enabled ? '✓' : '') + '</td><td>' + (s.credit_limit != null ? J(s.credit_limit) + (s.credit_set_by ? ' <span class="sub">(' + esc(s.credit_set_by) + ')</span>' : '') : '—') + '</td><td><button data-manage="' + s.id + '">Manage</button></td></tr>';
+          return '<tr><td><b>' + esc(s.name) + '</b></td><td>' + (s.portal_enabled ? '<span class="pill ok">on</span>' : '<span class="pill">off</span>') + '</td><td>' + (s.web_retail_enabled ? '✓' : '') + '</td><td>' + (s.credit_limit != null ? J(s.credit_limit) + (s.credit_set_by ? ' <span class="sub">(' + esc(s.credit_set_by) + ')</span>' : '') : '—') + '</td><td style="white-space:nowrap"><button data-manage="' + s.id + '">Manage</button> <button data-record="' + s.id + '" title="Company, addresses, tax ID, bills and items purchased">Record ›</button></td></tr>';
         }).join('') || '<tr><td colspan="5" class="empty">No suppliers.</td></tr>';
         all('[data-manage]').forEach(function (b) { b.onclick = function () { manage(Number(b.dataset.manage)); }; });
+        all('[data-record]').forEach(function (b) { b.onclick = function () { location.href = '/admin.html#tab=suppliers&id=' + b.dataset.record; }; });
       };
       $('#sq').oninput = paint; paint();
     }).catch(fail);

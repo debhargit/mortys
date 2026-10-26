@@ -4570,6 +4570,9 @@ async function renderPOS(panel){
           (POS.customer && !POS.customer.is_walkin && POS.customer.open_balance_cents > 0 && ['owner', 'manager'].indexOf(CURRENT_ADMIN_ROLE) !== -1
             ? '<button id="posCustSettle" class="posBarBtn" style="background:#fee2e2;color:#7f1d1d" title="Record a payment against this customer\'s account">💰 Settle</button>'
             : '') +
+          // The full tabbed customer record, in a new browser tab so the sale
+          // in progress stays put.
+          (POS.customer && !POS.customer.is_walkin && POS.customer.id ? '<button id="posCustRecord" class="posBarBtn" title="Open this customer\'s full record (new tab)">📋 Record</button>' : '') +
           (POS.customer && !POS.customer.is_walkin ? '<button id="posCustClear" class="posBarBtn" title="Back to walk-in">✕</button>' : '') +
         '</div>' +
         '<div id="posCustResults" style="display:none;position:absolute;top:100%;left:0;right:0;margin-top:4px;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(0,0,0,.22);z-index:60;max-height:280px;overflow-y:auto"></div>' +
@@ -6199,6 +6202,8 @@ async function renderPOS(panel){
   document.getElementById('posCustNew').addEventListener('click', function(){ posNewCustomerModal(refreshBar); });
   var settleBtn = document.getElementById('posCustSettle');
   if (settleBtn) settleBtn.addEventListener('click', function(){ posSettleBalanceModal(POS.customer, refreshBar); });
+  var recBtn = document.getElementById('posCustRecord');
+  if (recBtn) recBtn.addEventListener('click', function(){ window.open('/admin.html#tab=customers&id=' + POS.customer.id, '_blank'); });
   var cc = document.getElementById('posCustClear');
   if (cc) cc.addEventListener('click', function(){
     posAttachCustomer(walkin ? { id: walkin.id, name: walkin.name, account_number: walkin.account_number, is_walkin: true } : null);
@@ -6841,36 +6846,56 @@ function posSettleBalanceModal(customer, after){
 // A walk-in who wants a charge account or a delivery has to exist as a real
 // customer record; sending the counter off to the CRM tab mid-sale loses the cart.
 function posNewCustomerModal(after, prefillName){
+  // Tabbed like the customer record in Customers (CRM), cut down to what the
+  // counter needs mid-sale. Credit, terms and addresses are set on the full
+  // record ("Full record ›" opens it in a new tab, so the cart is kept).
+  // Field ids are pnc*, not nc*, so they never collide with the CRM's form.
   posModal('New customer',
-    '<div style="display:grid;gap:8px">' +
-      '<div><label class="lbl">Name *</label><input id="ncName" class="fld" placeholder="Full name" value="' + esc(prefillName || '') + '"/></div>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
-        '<div><label class="lbl">Phone</label><input id="ncPhone" class="fld" placeholder="876-000-0000"/></div>' +
-        '<div><label class="lbl">Email</label><input id="ncEmail" class="fld" type="email" placeholder="optional"/></div>' +
-      '</div>' +
-      '<div><label class="lbl">Price tier</label><select id="ncTier" class="fld">' +
-        '<option value="retail">Retail</option><option value="trade">Trade</option>' +
-        '<option value="fleet">Fleet</option><option value="dealer">Dealer</option>' +
-      '</select></div>' +
-      '<div id="ncMsg" style="display:none;padding:8px 10px;border-radius:6px;font-size:12.5px"></div>' +
-      '<button type="button" id="ncSave" style="background:var(--red);color:#fff;border:0;padding:11px;border-radius:7px;font-weight:800;cursor:pointer;font-size:13.5px">Create &amp; attach</button>' +
+    '<div id="pncForm">' +
+      formTabs([
+        { key: 'info', label: 'Customer info', req: true, html:
+          '<div class="full"><label class="lbl">Name *</label><input id="pncName" class="fld" placeholder="Full name" value="' + esc(prefillName || '') + '"/></div>' +
+          '<div><label class="lbl">Phone</label><input id="pncPhone" class="fld" placeholder="876-000-0000"/></div>' +
+          '<div><label class="lbl">Email</label><input id="pncEmail" class="fld" type="email" placeholder="optional"/></div>' +
+          '<div><label class="lbl">Company</label><input id="pncCompany" class="fld"/></div>' +
+          '<div><label class="lbl">Category</label><select id="pncType" class="fld"><option value="">—</option>' +
+            CUST_TYPE_OPTS.map(function(t){ return '<option value="' + t + '">' + t + '</option>'; }).join('') + '</select></div>' },
+        { key: 'price', label: 'Pricing', html:
+          '<div><label class="lbl">Price tier</label><select id="pncTier" class="fld">' +
+            '<option value="retail">Retail</option><option value="trade">Trade</option>' +
+            '<option value="fleet">Fleet</option><option value="dealer">Dealer</option>' +
+          '</select></div>' },
+        { key: 'tax', label: 'Tax info', html:
+          '<div><label class="lbl">Tax status</label><select id="pncTaxExempt" class="fld"><option value="0">Taxable (GCT applies)</option><option value="1">Tax exempt (no GCT)</option></select></div>' +
+          '<div><label class="lbl">Tax ID</label><input id="pncTax" class="fld" placeholder="TRN / exemption cert #"/></div>' },
+        { key: 'notes', label: 'Notes', html:
+          '<div class="full"><label class="lbl">Notes</label><textarea id="pncNotes" class="fld" rows="3"></textarea></div>' },
+      ]) +
+      '<div id="pncMsg" style="display:none;margin-top:10px;padding:8px 10px;border-radius:6px;font-size:12.5px"></div>' +
+      '<button type="button" id="pncSave" style="width:100%;margin-top:12px;background:var(--red);color:#fff;border:0;padding:11px;border-radius:7px;font-weight:800;cursor:pointer;font-size:13.5px">Create &amp; attach</button>' +
     '</div>'
   );
-  document.getElementById('ncSave').addEventListener('click', async function(){
-    var msg = document.getElementById('ncMsg');
-    var name = document.getElementById('ncName').value.trim();
-    if (!name) { msg.style.display='block'; msg.style.background='#fee2e2'; msg.style.color='#b91c1c'; msg.textContent='A name is required.'; return; }
-    this.disabled = true; this.textContent = 'Saving…';
+  var form = document.getElementById('pncForm');
+  wireFormTabs(form);
+  var v = function(id){ return document.getElementById(id).value.trim(); };
+  async function save(){
+    var btn = document.getElementById('pncSave');
+    var msg = document.getElementById('pncMsg');
+    var name = v('pncName');
+    var bad = formTabsCheck(form, [{ id: 'pncName', ok: !!name, msg: 'A name is required.' }]);
+    if (bad) { msg.style.display='block'; msg.style.background='#fee2e2'; msg.style.color='#b91c1c'; msg.textContent = bad; return; }
+    btn.disabled = true; btn.textContent = 'Saving…';
     try {
+      var taxExempt = v('pncTaxExempt') === '1';
       var res = await api('/api/admin/pos/customer', { method:'POST', body: {
-        name: name,
-        phone: document.getElementById('ncPhone').value.trim(),
-        email: document.getElementById('ncEmail').value.trim(),
-        price_tier: document.getElementById('ncTier').value,
+        name: name, phone: v('pncPhone'), email: v('pncEmail'), price_tier: v('pncTier'),
+        company_name: v('pncCompany') || null, customer_type: v('pncType') || null,
+        tax_exempt: taxExempt, tax_id: v('pncTax') || null, internal_notes: v('pncNotes') || null,
       }});
       POS.customer = {
-        id: res.id, name: name, phone: document.getElementById('ncPhone').value.trim(),
-        email: res.email, price_tier: document.getElementById('ncTier').value,
+        id: res.id, name: name, phone: v('pncPhone'),
+        email: res.email, account_number: res.account_number, price_tier: v('pncTier'),
+        company_name: v('pncCompany') || null, tax_exempt: taxExempt, tax_id: v('pncTax') || null,
         points_balance: 0, open_balance_cents: 0,
       };
       POS.custName = name;
@@ -6880,10 +6905,12 @@ function posNewCustomerModal(after, prefillName){
       if (after) after();
     } catch (e) {
       msg.style.display='block'; msg.style.background='#fee2e2'; msg.style.color='#b91c1c'; msg.textContent = e.message;
-      this.disabled = false; this.textContent = 'Create & attach';
+      btn.disabled = false; btn.textContent = 'Create & attach';
     }
-  });
-  document.getElementById(prefillName ? 'ncPhone' : 'ncName').focus();
+  }
+  document.getElementById('pncSave').addEventListener('click', save);
+  form.addEventListener('keydown', function(e){ if (e.key === 'Enter' && e.target.tagName === 'INPUT') { e.preventDefault(); save(); } });
+  document.getElementById(prefillName ? 'pncPhone' : 'pncName').focus();
 }
 
 // =============================================================================
@@ -19440,8 +19467,15 @@ async function init(){
     var landing = POS_PREFS && POS_PREFS.landingTab;
     var hidden = (MY_ROLE && Array.isArray(MY_ROLE.hidden_tabs)) ? MY_ROLE.hidden_tabs : [];
     if (!landing || !renderers[landing] || hidden.indexOf(landing) !== -1) landing = null;
-    var linked = (location.hash.match(/^#tab=([a-z]+)$/) || [])[1];
+    // #tab=customers&id=12 / #tab=suppliers&id=3 open that record's tabbed
+    // form directly: Receivables, Payables and Supplier management link here.
+    var hm = location.hash.match(/^#tab=([a-z]+)(?:&id=(\d+))?$/) || [];
+    var linked = hm[1];
     if (linked && renderers[linked] && hidden.indexOf(linked) === -1) landing = linked; else linked = null;
+    if (linked && hm[2]) {
+      if (linked === 'customers') { CUST_VIEW_ID = hm[2]; }
+      if (linked === 'suppliers') { SUP_VIEW_ID = hm[2]; }
+    }
     await show((linked && landing) || currentTab || landing || 'pos');
   } catch (e) {
     console.warn('[init] failed:', e);

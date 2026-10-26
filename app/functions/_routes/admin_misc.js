@@ -298,10 +298,15 @@ export default function mount(app) {
       return c.json({ error: 'A customer with that email already exists' }, 409);
     const hash = await bcrypt.hash(crypto.randomUUID(), 10);
     const tier = ['retail', 'trade', 'fleet', 'dealer'].includes(b.price_tier) ? b.price_tier : 'retail';
+    // Extra fields from the till's tabbed "New customer" form; credit and
+    // terms stay on the customer record.
     const r = await db.run(
-      `INSERT INTO users (email, name, password_hash, phone, via, is_admin, price_tier, account_number)
-         VALUES (?,?,?,?, 'pos', 0, ?, ?)`,
-      email, name, hash, (b.phone || '').trim() || null, tier, acctNo);
+      `INSERT INTO users (email, name, password_hash, phone, via, is_admin, price_tier, account_number,
+                          company_name, customer_type, tax_exempt, tax_id, internal_notes)
+         VALUES (?,?,?,?, 'pos', 0, ?, ?, ?, ?, ?, ?, ?)`,
+      email, name, hash, (b.phone || '').trim() || null, tier, acctNo,
+      (b.company_name || '').trim() || null, b.customer_type || null, b.tax_exempt ? 1 : 0,
+      (b.tax_id || '').trim() || null, (b.internal_notes || '').trim() || null);
     return c.json({ ok: true, id: r.meta.last_row_id, email, account_number: acctNo });
   });
   app.get('/api/admin/pos/scan', adminMw, async (c) => {
