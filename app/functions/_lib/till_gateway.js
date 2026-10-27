@@ -39,6 +39,22 @@ export async function gatewaySignature(secret, ts, method, pathAndQuery, email) 
   return [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+// Pages built on the till after the Cloudflare port: on the website every one
+// of them loads, then each of its API calls answers 501 "not ported". Must
+// match TILL_ONLY_PAGES in admin.html, which points the admin's own links at
+// the till; this catches the rest (bookmarks, typed addresses, history).
+const TILL_ONLY_PAGE = /^\/(accounting|documents|receivables|payables|banking|loans-rent|report-balancing|payroll|clock|attendance|commission|training|hiring|dispatch|fleet-wall|mobile|driver|cashier|warehouse|stockcash|report-planning|terminal|ai|system|security)(\.html)?\/?$/;
+
+// Returns a redirect to the same page on the till, or null.
+export function tillPageRedirect(request, env, pathname) {
+  const origin = env && env.TILL_ORIGIN;
+  if (!origin || (request.method !== 'GET' && request.method !== 'HEAD')) return null;
+  const m = TILL_ONLY_PAGE.exec(pathname);
+  if (!m) return null;
+  const src = new URL(request.url);
+  return Response.redirect(new URL('/' + m[1] + '.html' + src.search, origin).href, 302);
+}
+
 export function isTillHistoryRead(request, pathname) {
   return request.method === 'GET' && PATHS.test(pathname);
 }

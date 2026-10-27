@@ -32,7 +32,7 @@ import mountAdminMisc from './_routes/admin_misc.js'; // Phase 15 (settings, mar
 import mountStoreOps from './_routes/storeops.js'; // departments, store locations, cashier (migration 0064)
 import mountGl from './_routes/gl.js'; // general ledger: chart, journal, reports, exports (migration 0064)
 import mountAi from './_routes/ai.js'; // customer chat, answered by staff (migration 0066)
-import { isTillHistoryRead, fromTill } from './_lib/till_gateway.js'; // full-history reads from the till
+import { isTillHistoryRead, fromTill, tillPageRedirect } from './_lib/till_gateway.js'; // full-history reads from the till
 
 const app = new Hono();
 
@@ -102,5 +102,8 @@ export const onRequest = async (context) => {
     }
     return app.fetch(context.request, context.env, context);
   }
+  // Payables, banking and the other till-only screens open on the till.
+  const toTill = tillPageRedirect(context.request, context.env, pathname);
+  if (toTill) return toTill;
   return context.next();
 };
