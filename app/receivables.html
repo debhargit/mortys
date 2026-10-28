@@ -20,6 +20,8 @@
 <div class="toast" id="toast"></div>
 <script src="/assets/books-common.js?v=20261019"></script>
 <script src="/assets/billing-ui.js?v=20261019"></script>
+<script src="/assets/doc-attach.js"></script>
+<script src="/assets/invoice-scan.js?v=20261028"></script>
 <script>
 (function () {
   'use strict';
@@ -57,7 +59,7 @@
         '<div class="controls"><span class="sub">Accounting defaults for new invoice lines:</span><div><label>Category</label><select id="dca"><option value="">Rental Income (standard)</option>' + accounts.filter(function (a) { return ['income', 'other_income'].indexOf(a.type) >= 0; }).map(function (a) { return '<option value="' + a.id + '"' + (String(c.default_income_account_id) === String(a.id) ? ' selected' : '') + '>' + esc(a.code + ' ' + a.name) + '</option>'; }).join('') + '</select></div>' +
         '<div><label>Class</label><select id="dcl">' + B.classOptions(c.default_class_id) + '</select></div><button id="dsv">Save defaults</button></div></div>' +
         '<div class="card"><h2>Open invoices</h2><div class="scroll"><table><thead><tr><th>Invoice</th><th>Date</th><th>Due</th><th class="n">Total</th><th class="n">Paid</th><th class="n">Open</th><th class="n">Overdue</th></tr></thead><tbody>' +
-        (d.invoices.length ? d.invoices.map(function (i) { return '<tr><td>' + esc(i.receipt_number) + (i.invoice_kind === 'late_fee' ? ' <span class="pill warn">late fee</span>' : '') + (i.doc === 'invoice' && !i.paid ? ' <button class="sm" data-vi="' + i.id + '" data-fee="' + (i.invoice_kind === 'late_fee' ? 1 : 0) + '">' + (i.invoice_kind === 'late_fee' ? 'Waive' : 'Void') + '</button>' : '') + '</td><td>' + esc(i.day) + '</td><td>' + esc(i.due || i.day) + '</td><td class="n">' + J(i.total) + '</td><td class="n">' + J(i.paid) + '</td><td class="n"><b>' + J(i.open) + '</b></td><td class="n">' + (i.days_overdue ? '<span class="pill ' + (i.days_overdue > 45 ? 'bad' : 'warn') + '">' + i.days_overdue + ' d</span>' : '') + '</td></tr>'; }).join('') : '<tr><td colspan="7" class="empty">Nothing open.</td></tr>') + '</tbody></table></div></div>' +
+        (d.invoices.length ? d.invoices.map(function (i) { return '<tr><td>' + esc(i.receipt_number) + (i.invoice_kind === 'late_fee' ? ' <span class="pill warn">late fee</span>' : '') + (i.doc === 'invoice' && i.invoice_kind !== 'late_fee' ? ' <button class="sm" data-sg="' + i.id + '" title="Get the customer\'s signature: here on the screen, or by a link">✍ Sign</button>' : '') + (i.doc === 'invoice' && !i.paid ? ' <button class="sm" data-vi="' + i.id + '" data-fee="' + (i.invoice_kind === 'late_fee' ? 1 : 0) + '">' + (i.invoice_kind === 'late_fee' ? 'Waive' : 'Void') + '</button>' : '') + '</td><td>' + esc(i.day) + '</td><td>' + esc(i.due || i.day) + '</td><td class="n">' + J(i.total) + '</td><td class="n">' + J(i.paid) + '</td><td class="n"><b>' + J(i.open) + '</b></td><td class="n">' + (i.days_overdue ? '<span class="pill ' + (i.days_overdue > 45 ? 'bad' : 'warn') + '">' + i.days_overdue + ' d</span>' : '') + '</td></tr>'; }).join('') : '<tr><td colspan="7" class="empty">Nothing open.</td></tr>') + '</tbody></table></div></div>' +
         '<div class="card"><h2>Recurring invoices <button class="sm" id="np">New recurring invoice</button></h2><div id="cplans"></div></div>' +
         '<div class="card"><h2>Payments received</h2><div class="scroll"><table><thead><tr><th>Date</th><th>Method</th><th>Ref</th><th class="n">Amount</th><th>Applied to</th><th class="n">Unapplied</th><th>Deposited to</th><th></th></tr></thead><tbody>' +
         (d.payments.length ? d.payments.map(function (p) {
@@ -65,10 +67,13 @@
             '<td class="n">' + (p.voided_at ? '<span class="pill bad">void</span>' : p.unapplied ? '<b>' + J(p.unapplied) + '</b>' : '') + '</td><td><small>' + esc(p.deposit_to || '') + '</small></td>' +
             '<td style="white-space:nowrap">' + (!p.voided_at && p.unapplied > 0.005 && d.invoices.length ? '<button class="sm" data-ap="' + p.id + '" data-u="' + p.unapplied + '">Apply credit</button> ' : '') + (!p.voided_at ? '<button class="sm" data-vd="' + p.id + '">Void</button>' : '<small>' + esc(p.void_reason || '') + '</small>') + '</td></tr>';
         }).join('') : '<tr><td colspan="8" class="empty">No payments.</td></tr>') + '</tbody></table></div></div>' +
+        '<div class="card"><h2>Invoices &amp; documents</h2><p class="sub">Signed invoices, signed delivery slips, statements and anything else for this customer, kept in the document centre.</p><div id="cdocs"></div></div>' +
         '<div class="card"><h2>Collections notes</h2><div class="controls"><div><label>Kind</label><select id="nk"><option value="call">Phone call</option><option value="note">Note</option><option value="email">Email</option><option value="promise">Promise to pay</option></select></div>' +
         '<div style="flex:1"><label>What happened</label><input id="nt" style="width:100%"></div><div id="pp" style="display:none"><label>Pay by</label><input id="pd" type="date"> <input id="pa" type="number" placeholder="J$" style="width:110px"></div><button id="na">Add</button></div>' +
         (d.notes.length ? '<table><tbody>' + d.notes.map(function (x) { return '<tr><td style="white-space:nowrap">' + esc(B.dt(x.created_at)) + '</td><td><span class="pill">' + esc(x.kind) + '</span></td><td>' + esc(x.note) + (x.promise_day ? ' <b>(promised ' + esc(x.promise_day) + (x.promise_amount ? ', ' + J(x.promise_amount) : '') + ')</b>' : '') + '</td><td><small>' + esc(x.by_name || '') + '</small></td></tr>'; }).join('') + '</tbody></table>' : '<p class="sub">No notes yet.</p>') + '</div>';
       $('#bk').onclick = show;
+      if (window.VADocs) window.VADocs.mount($('#cdocs'), 'customer', id, { category: 'receivables' });
+      all('[data-sg]').forEach(function (b) { b.onclick = function () { signing(+b.getAttribute('data-sg'), c, function () { detail(id); }); }; });
       $('#er').onclick = function () { location.href = '/admin.html#tab=customers&id=' + id; };
       $('#rp').onclick = function () { receive(c, d.invoices); };
       var again = function () { detail(id); };
@@ -86,6 +91,56 @@
       $('#na').onclick = function () { api('/api/ar/customers/' + id + '/notes', 'POST', { kind: $('#nk').value, note: $('#nt').value, promise_date: $('#pd').value, promise_amount: $('#pa').value }).then(function () { detail(id); }).catch(function (e) { toast(e.message); }); };
       all('[data-vd]').forEach(function (b) { b.onclick = function () { var r = prompt('Why is this payment voided? (e.g. cheque returned)'); if (!r) return; api('/api/ar/payments/' + b.getAttribute('data-vd') + '/void', 'POST', { reason: r }).then(function () { toast('Voided'); detail(id); }).catch(function (e) { toast(e.message); }); }; });
       all('[data-ap]').forEach(function (b) { b.onclick = function () { applyCredit(c, d.invoices, +b.getAttribute('data-ap'), +b.getAttribute('data-u')); }; });
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // ------------------------------------------------------------ signatures --
+  // A customer's signature on an invoice: here on the screen (in person), or from a
+  // one-time link. Each signature is sealed against the invoice's contents; the
+  // signed copy is filed in the document centre (invoice-docs.js).
+  function signing(invId, c, after) {
+    api('/api/ar/invoices/' + invId + '/signing').then(function (d) {
+      var i = d.invoice, open = d.requests.filter(function (r) { return r.open; });
+      modal('<h2>Signature · invoice ' + esc(i.number) + ' · ' + esc(c.name) + '</h2><p class="sub">' + esc(i.day) + (i.due ? ' · due ' + esc(i.due) : '') + ' · ' + J(i.total) + (i.voided_at ? ' · <span class="pill bad">void</span>' : '') + '</p>' +
+        '<table><tbody>' + d.lines.map(function (l) { return '<tr><td>' + esc(l.description || '') + '</td><td class="n">' + J(l.amount) + '</td></tr>'; }).join('') + (i.gct ? '<tr><td>GCT</td><td class="n">' + J(i.gct) + '</td></tr>' : '') + '<tr><td><b>Total</b></td><td class="n"><b>' + J(i.total) + '</b></td></tr></tbody></table>' +
+        (d.signatures.length ? '<h3 style="margin-top:12px">Signed</h3>' + d.signatures.map(function (s) {
+          var ok = s.unchanged && s.sealed;
+          return '<div class="note ' + (ok ? 'info' : 'bad') + '" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><img src="' + s.image + '" alt="signature" style="height:54px;background:#fff;border-radius:4px">' +
+            '<div><b>' + esc(s.signer_name) + '</b> · ' + esc(B.dt(s.signed_at)) + '<br><small>' + (s.method === 'in_person' ? 'In person' + (s.witness ? ', witnessed by ' + esc(s.witness) : '') : 'From a link' + (s.signer_email ? ' sent to ' + esc(s.signer_email) : '') + (s.ip ? ', from ' + esc(s.ip) : '')) + '</small><br>' +
+            (ok ? '<small>✔ Seal intact: the invoice is unchanged since it was signed.</small>' : '<b>⚠ ' + (!s.unchanged ? 'The invoice has changed since it was signed.' : 'The signature record has been altered.') + '</b>') + '</div>' +
+            (s.document_id ? '<a class="pill" style="margin-left:auto" href="/api/docs/' + s.document_id + '/file" target="_blank" rel="noopener">Signed copy ' + esc(s.document_number || '') + ' ↗</a>' : '') + '</div>';
+        }).join('') : '') +
+        (i.voided_at ? '' :
+          '<h3 style="margin-top:12px">Sign here now</h3><p class="sub">Hand the screen to the customer. They sign with a finger, pen or mouse; you are the witness.</p>' +
+          '<div id="sgpad"></div><div class="controls" style="margin-top:6px"><div style="flex:1"><label>Name of the person signing</label><input id="sgname" style="width:100%" value="' + esc(c.name) + '"></div><button class="sm" id="sgclr">Clear</button><button class="primary" id="sggo">Save signature</button></div>' +
+          '<h3 style="margin-top:12px">Or send it to sign on their phone</h3><div class="controls"><div style="flex:1"><label>Email (blank: just make the link, to send by WhatsApp or text)</label><input id="sgmail" type="email" style="width:100%" value="' + esc(c.email && !/\.local$/.test(c.email) ? c.email : '') + '"></div>' +
+          '<div><label>Link lasts (days)</label><input id="sgdays" type="number" min="1" max="60" value="14" style="width:80px"></div><button id="sgsend">Send for signature</button></div><div id="sglink"></div>') +
+        (open.length ? '<p class="sub">Links waiting: ' + open.map(function (r) { return esc(r.sent_to || 'link only') + ' (until ' + esc(String(r.expires_at).slice(0, 10)) + ') <a href="#" data-cx="' + r.id + '">cancel</a>'; }).join(' · ') + '</p>' : '') +
+        '<div id="sgdocs"></div><p class="sub" style="word-break:break-all">Invoice fingerprint (SHA-256): ' + esc(d.fingerprint) + '</p><div class="controls"><button id="sgx">Close</button></div>');
+      var again = function () { signing(invId, c, after); };
+      $('#sgx').onclick = function () { close(); if (after) after(); };
+      if (window.VADocs) window.VADocs.mount($('#sgdocs'), 'invoice', invId, { category: 'receivables' });
+      all('[data-cx]').forEach(function (a) { a.onclick = function (e) { e.preventDefault(); api('/api/ar/sign-requests/' + a.getAttribute('data-cx') + '/cancel', 'POST').then(again).catch(function (er) { toast(er.message); }); }; });
+      if (i.voided_at) return;
+      var pad = window.VAScan.pad($('#sgpad'));
+      $('#sgclr').onclick = pad.clear;
+      $('#sggo').onclick = function () {
+        if (pad.empty()) return toast('Sign in the box first');
+        $('#sggo').disabled = true;
+        api('/api/ar/invoices/' + invId + '/sign', 'POST', { name: $('#sgname').value, image: pad.png() })
+          .then(function (r) { toast('Signed' + (r.document ? ': filed as ' + r.document.number : '')); again(); })
+          .catch(function (e) { $('#sggo').disabled = false; toast(e.message); });
+      };
+      $('#sgsend').onclick = function () {
+        $('#sgsend').disabled = true;
+        api('/api/ar/invoices/' + invId + '/sign-request', 'POST', { email: $('#sgmail').value.trim(), days: $('#sgdays').value }).then(function (r) {
+          var wa = 'https://wa.me/?text=' + encodeURIComponent('Please sign invoice ' + i.number + ' (' + J(i.total) + ') from ' + B.shopName() + ': ' + r.link);
+          $('#sglink').innerHTML = '<div class="note info">' + (r.emailed ? 'Emailed. ' : '') + 'This link works once, for ' + r.expires_in_days + ' days, and is shown only now:<br><input id="sgl" readonly style="width:100%;margin:6px 0" value="' + esc(r.link) + '">' +
+            '<button class="sm" id="sgcopy">Copy link</button> <a class="pill" href="' + esc(wa) + '" target="_blank" rel="noopener">Send by WhatsApp ↗</a></div>';
+          $('#sgcopy').onclick = function () { $('#sgl').select(); (navigator.clipboard ? navigator.clipboard.writeText(r.link) : Promise.reject()).then(function () { toast('Copied'); }, function () { document.execCommand('copy'); toast('Copied'); }); };
+          $('#sgsend').disabled = false;
+        }).catch(function (e) { $('#sgsend').disabled = false; toast(e.message); });
+      };
     }).catch(function (e) { toast(e.message); });
   }
 

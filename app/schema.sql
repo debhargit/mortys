@@ -6058,3 +6058,38 @@ INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
   ('1015', 'Petty Cash',                          'asset',     'Petty Cash',                          'BANK',   'petty_cash'),
   ('2160', 'Redeemables Held for Operator',       'liability', 'Redeemables Held for Operator',       'OCLIAB', 'redeemables_payable')
 ON CONFLICT DO NOTHING;
+
+-- =============================================================================
+--  INVOICE SCANNING AND SIGNATURES (invoice-docs.js)
+--  Signatures on A/R invoices, in person or from a one-time link, sealed with a
+--  hash of the invoice and an HMAC; the signed copy is filed in documents.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS invoice_sign_requests (
+  id            SERIAL PRIMARY KEY,
+  invoice_id    INTEGER NOT NULL REFERENCES ar_invoices(id) ON DELETE CASCADE,
+  token_sha256  TEXT NOT NULL UNIQUE,                       -- the link's token is never stored
+  sent_to       TEXT,
+  sent_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  expires_at    TIMESTAMPTZ NOT NULL,
+  used_at       TIMESTAMPTZ,
+  cancelled_at  TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_sign_requests_invoice ON invoice_sign_requests (invoice_id);
+CREATE TABLE IF NOT EXISTS invoice_signatures (
+  id              SERIAL PRIMARY KEY,
+  invoice_id      INTEGER NOT NULL REFERENCES ar_invoices(id) ON DELETE CASCADE,
+  method          TEXT NOT NULL CHECK (method IN ('in_person', 'remote')),
+  signer_name     TEXT NOT NULL,
+  signer_email    TEXT,
+  image           TEXT NOT NULL,                            -- data:image/png;base64,...
+  content_sha256  TEXT NOT NULL,                            -- the invoice as signed
+  seal            TEXT NOT NULL,                            -- HMAC over invoice, hash, method, signer, time, picture
+  ip              TEXT,
+  user_agent      TEXT,
+  witnessed_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  request_id      INTEGER REFERENCES invoice_sign_requests(id) ON DELETE SET NULL,
+  document_id     INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  signed_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_signatures_invoice ON invoice_signatures (invoice_id);

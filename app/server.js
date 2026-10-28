@@ -920,7 +920,7 @@ const sysops = require('./sysops').register(app, { query, requireAdmin, requireC
 require('./cyber').register(app, { query, requireAdmin, requireCap, mailer, devMode: DEV_MODE, sysops });
 // Document and communication centre (docs.js): the filed-document library, templates and
 // forms, and the journal of every email / SMS the system sends (it wraps mailer and sms).
-require('./docs').register(app, { query, requireCap, userCan, mailer, sms, devMode: DEV_MODE, sysops });
+const docsCentre = require('./docs').register(app, { query, requireCap, userCan, mailer, sms, devMode: DEV_MODE, sysops });
 // Dispatch, the driver app and vehicle tracking (fleet.js), plus the mobile app shell.
 require('./fleet').register(app, { query, requireCap, userCan, permState: (id) => userPermState(id), mailer, devMode: DEV_MODE });
 // Time clock: attendance, the clocked-in-on-site rule for taking money, shifts,
@@ -6467,6 +6467,9 @@ const books = require('./books').register(app, { query, getPool: () => pool, req
   getShop: async () => shopSettingsToShop(await getShopSettings()), arOpenSql: AR_OPEN_SQL });
 // Loans, invoices raised on the books, recurring invoices and bills, scheduled reminders and late fees (billing.js).
 require('./billing').register(app, { query, getPool: () => pool, requireAdmin, requireCap, userCan, mailer, books, notify,
+  getShop: async () => shopSettingsToShop(await getShopSettings()) });
+// Reading supplier invoices (photo / PDF) for bills and receiving, and signatures on customer invoices (invoice-docs.js).
+require('./invoice-docs').register(app, { query, requireAdmin, requireManager, requireCap, userCan, mailer, docs: docsCentre, devMode: DEV_MODE,
   getShop: async () => shopSettingsToShop(await getShopSettings()) });
 // POS add-ons: petty cash and payouts, warranty register and claims, redeemable instruments, terminal presence (posaddons.js).
 const posAddons = require('./posaddons');

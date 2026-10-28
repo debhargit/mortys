@@ -22,6 +22,7 @@
 <script src="/assets/books-common.js?v=20261019"></script>
 <script src="/assets/billing-ui.js?v=20261019"></script>
 <script src="/assets/doc-attach.js"></script>
+<script src="/assets/invoice-scan.js?v=20261028"></script>
 <script>
 (function () {
   'use strict';
@@ -52,8 +53,10 @@
         '<div class="card"><h2>Unpaid</h2><div class="scroll"><table><thead><tr><th>Type</th><th>Number</th><th>Date</th><th>Due</th><th class="n">Amount</th><th class="n">Paid</th><th class="n">Open</th><th class="n">Overdue</th></tr></thead><tbody>' + (d.open.length ? docRows(d.open) : '<tr><td colspan="8" class="empty">Nothing unpaid.</td></tr>') + '</tbody></table></div></div>' +
         '<div class="card"><h2>Payments</h2><div class="scroll"><table><thead><tr><th>Date</th><th>Method</th><th>Cheque / ref</th><th>Paid from</th><th class="n">Amount</th><th></th></tr></thead><tbody>' +
         (d.payments.length ? d.payments.map(function (p) { return '<tr style="' + (p.voided_at ? 'opacity:.5' : '') + '"><td>' + esc(p.day) + '</td><td>' + esc(p.method) + '</td><td>' + esc(p.cheque_number || p.reference || '') + '</td><td>' + esc(p.paid_from) + '</td><td class="n">' + J(p.amount) + '</td><td style="white-space:nowrap"><button class="sm" data-pp="' + p.id + '">Print</button> ' + (p.voided_at ? '<span class="pill bad">void</span> <small>' + esc(p.void_reason || '') + '</small>' : '<button class="sm" data-vp="' + p.id + '">Void</button>') + '</td></tr>'; }).join('') : '<tr><td colspan="6" class="empty">No payments.</td></tr>') + '</tbody></table></div></div>' +
-        (d.history.length ? '<div class="card"><h2>Paid bills</h2><div class="scroll"><table><tbody>' + docRows(d.history) + '</tbody></table></div></div>' : '');
+        (d.history.length ? '<div class="card"><h2>Paid bills</h2><div class="scroll"><table><tbody>' + docRows(d.history) + '</tbody></table></div></div>' : '') +
+        '<div class="card"><h2>Supplier invoices &amp; documents</h2><p class="sub">Invoices, statements and anything else from this supplier, kept in the document centre. A bill\'s own invoice is filed with the bill (Enter a bill → Scan the supplier\'s invoice).</p><div id="supdocs"></div></div>';
       $('#bk').onclick = show;
+      if (window.VADocs) window.VADocs.mount($('#supdocs'), 'supplier', id, { category: 'payables' });
       $('#er').onclick = function () { location.href = '/admin.html#tab=suppliers&id=' + id; };
       $('#pb').onclick = function () { tab = 'pay'; mark(); pay(id); };
       $('#eb').onclick = function () { tab = 'bill'; mark(); billForm('bill', s); };
@@ -146,6 +149,7 @@
   function billForm(kind, pre) {
     var isCredit = kind === 'credit';
     $('#out').innerHTML = '<div class="card"><h2>' + (isCredit ? 'Supplier credit' : 'Enter a bill') + '</h2><p class="sub">' + (isCredit ? 'A credit note from a supplier (a refund owed to you, or a discount). Use it in Pay Bills to reduce a payment.' : 'For bills that did not come through a purchase order: rent, light, phone, repairs, services. Stock bought on a purchase order comes in through receiving.') + '</p>' +
+      '<div class="controls" id="scanbar"></div><div id="scaninfo"></div>' +
       '<div class="controls"><div style="flex:1;min-width:220px"><label>Supplier</label><input id="bs" list="suppliers" style="width:100%" value="' + esc(pre ? pre.name : '') + '"></div><div><label>' + (isCredit ? 'Credit note no.' : 'Supplier invoice no.') + '</label><input id="bn" style="width:150px"></div>' +
       '<div><label>Date</label><input type="date" id="bd" value="' + B.today() + '"></div>' + (isCredit ? '' : '<div><label>Due (blank = from terms)</label><input type="date" id="bdu"></div>') + '</div>' +
       '<table class="lines"><thead><tr><th style="width:32%">Category (account)</th><th style="width:15%">Class</th><th>Description</th><th class="n" style="width:150px">Amount</th><th style="width:40px"></th></tr></thead><tbody id="bl"></tbody></table>' +
@@ -167,6 +171,45 @@
     // The supplier's default category and class fill the first line if it is still blank.
     $('#bs').onchange = function () { var s = supNow(); if (!s) return; var first = $('[data-la]'), fc = $('[data-lc]'); if (first && !first.value && s.default_account_id) first.value = s.default_account_id; if (fc && !fc.value && s.default_class_id) fc.value = s.default_class_id; };
     $('#add').onclick = function () { addLine(); };
+    // The supplier's invoice: read it to fill the bill, or just attach it. Either way the
+    // original is filed in the document centre against the bill when the bill is saved.
+    var invFile = null;
+    var showFile = function (extra) {
+      $('#scaninfo').innerHTML = (invFile ? '<p class="sub">📎 <b>' + esc(invFile.name) + '</b> will be filed with this ' + (isCredit ? 'credit' : 'bill') + ' in the document centre. <a href="#" id="unfile">remove</a></p>' : '') + (extra || '');
+      if ($('#unfile')) $('#unfile').onclick = function (e) { e.preventDefault(); invFile = null; showFile(); };
+    };
+    var fill = function (r) {
+      var v = r.invoice, warn = [];
+      if (!v.is_invoice) warn.push('This does not look like an invoice: check it.');
+      if (r.supplier) { $('#bs').value = r.supplier.name; $('#bs').onchange(); }
+      else if (v.supplier_name) warn.push('The supplier "' + esc(v.supplier_name) + '" is not on file: choose or add them.');
+      if (v.invoice_number) $('#bn').value = v.invoice_number;
+      if (v.invoice_date) $('#bd').value = v.invoice_date;
+      if (v.due_date && $('#bdu')) $('#bdu').value = v.due_date;
+      if (v.currency && v.currency !== 'JMD') warn.push('The invoice is in ' + esc(v.currency) + ': convert the amounts to J$ before saving.');
+      var s = supNow(), acct = s && s.default_account_id, cls = s && s.default_class_id;
+      $('#bl').innerHTML = '';
+      var put = function (desc, amt) { addLine(acct || undefined, cls || undefined); var tr = $('#bl').lastChild; tr.querySelector('[data-ld]').value = desc; if (amt != null) tr.querySelector('[data-lm]').value = (+amt).toFixed(2); };
+      v.lines.forEach(function (l) {
+        var amt = l.amount != null ? l.amount : (l.qty != null && l.unit_cost != null ? Math.round(l.qty * l.unit_cost * 100) / 100 : null);
+        put((l.qty != null && l.qty !== 1 ? l.qty + ' × ' : '') + (l.sku ? l.sku + ' ' : '') + l.description, amt);
+      });
+      if (!v.lines.length) put(v.supplier_name ? 'Invoice ' + (v.invoice_number || '') : '', v.subtotal != null ? v.subtotal : (v.total != null ? v.total - (v.tax || 0) - (v.freight || 0) : null));
+      if (v.freight) put('Freight', v.freight);
+      if (v.tax != null) $('#bg').value = (+v.tax).toFixed(2);
+      if (v.notes) $('#bm').value = v.notes.slice(0, 200);
+      total();
+      var got = Math.round((sub() + (+$('#bg').value || 0)) * 100) / 100;
+      if (v.total != null && Math.abs(got - v.total) > 0.01) warn.push('The lines add up to ' + J(got) + ' but the invoice total is ' + J(v.total) + ': check the lines.');
+      showFile('<div class="note ' + (warn.length ? 'warn' : 'info') + '">Read from the invoice: check every field before saving. Choose the category (account) for each line.' + (warn.length ? '<br>' + warn.join('<br>') : '') + '</div>');
+    };
+    if (window.VAScan) {
+      $('#scanbar').appendChild(window.VAScan.button('📷 Scan the supplier\'s invoice', function (f) {
+        invFile = f; showFile('<p class="sub">Reading the invoice…</p>');
+        window.VAScan.read(f).then(fill).catch(function (e) { showFile('<div class="note bad">' + esc(e.message) + '</div>'); });
+      }, { primary: true }));
+      $('#scanbar').appendChild(window.VAScan.button('📎 Attach it without reading', function (f) { invFile = f; showFile(); }));
+    }
     $('#bg').oninput = total;
     $('#g15').onclick = function () { $('#bg').value = (Math.round(sub() * 0.15 * 100) / 100).toFixed(2); total(); };
     total();
@@ -175,7 +218,14 @@
       if (!s) return toast('Choose the supplier from the list');
       var lines = all('#bl tr').map(function (tr) { return { account_id: tr.querySelector('[data-la]').value, class_id: tr.querySelector('[data-lc]').value, description: tr.querySelector('[data-ld]').value, amount: tr.querySelector('[data-lm]').value }; }).filter(function (l) { return +l.amount > 0; });
       api('/api/ap/bills', 'POST', { kind: kind, supplier_id: s.id, number: $('#bn').value, bill_date: $('#bd').value, due_date: $('#bdu') ? $('#bdu').value : '', gct_amount: $('#bg').value, memo: $('#bm').value, lines: lines })
-        .then(function (r) { toast((isCredit ? 'Credit' : 'Bill') + ' saved: ' + J(r.total) + (r.due_date ? ', due ' + r.due_date : '')); billForm(kind); })
+        .then(function (r) {
+          var said = (isCredit ? 'Credit' : 'Bill') + ' saved: ' + J(r.total) + (r.due_date ? ', due ' + r.due_date : '');
+          if (!invFile) { toast(said); return billForm(kind); }
+          return window.VAScan.fileIt(invFile, { category: 'payables', title: (isCredit ? 'Credit note ' : 'Supplier invoice ') + ($('#bn').value || '') + ' - ' + s.name, reference: $('#bn').value, issuer: s.name, issue_date: $('#bd').value,
+            links: [{ type: 'bill', id: r.id }, { type: 'supplier', id: s.id }] })
+            .then(function (d) { toast(said + '; invoice filed as ' + d.number); }, function (e) { toast(said + '. The invoice was NOT filed (' + e.message + '): file it from the bill.'); })
+            .then(function () { billForm(kind); });
+        })
         .catch(function (e) { toast(e.message); });
     };
   }

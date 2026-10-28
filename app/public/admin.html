@@ -11423,6 +11423,8 @@ async function renderReceiveStock(panel){
       '<h2 style="margin:0 0 4px">📥 Receive Stock</h2><p style="margin:0 0 14px;color:var(--muted);font-size:13px">What arrived, and the supplier\'s bill with it. The bill goes to Payables; any difference between the bill and what arrived is explained before it is posted.</p>' +
       formTabs([
         { key: 'source', label: 'Source', req: true, html:
+          '<div class="full" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;border:1px dashed var(--line);border-radius:8px;padding:10px"><span id="rsScanBtn"></span><span style="font-size:12.5px;color:var(--muted)">A photo or PDF of the supplier\'s invoice fills in the supplier, order, items and bill for you to check. The invoice is filed with the bill in the document centre.</span></div>' +
+          '<div class="full" id="rsScanInfo"></div>' +
           '<div class="full" style="display:flex;gap:18px;flex-wrap:wrap">' +
             '<label style="display:inline-flex;gap:7px;align-items:center;font-size:13px"><input type="radio" name="rsMode" value="po"' + (st.mode === 'po' ? ' checked' : '') + (pos.length ? '' : ' disabled') + '/> Against a purchase order' + tip('The delivery is for an order you placed: its lines and costs come from the PO, and what is not delivered stays on the PO.') + '</label>' +
             '<label style="display:inline-flex;gap:7px;align-items:center;font-size:13px"><input type="radio" name="rsMode" value="none"' + (st.mode === 'none' ? ' checked' : '') + '/> No purchase order' + tip('A delivery or purchase with no PO: pick the parts yourself on the Items tab.') + '</label>' +
@@ -11630,12 +11632,99 @@ async function renderReceiveStock(panel){
     }
     try {
       var r = await api('/api/admin/receive-stock', { method: 'POST', body: body });
+      var filed = await fileScan(r, supId);
       posToast('Received ' + r.lines.length + ' line' + (r.lines.length === 1 ? '' : 's') + ' (' + fmtMoney(r.value_received) + ')' +
         (r.bill ? '; bill ' + (r.bill.number || '') + ' ' + fmtMoney(r.bill.total) + ' in Payables, due ' + r.bill.due_date : '') +
-        (r.back_order_po ? '; back-order ' + r.back_order_po.po_number + ' opened' : ''));
+        (r.back_order_po ? '; back-order ' + r.back_order_po.po_number + ' opened' : '') + filed, /NOT filed/.test(filed));
       if (st.mode === 'po') { PO_VIEW_ID = st.po.id; show('purchaseorders'); } else renderReceiveStock(panel);
     } catch (e) { msg.textContent = e.message; msg.style.color = 'var(--red)'; btn.disabled = false; }
   });
+
+  // ---- scan the supplier's invoice ------------------------------------------------
+  // POST /api/invoice-scan reads it (invoice-docs.js); this fills the form from what
+  // was read and matched, and keeps the file to put in the document centre on posting.
+  var scanFile = null;
+  var keyOf = function(v){ return String(v || '').toLowerCase().replace(/[\s-]+/g, ''); };
+  var setNum = function(id, v){ if (v != null) document.getElementById(id).value = Number(v).toFixed(2); };
+  async function applyScan(r){
+    var v = r.invoice, notes = [], unmatched = [];
+    if (!v.is_invoice) notes.push('This does not look like an invoice: check everything.');
+    if (v.currency && v.currency !== 'JMD') notes.push('The invoice is in ' + v.currency + ': the costs are as printed, so convert them to J$ first.');
+    var openPos = (r.open_pos || []).filter(function(p){ return document.querySelector('#rsPo option[value="' + p.id + '"]'); });
+    if (r.supplier && openPos.length) {
+      var pick = openPos[0];
+      form.querySelector('[name=rsMode][value=po]').checked = true; setMode();
+      document.getElementById('rsPo').value = String(pick.id);
+      await loadPo(pick.id);
+      if (openPos.length > 1) notes.push(r.supplier.name + ' has ' + openPos.length + ' open orders (' + openPos.map(function(p){ return p.po_number; }).join(', ') + '); ' + pick.po_number + ' was picked. Change it here if it is another.');
+      var hit = {};
+      v.lines.forEach(function(l){
+        var k = keyOf(l.sku), d = String(l.description || '').toLowerCase();
+        var i = st.poLines.findIndex(function(x, j){ return !hit[j] && k && keyOf(x.sku) === k; });
+        if (i < 0) i = st.poLines.findIndex(function(x, j){ var xd = String(x.description || '').toLowerCase(); return !hit[j] && d.length > 3 && xd && (xd.indexOf(d) >= 0 || d.indexOf(xd) >= 0); });
+        if (i < 0) { unmatched.push(l); return; }
+        hit[i] = true;
+        var pl = st.poLines[i], out = pl.qty_ordered - pl.qty_received, nm = pl.sku || pl.description;
+        pl.qty = Math.max(0, Math.min(out, l.qty != null ? Math.round(l.qty) : out));
+        if (l.qty != null && l.qty > out) notes.push(nm + ': the invoice says ' + l.qty + ' but only ' + out + ' are outstanding on the order.');
+        if (l.unit_cost != null && Math.abs(l.unit_cost - pl.unit_cost) > 0.005) notes.push(nm + ': invoice price ' + fmtMoney(l.unit_cost) + ', order price ' + fmtMoney(pl.unit_cost) + ' (the tally shows the difference).');
+      });
+      drawItems();
+    } else {
+      form.querySelector('[name=rsMode][value=none]').checked = true; setMode();
+      if (r.supplier && supSel.querySelector('option[value="' + r.supplier.id + '"]')) supSel.value = String(r.supplier.id);
+      else if (r.supplier || v.supplier_name) notes.push('The supplier "' + (r.supplier ? r.supplier.name : v.supplier_name) + '" is not in the list: choose them, or ➕ add them.');
+      st.loose = [];
+      v.lines.forEach(function(l){
+        if (!l.product) { unmatched.push(l); return; }
+        var q = Math.max(1, Math.round(l.qty || 1)), ex = st.loose.find(function(x){ return x.img === l.product.img; });
+        if (ex) ex.qty += q;
+        else st.loose.push({ img: l.product.img, name: l.product.name, sku: l.product.sku || '', qty: q, cost: l.unit_cost, oldCost: l.product.cost_usd, sell: null, bin: l.product.bin_location || null });
+      });
+      drawItems();
+    }
+    // The bill, as printed.
+    var hb = document.getElementById('rsHaveBill'); hb.checked = true; hb.dispatchEvent(new Event('change'));
+    if (v.invoice_number) document.getElementById('rsBillNo').value = v.invoice_number;
+    if (v.invoice_date) document.getElementById('rsBillDate').value = v.invoice_date;
+    if (v.due_date) document.getElementById('rsDue').value = v.due_date;
+    var tax = v.tax || 0, fr = v.freight || 0;
+    setNum('rsSub', v.subtotal != null ? v.subtotal : (v.total != null ? Math.round((v.total - tax - fr) * 100) / 100 : null));
+    setNum('rsTax', v.tax); setNum('rsFreight', v.freight);
+    var tot = document.getElementById('rsTotal');
+    if (v.total != null) { setNum('rsTotal', v.total); tot.dataset.touched = '1'; }
+    else { tot.value = ((num('rsSub') || 0) + tax + fr).toFixed(2); delete tot.dataset.touched; }
+    totHint();
+    if (unmatched.length) notes.push('Not matched to ' + (st.mode === 'po' ? 'the order' : 'a part on file') + ' (add ' + (unmatched.length === 1 ? 'it' : 'them') + ' yourself, or add the part in Parts Department first): ' +
+      unmatched.map(function(l){ return esc((l.qty != null ? l.qty + ' × ' : '') + (l.sku ? l.sku + ' ' : '') + l.description); }).join('; '));
+    if (v.notes) notes.push('From the reader: ' + esc(v.notes));
+    document.getElementById('rsScanInfo').innerHTML = '<div style="border-left:3px solid ' + (notes.length ? '#f59e0b' : 'var(--ok,#15803d)') + ';background:var(--card);padding:8px 10px;border-radius:6px;font-size:12.5px">' +
+      '<b>Read from ' + esc(scanFile.name) + '</b>: ' + v.lines.length + ' line' + (v.lines.length === 1 ? '' : 's') + (v.invoice_number ? ', bill ' + esc(v.invoice_number) : '') + (v.total != null ? ', total ' + fmtMoney(v.total) : '') + '. Check the Items and Supplier bill tabs before posting.' +
+      (notes.length ? '<ul style="margin:6px 0 0;padding-left:18px">' + notes.map(function(x){ return '<li>' + x + '</li>'; }).join('') + '</ul>' : '') + '</div>';
+    openFormTab(form, 'items');
+  }
+  var scanJs = window.VAScan ? Promise.resolve() : new Promise(function(ok, no){ var s = document.createElement('script'); s.src = '/assets/invoice-scan.js?v=20261028'; s.onload = ok; s.onerror = no; document.head.appendChild(s); });
+  scanJs.then(function(){
+    var slot = document.getElementById('rsScanBtn'); if (!slot) return;
+    slot.appendChild(window.VAScan.button('📷 Scan the supplier\'s invoice', async function(f){
+      var info = document.getElementById('rsScanInfo');
+      scanFile = f; info.innerHTML = '<small style="color:var(--muted)">Reading ' + esc(f.name) + '…</small>';
+      try { await applyScan(await window.VAScan.read(f)); }
+      catch (e) { info.innerHTML = '<div style="color:var(--red);font-size:12.5px">' + esc(e.message) + ' The invoice will still be filed with the bill when you post.</div>'; }
+    }, { className: 'btn ok', dev: location.hostname === 'localhost' }));
+  }).catch(function(){});
+  // After posting: the original invoice goes in the document centre, linked to the bill, supplier and PO.
+  async function fileScan(r, supId){
+    if (!scanFile || !window.VAScan) return '';
+    var links = [];
+    if (r.bill && r.bill.id) links.push({ type: 'bill', id: r.bill.id });
+    if (supId) links.push({ type: 'supplier', id: supId });
+    if (st.mode === 'po' && st.po) links.push({ type: 'po', id: st.po.id });
+    try {
+      var d = await window.VAScan.fileIt(scanFile, { category: 'payables', title: 'Supplier invoice ' + (val('rsBillNo') || '') + (st.po ? ' - ' + (st.po.supplier_name || '') : ''), reference: val('rsBillNo'), issue_date: val('rsBillDate'), links: links });
+      return '; invoice filed as ' + d.number;
+    } catch (e) { return '; the invoice was NOT filed (' + e.message + ')'; }
+  }
 
   setMode();
   if (preset) { await loadPo(preset); openFormTab(form, 'items'); }

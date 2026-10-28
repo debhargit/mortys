@@ -81,6 +81,7 @@ const CONF = ['public', 'internal', 'confidential', 'restricted'];
 const ENTITIES = {
   supplier:  { label: 'Supplier', search: `SELECT id::text AS id, name AS label FROM suppliers WHERE name ILIKE $1 ORDER BY name LIMIT 20`, one: `SELECT name AS label FROM suppliers WHERE id = $1::int` },
   bill:      { label: 'Supplier bill', search: `SELECT b.id::text AS id, COALESCE(b.number, 'Bill ' || b.id) || ' - ' || s.name || ' (' || to_char(b.bill_date, 'DD Mon YYYY') || ')' AS label FROM ap_bills b JOIN suppliers s ON s.id = b.supplier_id WHERE b.number ILIKE $1 OR s.name ILIKE $1 ORDER BY b.bill_date DESC LIMIT 20`, one: `SELECT COALESCE(b.number, 'Bill ' || b.id) || ' - ' || s.name AS label FROM ap_bills b JOIN suppliers s ON s.id = b.supplier_id WHERE b.id = $1::int` },
+  invoice:   { label: 'Customer invoice', search: `SELECT i.id::text AS id, i.number || ' - ' || COALESCE(NULLIF(u.name, ''), u.email) || ' (' || to_char(i.invoice_date, 'DD Mon YYYY') || ')' AS label FROM ar_invoices i JOIN users u ON u.id = i.customer_id WHERE i.number ILIKE $1 OR u.name ILIKE $1 ORDER BY i.invoice_date DESC LIMIT 20`, one: `SELECT i.number || ' - ' || COALESCE(NULLIF(u.name, ''), u.email) AS label FROM ar_invoices i JOIN users u ON u.id = i.customer_id WHERE i.id = $1::int` },
   po:        { label: 'Purchase order', search: `SELECT id::text AS id, 'PO ' || id AS label FROM purchase_orders WHERE id::text ILIKE $1 ORDER BY id DESC LIMIT 20`, one: `SELECT 'PO ' || id AS label FROM purchase_orders WHERE id = $1::int` },
   staff:     { label: 'Staff member', search: `SELECT id::text AS id, COALESCE(name, email) AS label FROM users WHERE (is_staff OR is_admin) AND (name ILIKE $1 OR email ILIKE $1) ORDER BY name LIMIT 20`, one: `SELECT COALESCE(name, email) AS label FROM users WHERE id = $1::int` },
   employee:  { label: 'Payroll employee', search: `SELECT id::text AS id, name || COALESCE(' (' || employee_no || ')', '') AS label FROM payroll_employees WHERE name ILIKE $1 OR employee_no ILIKE $1 ORDER BY name LIMIT 20`, one: `SELECT name AS label FROM payroll_employees WHERE id = $1::int` },
@@ -999,5 +1000,20 @@ exports.register = function register(app, deps) {
     ];
   });
 
-  return { logComm, createDoc, CATEGORIES, ENTITIES };
+  // File a page the system wrote (a signed invoice, say) as a document: the same
+  // steps as a filled-in form above. req may have no session (a customer signing
+  // from a link); the document is then filed by nobody and logged without a user.
+  async function fileHtml(req, f) {
+    const doc = await createDoc(req, Object.assign({ source: 'upload' }, f, { storage: null }));
+    const tmp = path.join(INCOMING, crypto.randomBytes(16).toString('hex') + '.html');
+    fs.writeFileSync(tmp, f.html);
+    const size = fs.statSync(tmp).size; const sha = await sha256File(tmp);
+    const storage = file(tmp, '.html');
+    const fname = String(f.file_name || f.title || 'document').replace(/[^\w .-]+/g, '').trim() + ' ' + doc.number + '.html';
+    await query(`UPDATE documents SET file_name = $2, mime = 'text/html', size = $3, sha256 = $4, storage = $5, text_content = $6 WHERE id = $1`, [doc.id, fname, size, sha, storage, plain(f.html)]);
+    await query(`INSERT INTO document_versions (document_id, version, file_name, mime, size, sha256, storage, note, uploaded_by) VALUES ($1, 1, $2, 'text/html', $3, $4, $5, $6, $7)`, [doc.id, fname, size, sha, storage, f.note || 'First version', me(req)]);
+    return doc;
+  }
+
+  return { logComm, createDoc, fileHtml, CATEGORIES, ENTITIES };
 };
