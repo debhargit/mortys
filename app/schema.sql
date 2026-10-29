@@ -6170,3 +6170,8 @@ ALTER TABLE bank_feed_lines ADD COLUMN IF NOT EXISTS payee              TEXT;
 ALTER TABLE bank_feed_lines ADD COLUMN IF NOT EXISTS reference          TEXT;
 ALTER TABLE bank_feed_lines ADD COLUMN IF NOT EXISTS suggest_account_id INTEGER REFERENCES gl_accounts(id);
 ALTER TABLE bank_feed_lines ADD COLUMN IF NOT EXISTS note               TEXT;
+-- Bills brought over from QuickBooks (books.js import): a later import of the
+-- Unpaid Bills report compares itself with these, so a changed bill is voided
+-- and entered again as it is now, and one paid in QuickBooks can be voided.
+ALTER TABLE ap_bills ADD COLUMN IF NOT EXISTS source TEXT;   -- NULL: entered here | quickbooks
+UPDATE ap_bills SET source = 'quickbooks' WHERE source IS NULL AND memo LIKE 'Imported from QuickBooks (%';

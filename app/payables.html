@@ -254,72 +254,96 @@
   // ------------------------------------------------------- QuickBooks import --
   // Supplier list (IIF or CSV) and the Unpaid Bills report (CSV): previewed, then the ticked rows imported.
   function qbImport() {
-    $('#out').innerHTML = '<div class="card"><h2>Import from QuickBooks</h2><p class="sub">Bring suppliers, and what is still owed to them, over from QuickBooks. You see everything before it is added, and importing the same file again adds nothing twice.</p>' +
+    $('#out').innerHTML = '<div class="card"><h2>Import from QuickBooks</h2><p class="sub">Bring suppliers, and what is still owed to them, over from QuickBooks. The file is compared with what is here first: you see what is new, what has changed (old and new side by side) and what is unchanged, before anything is saved.</p>' +
       '<div class="controls"><div><label>What is in the file</label><select id="qk"><option value="bills">Unpaid bills</option><option value="suppliers">Supplier (vendor) list</option></select></div>' +
       '<div><label>File from QuickBooks</label><input type="file" id="qf" accept=".csv,.iif,.txt,text/csv"></div>' +
-      '<div><label>Dates are</label><select id="qo"><option value="mdy">month/day/year (QuickBooks)</option><option value="dmy">day/month/year</option></select></div><button class="primary" id="qp">Preview</button></div>' +
+      '<div><label>Dates are</label><select id="qo"><option value="mdy">month/day/year (QuickBooks)</option><option value="dmy">day/month/year</option></select></div>' +
+      '<div><label>What is here already</label><select id="qm"><option value="update">Update only what changed</option><option value="replace">Replace with the file</option></select></div><button class="primary" id="qp">Preview</button></div>' +
       '<div id="qhelp"></div></div><div id="qout"></div>';
     var help = function () {
-      $('#qhelp').innerHTML = $('#qk').value === 'bills'
-        ? '<p class="sub"><b>QuickBooks Desktop:</b> Reports › Vendors &amp; Payables › Unpaid Bills Detail, dated today, then Excel › Create New Worksheet › Create a comma separated values (.csv) file. <b>QuickBooks Online:</b> Reports › Unpaid Bills › Export to CSV (or to Excel, then save as CSV).</p>'
-        : '<p class="sub"><b>QuickBooks Desktop:</b> File › Utilities › Export › Lists to IIF Files › Vendor List; or Reports › List › Vendor Contact List › Excel › CSV. <b>QuickBooks Online:</b> Expenses › Vendors › Export to Excel, then save as CSV.</p>';
+      var mode = $('#qm').value === 'replace'
+        ? ($('#qk').value === 'bills' ? ' <b>Replace:</b> bills brought over from QuickBooks before are made to match the file: changed ones are corrected and ones no longer in it are voided. Bills paid here, and bills entered here by hand, are never touched.'
+          : ' <b>Replace:</b> each supplier already here takes every detail from the file, blanks and name included.')
+        : ($('#qk').value === 'bills' ? ' <b>Update:</b> new bills are added and changed ones corrected; bills no longer in the file are listed for you to void if you choose.'
+          : ' <b>Update:</b> new suppliers are added; for one already here, only details the file gives that differ are changed.');
+      $('#qhelp').innerHTML = ($('#qk').value === 'bills'
+        ? '<p class="sub"><b>QuickBooks Desktop:</b> Reports › Vendors &amp; Payables › Unpaid Bills Detail, dated today, then Excel › Create New Worksheet › Create a comma separated values (.csv) file. <b>QuickBooks Online:</b> Reports › Unpaid Bills › Export to CSV (or to Excel, then save as CSV).'
+        : '<p class="sub"><b>QuickBooks Desktop:</b> File › Utilities › Export › Lists to IIF Files › Vendor List; or Reports › List › Vendor Contact List › Excel › CSV. <b>QuickBooks Online:</b> Expenses › Vendors › Export to Excel, then save as CSV.') + mode + '</p>';
     };
-    $('#qk').onchange = function () { help(); $('#qout').innerHTML = ''; };
-    help();
     var file = null;
+    var preview = function () {
+      var kind = $('#qk').value;
+      return api('/api/ap/import/' + kind, 'POST', { file: file, date_order: $('#qo').value, mode: $('#qm').value, preview: true })
+        .then(function (d) { (kind === 'bills' ? qbBills : qbSuppliers)(d, file, $('#qm').value); }).catch(function (e) { toast(e.message); });
+    };
+    $('#qk').onchange = function () { help(); file = null; $('#qout').innerHTML = ''; };
+    $('#qm').onchange = function () { help(); if (file) preview(); };
+    help();
     $('#qp').onclick = function () {
       var f = $('#qf').files[0]; if (!f) return toast('Choose the file');
-      var kind = $('#qk').value;
-      f.text().then(function (t) { file = t; return api('/api/ap/import/' + kind, 'POST', { file: t, date_order: $('#qo').value, preview: true }); })
-        .then(function (d) { (kind === 'bills' ? qbBills : qbSuppliers)(d, file); }).catch(function (e) { toast(e.message); });
+      f.text().then(function (t) { file = t; return preview(); });
     };
     return Promise.resolve();
   }
-  var QST = { ok: ['ok', 'To import'], in_system: ['warn', 'Check'], duplicate: ['', 'Already here'], error: ['bad', 'Problem'] };
-  function qbBills(d, file) {
-    var oe = d.opening_equity;
-    $('#qout').innerHTML = '<div class="card"><h2>' + d.rows.length + ' unpaid bill' + (d.rows.length === 1 ? '' : 's') + ' and credit' + (d.rows.length === 1 ? '' : 's') + ' in the file</h2>' +
+  // Old -> new for each difference a row makes.
+  function changeList(ch, money) {
+    return (ch || []).map(function (x) { var f = function (v) { return v === '' || v == null ? '(blank)' : money ? J(v) : esc(v); }; return '<div><small>' + esc(x.label) + ': <s>' + f(x.from) + '</s> → <b>' + f(x.to) + '</b></small></div>'; }).join('');
+  }
+  var QST = { new: ['ok', 'New'], changed: ['warn', 'Changed'], same: ['', 'Unchanged'], gone: ['bad', 'Not in the file'], locked: ['', 'Left alone'], in_system: ['warn', 'Check'], duplicate: ['', 'Already here'], error: ['bad', 'Problem'] };
+  function qbBills(d, file, mode) {
+    var oe = d.opening_equity, cnt = function (s) { return d.rows.filter(function (r) { return r.status === s; }).length; };
+    // Ticked to start with: new and changed; with "replace", the ones no longer in the file too.
+    var on = function (r) { return r.status === 'new' || r.status === 'changed' || (r.status === 'gone' && mode === 'replace'); };
+    var can = function (r) { return ['new', 'changed', 'gone', 'in_system'].indexOf(r.status) >= 0; };
+    $('#qout').innerHTML = '<div class="card"><h2>Unpaid bills: ' + cnt('new') + ' new, ' + cnt('changed') + ' changed, ' + cnt('same') + ' unchanged' + (cnt('gone') ? ', ' + cnt('gone') + ' no longer in QuickBooks' : '') + '</h2>' +
       (d.ledger_start ? '' : '<div class="note bad">The ledger has not been started. Bills imported now show in Payables, but the ledger\'s opening balances will not include them: start the ledger first (Accounting), then import.</div>') +
-      '<p class="sub">Each becomes a bill here for what is still owed (its open balance). QuickBooks has already counted these costs, so book them against Opening Balance Equity: only what you owe is added to the books. Choose an expense account only for bills that never went into QuickBooks\'s profit and loss. "Check" means the supplier is already owed that amount or number here from purchasing; tick it only if it is a different bill.</p>' +
-      '<div class="controls"><div><label>Book against</label><select id="qa">' + B.accountOptions('line', oe && oe.id) + '</select></div><div><label>Class</label><select id="qc">' + B.classOptions() + '</select></div>' +
+      '<p class="sub">A new bill is added for what is still owed (its open balance). A changed one is voided and entered again as it is now, so the ledger shows the correction. QuickBooks has already counted these costs, so book them against Opening Balance Equity: only what you owe is added to the books. "Check" means the supplier is already owed that amount or number from purchasing; tick it only if it is a different bill.</p>' +
+      '<div class="controls"><div><label>Book new and changed bills against</label><select id="qa">' + B.accountOptions('line', oe && oe.id) + '</select></div><div><label>Class</label><select id="qc">' + B.classOptions() + '</select></div>' +
       '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="qn" checked> Add suppliers that are not here yet</label></div>' +
       '<div class="scroll"><table><thead><tr><th><input type="checkbox" id="qall"></th><th>Supplier in QuickBooks</th><th>Supplier here</th><th>Type</th><th>No.</th><th>Date</th><th>Due</th><th class="n">Owed</th><th>Status</th></tr></thead><tbody>' +
       d.rows.map(function (r) {
-        var can = r.status === 'ok' || r.status === 'in_system';
-        return '<tr><td>' + (can ? '<input type="checkbox" data-q="' + r.i + '"' + (r.status === 'ok' ? ' checked' : '') + '>' : '') + '</td><td>' + esc(r.vendor) + '</td>' +
+        return '<tr style="' + (r.status === 'same' ? 'opacity:.55' : '') + '"><td>' + (can(r) ? '<input type="checkbox" data-q="' + r.i + '"' + (on(r) ? ' checked' : '') + '>' : '') + '</td><td>' + esc(r.vendor) + '</td>' +
           '<td>' + (r.supplier_id ? esc(r.supplier) + (r.how === 'similar' ? ' <span class="pill warn">similar name</span>' : '') : '<span class="pill">new</span>') + '</td>' +
           '<td>' + (r.kind === 'credit' ? 'Credit' : 'Bill') + '</td><td>' + esc(r.number) + '</td><td>' + esc(r.date) + '</td><td>' + esc(r.due || '') + '</td><td class="n">' + J(r.kind === 'credit' ? -r.amount : r.amount) + '</td>' +
-          '<td><span class="pill ' + QST[r.status][0] + '">' + QST[r.status][1] + '</span>' + (r.reason ? '<br><small>' + esc(r.reason) + '</small>' : '') + '</td></tr>';
+          '<td><span class="pill ' + QST[r.status][0] + '">' + QST[r.status][1] + '</span>' + changeList(r.changes && r.changes.filter(function (x) { return x.field !== 'amount'; })) + changeList(r.changes && r.changes.filter(function (x) { return x.field === 'amount'; }), true) +
+          (r.reason && r.status !== 'same' ? '<br><small>' + esc(r.reason) + '</small>' : '') + '</td></tr>';
       }).join('') + '</tbody></table></div><div class="controls" style="margin-top:10px"><b id="qt"></b><span style="margin-left:auto"></span><button class="primary" id="qgo">Import</button></div></div>';
     var tot = function () {
-      var n = 0, t = 0;
-      all('[data-q]:checked').forEach(function (x) { var r = d.rows[+x.getAttribute('data-q')]; n++; t += r.kind === 'credit' ? -r.amount : r.amount; });
-      $('#qt').textContent = n + ' ticked, ' + J(t) + ' owed'; $('#qgo').textContent = 'Import ' + n; $('#qgo').disabled = !n;
+      var n = { add: 0, upd: 0, gone: 0 };
+      all('[data-q]:checked').forEach(function (x) { var r = d.rows[+x.getAttribute('data-q')]; n[r.status === 'changed' ? 'upd' : r.status === 'gone' ? 'gone' : 'add']++; });
+      $('#qt').textContent = n.add + ' to add, ' + n.upd + ' to correct, ' + n.gone + ' to void';
+      $('#qgo').textContent = 'Import'; $('#qgo').disabled = !(n.add + n.upd + n.gone);
     };
     all('[data-q]').forEach(function (x) { x.onchange = tot; });
-    $('#qall').onchange = function () { var on = this.checked; all('[data-q]').forEach(function (x) { x.checked = on; }); tot(); };
+    $('#qall').onchange = function () { var v = this.checked; all('[data-q]').forEach(function (x) { x.checked = v; }); tot(); };
     tot();
     $('#qgo').onclick = function () {
-      if (!$('#qa').value) return toast('Choose the account to book them against');
+      var ticked = all('[data-q]:checked').map(function (x) { return +x.getAttribute('data-q'); });
+      var voids = ticked.filter(function (i) { return d.rows[i].status === 'gone'; }).length;
+      if (voids && !confirm('Void ' + voids + ' bill(s) that are no longer unpaid in QuickBooks? The ledger reverses them.')) return;
+      if (ticked.some(function (i) { return d.rows[i].status !== 'gone'; }) && !$('#qa').value) return toast('Choose the account to book them against');
       var b = this; b.disabled = true;
-      api('/api/ap/import/bills', 'POST', { file: file, date_order: $('#qo').value, include: all('[data-q]:checked').map(function (x) { return +x.getAttribute('data-q'); }), account_id: $('#qa').value, class_id: $('#qc').value, create_suppliers: $('#qn').checked })
-        .then(function (r) { toast('Imported ' + r.bills + ' bill(s)' + (r.credits ? ' and ' + r.credits + ' credit(s)' : '') + (r.suppliers ? ', ' + r.suppliers + ' new supplier(s)' : '') + ': ' + J(r.total)); return loadSuppliers(); })
+      api('/api/ap/import/bills', 'POST', { file: file, date_order: $('#qo').value, include: ticked, account_id: $('#qa').value, class_id: $('#qc').value, create_suppliers: $('#qn').checked })
+        .then(function (r) { toast('Added ' + (r.bills + r.credits) + ', corrected ' + r.updated + ', voided ' + r.voided + (r.suppliers ? '; ' + r.suppliers + ' new supplier(s)' : '')); return loadSuppliers(); })
         .then(function () { tab = 'sup'; show(); }).catch(function (e) { b.disabled = false; toast(e.message); });
     };
   }
-  function qbSuppliers(d, file) {
-    var ST = { new: ['ok', 'New'], exists: ['', 'Already here'], duplicate: ['bad', 'Twice in the file'] };
-    $('#qout').innerHTML = '<div class="card"><h2>' + d.rows.length + ' supplier' + (d.rows.length === 1 ? '' : 's') + ' in the file</h2><p class="sub">New suppliers are added. For one already here, only its blank details (phone, email, address, contact, terms, account number, tax ID) are filled in; nothing already entered is changed.</p>' +
-      '<div class="scroll"><table><thead><tr><th><input type="checkbox" id="qall" checked></th><th>Name</th><th>Here</th><th>Phone</th><th>Email</th><th>Terms</th><th>Status</th></tr></thead><tbody>' +
+  function qbSuppliers(d, file, mode) {
+    var cnt = function (s) { return d.rows.filter(function (r) { return r.status === s; }).length; };
+    $('#qout').innerHTML = '<div class="card"><h2>Suppliers: ' + cnt('new') + ' new, ' + cnt('changed') + ' changed, ' + cnt('same') + ' unchanged</h2><p class="sub">' +
+      (mode === 'replace' ? 'Replacing: a supplier already here takes every detail from the file, so a detail left blank in QuickBooks is blanked here too.' : 'Updating: a supplier already here changes only the details the file gives that differ; details the file leaves blank are kept.') + '</p>' +
+      '<div class="scroll"><table><thead><tr><th><input type="checkbox" id="qall" checked></th><th>Name</th><th>Here</th><th>Phone</th><th>Email</th><th>Terms</th><th>Status and changes</th></tr></thead><tbody>' +
       d.rows.map(function (r) {
-        return '<tr><td>' + (r.status !== 'duplicate' ? '<input type="checkbox" data-q="' + r.i + '" checked>' : '') + '</td><td>' + esc(r.name) + '</td><td>' + (r.supplier ? esc(r.supplier) + (r.how === 'similar' ? ' <span class="pill warn">similar name</span>' : '') : '') + '</td>' +
-          '<td>' + esc(r.phone) + '</td><td>' + esc(r.email) + '</td><td>' + esc(r.terms) + (r.terms_days != null ? ' <small>(' + r.terms_days + ' days)</small>' : '') + '</td><td><span class="pill ' + ST[r.status][0] + '">' + ST[r.status][1] + '</span></td></tr>';
+        var can = r.status === 'new' || r.status === 'changed';
+        return '<tr style="' + (r.status === 'same' ? 'opacity:.55' : '') + '"><td>' + (can ? '<input type="checkbox" data-q="' + r.i + '" checked>' : '') + '</td><td>' + esc(r.name) + '</td><td>' + (r.supplier ? esc(r.supplier) + (r.how === 'similar' ? ' <span class="pill warn">similar name</span>' : '') : '') + '</td>' +
+          '<td>' + esc(r.phone) + '</td><td>' + esc(r.email) + '</td><td>' + esc(r.terms) + (r.terms_days != null ? ' <small>(' + r.terms_days + ' days)</small>' : '') + '</td>' +
+          '<td><span class="pill ' + QST[r.status][0] + '">' + (r.status === 'duplicate' ? 'Twice in the file' : QST[r.status][1]) + '</span>' + changeList(r.changes) + '</td></tr>';
       }).join('') + '</tbody></table></div><div class="controls" style="margin-top:10px"><span style="margin-left:auto"></span><button class="primary" id="qgo">Import ticked suppliers</button></div></div>';
-    $('#qall').onchange = function () { var on = this.checked; all('[data-q]').forEach(function (x) { x.checked = on; }); };
+    $('#qall').onchange = function () { var v = this.checked; all('[data-q]').forEach(function (x) { x.checked = v; }); };
     $('#qgo').onclick = function () {
       var b = this; b.disabled = true;
-      api('/api/ap/import/suppliers', 'POST', { file: file, include: all('[data-q]:checked').map(function (x) { return +x.getAttribute('data-q'); }) })
-        .then(function (r) { toast('Added ' + r.added + ' supplier(s); filled in details for ' + r.updated); $('#qout').innerHTML = ''; return loadSuppliers(); })
+      api('/api/ap/import/suppliers', 'POST', { file: file, mode: mode, include: all('[data-q]:checked').map(function (x) { return +x.getAttribute('data-q'); }) })
+        .then(function (r) { toast('Added ' + r.added + ' supplier(s); updated ' + r.updated); $('#qout').innerHTML = ''; return loadSuppliers(); })
         .catch(function (e) { b.disabled = false; toast(e.message); });
     };
   }

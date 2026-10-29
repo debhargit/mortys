@@ -1091,7 +1091,8 @@ function register(app, deps) {
   //                  CSV: each line from a date on (the ledger start) joins the
   //                  Bank statement review list, with QuickBooks's own account
   //                  (the Split column) and payee suggested, to match or add.
-  // Each is previewed first, and the same file imported twice adds nothing twice.
+  // Each is previewed first against what is here: a later file updates what
+  // changed (or, with "replace", makes what came from QuickBooks match it).
   const qnorm = (s) => String(s || '').toLowerCase().replace(/&/g, ' and ').replace(/\b(ltd|limited|co|company|inc|incorporated|the)\b\.?/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
   // The heading row: QuickBooks puts the report title and dates above it.
   function headingRow(rows, need) {
@@ -1127,7 +1128,7 @@ function register(app, deps) {
     return t && !/^total\b/i.test(t) ? t : null;
   }
   async function supplierMatcher() {
-    const { rows } = await query(`SELECT id, name, phone, email, address, contact_name, payment_terms, payment_terms_days FROM suppliers WHERE name IS NOT NULL AND name <> ''`);
+    const { rows } = await query(`SELECT id, name, phone, email, address, contact_name, payment_terms, payment_terms_days, account_number, tax_id FROM suppliers WHERE name IS NOT NULL AND name <> ''`);
     const exact = new Map(), loose = new Map();
     for (const s of rows) { exact.set(s.name.trim().toLowerCase(), s); if (!loose.has(qnorm(s.name))) loose.set(qnorm(s.name), s); }
     return (name) => {
@@ -1141,6 +1142,16 @@ function register(app, deps) {
     const { rows } = await query(`SELECT to_char((value::timestamptz AT TIME ZONE 'America/Jamaica')::date, 'YYYY-MM-DD') AS d FROM warehouse_settings WHERE key = 'gl_start_at' AND value IS NOT NULL AND value <> ''`);
     return rows.length ? rows[0].d : null;
   };
+
+  // Each import compares the file with what is here. Rows come back as new,
+  // changed (with each difference), same, gone (here from an earlier import
+  // but no longer in the file) or locked (changed in QuickBooks but already
+  // used here, so left for a person). Two modes: "update" changes only what
+  // the file changes; "replace" makes what came from QuickBooks match the file
+  // exactly, blanks and removals included. Nothing that staff have used here
+  // (a paid bill, a statement line already matched or added) is ever changed.
+  const IMPORT_MODES = ['update', 'replace'];
+  const sameText = (a, b) => String(a == null ? '' : a).trim().replace(/\s+/g, ' ').toLowerCase() === String(b == null ? '' : b).trim().replace(/\s+/g, ' ').toLowerCase();
 
   // ---- Supplier list
   function parseVendors(text) {
@@ -1163,38 +1174,51 @@ function register(app, deps) {
     return rows.slice(hr.i + 1).map((r) => ({ name: get(r, 'name'), phone: get(r, 'phone'), email: get(r, 'email'), address: get(r, 'address'), contact: get(r, 'contact'), terms: get(r, 'terms'), account_number: get(r, 'account_number'), tax_id: get(r, 'tax_id') }))
       .filter((v) => v.name && !/^total\b/i.test(v.name));
   }
-  async function vendorPreview(text) {
+  // Supplier column <- file field, with its label and limit.
+  const VEND_FIELDS = [['phone', 'phone', 'Phone', 40], ['email', 'email', 'Email', 120], ['address', 'address', 'Address', 300], ['contact_name', 'contact', 'Contact', 80],
+    ['payment_terms', 'terms', 'Terms', 40], ['payment_terms_days', 'terms_days', 'Terms (days)', 0], ['account_number', 'account_number', 'Account no.', 40], ['tax_id', 'tax_id', 'Tax ID', 40]];
+  // The changes a file row makes to a supplier: in "update" only fields the file fills in;
+  // in "replace" every field, so a blank in QuickBooks blanks it here, and the name too.
+  function vendorChanges(s, v, mode) {
+    const out = [];
+    if (mode === 'replace' && s.name !== v.name) out.push({ field: 'name', label: 'Name', from: s.name, to: v.name });
+    for (const [colName, key, label, max] of VEND_FIELDS) {
+      const to = key === 'terms_days' ? v.terms_days : (max ? String(v[key] || '').slice(0, max) : v[key]) || null, from = s[colName];
+      if (mode === 'update' && (to == null || to === '')) continue;
+      if (key === 'terms_days' ? (from == null ? null : +from) !== to : !sameText(from, to)) out.push({ field: colName, label, from: from == null ? '' : from, to: to == null ? '' : to });
+    }
+    return out;
+  }
+  async function vendorPreview(text, mode) {
     const list = parseVendors(text), match = await supplierMatcher(), seen = new Set();
     return list.map((v, i) => {
       const key = v.name.toLowerCase(), m = match(v.name);
       const row = Object.assign({ i, terms_days: termsDays(v.terms) }, v, { name: v.name.slice(0, 120) });
       if (seen.has(key)) return Object.assign(row, { status: 'duplicate', reason: 'Twice in the file' });
       seen.add(key);
-      return m ? Object.assign(row, { status: 'exists', supplier_id: m.s.id, supplier: m.s.name, how: m.how }) : Object.assign(row, { status: 'new' });
+      if (!m) return Object.assign(row, { status: 'new' });
+      const changes = vendorChanges(m.s, row, mode);
+      return Object.assign(row, { status: changes.length ? 'changed' : 'same', supplier_id: m.s.id, supplier: m.s.name, how: m.how, changes });
     });
   }
   app.post('/api/ap/import/suppliers', ...AP, async (req, res) => {
     try {
-      const b = req.body || {};
-      const rows = await vendorPreview(String(b.file || '').slice(0, 5000000));
+      const b = req.body || {}, mode = IMPORT_MODES.includes(b.mode) ? b.mode : 'update';
+      const rows = await vendorPreview(String(b.file || '').slice(0, 5000000), mode);
       if (!rows.length) throw httpError(400, 'No suppliers found in the file');
-      if (b.preview) return res.json({ rows });
+      if (b.preview) return res.json({ rows, mode });
       const take = new Set((Array.isArray(b.include) ? b.include : []).map(Number));
       const out = { added: 0, updated: 0 };
       await tx(async (c) => {
         for (const v of rows.filter((x) => take.has(x.i))) {
-          const f = [v.phone.slice(0, 40) || null, v.email.slice(0, 120) || null, v.address.slice(0, 300) || null, v.contact.slice(0, 80) || null, v.terms.slice(0, 40) || null, v.terms_days, v.account_number.slice(0, 40) || null, v.tax_id.slice(0, 40) || null];
           if (v.status === 'new') {
+            const f = VEND_FIELDS.map(([, key, , max]) => (key === 'terms_days' ? v.terms_days : String(v[key] || '').slice(0, max) || null));
             await c.query(`INSERT INTO suppliers (name, phone, email, address, contact_name, payment_terms, payment_terms_days, account_number, tax_id, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'From QuickBooks')`, [v.name].concat(f));
             out.added++;
-          } else if (v.status === 'exists') {
-            // Fill what is blank here; never overwrite what staff have entered.
-            const { rowCount } = await c.query(
-              `UPDATE suppliers SET phone = COALESCE(NULLIF(phone, ''), $2), email = COALESCE(NULLIF(email, ''), $3), address = COALESCE(NULLIF(address, ''), $4), contact_name = COALESCE(NULLIF(contact_name, ''), $5),
-                      payment_terms = COALESCE(NULLIF(payment_terms, ''), $6), payment_terms_days = COALESCE(payment_terms_days, $7), account_number = COALESCE(NULLIF(account_number, ''), $8), tax_id = COALESCE(NULLIF(tax_id, ''), $9)
-                WHERE id = $1 AND (NULLIF(phone, '') IS NULL OR NULLIF(email, '') IS NULL OR NULLIF(address, '') IS NULL OR NULLIF(contact_name, '') IS NULL OR NULLIF(payment_terms, '') IS NULL
-                                   OR payment_terms_days IS NULL OR NULLIF(account_number, '') IS NULL OR NULLIF(tax_id, '') IS NULL)`, [v.supplier_id].concat(f));
-            out.updated += rowCount;
+          } else if (v.status === 'changed') {
+            const sets = v.changes.map((x, k) => x.field + ' = $' + (k + 2)), vals = v.changes.map((x) => (x.to === '' ? null : x.to));
+            await c.query(`UPDATE suppliers SET ${sets.join(', ')} WHERE id = $1`, [v.supplier_id].concat(vals));
+            out.updated++;
           }
         }
       });
@@ -1228,8 +1252,16 @@ function register(app, deps) {
     }
     return out;
   }
+  // Bills brought over from QuickBooks before, still open here, with what has been paid on them here.
+  async function importedBills() {
+    const { rows } = await query(
+      `SELECT b.id, b.kind, b.supplier_id, s.name AS supplier, b.number, to_char(b.bill_date, 'YYYY-MM-DD') AS date, to_char(b.due_date, 'YYYY-MM-DD') AS due, b.total::float AS amount,
+              COALESCE((SELECT SUM(a.amount) FROM ap_applications a JOIN ap_payments p ON p.id = a.payment_id WHERE p.voided_at IS NULL AND a.bill_kind IN ('bill', 'credit') AND a.bill_id = b.id), 0)::float AS used
+         FROM ap_bills b JOIN suppliers s ON s.id = b.supplier_id WHERE b.voided_at IS NULL AND b.source = 'quickbooks'`);
+    return rows;
+  }
   async function billPreview(text, order) {
-    const list = parseUnpaid(text, order), match = await supplierMatcher(), seen = new Set();
+    const list = parseUnpaid(text, order), match = await supplierMatcher(), seen = new Set(), prior = await importedBills(), claimed = new Set();
     const docsBy = {};
     const docsOf = async (sid) => (docsBy[sid] = docsBy[sid] || (await apDocs(sid)));
     const out = [];
@@ -1240,19 +1272,40 @@ function register(app, deps) {
       if (!b.vendor) { b.status = 'error'; b.reason = 'No supplier name'; }
       else if (seen.has(key)) { b.status = 'duplicate'; b.reason = 'Twice in the file'; }
       else if (m) {
-        const { rows: dup } = await query(
-          `SELECT COALESCE(number, '#' || id) AS number FROM ap_bills WHERE supplier_id = $1 AND kind = $2 AND voided_at IS NULL
-              AND (($3 <> '' AND lower(number) = lower($3)) OR ($3 = '' AND bill_date = $4 AND total = $5)) LIMIT 1`, [m.s.id, b.kind, b.number, b.date, b.amount]);
-        if (dup.length) { b.status = 'duplicate'; b.reason = 'Already here as ' + (b.kind === 'credit' ? 'credit ' : 'bill ') + dup[0].number; }
-        else {
-          // Owed here already from the purchasing screens (a goods receipt or PO invoice)?
-          const same = (await docsOf(m.s.id)).find((d) => (d.kind === 'receipt' || d.kind === 'po') && d.open > 0.005 && ((b.number && String(d.number || '').toLowerCase() === b.number.toLowerCase()) || Math.abs(d.open - b.amount) < 0.005));
-          if (same) { b.status = 'in_system'; b.reason = 'Already owed here from purchasing: ' + (same.kind === 'receipt' ? 'goods receipt ' : 'PO ') + same.number + ' (' + money(same.open) + ')'; }
-          else b.status = 'ok';
+        // The same bill from an earlier import: by number, or with no number by date (then amount).
+        const was = prior.find((p) => !claimed.has(p.id) && p.supplier_id === m.s.id && p.kind === b.kind && (b.number ? sameText(p.number, b.number) : !p.number && p.date === b.date && Math.abs(p.amount - b.amount) < 0.005))
+          || (!b.number && prior.find((p) => !claimed.has(p.id) && p.supplier_id === m.s.id && p.kind === b.kind && !p.number && p.date === b.date));
+        if (was) {
+          claimed.add(was.id);
+          b.bill_id = was.id;
+          const changes = [];
+          if (Math.abs(was.amount - b.amount) > 0.005) changes.push({ field: 'amount', label: 'Owed', from: was.amount, to: b.amount });
+          if (was.date !== b.date) changes.push({ field: 'date', label: 'Date', from: was.date, to: b.date });
+          if (b.kind === 'bill' && b.due && was.due !== b.due) changes.push({ field: 'due', label: 'Due', from: was.due, to: b.due });
+          b.changes = changes;
+          if (!changes.length) { b.status = 'same'; b.reason = 'Already brought over, unchanged'; }
+          else if (was.used > 0.005) { b.status = 'locked'; b.reason = money(was.used) + ' of it has been paid here: change it by hand if QuickBooks is right'; }
+          else { b.status = 'changed'; b.reason = 'Changed in QuickBooks since the last import'; }
+        } else {
+          const { rows: dup } = await query(
+            `SELECT COALESCE(number, '#' || id) AS number FROM ap_bills WHERE supplier_id = $1 AND kind = $2 AND voided_at IS NULL
+                AND (($3 <> '' AND lower(number) = lower($3)) OR ($3 = '' AND bill_date = $4 AND total = $5)) LIMIT 1`, [m.s.id, b.kind, b.number, b.date, b.amount]);
+          if (dup.length) { b.status = 'duplicate'; b.reason = 'Already entered here as ' + (b.kind === 'credit' ? 'credit ' : 'bill ') + dup[0].number + ' (not from QuickBooks, so left alone)'; }
+          else {
+            const same = (await docsOf(m.s.id)).find((d) => (d.kind === 'receipt' || d.kind === 'po') && d.open > 0.005 && ((b.number && String(d.number || '').toLowerCase() === b.number.toLowerCase()) || Math.abs(d.open - b.amount) < 0.005));
+            if (same) { b.status = 'in_system'; b.reason = 'Already owed here from purchasing: ' + (same.kind === 'receipt' ? 'goods receipt ' : 'PO ') + same.number + ' (' + money(same.open) + ')'; }
+            else b.status = 'new';
+          }
         }
-      } else b.status = 'ok';
+      } else b.status = 'new';
       seen.add(key);
       out.push(b);
+    }
+    // Brought over before but not in this file: paid or removed in QuickBooks.
+    let k = list.length;
+    for (const p of prior.filter((x) => !claimed.has(x.id))) {
+      out.push({ i: k++, gone: true, bill_id: p.id, vendor: p.supplier, supplier: p.supplier, supplier_id: p.supplier_id, kind: p.kind, number: p.number || '', date: p.date, due: p.due, amount: p.amount,
+        status: p.used > 0.005 ? 'locked' : 'gone', reason: p.used > 0.005 ? 'Not in the file any more, but ' + money(p.used) + ' has been paid here: left alone' : 'Not in QuickBooks\' unpaid list any more (paid or removed there): void it here' });
     }
     return out;
   }
@@ -1263,20 +1316,29 @@ function register(app, deps) {
       if (!rows.length) throw httpError(400, 'No unpaid bills found in the file');
       const { rows: oe } = await query(`SELECT id, code, name FROM gl_accounts WHERE system_key = 'opening_equity'`);
       if (b.preview) return res.json({ rows, ledger_start: await ledgerStart(), opening_equity: oe[0] || null });
-      const acct = await lineAccount(b.account_id), cls = await classId(b.class_id);
       const take = new Set((Array.isArray(b.include) ? b.include : []).map(Number));
       const chosen = rows.filter((x) => take.has(x.i));
-      if (!chosen.length) throw httpError(400, 'Tick the bills to import');
-      if (chosen.some((x) => x.status === 'duplicate' || x.status === 'error')) throw httpError(400, 'A ticked bill is a duplicate or has no supplier');
-      if (!b.create_suppliers && chosen.some((x) => !x.supplier_id)) throw httpError(400, 'Some suppliers are not here yet: tick "Add suppliers that are not here yet" or untick those bills');
+      if (!chosen.length) throw httpError(400, 'Tick what to import');
+      if (chosen.some((x) => ['duplicate', 'error', 'same', 'locked'].includes(x.status))) throw httpError(400, 'A ticked row cannot be imported (a duplicate, unchanged, already paid here, or with no supplier)');
+      const adding = chosen.filter((x) => x.status !== 'gone');
+      const acct = adding.length ? await lineAccount(b.account_id) : null, cls = adding.length ? await classId(b.class_id) : null;
+      if (!b.create_suppliers && adding.some((x) => !x.supplier_id)) throw httpError(400, 'Some suppliers are not here yet: tick "Add suppliers that are not here yet" or untick those bills');
+      const reason = 'Replaced by QuickBooks import ' + today();
       const out = await tx(async (c) => {
-        const made = {}, res2 = { bills: 0, credits: 0, suppliers: 0, total: 0 };
-        for (const x of chosen) {
+        const made = {}, res2 = { bills: 0, credits: 0, suppliers: 0, total: 0, updated: 0, voided: 0 };
+        // A changed or gone bill is voided (the ledger reverses it); a changed one is then entered again as it is now.
+        const unpaid = async (id) => (await c.query(`SELECT 1 FROM ap_applications a JOIN ap_payments p ON p.id = a.payment_id WHERE p.voided_at IS NULL AND a.bill_kind IN ('bill', 'credit') AND a.bill_id = $1 LIMIT 1`, [id])).rows.length === 0;
+        for (const x of chosen.filter((y) => y.status === 'changed' || y.status === 'gone')) {
+          if (!(await unpaid(x.bill_id))) throw httpError(409, 'Bill ' + (x.number || '#' + x.bill_id) + ' has just been paid here: preview again');
+          await c.query(`UPDATE ap_bills SET voided_at = NOW(), voided_by = $2, void_reason = $3 WHERE id = $1 AND voided_at IS NULL`, [x.bill_id, req.session.userId, x.status === 'gone' ? 'No longer unpaid in QuickBooks (' + today() + ')' : reason]);
+          if (x.status === 'gone') res2.voided++; else res2.updated++;
+        }
+        for (const x of adding) {
           let sid = x.supplier_id;
           if (!sid) {
-            const k = x.vendor.toLowerCase();
-            if (!made[k]) { made[k] = (await c.query(`INSERT INTO suppliers (name, notes) VALUES ($1, 'From QuickBooks') RETURNING id`, [x.vendor])).rows[0].id; res2.suppliers++; }
-            sid = made[k];
+            const key = x.vendor.toLowerCase();
+            if (!made[key]) { made[key] = (await c.query(`INSERT INTO suppliers (name, notes) VALUES ($1, 'From QuickBooks') RETURNING id`, [x.vendor])).rows[0].id; res2.suppliers++; }
+            sid = made[key];
           }
           let due = x.kind === 'bill' ? x.due : null;
           if (x.kind === 'bill' && !due) {
@@ -1284,11 +1346,11 @@ function register(app, deps) {
             due = new Date(Date.parse(x.date) + ((t[0] && t[0].payment_terms_days) || 0) * 86400000).toISOString().slice(0, 10);
           }
           const { rows: ins } = await c.query(
-            `INSERT INTO ap_bills (kind, supplier_id, number, bill_date, due_date, memo, gct_amount, total, created_by) VALUES ($1,$2,$3,$4,$5,$6,0,$7,$8) RETURNING id`,
+            `INSERT INTO ap_bills (kind, supplier_id, number, bill_date, due_date, memo, gct_amount, total, created_by, source) VALUES ($1,$2,$3,$4,$5,$6,0,$7,$8,'quickbooks') RETURNING id`,
             [x.kind, sid, x.number || null, x.date, due, 'Imported from QuickBooks (' + x.type + ')', x.amount, req.session.userId]);
           await c.query(`INSERT INTO ap_bill_lines (bill_id, account_id, description, amount, class_id) VALUES ($1,$2,$3,$4,$5)`,
             [ins[0].id, acct.id, ('QuickBooks ' + x.type + ' ' + (x.number || '')).trim(), x.amount, cls]);
-          if (x.kind === 'credit') res2.credits++; else res2.bills++;
+          if (x.status === 'new' || x.status === 'in_system') { if (x.kind === 'credit') res2.credits++; else res2.bills++; }
           res2.total = r2(res2.total + (x.kind === 'credit' ? -x.amount : x.amount));
         }
         return res2;
@@ -1331,7 +1393,7 @@ function register(app, deps) {
     try {
       const a = await bankAccount(req.params.accountId);
       a.qb_name = (await query(`SELECT qb_name FROM gl_accounts WHERE id = $1`, [a.id])).rows[0].qb_name;
-      const b = req.body || {}, order = b.date_order === 'dmy' ? 'dmy' : 'mdy';
+      const b = req.body || {}, order = b.date_order === 'dmy' ? 'dmy' : 'mdy', mode = IMPORT_MODES.includes(b.mode) ? b.mode : 'update';
       let { lines, groups } = parseRegister(String(b.file || '').slice(0, 5000000), order);
       // A report for several accounts: keep this account's section only.
       if (groups.length) {
@@ -1344,7 +1406,7 @@ function register(app, deps) {
       if (from) lines = lines.filter((l) => l.date >= from);
       // QuickBooks's other-side account -> an account here, by QuickBooks name or name.
       const { rows: accts } = await query(`SELECT id, code, name, qb_name, qb_type, system_key FROM gl_accounts WHERE is_active`);
-      const byName = new Map();
+      const byName = new Map(), byId = new Map(accts.map((x) => [x.id, x]));
       for (const x of accts) for (const k of [x.qb_name, x.name, x.qb_name && x.qb_name.split(':').pop()]) if (k && !byName.has(k.trim().toLowerCase())) byName.set(k.trim().toLowerCase(), x);
       const seen = {};
       for (const l of lines) {
@@ -1359,24 +1421,59 @@ function register(app, deps) {
         seen[base] = (seen[base] || 0) + 1;
         l.hash = crypto.createHash('sha256').update(base + '|' + seen[base]).digest('hex').slice(0, 32);
       }
-      const { rows: have } = lines.length ? await query(`SELECT line_hash FROM bank_feed_lines WHERE account_id = $1 AND line_hash = ANY($2)`, [a.id, lines.map((l) => l.hash)]) : { rows: [] };
-      const done = new Set(have.map((r) => r.line_hash));
-      for (const l of lines) l.already = done.has(l.hash);
-      const fresh = lines.filter((l) => !l.already);
-      const summary = { found: lines.length + before, from, ledger_start: start, before, already: lines.length - fresh.length, to_add: fresh.length,
-        with_account: fresh.filter((l) => l.account_id).length, money_in: r2(fresh.filter((l) => l.amount > 0).reduce((t, l) => t + l.amount, 0)), money_out: r2(fresh.filter((l) => l.amount < 0).reduce((t, l) => t - l.amount, 0)),
-        unknown: [...new Set(fresh.filter((l) => l.note && /not in the chart/.test(l.note)).map((l) => l.split))].slice(0, 20) };
-      if (b.preview) return res.json({ summary, lines: lines.slice(0, 300).map((l) => ({ date: l.date, type: l.type, num: l.num, name: l.name, memo: l.memo, split: l.split, amount: l.amount, account: l.account || null, note: l.note || null, already: l.already })) });
-      const ref = 'QuickBooks ' + new Date().toISOString().slice(0, 16);
-      let added = 0;
-      for (const l of fresh) {
-        const { rowCount } = await query(
-          `INSERT INTO bank_feed_lines (account_id, import_ref, txn_date, description, amount, line_hash, created_by, source, payee, reference, suggest_account_id, note)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,'quickbooks',$8,$9,$10,$11) ON CONFLICT (account_id, line_hash) DO NOTHING`,
-          [a.id, ref, l.date, l.description, l.amount, l.hash, req.session.userId, l.name || null, l.num || null, l.account_id || null, l.note || null]);
-        added += rowCount;
+      // What earlier QuickBooks imports put in the review list for the same dates.
+      const last = lines.reduce((m, l) => (l.date > m ? l.date : m), from || '0000-00-00');
+      const { rows: prior } = lines.length ? await query(
+        `SELECT id, to_char(txn_date, 'YYYY-MM-DD') AS date, description, amount::float AS amount, status, line_hash, payee, reference, suggest_account_id
+           FROM bank_feed_lines WHERE account_id = $1 AND source = 'quickbooks' AND txn_date BETWEEN $2::date AND $3::date`, [a.id, from || '0001-01-01', last]) : { rows: [] };
+      const byHash = new Map(prior.map((p) => [p.line_hash, p])), claimed = new Set();
+      for (const l of lines) { const p = byHash.get(l.hash); if (p) { claimed.add(p.id); l.status = 'same'; l.feed_id = p.id; } }
+      for (const l of lines.filter((x) => !x.status)) {
+        // The same transaction changed in QuickBooks: same date and number (or, with no number, payee).
+        const p = prior.find((q) => !claimed.has(q.id) && q.date === l.date && (l.num ? sameText(q.reference, l.num) : !q.reference && sameText(q.payee, l.name)));
+        if (!p) { l.status = 'new'; continue; }
+        claimed.add(p.id); l.feed_id = p.id;
+        l.changes = [];
+        if (Math.abs(p.amount - l.amount) > 0.005) l.changes.push({ label: 'Amount', from: p.amount, to: l.amount });
+        if (!sameText(p.description, l.description)) l.changes.push({ label: 'Description', from: p.description, to: l.description });
+        if ((p.suggest_account_id || null) !== (l.account_id || null)) l.changes.push({ label: 'Account', from: p.suggest_account_id && byId.get(p.suggest_account_id) ? byId.get(p.suggest_account_id).code + ' ' + byId.get(p.suggest_account_id).name : '', to: l.account || '' });
+        if (!l.changes.length) l.status = 'same';
+        else if (p.status === 'new') l.status = 'changed';
+        else { l.status = 'locked'; l.reason = 'Already ' + p.status + ' here; check it against QuickBooks'; }
       }
-      res.json({ ok: true, added, already: summary.already, before });
+      const gone = prior.filter((p) => !claimed.has(p.id)).map((p) => ({ date: p.date, description: p.description, amount: p.amount, feed_id: p.id, status: p.status === 'new' ? 'gone' : 'locked',
+        reason: p.status === 'new' ? 'Not in the file any more: taken off the review list when replacing' : 'Not in the file any more, but already ' + p.status + ' here: left alone' }));
+      const cnt = (st) => lines.filter((l) => l.status === st).length;
+      const summary = { found: lines.length + before, from, ledger_start: start, before, mode, new: cnt('new'), changed: cnt('changed'), same: cnt('same'), locked: cnt('locked') + gone.filter((g) => g.status === 'locked').length,
+        gone: gone.filter((g) => g.status === 'gone').length, with_account: lines.filter((l) => l.status === 'new' && l.account_id).length,
+        unknown: [...new Set(lines.filter((l) => l.status !== 'same' && l.note && /not in the chart/.test(l.note)).map((l) => l.split))].slice(0, 20) };
+      if (b.preview) {
+        return res.json({ summary, lines: lines.slice(0, 300).map((l) => ({ date: l.date, type: l.type, num: l.num, name: l.name, memo: l.memo, split: l.split, amount: l.amount, account: l.account || null, note: l.note || null, status: l.status, changes: l.changes || null, reason: l.reason || null }))
+          .concat(gone.map((g) => ({ date: g.date, type: '', num: '', name: g.description, memo: '', amount: g.amount, status: g.status, reason: g.reason }))) });
+      }
+      const ref = 'QuickBooks ' + new Date().toISOString().slice(0, 16);
+      const out = { added: 0, updated: 0, removed: 0 };
+      await tx(async (c) => {
+        for (const l of lines.filter((x) => x.status === 'changed')) {
+          const { rowCount } = await c.query(
+            `UPDATE bank_feed_lines SET description = $2, amount = $3, line_hash = $4, payee = $5, reference = $6, suggest_account_id = $7, note = $8, import_ref = $9
+              WHERE id = $1 AND status = 'new' AND NOT EXISTS (SELECT 1 FROM bank_feed_lines x WHERE x.account_id = $10 AND x.line_hash = $4)`,
+            [l.feed_id, l.description, l.amount, l.hash, l.name || null, l.num || null, l.account_id || null, l.note || null, ref, a.id]);
+          out.updated += rowCount;
+        }
+        if (mode === 'replace') {
+          const ids = gone.filter((g) => g.status === 'gone').map((g) => g.feed_id);
+          if (ids.length) out.removed = (await c.query(`DELETE FROM bank_feed_lines WHERE id = ANY($1) AND status = 'new' AND source = 'quickbooks'`, [ids])).rowCount;
+        }
+        for (const l of lines.filter((x) => x.status === 'new')) {
+          const { rowCount } = await c.query(
+            `INSERT INTO bank_feed_lines (account_id, import_ref, txn_date, description, amount, line_hash, created_by, source, payee, reference, suggest_account_id, note)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,'quickbooks',$8,$9,$10,$11) ON CONFLICT (account_id, line_hash) DO NOTHING`,
+            [a.id, ref, l.date, l.description, l.amount, l.hash, req.session.userId, l.name || null, l.num || null, l.account_id || null, l.note || null]);
+          out.added += rowCount;
+        }
+      });
+      res.json(Object.assign({ ok: true, before, same: summary.same }, out));
     } catch (e) { fail(res, e); }
   });
 
