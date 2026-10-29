@@ -6135,3 +6135,29 @@ CREATE TABLE IF NOT EXISTS investments (
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
+-- Saved budget versions: a named copy of one year's budget (whole business or
+-- a class) -- "Original 2027", "Revised after Q1" -- kept while the working
+-- budget in gl_budgets is changed. data = {months: [12 x 'YYYY-MM-01'],
+-- rows: [{account_id, amounts[12]}]}, in J$. Putting one back copies it into
+-- gl_budgets (after keeping the working budget as a version of its own).
+CREATE TABLE IF NOT EXISTS gl_budget_versions (
+  id          SERIAL PRIMARY KEY,
+  year        INTEGER NOT NULL,
+  class_id    INTEGER REFERENCES gl_classes(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  notes       TEXT,
+  data        JSONB NOT NULL,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_gl_budget_versions_year ON gl_budget_versions (year, class_id);
+-- Financial health reports kept for comparison over time: the report exactly as
+-- it was worked out from the books that day (budget.js buildHealth).
+CREATE TABLE IF NOT EXISTS financial_health_reports (
+  id          SERIAL PRIMARY KEY,
+  as_of       DATE NOT NULL,
+  score       INTEGER,
+  report      JSONB NOT NULL,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);

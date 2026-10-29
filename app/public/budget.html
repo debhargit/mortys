@@ -25,6 +25,7 @@
   .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 12px}
   .tabs button{border-radius:999px;padding:6px 13px;font-size:13px}
   .tabs button.on{background:var(--navy);border-color:var(--navy);color:#fff}
+  .curpick{margin-left:auto;display:flex;gap:6px;align-items:center;font-size:12.5px;color:var(--muted)} .curpick select{padding:4px 8px}
   .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px}
   .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
   table{width:100%;border-collapse:collapse}
@@ -57,6 +58,7 @@
   .fgrid td:first-child,.fgrid th:first-child{position:sticky;left:0;background:var(--card);z-index:1;min-width:190px}
   .fgrid tr.head td:first-child{background:var(--chip)}
   .grid>*{min-width:0}
+  .controls>div{min-width:0;max-width:100%} .controls select{max-width:100%}
   .slider{display:flex;align-items:center;gap:8px;margin:6px 0} .slider span{flex:0 1 170px} .slider input[type=range]{flex:1;min-width:0} .slider b{min-width:46px;text-align:right}
   .form label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px} .form input,.form select,.form textarea{width:100%}
   svg text{fill:var(--muted);font-size:11px}
@@ -71,8 +73,10 @@
 <header><h1>Budget &amp; forecast</h1><nav><a href="/accounting.html">Accounting</a><a href="/banking.html">Banking</a><a href="/admin.html">Admin</a></nav></header>
 <main>
   <div class="tabs" id="tabs">
-    <button data-t="budget" class="on">Budget</button><button data-t="forecast">Cash forecast</button><button data-t="breakeven">Break-even</button><button data-t="roi">Investments &amp; ROI</button>
+    <button data-t="budget" class="on">Budget</button><button data-t="outlook">12-month forecast</button><button data-t="forecast">13-week cash</button><button data-t="breakeven">Break-even</button><button data-t="roi">Investments &amp; ROI</button><button data-t="health">Health report</button>
+    <label class="curpick">Show in <select id="cur" title="Currency the figures are shown in"><option value="JMD">J$</option></select></label>
   </div>
+  <div id="curnote"></div>
   <div id="out"><div class="empty">Loading…</div></div>
 </main>
 <div id="modal"></div>
@@ -84,8 +88,17 @@
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
   var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
-  var J = function (v) { if (v == null || !isFinite(v)) return '–'; var x = Number(v); var s = Math.abs(x).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); return x < 0 ? '(' + s + ')' : s; };
-  var J0 = function (v) { if (v == null || !isFinite(v)) return '–'; var x = Math.round(Number(v)); var s = Math.abs(x).toLocaleString('en-JM'); return x < 0 ? '(' + s + ')' : s; };
+  // Money comes from the server in J$, the books' currency. CUR is the currency the page shows it in:
+  // J / J0 convert and format, moneyIn puts an amount in a box, moneyOut reads one back as J$.
+  var CUR = { code: 'JMD', symbol: 'J$', rate: 1 }, CURS = [CUR];
+  var cs = function () { return CUR.symbol; };
+  var cv = function (v) { return Number(v) / CUR.rate; };
+  var F = function (v) { if (v == null || !isFinite(v)) return '–'; var x = Number(v); var s = Math.abs(x).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); return x < 0 ? '(' + s + ')' : s; };
+  var J = function (v) { return v == null || !isFinite(v) ? '–' : F(cv(v)); };
+  var J0 = function (v) { if (v == null || !isFinite(v)) return '–'; var x = Math.round(cv(v)); var s = Math.abs(x).toLocaleString('en-JM'); return x < 0 ? '(' + s + ')' : s; };
+  function moneyIn(v) { return v == null || v === '' ? '' : String(Math.round(cv(v) * 100) / 100); }
+  // An unchanged box gives back the exact J$ it showed, so viewing in another currency never nudges saved figures.
+  function moneyOut(text, orig) { var t = String(text == null ? '' : text).trim(); if (t === '') return null; return orig != null && orig !== '' && t === moneyIn(orig) ? Number(orig) : Math.round(num(t) * CUR.rate * 100) / 100; }
   var pct = function (v, d) { return v == null || !isFinite(v) ? '–' : (v * 100).toFixed(d == null ? 1 : d) + '%'; };
   var r2 = function (v) { return Math.round(Number(v || 0) * 100) / 100; };
   var num = function (v) { var x = parseFloat(String(v == null ? '' : v).replace(/[,\s$J]/g, '')); return isFinite(x) ? x : 0; };
@@ -113,6 +126,26 @@
     var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([rows.map(function (r) { return r.map(q).join(','); }).join('\n')], { type: 'text/csv' })); a.download = name; a.click();
   }
   function loadMeta() { return meta ? Promise.resolve(meta) : api('/api/budget/meta').then(function (d) { meta = d; return d; }); }
+  // The currencies with a rate, and the one this person last chose.
+  function loadCurrencies() {
+    return api('/api/budget/currencies').then(function (d) {
+      CURS = d.currencies;
+      var want = 'JMD'; try { want = localStorage.getItem('vision.budgetCur') || 'JMD'; } catch (_) {}
+      CUR = CURS.filter(function (c) { return c.code === want; })[0] || CURS[0];
+      $('#cur').innerHTML = CURS.map(function (c) { return '<option value="' + esc(c.code) + '"' + (c === CUR ? ' selected' : '') + '>' + esc(c.code === 'JMD' ? 'J$' : c.code) + '</option>'; }).join('');
+      curNote();
+    }).catch(function () { /* J$ only */ });
+  }
+  function curNote() {
+    $('#curnote').innerHTML = CUR.code === 'JMD' ? '' : '<div class="note info">Figures are shown in ' + esc(CUR.code) + ' at J$' + F(CUR.rate) + ' to ' + esc(CUR.symbol.trim()) + '1' +
+      (CUR.rate_date ? ' (' + (CUR.source === 'manual' ? 'set by hand' : 'Bank of Jamaica') + ', ' + esc(CUR.rate_date) + ')' : '') + '. The books are kept in J$; amounts you type are turned into J$ at this rate.</div>';
+  }
+  $('#cur').onchange = function () {
+    var code = this.value;
+    CUR = CURS.filter(function (c) { return c.code === code; })[0] || CURS[0];
+    try { localStorage.setItem('vision.budgetCur', CUR.code); } catch (_) {}
+    curNote(); show();
+  };
   function classOptions(sel, allLabel) {
     return '<option value="">' + esc(allLabel || 'Whole business') + '</option>' + meta.classes.map(function (c) { return '<option value="' + c.id + '"' + (String(sel) === String(c.id) ? ' selected' : '') + '>' + esc(c.name) + '</option>'; }).join('');
   }
@@ -127,22 +160,26 @@
   }
 
   // ================================================================ BUDGET ==
-  var bq = null, bdata = null;
+  var bq = null, bdata = null, versions = [];
   function fyYear() { var t = new Date(); var s = meta.fy_start || 1; return t.getMonth() + 1 >= s ? t.getFullYear() : t.getFullYear() - 1; }
+  // bq.ver: a saved version being looked at instead of the working budget.
   function budgetTab() {
     return loadMeta().then(function () {
-      if (!bq) bq = { year: fyYear(), cls: '', mode: 'enter', upto: 'ytd' };
-      return api('/api/budget?year=' + bq.year + (bq.cls ? '&class_id=' + bq.cls : '')).then(function (d) { bdata = d; drawBudget(); });
+      if (!bq) bq = { year: fyYear(), cls: '', mode: 'enter', upto: 'ytd', ver: '' };
+      var yc = 'year=' + bq.year + (bq.cls ? '&class_id=' + bq.cls : '');
+      return Promise.all([api('/api/budget?' + (bq.ver ? 'version_id=' + bq.ver : yc)).catch(function (e) { bq.ver = ''; toast(e.message); return api('/api/budget?' + yc); }), api('/api/budget/versions?' + yc)])
+        .then(function (r) { bdata = r[0]; versions = r[1].versions; drawBudget(); });
     });
   }
   function bRow(id) { return bdata.rows.filter(function (r) { return r.account_id === id; })[0] || { account_id: id, budget: Array(12).fill(0), actual: Array(12).fill(0) }; }
   function drawBudget() {
     var years = []; for (var y = bq.year - 3; y <= bq.year + 2; y++) years.push(y);
     var fyLabel = function (y) { return meta.fy_start === 1 ? String(y) : y + '/' + String(y + 1).slice(2); };
-    var h = '<div class="card"><h2>Budget ' + esc(fyLabel(bq.year)) + '</h2><p class="sub">An amount for each income and cost account each month, for the whole business or one class, compared with what the books show.</p>' +
+    var h = '<div class="card"><h2>Budget ' + esc(fyLabel(bq.year)) + (bdata.version ? ' <span class="pill warn">version: ' + esc(bdata.version.name) + '</span>' : '') + '</h2><p class="sub">An amount for each income and cost account each month, for the whole business or one class, compared with what the books show.</p>' +
       (meta.ledger_started ? '' : '<div class="note warn">The ledger has not been started, so there are no actual figures yet. You can still enter the budget.</div>') +
       '<div class="controls"><div><label>Year</label><select id="by">' + years.map(function (y) { return '<option value="' + y + '"' + (y === bq.year ? ' selected' : '') + '>' + fyLabel(y) + '</option>'; }).join('') + '</select></div>' +
       '<div><label>For</label><select id="bc">' + classOptions(bq.cls) + '</select></div>' +
+      '<div><label>Budget</label><select id="bv"><option value="">Working budget</option>' + versions.map(function (v) { return '<option value="' + v.id + '"' + (String(bq.ver) === String(v.id) ? ' selected' : '') + '>' + esc(v.name) + ' (' + esc(v.saved_at.slice(0, 10)) + ')</option>'; }).join('') + '</select></div>' +
       '<div><label>Show</label><select id="bm"><option value="enter"' + (bq.mode === 'enter' ? ' selected' : '') + '>Enter the budget</option><option value="vs"' + (bq.mode === 'vs' ? ' selected' : '') + '>Budget against actual</option></select></div>' +
       (bq.mode === 'vs' ? '<div><label>Period</label><select id="bu">' + '<option value="ytd"' + (bq.upto === 'ytd' ? ' selected' : '') + '>Year to date</option><option value="year"' + (bq.upto === 'year' ? ' selected' : '') + '>Whole year</option>' +
         bdata.months.map(function (m, i) { return '<option value="' + i + '"' + (String(bq.upto) === String(i) ? ' selected' : '') + '>' + mlabel(m) + '</option>'; }).join('') + '</select></div>' : '') +
@@ -150,8 +187,9 @@
       '<span style="margin-left:auto"></span><button id="bpr">Print / PDF</button><button id="bcsv">CSV</button></div></div>';
     h += bq.mode === 'vs' ? budgetVs() : budgetEnter();
     $('#out').innerHTML = h;
-    $('#by').onchange = function () { bq.year = +this.value; budgetTab(); };
-    $('#bc').onchange = function () { bq.cls = this.value; budgetTab(); };
+    $('#by').onchange = function () { bq.year = +this.value; bq.ver = ''; budgetTab(); };
+    $('#bc').onchange = function () { bq.cls = this.value; bq.ver = ''; budgetTab(); };
+    $('#bv').onchange = function () { bq.ver = this.value; budgetTab(); };
     $('#bm').onchange = function () { bq.mode = this.value; drawBudget(); };
     if ($('#bu')) $('#bu').onchange = function () { bq.upto = this.value; drawBudget(); };
     $('#bfy').onchange = function () {
@@ -165,23 +203,31 @@
   }
   function accountsOf(type) { return meta.accounts.filter(function (a) { return a.type === type; }); }
   function budgetEnter() {
-    var h = '<div class="card"><div class="controls"><button id="bcopy">Fill from last year\'s actuals…</button><button id="bzero">Clear all</button><span class="sub" style="margin:0">Type a yearly amount in the Year column to spread it evenly over the 12 months.</span><span style="margin-left:auto"></span><button class="primary" id="bsave">Save budget</button></div>' +
+    var v = bdata.version, ro = v ? ' disabled' : '';
+    var h = '<div class="card">' + (v
+      ? '<div class="note info">A saved version, kept ' + esc(v.saved_at) + (v.saved_by ? ' by ' + esc(v.saved_by) : '') + '. It cannot be changed; put it back as the working budget to work on it.' + (v.notes ? '<br>' + esc(v.notes) : '') + '</div>' +
+        '<div class="controls"><button class="primary" id="vrestore">Put back as the working budget</button><button id="vdel" style="color:var(--red)">Delete version</button><button id="vback">Back to the working budget</button></div>'
+      : '<div class="controls"><button id="bcopy">Fill from last year\'s actuals…</button><button id="bzero">Clear all</button><span class="sub" style="margin:0">Type a yearly amount in the Year column to spread it evenly over the 12 months.</span><span style="margin-left:auto"></span><button id="bkeep">Keep as a version…</button><button class="primary" id="bsave">Save budget</button></div>') +
       '<div class="scroll"><table class="bgrid"><thead><tr><th>Account</th>' + bdata.months.map(function (m) { return '<th class="n">' + mlabel(m) + '</th>'; }).join('') + '<th class="n">Year</th></tr></thead><tbody>';
     TYPES.forEach(function (t) {
       var list = accountsOf(t[0]); if (!list.length) return;
       h += '<tr class="head"><td colspan="14">' + t[1] + '</td></tr>';
       list.forEach(function (a) {
         var r = bRow(a.id);
-        h += '<tr data-acct="' + a.id + '"><td>' + esc(a.code + ' ' + a.name) + '</td>' + r.budget.map(function (v, i) { return '<td><input class="amt" inputmode="decimal" data-i="' + i + '" value="' + (v ? r2(v) : '') + '"></td>'; }).join('') +
-          '<td><input class="amt tot" inputmode="decimal" data-tot="1" value=""></td></tr>';
+        h += '<tr data-acct="' + a.id + '"><td>' + esc(a.code + ' ' + a.name) + '</td>' + r.budget.map(function (v, i) { return '<td><input class="amt" inputmode="decimal" data-i="' + i + '" data-j="' + (v || '') + '" value="' + (v ? moneyIn(v) : '') + '"' + ro + '></td>'; }).join('') +
+          '<td><input class="amt tot" inputmode="decimal" data-tot="1" value=""' + ro + '></td></tr>';
       });
       h += '<tr class="total" data-sum="' + t[0] + '"><td>Total ' + t[1].toLowerCase() + '</td>' + bdata.months.map(function () { return '<td class="n"></td>'; }).join('') + '<td class="n"></td></tr>';
     });
     h += '<tr class="total" data-sum="net"><td>Net profit</td>' + bdata.months.map(function () { return '<td class="n"></td>'; }).join('') + '<td class="n"></td></tr></tbody></table></div></div>';
+    if (!v) h += '<div class="card"><h2>Saved versions</h2><p class="sub">Named copies of this year\'s budget, such as the original and each revision. Choose one under Budget to look at it, compare it with actual, or put it back.</p>' +
+      (versions.length ? '<div class="scroll"><table><thead><tr><th>Version</th><th>Kept</th><th class="n">Income</th><th class="n">Net profit</th><th></th></tr></thead><tbody>' + versions.map(function (x) {
+        return '<tr class="click" data-ver="' + x.id + '"><td><b>' + esc(x.name) + '</b>' + (x.notes ? '<br><small class="sub">' + esc(x.notes) + '</small>' : '') + '</td><td>' + esc(x.saved_at) + (x.saved_by ? '<br><small class="sub">' + esc(x.saved_by) + '</small>' : '') + '</td><td class="n">' + J(x.income) + '</td><td class="n">' + J(x.net) + '</td><td class="n"><button class="sm">Open</button></td></tr>';
+      }).join('') + '</tbody></table></div>' : '<p class="sub">None yet. Press "Keep as a version" to keep the budget as it stands.</p>') + '</div>';
     return h;
   }
   function gridValues() {
-    return all('tr[data-acct]').map(function (tr) { return { account_id: +tr.getAttribute('data-acct'), amounts: all('input[data-i]', tr).map(function (i) { return r2(num(i.value)); }) }; });
+    return all('tr[data-acct]').map(function (tr) { return { account_id: +tr.getAttribute('data-acct'), amounts: all('input[data-i]', tr).map(function (i) { return moneyOut(i.value, i.getAttribute('data-j')) || 0; }) }; });
   }
   function sumGrid() {
     var by = {}; meta.accounts.forEach(function (a) { by[a.id] = a.type; });
@@ -190,14 +236,44 @@
       var vals = all('input[data-i]', tr).map(function (i) { return num(i.value); }), type = by[tr.getAttribute('data-acct')];
       vals.forEach(function (v, i) { tot[type][i] += v; });
       var y = vals.reduce(function (a, b) { return a + b; }, 0), ti = $('input[data-tot]', tr);
-      if (document.activeElement !== ti) ti.value = y ? J(y) : '';
+      if (document.activeElement !== ti) ti.value = y ? F(y) : '';   // the boxes are already in the shown currency
     });
     var net = Array(12).fill(0).map(function (_, i) { return tot.income[i] - tot.cogs[i] - tot.expense[i] + tot.other_income[i] - tot.other_expense[i]; });
-    var put = function (key, arr) { var tr = $('tr[data-sum="' + key + '"]'); if (!tr) return; var tds = all('td.n', tr); arr.forEach(function (v, i) { tds[i].textContent = J(v); }); tds[12].textContent = J(arr.reduce(function (a, b) { return a + b; }, 0)); };
+    var put = function (key, arr) { var tr = $('tr[data-sum="' + key + '"]'); if (!tr) return; var tds = all('td.n', tr); arr.forEach(function (v, i) { tds[i].textContent = F(v); }); tds[12].textContent = F(arr.reduce(function (a, b) { return a + b; }, 0)); };
     TYPES.forEach(function (t) { put(t[0], tot[t[0]]); }); put('net', net);
   }
   function wireEnter() {
     sumGrid();
+    var v = bdata.version;
+    if (v) {
+      $('#vback').onclick = function () { bq.ver = ''; budgetTab(); };
+      $('#vrestore').onclick = function () {
+        if (!confirm('Put "' + v.name + '" back as the working budget? The working budget as it stands is kept as a version first, so nothing is lost.')) return;
+        api('/api/budget/versions/' + v.id + '/restore', 'POST').then(function () { bq.ver = ''; toast('"' + v.name + '" is the working budget again'); return budgetTab(); }).catch(function (e) { toast(e.message); });
+      };
+      $('#vdel').onclick = function () {
+        if (!confirm('Delete the version "' + v.name + '"? The working budget is not changed.')) return;
+        api('/api/budget/versions/' + v.id, 'DELETE').then(function () { bq.ver = ''; toast('Version deleted'); return budgetTab(); }).catch(function (e) { toast(e.message); });
+      };
+      return;
+    }
+    all('[data-ver]').forEach(function (tr) { tr.onclick = function () { bq.ver = tr.getAttribute('data-ver'); budgetTab(); }; });
+    $('#bkeep').onclick = function () {
+      modal('<h2>Keep as a version</h2><p class="sub">Saves the budget on screen, then keeps a copy of it under a name, such as "Original 2027" or "Revised after March". You can go on changing the working budget; the version stays as it is.</p><div class="form">' +
+        '<label>Name</label><input id="kn" maxlength="80"><label>Notes (optional)</label><textarea id="kx" rows="2" maxlength="1000"></textarea>' +
+        '<div class="controls" style="margin-top:10px"><button class="primary" id="kgo">Keep</button><button id="kc">Cancel</button></div></div>');
+      $('#kn').focus();
+      $('#kc').onclick = closeModal;
+      $('#kgo').onclick = function () {
+        var name = $('#kn').value.trim(), notes = $('#kx').value, b = this;
+        if (!name) { toast('Give the version a name'); return; }
+        b.disabled = true;
+        api('/api/budget', 'PUT', { year: bq.year, class_id: bq.cls || null, rows: gridValues() })
+          .then(function () { return api('/api/budget/versions', 'POST', { year: bq.year, class_id: bq.cls || null, name: name, notes: notes }); })
+          .then(function () { closeModal(); toast('Budget saved and kept as "' + name + '"'); return budgetTab(); })
+          .catch(function (e) { b.disabled = false; toast(e.message); });
+      };
+    };
     all('tr[data-acct] input[data-i]').forEach(function (i) { i.oninput = sumGrid; });
     all('tr[data-acct] input[data-tot]').forEach(function (i) {
       i.onfocus = function () { this.value = this.value ? num(this.value) : ''; };
@@ -224,7 +300,7 @@
             var ins = all('input[data-i]', tr);
             if (onlyEmpty && ins.some(function (i) { return num(i.value); })) return;
             var r = prev.rows.filter(function (x) { return x.account_id === +tr.getAttribute('data-acct'); })[0]; if (!r) return;
-            ins.forEach(function (i, k) { var v = r2(r.actual[k] * (1 + p)); i.value = v ? v : ''; }); n++;
+            ins.forEach(function (i, k) { var v = r2(r.actual[k] * (1 + p)); i.value = v ? moneyIn(v) : ''; }); n++;
           });
           closeModal(); sumGrid(); toast(n ? n + ' row' + (n === 1 ? '' : 's') + ' filled: check them, then Save budget' : 'Last year has no actual figures to copy');
         }).catch(function (e) { toast(e.message); });
@@ -272,14 +348,14 @@
     all('[data-dr]').forEach(function (td) { td.onclick = function () { drill(td.getAttribute('data-dr'), from, to, bq.cls); }; });
   }
   function budgetCsv() {
-    var rows = [['Account', 'Type'].concat(bdata.months.map(mlabel)).concat(['Year'])];
+    var rows = [['Account', 'Type'].concat(bdata.months.map(mlabel)).concat(['Year (' + CUR.code + ')'])], conv = function (arr) { return arr.map(function (v) { return r2(cv(v)); }); };
     meta.accounts.forEach(function (a) {
       var r = bRow(a.id);
-      var vals = bq.mode === 'enter' && $('tr[data-acct="' + a.id + '"]') ? all('tr[data-acct="' + a.id + '"] input[data-i]').map(function (i) { return r2(num(i.value)); }) : r.budget;
+      var vals = bq.mode === 'enter' && $('tr[data-acct="' + a.id + '"]') ? all('tr[data-acct="' + a.id + '"] input[data-i]').map(function (i) { return r2(num(i.value)); }) : conv(r.budget);
       rows.push([a.code + ' ' + a.name, a.type].concat(vals).concat([r2(vals.reduce(function (x, y) { return x + y; }, 0))]));
-      if (bq.mode === 'vs') rows.push([a.code + ' ' + a.name + ' (actual)', a.type].concat(r.actual).concat([r2(r.actual.reduce(function (x, y) { return x + y; }, 0))]));
+      if (bq.mode === 'vs') { var act = conv(r.actual); rows.push([a.code + ' ' + a.name + ' (actual)', a.type].concat(act).concat([r2(act.reduce(function (x, y) { return x + y; }, 0))])); }
     });
-    csvDownload('budget-' + bq.year + (bq.cls ? '-class' + bq.cls : '') + '.csv', rows);
+    csvDownload('budget-' + bq.year + (bq.cls ? '-class' + bq.cls : '') + (bdata.version ? '-' + bdata.version.name.replace(/[^\w-]+/g, '_') : '') + (CUR.code !== 'JMD' ? '-' + CUR.code : '') + '.csv', rows);
   }
 
   // ======================================================== CASH FORECAST ==
@@ -297,7 +373,7 @@
     [lo, (lo + hi) / 2, hi].forEach(function (v) { s += '<line x1="' + P.l + '" x2="' + (W - P.r) + '" y1="' + y(v) + '" y2="' + y(v) + '" stroke="var(--line)"/><text x="' + (P.l - 6) + '" y="' + (y(v) + 4) + '" text-anchor="end">' + J0(v / 1000) + 'k</text>'; });
     d.weeks.forEach(function (w, i) {
       var x = P.l + i * bw + bw * 0.15, top = y(Math.max(0, w.closing)), bot = y(Math.min(0, w.closing));
-      s += '<rect x="' + x + '" y="' + top + '" width="' + (bw * 0.7) + '" height="' + Math.max(1, bot - top) + '" rx="3" fill="' + (w.low || w.closing < 0 ? 'var(--red)' : 'var(--bar)') + '"><title>' + dlabel(w.start) + ': J$' + J(w.closing) + '</title></rect>' +
+      s += '<rect x="' + x + '" y="' + top + '" width="' + (bw * 0.7) + '" height="' + Math.max(1, bot - top) + '" rx="3" fill="' + (w.low || w.closing < 0 ? 'var(--red)' : 'var(--bar)') + '"><title>' + dlabel(w.start) + ': ' + cs() + J(w.closing) + '</title></rect>' +
         '<text x="' + (x + bw * 0.35) + '" y="' + (H - 8) + '" text-anchor="middle">' + dlabel(w.start) + '</text>';
     });
     if (min != null) s += '<line x1="' + P.l + '" x2="' + (W - P.r) + '" y1="' + y(min) + '" y2="' + y(min) + '" stroke="var(--warn)" stroke-dasharray="5 4" stroke-width="1.5"/><text x="' + (W - P.r) + '" y="' + (y(min) - 4) + '" text-anchor="end">minimum</text>';
@@ -307,10 +383,10 @@
     var d = fdata, w = d.weeks, low = w.reduce(function (m, x) { return x.closing < m.closing ? x : m; }, w[0]), under = w.filter(function (x) { return x.low; }).length;
     var h = '<div class="card"><h2>Cash forecast · next 13 weeks</h2><p class="sub">Starts with the money on hand now, then adds what is due in and takes off what is due out, week by week (weeks start on Monday). Click a figure to see what makes it up.</p>' +
       d.notes.map(function (n) { return '<div class="note warn">' + esc(n) + '</div>'; }).join('') +
-      '<div class="kpis"><div class="kpi"><span>Money on hand now</span><b>J$' + J(d.opening) + '</b><small>' + (d.settings.opening_override != null ? 'typed in under Assumptions' : 'bank and cash accounts in the ledger') + '</small></div>' +
-      '<div class="kpi"><span>Lowest point</span><b style="color:' + (low.closing < 0 || low.low ? 'var(--red)' : 'inherit') + '">J$' + J(low.closing) + '</b><small>week of ' + dlabel(low.start) + '</small></div>' +
-      '<div class="kpi"><span>In 13 weeks</span><b>J$' + J(w[w.length - 1].closing) + '</b><small>' + (w[w.length - 1].closing >= d.opening ? 'up ' : 'down ') + 'J$' + J(Math.abs(w[w.length - 1].closing - d.opening)) + '</small></div>' +
-      '<div class="kpi"><span>Weeks below your minimum</span><b style="color:' + (under ? 'var(--red)' : 'inherit') + '">' + (d.settings.min_cash == null ? '–' : under) + '</b><small>' + (d.settings.min_cash == null ? 'set a minimum under Assumptions' : 'minimum J$' + J(d.settings.min_cash)) + '</small></div></div>' +
+      '<div class="kpis"><div class="kpi"><span>Money on hand now</span><b>' + cs() + J(d.opening) + '</b><small>' + (d.settings.opening_override != null ? 'typed in under Assumptions' : 'bank and cash accounts in the ledger') + '</small></div>' +
+      '<div class="kpi"><span>Lowest point</span><b style="color:' + (low.closing < 0 || low.low ? 'var(--red)' : 'inherit') + '">' + cs() + J(low.closing) + '</b><small>week of ' + dlabel(low.start) + '</small></div>' +
+      '<div class="kpi"><span>In 13 weeks</span><b>' + cs() + J(w[w.length - 1].closing) + '</b><small>' + (w[w.length - 1].closing >= d.opening ? 'up ' : 'down ') + '' + cs() + J(Math.abs(w[w.length - 1].closing - d.opening)) + '</small></div>' +
+      '<div class="kpi"><span>Weeks below your minimum</span><b style="color:' + (under ? 'var(--red)' : 'inherit') + '">' + (d.settings.min_cash == null ? '–' : under) + '</b><small>' + (d.settings.min_cash == null ? 'set a minimum under Assumptions' : 'minimum ' + cs() + J(d.settings.min_cash)) + '</small></div></div>' +
       '<div style="margin-top:12px">' + chart(d) + '</div></div>';
     h += '<div class="card"><div class="controls"><span style="margin-left:auto"></span><button id="fpr">Print / PDF</button><button id="fcsv">CSV</button></div><div class="scroll"><table class="fgrid"><thead><tr><th>Week of</th>' + w.map(function (x) { return '<th class="n">' + dlabel(x.start) + '</th>'; }).join('') + '<th class="n">13 weeks</th></tr></thead><tbody>' +
       '<tr><td>Money at the start</td>' + w.map(function (x) { return '<td class="n">' + J0(x.opening) + '</td>'; }).join('') + '<td></td></tr>';
@@ -327,17 +403,17 @@
       '<tr class="total"><td>Money at the end</td>' + w.map(function (x) { return '<td class="n' + (x.low || x.closing < 0 ? ' bad' : '') + '">' + J0(x.closing) + '</td>'; }).join('') + '<td></td></tr></tbody></table></div></div>';
     var S = d.settings, A = d.averages;
     h += '<div class="grid"><div class="card form"><h2>Assumptions</h2><p class="sub">Leave a box empty to use the figure worked out from the books (shown in grey).</p>' +
-      '<label>Money on hand now (J$)</label><input id="s_open" inputmode="decimal" value="' + (S.opening_override == null ? '' : S.opening_override) + '" placeholder="' + J(d.cash_accounts.reduce(function (a, c) { return a + c.balance; }, 0)) + ' from the ledger">' +
+      '<label>Money on hand now (' + cs() + ')</label><input id="s_open" inputmode="decimal" value="' + moneyIn(S.opening_override) + '" placeholder="' + J(d.cash_accounts.reduce(function (a, c) { return a + c.balance; }, 0)) + ' from the ledger">' +
       '<label>Of what customers owe that is already overdue, % expected in this week</label><input id="s_od" type="number" min="0" max="100" value="' + S.overdue_pct + '">' +
-      '<label>Counter and workshop takings a week (J$)</label><input id="s_tk" inputmode="decimal" value="' + (S.takings_weekly == null ? '' : S.takings_weekly) + '" placeholder="' + J(A.takings_weekly) + ' (last 8 weeks)">' +
-      '<label>New supplier bills a week, for stock and other buying (J$)</label><input id="s_pu" inputmode="decimal" value="' + (S.purchases_weekly == null ? '' : S.purchases_weekly) + '" placeholder="' + J(A.purchases_weekly) + ' (last 8 weeks)">' +
+      '<label>Counter and workshop takings a week (' + cs() + ')</label><input id="s_tk" inputmode="decimal" value="' + moneyIn(S.takings_weekly) + '" placeholder="' + J(A.takings_weekly) + ' (last 8 weeks)">' +
+      '<label>New supplier bills a week, for stock and other buying (' + cs() + ')</label><input id="s_pu" inputmode="decimal" value="' + moneyIn(S.purchases_weekly) + '" placeholder="' + J(A.purchases_weekly) + ' (last 8 weeks)">' +
       '<label>Pay for those from week (bills already received are under Supplier bills)</label><input id="s_pw" type="number" min="1" max="13" value="' + S.purchases_from_week + '">' +
-      '<label>Lowest balance you want to keep (J$)</label><input id="s_min" inputmode="decimal" value="' + (S.min_cash == null ? '' : S.min_cash) + '" placeholder="none">' +
+      '<label>Lowest balance you want to keep (' + cs() + ')</label><input id="s_min" inputmode="decimal" value="' + moneyIn(S.min_cash) + '" placeholder="none">' +
       '<div class="controls" style="margin-top:10px"><button class="primary" id="s_save">Save assumptions</button></div>' +
-      '<p class="sub" style="margin-top:8px">Money on hand from: ' + (d.cash_accounts.length ? d.cash_accounts.map(function (a) { return esc(a.code + ' ' + a.name) + ' J$' + J(a.balance); }).join(' · ') : 'no bank or cash accounts') + '</p></div>';
+      '<p class="sub" style="margin-top:8px">Money on hand from: ' + (d.cash_accounts.length ? d.cash_accounts.map(function (a) { return esc(a.code + ' ' + a.name) + ' ' + cs() + J(a.balance); }).join(' · ') : 'no bank or cash accounts') + '</p></div>';
     h += '<div class="card form"><h2>Your own lines</h2><p class="sub">One-off money in or out the books cannot know about yet: a loan coming in, an insurance claim, a new machine, a tax payment.</p>' +
       '<div class="controls"><div><label>Date</label><input type="date" id="o_day" value="' + esc(d.today) + '" style="width:auto"></div><div><label>In or out</label><select id="o_dir" style="width:auto"><option value="out">Money out</option><option value="in">Money in</option></select></div>' +
-      '<div><label>Amount (J$)</label><input id="o_amt" inputmode="decimal" style="width:130px"></div></div><label>What it is</label><input id="o_desc" maxlength="200" placeholder="New compressor">' +
+      '<div><label>Amount (' + cs() + ')</label><input id="o_amt" inputmode="decimal" style="width:130px"></div></div><label>What it is</label><input id="o_desc" maxlength="200" placeholder="New compressor">' +
       '<div class="controls" style="margin-top:10px"><button class="primary" id="o_add">Add line</button></div>' +
       (d.own.length ? '<table><tbody>' + d.own.map(function (o) { return '<tr><td>' + esc(o.day) + '</td><td>' + esc(o.description) + '</td><td class="n" style="color:' + (o.direction === 'in' ? 'var(--ok)' : 'var(--red)') + '">' + (o.direction === 'in' ? '+' : '−') + J(o.amount) + '</td><td class="n"><button class="sm" data-od="' + o.id + '">Remove</button></td></tr>'; }).join('') + '</tbody></table>' : '<p class="sub">None yet.</p>') + '</div></div>';
     $('#out').innerHTML = h;
@@ -352,20 +428,21 @@
     });
     $('#fpr').onclick = function () { window.print(); };
     $('#fcsv').onclick = function () {
-      var rows = [['', ].concat(w.map(function (x) { return x.start; }))];
-      rows.push(['Money at the start'].concat(w.map(function (x) { return x.opening; })));
-      d.sources.forEach(function (s) { rows.push([(s.dir === 'in' ? 'In: ' : 'Out: ') + s.label].concat(s.weeks.map(function (c) { return c.amount; }))); });
-      rows.push(['Total in'].concat(w.map(function (x) { return x.in; }))); rows.push(['Total out'].concat(w.map(function (x) { return x.out; })));
-      rows.push(['Money at the end'].concat(w.map(function (x) { return x.closing; })));
-      csvDownload('cash-forecast-' + d.today + '.csv', rows);
+      var c = function (v) { return r2(cv(v)); };
+      var rows = [[CUR.code].concat(w.map(function (x) { return x.start; }))];
+      rows.push(['Money at the start'].concat(w.map(function (x) { return c(x.opening); })));
+      d.sources.forEach(function (s) { rows.push([(s.dir === 'in' ? 'In: ' : 'Out: ') + s.label].concat(s.weeks.map(function (x) { return c(x.amount); }))); });
+      rows.push(['Total in'].concat(w.map(function (x) { return c(x.in); }))); rows.push(['Total out'].concat(w.map(function (x) { return c(x.out); })));
+      rows.push(['Money at the end'].concat(w.map(function (x) { return c(x.closing); })));
+      csvDownload('cash-forecast-' + d.today + (CUR.code !== 'JMD' ? '-' + CUR.code : '') + '.csv', rows);
     };
     var opt = function (id) { var v = $(id).value.trim(); return v === '' ? null : num(v); };
     $('#s_save').onclick = function () {
-      api('/api/budget/forecast/settings', 'PUT', { opening_override: opt('#s_open'), overdue_pct: opt('#s_od'), takings_weekly: opt('#s_tk'), purchases_weekly: opt('#s_pu'), purchases_from_week: opt('#s_pw'), min_cash: opt('#s_min') })
+      api('/api/budget/forecast/settings', 'PUT', { opening_override: moneyOut($('#s_open').value, S.opening_override), overdue_pct: opt('#s_od'), takings_weekly: moneyOut($('#s_tk').value, S.takings_weekly), purchases_weekly: moneyOut($('#s_pu').value, S.purchases_weekly), purchases_from_week: opt('#s_pw'), min_cash: moneyOut($('#s_min').value, S.min_cash) })
         .then(function () { toast('Saved'); return forecastTab(); }).catch(function (e) { toast(e.message); });
     };
     $('#o_add').onclick = function () {
-      api('/api/budget/forecast/items', 'POST', { day: $('#o_day').value, direction: $('#o_dir').value, amount: num($('#o_amt').value), description: $('#o_desc').value })
+      api('/api/budget/forecast/items', 'POST', { day: $('#o_day').value, direction: $('#o_dir').value, amount: moneyOut($('#o_amt').value), description: $('#o_desc').value })
         .then(function () { toast('Added'); return forecastTab(); }).catch(function (e) { toast(e.message); });
     };
     all('[data-od]').forEach(function (b) { b.onclick = function () { api('/api/budget/forecast/items/' + b.getAttribute('data-od'), 'DELETE').then(forecastTab).catch(function (e) { toast(e.message); }); }; });
@@ -440,15 +517,15 @@
     else if (!(c.cm > 0)) k = '<div class="note bad">Costs that go up with sales are more than the sales themselves (' + pct(c.varc / c.sales) + '), so no level of sales breaks even. Check prices and the costs marked variable.</div>';
     else {
       var gap = c.proj - c.be;
-      k = '<div class="kpis" style="margin-top:6px"><div class="kpi"><span>Break-even sales a month</span><b>J$' + J0(c.be) + '</b><small>about J$' + J0(c.be / c.tdpm) + ' a trading day</small></div>' +
-        '<div class="kpi"><span>Margin left after variable costs</span><b>' + pct(c.cm) + '</b><small>of every J$ of sales</small></div>' +
-        '<div class="kpi"><span>Fixed costs a month</span><b>J$' + J0(c.fixedPM) + '</b><small>average over ' + d.months.toFixed(1) + ' months</small></div>' +
-        '<div class="kpi"><span>Average sales a month</span><b>J$' + J0(c.salesPM) + '</b><small>' + (c.salesPM >= c.be ? 'J$' + J0(c.salesPM - c.be) + ' above break-even' : 'J$' + J0(c.be - c.salesPM) + ' short of break-even') + '</small></div></div>' +
+      k = '<div class="kpis" style="margin-top:6px"><div class="kpi"><span>Break-even sales a month</span><b>' + cs() + J0(c.be) + '</b><small>about ' + cs() + J0(c.be / c.tdpm) + ' a trading day</small></div>' +
+        '<div class="kpi"><span>Margin left after variable costs</span><b>' + pct(c.cm) + '</b><small>of every ' + cs() + ' of sales</small></div>' +
+        '<div class="kpi"><span>Fixed costs a month</span><b>' + cs() + J0(c.fixedPM) + '</b><small>average over ' + d.months.toFixed(1) + ' months</small></div>' +
+        '<div class="kpi"><span>Average sales a month</span><b>' + cs() + J0(c.salesPM) + '</b><small>' + (c.salesPM >= c.be ? '' + cs() + J0(c.salesPM - c.be) + ' above break-even' : '' + cs() + J0(c.be - c.salesPM) + ' short of break-even') + '</small></div></div>' +
         '<h3 style="font-size:14px;margin:14px 0 6px">This month (' + esc(d.month.from) + ' to ' + esc(d.month.to) + ')</h3><div class="kpis">' +
-        '<div class="kpi"><span>Sales so far</span><b>J$' + J0(c.soFar) + '</b><small>' + d.month.days_gone + ' of ' + d.month.days_in_month + ' days</small></div>' +
-        '<div class="kpi"><span>On course for</span><b style="color:' + (gap >= 0 ? 'var(--ok)' : 'var(--red)') + '">J$' + J0(c.proj) + '</b><small>' + (gap >= 0 ? 'J$' + J0(gap) + ' above break-even' : 'J$' + J0(-gap) + ' below break-even') + '</small></div>' +
+        '<div class="kpi"><span>Sales so far</span><b>' + cs() + J0(c.soFar) + '</b><small>' + d.month.days_gone + ' of ' + d.month.days_in_month + ' days</small></div>' +
+        '<div class="kpi"><span>On course for</span><b style="color:' + (gap >= 0 ? 'var(--ok)' : 'var(--red)') + '">' + cs() + J0(c.proj) + '</b><small>' + (gap >= 0 ? '' + cs() + J0(gap) + ' above break-even' : '' + cs() + J0(-gap) + ' below break-even') + '</small></div>' +
         '<div class="kpi"><span>Margin of safety</span><b style="color:' + (c.safety >= 0 ? 'inherit' : 'var(--red)') + '">' + pct(c.safety) + '</b><small>how far sales can fall before a loss</small></div>' +
-        '<div class="kpi"><span>Needed a day from now</span><b>' + (c.needDay == null ? '–' : 'J$' + J0(c.needDay)) + '</b><small>' + (c.left > 0 ? 'for the ' + c.left + ' day' + (c.left === 1 ? '' : 's') + ' left' : 'month ends today') + '</small></div></div>';
+        '<div class="kpi"><span>Needed a day from now</span><b>' + (c.needDay == null ? '–' : '' + cs() + J0(c.needDay)) + '</b><small>' + (c.left > 0 ? 'for the ' + c.left + ' day' + (c.left === 1 ? '' : 's') + ' left' : 'month ends today') + '</small></div></div>';
     }
     $('#bek').innerHTML = k + (c.x.sales ? '<table style="margin-top:12px"><tbody>' +
       '<tr><td>Sales in the period</td><td class="n">' + J(c.x.sales) + '</td></tr><tr><td>Cost of sales</td><td class="n">' + J(c.x.cogs) + '</td></tr>' +
@@ -456,8 +533,8 @@
       '<tr class="total"><td>Profit in the period</td><td class="n">' + J(c.x.sales - c.x.cogs - c.x.varExp - c.x.fixed) + '</td></tr></tbody></table>' : '');
     var changed = what.price || what.vc || what.fc;
     $('#bew').innerHTML = !changed ? '<p class="sub">Move a slider.</p>' : !(c.cm > 0) ? '<div class="note bad">No break-even at these figures.</div>' :
-      '<div class="kpis"><div class="kpi"><span>New break-even a month</span><b>J$' + J0(c.be) + '</b><small>' + (base.be ? (c.be <= base.be ? 'J$' + J0(base.be - c.be) + ' lower' : 'J$' + J0(c.be - base.be) + ' higher') : '') + '</small></div>' +
-      '<div class="kpi"><span>Profit a month at today\'s volume</span><b>J$' + J0(c.salesPM * c.cm - c.fixedPM) + '</b><small>was J$' + J0(base.salesPM * (base.cm || 0) - base.fixedPM) + '</small></div></div>' +
+      '<div class="kpis"><div class="kpi"><span>New break-even a month</span><b>' + cs() + J0(c.be) + '</b><small>' + (base.be ? (c.be <= base.be ? '' + cs() + J0(base.be - c.be) + ' lower' : '' + cs() + J0(c.be - base.be) + ' higher') : '') + '</small></div>' +
+      '<div class="kpi"><span>Profit a month at today\'s volume</span><b>' + cs() + J0(c.salesPM * c.cm - c.fixedPM) + '</b><small>was ' + cs() + J0(base.salesPM * (base.cm || 0) - base.fixedPM) + '</small></div></div>' +
       (what.price ? '<p class="sub" style="margin-top:6px">A price change assumes customers buy the same quantity.</p>' : '');
   }
 
@@ -486,7 +563,7 @@
     modal('<h2>' + (i ? esc(i.name) : 'New investment') + '</h2><div class="form">' +
       '<label>Name</label><input id="i_n" maxlength="120" value="' + esc(v.name) + '" placeholder="Delivery van, Spanish Town branch…">' +
       '<div class="grid"><div><label>Started</label><input type="date" id="i_d" value="' + esc(v.start_date) + '"></div><div><label>Class in the books (for actual profit)</label><select id="i_c">' + classOptions(v.class_id, 'None') + '</select></div>' +
-      '<div><label>Amount invested (J$)</label><input id="i_a" inputmode="decimal" value="' + (v.amount === '' ? '' : v.amount) + '"></div><div><label>Expected profit a month (J$)</label><input id="i_m" inputmode="decimal" value="' + (v.monthly_profit === '' ? '' : v.monthly_profit) + '"></div></div>' +
+      '<div><label>Amount invested (' + cs() + ')</label><input id="i_a" inputmode="decimal" value="' + moneyIn(v.amount) + '"></div><div><label>Expected profit a month (' + cs() + ')</label><input id="i_m" inputmode="decimal" value="' + moneyIn(v.monthly_profit) + '"></div></div>' +
       '<label>Notes</label><textarea id="i_x" rows="3">' + esc(v.notes || '') + '</textarea>' +
       (i ? '<label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" id="i_s" style="width:auto"' + (v.status === 'closed' ? ' checked' : '') + '> Closed (sold, ended or written off)</label>' : '') +
       '<p class="sub" style="margin-top:8px">A class gives the actual profit: income less every cost posted to that class since the start date. Without one, only the expected figures are shown.</p>' +
@@ -494,7 +571,7 @@
     if (i && window.VADocs) window.VADocs.mount($('#i_docs'), 'investment', i.id, { category: 'banking' });
     $('#i_x2').onclick = closeModal;
     $('#i_save').onclick = function () {
-      var body = { name: $('#i_n').value, start_date: $('#i_d').value, class_id: $('#i_c').value || null, amount: num($('#i_a').value), monthly_profit: num($('#i_m').value), notes: $('#i_x').value, status: $('#i_s') && $('#i_s').checked ? 'closed' : 'active' };
+      var body = { name: $('#i_n').value, start_date: $('#i_d').value, class_id: $('#i_c').value || null, amount: moneyOut($('#i_a').value, i && i.amount), monthly_profit: moneyOut($('#i_m').value, i && i.monthly_profit) || 0, notes: $('#i_x').value, status: $('#i_s') && $('#i_s').checked ? 'closed' : 'active' };
       api('/api/budget/investments' + (i ? '/' + i.id : ''), i ? 'PUT' : 'POST', body).then(function () { closeModal(); toast('Saved'); after(); }).catch(function (e) { toast(e.message); });
     };
     if ($('#i_del')) $('#i_del').onclick = function () {
@@ -503,15 +580,173 @@
     };
   }
 
+  // A bar per value (J$), with an optional dashed minimum line. color(i, v) gives each bar's fill.
+  function bars(labels, values, color, minLine) {
+    var W = 900, H = 200, P = { l: 70, r: 12, t: 12, b: 26 };
+    var vals = values.concat([0]); if (minLine != null) vals.push(minLine);
+    var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals); if (hi === lo) hi = lo + 1;
+    var y = function (v) { return P.t + (H - P.t - P.b) * (1 - (v - lo) / (hi - lo)); }, bw = (W - P.l - P.r) / values.length;
+    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto" role="img">';
+    [lo, (lo + hi) / 2, hi].forEach(function (v) { s += '<line x1="' + P.l + '" x2="' + (W - P.r) + '" y1="' + y(v) + '" y2="' + y(v) + '" stroke="var(--line)"/><text x="' + (P.l - 6) + '" y="' + (y(v) + 4) + '" text-anchor="end">' + J0(v / 1000) + 'k</text>'; });
+    if (lo < 0) s += '<line x1="' + P.l + '" x2="' + (W - P.r) + '" y1="' + y(0) + '" y2="' + y(0) + '" stroke="var(--muted)"/>';
+    values.forEach(function (v, i) {
+      var x = P.l + i * bw + bw * 0.15, top = y(Math.max(0, v)), bot = y(Math.min(0, v));
+      s += '<rect x="' + x + '" y="' + top + '" width="' + (bw * 0.7) + '" height="' + Math.max(1, bot - top) + '" rx="2" fill="' + color(i, v) + '"><title>' + esc(labels[i]) + ': ' + cs() + J(v) + '</title></rect>';
+      if (values.length <= 13 || i % 2 === 0) s += '<text x="' + (x + bw * 0.35) + '" y="' + (H - 8) + '" text-anchor="middle">' + esc(labels[i]) + '</text>';
+    });
+    if (minLine != null) s += '<line x1="' + P.l + '" x2="' + (W - P.r) + '" y1="' + y(minLine) + '" y2="' + y(minLine) + '" stroke="var(--warn)" stroke-dasharray="5 4" stroke-width="1.5"/><text x="' + (W - P.r) + '" y="' + (y(minLine) - 4) + '" text-anchor="end">minimum</text>';
+    return s + '</svg>';
+  }
+  var sumA = function (a) { return a.reduce(function (x, y) { return x + y; }, 0); };
+
+  // ===================================================== 12-MONTH FORECAST ==
+  var oq = null, odata = null;
+  function outlookTab() {
+    return loadMeta().then(function () {
+      if (!oq) oq = { method: '', sales: 0, costs: 0, cls: '', detail: false };
+      return api('/api/budget/outlook?method=' + oq.method + '&sales_pct=' + oq.sales + '&costs_pct=' + oq.costs + (oq.cls ? '&class_id=' + oq.cls : ''))
+        .then(function (d) { odata = d; oq.method = d.method; drawOutlook(); });
+    });
+  }
+  function drawOutlook() {
+    var d = odata, T = d.totals, O = d.outturn;
+    var s12 = sumA(T.income), n12 = sumA(T.net), hs = sumA(d.history_totals.income);
+    var ON = sumA(O.outlook.net), BN = sumA(O.budget.net), LN = sumA(O.last_year.net);
+    var fyl = d.fy_start === 1 ? String(O.fy) : O.fy + '/' + String(O.fy + 1).slice(2);
+    var low = d.cash ? d.cash.months.reduce(function (m, x) { return x.closing < m.closing ? x : m; }, d.cash.months[0]) : null;
+    var h = '<div class="card"><h2>12-month forecast</h2><p class="sub">Profit for the next 12 months, account by account, worked out from the books, and what it means for cash and for this financial year. Change the method or try a % change to see another outlook; nothing is saved.</p>' +
+      d.notes.map(function (n) { return '<div class="note warn">' + esc(n) + '</div>'; }).join('') +
+      '<div class="controls"><div><label>Work it out from</label><select id="om">' + Object.keys(d.methods).map(function (k) { return '<option value="' + k + '"' + (k === d.method ? ' selected' : '') + '>' + esc(d.methods[k]) + '</option>'; }).join('') + '</select></div>' +
+      '<div><label>Sales change (%)</label><input id="os" type="number" step="1" value="' + d.sales_pct + '" style="width:100px"></div>' +
+      '<div><label>Other costs change (%)</label><input id="oc" type="number" step="1" value="' + d.costs_pct + '" style="width:100px"></div>' +
+      '<div><label>For</label><select id="ocl">' + classOptions(oq.cls) + '</select></div><button class="primary" id="ogo">Show</button>' +
+      '<span style="margin-left:auto"></span><button id="opr">Print / PDF</button><button id="ocsv">CSV</button></div>' +
+      '<p class="sub">Cost of sales, and expenses ticked on the Break-even tab as going up with sales, follow the sales change. The other costs change applies to the rest.</p>' +
+      '<div class="kpis"><div class="kpi"><span>Sales, next 12 months</span><b>' + cs() + J0(s12) + '</b><small>' + (hs ? (s12 >= hs ? 'up ' : 'down ') + pct(Math.abs(s12 / hs - 1)) + ' on the last 12 months' : 'no sales in the last 12 months') + '</small></div>' +
+      '<div class="kpi"><span>Net profit, next 12 months</span><b style="color:' + (n12 < 0 ? 'var(--red)' : 'inherit') + '">' + cs() + J0(n12) + '</b><small>' + (s12 ? pct(n12 / s12) + ' of sales' : '') + '</small></div>' +
+      '<div class="kpi"><span>Net profit for ' + esc(fyl) + ' on this outlook</span><b style="color:' + (ON < 0 ? 'var(--red)' : 'inherit') + '">' + cs() + J0(ON) + '</b><small>' + (O.has_budget ? (ON >= BN ? cs() + J0(ON - BN) + ' better than budget' : cs() + J0(BN - ON) + ' short of budget') : 'no budget saved for the year') + '</small></div>' +
+      (low ? '<div class="kpi"><span>Lowest month-end cash</span><b style="color:' + (low.closing < 0 || (d.cash.min_cash != null && low.closing < d.cash.min_cash) ? 'var(--red)' : 'inherit') + '">' + cs() + J0(low.closing) + '</b><small>end of ' + mlabel(low.month) + '</small></div>' : '') + '</div>' +
+      '<h3 style="font-size:14px;margin:14px 0 4px">Net profit by month</h3><p class="sub">The last 12 months from the books in grey, the next 12 forecast in blue; losses in red.</p>' +
+      bars(d.history_months.concat(d.months).map(mlabel), d.history_totals.net.concat(T.net), function (i, v) { return v < 0 ? 'var(--red)' : i < 12 ? 'var(--muted)' : 'var(--bar)'; }) +
+      (d.cash ? '<h3 style="font-size:14px;margin:14px 0 4px">Money at the end of each month</h3>' + bars(d.months.map(mlabel), d.cash.months.map(function (m) { return m.closing; }), function (i, v) { return v < 0 || (d.cash.min_cash != null && v < d.cash.min_cash) ? 'var(--red)' : 'var(--bar)'; }, d.cash.min_cash) : '') + '</div>';
+
+    var M = d.months, row = function (label, arr, cls, extra) { return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + label + '</td>' + arr.map(function (v) { return '<td class="n' + (v < 0 && cls === 'total' ? ' bad' : '') + '">' + (v ? J0(v) : '') + '</td>'; }).join('') + '<td class="n">' + J0(sumA(arr)) + '</td>' + (extra || '') + '</tr>'; };
+    h += '<div class="card"><div class="controls"><b>By month</b><span style="margin-left:auto"></span><button id="odet">' + (oq.detail ? 'Hide accounts' : 'Show accounts') + '</button></div><div class="scroll"><table class="fgrid"><thead><tr><th>' + esc(CUR.code) + '</th>' + M.map(function (m) { return '<th class="n">' + mlabel(m) + '</th>'; }).join('') + '<th class="n">12 months</th></tr></thead><tbody>';
+    TYPES.forEach(function (t) {
+      var list = d.rows.filter(function (r) { return r.type === t[0]; });
+      if (!list.length) return;
+      if (oq.detail) { h += '<tr class="head"><td colspan="14">' + t[1] + '</td></tr>'; list.forEach(function (r) { h += row(esc(r.code + ' ' + r.name), r.forecast); }); }
+      h += row((oq.detail ? 'Total ' + t[1].toLowerCase() : t[1]), T[t[0]], oq.detail ? 'total' : '');
+      if (t[0] === 'cogs') h += row('Gross profit', T.gross, 'total');
+    });
+    h += row('Net profit', T.net, 'total');
+    if (d.cash) {
+      var C = d.cash.months, col = function (k) { return C.map(function (m) { return m[k]; }); };
+      h += '<tr class="head"><td colspan="14">Cash (money on hand now: ' + cs() + J0(d.cash.opening) + ')</td></tr>' + row('Profit' + (C[0] ? ' (this month: the days left)' : ''), col('profit')) +
+        (sumA(col('addback')) ? row('Depreciation added back', col('addback')) : '') + (sumA(col('loans')) ? row('Loan capital repaid', col('loans').map(function (v) { return -v; })) : '') +
+        (sumA(col('own').map(Math.abs)) ? row('Your own one-off lines', col('own')) : '') +
+        '<tr class="total"><td>Money at month end</td>' + C.map(function (m) { return '<td class="n' + (m.closing < 0 || (d.cash.min_cash != null && m.closing < d.cash.min_cash) ? ' bad' : '') + '">' + J0(m.closing) + '</td>'; }).join('') + '<td></td></tr>';
+    }
+    h += '</tbody></table></div>' + (d.cash ? '<p class="sub" style="margin-top:8px">Cash follows profit: it assumes customers and suppliers keep paying at today\'s pace, stock stays at today\'s level, and there is no large spending beyond your own lines on the 13-week cash tab. Use the 13-week cash tab for the weeks just ahead.</p>' : '<p class="sub" style="margin-top:8px">Cash is shown for the whole business only.</p>') + '</div>';
+
+    var oc = function (k) { return { ly: sumA(O.last_year[k]), b: sumA(O.budget[k]), o: sumA(O.outlook[k]) }; };
+    h += '<div class="card"><h2>' + esc(fyl) + ' financial year</h2><p class="sub">' + (O.done ? O.done + ' month' + (O.done === 1 ? '' : 's') + ' from the books and ' + (12 - O.done) + ' forecast' : 'All 12 months forecast') + ', against the budget and the year before.</p>' +
+      '<div class="scroll"><table><thead><tr><th></th><th class="n">Year before</th><th class="n">Budget</th><th class="n">This outlook</th><th class="n">Against budget</th><th class="n">Against year before</th></tr></thead><tbody>' +
+      [['income', 'Sales'], ['gross', 'Gross profit'], ['net', 'Net profit']].map(function (p) {
+        var x = oc(p[0]);
+        return '<tr' + (p[0] === 'net' ? ' class="total"' : '') + '><td>' + p[1] + '</td><td class="n">' + J0(x.ly) + '</td><td class="n">' + (O.has_budget ? J0(x.b) : '–') + '</td><td class="n">' + J0(x.o) + '</td>' +
+          '<td class="n' + (O.has_budget && x.o < x.b ? ' bad' : '') + '">' + (O.has_budget ? J0(x.o - x.b) : '–') + '</td><td class="n' + (x.o < x.ly ? ' bad' : '') + '">' + J0(x.o - x.ly) + '</td></tr>';
+      }).join('') + '</tbody></table></div></div>';
+    $('#out').innerHTML = h;
+    $('#ogo').onclick = function () { oq = { method: $('#om').value, sales: num($('#os').value), costs: num($('#oc').value), cls: $('#ocl').value, detail: oq.detail }; outlookTab().catch(function (e) { toast(e.message); }); };
+    $('#om').onchange = $('#ogo').onclick;
+    $('#odet').onclick = function () { oq.detail = !oq.detail; drawOutlook(); };
+    $('#opr').onclick = function () { window.print(); };
+    $('#ocsv').onclick = function () {
+      var c = function (a) { return a.map(function (v) { return r2(cv(v)); }); }, rows = [['Account (' + CUR.code + ')', 'Type'].concat(M.map(mlabel))];
+      d.rows.forEach(function (r) { rows.push([r.code + ' ' + r.name, r.type].concat(c(r.forecast))); });
+      rows.push(['Gross profit', ''].concat(c(T.gross))); rows.push(['Net profit', ''].concat(c(T.net)));
+      if (d.cash) rows.push(['Money at month end', ''].concat(c(d.cash.months.map(function (m) { return m.closing; }))));
+      csvDownload('forecast-12-months-' + d.today + (CUR.code !== 'JMD' ? '-' + CUR.code : '') + '.csv', rows);
+    };
+  }
+
+  // ======================================================== HEALTH REPORT ==
+  var hdata = null, hsaved = [], hview = '';   // hview: a kept report being looked at
+  var RATE = { good: ['ok', 'Healthy'], watch: ['warn', 'Watch'], poor: ['bad', 'Concern'], na: ['', 'Not measured'] };
+  // The server writes money in its text as {J:amount}; show it in the chosen currency.
+  function htext(s) { return esc(s).replace(/\{J:(-?[\d.]+)\}/g, function (_, v) { var x = Number(v); return (x < 0 ? '−' : '') + cs() + J0(Math.abs(x)); }); }
+  function healthTab() {
+    return Promise.all([api(hview ? '/api/budget/health/saved/' + hview : '/api/budget/health').catch(function (e) { if (!hview) throw e; hview = ''; toast(e.message); return api('/api/budget/health'); }), api('/api/budget/health/saved')])
+      .then(function (r) { hdata = r[0]; hsaved = r[1].reports; drawHealth(); });
+  }
+  function dial(score, band) {
+    var c = band === 'Strong' ? 'var(--ok)' : band === 'Sound' ? 'var(--bar)' : band === 'Needs attention' ? 'var(--warn)' : 'var(--red)', L = 2 * Math.PI * 52;
+    return '<svg viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="Score ' + score + ' out of 100"><circle cx="60" cy="60" r="52" fill="none" stroke="var(--line)" stroke-width="12"/>' +
+      '<circle cx="60" cy="60" r="52" fill="none" stroke="' + c + '" stroke-width="12" stroke-linecap="round" stroke-dasharray="' + (L * score / 100) + ' ' + L + '" transform="rotate(-90 60 60)"/>' +
+      '<text x="60" y="66" text-anchor="middle" style="font-size:30px;font-weight:700;fill:var(--ink)">' + score + '</text><text x="60" y="84" text-anchor="middle">out of 100</text></svg>';
+  }
+  function drawHealth() {
+    var d = hdata, h = '<div class="card"><h2>Financial health report</h2>';
+    var kept = hsaved.length ? '<div><label>Kept reports</label><select id="hk"><option value="">Today, from the books</option>' + hsaved.map(function (r) { return '<option value="' + r.id + '"' + (String(hview) === String(r.id) ? ' selected' : '') + '>' + esc(r.as_of) + ' · ' + (r.score == null ? '–' : r.score) + ' ' + esc(r.band || '') + '</option>'; }).join('') + '</select></div>' : '';
+    if (!d.ready) {
+      $('#out').innerHTML = h + '<div class="note warn">' + esc(d.reason) + '</div><div class="controls">' + kept + '</div></div>';
+      if ($('#hk')) $('#hk').onchange = function () { hview = this.value; healthTab(); };
+      return;
+    }
+    h += '<p class="sub">A check-up of the whole business from the books: ' + esc(d.period.from) + ' to ' + esc(d.period.to) + ' (' + d.period.months + ' month' + (d.period.months === 1 ? '' : 's') + ') for profit and growth, and balances on ' + esc(d.as_of) + '. Each measure is compared with a guide figure for a small retail and workshop business.</p>' +
+      (d.saved ? '<div class="note info">A kept report, saved ' + esc(d.saved.at) + (d.saved.by ? ' by ' + esc(d.saved.by) : '') + '. It shows the books as they were that day.</div>' : '') +
+      '<div class="controls">' + kept + (hview ? '<button id="hnow">Today\'s report</button><button id="hdel" style="color:var(--red)">Delete this report</button>' : '<button id="hre">Work it out again</button><button id="hkeep">Keep this report</button>') +
+      '<span style="margin-left:auto"></span><button id="hpr">Print / PDF</button></div>' +
+      '<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin-top:6px">' + (d.score == null ? '' : dial(d.score, d.band)) +
+      '<div style="flex:1;min-width:220px"><div style="font-size:20px;font-weight:700">' + esc(d.band || '') + '</div><p style="margin:4px 0 0">' + esc(d.verdict) + '</p></div></div></div>';
+    var K = d.key, n = d.period.months;
+    h += '<div class="card"><h2>Key figures</h2><div class="kpis">' + [
+      ['Sales', K.sales, n + ' month' + (n === 1 ? '' : 's')], ['Gross profit', K.gross, K.sales ? pct(K.gross / K.sales) + ' of sales' : ''], ['Net profit', K.net, K.sales ? pct(K.net / K.sales) + ' of sales' : ''],
+      ['Money on hand', K.cash, 'bank and cash'], ['Customers owe', K.ar, ''], ['Stock', K.stock, 'at cost'], ['Owed to suppliers', K.ap, ''], ['Owners\' stake', K.equity, 'including profit to date'],
+    ].map(function (k) { return '<div class="kpi"><span>' + k[0] + '</span><b style="color:' + (k[1] < 0 ? 'var(--red)' : 'inherit') + '">' + cs() + J0(k[1]) + '</b><small>' + esc(k[2]) + '</small></div>'; }).join('') + '</div></div>';
+    var li = function (list, withPill) { return list.length ? '<ul style="margin:6px 0 0;padding-left:18px">' + list.map(function (x) { return '<li style="margin-bottom:6px"><b>' + esc(x.label) + '.</b> ' + (withPill ? '<span class="pill ' + RATE[x.rating][0] + '">' + RATE[x.rating][1] + '</span> ' : '') + htext(x.text) + '</li>'; }).join('') + '</ul>' : '<p class="sub">None.</p>'; };
+    h += '<div class="grid"><div class="card"><h2>Strengths</h2>' + li(d.strengths) + '</div><div class="card"><h2>Concerns</h2>' + li(d.concerns, true) + '</div></div>' +
+      '<div class="card"><h2>Recommended actions</h2><p class="sub">In order of importance.</p>' + (d.actions.length ? '<ol style="margin:6px 0 0;padding-left:20px">' + d.actions.map(function (a) { return '<li style="margin-bottom:8px"><b>' + esc(a.label) + ':</b> ' + htext(a.text) + '</li>'; }).join('') + '</ol>' : '<p class="sub">Nothing pressing. Keep the budget and forecasts up to date and check this report each month.</p>') + '</div>';
+    d.sections.forEach(function (s) {
+      var list = d.metrics.filter(function (m) { return m.section === s[0]; });
+      if (!list.length) return;
+      h += '<div class="card"><h2>' + esc(s[1]) + '</h2><div class="scroll"><table><thead><tr><th>Measure</th><th class="n">Result</th><th>Guide</th><th>Rating</th><th>What it shows, and what to do</th></tr></thead><tbody>' +
+        list.map(function (m) {
+          return '<tr><td><b>' + esc(m.label) + '</b></td><td class="n">' + htext(m.shown) + '</td><td><small>' + esc(m.guide) + '</small></td><td><span class="pill ' + RATE[m.rating][0] + '">' + RATE[m.rating][1] + '</span></td>' +
+            '<td style="min-width:260px">' + htext(m.finding) + (m.advice ? '<br><span style="color:var(--muted)">' + htext(m.advice) + '</span>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div></div>';
+    });
+    if (hsaved.length > 1) h += '<div class="card"><h2>Over time</h2><div class="scroll"><table><thead><tr><th>Kept</th><th>As of</th><th class="n">Score</th><th>Rating</th><th>By</th></tr></thead><tbody>' + hsaved.map(function (r, i) {
+      var prev = hsaved[i + 1], diff = prev && r.score != null && prev.score != null ? r.score - prev.score : null;
+      return '<tr class="click" data-hr="' + r.id + '"><td>' + esc(r.saved_at) + '</td><td>' + esc(r.as_of) + '</td><td class="n">' + (r.score == null ? '–' : r.score) + (diff ? ' <small class="' + (diff > 0 ? 'good' : 'bad') + '" style="color:' + (diff > 0 ? 'var(--ok)' : 'var(--red)') + '">' + (diff > 0 ? '▲' : '▼') + Math.abs(diff) + '</small>' : '') + '</td><td>' + esc(r.band || '') + '</td><td>' + esc(r.saved_by || '') + '</td></tr>';
+    }).join('') + '</tbody></table></div></div>';
+    h += '<div class="card"><p class="sub" style="margin:0">' + d.notes.map(esc).join(' ') + ' This report is worked out from the books by fixed rules and common guide figures; the same books always give the same report. It is not audited and does not replace advice from your accountant, who knows the business\'s circumstances. It is only as good as the bookkeeping behind it.</p></div>';
+    $('#out').innerHTML = h;
+    if ($('#hk')) $('#hk').onchange = function () { hview = this.value; healthTab(); };
+    all('[data-hr]').forEach(function (tr) { tr.onclick = function () { hview = tr.getAttribute('data-hr'); healthTab(); window.scrollTo(0, 0); }; });
+    $('#hpr').onclick = function () { window.print(); };
+    if ($('#hre')) $('#hre').onclick = function () { healthTab().then(function () { toast('Worked out again from the books'); }).catch(function (e) { toast(e.message); }); };
+    if ($('#hkeep')) $('#hkeep').onclick = function () {
+      var b = this; b.disabled = true;
+      api('/api/budget/health/saved', 'POST').then(function () { toast('Report kept'); return healthTab(); }).catch(function (e) { b.disabled = false; toast(e.message); });
+    };
+    if ($('#hnow')) $('#hnow').onclick = function () { hview = ''; healthTab(); };
+    if ($('#hdel')) $('#hdel').onclick = function () {
+      if (!confirm('Delete the report kept ' + d.saved.at + '?')) return;
+      api('/api/budget/health/saved/' + hview, 'DELETE').then(function () { hview = ''; toast('Report deleted'); return healthTab(); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
   function show() {
     all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); });
     try { localStorage.setItem('vision.budgetTab', tab); } catch (_) {}
-    var f = { budget: budgetTab, forecast: forecastTab, breakeven: breakevenTab, roi: roiTab }[tab] || budgetTab;
+    var f = { budget: budgetTab, outlook: outlookTab, forecast: forecastTab, breakeven: breakevenTab, roi: roiTab, health: healthTab }[tab] || budgetTab;
     $('#out').innerHTML = '<div class="empty">Loading…</div>';
     f().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
   }
   all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
-  show();
+  loadCurrencies().then(show);
 })();
 </script>
 <script src="/assets/staff-assist.js?v=20261020" defer></script>
