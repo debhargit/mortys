@@ -321,6 +321,8 @@ Receive Stock: Purchasing > Receive Stock is one screen for every delivery, with
 
 Receive Stock step 1, Source: choose "Against a purchase order" and pick it, or "No purchase order" and pick the supplier. Set the date received if it was not today.
 
+Receiving from the supplier's invoice: on the Source tab, "Scan the supplier's invoice" takes a photo or PDF of the invoice and reads it. It picks the supplier, and the open purchase order if there is one, fills the quantities and costs of the lines it can match by part number, and fills the bill number, dates, subtotal, GCT, freight and total. It lists the lines it could not match and any price or quantity that differs from the PO. Always check the goods against what it filled in - count, do not trust the paper. When you post, the scanned invoice is filed in the Document centre against the bill, the supplier and the PO. If reading is not set up, the button says so: type the delivery in as usual.
+
 Receive Stock step 2, Items: with a PO, type how many of each line arrived ("Everything outstanding arrived" fills them all). Without a PO, search the parts and give the quantity and cost. Receive only what you counted.
 
 Receive Stock step 3, Supplier bill: bill number, bill date, due date (blank = from the supplier's terms), subtotal, GCT, freight and the bill total, which must equal subtotal + GCT + freight. If the bill has not come yet, untick "The supplier's bill came with it" and enter it later in Payables > Enter a bill.
@@ -400,11 +402,18 @@ A/R aging: what each customer owes by age (current, 1-30, 31-60, 61-90, over 90 
 
 Statements: print or email a customer's statement of account for a period from their page, or from Loans & Rent.
 
-Invoices on the books: a New invoice or New recurring invoice on the customer's page bills something that is not a till sale - rent, a service, a late fee. See the Loans, rent and late fees lesson.`,
+Invoices on the books: a New invoice or New recurring invoice on the customer's page bills something that is not a till sale - rent, a service, a late fee. See the Loans, rent and late fees lesson.
+
+Getting an invoice signed: the "✍ Sign" button on a customer's invoice opens its signature page. In person: "Sign here now" - hand the screen to the customer, they sign with a finger, pen or mouse and you are the witness. Away from the shop: "Send for signature" emails a link, or leave the email blank to get a link to send by WhatsApp or text. The link works once, lasts the days you set (14 unless changed) and is shown only that once; cancel a link that is no longer needed. The customer opens it on their phone, types their name, signs and ticks that they received the goods or services and agree to pay.
+
+Signed invoices: every signature is kept with the time, how it was signed and a seal over the invoice's contents, and a signed copy is filed in the Document centre against the invoice and the customer. "Seal intact" means the invoice has not changed since it was signed. If the invoice is edited afterwards, the page warns "The invoice has changed since it was signed" - get it signed again.
+
+Customer documents: the "Invoices & documents" panel on the customer's page keeps signed invoices, signed delivery slips, statements and their other papers, filed under Receivables in the Document centre.`,
     questions: [
       ['A customer pays J$30,000 against invoices of J$20,000 and J$15,000. With "oldest first", what happens?', ['Both are paid', 'The older one is paid and J$10,000 goes on the newer one', 'Nothing is applied', 'J$30,000 is refunded'], 1, 'Oldest first fills invoices in order.'],
       ['What does credit hold do?', ['Deletes the customer', 'The till refuses to charge to their account', 'Sends a statement', 'Adds a late fee'], 1, 'Credit hold blocks account charges at the till.'],
       ['A payment was entered against the wrong customer. What do you do?', ['Edit the amount', 'Void it and enter it again correctly', 'Ignore it', 'Delete the customer'], 1, 'Payments are voided, never edited.'],
+      ['A customer signed an invoice, then a line on it was changed. What do you do?', ['Nothing, it is signed', 'Get it signed again', 'Delete the signature', 'Void the customer'], 1, 'The seal shows the invoice changed after signing, so the old signature no longer covers it.'],
     ],
   },
   {
@@ -413,6 +422,10 @@ Invoices on the books: a New invoice or New recurring invoice on the customer's 
     body: `Payables: All modules > Payables. Tabs: Supplier centre, Pay bills, Enter a bill, Enter a supplier credit, A/P aging, Loans and Recurring bills. The tiles show unpaid bills, overdue and supplier credits.
 
 Entering a bill: bills from Receive Stock arrive by themselves. For other bills (light, phone, rent, repairs) use Enter a bill: supplier, bill number and dates, then a line for each cost with its category (account) and class. The supplier's usual category and class fill the first line. Attach the supplier's invoice; it is filed in the Document centre.
+
+Scanning a supplier's invoice: on Enter a bill, "Scan the supplier's invoice" reads a photo or PDF of it and fills in the supplier, bill number, dates, lines, freight, GCT and memo, with a warning for anything it was unsure of. Check every line and the total against the paper before saving. "Attach it without reading" just keeps the file. Either way, when you save the bill the invoice is filed in the Document centre under Payables, linked to the bill and the supplier. If reading is not set up, type the bill in and attach the file.
+
+Supplier documents: the "Supplier invoices & documents" panel on the supplier's page in the Supplier centre keeps their invoices, statements and other papers; you can file more there.
 
 Supplier credit: when a supplier owes us (returned goods, overcharge), Enter a supplier credit. It is used up against their bills in Pay bills.
 
@@ -432,6 +445,7 @@ Bank statement: import the bank's statement file. Lines are matched to what is a
       ['Cash from the till is taken to the bank. How is it recorded?', ['Receive money', 'Make deposits, from Undeposited Funds', 'A journal', 'Nothing'], 1, 'Make deposits moves it from the safe into the bank.'],
       ['When can you finish a bank reconciliation?', ['Any time', 'When the difference is zero', 'At month end only', 'When a manager signs'], 1, 'The difference must be zero.'],
       ['A supplier owes us for goods we sent back. What do you enter?', ['A bill', 'A supplier credit', 'A deposit', 'A void'], 1, 'Supplier credits are used up in Pay bills.'],
+      ['You scanned a supplier\'s invoice into Enter a bill. What do you do before saving?', ['Save at once', 'Check each line and the total against the paper', 'Print it', 'Email the supplier'], 1, 'Reading can be wrong; the paper is what counts.'],
     ],
   },
   {
@@ -551,7 +565,7 @@ Security screen: the Security screen (fleet wall) is a full-screen live driver m
     summary: 'Filing documents, finding them, forms such as leave requests, approvals and the communications journal.',
     body: `The Document centre: All modules > Document centre keeps every paper the business holds - templates and forms, policies and manuals, government and tax papers, staff files, supplier bills, customer documents, contracts, insurance, banking, assets and product images - in folders, each with a number (DOC-000123).
 
-Filing a document: "+ File a document": choose the file (PDF, pictures, Word, Excel and the like), the category and folder, and link it to the record it belongs to (supplier, bill, staff member, customer, product, asset). Set the issue and expiry dates where they apply. Confidential documents are only shown to people allowed to see them, and every open and download is logged.
+Filing a document: "+ File a document": choose the file (PDF, pictures, Word, Excel and the like), the category and folder, and link it to the record it belongs to (supplier, bill, staff member, customer, product, asset). Set the issue and expiry dates where they apply. Supplier invoices scanned or attached in Payables and Receive Stock, and signed customer invoices, are filed here by themselves. Confidential documents are only shown to people allowed to see them, and every open and download is logged.
 
 Finding a document: search the Library (the text inside Word, Excel and PDF files is searched too), browse folders, look By record (everything for one supplier or customer), or see Expiring.
 
