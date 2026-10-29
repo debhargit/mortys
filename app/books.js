@@ -14,6 +14,8 @@
 //               write cheque / spend money, receive money, transfer, Make
 //               Deposits from Undeposited Funds, reconcile, statement import
 //               with matching and rules.
+//  QuickBooks   import of the supplier list, unpaid bills and bank registers
+//               exported from QuickBooks, each previewed before it is added.
 //
 //  Documents are posted to the general ledger by gl.js (ap_bill, ap_payment,
 //  bank_txn, account_payment, and a reversal for each void); glPost() runs the
@@ -913,7 +915,11 @@ function register(app, deps) {
     try {
       const a = await bankAccount(req.params.accountId);
       const st = ['new', 'matched', 'added', 'ignored'].includes(req.query.status) ? req.query.status : 'new';
-      const { rows } = await query(`SELECT id, to_char(txn_date, 'YYYY-MM-DD') AS day, description, amount::float AS amount, status, gl_line_id::int AS gl_line_id, bank_txn_id FROM bank_feed_lines WHERE account_id = $1 AND status = $2 ORDER BY txn_date DESC, id DESC LIMIT 500`, [a.id, st]);
+      const { rows } = await query(
+        `SELECT f.id, to_char(f.txn_date, 'YYYY-MM-DD') AS day, f.description, f.amount::float AS amount, f.status, f.gl_line_id::int AS gl_line_id, f.bank_txn_id,
+                f.source, f.payee, f.reference, f.note, CASE WHEN ga.is_active AND ga.qb_type NOT IN ('AR', 'AP') THEN f.suggest_account_id END AS suggest_account_id
+           FROM bank_feed_lines f LEFT JOIN gl_accounts ga ON ga.id = f.suggest_account_id
+          WHERE f.account_id = $1 AND f.status = $2 ORDER BY f.txn_date DESC, f.id DESC LIMIT 500`, [a.id, st]);
       const rules = await rulesWithSplits(`ORDER BY length(r.contains) DESC`);
       if (st === 'new') {
         for (const f of rows) {
@@ -954,7 +960,7 @@ function register(app, deps) {
       const { rows: f } = await query(`SELECT *, to_char(txn_date, 'YYYY-MM-DD') AS day, amount::float AS amt FROM bank_feed_lines WHERE id = $1 AND status = 'new'`, [parseInt(req.params.id, 10)]);
       if (!f.length) throw httpError(409, 'Already dealt with');
       const line = f[0];
-      const payee = String(b.payee || '').trim().slice(0, 80) || null;
+      const payee = String(b.payee || '').trim().slice(0, 80) || line.payee || null;
       // The rule's split, unless staff chose one account for this line.
       let txLines;
       if (b.use_split && b.rule_id) {
@@ -969,7 +975,7 @@ function register(app, deps) {
       }
       const la = { id: txLines[0].account_id };
       const t = await tx(async (c) => {
-        const out = await makeTxn(c, { kind: line.amt < 0 ? 'expense' : 'deposit', accountId: line.account_id, date: line.day, payee, supplierId: null, cheque: null, reference: null,
+        const out = await makeTxn(c, { kind: line.amt < 0 ? 'expense' : 'deposit', accountId: line.account_id, date: line.day, payee, supplierId: null, cheque: null, reference: line.reference || null,
           memo: String(b.memo || line.description).slice(0, 300), lines: txLines, userId: req.session.userId });
         await c.query(`UPDATE bank_feed_lines SET status = 'added', bank_txn_id = $2 WHERE id = $1`, [line.id, out.id]);
         if (b.make_rule && String(b.rule_text || '').trim().length >= 3) await c.query(`INSERT INTO bank_rules (contains, gl_account_id, payee, created_by) VALUES ($1,$2,$3,$4)`, [String(b.rule_text).trim().slice(0, 80), la.id, payee, req.session.userId]);
@@ -1070,6 +1076,308 @@ function register(app, deps) {
   });
   app.delete('/api/bank/rules/:id', ...BK, async (req, res) => {
     try { await query(`DELETE FROM bank_rules WHERE id = $1`, [parseInt(req.params.id, 10)]); res.json({ ok: true }); } catch (e) { fail(res, e); }
+  });
+
+  // --------------------------------------------------- QuickBooks import --
+  // Bringing payables and banking over from QuickBooks (Desktop or Online):
+  //   Supplier list  the Vendor List as IIF (!VEND) or CSV: adds suppliers not
+  //                  here yet and fills blank phone, email, address and terms.
+  //   Unpaid bills   the Unpaid Bills Detail report as CSV: each open bill or
+  //                  bill credit becomes a bill here for what is still owed.
+  //                  QuickBooks already counted its cost, so it is booked
+  //                  against Opening Balance Equity unless another account is
+  //                  chosen: only the amount owed reaches the books.
+  //   Bank register  one account's register or Transaction Detail report as
+  //                  CSV: each line from a date on (the ledger start) joins the
+  //                  Bank statement review list, with QuickBooks's own account
+  //                  (the Split column) and payee suggested, to match or add.
+  // Each is previewed first, and the same file imported twice adds nothing twice.
+  const qnorm = (s) => String(s || '').toLowerCase().replace(/&/g, ' and ').replace(/\b(ltd|limited|co|company|inc|incorporated|the)\b\.?/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
+  // The heading row: QuickBooks puts the report title and dates above it.
+  function headingRow(rows, need) {
+    for (let i = 0; i < Math.min(rows.length, 15); i++) {
+      const h = rows[i].map((c) => c.trim().toLowerCase());
+      if (need.every((alts) => h.some((x) => alts.includes(x)))) return { i, h };
+    }
+    return null;
+  }
+  const colOf = (h, ...names) => { for (const nm of names) { const k = h.indexOf(nm); if (k >= 0) return k; } return -1; };
+  // "Net 30" -> 30, "Due on receipt" -> 0, "1% 10 Net 30" -> 30.
+  function termsDays(t) {
+    t = String(t || '').toLowerCase();
+    if (!t) return null;
+    if (/receipt|c\.?o\.?d|on delivery|cash/.test(t)) return 0;
+    const m = /(\d{1,3})/.exec(t.replace(/\d+(\.\d+)?\s*%\s*\d+/, ''));
+    return m && +m[1] <= 365 ? +m[1] : null;
+  }
+  function iifRows(text, kind) {
+    const out = []; let head = null;
+    for (const line of String(text).split(/\r?\n/)) {
+      const c = line.split('\t').map((x) => x.replace(/^"|"$/g, '').trim());
+      if (c[0] === '!' + kind) head = c.map((x) => x.toUpperCase());
+      else if (c[0] === kind && head) out.push(Object.fromEntries(head.map((h, i) => [h, c[i] || ''])));
+    }
+    return out;
+  }
+  // The group a QuickBooks report row sits under (a vendor, or an account): the
+  // text of a row with no date that is not a "Total ..." row.
+  function groupLabel(r, dateCol) {
+    if (String(r[dateCol] || '').trim()) return null;
+    const t = r.map((c) => c.trim()).find(Boolean);
+    return t && !/^total\b/i.test(t) ? t : null;
+  }
+  async function supplierMatcher() {
+    const { rows } = await query(`SELECT id, name, phone, email, address, contact_name, payment_terms, payment_terms_days FROM suppliers WHERE name IS NOT NULL AND name <> ''`);
+    const exact = new Map(), loose = new Map();
+    for (const s of rows) { exact.set(s.name.trim().toLowerCase(), s); if (!loose.has(qnorm(s.name))) loose.set(qnorm(s.name), s); }
+    return (name) => {
+      const e = exact.get(String(name || '').trim().toLowerCase());
+      if (e) return { s: e, how: 'exact' };
+      const l = qnorm(name) && loose.get(qnorm(name));
+      return l ? { s: l, how: 'similar' } : null;
+    };
+  }
+  const ledgerStart = async () => {
+    const { rows } = await query(`SELECT to_char((value::timestamptz AT TIME ZONE 'America/Jamaica')::date, 'YYYY-MM-DD') AS d FROM warehouse_settings WHERE key = 'gl_start_at' AND value IS NOT NULL AND value <> ''`);
+    return rows.length ? rows[0].d : null;
+  };
+
+  // ---- Supplier list
+  function parseVendors(text) {
+    const s = String(text || '');
+    if (/^!VEND\t/m.test(s)) {
+      return iifRows(s, 'VEND').map((v) => ({
+        name: v.NAME, phone: v.PHONE1 || v.PHONE2 || '', email: v.EMAIL || '', contact: v.CONT1 || '', terms: v.TERMS || '', tax_id: v.TAXID || '', account_number: v.ACCNUM || '',
+        address: ['ADDR1', 'ADDR2', 'ADDR3', 'ADDR4', 'ADDR5'].map((k) => v[k]).filter(Boolean).join(', '),
+      }));
+    }
+    const rows = parseCsv(s);
+    const hr = headingRow(rows, [['vendor', 'name', 'vendor name', 'supplier', 'company', 'company name', 'display name']]);
+    if (!hr) throw httpError(400, 'This does not look like a QuickBooks vendor list: no Vendor or Name heading. Export it as IIF, or as CSV from the Vendor Contact List.');
+    const h = hr.h, c = {
+      name: colOf(h, 'vendor', 'vendor name', 'supplier', 'display name', 'name', 'company', 'company name'), phone: colOf(h, 'main phone', 'phone', 'phone numbers', 'work phone'),
+      email: colOf(h, 'main email', 'email', 'e-mail'), address: colOf(h, 'bill from', 'billing address', 'address', 'street'), contact: colOf(h, 'primary contact', 'contact', 'full name'),
+      terms: colOf(h, 'terms'), account_number: colOf(h, 'account no.', 'account #', 'account number', 'account no'), tax_id: colOf(h, 'tax id', 'tax id.', 'trn', 'business id no.'),
+    };
+    const get = (r, k) => (c[k] >= 0 ? String(r[c[k]] || '').trim() : '');
+    return rows.slice(hr.i + 1).map((r) => ({ name: get(r, 'name'), phone: get(r, 'phone'), email: get(r, 'email'), address: get(r, 'address'), contact: get(r, 'contact'), terms: get(r, 'terms'), account_number: get(r, 'account_number'), tax_id: get(r, 'tax_id') }))
+      .filter((v) => v.name && !/^total\b/i.test(v.name));
+  }
+  async function vendorPreview(text) {
+    const list = parseVendors(text), match = await supplierMatcher(), seen = new Set();
+    return list.map((v, i) => {
+      const key = v.name.toLowerCase(), m = match(v.name);
+      const row = Object.assign({ i, terms_days: termsDays(v.terms) }, v, { name: v.name.slice(0, 120) });
+      if (seen.has(key)) return Object.assign(row, { status: 'duplicate', reason: 'Twice in the file' });
+      seen.add(key);
+      return m ? Object.assign(row, { status: 'exists', supplier_id: m.s.id, supplier: m.s.name, how: m.how }) : Object.assign(row, { status: 'new' });
+    });
+  }
+  app.post('/api/ap/import/suppliers', ...AP, async (req, res) => {
+    try {
+      const b = req.body || {};
+      const rows = await vendorPreview(String(b.file || '').slice(0, 5000000));
+      if (!rows.length) throw httpError(400, 'No suppliers found in the file');
+      if (b.preview) return res.json({ rows });
+      const take = new Set((Array.isArray(b.include) ? b.include : []).map(Number));
+      const out = { added: 0, updated: 0 };
+      await tx(async (c) => {
+        for (const v of rows.filter((x) => take.has(x.i))) {
+          const f = [v.phone.slice(0, 40) || null, v.email.slice(0, 120) || null, v.address.slice(0, 300) || null, v.contact.slice(0, 80) || null, v.terms.slice(0, 40) || null, v.terms_days, v.account_number.slice(0, 40) || null, v.tax_id.slice(0, 40) || null];
+          if (v.status === 'new') {
+            await c.query(`INSERT INTO suppliers (name, phone, email, address, contact_name, payment_terms, payment_terms_days, account_number, tax_id, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'From QuickBooks')`, [v.name].concat(f));
+            out.added++;
+          } else if (v.status === 'exists') {
+            // Fill what is blank here; never overwrite what staff have entered.
+            const { rowCount } = await c.query(
+              `UPDATE suppliers SET phone = COALESCE(NULLIF(phone, ''), $2), email = COALESCE(NULLIF(email, ''), $3), address = COALESCE(NULLIF(address, ''), $4), contact_name = COALESCE(NULLIF(contact_name, ''), $5),
+                      payment_terms = COALESCE(NULLIF(payment_terms, ''), $6), payment_terms_days = COALESCE(payment_terms_days, $7), account_number = COALESCE(NULLIF(account_number, ''), $8), tax_id = COALESCE(NULLIF(tax_id, ''), $9)
+                WHERE id = $1 AND (NULLIF(phone, '') IS NULL OR NULLIF(email, '') IS NULL OR NULLIF(address, '') IS NULL OR NULLIF(contact_name, '') IS NULL OR NULLIF(payment_terms, '') IS NULL
+                                   OR payment_terms_days IS NULL OR NULLIF(account_number, '') IS NULL OR NULLIF(tax_id, '') IS NULL)`, [v.supplier_id].concat(f));
+            out.updated += rowCount;
+          }
+        }
+      });
+      res.json(Object.assign({ ok: true }, out));
+    } catch (e) { fail(res, e); }
+  });
+
+  // ---- Unpaid bills
+  function parseUnpaid(text, order) {
+    const rows = parseCsv(text);
+    const hr = headingRow(rows, [['date', 'trans date', 'transaction date', 'bill date'], ['open balance', 'open bal', 'open', 'balance due', 'amount', 'balance']]);
+    if (!hr) throw httpError(400, 'This does not look like an Unpaid Bills report: it needs Date and Open Balance headings. In QuickBooks run Unpaid Bills Detail and save it as CSV.');
+    const h = hr.h, c = {
+      date: colOf(h, 'date', 'bill date', 'transaction date', 'trans date'), type: colOf(h, 'type', 'transaction type'), num: colOf(h, 'num', 'no.', 'ref no.', 'bill no.', 'number', 'ref no'),
+      due: colOf(h, 'due date', 'due'), open: colOf(h, 'open balance', 'open bal', 'open', 'balance due', 'balance'), amount: colOf(h, 'amount', 'original amount', 'total'), vendor: colOf(h, 'vendor', 'name', 'supplier', 'payee'),
+    };
+    const out = []; let group = null;
+    for (const r of rows.slice(hr.i + 1)) {
+      const g = groupLabel(r, c.date);
+      if (g) { group = g; continue; }
+      const date = parseDate(r[c.date], order);
+      if (!date) continue;
+      const type = c.type >= 0 ? String(r[c.type] || '').trim() : 'Bill';
+      if (/pmt|payment|check|cheque|deposit|journal/i.test(type)) continue;
+      let amt = c.open >= 0 ? num(r[c.open]) : null;
+      if (amt == null && c.amount >= 0) amt = num(r[c.amount]);
+      if (!amt) continue;
+      const vendor = (c.vendor >= 0 ? String(r[c.vendor] || '').trim() : '') || group || '';
+      out.push({ vendor: vendor.slice(0, 120), type: type || 'Bill', kind: /credit/i.test(type) || amt < 0 ? 'credit' : 'bill', number: c.num >= 0 ? String(r[c.num] || '').trim().slice(0, 60) : '',
+        date, due: c.due >= 0 ? parseDate(r[c.due], order) : null, amount: r2(Math.abs(amt)) });
+    }
+    return out;
+  }
+  async function billPreview(text, order) {
+    const list = parseUnpaid(text, order), match = await supplierMatcher(), seen = new Set();
+    const docsBy = {};
+    const docsOf = async (sid) => (docsBy[sid] = docsBy[sid] || (await apDocs(sid)));
+    const out = [];
+    for (let i = 0; i < list.length; i++) {
+      const b = Object.assign({ i }, list[i]), m = b.vendor ? match(b.vendor) : null;
+      if (m) { b.supplier_id = m.s.id; b.supplier = m.s.name; b.how = m.how; }
+      const key = [qnorm(b.vendor), b.kind, b.number.toLowerCase() || b.date + '|' + b.amount].join('|');
+      if (!b.vendor) { b.status = 'error'; b.reason = 'No supplier name'; }
+      else if (seen.has(key)) { b.status = 'duplicate'; b.reason = 'Twice in the file'; }
+      else if (m) {
+        const { rows: dup } = await query(
+          `SELECT COALESCE(number, '#' || id) AS number FROM ap_bills WHERE supplier_id = $1 AND kind = $2 AND voided_at IS NULL
+              AND (($3 <> '' AND lower(number) = lower($3)) OR ($3 = '' AND bill_date = $4 AND total = $5)) LIMIT 1`, [m.s.id, b.kind, b.number, b.date, b.amount]);
+        if (dup.length) { b.status = 'duplicate'; b.reason = 'Already here as ' + (b.kind === 'credit' ? 'credit ' : 'bill ') + dup[0].number; }
+        else {
+          // Owed here already from the purchasing screens (a goods receipt or PO invoice)?
+          const same = (await docsOf(m.s.id)).find((d) => (d.kind === 'receipt' || d.kind === 'po') && d.open > 0.005 && ((b.number && String(d.number || '').toLowerCase() === b.number.toLowerCase()) || Math.abs(d.open - b.amount) < 0.005));
+          if (same) { b.status = 'in_system'; b.reason = 'Already owed here from purchasing: ' + (same.kind === 'receipt' ? 'goods receipt ' : 'PO ') + same.number + ' (' + money(same.open) + ')'; }
+          else b.status = 'ok';
+        }
+      } else b.status = 'ok';
+      seen.add(key);
+      out.push(b);
+    }
+    return out;
+  }
+  app.post('/api/ap/import/bills', ...AP, async (req, res) => {
+    try {
+      const b = req.body || {}, order = b.date_order === 'dmy' ? 'dmy' : 'mdy';
+      const rows = await billPreview(String(b.file || '').slice(0, 5000000), order);
+      if (!rows.length) throw httpError(400, 'No unpaid bills found in the file');
+      const { rows: oe } = await query(`SELECT id, code, name FROM gl_accounts WHERE system_key = 'opening_equity'`);
+      if (b.preview) return res.json({ rows, ledger_start: await ledgerStart(), opening_equity: oe[0] || null });
+      const acct = await lineAccount(b.account_id), cls = await classId(b.class_id);
+      const take = new Set((Array.isArray(b.include) ? b.include : []).map(Number));
+      const chosen = rows.filter((x) => take.has(x.i));
+      if (!chosen.length) throw httpError(400, 'Tick the bills to import');
+      if (chosen.some((x) => x.status === 'duplicate' || x.status === 'error')) throw httpError(400, 'A ticked bill is a duplicate or has no supplier');
+      if (!b.create_suppliers && chosen.some((x) => !x.supplier_id)) throw httpError(400, 'Some suppliers are not here yet: tick "Add suppliers that are not here yet" or untick those bills');
+      const out = await tx(async (c) => {
+        const made = {}, res2 = { bills: 0, credits: 0, suppliers: 0, total: 0 };
+        for (const x of chosen) {
+          let sid = x.supplier_id;
+          if (!sid) {
+            const k = x.vendor.toLowerCase();
+            if (!made[k]) { made[k] = (await c.query(`INSERT INTO suppliers (name, notes) VALUES ($1, 'From QuickBooks') RETURNING id`, [x.vendor])).rows[0].id; res2.suppliers++; }
+            sid = made[k];
+          }
+          let due = x.kind === 'bill' ? x.due : null;
+          if (x.kind === 'bill' && !due) {
+            const { rows: t } = await c.query(`SELECT payment_terms_days FROM suppliers WHERE id = $1`, [sid]);
+            due = new Date(Date.parse(x.date) + ((t[0] && t[0].payment_terms_days) || 0) * 86400000).toISOString().slice(0, 10);
+          }
+          const { rows: ins } = await c.query(
+            `INSERT INTO ap_bills (kind, supplier_id, number, bill_date, due_date, memo, gct_amount, total, created_by) VALUES ($1,$2,$3,$4,$5,$6,0,$7,$8) RETURNING id`,
+            [x.kind, sid, x.number || null, x.date, due, 'Imported from QuickBooks (' + x.type + ')', x.amount, req.session.userId]);
+          await c.query(`INSERT INTO ap_bill_lines (bill_id, account_id, description, amount, class_id) VALUES ($1,$2,$3,$4,$5)`,
+            [ins[0].id, acct.id, ('QuickBooks ' + x.type + ' ' + (x.number || '')).trim(), x.amount, cls]);
+          if (x.kind === 'credit') res2.credits++; else res2.bills++;
+          res2.total = r2(res2.total + (x.kind === 'credit' ? -x.amount : x.amount));
+        }
+        return res2;
+      });
+      post();
+      res.json(Object.assign({ ok: true }, out));
+    } catch (e) { fail(res, e); }
+  });
+
+  // ---- Bank register
+  function parseRegister(text, order) {
+    const rows = parseCsv(text);
+    const hr = headingRow(rows, [['date', 'trans date', 'transaction date']]);
+    if (!hr) throw httpError(400, 'This does not look like a QuickBooks register or transaction report: no Date heading.');
+    const h = hr.h, c = {
+      date: colOf(h, 'date', 'transaction date', 'trans date'), type: colOf(h, 'type', 'transaction type'), num: colOf(h, 'num', 'number', 'no.', 'ref no.', 'ref no', 'check no.', 'ref'),
+      name: colOf(h, 'name', 'payee', 'vendor', 'customer'), memo: colOf(h, 'memo', 'memo/description', 'description'), split: colOf(h, 'split', 'split account'),
+      amount: colOf(h, 'amount'), debit: colOf(h, 'debit'), credit: colOf(h, 'credit'), pay: colOf(h, 'payment', 'payments', 'withdrawal'), dep: colOf(h, 'deposit', 'deposits'),
+    };
+    // A register export (Payment / Deposit columns) names the other side in its Account column.
+    if (c.split < 0 && c.pay >= 0) c.split = colOf(h, 'account');
+    if (c.amount < 0 && (c.debit < 0 || c.credit < 0) && (c.pay < 0 || c.dep < 0)) throw httpError(400, 'The report needs an Amount column, or Debit and Credit, or Payment and Deposit.');
+    const out = []; let group = null; const groups = [];
+    for (const r of rows.slice(hr.i + 1)) {
+      const g = groupLabel(r, c.date);
+      if (g) { group = g; if (!groups.includes(g)) groups.push(g); continue; }
+      const date = parseDate(r[c.date], order);
+      if (!date) continue;
+      let amt;
+      if (c.amount >= 0) amt = num(r[c.amount]);
+      else if (c.debit >= 0 && c.credit >= 0) { const d = num(r[c.debit]), cr = num(r[c.credit]); amt = d || cr ? Math.abs(d || 0) - Math.abs(cr || 0) : null; }   // for a bank account a debit is money in
+      else { const p = num(r[c.pay]), d = num(r[c.dep]); amt = p || d ? Math.abs(d || 0) - Math.abs(p || 0) : null; }
+      if (!amt) continue;
+      const get = (k) => (c[k] >= 0 ? String(r[c[k]] || '').trim() : '');
+      out.push({ group, date, type: get('type'), num: get('num').slice(0, 40), name: get('name').slice(0, 80), memo: get('memo').slice(0, 200), split: get('split').slice(0, 160), amount: r2(amt) });
+    }
+    return { lines: out, groups };
+  }
+  app.post('/api/bank/import-qb/:accountId', ...BK, async (req, res) => {
+    try {
+      const a = await bankAccount(req.params.accountId);
+      a.qb_name = (await query(`SELECT qb_name FROM gl_accounts WHERE id = $1`, [a.id])).rows[0].qb_name;
+      const b = req.body || {}, order = b.date_order === 'dmy' ? 'dmy' : 'mdy';
+      let { lines, groups } = parseRegister(String(b.file || '').slice(0, 5000000), order);
+      // A report for several accounts: keep this account's section only.
+      if (groups.length) {
+        const mine = groups.filter((g) => { const x = g.toLowerCase(); return [a.name, a.qb_name].filter(Boolean).some((nm) => { const y = nm.toLowerCase(); return x === y || x.split(':').pop().trim() === y.split(':').pop().trim(); }); });
+        if (mine.length) lines = lines.filter((l) => mine.includes(l.group));
+        else if (groups.length > 1) throw httpError(400, 'The report has several accounts (' + groups.slice(0, 6).join(', ') + ') and none is ' + a.name + '. Export only this account, or give it its QuickBooks name in Accounting.');
+      }
+      const start = await ledgerStart(), from = isDate(b.from) ? b.from : start;
+      const before = from ? lines.filter((l) => l.date < from).length : 0;
+      if (from) lines = lines.filter((l) => l.date >= from);
+      // QuickBooks's other-side account -> an account here, by QuickBooks name or name.
+      const { rows: accts } = await query(`SELECT id, code, name, qb_name, qb_type, system_key FROM gl_accounts WHERE is_active`);
+      const byName = new Map();
+      for (const x of accts) for (const k of [x.qb_name, x.name, x.qb_name && x.qb_name.split(':').pop()]) if (k && !byName.has(k.trim().toLowerCase())) byName.set(k.trim().toLowerCase(), x);
+      const seen = {};
+      for (const l of lines) {
+        const s = l.split.toLowerCase(), x = byName.get(s) || byName.get(s.split(':').pop().trim());
+        if (/^-?split-?$/i.test(l.split)) l.note = 'Split across several accounts in QuickBooks';
+        else if (x && (x.qb_type === 'AP' || x.system_key === 'ap')) l.note = 'A bill payment in QuickBooks: record it with Pay Bills, then match it here';
+        else if (x && (x.qb_type === 'AR' || x.system_key === 'ar')) l.note = 'A customer payment in QuickBooks: record it with Receive Payment, then match it here';
+        else if (x && x.id !== a.id) { l.account_id = x.id; l.account = x.code + ' ' + x.name; }
+        else if (l.split) l.note = 'QuickBooks account "' + l.split + '" is not in the chart here';
+        l.description = [l.type, l.name, l.memo].filter(Boolean).join(' · ').slice(0, 200) || 'QuickBooks';
+        const base = 'qb|' + l.date + '|' + l.amount + '|' + l.num.toLowerCase() + '|' + l.name.toLowerCase() + '|' + l.memo.toLowerCase();
+        seen[base] = (seen[base] || 0) + 1;
+        l.hash = crypto.createHash('sha256').update(base + '|' + seen[base]).digest('hex').slice(0, 32);
+      }
+      const { rows: have } = lines.length ? await query(`SELECT line_hash FROM bank_feed_lines WHERE account_id = $1 AND line_hash = ANY($2)`, [a.id, lines.map((l) => l.hash)]) : { rows: [] };
+      const done = new Set(have.map((r) => r.line_hash));
+      for (const l of lines) l.already = done.has(l.hash);
+      const fresh = lines.filter((l) => !l.already);
+      const summary = { found: lines.length + before, from, ledger_start: start, before, already: lines.length - fresh.length, to_add: fresh.length,
+        with_account: fresh.filter((l) => l.account_id).length, money_in: r2(fresh.filter((l) => l.amount > 0).reduce((t, l) => t + l.amount, 0)), money_out: r2(fresh.filter((l) => l.amount < 0).reduce((t, l) => t - l.amount, 0)),
+        unknown: [...new Set(fresh.filter((l) => l.note && /not in the chart/.test(l.note)).map((l) => l.split))].slice(0, 20) };
+      if (b.preview) return res.json({ summary, lines: lines.slice(0, 300).map((l) => ({ date: l.date, type: l.type, num: l.num, name: l.name, memo: l.memo, split: l.split, amount: l.amount, account: l.account || null, note: l.note || null, already: l.already })) });
+      const ref = 'QuickBooks ' + new Date().toISOString().slice(0, 16);
+      let added = 0;
+      for (const l of fresh) {
+        const { rowCount } = await query(
+          `INSERT INTO bank_feed_lines (account_id, import_ref, txn_date, description, amount, line_hash, created_by, source, payee, reference, suggest_account_id, note)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'quickbooks',$8,$9,$10,$11) ON CONFLICT (account_id, line_hash) DO NOTHING`,
+          [a.id, ref, l.date, l.description, l.amount, l.hash, req.session.userId, l.name || null, l.num || null, l.account_id || null, l.note || null]);
+        added += rowCount;
+      }
+      res.json({ ok: true, added, already: summary.already, before });
+    } catch (e) { fail(res, e); }
   });
 
   // For billing.js: the same open items, reminder email and supplier bills these screens use.

@@ -13,7 +13,7 @@
 <body>
 <header><h1>Suppliers &amp; payables</h1><nav><a href="/receivables.html">Receivables</a><a href="/banking.html">Banking</a><a href="/accounting.html">Ledger</a><a href="/admin.html">Admin</a></nav></header>
 <main>
-  <div class="tabs" id="tabs"><button data-t="sup" class="on">Supplier centre</button><button data-t="pay">Pay bills</button><button data-t="bill">Enter a bill</button><button data-t="credit">Enter a supplier credit</button><button data-t="aging">A/P aging</button><button data-t="loans">Loans</button><button data-t="rec">Recurring bills</button></div>
+  <div class="tabs" id="tabs"><button data-t="sup" class="on">Supplier centre</button><button data-t="pay">Pay bills</button><button data-t="bill">Enter a bill</button><button data-t="credit">Enter a supplier credit</button><button data-t="aging">A/P aging</button><button data-t="loans">Loans</button><button data-t="rec">Recurring bills</button><button data-t="qb">Import from QuickBooks</button></div>
   <div id="out"><div class="empty">Loading…</div></div>
 </main>
 <div id="modal"></div>
@@ -251,11 +251,83 @@
     window.BillingUI.upcoming($('#up'), ['ap', 'loan']);
     return window.BillingUI.planList($('#plans'), { side: 'ap' });
   }
+  // ------------------------------------------------------- QuickBooks import --
+  // Supplier list (IIF or CSV) and the Unpaid Bills report (CSV): previewed, then the ticked rows imported.
+  function qbImport() {
+    $('#out').innerHTML = '<div class="card"><h2>Import from QuickBooks</h2><p class="sub">Bring suppliers, and what is still owed to them, over from QuickBooks. You see everything before it is added, and importing the same file again adds nothing twice.</p>' +
+      '<div class="controls"><div><label>What is in the file</label><select id="qk"><option value="bills">Unpaid bills</option><option value="suppliers">Supplier (vendor) list</option></select></div>' +
+      '<div><label>File from QuickBooks</label><input type="file" id="qf" accept=".csv,.iif,.txt,text/csv"></div>' +
+      '<div><label>Dates are</label><select id="qo"><option value="mdy">month/day/year (QuickBooks)</option><option value="dmy">day/month/year</option></select></div><button class="primary" id="qp">Preview</button></div>' +
+      '<div id="qhelp"></div></div><div id="qout"></div>';
+    var help = function () {
+      $('#qhelp').innerHTML = $('#qk').value === 'bills'
+        ? '<p class="sub"><b>QuickBooks Desktop:</b> Reports › Vendors &amp; Payables › Unpaid Bills Detail, dated today, then Excel › Create New Worksheet › Create a comma separated values (.csv) file. <b>QuickBooks Online:</b> Reports › Unpaid Bills › Export to CSV (or to Excel, then save as CSV).</p>'
+        : '<p class="sub"><b>QuickBooks Desktop:</b> File › Utilities › Export › Lists to IIF Files › Vendor List; or Reports › List › Vendor Contact List › Excel › CSV. <b>QuickBooks Online:</b> Expenses › Vendors › Export to Excel, then save as CSV.</p>';
+    };
+    $('#qk').onchange = function () { help(); $('#qout').innerHTML = ''; };
+    help();
+    var file = null;
+    $('#qp').onclick = function () {
+      var f = $('#qf').files[0]; if (!f) return toast('Choose the file');
+      var kind = $('#qk').value;
+      f.text().then(function (t) { file = t; return api('/api/ap/import/' + kind, 'POST', { file: t, date_order: $('#qo').value, preview: true }); })
+        .then(function (d) { (kind === 'bills' ? qbBills : qbSuppliers)(d, file); }).catch(function (e) { toast(e.message); });
+    };
+    return Promise.resolve();
+  }
+  var QST = { ok: ['ok', 'To import'], in_system: ['warn', 'Check'], duplicate: ['', 'Already here'], error: ['bad', 'Problem'] };
+  function qbBills(d, file) {
+    var oe = d.opening_equity;
+    $('#qout').innerHTML = '<div class="card"><h2>' + d.rows.length + ' unpaid bill' + (d.rows.length === 1 ? '' : 's') + ' and credit' + (d.rows.length === 1 ? '' : 's') + ' in the file</h2>' +
+      (d.ledger_start ? '' : '<div class="note bad">The ledger has not been started. Bills imported now show in Payables, but the ledger\'s opening balances will not include them: start the ledger first (Accounting), then import.</div>') +
+      '<p class="sub">Each becomes a bill here for what is still owed (its open balance). QuickBooks has already counted these costs, so book them against Opening Balance Equity: only what you owe is added to the books. Choose an expense account only for bills that never went into QuickBooks\'s profit and loss. "Check" means the supplier is already owed that amount or number here from purchasing; tick it only if it is a different bill.</p>' +
+      '<div class="controls"><div><label>Book against</label><select id="qa">' + B.accountOptions('line', oe && oe.id) + '</select></div><div><label>Class</label><select id="qc">' + B.classOptions() + '</select></div>' +
+      '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="qn" checked> Add suppliers that are not here yet</label></div>' +
+      '<div class="scroll"><table><thead><tr><th><input type="checkbox" id="qall"></th><th>Supplier in QuickBooks</th><th>Supplier here</th><th>Type</th><th>No.</th><th>Date</th><th>Due</th><th class="n">Owed</th><th>Status</th></tr></thead><tbody>' +
+      d.rows.map(function (r) {
+        var can = r.status === 'ok' || r.status === 'in_system';
+        return '<tr><td>' + (can ? '<input type="checkbox" data-q="' + r.i + '"' + (r.status === 'ok' ? ' checked' : '') + '>' : '') + '</td><td>' + esc(r.vendor) + '</td>' +
+          '<td>' + (r.supplier_id ? esc(r.supplier) + (r.how === 'similar' ? ' <span class="pill warn">similar name</span>' : '') : '<span class="pill">new</span>') + '</td>' +
+          '<td>' + (r.kind === 'credit' ? 'Credit' : 'Bill') + '</td><td>' + esc(r.number) + '</td><td>' + esc(r.date) + '</td><td>' + esc(r.due || '') + '</td><td class="n">' + J(r.kind === 'credit' ? -r.amount : r.amount) + '</td>' +
+          '<td><span class="pill ' + QST[r.status][0] + '">' + QST[r.status][1] + '</span>' + (r.reason ? '<br><small>' + esc(r.reason) + '</small>' : '') + '</td></tr>';
+      }).join('') + '</tbody></table></div><div class="controls" style="margin-top:10px"><b id="qt"></b><span style="margin-left:auto"></span><button class="primary" id="qgo">Import</button></div></div>';
+    var tot = function () {
+      var n = 0, t = 0;
+      all('[data-q]:checked').forEach(function (x) { var r = d.rows[+x.getAttribute('data-q')]; n++; t += r.kind === 'credit' ? -r.amount : r.amount; });
+      $('#qt').textContent = n + ' ticked, ' + J(t) + ' owed'; $('#qgo').textContent = 'Import ' + n; $('#qgo').disabled = !n;
+    };
+    all('[data-q]').forEach(function (x) { x.onchange = tot; });
+    $('#qall').onchange = function () { var on = this.checked; all('[data-q]').forEach(function (x) { x.checked = on; }); tot(); };
+    tot();
+    $('#qgo').onclick = function () {
+      if (!$('#qa').value) return toast('Choose the account to book them against');
+      var b = this; b.disabled = true;
+      api('/api/ap/import/bills', 'POST', { file: file, date_order: $('#qo').value, include: all('[data-q]:checked').map(function (x) { return +x.getAttribute('data-q'); }), account_id: $('#qa').value, class_id: $('#qc').value, create_suppliers: $('#qn').checked })
+        .then(function (r) { toast('Imported ' + r.bills + ' bill(s)' + (r.credits ? ' and ' + r.credits + ' credit(s)' : '') + (r.suppliers ? ', ' + r.suppliers + ' new supplier(s)' : '') + ': ' + J(r.total)); return loadSuppliers(); })
+        .then(function () { tab = 'sup'; show(); }).catch(function (e) { b.disabled = false; toast(e.message); });
+    };
+  }
+  function qbSuppliers(d, file) {
+    var ST = { new: ['ok', 'New'], exists: ['', 'Already here'], duplicate: ['bad', 'Twice in the file'] };
+    $('#qout').innerHTML = '<div class="card"><h2>' + d.rows.length + ' supplier' + (d.rows.length === 1 ? '' : 's') + ' in the file</h2><p class="sub">New suppliers are added. For one already here, only its blank details (phone, email, address, contact, terms, account number, tax ID) are filled in; nothing already entered is changed.</p>' +
+      '<div class="scroll"><table><thead><tr><th><input type="checkbox" id="qall" checked></th><th>Name</th><th>Here</th><th>Phone</th><th>Email</th><th>Terms</th><th>Status</th></tr></thead><tbody>' +
+      d.rows.map(function (r) {
+        return '<tr><td>' + (r.status !== 'duplicate' ? '<input type="checkbox" data-q="' + r.i + '" checked>' : '') + '</td><td>' + esc(r.name) + '</td><td>' + (r.supplier ? esc(r.supplier) + (r.how === 'similar' ? ' <span class="pill warn">similar name</span>' : '') : '') + '</td>' +
+          '<td>' + esc(r.phone) + '</td><td>' + esc(r.email) + '</td><td>' + esc(r.terms) + (r.terms_days != null ? ' <small>(' + r.terms_days + ' days)</small>' : '') + '</td><td><span class="pill ' + ST[r.status][0] + '">' + ST[r.status][1] + '</span></td></tr>';
+      }).join('') + '</tbody></table></div><div class="controls" style="margin-top:10px"><span style="margin-left:auto"></span><button class="primary" id="qgo">Import ticked suppliers</button></div></div>';
+    $('#qall').onchange = function () { var on = this.checked; all('[data-q]').forEach(function (x) { x.checked = on; }); };
+    $('#qgo').onclick = function () {
+      var b = this; b.disabled = true;
+      api('/api/ap/import/suppliers', 'POST', { file: file, include: all('[data-q]:checked').map(function (x) { return +x.getAttribute('data-q'); }) })
+        .then(function (r) { toast('Added ' + r.added + ' supplier(s); filled in details for ' + r.updated); $('#qout').innerHTML = ''; return loadSuppliers(); })
+        .catch(function (e) { b.disabled = false; toast(e.message); });
+    };
+  }
   function loadSuppliers() { return api('/api/ap/supplier-list').then(function (d) { suppliers = d.suppliers; $('#suppliers').innerHTML = suppliers.map(function (s) { return '<option value="' + esc(s.name) + '">'; }).join(''); }); }
   function mark() { all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); }); }
   function show() {
     mark();
-    var f = { sup: sup, pay: function () { return pay(); }, bill: function () { billForm('bill'); return Promise.resolve(); }, credit: function () { billForm('credit'); return Promise.resolve(); }, aging: aging, loans: loans, rec: rec }[tab];
+    var f = { sup: sup, pay: function () { return pay(); }, bill: function () { billForm('bill'); return Promise.resolve(); }, credit: function () { billForm('credit'); return Promise.resolve(); }, aging: aging, loans: loans, rec: rec, qb: qbImport }[tab];
     f().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
   }
   all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });

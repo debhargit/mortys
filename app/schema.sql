@@ -6161,3 +6161,12 @@ CREATE TABLE IF NOT EXISTS financial_health_reports (
   created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+-- QuickBooks bank register import (books.js): register lines join the
+-- statement review list with where they came from, QuickBooks's payee and
+-- number, the account its Split column names here, and a note when the line
+-- needs Pay Bills or Receive Payment instead.
+ALTER TABLE bank_feed_lines ADD COLUMN IF NOT EXISTS source             TEXT NOT NULL DEFAULT 'bank';   -- bank | quickbooks
+ALTER TABLE bank_feed_lines ADD COLUMN IF NOT EXISTS payee              TEXT;
+ALTER TABLE bank_feed_lines ADD COLUMN IF NOT EXISTS reference          TEXT;
+ALTER TABLE bank_feed_lines ADD COLUMN IF NOT EXISTS suggest_account_id INTEGER REFERENCES gl_accounts(id);
+ALTER TABLE bank_feed_lines ADD COLUMN IF NOT EXISTS note               TEXT;

@@ -174,6 +174,10 @@
     return api('/api/bank/feed/' + acct + '?status=' + st).then(function (d) {
       $('#out').innerHTML = '<div class="card"><h2>Bank statement · import and match</h2><div class="controls"><div><label>Account</label>' + accountSelect('fa', true) + '</div><div><label>CSV file from the bank</label><input type="file" id="ff" accept=".csv,text/csv"></div><div><label>Dates are</label><select id="fo"><option value="dmy">day/month/year</option><option value="mdy">month/day/year</option></select></div><button id="fi">Import</button></div>' +
         '<p class="sub">The file needs a heading row with Date, Description, and Amount (or Debit and Credit). Lines already imported are skipped. Then each line is matched to what is already in the books, or added as a new transaction.</p></div>' +
+        '<div class="card"><h2>From QuickBooks · register</h2><p class="sub">Bring over what was entered in QuickBooks for this account. <b>QuickBooks Desktop:</b> run a QuickReport (or Transaction Detail by Account) for the account, then Excel › Create New Worksheet › save as CSV. <b>QuickBooks Online:</b> run Transaction Detail by Account for it and Export to CSV. ' +
+        'Lines from the date below (the ledger start, unless changed: QuickBooks lines before it are already in the opening balances) join the list below with QuickBooks\'s account and payee filled in, to match or add like a statement line.</p>' +
+        '<div class="controls"><div><label>CSV file from QuickBooks</label><input type="file" id="qf" accept=".csv,text/csv"></div><div><label>Dates are</label><select id="qo"><option value="mdy">month/day/year (QuickBooks)</option><option value="dmy">day/month/year</option></select></div>' +
+        '<div><label>From</label><input type="date" id="qd"></div><button id="qp">Preview</button></div><div id="qout"></div></div>' +
         '<div class="card"><div class="tabs"><button data-s="new"' + (st === 'new' ? ' class="on"' : '') + '>To review</button><button data-s="matched"' + (st === 'matched' ? ' class="on"' : '') + '>Matched</button><button data-s="ignored"' + (st === 'ignored' ? ' class="on"' : '') + '>Ignored</button></div>' +
         '<div class="scroll"><table><thead><tr><th>Date</th><th>Description</th><th class="n">Amount</th><th>' + (st === 'new' ? 'Match or add' : '') + '</th></tr></thead><tbody>' +
         (d.lines.length ? d.lines.map(function (f, i) {
@@ -182,9 +186,9 @@
             act = (f.matches.length ? f.matches.map(function (m) { return '<button class="sm primary" data-m="' + f.id + ':' + m.id + '">Match ' + esc(m.day) + ' ' + esc((m.what || m.ref || m.number || '').slice(0, 30)) + '</button>'; }).join(' ') + '<br>' : '') +
               (f.rule && f.rule.split ? '<div class="note">Rule splits this: ' + f.rule.split.map(function (x) { var a = B.accounts().find(function (y) { return y.id === x.account_id; }); return J(x.amount) + ' to ' + esc(a ? a.code + ' ' + a.name : x.account_id); }).join(' · ') + ' <button class="sm primary" data-sp="' + i + '">Add as split</button><br><small>Or use one account instead:</small></div>' : '') +
               (f.rule && f.rule.split_error ? '<div class="note bad">Rule cannot split this line: ' + esc(f.rule.split_error) + '. Use one account:</div>' : '') +
-              '<select data-acc="' + i + '" style="max-width:240px">' + B.accountOptions('line', f.rule && f.rule.account_id) + '</select> <select data-cls="' + i + '" style="max-width:130px">' + B.classOptions() + '</select> <input data-py="' + i + '" placeholder="Payee" value="' + esc(f.rule && f.rule.payee || '') + '" style="width:120px"> <label style="display:inline;font-size:12px"><input type="checkbox" data-rl="' + i + '"> remember</label> <button class="sm" data-add="' + i + '">Add</button> <button class="sm" data-ig="' + f.id + '">Ignore</button>';
+              '<select data-acc="' + i + '" style="max-width:240px">' + B.accountOptions('line', (f.rule && f.rule.account_id) || f.suggest_account_id) + '</select> <select data-cls="' + i + '" style="max-width:130px">' + B.classOptions() + '</select> <input data-py="' + i + '" placeholder="Payee" value="' + esc((f.rule && f.rule.payee) || f.payee || '') + '" style="width:120px"> <label style="display:inline;font-size:12px"><input type="checkbox" data-rl="' + i + '"> remember</label> <button class="sm" data-add="' + i + '">Add</button> <button class="sm" data-ig="' + f.id + '">Ignore</button>';
           } else if (st === 'ignored') act = '<button class="sm" data-un="' + f.id + '">Back to review</button>';
-          return '<tr><td>' + esc(f.day) + '</td><td>' + esc(f.description) + (f.rule ? ' <span class="pill">rule</span>' : '') + '</td><td class="n ' + (f.amount < 0 ? 'bad' : '') + '">' + J(f.amount) + '</td><td>' + act + '</td></tr>';
+          return '<tr><td>' + esc(f.day) + '</td><td>' + esc(f.description) + (f.source === 'quickbooks' ? ' <span class="pill">QuickBooks</span>' : '') + (f.reference ? ' <small>No. ' + esc(f.reference) + '</small>' : '') + (f.rule ? ' <span class="pill">rule</span>' : '') + (f.note && st === 'new' ? '<div class="note">' + esc(f.note) + '</div>' : '') + '</td><td class="n ' + (f.amount < 0 ? 'bad' : '') + '">' + J(f.amount) + '</td><td>' + act + '</td></tr>';
         }).join('') : '<tr><td colspan="4" class="empty">Nothing here.</td></tr>') + '</tbody></table></div></div>';
       $('#fa').onchange = function () { pick(+this.value); feed(); };
       all('[data-s]').forEach(function (b) { b.onclick = function () { feed.st = b.getAttribute('data-s'); feed(); }; });
@@ -192,6 +196,23 @@
         var f = $('#ff').files[0]; if (!f) return toast('Choose the CSV file');
         f.text().then(function (txt) { return api('/api/bank/import/' + acct, 'POST', { csv: txt, date_order: $('#fo').value }); })
           .then(function (r) { toast(r.added + ' new line(s)' + (r.duplicates ? ', ' + r.duplicates + ' already imported' : '') + (r.skipped ? ', ' + r.skipped + ' skipped' : '')); feed.st = 'new'; feed(); }).catch(function (e) { toast(e.message); });
+      };
+      var qfile = null, qbody = function (preview) { return { file: qfile, date_order: $('#qo').value, from: $('#qd').value || null, preview: preview }; };
+      $('#qp').onclick = function () {
+        var f = $('#qf').files[0]; if (!f) return toast('Choose the CSV file from QuickBooks');
+        f.text().then(function (t) { qfile = t; return api('/api/bank/import-qb/' + acct, 'POST', qbody(true)); }).then(function (r) {
+          var s = r.summary;
+          if (s.from) $('#qd').value = s.from;
+          $('#qout').innerHTML = '<div class="note">' + s.found + ' line(s) in the file' + (s.before ? '; ' + s.before + ' before ' + esc(s.from) + ' left out' : '') + (s.already ? '; ' + s.already + ' already brought over' : '') + '. <b>' + s.to_add + ' to add</b>: ' + J(s.money_in) + ' in, ' + J(s.money_out) + ' out; ' + s.with_account + ' with an account found here.' +
+              (s.unknown.length ? '<br>QuickBooks accounts not in the chart here (choose an account for those lines when you add them): ' + s.unknown.map(esc).join(', ') : '') + '</div>' +
+            '<div class="scroll" style="max-height:340px"><table><thead><tr><th>Date</th><th>Type</th><th>No.</th><th>Name / memo</th><th class="n">Amount</th><th>Account here</th></tr></thead><tbody>' +
+            r.lines.map(function (l) { return '<tr style="' + (l.already ? 'opacity:.5' : '') + '"><td>' + esc(l.date) + '</td><td>' + esc(l.type) + '</td><td>' + esc(l.num) + '</td><td>' + esc([l.name, l.memo].filter(Boolean).join(' · ')) + '</td><td class="n ' + (l.amount < 0 ? 'bad' : '') + '">' + J(l.amount) + '</td><td>' + (l.already ? 'already brought over' : l.account ? esc(l.account) : '<small>' + esc(l.note || '') + '</small>') + '</td></tr>'; }).join('') +
+            '</tbody></table></div><div class="controls" style="margin-top:10px"><button class="primary" id="qgo"' + (s.to_add ? '' : ' disabled') + '>Add ' + s.to_add + ' line(s) to review</button></div>';
+          $('#qgo').onclick = function () {
+            this.disabled = true;
+            api('/api/bank/import-qb/' + acct, 'POST', qbody(false)).then(function (x) { toast(x.added + ' QuickBooks line(s) added to review'); feed.st = 'new'; feed(); }).catch(function (e) { toast(e.message); });
+          };
+        }).catch(function (e) { toast(e.message); });
       };
       all('[data-m]').forEach(function (b) { b.onclick = function () { var k = b.getAttribute('data-m').split(':'); api('/api/bank/feed/' + k[0] + '/match', 'POST', { gl_line_id: +k[1] }).then(feed).catch(function (e) { toast(e.message); }); }; });
       all('[data-ig]').forEach(function (b) { b.onclick = function () { api('/api/bank/feed/' + b.getAttribute('data-ig') + '/ignore', 'POST').then(feed).catch(function (e) { toast(e.message); }); }; });

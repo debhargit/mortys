@@ -418,8 +418,8 @@ Customer documents: the "Invoices & documents" panel on the customer's page keep
   },
   {
     key: 'payables-banking', title: 'Payables and banking', sort: 115, roles: ['owner', 'manager'],
-    summary: 'Supplier bills and credits, paying bills, cheques, deposits, reconciling and statement import.',
-    body: `Payables: All modules > Payables. Tabs: Supplier centre, Pay bills, Enter a bill, Enter a supplier credit, A/P aging, Loans and Recurring bills. The tiles show unpaid bills, overdue and supplier credits.
+    summary: 'Supplier bills and credits, paying bills, cheques, deposits, reconciling, statement import and bringing payables and banking over from QuickBooks.',
+    body: `Payables: All modules > Payables. Tabs: Supplier centre, Pay bills, Enter a bill, Enter a supplier credit, A/P aging, Loans, Recurring bills and Import from QuickBooks. The tiles show unpaid bills, overdue and supplier credits.
 
 Entering a bill: bills from Receive Stock arrive by themselves. For other bills (light, phone, rent, repairs) use Enter a bill: supplier, bill number and dates, then a line for each cost with its category (account) and class. The supplier's usual category and class fill the first line. Attach the supplier's invoice; it is filed in the Document centre.
 
@@ -439,12 +439,22 @@ Make deposits: cash and cheques taken at the till sit in Undeposited Funds (the 
 
 Reconcile: once a month, enter the statement's ending balance and date, and tick each line that is on the bank statement ("Tick everything matched to the imported statement" does most of it). Add bank charges and interest from the statement. The difference must be zero before you finish; "Adjust the difference" is only for when you cannot find it.
 
-Bank statement: import the bank's statement file. Lines are matched to what is already in the books; the rest you add with a category. Statement rules send lines with given text to one account or split them (fixed J$, a % and the rest), for example a loan debit split between interest and principal.`,
+Bank statement: import the bank's statement file. Lines are matched to what is already in the books; the rest you add with a category. Statement rules send lines with given text to one account or split them (fixed J$, a % and the rest), for example a loan debit split between interest and principal.
+
+Importing from QuickBooks: Payables > Import from QuickBooks brings over the supplier list and the unpaid bills; Banking > Bank statement > From QuickBooks brings over an account's register. The screen says how to export each file from QuickBooks Desktop or Online. Every file is previewed first: tick what to bring over, then import. Importing the same file again adds nothing twice.
+
+Supplier list (IIF or CSV): new suppliers are added; for suppliers already here only blank details (phone, email, address, contact, terms, account number, tax ID) are filled in. Terms such as "Net 30" become 30 days.
+
+Unpaid bills (the Unpaid Bills Detail report as CSV): each open bill or bill credit becomes a bill here for what is still owed. Suppliers are matched by name, allowing for "Ltd" and "Limited"; ones not here can be added. "Already here" means the bill number is already in Payables; "Check" means the supplier is already owed that amount or number from purchasing. QuickBooks has already counted the cost of these bills, so book them against Opening Balance Equity: only what is owed is added to the books. Start the ledger first.
+
+Bank register (CSV): lines from the ledger start date on join the Bank statement review list, marked QuickBooks, with QuickBooks's account, payee and cheque number filled in. Match each to what is already here, or Add it. A bill payment or customer payment from QuickBooks is noted: record it with Pay bills or Receive Payment, then match it. Lines before the ledger start are left out, because the opening balances already include them.`,
     questions: [
       ['Where do you enter the electricity bill?', ['Receive Stock', 'Payables > Enter a bill', 'Petty cash', 'Products'], 1, 'Expense bills are entered in Payables.'],
       ['Cash from the till is taken to the bank. How is it recorded?', ['Receive money', 'Make deposits, from Undeposited Funds', 'A journal', 'Nothing'], 1, 'Make deposits moves it from the safe into the bank.'],
       ['When can you finish a bank reconciliation?', ['Any time', 'When the difference is zero', 'At month end only', 'When a manager signs'], 1, 'The difference must be zero.'],
       ['A supplier owes us for goods we sent back. What do you enter?', ['A bill', 'A supplier credit', 'A deposit', 'A void'], 1, 'Supplier credits are used up in Pay bills.'],
+      ['You import unpaid bills from QuickBooks. Which account do you book them against?', ['Rent', 'Opening Balance Equity', 'Cost of Goods Sold', 'The bank'], 1, 'QuickBooks already counted their cost; Opening Balance Equity adds only what is owed.'],
+      ['A QuickBooks register line is a bill payment. What do you do?', ['Add it to an expense', 'Record it with Pay bills, then match it', 'Ignore the bill', 'Delete the supplier'], 1, 'Pay bills clears the bill; the line then matches that payment.'],
       ['You scanned a supplier\'s invoice into Enter a bill. What do you do before saving?', ['Save at once', 'Check each line and the total against the paper', 'Print it', 'Email the supplier'], 1, 'Reading can be wrong; the paper is what counts.'],
     ],
   },
