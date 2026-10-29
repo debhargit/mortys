@@ -6084,7 +6084,7 @@ CREATE TABLE IF NOT EXISTS invoice_signatures (
   signer_email    TEXT,
   image           TEXT NOT NULL,                            -- data:image/png;base64,...
   content_sha256  TEXT NOT NULL,                            -- the invoice as signed
-  seal            TEXT NOT NULL,                            -- HMAC over invoice, hash, method, signer, time, picture
+  seal            TEXT NOT NULL,                            -- HMAC over invoice, hash, method, signer, time, picture, email, ip, witness, request
   ip              TEXT,
   user_agent      TEXT,
   witnessed_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,

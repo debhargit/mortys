@@ -11649,14 +11649,14 @@ async function renderReceiveStock(panel){
   async function applyScan(r){
     var v = r.invoice, notes = [], unmatched = [];
     if (!v.is_invoice) notes.push('This does not look like an invoice: check everything.');
-    if (v.currency && v.currency !== 'JMD') notes.push('The invoice is in ' + v.currency + ': the costs are as printed, so convert them to J$ first.');
+    if (v.currency && v.currency !== 'JMD') notes.push('The invoice is in ' + esc(v.currency) + ': the costs are as printed, so convert them to J$ first.');
     var openPos = (r.open_pos || []).filter(function(p){ return document.querySelector('#rsPo option[value="' + p.id + '"]'); });
     if (r.supplier && openPos.length) {
       var pick = openPos[0];
       form.querySelector('[name=rsMode][value=po]').checked = true; setMode();
       document.getElementById('rsPo').value = String(pick.id);
       await loadPo(pick.id);
-      if (openPos.length > 1) notes.push(r.supplier.name + ' has ' + openPos.length + ' open orders (' + openPos.map(function(p){ return p.po_number; }).join(', ') + '); ' + pick.po_number + ' was picked. Change it here if it is another.');
+      if (openPos.length > 1) notes.push(esc(r.supplier.name) + ' has ' + openPos.length + ' open orders (' + openPos.map(function(p){ return esc(p.po_number); }).join(', ') + '); ' + esc(pick.po_number) + ' was picked. Change it here if it is another.');
       var hit = {};
       v.lines.forEach(function(l){
         var k = keyOf(l.sku), d = String(l.description || '').toLowerCase();
@@ -11664,16 +11664,16 @@ async function renderReceiveStock(panel){
         if (i < 0) i = st.poLines.findIndex(function(x, j){ var xd = String(x.description || '').toLowerCase(); return !hit[j] && d.length > 3 && xd && (xd.indexOf(d) >= 0 || d.indexOf(xd) >= 0); });
         if (i < 0) { unmatched.push(l); return; }
         hit[i] = true;
-        var pl = st.poLines[i], out = pl.qty_ordered - pl.qty_received, nm = pl.sku || pl.description;
+        var pl = st.poLines[i], out = pl.qty_ordered - pl.qty_received, nm = esc(pl.sku || pl.description);
         pl.qty = Math.max(0, Math.min(out, l.qty != null ? Math.round(l.qty) : out));
-        if (l.qty != null && l.qty > out) notes.push(nm + ': the invoice says ' + l.qty + ' but only ' + out + ' are outstanding on the order.');
+        if (l.qty != null && l.qty > out) notes.push(nm + ': the invoice says ' + esc(l.qty) + ' but only ' + out + ' are outstanding on the order.');
         if (l.unit_cost != null && Math.abs(l.unit_cost - pl.unit_cost) > 0.005) notes.push(nm + ': invoice price ' + fmtMoney(l.unit_cost) + ', order price ' + fmtMoney(pl.unit_cost) + ' (the tally shows the difference).');
       });
       drawItems();
     } else {
       form.querySelector('[name=rsMode][value=none]').checked = true; setMode();
       if (r.supplier && supSel.querySelector('option[value="' + r.supplier.id + '"]')) supSel.value = String(r.supplier.id);
-      else if (r.supplier || v.supplier_name) notes.push('The supplier "' + (r.supplier ? r.supplier.name : v.supplier_name) + '" is not in the list: choose them, or ➕ add them.');
+      else if (r.supplier || v.supplier_name) notes.push('The supplier "' + esc(r.supplier ? r.supplier.name : v.supplier_name) + '" is not in the list: choose them, or ➕ add them.');
       st.loose = [];
       v.lines.forEach(function(l){
         if (!l.product) { unmatched.push(l); return; }

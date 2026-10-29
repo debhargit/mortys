@@ -23,7 +23,9 @@
 //                their phone at till.visionautosolutions.com/sign-invoice.html.
 //    Either way the signature is sealed: a SHA-256 of the invoice's contents
 //    (number, dates, customer, lines, GCT, total) is kept with it, and an HMAC
-//    (SESSION_SECRET) over that hash, the signer, the time and the picture. The
+//    (SESSION_SECRET) over that hash, the signer, the time, the picture, and
+//    where it came from (email, address, witness, link). SESSION_SECRET must
+//    never change once signatures exist, or every seal reads as broken. The
 //    invoice's signing panel re-checks both, so a changed invoice or an edited
 //    signature row shows as broken. A signed copy (invoice, signature, seal and
 //    audit line) is filed in the document centre against the invoice and the
@@ -78,9 +80,13 @@ function register(app, deps) {
   const money = (v) => 'J$' + r2(v).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   function httpError(status, msg) { const e = new Error(msg); e.status = status; return e; }
   const fail = (res, e) => { if (!e.status) console.error('[invoice-docs]', e); res.status(e.status || 500).json({ error: e.status ? e.message : 'Server error' }); };
-  const ipOf = (req) => String(req.headers['cf-connecting-ip'] || (req.socket && req.socket.remoteAddress) || '').replace(/^::ffff:/, '').slice(0, 64);
+  // req.ip, resolved through trust proxy: a raw cf-connecting-ip read could be
+  // set to anything by a caller reaching the till directly on the LAN.
+  const ipOf = (req) => String(req.ip || '').replace(/^::ffff:/, '').slice(0, 64);
   const TILL = (process.env.TILL_PUBLIC_URL || 'https://till.visionautosolutions.com').replace(/\/$/, '');
-  const SECRET = process.env.SESSION_SECRET || 'vision-dev-secret';
+  // No published fallback key outside development: without SESSION_SECRET,
+  // signing is refused rather than sealed with a key anyone can read.
+  const SECRET = process.env.SESSION_SECRET || (devMode ? 'vision-dev-secret' : null);
   const AR = [requireAdmin, requireCap('ar.manage')];
   // Payables staff, or a manager receiving stock.
   const SCAN = [requireAdmin, async (req, res, next) => ((await userCan(req, 'ap.manage')) ? next() : requireManager(req, res, next))];
@@ -196,7 +202,9 @@ function register(app, deps) {
       lines: lines.map((l) => [l.description || '', r2(l.amount)]), gct: r2(i.gct), total: r2(i.total) }));
     return { invoice: i, lines, hash };
   }
-  const sealOf = (s) => crypto.createHmac('sha256', SECRET).update([s.invoice_id, s.content_sha256, s.method, s.signer_name, new Date(s.signed_at).toISOString(), sha(s.image)].join('|')).digest('hex');
+  // JSON, not a joined string, so no field can bleed into the next.
+  const sealOf = (s) => (SECRET ? crypto.createHmac('sha256', SECRET).update(JSON.stringify([s.invoice_id, s.content_sha256, s.method, s.signer_name, new Date(s.signed_at).toISOString(), sha(s.image),
+    s.signer_email || null, s.ip || null, s.witnessed_by || null, s.request_id || null])).digest('hex') : null);
 
   function invoiceHtml(shop, c, sig) {
     const i = c.invoice;
@@ -215,6 +223,7 @@ function register(app, deps) {
   async function saveSignature(req, c, s) {
     const i = c.invoice;
     if (i.voided_at) throw httpError(409, 'This invoice is voided');
+    if (!SECRET) throw httpError(503, 'Signing is not set up on this till (SESSION_SECRET is missing)');
     const name = String(s.name || '').trim().slice(0, 100);
     if (name.length < 2) throw httpError(400, 'Type the name of the person signing');
     const image = String(s.image || '');
@@ -222,12 +231,13 @@ function register(app, deps) {
     if (!m || m[1].length > 400000) throw httpError(400, 'Sign in the box first');
     const png = Buffer.from(m[1], 'base64');
     if (png.length < 200 || png.slice(0, 8).toString('hex') !== '89504e470d0a1a0a') throw httpError(400, 'Sign in the box first');
-    const row = { invoice_id: i.id, content_sha256: c.hash, method: s.method, signer_name: name, signed_at: new Date(), image };
+    const row = { invoice_id: i.id, content_sha256: c.hash, method: s.method, signer_name: name, signed_at: new Date(), image,
+      signer_email: s.email || null, ip: ipOf(req), witnessed_by: s.witness_id || null, request_id: s.request_id || null };
     row.seal = sealOf(row);
     const { rows } = await query(
       `INSERT INTO invoice_signatures (invoice_id, method, signer_name, signer_email, image, content_sha256, seal, ip, user_agent, witnessed_by, request_id, signed_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
-      [i.id, s.method, name, s.email || null, image, c.hash, row.seal, ipOf(req), String(req.headers['user-agent'] || '').slice(0, 300), s.witness_id || null, s.request_id || null, row.signed_at]);
+      [i.id, s.method, name, row.signer_email, image, c.hash, row.seal, row.ip, String(req.headers['user-agent'] || '').slice(0, 300), row.witnessed_by, row.request_id, row.signed_at]);
     const id = rows[0].id;
     // The signed copy, filed against the invoice and the customer.
     let doc = null;
@@ -235,7 +245,7 @@ function register(app, deps) {
       try {
         let witness = null;
         if (s.witness_id) witness = ((await query(`SELECT COALESCE(NULLIF(name, ''), email) AS n FROM users WHERE id = $1`, [s.witness_id])).rows[0] || {}).n;
-        const html = invoiceHtml((await getShop()) || {}, c, Object.assign({}, row, { signer_email: s.email, ip: ipOf(req), witness }));
+        const html = invoiceHtml((await getShop()) || {}, c, Object.assign({}, row, { witness }));
         doc = await docs.fileHtml(req, { title: 'Signed invoice ' + i.number + ' - ' + i.customer, category: 'receivables', reference: i.number, issuer: name, issue_date: row.signed_at.toISOString().slice(0, 10),
           tags: 'signed invoice', html, file_name: 'Signed invoice ' + i.number, note: s.method === 'in_person' ? 'Signed in person' : 'Signed from a link',
           links: [{ type: 'invoice', id: i.id }, { type: 'customer', id: i.customer_id }] });
@@ -249,7 +259,7 @@ function register(app, deps) {
 
   async function signingState(c) {
     const { rows: sigs } = await query(
-      `SELECT s.id, s.invoice_id, s.method, s.signer_name, s.signer_email, s.image, s.content_sha256, s.seal, s.ip, s.signed_at, s.document_id, d.number AS document_number,
+      `SELECT s.id, s.invoice_id, s.method, s.signer_name, s.signer_email, s.image, s.content_sha256, s.seal, s.ip, s.witnessed_by, s.request_id, s.signed_at, s.document_id, d.number AS document_number,
               COALESCE(NULLIF(w.name, ''), w.email) AS witness
          FROM invoice_signatures s LEFT JOIN documents d ON d.id = s.document_id LEFT JOIN users w ON w.id = s.witnessed_by WHERE s.invoice_id = $1 ORDER BY s.id`, [c.invoice.id]);
     const { rows: reqs } = await query(
@@ -258,7 +268,7 @@ function register(app, deps) {
     return {
       signatures: sigs.map((s) => ({ id: s.id, method: s.method, signer_name: s.signer_name, signer_email: s.signer_email, image: s.image, ip: s.ip, signed_at: s.signed_at, witness: s.witness,
         document_id: s.document_id, document_number: s.document_number, content_sha256: s.content_sha256,
-        unchanged: s.content_sha256 === c.hash, sealed: sealOf(s) === s.seal })),
+        unchanged: s.content_sha256 === c.hash, sealed: !!s.seal && sealOf(s) === s.seal })),
       requests: reqs.map((r) => Object.assign(r, { open: !r.used_at && !r.cancelled_at && new Date(r.expires_at) > new Date() })),
     };
   }
