@@ -201,7 +201,7 @@ Orders from the assistant appear in the cashier queue like any other order; chec
 
 The menu: the left-hand menu has the groups Overview, Parts Department, Purchasing, Sales & POS, POS Add-ons, Customers and Settings. Click a group to open it; only one stays open at a time. What you see depends on your role: a screen you cannot see is one your role does not allow.
 
-All modules: Overview > All modules shows a tile for every other part of the system - Accounting, Receivables, Payables, Banking, Loans & Rent, Payroll, Time clock, Attendance, Commission, Training, Hiring, Dispatch, Driver app, Mobile app, Warehouse, Stock to cash, Planning, Documents, Customer messages, Department store, Supplier management, System management and Security.
+All modules: Overview > All modules shows a tile for every other part of the system - Accounting, Budget & forecast, Receivables, Payables, Banking, Loans & Rent, Payroll, Time clock, Attendance, Commission, Training, Hiring, Dispatch, Driver app, Mobile app, Warehouse, Stock to cash, Planning, Documents, Customer messages, Department store, Supplier management, System management and Security.
 
 Pinned screens: press the star beside a menu item to pin it under Favourites at the top of the menu. A manager can set the pinned screens for a role; then you cannot change them.
 
@@ -498,6 +498,27 @@ Close & export: close a month once it is checked so nothing more posts into it (
       ['What should the Suspense balance be?', ['Large', 'Zero', 'Negative', 'Equal to sales'], 1, 'Suspense holds what did not add up; it should be cleared.'],
       ['You want rent income separated from parts sales in the profit and loss. What do you use?', ['A class or its own income account', 'A coupon', 'A new till', 'Nothing'], 0, 'Categories and classes split the profit and loss.'],
       ['Can a class that has been used be deleted?', ['Yes', 'No, it can only be retired', 'Only on Sundays', 'Only by a cashier'], 1, 'Used classes are retired to keep history.'],
+    ],
+  },
+  {
+    key: 'budget-forecast', title: 'Budget, cash forecast, break-even and ROI', sort: 127, roles: ['owner', 'manager'],
+    summary: 'Setting a budget and checking it against the books, the 13-week cash forecast, break-even sales and the return on investments.',
+    body: `Where: All modules > Budget & forecast (also linked from the top of Accounting). Tabs: Budget, Cash forecast, Break-even, and Investments & ROI. Everyone who can see Accounting can look; changing budgets, the forecast and investments needs the permission "Edit budgets, the cash forecast and investments" (owners and managers have it). The figures come from the ledger, so the ledger must be started.
+
+The budget: choose the year and who it is for - the whole business or one class, such as a branch. "Enter the budget" shows every income and cost account with a box for each month. Type each month, or type a yearly figure in the Year column to spread it evenly over the 12 months. "Fill from last year's actuals" copies what the books showed for each month a year earlier, raised or lowered by the % you give. Nothing is kept until you press Save budget. "Year starts in" sets the first month of the financial year.
+
+Budget against actual: choose "Budget against actual" and the period (year to date, the whole year or one month). Each account shows the budget, the actual, how much better or worse it is, and the % of the budget used. A cost more than 10% over its budget, or income more than 10% under, is red. Click an actual figure to see the entries behind it.
+
+The cash forecast: the next 13 weeks, Monday to Sunday. It starts with the money on hand now (the bank accounts, the safe, cheques waiting to deposit and the drawers, from the ledger) and adds, by the week they fall due: what customers owe (overdue amounts in this week, at the % you expect to collect), recurring invoices, and the usual counter and workshop takings. It takes off supplier bills by due date, recurring bills, loan instalments not yet billed, payroll (the average of the last 3 runs on the same schedule) and the usual new supplier bills. The usual takings and supplier bills are the last 8 weeks' averages unless you type your own under Assumptions. Add one-off money in or out (a loan coming in, a new machine, a tax payment) under Your own lines. Set the lowest balance you want to keep: any week below it is red. Click a figure to see what makes it up.
+
+Break-even: choose a past period (the last 3 full months unless changed) and, if you like, one class. Cost of sales, and any expense ticked as going up with sales (card fees, commission), are variable costs; every other cost is fixed. Break-even sales a month = fixed costs a month / the margin left after variable costs. The page shows this, the sales needed a trading day, where this month is heading, the margin of safety (how far sales can fall before a loss) and the sales needed each day for the rest of the month. The What if sliders show the effect of changing prices, cost of goods or fixed costs; they save nothing.
+
+Investments & ROI: record each investment - a branch, a vehicle, a machine, a stock line - with the amount, the start date and the profit it is expected to make a month. The page shows the expected payback time and yearly return. Give it a class in the books and it also shows the actual profit since it started (income less every cost posted to that class), the actual return so far and the payback time at current results. File the papers (quotes, invoices, loan letters) in its Documents panel. Mark it closed when it is sold or ended.`,
+    questions: [
+      ['Where do you type a figure for the whole year so it is spread evenly over the months?', ['In January', 'In the Year column of the budget', 'In Accounting', 'In the cash forecast'], 1, 'The Year column spreads a yearly figure over the 12 months.'],
+      ['Fixed costs are J$600,000 a month and 30% of every J$ of sales is left after variable costs. What are break-even sales a month?', ['J$180,000', 'J$600,000', 'J$2,000,000', 'J$780,000'], 2, 'J$600,000 / 0.30 = J$2,000,000.'],
+      ['The bank will lend J$1,000,000 next month. How do you show it in the cash forecast?', ['It shows by itself', 'Add it under Your own lines as money in', 'Change the takings', 'Enter a supplier bill'], 1, 'One-off money in or out goes under Your own lines.'],
+      ['A van cost J$3,000,000 and earns J$100,000 a month. What is the expected payback?', ['3 months', '30 months', '300 months', '12 months'], 1, 'J$3,000,000 / J$100,000 = 30 months.'],
     ],
   },
   {

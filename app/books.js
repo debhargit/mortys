@@ -1073,7 +1073,9 @@ function register(app, deps) {
   });
 
   // For billing.js: the same open items, reminder email and supplier bills these screens use.
-  return { openInvoices, reminderEmail, canEmail, apDocs, makeTxn, lineAccount, bankAccount, classId, post };
+  // Every open customer item (sales on account and invoices), for the cash forecast (budget.js).
+  const arOpenItems = async () => (await query(`SELECT o.doc, o.id, o.customer_id, o.open::float AS open, to_char(COALESCE(o.due_date, o.created_at::date), 'YYYY-MM-DD') AS due FROM (${OPEN_SQL}) o`)).rows;
+  return { openInvoices, reminderEmail, canEmail, apDocs, arOpenItems, makeTxn, lineAccount, bankAccount, classId, post };
 }
 
 module.exports = { register };

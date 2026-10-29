@@ -5101,7 +5101,7 @@ CREATE TABLE IF NOT EXISTS document_versions (
 CREATE TABLE IF NOT EXISTS document_links (
   id           SERIAL PRIMARY KEY,
   document_id  INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-  entity_type  TEXT NOT NULL,                     -- supplier, bill, po, staff, employee, customer, product, asset, applicant, inquiry, order, incident, ticket, risk, journal
+  entity_type  TEXT NOT NULL,                     -- supplier, bill, po, staff, employee, customer, product, asset, applicant, inquiry, order, incident, ticket, risk, journal, investment
   entity_id    TEXT NOT NULL,
   label        TEXT,                              -- how it read when linked ("Bill 4411 - Toyota Tsusho")
   created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -6093,3 +6093,45 @@ CREATE TABLE IF NOT EXISTS invoice_signatures (
   signed_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_invoice_signatures_invoice ON invoice_signatures (invoice_id);
+
+-- =============================================================================
+--  BUDGET AND FORECAST (budget.js, 2026-10)
+--  Budgets per P&L account and month (class_id NULL: the whole business), the
+--  cash forecast's own one-off lines, and the investments tracked for ROI.
+--  Settings (financial year start, forecast assumptions, which expense
+--  accounts count as variable for break-even) are warehouse_settings keys
+--  starting budget_ / forecast_ / breakeven_.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS gl_budgets (
+  id          SERIAL PRIMARY KEY,
+  account_id  INTEGER NOT NULL REFERENCES gl_accounts(id) ON DELETE CASCADE,
+  class_id    INTEGER REFERENCES gl_classes(id) ON DELETE CASCADE,
+  month       DATE NOT NULL CHECK (EXTRACT(DAY FROM month) = 1),   -- first of the month
+  amount      NUMERIC(14,2) NOT NULL DEFAULT 0,
+  updated_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_gl_budgets ON gl_budgets (account_id, COALESCE(class_id, 0), month);
+CREATE TABLE IF NOT EXISTS cash_forecast_items (
+  id          SERIAL PRIMARY KEY,
+  day         DATE NOT NULL,                     -- the week it falls in is worked out from this
+  direction   TEXT NOT NULL CHECK (direction IN ('in', 'out')),
+  amount      NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+  description TEXT NOT NULL,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_cash_forecast_items_day ON cash_forecast_items (day);
+CREATE TABLE IF NOT EXISTS investments (
+  id              SERIAL PRIMARY KEY,
+  name            TEXT NOT NULL,                  -- "Delivery van", "Spanish Town branch"
+  class_id        INTEGER REFERENCES gl_classes(id) ON DELETE SET NULL,   -- its actual profit, when set
+  start_date      DATE NOT NULL,
+  amount          NUMERIC(14,2) NOT NULL CHECK (amount > 0),              -- what was invested
+  monthly_profit  NUMERIC(14,2) NOT NULL DEFAULT 0,                       -- what it is expected to earn a month
+  notes           TEXT,
+  status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'closed')),
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW()
+);

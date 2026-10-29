@@ -94,6 +94,7 @@ const ENTITIES = {
   incident:  { label: 'Security incident', search: `SELECT id::text AS id, number || ' ' || title AS label FROM sys_incidents WHERE number ILIKE $1 OR title ILIKE $1 ORDER BY id DESC LIMIT 20`, one: `SELECT number || ' ' || title AS label FROM sys_incidents WHERE id = $1::int` },
   ticket:    { label: 'IT ticket', search: `SELECT id::text AS id, number || ' ' || title AS label FROM sys_tickets WHERE number ILIKE $1 OR title ILIKE $1 ORDER BY id DESC LIMIT 20`, one: `SELECT number || ' ' || title AS label FROM sys_tickets WHERE id = $1::int` },
   risk:      { label: 'Risk', search: `SELECT id::text AS id, number || ' ' || title AS label FROM sys_risks WHERE number ILIKE $1 OR title ILIKE $1 ORDER BY id DESC LIMIT 20`, one: `SELECT number || ' ' || title AS label FROM sys_risks WHERE id = $1::int` },
+  investment: { label: 'Investment', search: `SELECT id::text AS id, name || ' (' || to_char(start_date, 'Mon YYYY') || ')' AS label FROM investments WHERE name ILIKE $1 ORDER BY id DESC LIMIT 20`, one: `SELECT name AS label FROM investments WHERE id = $1::int` },
 };
 
 // Starter templates. {{field}} is filled in; company / today / number / person are automatic.

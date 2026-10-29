@@ -1193,6 +1193,7 @@ const CAPABILITIES = [
   { key: 'acct.setup',  group: 'Accounting', label: 'Start the ledger, edit accounts and posting rules' },
   { key: 'acct.close',  group: 'Accounting', label: 'Close and reopen months' },
   { key: 'acct.export', group: 'Accounting', label: 'Export to QuickBooks' },
+  { key: 'acct.budget', group: 'Accounting', label: 'Edit budgets, the cash forecast and investments' },
   { key: 'sec.manage', group: 'Security', label: 'Set sign-in rules, unlock accounts, reset 2-step sign-in' },
   { key: 'audit.view', group: 'Security', label: 'See the audit log of who changed what' },
   { key: 'dept.manage', group: 'Departments', label: 'Set up departments, who works in them, and till exception rules' },
@@ -1241,7 +1242,7 @@ const CAPABILITY_KEYS = new Set(CAPABILITIES.map((c) => c.key));
 // approvals and the audit log.
 const RESTRICTED_CAPS = new Set([
   'purchasing.approve_bills', 'purchasing.settings', 'fulfil.manage', 'cashier.manage', 'count.approve', 'planning.targets', 'notify.manage',
-  'acct.view', 'acct.post', 'acct.setup', 'acct.close', 'acct.export', 'sec.manage', 'audit.view', 'dept.manage', 'tj.view',
+  'acct.view', 'acct.post', 'acct.setup', 'acct.close', 'acct.export', 'acct.budget', 'sec.manage', 'audit.view', 'dept.manage', 'tj.view',
   'comm.view', 'comm.rules', 'comm.approve', 'reps.manage', 'hr.manage', 'clock.manage', 'clock.approve', 'mkt.manage', 'ai.manage', 'training.manage',
   'ar.manage', 'ap.manage', 'bank.manage', 'payroll.view', 'payroll.run', 'payroll.approve', 'sys.audit', 'sys.security', 'sys.support', 'sys.network',
   'docs.manage', 'docs.confidential', 'docs.restricted', 'docs.approve', 'comms.journal',
@@ -6471,6 +6472,8 @@ require('./billing').register(app, { query, getPool: () => pool, requireAdmin, r
 // Reading supplier invoices (photo / PDF) for bills and receiving, and signatures on customer invoices (invoice-docs.js).
 require('./invoice-docs').register(app, { query, requireAdmin, requireManager, requireCap, userCan, mailer, docs: docsCentre, devMode: DEV_MODE,
   getShop: async () => shopSettingsToShop(await getShopSettings()) });
+// Budgets, the 13-week cash forecast, break-even and ROI (budget.js).
+require('./budget').register(app, { query, requireAdmin, requireCap, books });
 // POS add-ons: petty cash and payouts, warranty register and claims, redeemable instruments, terminal presence (posaddons.js).
 const posAddons = require('./posaddons');
 posAddons.register(app, { query, getPool: () => pool, requireAdmin, requireManager, userCan, upload });

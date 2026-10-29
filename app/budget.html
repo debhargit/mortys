@@ -1,0 +1,519 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Budget & forecast · Vision Auto Solutions</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; --bar:#2563eb; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; --bar:#60a5fa; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0}
+  header nav{margin-left:auto;display:flex;gap:14px;font-size:13px}
+  header a{color:#fff;opacity:.85}
+  main{max-width:1280px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  input,select,button,textarea{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  button{cursor:pointer;background:var(--card)}
+  button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600}
+  button.sm{padding:3px 9px;font-size:12.5px}
+  button:disabled{opacity:.5;cursor:default}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 12px}
+  .tabs button{border-radius:999px;padding:6px 13px;font-size:13px}
+  .tabs button.on{background:var(--navy);border-color:var(--navy);color:#fff}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px}
+  .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  tr.total td{font-weight:700;border-top:2px solid var(--ink)}
+  tr.head td{font-weight:700;background:var(--chip)}
+  tr.click{cursor:pointer} tr.click:hover td{background:var(--chip)}
+  td.cell{cursor:pointer} td.cell:hover{background:var(--chip)}
+  tr.bad td{color:var(--red)} td.bad{color:var(--red);font-weight:600} td.good{color:var(--ok)}
+  .scroll{overflow-x:auto}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip);white-space:nowrap}
+  .pill.ok{background:#16a34a22;color:var(--ok)} .pill.bad{background:#d6282822;color:var(--red)} .pill.warn{background:#f59e0b22;color:var(--warn)}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+  .kpi{background:var(--chip);border-radius:10px;padding:10px 12px}
+  .kpi span{display:block;font-size:12px;color:var(--muted)} .kpi b{font-size:18px;font-variant-numeric:tabular-nums} .kpi small{display:block;color:var(--muted);font-size:11.5px}
+  .note{padding:8px 10px;border-radius:8px;font-size:13px;margin-bottom:8px}
+  .note.warn{background:#f59e0b18;border-left:3px solid var(--warn)} .note.bad{background:#d6282812;border-left:3px solid var(--red)} .note.info{background:var(--chip)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media (max-width:860px){ .grid{grid-template-columns:1fr} }
+  .modal{position:fixed;inset:0;background:rgba(10,15,25,.55);display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow:auto;z-index:40}
+  .modal .card{max-width:820px;width:100%}
+  .empty{color:var(--muted);text-align:center;padding:24px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60;max-width:90vw}
+  input.amt{width:96px;text-align:right;padding:5px 7px}
+  input.amt.tot{width:116px;font-weight:600}
+  .bgrid td{padding:3px 4px} .bgrid td:first-child{min-width:200px;padding-left:8px}
+  .bgrid td:first-child,.bgrid th:first-child{position:sticky;left:0;background:var(--card);z-index:1}
+  .fgrid td:first-child,.fgrid th:first-child{position:sticky;left:0;background:var(--card);z-index:1;min-width:190px}
+  .fgrid tr.head td:first-child{background:var(--chip)}
+  .grid>*{min-width:0}
+  .slider{display:flex;align-items:center;gap:8px;margin:6px 0} .slider span{flex:0 1 170px} .slider input[type=range]{flex:1;min-width:0} .slider b{min-width:46px;text-align:right}
+  .form label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px} .form input,.form select,.form textarea{width:100%}
+  svg text{fill:var(--muted);font-size:11px}
+  @media print{ header,.tabs,.controls,button{display:none!important} .card{border:0} }
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Budget &amp; forecast</h1><nav><a href="/accounting.html">Accounting</a><a href="/banking.html">Banking</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs">
+    <button data-t="budget" class="on">Budget</button><button data-t="forecast">Cash forecast</button><button data-t="breakeven">Break-even</button><button data-t="roi">Investments &amp; ROI</button>
+  </div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<script src="/assets/doc-attach.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var J = function (v) { if (v == null || !isFinite(v)) return '–'; var x = Number(v); var s = Math.abs(x).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); return x < 0 ? '(' + s + ')' : s; };
+  var J0 = function (v) { if (v == null || !isFinite(v)) return '–'; var x = Math.round(Number(v)); var s = Math.abs(x).toLocaleString('en-JM'); return x < 0 ? '(' + s + ')' : s; };
+  var pct = function (v, d) { return v == null || !isFinite(v) ? '–' : (v * 100).toFixed(d == null ? 1 : d) + '%'; };
+  var r2 = function (v) { return Math.round(Number(v || 0) * 100) / 100; };
+  var num = function (v) { var x = parseFloat(String(v == null ? '' : v).replace(/[,\s$J]/g, '')); return isFinite(x) ? x : 0; };
+  var MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  var mlabel = function (d) { return MON[+String(d).slice(5, 7) - 1] + ' ' + String(d).slice(2, 4); };
+  var dlabel = function (d) { return +String(d).slice(8, 10) + ' ' + MON[+String(d).slice(5, 7) - 1]; };
+  var TYPES = [['income', 'Income'], ['cogs', 'Cost of sales'], ['expense', 'Expenses'], ['other_income', 'Other income'], ['other_expense', 'Other expenses']];
+  var INCOME = { income: 1, other_income: 1 };
+  var tab = 'budget', meta = null;
+  try { tab = localStorage.getItem('vision.budgetTab') || 'budget'; } catch (_) {}
+
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 3500); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); }
+        return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; });
+      });
+  }
+  function ymd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  function modal(html) { $('#modal').innerHTML = '<div class="modal"><div class="card">' + html + '</div></div>'; $('.modal').addEventListener('mousedown', function (e) { if (e.target.classList.contains('modal')) closeModal(); }); }
+  function closeModal() { $('#modal').innerHTML = ''; }
+  function csvDownload(name, rows) {
+    var q = function (v) { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([rows.map(function (r) { return r.map(q).join(','); }).join('\n')], { type: 'text/csv' })); a.download = name; a.click();
+  }
+  function loadMeta() { return meta ? Promise.resolve(meta) : api('/api/budget/meta').then(function (d) { meta = d; return d; }); }
+  function classOptions(sel, allLabel) {
+    return '<option value="">' + esc(allLabel || 'Whole business') + '</option>' + meta.classes.map(function (c) { return '<option value="' + c.id + '"' + (String(sel) === String(c.id) ? ' selected' : '') + '>' + esc(c.name) + '</option>'; }).join('');
+  }
+  // The ledger lines behind one account in a period (Accounting's drill-down).
+  function drill(acct, from, to, cls) {
+    api('/api/gl/reports/lines?account_id=' + acct + '&from=' + from + '&to=' + to + (cls ? '&class_id=' + cls : '')).then(function (d) {
+      modal('<h2>' + esc(d.account ? d.account.code + ' ' + d.account.name : 'Account') + '</h2><p class="sub">' + esc(from) + ' to ' + esc(to) + '</p><div class="scroll"><table><thead><tr><th>Date</th><th>Entry</th><th>Name / memo</th><th class="n">Amount</th></tr></thead><tbody>' +
+        (d.lines.length ? d.lines.map(function (l) { return '<tr><td>' + esc(l.day) + '</td><td>' + esc(l.number || '') + '</td><td>' + esc([l.party, l.line_memo || l.memo].filter(Boolean).join(' · ')) + '</td><td class="n">' + J(l.amount) + '</td></tr>'; }).join('') : '<tr><td colspan="4" class="empty">No lines</td></tr>') +
+        '</tbody></table></div><div class="controls" style="margin-top:10px"><button id="mx">Close</button></div>');
+      $('#mx').onclick = closeModal;
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // ================================================================ BUDGET ==
+  var bq = null, bdata = null;
+  function fyYear() { var t = new Date(); var s = meta.fy_start || 1; return t.getMonth() + 1 >= s ? t.getFullYear() : t.getFullYear() - 1; }
+  function budgetTab() {
+    return loadMeta().then(function () {
+      if (!bq) bq = { year: fyYear(), cls: '', mode: 'enter', upto: 'ytd' };
+      return api('/api/budget?year=' + bq.year + (bq.cls ? '&class_id=' + bq.cls : '')).then(function (d) { bdata = d; drawBudget(); });
+    });
+  }
+  function bRow(id) { return bdata.rows.filter(function (r) { return r.account_id === id; })[0] || { account_id: id, budget: Array(12).fill(0), actual: Array(12).fill(0) }; }
+  function drawBudget() {
+    var years = []; for (var y = bq.year - 3; y <= bq.year + 2; y++) years.push(y);
+    var fyLabel = function (y) { return meta.fy_start === 1 ? String(y) : y + '/' + String(y + 1).slice(2); };
+    var h = '<div class="card"><h2>Budget ' + esc(fyLabel(bq.year)) + '</h2><p class="sub">An amount for each income and cost account each month, for the whole business or one class, compared with what the books show.</p>' +
+      (meta.ledger_started ? '' : '<div class="note warn">The ledger has not been started, so there are no actual figures yet. You can still enter the budget.</div>') +
+      '<div class="controls"><div><label>Year</label><select id="by">' + years.map(function (y) { return '<option value="' + y + '"' + (y === bq.year ? ' selected' : '') + '>' + fyLabel(y) + '</option>'; }).join('') + '</select></div>' +
+      '<div><label>For</label><select id="bc">' + classOptions(bq.cls) + '</select></div>' +
+      '<div><label>Show</label><select id="bm"><option value="enter"' + (bq.mode === 'enter' ? ' selected' : '') + '>Enter the budget</option><option value="vs"' + (bq.mode === 'vs' ? ' selected' : '') + '>Budget against actual</option></select></div>' +
+      (bq.mode === 'vs' ? '<div><label>Period</label><select id="bu">' + '<option value="ytd"' + (bq.upto === 'ytd' ? ' selected' : '') + '>Year to date</option><option value="year"' + (bq.upto === 'year' ? ' selected' : '') + '>Whole year</option>' +
+        bdata.months.map(function (m, i) { return '<option value="' + i + '"' + (String(bq.upto) === String(i) ? ' selected' : '') + '>' + mlabel(m) + '</option>'; }).join('') + '</select></div>' : '') +
+      '<div><label>Year starts in</label><select id="bfy">' + MON.map(function (m, i) { return '<option value="' + (i + 1) + '"' + (meta.fy_start === i + 1 ? ' selected' : '') + '>' + m + '</option>'; }).join('') + '</select></div>' +
+      '<span style="margin-left:auto"></span><button id="bpr">Print / PDF</button><button id="bcsv">CSV</button></div></div>';
+    h += bq.mode === 'vs' ? budgetVs() : budgetEnter();
+    $('#out').innerHTML = h;
+    $('#by').onchange = function () { bq.year = +this.value; budgetTab(); };
+    $('#bc').onchange = function () { bq.cls = this.value; budgetTab(); };
+    $('#bm').onchange = function () { bq.mode = this.value; drawBudget(); };
+    if ($('#bu')) $('#bu').onchange = function () { bq.upto = this.value; drawBudget(); };
+    $('#bfy').onchange = function () {
+      var v = +this.value;
+      if (!confirm('Start the financial year in ' + MON[v - 1] + '? Budgets already entered stay on their own months.')) { this.value = meta.fy_start; return; }
+      api('/api/budget/settings', 'PUT', { fy_start: v }).then(function () { meta.fy_start = v; bq.year = fyYear(); budgetTab(); }).catch(function (e) { toast(e.message); });
+    };
+    $('#bpr').onclick = function () { window.print(); };
+    $('#bcsv').onclick = budgetCsv;
+    if (bq.mode === 'vs') wireVs(); else wireEnter();
+  }
+  function accountsOf(type) { return meta.accounts.filter(function (a) { return a.type === type; }); }
+  function budgetEnter() {
+    var h = '<div class="card"><div class="controls"><button id="bcopy">Fill from last year\'s actuals…</button><button id="bzero">Clear all</button><span class="sub" style="margin:0">Type a yearly amount in the Year column to spread it evenly over the 12 months.</span><span style="margin-left:auto"></span><button class="primary" id="bsave">Save budget</button></div>' +
+      '<div class="scroll"><table class="bgrid"><thead><tr><th>Account</th>' + bdata.months.map(function (m) { return '<th class="n">' + mlabel(m) + '</th>'; }).join('') + '<th class="n">Year</th></tr></thead><tbody>';
+    TYPES.forEach(function (t) {
+      var list = accountsOf(t[0]); if (!list.length) return;
+      h += '<tr class="head"><td colspan="14">' + t[1] + '</td></tr>';
+      list.forEach(function (a) {
+        var r = bRow(a.id);
+        h += '<tr data-acct="' + a.id + '"><td>' + esc(a.code + ' ' + a.name) + '</td>' + r.budget.map(function (v, i) { return '<td><input class="amt" inputmode="decimal" data-i="' + i + '" value="' + (v ? r2(v) : '') + '"></td>'; }).join('') +
+          '<td><input class="amt tot" inputmode="decimal" data-tot="1" value=""></td></tr>';
+      });
+      h += '<tr class="total" data-sum="' + t[0] + '"><td>Total ' + t[1].toLowerCase() + '</td>' + bdata.months.map(function () { return '<td class="n"></td>'; }).join('') + '<td class="n"></td></tr>';
+    });
+    h += '<tr class="total" data-sum="net"><td>Net profit</td>' + bdata.months.map(function () { return '<td class="n"></td>'; }).join('') + '<td class="n"></td></tr></tbody></table></div></div>';
+    return h;
+  }
+  function gridValues() {
+    return all('tr[data-acct]').map(function (tr) { return { account_id: +tr.getAttribute('data-acct'), amounts: all('input[data-i]', tr).map(function (i) { return r2(num(i.value)); }) }; });
+  }
+  function sumGrid() {
+    var by = {}; meta.accounts.forEach(function (a) { by[a.id] = a.type; });
+    var tot = {}; TYPES.forEach(function (t) { tot[t[0]] = Array(12).fill(0); });
+    all('tr[data-acct]').forEach(function (tr) {
+      var vals = all('input[data-i]', tr).map(function (i) { return num(i.value); }), type = by[tr.getAttribute('data-acct')];
+      vals.forEach(function (v, i) { tot[type][i] += v; });
+      var y = vals.reduce(function (a, b) { return a + b; }, 0), ti = $('input[data-tot]', tr);
+      if (document.activeElement !== ti) ti.value = y ? J(y) : '';
+    });
+    var net = Array(12).fill(0).map(function (_, i) { return tot.income[i] - tot.cogs[i] - tot.expense[i] + tot.other_income[i] - tot.other_expense[i]; });
+    var put = function (key, arr) { var tr = $('tr[data-sum="' + key + '"]'); if (!tr) return; var tds = all('td.n', tr); arr.forEach(function (v, i) { tds[i].textContent = J(v); }); tds[12].textContent = J(arr.reduce(function (a, b) { return a + b; }, 0)); };
+    TYPES.forEach(function (t) { put(t[0], tot[t[0]]); }); put('net', net);
+  }
+  function wireEnter() {
+    sumGrid();
+    all('tr[data-acct] input[data-i]').forEach(function (i) { i.oninput = sumGrid; });
+    all('tr[data-acct] input[data-tot]').forEach(function (i) {
+      i.onfocus = function () { this.value = this.value ? num(this.value) : ''; };
+      i.onchange = function () {
+        var y = num(this.value), each = Math.floor(y / 12 * 100) / 100, last = r2(y - each * 11), ins = all('input[data-i]', this.closest('tr'));
+        ins.forEach(function (x, k) { x.value = y ? (k === 11 ? last : each) : ''; }); this.blur(); sumGrid();
+      };
+    });
+    $('#bzero').onclick = function () { if (confirm('Clear every amount on the screen? Nothing is saved until you press Save.')) { all('tr[data-acct] input').forEach(function (i) { i.value = ''; }); sumGrid(); } };
+    $('#bsave').onclick = function () {
+      var b = this; b.disabled = true;
+      api('/api/budget', 'PUT', { year: bq.year, class_id: bq.cls || null, rows: gridValues() }).then(function () { toast('Budget saved'); return budgetTab(); }).catch(function (e) { toast(e.message); }).then(function () { b.disabled = false; });
+    };
+    $('#bcopy').onclick = function () {
+      modal('<h2>Fill from last year\'s actuals</h2><p class="sub">Each month\'s budget becomes what the books show for the same month a year earlier, changed by the % you give. Nothing is saved until you press Save budget.</p>' +
+        '<div class="controls"><div><label>Change (%)</label><input id="cp" type="number" step="0.5" value="0" style="width:110px"></div><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="ce" checked style="width:auto"> Only empty rows</label></div>' +
+        '<div class="controls"><button class="primary" id="cgo">Fill</button><button id="cx">Cancel</button></div>');
+      $('#cx').onclick = closeModal;
+      $('#cgo').onclick = function () {
+        var p = num($('#cp').value) / 100, onlyEmpty = $('#ce').checked;
+        api('/api/budget?year=' + (bq.year - 1) + (bq.cls ? '&class_id=' + bq.cls : '')).then(function (prev) {
+          var n = 0;
+          all('tr[data-acct]').forEach(function (tr) {
+            var ins = all('input[data-i]', tr);
+            if (onlyEmpty && ins.some(function (i) { return num(i.value); })) return;
+            var r = prev.rows.filter(function (x) { return x.account_id === +tr.getAttribute('data-acct'); })[0]; if (!r) return;
+            ins.forEach(function (i, k) { var v = r2(r.actual[k] * (1 + p)); i.value = v ? v : ''; }); n++;
+          });
+          closeModal(); sumGrid(); toast(n ? n + ' row' + (n === 1 ? '' : 's') + ' filled: check them, then Save budget' : 'Last year has no actual figures to copy');
+        }).catch(function (e) { toast(e.message); });
+      };
+    };
+  }
+  // Which months the comparison covers.
+  function vsRange() {
+    var cur = meta.today.slice(0, 7) + '-01', idx;
+    if (bq.upto === 'year') idx = [0, 11];
+    else if (bq.upto === 'ytd') { var k = bdata.months.indexOf(cur); idx = [0, k < 0 ? (cur < bdata.months[0] ? -1 : 11) : k]; }
+    else idx = [+bq.upto, +bq.upto];
+    return idx;
+  }
+  function budgetVs() {
+    var idx = vsRange();
+    if (idx[1] < 0) return '<div class="card empty">This financial year has not started yet. Choose a month, or the whole year.</div>';
+    var sum = function (arr) { var t = 0; for (var i = idx[0]; i <= idx[1]; i++) t += arr[i] || 0; return r2(t); };
+    var tot = {}, h = '<div class="card"><p class="sub">' + mlabel(bdata.months[idx[0]]) + (idx[1] > idx[0] ? ' to ' + mlabel(bdata.months[idx[1]]) : '') + '. A cost more than 10% over budget, or income more than 10% under it, is shown in red. Click an actual figure to see the entries behind it.</p>' +
+      '<div class="scroll"><table><thead><tr><th>Account</th><th class="n">Budget</th><th class="n">Actual</th><th class="n">Better / (worse)</th><th class="n">% of budget</th></tr></thead><tbody>';
+    TYPES.forEach(function (t) {
+      var list = accountsOf(t[0]).map(function (a) { var r = bRow(a.id); return { a: a, b: sum(r.budget), x: sum(r.actual) }; }).filter(function (r) { return r.b || r.x; });
+      tot[t[0]] = { b: 0, x: 0 };
+      if (!list.length) return;
+      h += '<tr class="head"><td colspan="5">' + t[1] + '</td></tr>';
+      list.forEach(function (r) {
+        var inc = INCOME[t[0]], diff = inc ? r.x - r.b : r.b - r.x, used = r.b ? r.x / r.b : null;
+        var bad = r.b ? (inc ? r.x < r.b * 0.9 : r.x > r.b * 1.1) : (!inc && r.x > 0);
+        tot[t[0]].b += r.b; tot[t[0]].x += r.x;
+        h += '<tr' + (bad ? ' class="bad"' : '') + '><td>' + esc(r.a.code + ' ' + r.a.name) + '</td><td class="n">' + J(r.b) + '</td><td class="n cell" data-dr="' + r.a.id + '">' + J(r.x) + '</td><td class="n">' + J(diff) + '</td><td class="n">' + pct(used, 0) + '</td></tr>';
+      });
+      var tb = tot[t[0]].b, tx = tot[t[0]].x;
+      h += '<tr class="total"><td>Total ' + t[1].toLowerCase() + '</td><td class="n">' + J(tb) + '</td><td class="n">' + J(tx) + '</td><td class="n">' + J(INCOME[t[0]] ? tx - tb : tb - tx) + '</td><td class="n">' + pct(tb ? tx / tb : null, 0) + '</td></tr>';
+    });
+    var nb = tot.income.b - tot.cogs.b - tot.expense.b + tot.other_income.b - tot.other_expense.b, nx = tot.income.x - tot.cogs.x - tot.expense.x + tot.other_income.x - tot.other_expense.x;
+    var gb = tot.income.b - tot.cogs.b, gx = tot.income.x - tot.cogs.x;
+    h += '<tr class="total"><td>Gross profit</td><td class="n">' + J(gb) + '</td><td class="n">' + J(gx) + '</td><td class="n">' + J(gx - gb) + '</td><td class="n">' + pct(gb ? gx / gb : null, 0) + '</td></tr>' +
+      '<tr class="total"><td>Net profit</td><td class="n">' + J(nb) + '</td><td class="n">' + J(nx) + '</td><td class="n">' + J(nx - nb) + '</td><td class="n">' + pct(nb ? nx / nb : null, 0) + '</td></tr></tbody></table></div>' +
+      (bdata.saved ? '' : '<div class="note info" style="margin-top:10px">No budget is saved for this year' + (bq.cls ? ' and class' : '') + ' yet. Choose "Enter the budget" to make one.</div>') + '</div>';
+    return h;
+  }
+  function wireVs() {
+    var idx = vsRange(); if (idx[1] < 0) return;
+    var from = bdata.months[idx[0]], last = bdata.months[idx[1]], to = ymd(new Date(+last.slice(0, 4), +last.slice(5, 7), 0));
+    all('[data-dr]').forEach(function (td) { td.onclick = function () { drill(td.getAttribute('data-dr'), from, to, bq.cls); }; });
+  }
+  function budgetCsv() {
+    var rows = [['Account', 'Type'].concat(bdata.months.map(mlabel)).concat(['Year'])];
+    meta.accounts.forEach(function (a) {
+      var r = bRow(a.id);
+      var vals = bq.mode === 'enter' && $('tr[data-acct="' + a.id + '"]') ? all('tr[data-acct="' + a.id + '"] input[data-i]').map(function (i) { return r2(num(i.value)); }) : r.budget;
+      rows.push([a.code + ' ' + a.name, a.type].concat(vals).concat([r2(vals.reduce(function (x, y) { return x + y; }, 0))]));
+      if (bq.mode === 'vs') rows.push([a.code + ' ' + a.name + ' (actual)', a.type].concat(r.actual).concat([r2(r.actual.reduce(function (x, y) { return x + y; }, 0))]));
+    });
+    csvDownload('budget-' + bq.year + (bq.cls ? '-class' + bq.cls : '') + '.csv', rows);
+  }
+
+  // ======================================================== CASH FORECAST ==
+  var fdata = null;
+  function forecastTab() {
+    return api('/api/budget/forecast').then(function (d) { fdata = d; drawForecast(); });
+  }
+  function chart(d) {
+    var W = 900, H = 220, P = { l: 70, r: 12, t: 12, b: 26 };
+    var vals = d.weeks.map(function (w) { return w.closing; }).concat([d.opening]), min = d.settings.min_cash;
+    if (min != null) vals.push(min);
+    var lo = Math.min(0, Math.min.apply(null, vals)), hi = Math.max.apply(null, vals); if (hi === lo) hi = lo + 1;
+    var y = function (v) { return P.t + (H - P.t - P.b) * (1 - (v - lo) / (hi - lo)); }, bw = (W - P.l - P.r) / d.weeks.length;
+    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto" role="img" aria-label="Closing balance by week">';
+    [lo, (lo + hi) / 2, hi].forEach(function (v) { s += '<line x1="' + P.l + '" x2="' + (W - P.r) + '" y1="' + y(v) + '" y2="' + y(v) + '" stroke="var(--line)"/><text x="' + (P.l - 6) + '" y="' + (y(v) + 4) + '" text-anchor="end">' + J0(v / 1000) + 'k</text>'; });
+    d.weeks.forEach(function (w, i) {
+      var x = P.l + i * bw + bw * 0.15, top = y(Math.max(0, w.closing)), bot = y(Math.min(0, w.closing));
+      s += '<rect x="' + x + '" y="' + top + '" width="' + (bw * 0.7) + '" height="' + Math.max(1, bot - top) + '" rx="3" fill="' + (w.low || w.closing < 0 ? 'var(--red)' : 'var(--bar)') + '"><title>' + dlabel(w.start) + ': J$' + J(w.closing) + '</title></rect>' +
+        '<text x="' + (x + bw * 0.35) + '" y="' + (H - 8) + '" text-anchor="middle">' + dlabel(w.start) + '</text>';
+    });
+    if (min != null) s += '<line x1="' + P.l + '" x2="' + (W - P.r) + '" y1="' + y(min) + '" y2="' + y(min) + '" stroke="var(--warn)" stroke-dasharray="5 4" stroke-width="1.5"/><text x="' + (W - P.r) + '" y="' + (y(min) - 4) + '" text-anchor="end">minimum</text>';
+    return s + '</svg>';
+  }
+  function drawForecast() {
+    var d = fdata, w = d.weeks, low = w.reduce(function (m, x) { return x.closing < m.closing ? x : m; }, w[0]), under = w.filter(function (x) { return x.low; }).length;
+    var h = '<div class="card"><h2>Cash forecast · next 13 weeks</h2><p class="sub">Starts with the money on hand now, then adds what is due in and takes off what is due out, week by week (weeks start on Monday). Click a figure to see what makes it up.</p>' +
+      d.notes.map(function (n) { return '<div class="note warn">' + esc(n) + '</div>'; }).join('') +
+      '<div class="kpis"><div class="kpi"><span>Money on hand now</span><b>J$' + J(d.opening) + '</b><small>' + (d.settings.opening_override != null ? 'typed in under Assumptions' : 'bank and cash accounts in the ledger') + '</small></div>' +
+      '<div class="kpi"><span>Lowest point</span><b style="color:' + (low.closing < 0 || low.low ? 'var(--red)' : 'inherit') + '">J$' + J(low.closing) + '</b><small>week of ' + dlabel(low.start) + '</small></div>' +
+      '<div class="kpi"><span>In 13 weeks</span><b>J$' + J(w[w.length - 1].closing) + '</b><small>' + (w[w.length - 1].closing >= d.opening ? 'up ' : 'down ') + 'J$' + J(Math.abs(w[w.length - 1].closing - d.opening)) + '</small></div>' +
+      '<div class="kpi"><span>Weeks below your minimum</span><b style="color:' + (under ? 'var(--red)' : 'inherit') + '">' + (d.settings.min_cash == null ? '–' : under) + '</b><small>' + (d.settings.min_cash == null ? 'set a minimum under Assumptions' : 'minimum J$' + J(d.settings.min_cash)) + '</small></div></div>' +
+      '<div style="margin-top:12px">' + chart(d) + '</div></div>';
+    h += '<div class="card"><div class="controls"><span style="margin-left:auto"></span><button id="fpr">Print / PDF</button><button id="fcsv">CSV</button></div><div class="scroll"><table class="fgrid"><thead><tr><th>Week of</th>' + w.map(function (x) { return '<th class="n">' + dlabel(x.start) + '</th>'; }).join('') + '<th class="n">13 weeks</th></tr></thead><tbody>' +
+      '<tr><td>Money at the start</td>' + w.map(function (x) { return '<td class="n">' + J0(x.opening) + '</td>'; }).join('') + '<td></td></tr>';
+    ['in', 'out'].forEach(function (dir) {
+      h += '<tr class="head"><td colspan="' + (w.length + 2) + '">' + (dir === 'in' ? 'Money in' : 'Money out') + '</td></tr>';
+      d.sources.filter(function (s) { return s.dir === dir; }).forEach(function (s) {
+        var t = s.weeks.reduce(function (a, c) { return a + c.amount; }, 0);
+        if (!t && !/^own_/.test(s.key)) return;
+        h += '<tr><td>' + esc(s.label) + '</td>' + s.weeks.map(function (c, i) { return '<td class="n' + (c.amount ? ' cell' : '') + '" data-c="' + s.key + ':' + i + '">' + (c.amount ? J0(c.amount) : '') + '</td>'; }).join('') + '<td class="n">' + J0(t) + '</td></tr>';
+      });
+      h += '<tr class="total"><td>Total money ' + dir + '</td>' + w.map(function (x) { return '<td class="n">' + J0(x[dir]) + '</td>'; }).join('') + '<td class="n">' + J0(w.reduce(function (a, x) { return a + x[dir]; }, 0)) + '</td></tr>';
+    });
+    h += '<tr class="total"><td>Net for the week</td>' + w.map(function (x) { return '<td class="n' + (x.net < 0 ? ' bad' : '') + '">' + J0(x.net) + '</td>'; }).join('') + '<td class="n">' + J0(w.reduce(function (a, x) { return a + x.net; }, 0)) + '</td></tr>' +
+      '<tr class="total"><td>Money at the end</td>' + w.map(function (x) { return '<td class="n' + (x.low || x.closing < 0 ? ' bad' : '') + '">' + J0(x.closing) + '</td>'; }).join('') + '<td></td></tr></tbody></table></div></div>';
+    var S = d.settings, A = d.averages;
+    h += '<div class="grid"><div class="card form"><h2>Assumptions</h2><p class="sub">Leave a box empty to use the figure worked out from the books (shown in grey).</p>' +
+      '<label>Money on hand now (J$)</label><input id="s_open" inputmode="decimal" value="' + (S.opening_override == null ? '' : S.opening_override) + '" placeholder="' + J(d.cash_accounts.reduce(function (a, c) { return a + c.balance; }, 0)) + ' from the ledger">' +
+      '<label>Of what customers owe that is already overdue, % expected in this week</label><input id="s_od" type="number" min="0" max="100" value="' + S.overdue_pct + '">' +
+      '<label>Counter and workshop takings a week (J$)</label><input id="s_tk" inputmode="decimal" value="' + (S.takings_weekly == null ? '' : S.takings_weekly) + '" placeholder="' + J(A.takings_weekly) + ' (last 8 weeks)">' +
+      '<label>New supplier bills a week, for stock and other buying (J$)</label><input id="s_pu" inputmode="decimal" value="' + (S.purchases_weekly == null ? '' : S.purchases_weekly) + '" placeholder="' + J(A.purchases_weekly) + ' (last 8 weeks)">' +
+      '<label>Pay for those from week (bills already received are under Supplier bills)</label><input id="s_pw" type="number" min="1" max="13" value="' + S.purchases_from_week + '">' +
+      '<label>Lowest balance you want to keep (J$)</label><input id="s_min" inputmode="decimal" value="' + (S.min_cash == null ? '' : S.min_cash) + '" placeholder="none">' +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="s_save">Save assumptions</button></div>' +
+      '<p class="sub" style="margin-top:8px">Money on hand from: ' + (d.cash_accounts.length ? d.cash_accounts.map(function (a) { return esc(a.code + ' ' + a.name) + ' J$' + J(a.balance); }).join(' · ') : 'no bank or cash accounts') + '</p></div>';
+    h += '<div class="card form"><h2>Your own lines</h2><p class="sub">One-off money in or out the books cannot know about yet: a loan coming in, an insurance claim, a new machine, a tax payment.</p>' +
+      '<div class="controls"><div><label>Date</label><input type="date" id="o_day" value="' + esc(d.today) + '" style="width:auto"></div><div><label>In or out</label><select id="o_dir" style="width:auto"><option value="out">Money out</option><option value="in">Money in</option></select></div>' +
+      '<div><label>Amount (J$)</label><input id="o_amt" inputmode="decimal" style="width:130px"></div></div><label>What it is</label><input id="o_desc" maxlength="200" placeholder="New compressor">' +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="o_add">Add line</button></div>' +
+      (d.own.length ? '<table><tbody>' + d.own.map(function (o) { return '<tr><td>' + esc(o.day) + '</td><td>' + esc(o.description) + '</td><td class="n" style="color:' + (o.direction === 'in' ? 'var(--ok)' : 'var(--red)') + '">' + (o.direction === 'in' ? '+' : '−') + J(o.amount) + '</td><td class="n"><button class="sm" data-od="' + o.id + '">Remove</button></td></tr>'; }).join('') + '</tbody></table>' : '<p class="sub">None yet.</p>') + '</div></div>';
+    $('#out').innerHTML = h;
+    all('[data-c]').forEach(function (td) {
+      if (!td.classList.contains('cell')) return;
+      td.onclick = function () {
+        var p = td.getAttribute('data-c').split(':'), s = d.sources.filter(function (x) { return x.key === p[0]; })[0], c = s.weeks[+p[1]], wk = d.weeks[+p[1]];
+        modal('<h2>' + esc(s.label) + '</h2><p class="sub">Week of ' + dlabel(wk.start) + ' to ' + dlabel(wk.end) + '</p><table><tbody>' + c.items.map(function (it) { return '<tr><td>' + esc(it.day || '') + '</td><td>' + esc(it.label) + '</td><td class="n">' + J(it.amount) + '</td></tr>'; }).join('') +
+          (c.more ? '<tr><td colspan="3" class="sub">and ' + c.more + ' more</td></tr>' : '') + '<tr class="total"><td colspan="2">Total</td><td class="n">' + J(c.amount) + '</td></tr></tbody></table><div class="controls" style="margin-top:10px"><button id="mx">Close</button></div>');
+        $('#mx').onclick = closeModal;
+      };
+    });
+    $('#fpr').onclick = function () { window.print(); };
+    $('#fcsv').onclick = function () {
+      var rows = [['', ].concat(w.map(function (x) { return x.start; }))];
+      rows.push(['Money at the start'].concat(w.map(function (x) { return x.opening; })));
+      d.sources.forEach(function (s) { rows.push([(s.dir === 'in' ? 'In: ' : 'Out: ') + s.label].concat(s.weeks.map(function (c) { return c.amount; }))); });
+      rows.push(['Total in'].concat(w.map(function (x) { return x.in; }))); rows.push(['Total out'].concat(w.map(function (x) { return x.out; })));
+      rows.push(['Money at the end'].concat(w.map(function (x) { return x.closing; })));
+      csvDownload('cash-forecast-' + d.today + '.csv', rows);
+    };
+    var opt = function (id) { var v = $(id).value.trim(); return v === '' ? null : num(v); };
+    $('#s_save').onclick = function () {
+      api('/api/budget/forecast/settings', 'PUT', { opening_override: opt('#s_open'), overdue_pct: opt('#s_od'), takings_weekly: opt('#s_tk'), purchases_weekly: opt('#s_pu'), purchases_from_week: opt('#s_pw'), min_cash: opt('#s_min') })
+        .then(function () { toast('Saved'); return forecastTab(); }).catch(function (e) { toast(e.message); });
+    };
+    $('#o_add').onclick = function () {
+      api('/api/budget/forecast/items', 'POST', { day: $('#o_day').value, direction: $('#o_dir').value, amount: num($('#o_amt').value), description: $('#o_desc').value })
+        .then(function () { toast('Added'); return forecastTab(); }).catch(function (e) { toast(e.message); });
+    };
+    all('[data-od]').forEach(function (b) { b.onclick = function () { api('/api/budget/forecast/items/' + b.getAttribute('data-od'), 'DELETE').then(forecastTab).catch(function (e) { toast(e.message); }); }; });
+  }
+
+  // =========================================================== BREAK-EVEN ==
+  var beq = null, bedata = null, what = { price: 0, vc: 0, fc: 0 };
+  function breakevenTab() {
+    return loadMeta().then(function () {
+      if (!beq) { var t = new Date(); beq = { from: ymd(new Date(t.getFullYear(), t.getMonth() - 3, 1)), to: ymd(new Date(t.getFullYear(), t.getMonth(), 0)), cls: '' }; }
+      return api('/api/budget/breakeven?from=' + beq.from + '&to=' + beq.to + (beq.cls ? '&class_id=' + beq.cls : '')).then(function (d) { bedata = d; drawBreakeven(); });
+    });
+  }
+  // Splits a P&L into sales, variable costs and fixed costs. Other income lowers the fixed costs.
+  function split(accounts, variable) {
+    var x = { sales: 0, cogs: 0, varExp: 0, fixed: 0 };
+    accounts.forEach(function (a) {
+      if (a.type === 'income') x.sales += a.amount;
+      else if (a.type === 'cogs') x.cogs += a.amount;
+      else if (a.type === 'other_income') x.fixed -= a.amount;
+      else if (variable.indexOf(a.id) >= 0) x.varExp += a.amount;
+      else x.fixed += a.amount;
+    });
+    return x;
+  }
+  function beCalc() {
+    var d = bedata, x = split(d.accounts, d.variable);
+    var sales = x.sales * (1 + what.price / 100), varc = (x.cogs + x.varExp) * (1 + what.vc / 100), fixedPM = x.fixed / d.months * (1 + what.fc / 100);
+    var cm = sales ? (sales - varc) / sales : null;
+    var be = cm > 0 ? fixedPM / cm : null;
+    var tdpm = d.trading_days ? d.trading_days / d.months : 26;
+    var m = split(d.month.accounts, d.variable), soFar = m.sales;
+    var proj = d.month.days_gone ? soFar / d.month.days_gone * d.month.days_in_month : 0;
+    var left = d.month.days_in_month - d.month.days_gone;
+    return { x: x, sales: sales, varc: varc, fixedPM: fixedPM, cm: cm, be: be, tdpm: tdpm, salesPM: sales / d.months, soFar: soFar, proj: proj, left: left,
+      needDay: be != null && left > 0 ? Math.max(0, (be - soFar) / left) : null, safety: be != null && proj ? (proj - be) / proj : null };
+  }
+  function drawBreakeven() {
+    var d = bedata;
+    var expAcc = d.accounts.filter(function (a) { return a.type === 'expense' || a.type === 'other_expense'; });
+    var h = '<div class="card"><h2>Break-even</h2><p class="sub">The sales a month that cover every cost, worked out from a past period of the books. Cost of sales and any expense you mark as "goes up with sales" are variable; every other cost is fixed.</p>' +
+      '<div class="controls"><div><label>From</label><input type="date" id="pf" value="' + beq.from + '"></div><div><label>To</label><input type="date" id="pt" value="' + beq.to + '"></div><div><label>For</label><select id="pc">' + classOptions(beq.cls) + '</select></div><button class="primary" id="pgo">Show</button></div>' +
+      (meta.ledger_started ? '' : '<div class="note warn">The ledger has not been started, so there are no figures to work from yet.</div>') + '<div id="bek"></div></div>';
+    h += '<div class="grid"><div class="card"><h2>What if…</h2><p class="sub">Try a change and see the new break-even. Nothing is saved.</p>' +
+      '<div class="slider"><span>Prices up / down</span><input type="range" id="w_p" min="-30" max="30" step="1" value="' + what.price + '"><b id="w_pv"></b></div>' +
+      '<div class="slider"><span>Cost of goods up / down</span><input type="range" id="w_v" min="-30" max="30" step="1" value="' + what.vc + '"><b id="w_vv"></b></div>' +
+      '<div class="slider"><span>Fixed costs up / down</span><input type="range" id="w_f" min="-30" max="30" step="1" value="' + what.fc + '"><b id="w_fv"></b></div>' +
+      '<button class="sm" id="w_r">Reset</button><div id="bew" style="margin-top:10px"></div></div>' +
+      '<div class="card"><h2>Which costs go up with sales?</h2><p class="sub">Tick expenses that rise and fall with sales, such as card fees or sales commission. The rest are fixed (rent, salaries, light).</p>' +
+      (expAcc.length ? '<table><tbody>' + expAcc.map(function (a) { return '<tr><td><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" data-v="' + a.id + '"' + (d.variable.indexOf(a.id) >= 0 ? ' checked' : '') + ' style="width:auto">' + esc(a.code + ' ' + a.name) + '</label></td><td class="n">' + J(a.amount) + '</td></tr>'; }).join('') + '</tbody></table>' +
+        '<div class="controls" style="margin-top:10px"><button class="primary" id="vsave">Save</button></div>' : '<p class="sub">No expenses in this period.</p>') + '</div></div>';
+    $('#out').innerHTML = h;
+    $('#pgo').onclick = function () { beq = { from: $('#pf').value, to: $('#pt').value, cls: $('#pc').value }; breakevenTab().catch(function (e) { toast(e.message); }); };
+    var upd = function () {
+      what = { price: +$('#w_p').value, vc: +$('#w_v').value, fc: +$('#w_f').value };
+      ['p', 'v', 'f'].forEach(function (k) { var v = +$('#w_' + k).value; $('#w_' + k + 'v').textContent = (v > 0 ? '+' : '') + v + '%'; });
+      drawBe();
+    };
+    ['#w_p', '#w_v', '#w_f'].forEach(function (s) { $(s).oninput = upd; });
+    $('#w_r').onclick = function () { $('#w_p').value = 0; $('#w_v').value = 0; $('#w_f').value = 0; upd(); };
+    if ($('#vsave')) $('#vsave').onclick = function () {
+      var ids = all('[data-v]').filter(function (c) { return c.checked; }).map(function (c) { return +c.getAttribute('data-v'); });
+      api('/api/budget/breakeven/variable', 'PUT', { account_ids: ids }).then(function (r) { bedata.variable = r.variable; toast('Saved'); drawBe(); }).catch(function (e) { toast(e.message); });
+    };
+    all('[data-v]').forEach(function (c) { c.onchange = function () { bedata.variable = all('[data-v]').filter(function (x) { return x.checked; }).map(function (x) { return +x.getAttribute('data-v'); }); drawBe(); }; });
+    upd();
+  }
+  function drawBe() {
+    var d = bedata, c = beCalc(), base = (function () { var s = what; what = { price: 0, vc: 0, fc: 0 }; var r = beCalc(); what = s; return r; })();
+    var k = '';
+    if (!c.x.sales) k = '<div class="note info">There are no sales in this period to work from. Choose another period.</div>';
+    else if (!(c.cm > 0)) k = '<div class="note bad">Costs that go up with sales are more than the sales themselves (' + pct(c.varc / c.sales) + '), so no level of sales breaks even. Check prices and the costs marked variable.</div>';
+    else {
+      var gap = c.proj - c.be;
+      k = '<div class="kpis" style="margin-top:6px"><div class="kpi"><span>Break-even sales a month</span><b>J$' + J0(c.be) + '</b><small>about J$' + J0(c.be / c.tdpm) + ' a trading day</small></div>' +
+        '<div class="kpi"><span>Margin left after variable costs</span><b>' + pct(c.cm) + '</b><small>of every J$ of sales</small></div>' +
+        '<div class="kpi"><span>Fixed costs a month</span><b>J$' + J0(c.fixedPM) + '</b><small>average over ' + d.months.toFixed(1) + ' months</small></div>' +
+        '<div class="kpi"><span>Average sales a month</span><b>J$' + J0(c.salesPM) + '</b><small>' + (c.salesPM >= c.be ? 'J$' + J0(c.salesPM - c.be) + ' above break-even' : 'J$' + J0(c.be - c.salesPM) + ' short of break-even') + '</small></div></div>' +
+        '<h3 style="font-size:14px;margin:14px 0 6px">This month (' + esc(d.month.from) + ' to ' + esc(d.month.to) + ')</h3><div class="kpis">' +
+        '<div class="kpi"><span>Sales so far</span><b>J$' + J0(c.soFar) + '</b><small>' + d.month.days_gone + ' of ' + d.month.days_in_month + ' days</small></div>' +
+        '<div class="kpi"><span>On course for</span><b style="color:' + (gap >= 0 ? 'var(--ok)' : 'var(--red)') + '">J$' + J0(c.proj) + '</b><small>' + (gap >= 0 ? 'J$' + J0(gap) + ' above break-even' : 'J$' + J0(-gap) + ' below break-even') + '</small></div>' +
+        '<div class="kpi"><span>Margin of safety</span><b style="color:' + (c.safety >= 0 ? 'inherit' : 'var(--red)') + '">' + pct(c.safety) + '</b><small>how far sales can fall before a loss</small></div>' +
+        '<div class="kpi"><span>Needed a day from now</span><b>' + (c.needDay == null ? '–' : 'J$' + J0(c.needDay)) + '</b><small>' + (c.left > 0 ? 'for the ' + c.left + ' day' + (c.left === 1 ? '' : 's') + ' left' : 'month ends today') + '</small></div></div>';
+    }
+    $('#bek').innerHTML = k + (c.x.sales ? '<table style="margin-top:12px"><tbody>' +
+      '<tr><td>Sales in the period</td><td class="n">' + J(c.x.sales) + '</td></tr><tr><td>Cost of sales</td><td class="n">' + J(c.x.cogs) + '</td></tr>' +
+      '<tr><td>Expenses that go up with sales</td><td class="n">' + J(c.x.varExp) + '</td></tr><tr><td>Fixed costs (less other income)</td><td class="n">' + J(c.x.fixed) + '</td></tr>' +
+      '<tr class="total"><td>Profit in the period</td><td class="n">' + J(c.x.sales - c.x.cogs - c.x.varExp - c.x.fixed) + '</td></tr></tbody></table>' : '');
+    var changed = what.price || what.vc || what.fc;
+    $('#bew').innerHTML = !changed ? '<p class="sub">Move a slider.</p>' : !(c.cm > 0) ? '<div class="note bad">No break-even at these figures.</div>' :
+      '<div class="kpis"><div class="kpi"><span>New break-even a month</span><b>J$' + J0(c.be) + '</b><small>' + (base.be ? (c.be <= base.be ? 'J$' + J0(base.be - c.be) + ' lower' : 'J$' + J0(c.be - base.be) + ' higher') : '') + '</small></div>' +
+      '<div class="kpi"><span>Profit a month at today\'s volume</span><b>J$' + J0(c.salesPM * c.cm - c.fixedPM) + '</b><small>was J$' + J0(base.salesPM * (base.cm || 0) - base.fixedPM) + '</small></div></div>' +
+      (what.price ? '<p class="sub" style="margin-top:6px">A price change assumes customers buy the same quantity.</p>' : '');
+  }
+
+  // ========================================================== INVESTMENTS ==
+  function roiTab() {
+    return loadMeta().then(function () { return api('/api/budget/investments'); }).then(function (d) {
+      var h = '<div class="card"><h2>Investments &amp; ROI</h2><p class="sub">What you put into a branch, vehicle, machine or stock line, what it is expected to earn, and, when it has its own class in the books, what it has actually earned.</p>' +
+        '<div class="controls"><button class="primary" id="inew">＋ New investment</button></div>' +
+        (d.investments.length ? '<div class="scroll"><table><thead><tr><th>Investment</th><th>Started</th><th class="n">Invested</th><th class="n">Expected a month</th><th class="n">Expected payback</th><th class="n">Expected ROI a year</th><th class="n">Actual profit so far</th><th class="n">Actual ROI so far</th><th class="n">Payback at current results</th><th></th></tr></thead><tbody>' +
+          d.investments.map(function (i) {
+            var pay = i.monthly_profit > 0 ? i.amount / i.monthly_profit : null, roi = i.monthly_profit * 12 / i.amount;
+            var act = i.actual_profit, perM = act != null && i.months > 0.5 ? act / i.months : null, payNow = perM > 0 ? i.amount / perM : null;
+            var months = function (m) { return m == null ? '–' : m < 24 ? m.toFixed(1) + ' months' : (m / 12).toFixed(1) + ' years'; };
+            return '<tr class="click" data-iv="' + i.id + '"><td><b>' + esc(i.name) + '</b>' + (i.class ? '<br><small class="sub">class ' + esc(i.class) + '</small>' : '') + (i.status === 'closed' ? ' <span class="pill">closed</span>' : '') + '</td><td>' + esc(i.start_date) + '</td>' +
+              '<td class="n">' + J0(i.amount) + '</td><td class="n">' + J0(i.monthly_profit) + '</td><td class="n">' + months(pay) + '</td><td class="n">' + pct(roi) + '</td>' +
+              '<td class="n">' + (act == null ? '<small class="sub">no class</small>' : J0(act)) + '</td><td class="n' + (act != null && act < 0 ? ' bad' : '') + '">' + (act == null ? '–' : pct(act / i.amount)) + '</td>' +
+              '<td class="n">' + (act == null ? '–' : payNow ? months(payNow) + (act >= i.amount ? ' <span class="pill ok">paid back</span>' : '') : '<span class="pill warn">not earning</span>') + '</td><td class="n"><button class="sm">Open</button></td></tr>';
+          }).join('') + '</tbody></table></div>' : '<div class="empty">No investments yet.</div>') + '</div>';
+      $('#out').innerHTML = h;
+      $('#inew').onclick = function () { invForm(null, roiTab); };
+      all('[data-iv]').forEach(function (tr) { tr.onclick = function () { invForm(d.investments.filter(function (x) { return x.id === +tr.getAttribute('data-iv'); })[0], roiTab); }; });
+    });
+  }
+  function invForm(i, after) {
+    var v = i || { name: '', class_id: '', start_date: ymd(new Date()), amount: '', monthly_profit: '', notes: '', status: 'active' };
+    modal('<h2>' + (i ? esc(i.name) : 'New investment') + '</h2><div class="form">' +
+      '<label>Name</label><input id="i_n" maxlength="120" value="' + esc(v.name) + '" placeholder="Delivery van, Spanish Town branch…">' +
+      '<div class="grid"><div><label>Started</label><input type="date" id="i_d" value="' + esc(v.start_date) + '"></div><div><label>Class in the books (for actual profit)</label><select id="i_c">' + classOptions(v.class_id, 'None') + '</select></div>' +
+      '<div><label>Amount invested (J$)</label><input id="i_a" inputmode="decimal" value="' + (v.amount === '' ? '' : v.amount) + '"></div><div><label>Expected profit a month (J$)</label><input id="i_m" inputmode="decimal" value="' + (v.monthly_profit === '' ? '' : v.monthly_profit) + '"></div></div>' +
+      '<label>Notes</label><textarea id="i_x" rows="3">' + esc(v.notes || '') + '</textarea>' +
+      (i ? '<label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" id="i_s" style="width:auto"' + (v.status === 'closed' ? ' checked' : '') + '> Closed (sold, ended or written off)</label>' : '') +
+      '<p class="sub" style="margin-top:8px">A class gives the actual profit: income less every cost posted to that class since the start date. Without one, only the expected figures are shown.</p>' +
+      '<div id="i_docs"></div><div class="controls" style="margin-top:10px"><button class="primary" id="i_save">Save</button>' + (i ? '<button id="i_del" style="color:var(--red)">Delete</button>' : '') + '<button id="i_x2">Cancel</button></div></div>');
+    if (i && window.VADocs) window.VADocs.mount($('#i_docs'), 'investment', i.id, { category: 'banking' });
+    $('#i_x2').onclick = closeModal;
+    $('#i_save').onclick = function () {
+      var body = { name: $('#i_n').value, start_date: $('#i_d').value, class_id: $('#i_c').value || null, amount: num($('#i_a').value), monthly_profit: num($('#i_m').value), notes: $('#i_x').value, status: $('#i_s') && $('#i_s').checked ? 'closed' : 'active' };
+      api('/api/budget/investments' + (i ? '/' + i.id : ''), i ? 'PUT' : 'POST', body).then(function () { closeModal(); toast('Saved'); after(); }).catch(function (e) { toast(e.message); });
+    };
+    if ($('#i_del')) $('#i_del').onclick = function () {
+      if (!confirm('Delete ' + i.name + '? Its documents stay in the document centre.')) return;
+      api('/api/budget/investments/' + i.id, 'DELETE').then(function () { closeModal(); toast('Deleted'); after(); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  function show() {
+    all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); });
+    try { localStorage.setItem('vision.budgetTab', tab); } catch (_) {}
+    var f = { budget: budgetTab, forecast: forecastTab, breakeven: breakevenTab, roi: roiTab }[tab] || budgetTab;
+    $('#out').innerHTML = '<div class="empty">Loading…</div>';
+    f().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
+  show();
+})();
+</script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+</body>
+</html>

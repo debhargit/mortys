@@ -18149,7 +18149,7 @@ function stub(label){ return async function(panel){ panel.innerHTML = '<div clas
 var TILL_ORIGIN = 'https://till.visionautosolutions.com';
 var ON_WEBSITE = location.hostname !== 'till.visionautosolutions.com' &&
   /(^|\.)visionautosolutions\.(com|pages\.dev)$/.test(location.hostname);
-var TILL_ONLY_PAGES = ['accounting', 'documents', 'receivables', 'payables', 'banking', 'loans-rent', 'report-balancing', 'payroll',
+var TILL_ONLY_PAGES = ['accounting', 'budget', 'documents', 'receivables', 'payables', 'banking', 'loans-rent', 'report-balancing', 'payroll',
   'clock', 'attendance', 'commission', 'training', 'hiring', 'dispatch', 'fleet-wall', 'mobile',
   'driver', 'cashier', 'warehouse', 'stockcash', 'report-planning', 'terminal', 'ai', 'system', 'security'];
 function tillHref(href) {
@@ -18180,6 +18180,7 @@ var MODULE_GROUPS = [
   ]},
   { title: '💰 Money', items: [
     { href: '/accounting.html',  icon: '📒', name: 'Accounting', blurb: 'General ledger, journals, trial balance, QuickBooks export' },
+    { href: '/budget.html',      icon: '💰', name: 'Budget & forecast', blurb: 'Budget against actual, 13-week cash forecast, break-even, ROI' },
     { href: '/receivables.html', icon: '📥', name: 'Receivables', blurb: 'Customer accounts, payments, statements, collections' },
     { href: '/payables.html',    icon: '📤', name: 'Payables', blurb: 'Supplier bills and paying them' },
     { href: '/banking.html',     icon: '🏦', name: 'Banking', blurb: 'Registers, deposits, reconciliation' },
