@@ -1,7 +1,8 @@
 /* =============================================================================
    Vision Auto Solutions -- "Lost sale" quick entry (Phase 5)
 
-   VisionLostSale.open({ q, product, channel, onSaved })
+   VisionLostSale.open({ q, product, channel, qty, unit_price, reason, customer, vehicle, onSaved })
+   VisionLostSale.openMany({ lines, customer, vehicle, channel, onSaved })  -- a whole ticket
    A self-contained dialog for recording a part a customer asked for that we
    could not sell: search the catalogue or type what was asked, quantity,
    reason, optional customer phone for a call-back. Posts /api/plan/lost-sales.
@@ -92,7 +93,7 @@
       box.style.display = 'flex';
       box.innerHTML = '<span><b>' + esc(picked.sku || picked.img) + '</b> ' + esc(picked.name) + ' &middot; ' +
         (picked.stock_count > 0 ? picked.stock_count + ' in stock' : 'out of stock') + ' &middot; ' + money(picked.price_usd) + '</span><a href="#" id="vls-unpick">change</a>';
-      $('vls-reason').value = picked.stock_count > 0 ? 'price' : 'out_of_stock';
+      $('vls-reason').value = opts.reason || (picked.stock_count > 0 ? 'price' : 'out_of_stock');
       if (!$('vls-price').value && picked.price_usd != null) $('vls-price').value = picked.price_usd;
       $('vls-unpick').onclick = function (e) { e.preventDefault(); picked = null; showPicked(); $('vls-q').focus(); };
     }
@@ -133,6 +134,7 @@
         qty: $('vls-qty').value, reason: $('vls-reason').value, channel: $('vls-ch').value,
         unit_price: $('vls-price').value, vehicle: $('vls-veh').value, customer_name: $('vls-name').value,
         customer_phone: $('vls-phone').value, follow_up: $('vls-fu').checked, competitor: $('vls-comp').value, note: $('vls-note').value,
+        customer_id: opts.customer && opts.customer.id || null,
       };
       if (!body.product_img && !body.description) { $('vls-err').textContent = 'Pick a part or type what the customer asked for.'; $('vls-q').focus(); return; }
       if (body.follow_up && !body.customer_phone.trim()) { $('vls-err').textContent = 'A call-back needs the customer’s phone number.'; $('vls-phone').focus(); return; }
@@ -143,11 +145,96 @@
       }).catch(function (e) { btn.disabled = false; $('vls-err').textContent = e.message; });
     };
 
+    // From the POS: the ticket's customer and vehicle, and for a ticket line
+    // its quantity and price, so the counter only has to say why.
+    var cu = opts.customer || {};
+    if (cu.name) $('vls-name').value = cu.name;
+    if (cu.phone) { $('vls-phone').value = cu.phone; $('vls-fu').checked = true; }
+    if (opts.vehicle) $('vls-veh').value = opts.vehicle;
+    if (opts.unit_price != null && opts.unit_price !== '') $('vls-price').value = opts.unit_price;
     if (opts.product) pick(opts.product);
     else if (opts.q) { $('vls-q').value = opts.q; search(); }
-    setTimeout(function () { (opts.product ? $('vls-qty') : $('vls-q')).focus(); }, 0);
+    if (opts.qty) $('vls-qty').value = opts.qty;
+    if (opts.reason) $('vls-reason').value = opts.reason;
+    setTimeout(function () { (opts.product ? $('vls-reason') : $('vls-q')).focus(); }, 0);
     return { close: close };
   }
 
-  window.VisionLostSale = { open: open };
+  // A whole ticket the customer walked away from: one reason for every line,
+  // with a box per line to leave out the ones that do not count. Each ticked
+  // line becomes its own lost-sale record.
+  //   openMany({ lines: [{ img, sku, name, qty, price, stock_count }], customer, vehicle, channel, onSaved })
+  function openMany(opts) {
+    opts = opts || {};
+    css();
+    var lines = opts.lines || [], cu = opts.customer || {};
+    var back = document.createElement('div');
+    back.className = 'vls-back';
+    back.innerHTML =
+      '<div class="vls" role="dialog" aria-modal="true" aria-labelledby="vls-h">' +
+      '<h3 id="vls-h">Record the ticket as lost sales</h3><p class="sub">The customer left without buying. Each ticked line is recorded as a lost sale for reordering and a call-back.</p>' +
+      '<div class="hits" style="display:block;max-height:220px">' + lines.map(function (l, i) {
+        return '<label class="vls-hit" style="justify-content:flex-start;margin:0;color:inherit;font-size:13px"><input type="checkbox" class="vls-line" data-i="' + i + '" checked style="width:auto">' +
+          '<span style="flex:1"><b>' + esc(l.sku || l.img) + '</b> ' + esc(l.name) + '</span><small>' + l.qty + ' × ' + money(l.price) + (l.stock_count > 0 ? '' : ' · out') + '</small></label>';
+      }).join('') + '</div>' +
+      '<div class="row"><div><label for="vls-reason">Why</label><select id="vls-reason">' + REASONS.map(function (r) { return '<option value="' + r[0] + '">' + r[1] + '</option>'; }).join('') + '</select></div>' +
+      '<div><label for="vls-ch">How they asked</label><select id="vls-ch">' + CHANNELS.map(function (c) { return '<option value="' + c[0] + '">' + c[1] + '</option>'; }).join('') + '</select></div></div>' +
+      '<div class="row"><div><label for="vls-name">Customer name</label><input id="vls-name"></div>' +
+      '<div><label for="vls-phone">Customer phone</label><input id="vls-phone" type="tel"></div></div>' +
+      '<label for="vls-veh">Vehicle</label><input id="vls-veh">' +
+      '<label class="chk"><input type="checkbox" id="vls-fu"> Call the customer back</label>' +
+      '<label for="vls-comp">Bought elsewhere / competitor (if known)</label><input id="vls-comp">' +
+      '<label for="vls-note">Note</label><input id="vls-note">' +
+      '<div class="err" id="vls-err" role="alert"></div>' +
+      '<div class="actions"><button type="button" id="vls-cancel">Cancel</button><button type="button" class="go" id="vls-save">Save lost sales</button></div></div>';
+    document.body.appendChild(back);
+    var $ = function (id) { return back.querySelector('#' + id); };
+    function close() { document.removeEventListener('keydown', onKey, true); back.remove(); }
+    function onKey(e) { if (e.key === 'Escape') { e.stopPropagation(); close(); } }
+    document.addEventListener('keydown', onKey, true);
+    back.addEventListener('mousedown', function (e) { if (e.target === back) close(); });
+    $('vls-cancel').onclick = close;
+    $('vls-ch').value = opts.channel || 'counter';
+    // Most lines out of stock: that is the likely reason; otherwise price.
+    var outs = lines.filter(function (l) { return !(l.stock_count > 0); }).length;
+    $('vls-reason').value = outs * 2 >= lines.length ? 'out_of_stock' : 'price';
+    if (cu.name) $('vls-name').value = cu.name;
+    if (cu.phone) { $('vls-phone').value = cu.phone; $('vls-fu').checked = true; }
+    if (opts.vehicle) $('vls-veh').value = opts.vehicle;
+    $('vls-phone').addEventListener('input', function () { $('vls-fu').checked = !!this.value.trim(); });
+
+    $('vls-save').onclick = function () {
+      var btn = this;
+      var chosen = Array.prototype.filter.call(back.querySelectorAll('.vls-line'), function (c) { return c.checked; });
+      if (!chosen.length) { $('vls-err').textContent = 'Tick at least one line.'; return; }
+      var common = {
+        reason: $('vls-reason').value, channel: $('vls-ch').value, vehicle: $('vls-veh').value,
+        customer_id: cu.id || null, customer_name: $('vls-name').value, customer_phone: $('vls-phone').value,
+        follow_up: $('vls-fu').checked, competitor: $('vls-comp').value, note: $('vls-note').value,
+      };
+      if (common.follow_up && !common.customer_phone.trim()) { $('vls-err').textContent = 'A call-back needs the customer’s phone number.'; $('vls-phone').focus(); return; }
+      btn.disabled = true; $('vls-err').textContent = '';
+      // One at a time, so a refusal stops the rest and says which line. A
+      // saved line is unticked, so pressing Save again does not repeat it.
+      var done = 0;
+      chosen.reduce(function (p, box) {
+        var l = lines[+box.getAttribute('data-i')];
+        return p.then(function () {
+          return req('/api/plan/lost-sales', Object.assign({ product_img: l.img || null, description: l.img ? '' : l.name, qty: l.qty, unit_price: l.price || '' }, common))
+            .then(function () { done++; box.checked = false; box.disabled = true; })
+            .catch(function (e) { throw new Error((l.name || 'A line') + ': ' + e.message); });
+        });
+      }, Promise.resolve()).then(function () {
+        close();
+        if (typeof opts.onSaved === 'function') opts.onSaved({ count: done });
+      }).catch(function (e) {
+        btn.disabled = false;
+        $('vls-err').textContent = (done ? done + ' saved before this failed. ' : '') + e.message;
+      });
+    };
+    setTimeout(function () { $('vls-reason').focus(); }, 0);
+    return { close: close };
+  }
+
+  window.VisionLostSale = { open: open, openMany: openMany };
 })();

@@ -30,7 +30,11 @@ Hold and recall: Hold (F7) parks the cart so you can serve someone else; Recall 
 
 Quote instead of sale: QUOTE saves the cart as a quote without taking money. It is listed under Sales & POS > Quotes, and can be turned into a sale later.
 
-Part not in stock: press "Lost sale" and record what the customer asked for and how to call them back. Purchasing sees it on the Planning > Lost sales list and the call-back list.
+Lost sales: record every part a customer wanted but did not buy, so purchasing can stock it and someone can call them back. The ticket's customer, phone and vehicle are filled in for you; choose why (out of stock, we do not carry it, price, wait too long, other brand) and tick the call-back if they want one.
+- Not on the ticket: press "✗ Lost sale" beside the search box. If a search finds nothing, the "Record ... as a lost sale" button under it does the same with what you typed.
+- On the ticket but they will not take it: press the yellow ✗ on that line. Its quantity and price are recorded and the line comes off the ticket. A scanned part that is out of stock says so on the status line.
+- They leave without buying anything: press CLEAR, then "✗ Customer walked away". Untick any line that does not count; every ticked line is saved as a lost sale, then the ticket is emptied.
+Purchasing sees them on Planning > Lost sales and the call-back list.
 
 Taking over a till: PIN lets you take over this till with your own PIN, so the sale is recorded under you. Never sell under someone else's name.
 

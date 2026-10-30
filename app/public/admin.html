@@ -5123,7 +5123,12 @@ async function renderPOS(panel){
     posCountMode = resp.count_mode || (resp.approximate ? 'capped' : 'exact');
 
     if (!r.products.length){
-      results.innerHTML = '<div class="empty" style="padding:30px;text-align:center;color:var(--muted)">No matches. Try clearing a filter or widening the search.</div>';
+      var askedFor = (document.getElementById('posSearch').value || '').trim();
+      results.innerHTML = '<div class="empty" style="padding:30px;text-align:center;color:var(--muted)">No matches. Try clearing a filter or widening the search.' +
+        (askedFor ? '<div style="margin-top:12px"><button type="button" class="btn" id="posLostNone" style="font-size:12.5px;padding:7px 14px">✗ Record “' + esc(askedFor) + '” as a lost sale</button></div>' : '') +
+        '</div>';
+      var ln = document.getElementById('posLostNone');
+      if (ln) ln.addEventListener('click', function(){ posLostSale('open', { q: askedFor, reason: 'not_stocked', onSaved: function(){ posToast('Lost sale recorded'); } }); });
       results.__posProducts = []; POS_SEL_INDEX = -1;
       status.textContent = '';
       // The status line goes blank here (the empty-state card already says
@@ -5383,7 +5388,7 @@ async function renderPOS(panel){
         '<span style="width:90px;flex-shrink:0;text-align:right">UNIT</span>' +
         '<span style="width:128px;flex-shrink:0;text-align:right">DISC $ / %</span>' +
         '<span style="width:104px;flex-shrink:0;text-align:right">EXTENDED</span>' +
-        '<span style="width:26px;flex-shrink:0"></span>' +
+        '<span style="width:61px;flex-shrink:0"></span>' +
       '</div>';
 
     var body = POS.cart.map(function(i, idx){
@@ -5438,6 +5443,8 @@ async function renderPOS(panel){
         '</span>' +
         '<b style="width:104px;flex-shrink:0;text-align:right;font-weight:800;font-size:' + cFS + '">' +
           (i.price > 0 ? fmtMoney(net) : '—') + '</b>' +
+        '<button data-lost="' + idx + '" title="Customer won’t take this part: record a lost sale and take it off the ticket" ' +
+          'style="width:26px;flex-shrink:0;background:#fef3c7;color:#b45309;border:0;height:25px;border-radius:5px;cursor:pointer;font-weight:800;font-size:' + posFS(11) + '">✗</button>' +
         '<button data-rm="' + idx + '" title="Remove this line" ' +
           'style="width:26px;flex-shrink:0;background:#fee2e2;color:#b91c1c;border:0;height:25px;border-radius:5px;cursor:pointer;font-weight:800;font-size:' + posFS(12) + '">×</button>' +
       '</div>';
@@ -5481,6 +5488,7 @@ async function renderPOS(panel){
             (i.location ? '<br/><small style="color:#0891b2">📍 ' + esc(i.location) + '</small>'
                         : (i.bin_location ? '<br/><small style="color:var(--muted)">🗂 ' + esc(i.bin_location) + '</small>' : '')) +
           '</div>' +
+          '<button data-lost="' + idx + '" title="Customer won’t take this part: record a lost sale and take it off the ticket" style="background:#fef3c7;color:#b45309;border:0;width:24px;height:24px;border-radius:4px;cursor:pointer;font-weight:700;flex:none">✗</button>' +
           '<button data-rm="' + idx + '" title="Remove" style="background:#fee2e2;color:#b91c1c;border:0;width:24px;height:24px;border-radius:4px;cursor:pointer;font-weight:700;flex:none">×</button>' +
         '</div>' +
         // Price is editable here so an unpriced part can be quoted or sold
@@ -5695,6 +5703,28 @@ async function renderPOS(panel){
       cb.addEventListener('change', function(){
         POS.cart[parseInt(cb.getAttribute('data-cidx'), 10)].coreReturned = cb.checked;
         drawCart();
+      });
+    });
+    // ✗ on a line: the customer will not take it. Recorded as a lost sale with
+    // the line's quantity and price, and the line comes off the ticket only
+    // once the record is saved.
+    items.querySelectorAll('[data-lost]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var line = POS.cart[parseInt(btn.getAttribute('data-lost'), 10)];
+        if (!line) return;
+        posLostSale('open', {
+          product: { img: line.img, sku: line.sku, name: line.name, stock_count: line.stock_count, price_usd: line.price },
+          qty: line.qty, unit_price: line.price > 0 ? line.price : '',
+          onSaved: function(){
+            var at = POS.cart.indexOf(line);
+            if (at >= 0) {
+              posJournal('item_removed', { img: line.img, sku: line.sku, name: line.name, qty: line.qty, amount: posLineNet(line), lost_sale: true });
+              POS.cart.splice(at, 1);
+              drawCart();
+            }
+            posToast('Lost sale recorded: ' + line.name);
+          },
+        });
       });
     });
     items.querySelectorAll('[data-rm]').forEach(function(btn){
@@ -6411,6 +6441,10 @@ async function renderPOS(panel){
       posAddToCart(res.product, qty);
       drawCart();
       status.innerHTML = '<span style="color:#15803d;font-weight:700">✔ Added ' + (qty > 1 ? qty + '× ' : '') + esc(res.product.name) + '</span>';
+      // Out of stock: the ✗ on the line records it as a lost sale; say so here,
+      // where the operator is looking.
+      if (res.product.stock_level === 'out')
+        status.innerHTML += ' <span style="color:#b45309;font-weight:700">— out of stock. If they won’t wait, press ✗ on the line to record a lost sale.</span>';
       // Out of stock, but a linked substitute is in stock -> offer to swap.
       var fwd = (res.product.substitutes && res.product.substitutes.forward) || [];
       var inStockSub = res.product.stock_level === 'out' && fwd.filter(function(s){ return s.stock_level !== 'out'; })[0];
@@ -6444,16 +6478,10 @@ async function renderPOS(panel){
   });
 
   document.getElementById('posSearch').addEventListener('input', drawGrid);
-  // Lost sale: the dialog lives in /assets/lost-sale.js, loaded on first use.
+  // Lost sale: a part asked for that is not on the ticket (see posLostSale).
   document.getElementById('posLostBtn').addEventListener('click', function(){
     var q = (document.getElementById('posSearch').value || '').trim();
-    var go = function(){ window.VisionLostSale.open({ q: q, onSaved: function(){ posToast('Lost sale recorded'); } }); };
-    if (window.VisionLostSale) return go();
-    var s = document.createElement('script');
-    s.src = '/assets/lost-sale.js';
-    s.onload = go;
-    s.onerror = function(){ posToast('Could not load the lost-sale form'); };
-    document.head.appendChild(s);
+    posLostSale('open', { q: q, onSaved: function(){ posToast('Lost sale recorded'); } });
   });
   // ↑/↓ from inside the search box walk the results list and Enter adds the
   // highlighted part -- without needing Legacy keys mode or moving focus off
@@ -6672,10 +6700,19 @@ async function renderPOS(panel){
   document.getElementById('posSaveQuote').addEventListener('click', function(){ if (!posRequireCustomer()) return; posSaveCartAsQuote(refreshBar); });
   document.getElementById('posClear').addEventListener('click', async function(){
     if (!POS.cart.length) return;
-    if (!(await posConfirm('Empty the cart?', { ok:'Empty', danger:true }))) return;
-    posJournal('cart_cleared', { qty: POS.cart.length, amount: POS.cart.reduce(function(s, l){ return s + posLineNet(l); }, 0) });
-    POS.cart = [];
-    drawCart();
+    var how = await posConfirm('Empty the cart?\n\nIf the customer is leaving without buying, record the ticket as lost sales first.', { ok:'Empty', danger:true, alt:'✗ Customer walked away' });
+    if (!how) return;
+    function empty(lost){
+      posJournal('cart_cleared', { qty: POS.cart.length, amount: POS.cart.reduce(function(s, l){ return s + posLineNet(l); }, 0), lost_sale: !!lost });
+      POS.cart = [];
+      drawCart();
+    }
+    if (how !== 'alt') return empty(false);
+    // Lost sales first; the cart is emptied only once they are saved.
+    posLostSale('openMany', {
+      lines: POS.cart.map(function(l){ return { img: l.img, sku: l.sku, name: l.name, qty: l.qty, price: l.price, stock_count: l.stock_count }; }),
+      onSaved: function(r){ empty(true); posToast((r && r.count) + ' lost sale' + (r && r.count === 1 ? '' : 's') + ' recorded'); },
+    });
   });
   window.__posRedraw = drawCart;   // lets a manager approval (posDeptApprove) redraw this cart
 
@@ -9204,6 +9241,25 @@ function posToast(msg, isError){
     setTimeout(function(){ t.remove(); }, 220);
   }, isError ? 4200 : 2600);
 }
+// Lost sale from the till: the dialog lives in /assets/lost-sale.js, loaded on
+// first use. how is 'open' (one part) or 'openMany' (a whole ticket). Every way
+// in fills in the ticket's customer (not the walk-in placeholder) and vehicle.
+function posLostSale(how, opts){
+  opts = opts || {};
+  var c = POS && POS.customer;
+  if (c && !c.is_walkin && !opts.customer) opts.customer = { id: c.id, name: c.name, phone: c.phone };
+  if (POS && POS.vehicle && !opts.vehicle) opts.vehicle = POS.vehicle;
+  var go = function(){ window.VisionLostSale[how](opts); };
+  if (window.VisionLostSale && window.VisionLostSale[how]) return go();
+  window.VisionLostSale = null;   // an older copy without openMany
+  var sc = document.createElement('script');
+  sc.src = '/assets/lost-sale.js?v=2';
+  sc.onload = go;
+  sc.onerror = function(){ posToast('Could not load the lost-sale form'); };
+  document.head.appendChild(sc);
+}
+
+// opts.alt adds a third button between Cancel and OK; choosing it resolves 'alt'.
 function posConfirm(msg, opts){
   opts = opts || {};
   return new Promise(function(resolve){
@@ -9214,6 +9270,7 @@ function posConfirm(msg, opts){
         '<div style="font-size:13.5px;line-height:1.55;color:var(--ink);white-space:pre-wrap">' + esc(String(msg)) + '</div>' +
         '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">' +
           '<button type="button" class="btn ghost" data-v="0" style="font-size:12.5px;padding:7px 14px">' + esc(opts.cancel || 'Cancel') + '</button>' +
+          (opts.alt ? '<button type="button" class="btn ghost" data-v="2" style="font-size:12.5px;padding:7px 14px">' + esc(opts.alt) + '</button>' : '') +
           '<button type="button" class="btn" data-v="1" style="font-size:12.5px;padding:7px 14px' + (opts.danger ? ';background:var(--red)' : '') + '">' + esc(opts.ok || 'OK') + '</button>' +
         '</div>' +
       '</div>';
@@ -9221,7 +9278,7 @@ function posConfirm(msg, opts){
     function done(v){ wrap.remove(); document.removeEventListener('keydown', onKey); resolve(v); }
     function onKey(e){ if (e.key === 'Escape') done(false); else if (e.key === 'Enter') done(true); }
     wrap.addEventListener('click', function(e){ if (e.target === wrap) done(false); });
-    wrap.querySelectorAll('button[data-v]').forEach(function(b){ b.addEventListener('click', function(){ done(b.dataset.v === '1'); }); });
+    wrap.querySelectorAll('button[data-v]').forEach(function(b){ b.addEventListener('click', function(){ done(b.dataset.v === '2' ? 'alt' : b.dataset.v === '1'); }); });
     document.addEventListener('keydown', onKey);
     var okb = wrap.querySelector('button[data-v="1"]'); if (okb) okb.focus();
   });
