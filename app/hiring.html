@@ -10,24 +10,38 @@
   *{box-sizing:border-box}
   html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
   header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-  header h1{font-size:17px;margin:0} header nav{margin-left:auto;display:flex;gap:14px;font-size:13px} header a{color:#fff;opacity:.85}
+  header h1{font-size:17px;margin:0} header nav{margin-left:auto;display:flex;gap:14px;font-size:13px;align-items:center} header a{color:#fff;opacity:.85}
+  header button{background:rgba(255,255,255,.12);color:#fff;border:0}
   main{max-width:1250px;margin:0 auto;padding:14px 16px 60px}
   .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
   .card h2{font-size:15px;margin:0 0 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
   input,select,button,textarea{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
   textarea{width:100%} button{cursor:pointer;background:var(--card)} button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600} button.sm{padding:3px 9px;font-size:12.5px}
+  button.link{border:0;background:none;color:var(--red);padding:0;font-weight:600}
   .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px} .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  .scroll{overflow-x:auto}
   table{width:100%;border-collapse:collapse} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
   th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600}
   .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip)} .pill.ok{background:#16a34a22;color:var(--ok)} .pill.warn{background:#f59e0b22;color:var(--warn)}
   .board{display:grid;grid-template-columns:repeat(6,minmax(170px,1fr));gap:10px;overflow-x:auto}
   .col{background:var(--chip);border-radius:10px;padding:8px;min-height:120px} .col h3{font-size:12.5px;margin:2px 4px 8px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
   .app{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:6px;cursor:pointer} .app:hover{border-color:var(--red)} .app small{color:var(--muted)}
-  .modal{position:fixed;inset:0;background:rgba(10,15,25,.55);display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow:auto;z-index:40} .modal .card{max-width:760px;width:100%}
+  tr.row{cursor:pointer} tr.row:hover td{background:var(--chip)}
+  .modal{position:fixed;inset:0;background:rgba(10,15,25,.55);display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow:auto;z-index:9990} .modal .card{max-width:780px;width:100%}
+  .modal.top{z-index:9995}
   .empty{color:var(--muted);text-align:center;padding:20px}
-  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:9999}
   .pre{white-space:pre-wrap}
+  .menu{position:relative;display:inline-block} .menu > div{position:absolute;right:0;top:100%;z-index:20;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(0,0,0,.18);min-width:190px;padding:4px 0}
+  .menu > div button,.menu > div a{display:block;width:100%;text-align:left;border:0;border-radius:0;background:none;padding:7px 12px;color:var(--ink);text-decoration:none;font-size:13px}
+  .menu > div button:hover,.menu > div a:hover{background:var(--chip)}
+  .lines .ln{display:flex;gap:6px;align-items:center;margin-bottom:6px} .lines .ln input[type=text]{flex:1} .lines .ln label{display:flex;gap:4px;align-items:center;font-size:12.5px;color:var(--muted);white-space:nowrap}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 8px} .chips button{font-size:12px;padding:2px 9px;border-radius:999px}
+  .docs{margin:6px 0} .docs div{display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)} .docs div span{flex:1}
+  .warn{background:#f59e0b18;border-left:3px solid var(--warn);padding:8px 10px;border-radius:8px;margin:8px 0}
+  .qa{margin:4px 0 8px} .qa b{display:block;font-size:12.5px;color:var(--muted);font-weight:600}
+  h4{margin:14px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
 </style>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
@@ -35,12 +49,20 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 </head>
 <body>
-<header><h1>Hiring</h1><nav><a href="/careers.html" target="_blank" rel="noopener">Public careers page ↗</a><a href="/admin.html">Admin</a></nav></header>
+<header><h1>Hiring</h1><nav><button class="sm" id="setBtn">⚙ Emails &amp; settings</button><a href="/careers.html" target="_blank" rel="noopener">Public careers page ↗</a><a href="/admin.html">Admin</a></nav></header>
 <main>
-  <div class="card"><h2>Jobs <button class="sm primary" id="newJob">+ Job</button></h2><div id="jobs"></div></div>
-  <div class="card"><h2>Applicants <select id="jobF"><option value="">All jobs</option></select></h2><p class="sub">Applicants who are not hired are deleted (details and CV) after the retention period. Click one to open it.</p><div class="board" id="board"></div></div>
+  <div class="card"><h2>Job postings <button class="sm primary" id="newJob">+ Job</button></h2><div id="jobs"></div></div>
+  <div class="card"><h2>Applicants</h2>
+    <div class="controls">
+      <div><label>Job</label><select id="jobF"><option value="">All jobs</option></select></div>
+      <div style="flex:1;min-width:180px"><label>Find</label><input id="q" type="search" placeholder="Name, email, phone or reference" style="width:100%"></div>
+      <div><label>View</label><select id="view"><option value="board">Board</option><option value="list">List</option></select></div>
+      <button id="csv">Export CSV</button>
+    </div>
+    <p class="sub">Applicants get an automatic reply with a link where they can add documents or withdraw. Those not hired are deleted (details, CV and documents) after the retention period. Click one to open it.</p>
+    <div id="board"></div></div>
 </main>
-<div id="modal"></div>
+<div id="modal"></div><div id="modal2"></div>
 <div class="toast" id="toast"></div>
 <script>
 (function () {
@@ -49,88 +71,274 @@
   var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
   var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
   var day = function (t) { return t ? new Date(t).toLocaleDateString('en-JM') : ''; };
+  var when = function (t) { return t ? new Date(t).toLocaleString('en-JM', { dateStyle: 'short', timeStyle: 'short' }) : ''; };
   var STAGE = { new: 'New', screen: 'Screen', interview: 'Interview', offer: 'Offer', hired: 'Hired', rejected: 'Rejected' };
   var KIND = { full_time: 'Full time', part_time: 'Part time', contract: 'Contract', freelance_rep: 'Freelance rep' };
-  var jobs = [];
-  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 3200); }
+  // Documents a job commonly asks for, one click to add.
+  var DOC_PRESETS = ['Photo ID', 'TRN card', 'NIS card', 'Police record', 'Driver’s licence', 'Certificates', 'Two references', 'Proof of address'];
+  // Stages whose change is worth an email, with the template it starts from.
+  var STAGE_MAIL = { interview: 'interview', offer: 'offer', rejected: 'rejected' };
+  var jobs = [], apps = [];
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 3500); }
   function api(url, method, body) {
-    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+    var isForm = body instanceof FormData;
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: isForm ? { Accept: 'application/json' } : { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? (isForm ? body : JSON.stringify(body)) : undefined })
       .then(function (r) {
         if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); }
         return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; });
       });
   }
-  function modal(h) { $('#modal').innerHTML = '<div class="modal"><div class="card">' + h + '</div></div>'; $('.modal').addEventListener('mousedown', function (e) { if (e.target.classList.contains('modal')) close(); }); }
-  function close() { $('#modal').innerHTML = ''; }
+  // Two layers: an application can open the email composer on top of itself.
+  function modal(h, layer) {
+    var host = $(layer === 2 ? '#modal2' : '#modal');
+    host.innerHTML = '<div class="modal' + (layer === 2 ? ' top' : '') + '"><div class="card">' + h + '</div></div>';
+    host.firstChild.addEventListener('mousedown', function (e) { if (e.target.classList.contains('modal')) close(layer); });
+    return host.firstChild;
+  }
+  function close(layer) { $(layer === 2 ? '#modal2' : '#modal').innerHTML = ''; }
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { if ($('#modal2').innerHTML) close(2); else close(); } });
+  document.addEventListener('click', function (e) { if (!e.target.closest('.menu')) all('.menu > div').forEach(function (d) { d.hidden = true; }); });
+  // For a datetime-local box: the moment in this computer's time, using that
+  // date's own offset (today's would be an hour out across daylight saving).
+  function localInput(t) { var d = new Date(t); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }
+  var jobLink = function (j) { return location.origin + '/careers.html?job=' + j.id; };
 
+  // ---------------------------------------------------------------- jobs --
   function loadJobs() {
     return api('/api/hr/jobs').then(function (d) {
       jobs = d.jobs;
-      $('#jobs').innerHTML = jobs.length ? '<table><thead><tr><th>Job</th><th>Type</th><th>Open</th>' + Object.keys(STAGE).map(function (s) { return '<th>' + STAGE[s] + '</th>'; }).join('') + '<th></th></tr></thead><tbody>' + jobs.map(function (j, i) {
-        return '<tr><td><b>' + esc(j.title) + '</b><br><small>' + esc([j.department, j.location].filter(Boolean).join(' · ')) + '</small></td><td>' + esc(KIND[j.kind] || j.kind) + '</td><td>' + (j.is_open ? '<span class="pill ok">open</span>' + (j.closes_on ? '<br><small>to ' + esc(day(j.closes_on)) + '</small>' : '') : '<span class="pill">closed</span>') + '</td>' +
-          Object.keys(STAGE).map(function (s) { return '<td>' + (j[s] || '') + '</td>'; }).join('') + '<td><button class="sm" data-ej="' + i + '">Edit</button></td></tr>';
-      }).join('') + '</tbody></table>' : '<div class="empty">No jobs posted yet.</div>';
+      $('#jobs').innerHTML = jobs.length ? '<div class="scroll"><table><thead><tr><th>Job</th><th>Type</th><th>Posting</th><th>Asks for</th>' + Object.keys(STAGE).map(function (s) { return '<th>' + STAGE[s] + '</th>'; }).join('') + '<th></th></tr></thead><tbody>' + jobs.map(function (j, i) {
+        var docs = (j.documents || []).length, qs = (j.questions || []).length;
+        return '<tr><td><b>' + esc(j.title) + '</b>' + (j.openings > 1 ? ' <span class="pill">' + j.openings + ' openings</span>' : '') + '<br><small>' + esc([j.department, j.location].filter(Boolean).join(' · ')) + '</small></td><td>' + esc(KIND[j.kind] || j.kind) + '</td>' +
+          '<td>' + (j.is_open ? '<span class="pill ok">open</span>' + (j.closes_on ? '<br><small>to ' + esc(day(j.closes_on)) + '</small>' : '') : '<span class="pill">closed</span>') + '</td>' +
+          '<td><small>' + [j.cv_required ? 'CV' : '', docs ? docs + ' document' + (docs > 1 ? 's' : '') : '', qs ? qs + ' question' + (qs > 1 ? 's' : '') : ''].filter(Boolean).join(', ') + '</small></td>' +
+          Object.keys(STAGE).map(function (s) { return '<td>' + (j[s] || '') + '</td>'; }).join('') +
+          '<td style="white-space:nowrap"><button class="sm" data-ej="' + i + '">Edit</button> <span class="menu"><button class="sm" data-mn>▾</button><div hidden>' +
+            '<button data-dup="' + i + '">Duplicate</button>' +
+            '<button data-tog="' + i + '">' + (j.is_open ? 'Close posting' : 'Reopen posting') + '</button>' +
+            '<button data-copy="' + i + '">Copy link</button>' +
+            '<a href="' + esc(jobLink(j)) + '" target="_blank" rel="noopener">View on careers page</a>' +
+            '<a href="https://wa.me/?text=' + encodeURIComponent(j.title + ' at Vision Auto Solutions: ' + jobLink(j)) + '" target="_blank" rel="noopener">Share on WhatsApp</a>' +
+            '<a href="https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(jobLink(j)) + '" target="_blank" rel="noopener">Share on Facebook</a>' +
+            '<a href="https://www.linkedin.com/sharing/share-offsite/?url=' + encodeURIComponent(jobLink(j)) + '" target="_blank" rel="noopener">Share on LinkedIn</a>' +
+          '</div></span></td></tr>';
+      }).join('') + '</tbody></table></div>' : '<div class="empty">No jobs posted yet. Press + Job.</div>';
+      var cur = $('#jobF').value;
       $('#jobF').innerHTML = '<option value="">All jobs</option>' + jobs.map(function (j) { return '<option value="' + j.id + '">' + esc(j.title) + '</option>'; }).join('');
+      $('#jobF').value = cur;
       all('[data-ej]').forEach(function (b) { b.onclick = function () { jobForm(jobs[+b.getAttribute('data-ej')]); }; });
+      all('[data-mn]').forEach(function (b) { b.onclick = function (e) { e.stopPropagation(); var d = b.nextElementSibling, was = d.hidden; all('.menu > div').forEach(function (x) { x.hidden = true; }); d.hidden = !was; }; });
+      all('[data-dup]').forEach(function (b) { b.onclick = function () { var j = jobs[+b.getAttribute('data-dup')]; jobForm(Object.assign({}, j, { id: null, title: 'Copy of ' + j.title, is_open: false })); }; });
+      all('[data-tog]').forEach(function (b) { b.onclick = function () {
+        var j = jobs[+b.getAttribute('data-tog')];
+        api('/api/hr/jobs/' + j.id, 'PATCH', { is_open: !j.is_open }).then(function () { toast(j.is_open ? 'Posting closed' : 'Posting reopened'); loadJobs(); }).catch(function (e) { toast(e.message); });
+      }; });
+      all('[data-copy]').forEach(function (b) { b.onclick = function () {
+        var link = jobLink(jobs[+b.getAttribute('data-copy')]);
+        (navigator.clipboard ? navigator.clipboard.writeText(link) : Promise.reject()).then(function () { toast('Link copied'); }, function () { prompt('Copy this link', link); });
+      }; });
     });
   }
+  function lineHtml(kind, x) {
+    x = x || {};
+    return '<div class="ln">' + (kind === 'doc'
+      ? '<input type="text" class="lv" value="' + esc(x.label || '') + '" placeholder="e.g. Police record">'
+      : '<input type="text" class="lv" value="' + esc(x.q || '') + '" placeholder="e.g. Do you have a driver’s licence?"><select class="lk"><option value="text">Written answer</option><option value="yesno"' + (x.kind === 'yesno' ? ' selected' : '') + '>Yes / No</option></select>') +
+      '<input type="hidden" class="lkey" value="' + esc(x.key || '') + '"><label><input type="checkbox" class="lr"' + (x.required ? ' checked' : '') + '> ' + (kind === 'doc' ? 'needed' : 'must answer') + '</label><button class="sm" data-x>✕</button></div>';
+  }
   function jobForm(j) {
-    j = j || { kind: 'full_time', is_open: true };
-    modal('<h2>' + (j.id ? 'Edit job' : 'New job') + '</h2>' +
-      '<div class="controls"><div style="flex:2"><label>Title</label><input id="jt" value="' + esc(j.title || '') + '" style="width:100%"></div><div><label>Type</label><select id="jk">' + Object.keys(KIND).map(function (k) { return '<option value="' + k + '"' + (j.kind === k ? ' selected' : '') + '>' + KIND[k] + '</option>'; }).join('') + '</select></div></div>' +
+    j = j || { kind: 'full_time', is_open: true, openings: 1 };
+    var mo = modal('<h2>' + (j.id ? 'Edit job' : 'New job') + '</h2>' +
+      '<div class="controls"><div style="flex:2;min-width:200px"><label>Title</label><input id="jt" value="' + esc(j.title || '') + '" style="width:100%"></div><div><label>Type</label><select id="jk">' + Object.keys(KIND).map(function (k) { return '<option value="' + k + '"' + (j.kind === k ? ' selected' : '') + '>' + KIND[k] + '</option>'; }).join('') + '</select></div><div><label>Openings</label><input id="jn" type="number" min="1" max="99" value="' + (j.openings || 1) + '" style="width:80px"></div></div>' +
       '<div class="controls"><div><label>Department</label><input id="jd" value="' + esc(j.department || '') + '"></div><div><label>Location</label><input id="jl" value="' + esc(j.location || 'Kingston') + '"></div><div><label>Pay (shown)</label><input id="jp" value="' + esc(j.pay || '') + '"></div><div><label>Closes</label><input id="jc" type="date" value="' + esc(String(j.closes_on || '').slice(0, 10)) + '"></div></div>' +
       '<label class="sub">One-line summary</label><input id="js" value="' + esc(j.summary || '') + '" style="width:100%"><label class="sub">The job</label><textarea id="jdesc" rows="5">' + esc(j.description || '') + '</textarea><label class="sub">What they need</label><textarea id="jr" rows="4">' + esc(j.requirements || '') + '</textarea>' +
-      '<label style="display:flex;gap:6px;align-items:center;margin:8px 0"><input type="checkbox" id="jo"' + (j.is_open !== false ? ' checked' : '') + '> Open (shown on the careers page)</label>' +
+      '<h4>Documents to send</h4><p class="sub">Applicants attach these when they apply, or later from the link in their automatic reply. “Needed” ones show as missing until they arrive.</p>' +
+      '<div class="chips">' + DOC_PRESETS.map(function (p) { return '<button type="button" data-preset="' + esc(p) + '">+ ' + esc(p) + '</button>'; }).join('') + '</div>' +
+      '<div class="lines" id="jdocs">' + (j.documents || []).map(function (x) { return lineHtml('doc', x); }).join('') + '</div><button class="sm" id="addDoc">+ Document</button>' +
+      '<label style="display:flex;gap:6px;align-items:center;margin:10px 0 0"><input type="checkbox" id="jcv"' + (j.cv_required ? ' checked' : '') + '> A CV is required to apply</label>' +
+      '<h4>Questions</h4><p class="sub">Asked on the application form, so you can screen without a phone call.</p>' +
+      '<div class="lines" id="jqs">' + (j.questions || []).map(function (x) { return lineHtml('q', x); }).join('') + '</div><button class="sm" id="addQ">+ Question</button>' +
+      '<label style="display:flex;gap:6px;align-items:center;margin:14px 0 8px"><input type="checkbox" id="jo"' + (j.is_open !== false ? ' checked' : '') + '> Open (shown on the careers page)</label>' +
       '<div class="controls"><button class="primary" id="jsave">Save</button><button id="jx">Cancel</button></div>');
-    $('#jx').onclick = close;
+    function add(box, kind, x) { box.insertAdjacentHTML('beforeend', lineHtml(kind, x)); }
+    mo.addEventListener('click', function (e) { if (e.target.hasAttribute('data-x')) e.target.closest('.ln').remove(); });
+    $('#addDoc').onclick = function () { add($('#jdocs'), 'doc'); };
+    $('#addQ').onclick = function () { add($('#jqs'), 'q'); };
+    all('[data-preset]', mo).forEach(function (b) { b.onclick = function () { add($('#jdocs'), 'doc', { label: b.getAttribute('data-preset'), required: true }); }; });
+    $('#jx').onclick = function () { close(); };
+    function lines(box, kind) {
+      return all('.ln', box).map(function (ln) {
+        var v = $('.lv', ln).value.trim();
+        if (!v) return null;
+        var o = { key: $('.lkey', ln).value, required: $('.lr', ln).checked };
+        if (kind === 'doc') o.label = v; else { o.q = v; o.kind = $('.lk', ln).value; }
+        return o;
+      }).filter(Boolean);
+    }
     $('#jsave').onclick = function () {
-      var body = { title: $('#jt').value, kind: $('#jk').value, department: $('#jd').value, location: $('#jl').value, pay: $('#jp').value, closes_on: $('#jc').value, summary: $('#js').value, description: $('#jdesc').value, requirements: $('#jr').value, is_open: $('#jo').checked };
+      var body = { title: $('#jt').value, kind: $('#jk').value, openings: $('#jn').value, department: $('#jd').value, location: $('#jl').value, pay: $('#jp').value, closes_on: $('#jc').value, summary: $('#js').value, description: $('#jdesc').value, requirements: $('#jr').value, is_open: $('#jo').checked,
+        documents: lines($('#jdocs'), 'doc'), questions: lines($('#jqs'), 'q'), cv_required: $('#jcv').checked };
       api('/api/hr/jobs' + (j.id ? '/' + j.id : ''), j.id ? 'PUT' : 'POST', body).then(function () { close(); toast('Saved'); loadJobs(); }).catch(function (e) { toast(e.message); });
     };
   }
 
+  // ---------------------------------------------------------- applicants --
   function loadBoard() {
-    return api('/api/hr/applications' + ($('#jobF').value ? '?job=' + $('#jobF').value : '')).then(function (d) {
-      $('#board').innerHTML = d.stages.map(function (s) {
-        var list = d.applications.filter(function (a) { return a.stage === s; });
-        return '<div class="col"><h3>' + STAGE[s] + ' (' + list.length + ')</h3>' + list.map(function (a) {
-          return '<div class="app" data-a="' + a.id + '"><b>' + esc(a.name) + '</b>' + (a.rating ? ' ' + '★'.repeat(a.rating) : '') + '<br><small>' + esc(a.job || '') + '<br>' + esc(day(a.created_at)) + (a.has_cv ? ' · CV' : '') + (a.notes ? ' · ' + a.notes + ' note' + (a.notes > 1 ? 's' : '') : '') + (a.interview_at ? '<br>interview ' + esc(new Date(a.interview_at).toLocaleString('en-JM', { dateStyle: 'short', timeStyle: 'short' })) : '') + '</small></div>';
-        }).join('') + '</div>';
-      }).join('');
-      all('[data-a]').forEach(function (el) { el.onclick = function () { openApp(el.getAttribute('data-a')); }; });
-    });
+    return api('/api/hr/applications' + ($('#jobF').value ? '?job=' + $('#jobF').value : '')).then(function (d) { apps = d.applications; drawApps(d.stages); });
   }
+  function shown() {
+    var q = $('#q').value.trim().toLowerCase();
+    return apps.filter(function (a) { return !q || [a.name, a.email, a.phone, a.ref, a.job].join(' ').toLowerCase().indexOf(q) >= 0; });
+  }
+  function badges(a) {
+    return (a.has_cv ? ' · CV' : '') + (a.docs ? ' · ' + a.docs + ' doc' + (a.docs > 1 ? 's' : '') : '') + (a.notes ? ' · ' + a.notes + ' note' + (a.notes > 1 ? 's' : '') : '') +
+      (a.docs_missing ? ' <span class="pill warn">' + a.docs_missing + ' doc' + (a.docs_missing > 1 ? 's' : '') + ' missing</span>' : '');
+  }
+  function drawApps(stages) {
+    stages = stages || Object.keys(STAGE);
+    var list = shown();
+    if ($('#view').value === 'list') {
+      $('#board').innerHTML = list.length ? '<div class="scroll"><table><thead><tr><th>Applicant</th><th>Ref</th><th>Job</th><th>Stage</th><th>Applied</th><th>Files</th><th>Rating</th></tr></thead><tbody>' + list.map(function (a) {
+        return '<tr class="row" data-a="' + a.id + '"><td><b>' + esc(a.name) + '</b><br><small>' + esc(a.email) + ' · ' + esc(a.phone) + '</small></td><td>' + esc(a.ref || '') + '</td><td>' + esc(a.job || '') + '</td><td>' + esc(STAGE[a.stage]) +
+          (a.interview_at ? '<br><small>' + esc(when(a.interview_at)) + '</small>' : '') + '</td><td>' + esc(day(a.created_at)) + '</td><td><small>' + badges(a).replace(/^ · /, '') + '</small></td><td>' + (a.rating ? '★'.repeat(a.rating) : '') + '</td></tr>';
+      }).join('') + '</tbody></table></div>' : '<div class="empty">No applicants' + ($('#q').value ? ' match' : ' yet') + '.</div>';
+    } else {
+      $('#board').innerHTML = '<div class="board">' + stages.map(function (s) {
+        var col = list.filter(function (a) { return a.stage === s; });
+        return '<div class="col"><h3>' + STAGE[s] + ' (' + col.length + ')</h3>' + col.map(function (a) {
+          return '<div class="app" data-a="' + a.id + '"><b>' + esc(a.name) + '</b>' + (a.rating ? ' ' + '★'.repeat(a.rating) : '') + '<br><small>' + esc(a.ref || '') + ' · ' + esc(a.job || '') + '<br>' + esc(day(a.created_at)) + badges(a) + (a.interview_at ? '<br>interview ' + esc(when(a.interview_at)) : '') + '</small></div>';
+        }).join('') + '</div>';
+      }).join('') + '</div>';
+    }
+    all('[data-a]').forEach(function (el) { el.onclick = function () { openApp(el.getAttribute('data-a')); }; });
+  }
+  function exportCsv() {
+    var rows = [['Reference', 'Name', 'Email', 'Phone', 'Parish', 'Job', 'Stage', 'Applied', 'Interview', 'Rating', 'CV', 'Documents', 'Documents missing']].concat(shown().map(function (a) {
+      return [a.ref, a.name, a.email, a.phone, a.parish, a.job, STAGE[a.stage], day(a.created_at), when(a.interview_at), a.rating || '', a.has_cv ? 'yes' : 'no', a.docs, a.docs_missing];
+    }));
+    var csv = rows.map(function (r) { return r.map(function (v) { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(','); }).join('\r\n');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
+    a.download = 'applicants-' + new Date().toISOString().slice(0, 10) + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
   function openApp(id) {
     api('/api/hr/applications/' + id).then(function (d) {
       var a = d.application;
-      modal('<h2>' + esc(a.name) + ' <span class="pill">' + esc(STAGE[a.stage]) + '</span></h2><p class="sub">' + esc(a.job || '') + ' · applied ' + esc(day(a.created_at)) + ' · kept until ' + esc(day(a.retain_until)) + '</p>' +
-        '<p>' + esc(a.email) + ' · <a href="tel:' + esc(a.phone) + '">' + esc(a.phone) + '</a>' + (a.parish ? ' · ' + esc(a.parish) : '') + '</p>' +
-        (a.cover ? '<div class="card pre">' + esc(a.cover) + '</div>' : '') +
-        (a.cv_name ? '<p><a href="/api/hr/applications/' + a.id + '/cv" target="_blank" rel="noopener">Open CV (' + esc(a.cv_name) + ')</a> <small class="sub">opening it is recorded</small></p>' : '<p class="sub">No CV.</p>') +
+      var answers = Array.isArray(a.answers) ? a.answers : [];
+      var mo = modal('<h2>' + esc(a.name) + ' <span class="pill">' + esc(STAGE[a.stage]) + '</span></h2><p class="sub">' + esc(a.ref || '') + ' · ' + esc(a.job || '') + ' · applied ' + esc(day(a.created_at)) + ' · kept until ' + esc(day(a.retain_until)) + '</p>' +
+        '<p>' + esc(a.email) + ' · <a href="tel:' + esc(a.phone) + '">' + esc(a.phone) + '</a>' + (a.parish ? ' · ' + esc(a.parish) : '') + ' <button class="sm" id="amail">✉ Email</button></p>' +
+        (answers.length ? '<h4>Answers</h4>' + answers.map(function (x) { return '<div class="qa"><b>' + esc(x.q) + '</b>' + esc(x.a || '—') + '</div>'; }).join('') : '') +
+        (a.cover ? '<h4>In their words</h4><div class="pre">' + esc(a.cover) + '</div>' : '') +
+        '<h4>CV and documents</h4><div class="docs">' +
+          (a.cv_name ? '<div><span>CV</span><a href="/api/hr/applications/' + a.id + '/cv" target="_blank" rel="noopener">' + esc(a.cv_name) + '</a></div>' : '<div><span class="sub">No CV.</span></div>') +
+          d.documents.map(function (x) {
+            return '<div><span>' + esc(x.label) + ' <small class="sub">' + esc(day(x.uploaded_at)) + (x.via === 'applicant' ? ' · added by them later' : x.via === 'staff' ? ' · added by staff' : '') + '</small></span>' +
+              '<a href="/api/hr/applications/' + a.id + '/documents/' + x.id + '" target="_blank" rel="noopener">' + esc(x.orig_name || 'open') + '</a><button class="sm" data-rmdoc="' + x.id + '" title="Remove">✕</button></div>';
+          }).join('') + '</div>' +
+        '<p class="sub">Opening a file is recorded.</p>' +
+        (d.missing.length ? '<div class="warn"><b>Still needed:</b> ' + esc(d.missing.join(', ')) + ' <button class="sm" id="askDocs">Ask for them</button></div>' : '') +
+        '<div class="controls"><div><label>Add a paper document (scan or photo)</label><input type="text" id="sdLabel" placeholder="What it is"></div><div><input type="file" id="sdFile" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"></div><button class="sm" id="sdGo">Upload</button></div>' +
+        '<h4>Progress</h4>' +
         '<div class="controls">' + (a.stage !== 'hired' ? '<div><label>Stage</label><select id="ast">' + Object.keys(STAGE).filter(function (s) { return s !== 'hired'; }).map(function (s) { return '<option value="' + s + '"' + (a.stage === s ? ' selected' : '') + '>' + STAGE[s] + '</option>'; }).join('') + '</select></div>' : '') +
         '<div><label>Rating</label><select id="art"><option value="">–</option>' + [1, 2, 3, 4, 5].map(function (r) { return '<option' + (a.rating === r ? ' selected' : '') + '>' + r + '</option>'; }).join('') + '</select></div>' +
-        '<div><label>Interview</label><input id="aiv" type="datetime-local" value="' + (a.interview_at ? new Date(new Date(a.interview_at).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '') + '"></div></div>' +
+        '<div><label>Interview</label><input id="aiv" type="datetime-local" value="' + (a.interview_at ? localInput(a.interview_at) : '') + '"></div></div>' +
         '<label class="sub">Add a note</label><textarea id="ano" rows="2"></textarea>' +
         '<div class="controls" style="margin-top:8px"><button class="primary" id="asave">Save</button>' + (a.stage !== 'hired' ? '<button id="ahire">Hire</button>' : '') + '<button id="adel">Delete applicant</button><button id="ax">Close</button></div>' +
-        '<h2 style="margin-top:12px">History</h2>' + (d.notes.length ? d.notes.map(function (n) { return '<p class="sub"><b>' + esc(new Date(n.at).toLocaleString('en-JM', { dateStyle: 'short', timeStyle: 'short' })) + '</b> ' + esc(n.by_name || '') + ': ' + esc(n.note || n.kind) + '</p>'; }).join('') : '<p class="sub">Nothing yet.</p>'));
-      $('#ax').onclick = close;
+        '<h4>History</h4>' + (d.notes.length ? d.notes.map(function (n) { return '<p class="sub"><b>' + esc(when(n.at)) + '</b> ' + esc(n.by_name || (n.kind === 'email' ? 'automatic' : '')) + ': ' + esc(n.note || n.kind) + '</p>'; }).join('') : '<p class="sub">Nothing yet.</p>'));
+      $('#ax').onclick = function () { close(); };
+      $('#amail').onclick = function () { compose(a, 'blank'); };
+      if ($('#askDocs')) $('#askDocs').onclick = function () { compose(a, 'docs'); };
+      all('[data-rmdoc]', mo).forEach(function (b) { b.onclick = function () {
+        if (!confirm('Remove this document? The file is deleted.')) return;
+        api('/api/hr/applications/' + a.id + '/documents/' + b.getAttribute('data-rmdoc'), 'DELETE').then(function () { toast('Removed'); openApp(a.id); loadBoard(); }).catch(function (e) { toast(e.message); });
+      }; });
+      $('#sdGo').onclick = function () {
+        var f = $('#sdFile').files[0];
+        if (!f) return toast('Choose a file first');
+        if (f.size > 5 * 1024 * 1024) return toast('The file must be 5 MB or smaller');
+        var fd = new FormData(); fd.append('label', $('#sdLabel').value.trim() || 'Document handed in'); fd.append('doc_other', f);
+        api('/api/hr/applications/' + a.id + '/documents', 'POST', fd).then(function () { toast('Uploaded'); openApp(a.id); loadBoard(); }).catch(function (e) { toast(e.message); });
+      };
       $('#asave').onclick = function () {
-        var body = { rating: $('#art').value, interview_at: $('#aiv').value || null, note: $('#ano').value };
-        if ($('#ast')) body.stage = $('#ast').value;
-        api('/api/hr/applications/' + a.id, 'PATCH', body).then(function () { toast('Saved'); close(); loadBoard(); loadJobs(); }).catch(function (e) { toast(e.message); });
+        // Sent as an exact moment, so the server's time zone cannot shift it.
+        var body = { rating: $('#art').value, interview_at: $('#aiv').value ? new Date($('#aiv').value).toISOString() : null, note: $('#ano').value };
+        var to = $('#ast') ? $('#ast').value : a.stage;
+        if ($('#ast')) body.stage = to;
+        api('/api/hr/applications/' + a.id, 'PATCH', body).then(function () {
+          toast('Saved'); loadBoard(); loadJobs();
+          // A stage worth telling them about: offer the email, written from its template.
+          if (to !== a.stage && STAGE_MAIL[to] && a.email) compose(a, STAGE_MAIL[to], true);
+          else close();
+        }).catch(function (e) { toast(e.message); });
       };
       if ($('#ahire')) $('#ahire').onclick = function () {
         if (!confirm('Hire ' + a.name + '? A staff login is made for them, switched off until you set it up on the Staff screen.')) return;
         api('/api/hr/applications/' + a.id + '/hire', 'POST').then(function (r) { alert('Hired. ' + r.next); close(); loadBoard(); loadJobs(); }).catch(function (e) { toast(e.message); });
       };
       $('#adel').onclick = function () {
-        if (!confirm('Delete this applicant\'s details and CV now? This cannot be undone.')) return;
+        if (!confirm('Delete this applicant\'s details, CV and documents now? This cannot be undone.')) return;
         api('/api/hr/applications/' + a.id, 'DELETE').then(function () { toast('Deleted'); close(); loadBoard(); loadJobs(); }).catch(function (e) { toast(e.message); });
       };
     }).catch(function (e) { toast(e.message); });
   }
+  // The email composer: a template filled in for this applicant, to edit and send.
+  function compose(a, kind, afterStage) {
+    api('/api/hr/applications/' + a.id + '/email-draft?kind=' + kind).then(function (d) {
+      modal('<h2>' + (afterStage ? 'Tell ' + esc(a.name.split(' ')[0]) + '?' : 'Email ' + esc(a.name)) + '</h2>' +
+        (d.mail_on ? '' : '<div class="warn">Email is not set up on this till, so this is recorded on the application but does not leave. Ask whoever runs the server to set SMTP up.</div>') +
+        '<p class="sub">To ' + esc(d.to) + '. Edit before sending.</p>' +
+        '<label class="sub">Subject</label><input id="emS" value="' + esc(d.subject) + '" style="width:100%">' +
+        '<label class="sub">Message</label><textarea id="emB" rows="13">' + esc(d.body) + '</textarea>' +
+        '<div class="controls" style="margin-top:8px"><button class="primary" id="emGo">Send</button><button id="emX">' + (afterStage ? 'Don’t email' : 'Cancel') + '</button></div>', 2);
+      $('#emX').onclick = function () { close(2); if (afterStage) close(); };
+      $('#emGo').onclick = function () {
+        this.disabled = true;
+        api('/api/hr/applications/' + a.id + '/email', 'POST', { subject: $('#emS').value, body: $('#emB').value })
+          .then(function (r) { close(2); toast(r.note); if (afterStage) close(); else openApp(a.id); })
+          .catch(function (e) { $('#emGo').disabled = false; toast(e.message); });
+      };
+    }).catch(function (e) { toast(e.message); if (afterStage) close(); });
+  }
+
+  // ------------------------------------------------------------ settings --
+  function settings() {
+    api('/api/hr/settings').then(function (s) {
+      var keys = Object.keys(s.templates);
+      modal('<h2>Emails &amp; settings</h2>' +
+        (s.mail_on ? '' : '<div class="warn">Email is not set up on this till (no SMTP), so the automatic reply and these emails are recorded but not sent.</div>') +
+        '<div class="controls"><div style="flex:1;min-width:220px"><label>Tell this inbox about every new application</label><input id="stIn" type="email" value="' + esc(s.notify_email) + '" placeholder="e.g. hr@visionautosolutions.com" style="width:100%"></div>' +
+        '<div><label>Keep applicants who are not hired for (days)</label><input id="stDays" type="number" min="30" max="1095" value="' + s.retention_days + '" style="width:110px"></div></div>' +
+        '<h4>Email templates</h4><p class="sub">Filled in for each applicant: {first} {name} {job} {ref} {link} (their status page) {missing} (documents still needed) {interview} (the interview time).</p>' +
+        keys.map(function (k) {
+          return '<details style="margin-bottom:8px"' + (k === 'ack' ? ' open' : '') + '><summary><b>' + esc(s.templates[k].label) + '</b></summary>' +
+            '<label class="sub">Subject</label><input data-ts="' + k + '" value="' + esc(s.templates[k].subject) + '" style="width:100%">' +
+            '<label class="sub">Message</label><textarea data-tb="' + k + '" rows="9">' + esc(s.templates[k].body) + '</textarea>' +
+            '<button class="link" data-reset="' + k + '">Put back the original wording</button></details>';
+        }).join('') +
+        '<div class="controls" style="margin-top:10px"><button class="primary" id="stSave">Save</button><button id="stX">Cancel</button></div>');
+      all('[data-reset]').forEach(function (b) { b.onclick = function () {
+        var k = b.getAttribute('data-reset');
+        $('[data-ts="' + k + '"]').value = s.defaults[k].subject; $('[data-tb="' + k + '"]').value = s.defaults[k].body;
+      }; });
+      $('#stX').onclick = function () { close(); };
+      $('#stSave').onclick = function () {
+        var tpl = {};
+        keys.forEach(function (k) { tpl[k] = { subject: $('[data-ts="' + k + '"]').value, body: $('[data-tb="' + k + '"]').value }; });
+        api('/api/hr/settings', 'PUT', { templates: tpl, notify_email: $('#stIn').value, retention_days: $('#stDays').value })
+          .then(function () { close(); toast('Saved'); }).catch(function (e) { toast(e.message); });
+      };
+    }).catch(function (e) { toast(e.message); });
+  }
+
   $('#newJob').onclick = function () { jobForm(null); };
+  $('#setBtn').onclick = settings;
   $('#jobF').onchange = loadBoard;
+  $('#q').oninput = function () { drawApps(); };
+  $('#view').onchange = function () { try { localStorage.setItem('hiring.view', this.value); } catch (_) {} drawApps(); };
+  try { if (localStorage.getItem('hiring.view') === 'list') $('#view').value = 'list'; } catch (_) {}
+  $('#csv').onclick = exportCsv;
   loadJobs().then(loadBoard).catch(function (e) { $('#jobs').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
 })();
 </script>

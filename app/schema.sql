@@ -6185,3 +6185,34 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS archived_at    TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS left_on        DATE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS archive_reason TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS extra_roles    JSONB NOT NULL DEFAULT '[]';
+-- Careers (careers.js): what a posting asks for, and what applicants send.
+-- documents: [{key, label, required}]  questions: [{key, q, kind: text|yesno, required}]
+ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS openings    INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS documents   JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS questions   JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS cv_required BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS updated_at  TIMESTAMPTZ;
+-- ref: the number quoted to the applicant (VA-26-0042). token: the private
+-- link to their status page, cleared when the application is deleted.
+ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS ref     TEXT;
+ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS token   TEXT;
+ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS answers JSONB NOT NULL DEFAULT '[]';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_job_applications_token ON job_applications (token) WHERE token IS NOT NULL;
+-- Files sent with an application or added later (by the applicant from their
+-- link, or by staff for paper copies). Stored like CVs, in data/careers-cvs.
+CREATE TABLE IF NOT EXISTS application_documents (
+  id              SERIAL PRIMARY KEY,
+  application_id  INTEGER NOT NULL REFERENCES job_applications(id) ON DELETE CASCADE,
+  doc_key         TEXT NOT NULL,          -- the job's document key, or 'other'
+  label           TEXT NOT NULL,
+  file            TEXT NOT NULL,          -- random name in data/careers-cvs (never served directly)
+  orig_name       TEXT,
+  bytes           INTEGER,
+  via             TEXT NOT NULL DEFAULT 'apply',   -- apply | applicant | staff
+  uploaded_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_application_documents_app ON application_documents (application_id);
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('careers_notify_email', ''),   -- told about every new application; blank for none
+  ('careers_templates', '{}')     -- edited email templates; blank ones use the defaults in careers.js
+ON CONFLICT (key) DO NOTHING;
