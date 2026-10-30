@@ -3704,6 +3704,8 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
     // Deliberately reachable: an archive nobody can look in is a delete with
     // extra steps, and restoring is the whole reason for archiving.
     clauses.push(`u.is_archived = true`);
+    // Past employees are archived too; they are listed under Manage users.
+    clauses.push(`u.archived_at IS NULL`);
   } else if (origin === 'staff') {
     clauses.push(`(u.is_staff = true OR u.is_admin = true)`);
   } else {
@@ -3738,7 +3740,7 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
        COUNT(*) FILTER (WHERE is_staff = false AND is_admin = false AND is_archived = false AND (via IS NULL OR via NOT IN ('pos','local')))::int AS online,
        COUNT(*) FILTER (WHERE is_staff = false AND is_admin = false AND is_archived = false AND via = 'pos')::int AS counter,
        COUNT(*) FILTER (WHERE is_staff = true OR is_admin = true)::int AS staff,
-       COUNT(*) FILTER (WHERE is_archived = true)::int AS archived
+       COUNT(*) FILTER (WHERE is_archived = true AND archived_at IS NULL)::int AS archived
      FROM users`
   );
   res.json({ users: rows, counts: tallies[0] });
@@ -4048,19 +4050,36 @@ app.delete('/api/admin/user-categories/:id', requireManager, async (req, res) =>
 });
 
 // ---- staff -------------------------------------------------------------------
+// Extra roles a person holds on top of their main one (users.extra_roles).
+// Only limited roles qualify: an extra role adds the screens it opens, and
+// manager rights still come from the main role alone, so every manager check
+// in the app -- requireManager, userPermState, the till overrides -- keeps
+// reading admin_role and nothing else. Unknown codes and the main role itself
+// are dropped rather than refused.
+async function cleanExtraRoles(list, primary) {
+  if (!Array.isArray(list)) return [];
+  const wanted = [...new Set(list.filter((c) => typeof c === 'string' && c && c !== primary))].slice(0, 10);
+  if (!wanted.length) return [];
+  const { rows } = await query(
+    `SELECT code FROM roles WHERE code = ANY($1::text[]) AND NOT can_manage AND code <> 'owner'`, [wanted]);
+  const ok = new Set(rows.map((r) => r.code));
+  return wanted.filter((c) => ok.has(c));
+}
+
 app.get('/api/admin/staff', requireAdmin, async (req, res) => {
   const showNid = await canSeeNationalId(req);
   const { rows } = await query(
     `SELECT u.id, u.name, u.email, u.phone, u.is_admin, u.admin_role, u.employee_no,
             u.is_staff, u.disabled, u.created_at, u.perms, u.forced_favs, u.favs_locked,
             (u.pin_hash IS NOT NULL) AS has_pin, u.pin_set_at,
+            u.is_archived, u.archived_at, to_char(u.left_on, 'YYYY-MM-DD') AS left_on, u.archive_reason, u.extra_roles,
             ${showNid ? 'u.national_id' : 'NULL::text AS national_id'},
             COALESCE(JSON_AGG(JSON_BUILD_OBJECT('id', c.id, 'code', c.code, 'label', c.label)
                      ORDER BY c.sort_order) FILTER (WHERE c.id IS NOT NULL), '[]') AS categories
        FROM users u
        LEFT JOIN user_category_members m ON m.user_id = u.id
        LEFT JOIN user_categories c ON c.id = m.category_id
-      WHERE u.is_staff = true OR u.is_admin = true
+      WHERE u.is_staff = true OR u.is_admin = true OR u.archived_at IS NOT NULL
       GROUP BY u.id
       ORDER BY u.name NULLS LAST, u.email`
   );
@@ -4089,6 +4108,7 @@ app.post('/api/admin/staff', requireManager, async (req, res) => {
     // malformed one fails with nothing created.
     const hash = await bcrypt.hash(password, 10);
     const pinHash = b.pin ? await validateAndHashPin(b.pin, null) : null;
+    const extras = await cleanExtraRoles(b.extra_roles, role);
 
     // One transaction: a staff member half-created -- a login with no
     // categories, or an account whose PIN never landed -- is worse than a
@@ -4099,12 +4119,12 @@ app.post('/api/admin/staff', requireManager, async (req, res) => {
       await client.query('BEGIN');
       const { rows } = await client.query(
         `INSERT INTO users (email, name, password_hash, phone, via, is_admin, admin_role,
-                            is_staff, employee_no, national_id, pin_hash, pin_set_at)
+                            is_staff, employee_no, national_id, pin_hash, pin_set_at, extra_roles)
            VALUES (lower($1), $2, $3, $4, 'local', $5, $6, true, $7, $8, $9,
-                   CASE WHEN $9::text IS NULL THEN NULL ELSE NOW() END)
+                   CASE WHEN $9::text IS NULL THEN NULL ELSE NOW() END, $10::jsonb)
            RETURNING id, email, name, is_admin, admin_role, employee_no`,
         [email, name || null, hash, phone || null, isAdmin, role,
-         b.employee_no || null, b.national_id || null, pinHash]
+         b.employee_no || null, b.national_id || null, pinHash, JSON.stringify(extras)]
       );
       created = rows[0];
       const wanted = (Array.isArray(b.categories) ? b.categories : [])
@@ -4147,17 +4167,28 @@ app.patch('/api/admin/staff/:id', requireManager, async (req, res) => {
 
   // Disabling an account is a hard lockout, so it carries the same two guards
   // as a password reset: not yourself, and not an owner unless you are one.
-  if (b.disabled === true) {
+  // Archiving disables too, so it gets the same guards.
+  if (b.disabled === true || b.archived === true) {
+    const verb = b.archived === true ? 'archive' : 'disable';
     if (id === req.session.userId) {
-      return res.status(400).json({ error: 'You cannot disable your own account.' });
+      return res.status(400).json({ error: 'You cannot ' + verb + ' your own account.' });
     }
     const { rows: tgt } = await query('SELECT admin_role FROM users WHERE id = $1', [id]);
     if (tgt.length && tgt[0].admin_role === 'owner' && await actingRole(req) !== 'owner') {
-      return res.status(403).json({ error: 'Only an owner can disable an owner account.' });
+      return res.status(403).json({ error: 'Only an owner can ' + verb + ' an owner account.' });
     }
   }
 
-  const fields = ['name', 'phone', 'employee_no', 'national_id', 'is_staff', 'is_admin', 'disabled', 'favs_locked'];
+  // Archive: someone who has left. Signed out and unable to sign in, the till
+  // PIN removed, off the staff lists (is_staff false takes them off the sales
+  // rep and mechanic pickers through syncStaffProfile), and the day they left
+  // kept with the reason. Their history is untouched. Restore brings the
+  // record back but leaves sign-in disabled, so turning access back on is a
+  // separate, deliberate step.
+  const archiving = b.archived === true, restoring = b.archived === false;
+  const fields = ['name', 'phone', 'employee_no', 'national_id', 'is_admin', 'favs_locked']
+    .concat(archiving || restoring ? [] : ['is_staff'])
+    .concat(archiving ? [] : ['disabled']);
   const sets = []; const vals = [];
   for (const f of fields) if (b[f] !== undefined) { sets.push(`${f} = $${sets.length + 1}`); vals.push(b[f]); }
 
@@ -4171,12 +4202,34 @@ app.patch('/api/admin/staff/:id', requireManager, async (req, res) => {
     vals.push(JSON.stringify(arr));
   }
 
+  let newRole = null;
   if (b.admin_role !== undefined && await roleExists(b.admin_role)) {
     // Only an owner may mint another owner, and nobody may demote themselves
     // out of the last owner seat by accident.
     let role = b.admin_role;
     if (role === 'owner' && await actingRole(req) !== 'owner') role = 'manager';
-    sets.push(`admin_role = $${sets.length + 1}`); vals.push(role);
+    sets.push(`admin_role = $${sets.length + 1}`); vals.push(role); newRole = role;
+    // A role cannot be both someone's main role and an extra one.
+    if (b.extra_roles === undefined) { sets.push(`extra_roles = extra_roles - $${sets.length + 1}::text`); vals.push(role); }
+  }
+
+  // Placeholders below count vals, not sets: these add assignments with no value.
+  if (b.extra_roles !== undefined) {
+    let primary = newRole;
+    if (!primary) {
+      const { rows: cur } = await query('SELECT admin_role FROM users WHERE id = $1', [id]);
+      primary = cur.length ? cur[0].admin_role : null;
+    }
+    sets.push(`extra_roles = $${vals.length + 1}::jsonb`); vals.push(JSON.stringify(await cleanExtraRoles(b.extra_roles, primary)));
+  }
+  if (archiving) {
+    const left = /^\d{4}-\d{2}-\d{2}$/.test(String(b.left_on || '')) ? b.left_on : null;
+    sets.push('is_archived = true', 'disabled = true', 'is_staff = false', 'archived_at = NOW()',
+              'pin_hash = NULL', 'pin_set_at = NULL');
+    sets.push(`left_on = COALESCE($${vals.length + 1}::date, CURRENT_DATE)`); vals.push(left);
+    sets.push(`archive_reason = $${vals.length + 1}`); vals.push(String(b.archive_reason || '').trim().slice(0, 300) || null);
+  } else if (restoring) {
+    sets.push('is_archived = false', 'is_staff = true', 'archived_at = NULL', 'left_on = NULL', 'archive_reason = NULL');
   }
 
   try {
@@ -4230,7 +4283,8 @@ app.post('/api/admin/staff/:id/password', requireManager, async (req, res) => {
 app.get('/api/admin/roles', requireAdmin, async (_req, res) => {
   const { rows } = await query(
     `SELECT r.code, r.label, r.rank, r.can_manage, r.hidden_tabs, r.is_system,
-            (SELECT COUNT(*)::int FROM users u WHERE u.admin_role = r.code) AS member_count
+            (SELECT COUNT(*)::int FROM users u WHERE u.admin_role = r.code) AS member_count,
+            (SELECT COUNT(*)::int FROM users u WHERE u.extra_roles ? r.code) AS extra_count
        FROM roles r ORDER BY r.rank, r.label`
   );
   res.json({ roles: rows });
@@ -4240,7 +4294,7 @@ app.get('/api/admin/roles', requireAdmin, async (_req, res) => {
 // of carrying its own copy of the rules, which is how the server and the UI
 // used to disagree about who could see what.
 app.get('/api/admin/roles/mine', requireAdmin, async (req, res) => {
-  const { rows: u } = await query('SELECT admin_role FROM users WHERE id = $1', [req.session.userId]);
+  const { rows: u } = await query('SELECT admin_role, extra_roles FROM users WHERE id = $1', [req.session.userId]);
   const code = u.length ? u[0].admin_role : null;
   const { rows } = await query('SELECT code, label, can_manage, hidden_tabs, rank FROM roles WHERE code = $1', [code]);
   if (!rows.length) {
@@ -4249,6 +4303,19 @@ app.get('/api/admin/roles/mine', requireAdmin, async (req, res) => {
   }
   const r = rows[0];
   if (code === 'owner') r.can_manage = true;   // matches roleCanManage()
+  // Extra roles (users.extra_roles) each open their own screens: a screen stays
+  // hidden only when the main role and every extra role all hide it.
+  const extras = Array.isArray(u[0].extra_roles) ? u[0].extra_roles : [];
+  if (extras.length) {
+    const { rows: ex } = await query('SELECT code, label, hidden_tabs FROM roles WHERE code = ANY($1::text[])', [extras]);
+    let hidden = Array.isArray(r.hidden_tabs) ? r.hidden_tabs : [];
+    for (const x of ex) {
+      const h = new Set(Array.isArray(x.hidden_tabs) ? x.hidden_tabs : []);
+      hidden = hidden.filter((t) => h.has(t));
+    }
+    r.hidden_tabs = hidden;
+    r.extra_roles = ex.map((x) => ({ code: x.code, label: x.label }));
+  }
   res.json({ role: r });
 });
 
@@ -4317,9 +4384,10 @@ app.delete('/api/admin/roles/:code', requireManager, async (req, res) => {
   if (rows[0].is_system) return res.status(400).json({ error: '"' + rows[0].label + '" is a built-in role and cannot be deleted.' });
   // No foreign key from users.admin_role, so deleting a role in use would
   // silently leave those staff holding a code that grants nothing.
-  const { rows: held } = await query('SELECT COUNT(*)::int AS n FROM users WHERE admin_role = $1', [req.params.code]);
+  const { rows: held } = await query(
+    'SELECT COUNT(*)::int AS n FROM users WHERE admin_role = $1 OR extra_roles ? $1', [req.params.code]);
   if (held[0].n > 0) {
-    return res.status(400).json({ error: held[0].n + ' staff still have this role. Move them to another role first.' });
+    return res.status(400).json({ error: held[0].n + ' staff still have this role (as their main role or an extra one). Move them to another role first.' });
   }
   await query('DELETE FROM roles WHERE code = $1', [req.params.code]);
   res.json({ ok: true });

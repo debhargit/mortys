@@ -6175,3 +6175,13 @@ ALTER TABLE bank_feed_lines ADD COLUMN IF NOT EXISTS note               TEXT;
 -- and entered again as it is now, and one paid in QuickBooks can be voided.
 ALTER TABLE ap_bills ADD COLUMN IF NOT EXISTS source TEXT;   -- NULL: entered here | quickbooks
 UPDATE ap_bills SET source = 'quickbooks' WHERE source IS NULL AND memo LIKE 'Imported from QuickBooks (%';
+-- Manage users (admin.html): past employees are archived rather than deleted,
+-- with the day they left and why, so their sales, time and pay history keep a
+-- name. Archiving also disables sign-in and removes the till PIN.
+-- extra_roles: further limited roles a person holds on top of admin_role, the
+-- QuickBooks way of giving someone two jobs. Each adds the screens it opens;
+-- manager rights still come only from admin_role.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS archived_at    TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS left_on        DATE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS archive_reason TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS extra_roles    JSONB NOT NULL DEFAULT '[]';

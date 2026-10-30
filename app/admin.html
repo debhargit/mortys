@@ -13608,8 +13608,10 @@ async function renderStaff(panel){
   var ROLES = rolesRes.roles || [];
   var CAPS = capsRes.capabilities || [];
   var STAFF = r.staff || [];
-  var screens = 0;
-  SIDEBAR_GROUPS.forEach(function(g){ screens += g.items.length; });
+  var screens = 0, TABS = {};
+  SIDEBAR_GROUPS.forEach(function(g){ screens += g.items.length; g.items.forEach(function(i){ TABS[i.tab] = 1; }); });
+  // Hidden screens that are still in the sidebar; a role can name old ones.
+  function hiddenReal(list){ return (Array.isArray(list) ? list : []).filter(function(t){ return TABS[t]; }); }
   function roleOf(code){ return ROLES.find(function(x){ return x.code === code; }); }
   function roleIsFull(code){
     if (code === 'owner') return true;
@@ -13622,10 +13624,51 @@ async function renderStaff(panel){
     var rr = roleOf(code);
     if (code === 'owner') return 'Full access to everything. The owner role cannot be limited.';
     if (!rr) return '';
-    var h = Array.isArray(rr.hidden_tabs) ? rr.hidden_tabs.length : 0;
+    var h = hiddenReal(rr.hidden_tabs).length;
     return (rr.can_manage ? 'Manager rights — passes the manager-only checks. ' : 'Limited — no manager-only actions. ') +
       'Sees ' + Math.max(0, screens - h) + ' of ' + screens + ' screens.';
   }
+  // Extra roles: limited roles a person holds on top of their main one, the
+  // way QuickBooks lets one user have several roles. Each opens its own
+  // screens; manager rights come from the main role only, and the server
+  // drops a manager role offered as an extra.
+  function extrasOf(s){ return Array.isArray(s.extra_roles) ? s.extra_roles : []; }
+  function extraChecks(cls, primary, selected){
+    if (roleIsFull(primary)) return '<p class="qbo-note" style="margin-top:0">The main role already has full access, so extra roles add nothing.</p>';
+    var list = ROLES.filter(function(x){ return x.code !== 'owner' && !x.can_manage && x.code !== primary; });
+    if (!list.length) return '<p class="qbo-note" style="margin-top:0">No other limited roles yet. Add one on the Roles tab.</p>';
+    return '<div class="qbo-chips">' + list.map(function(x){
+      return '<label class="qbo-chip"><input type="checkbox" class="' + cls + '" value="' + esc(x.code) + '"' + (selected.indexOf(x.code) >= 0 ? ' checked' : '') + '/>' + esc(x.label) + '</label>';
+    }).join('') + '</div>';
+  }
+  // The main role's summary, or with extra roles, how many screens they open between them.
+  function comboSummary(primary, extras){
+    if (roleIsFull(primary) || !extras.length) return roleSummary(primary);
+    var rr = roleOf(primary), hid = hiddenReal(rr && rr.hidden_tabs);
+    extras.forEach(function(c){
+      var x = roleOf(c), h = x && Array.isArray(x.hidden_tabs) ? x.hidden_tabs : [];
+      hid = hid.filter(function(t){ return h.indexOf(t) >= 0; });
+    });
+    return 'Limited — no manager-only actions. With ' + extras.length + ' extra role' + (extras.length === 1 ? '' : 's') +
+      ', sees ' + Math.max(0, screens - hid.length) + ' of ' + screens + ' screens.';
+  }
+  // Wires a role picker to its extra-role chips and summary line.
+  function wireExtras(d, roleSel, wrapSel, sumSel, cls){
+    function picked(){ return Array.prototype.map.call(d.querySelectorAll('.' + cls + ':checked'), function(c){ return c.value; }); }
+    function sum(){ d.querySelector(sumSel).textContent = comboSummary(d.querySelector(roleSel).value, picked()); }
+    // A full-access main role shows no boxes; the last ticks come back if the
+    // role is changed back to a limited one.
+    var last = picked();
+    d.querySelector(roleSel).addEventListener('change', function(){
+      if (d.querySelector('.' + cls)) last = picked();
+      d.querySelector(wrapSel).innerHTML = extraChecks(cls, this.value, last); sum();
+    });
+    d.querySelector(wrapSel).addEventListener('change', function(){ last = picked(); sum(); });
+    sum();
+    return picked;
+  }
+  var EXTRA_NOTE = '<p class="qbo-note" style="margin-top:0">For someone who does two jobs, such as a cashier who also receives stock. Each extra role adds the screens it opens. Manager rights come from the main role only.</p>';
+  function todayLocal(){ var t = new Date(); return new Date(t.getTime() - t.getTimezoneOffset() * 60000).toISOString().slice(0, 10); }
   // Categories carry their own function-permission denies; a staff member
   // inherits the union of their categories' denies, then their own record
   // can re-grant (Allow) or force-deny (Deny) on top.
@@ -13694,31 +13737,39 @@ async function renderStaff(panel){
       '<label class="qbo-switch" style="margin-top:16px"><input type="checkbox" class="qbo-favlock"' + (locked ? ' checked' : '') + '/>' +
         '<span><span class="t">🔒 Lock pinned screens</span><span class="d">This person cannot pin or unpin screens themselves.</span></span></label>';
   }
-  function statusOf(s){ return s.disabled ? 'disabled' : !s.is_staff ? 'inactive' : 'active'; }
-  var ST = { active: ['ok', 'Active'], disabled: ['bad', 'Disabled'], inactive: ['ltd', 'No longer staff'] };
-  var counts = { active: 0, disabled: 0, inactive: 0 };
+  // Archived = a past employee (archived_at is set only by Archive here; a
+  // merged customer duplicate is archived too, but is never staff).
+  function statusOf(s){ return s.is_archived && s.archived_at ? 'archived' : s.disabled ? 'disabled' : !s.is_staff ? 'inactive' : 'active'; }
+  var ST = { active: ['ok', 'Active'], disabled: ['bad', 'Disabled'], inactive: ['ltd', 'No longer staff'], archived: ['ltd', 'Archived'] };
+  var counts = { active: 0, disabled: 0, inactive: 0, archived: 0 };
   STAFF.forEach(function(s){ counts[statusOf(s)]++; });
 
   var rows = STAFF.map(function(s){
     var st = statusOf(s), isSelf = String(s.id) === String(CURRENT_ADMIN_ID);
     var cl = (s.categories || []).map(function(c){ return esc(c.label); }).join(', ');
     var hay = [s.name, s.email, s.phone, s.employee_no, cl].join(' ').toLowerCase();
-    return '<tr class="qbo-urow" data-id="' + s.id + '" data-st="' + st + '" data-role="' + esc(s.is_admin ? s.admin_role : '') + '" data-hay="' + esc(hay) + '">' +
+    var roles = s.is_admin ? '|' + [s.admin_role].concat(extrasOf(s)).join('|') + '|' : '';
+    return '<tr class="qbo-urow" data-id="' + s.id + '" data-st="' + st + '" data-roles="' + esc(roles) + '" data-hay="' + esc(hay) + '">' +
       '<td><div class="qbo-who"><span class="qbo-av">' + esc(qboInitials(s.name || s.email)) + '</span><div>' +
         '<div class="qbo-rolename">' + esc(s.name || '—') + (isSelf ? ' <span class="qbo-pill sys">You</span>' : '') + '</div>' +
         '<div class="qbo-code">' + esc([s.employee_no, cl].filter(Boolean).join(' · ') || '—') + '</div></div></div></td>' +
       '<td>' + esc(s.email) + (s.phone ? '<div class="qbo-code">' + esc(s.phone) + '</div>' : '') + '</td>' +
       '<td>' + (s.is_admin
-        ? esc(roleLabel(s.admin_role)) + (roleIsFull(s.admin_role) && ['owner', 'manager'].indexOf(s.admin_role) < 0 ? ' <span class="qbo-pill mgr">Manager rights</span>' : '')
+        ? esc(roleLabel(s.admin_role)) + (roleIsFull(s.admin_role) && ['owner', 'manager'].indexOf(s.admin_role) < 0 ? ' <span class="qbo-pill mgr">Manager rights</span>' : '') +
+          (extrasOf(s).length ? '<div class="qbo-code">+ ' + extrasOf(s).map(function(c){ return esc(roleLabel(c)); }).join(', ') + '</div>' : '')
         : '<span style="color:var(--muted)">Till PIN only</span>') + '</td>' +
       '<td>' + (s.has_pin ? '<span class="qbo-pill mgr">Set</span>' : '<span style="color:var(--muted);font-size:12px">Not set</span>') + '</td>' +
-      '<td><span class="qbo-pill ' + ST[st][0] + '">' + ST[st][1] + '</span></td>' +
+      '<td><span class="qbo-pill ' + ST[st][0] + '">' + ST[st][1] + '</span>' +
+        (st === 'archived' && s.left_on ? '<div class="qbo-code">Left ' + esc(s.left_on) + '</div>' : '') + '</td>' +
       '<td class="qbo-act"><button class="qbo-link" data-edit="' + s.id + '">Edit</button>' +
         '<button class="qbo-caret" aria-label="More actions">▾</button>' +
         '<div class="qbo-menu" hidden>' +
-          '<button data-pin="' + s.id + '">Change till PIN</button>' +
-          '<button data-pw="' + s.id + '">Reset password</button>' +
-          (isSelf ? '' : '<button data-disable="' + s.id + '"' + (s.disabled ? '' : ' class="bad"') + '>' + (s.disabled ? 'Enable sign-in' : 'Disable sign-in') + '</button>') +
+          (st === 'archived'
+            ? '<button data-restore="' + s.id + '">Restore</button>'
+            : '<button data-pin="' + s.id + '">Change till PIN</button>' +
+              '<button data-pw="' + s.id + '">Reset password</button>' +
+              (isSelf ? '' : '<button data-disable="' + s.id + '"' + (s.disabled ? '' : ' class="bad"') + '>' + (s.disabled ? 'Enable sign-in' : 'Disable sign-in') + '</button>' +
+                             '<button class="bad" data-archive="' + s.id + '">Archive (has left)</button>')) +
         '</div></td>' +
     '</tr>';
   }).join('');
@@ -13733,10 +13784,12 @@ async function renderStaff(panel){
       '<div class="qbo-bar">' +
         '<input id="quSearch" class="fld" type="search" placeholder="Find by name, email, phone or employee no."/>' +
         '<select id="quStatus" class="fld">' +
-          '<option value="">All statuses (' + STAFF.length + ')</option>' +
+          '<option value="">Current staff (' + (STAFF.length - counts.archived) + ')</option>' +
           '<option value="active">Active (' + counts.active + ')</option>' +
           '<option value="disabled">Disabled (' + counts.disabled + ')</option>' +
           '<option value="inactive">No longer staff (' + counts.inactive + ')</option>' +
+          '<option value="archived">Archived — past employees (' + counts.archived + ')</option>' +
+          '<option value="all">Everyone (' + STAFF.length + ')</option>' +
         '</select>' +
         '<select id="quRole" class="fld"><option value="">All roles</option>' + roleOptions(QBO_ROLE_FILTER || '') + '<option value="-">Till PIN only</option></select>' +
         '<span class="qbo-code" id="quCount"></span>' +
@@ -13757,9 +13810,11 @@ async function renderStaff(panel){
     var st = panel.querySelector('#quStatus').value, ro = panel.querySelector('#quRole').value;
     var n = 0;
     panel.querySelectorAll('.qbo-urow').forEach(function(tr){
+      var rs = tr.getAttribute('data-st');
+      // Past employees stay out of the list unless asked for.
       var ok = (!q || tr.getAttribute('data-hay').indexOf(q) >= 0) &&
-               (!st || tr.getAttribute('data-st') === st) &&
-               (!ro || (ro === '-' ? !tr.getAttribute('data-role') : tr.getAttribute('data-role') === ro));
+               (st === 'all' || (st ? rs === st : rs !== 'archived')) &&
+               (!ro || (ro === '-' ? !tr.getAttribute('data-roles') : tr.getAttribute('data-roles').indexOf('|' + ro + '|') >= 0));
       tr.hidden = !ok; if (ok) n++;
     });
     panel.querySelector('#quCount').textContent = STAFF.length ? 'Showing ' + n + ' of ' + STAFF.length : '';
@@ -13786,10 +13841,11 @@ async function renderStaff(panel){
           '<span><span class="t">Can sign in to the admin panel</span><span class="d">Untick for staff who only need a PIN at the till.</span></span></label>' +
         '<div class="qbo-sec">Role</div><select id="sfRole" class="fld">' + roleOptions('cashier') + '</select>' +
         '<p class="qbo-note" id="sfRoleSum">' + esc(roleSummary('cashier')) + '</p>' +
+        '<div class="qbo-sec">Extra roles</div>' + EXTRA_NOTE + '<div id="sfXWrap">' + extraChecks('sfXRole', 'cashier', []) + '</div>' +
         '<div class="qbo-sec">Staff categories</div>' + catChecks('sfNewCat', []) },
     ], '<button class="qbo-btn ghost qbo-close">Cancel</button><span class="qbo-msg" id="sfMsg"></span><span class="sp"></span>' +
        '<button class="qbo-btn ghost" id="sfNext">Next</button><button class="qbo-btn" id="sfGo">Add user</button>');
-    d.querySelector('#sfRole').addEventListener('change', function(){ d.querySelector('#sfRoleSum').textContent = roleSummary(this.value); });
+    wireExtras(d, '#sfRole', '#sfXWrap', '#sfRoleSum', 'sfXRole');
     d.querySelector('#sfIsAdmin').addEventListener('change', function(){ d.querySelector('#sfRole').disabled = !this.checked; });
     d.querySelector('#sfNext').addEventListener('click', function(){ qboDrawerTab(d, 'access'); });
     d.querySelector('#sfGo').addEventListener('click', function(){ submitStaff(); });
@@ -13801,8 +13857,14 @@ async function renderStaff(panel){
     var s = STAFF.find(function(x){ return String(x.id) === String(id); });
     if (!s) return;
     var catIds = (s.categories || []).map(function(c){ return c.id; });
+    var archived = statusOf(s) === 'archived';
     var d = qboDrawer(root, s.name || s.email, esc(s.email) + (s.created_at ? ' · added ' + esc(String(s.created_at).slice(0, 10)) : ''), [
       { key: 'profile', label: 'Profile', html:
+        (archived
+          ? '<div class="qbo-switch" style="cursor:default;margin-bottom:16px;align-items:center"><span style="flex:1"><span class="t">Archived — left ' + esc(s.left_on || '') + '</span>' +
+              '<span class="d">' + esc(s.archive_reason || 'No reason recorded.') + ' Sign-in is off and the till PIN was removed.</span></span>' +
+              '<button type="button" class="qbo-btn ghost" id="euRestore">Restore</button></div>'
+          : '') +
         '<div class="qbo-grid">' +
           '<div><label class="lbl">Name</label><input class="fld" id="euName" value="' + esc(s.name || '') + '"/></div>' +
           '<div><label class="lbl">Email (sign-in)</label><input class="fld" disabled value="' + esc(s.email) + '"/></div>' +
@@ -13811,7 +13873,7 @@ async function renderStaff(panel){
           (r.national_id_visible
             ? '<div><label class="lbl">National ID (TRN)</label><input class="fld" id="euNid" value="' + esc(s.national_id || '') + '"/></div>'
             : '<div><label class="lbl">National ID</label><input class="fld" disabled value="hidden for your role"/></div>') +
-          '<div><label class="lbl">Status</label><select class="fld" id="euActive">' +
+          '<div><label class="lbl">Status</label><select class="fld" id="euActive"' + (archived ? ' disabled' : '') + '>' +
             '<option value="true"' + (s.is_staff ? ' selected' : '') + '>Active staff</option>' +
             '<option value="false"' + (!s.is_staff ? ' selected' : '') + '>No longer staff</option>' +
           '</select></div>' +
@@ -13819,18 +13881,21 @@ async function renderStaff(panel){
       { key: 'role', label: 'Role', html:
         (s.is_admin ? '' : '<p class="qbo-note">Signs in at the till with a PIN only. The role applies if they are given admin panel access.</p>') +
         '<div class="qbo-sec" style="margin-top:0">Role</div><select class="fld" id="euRole">' + roleOptions(s.admin_role) + '</select>' +
-        '<p class="qbo-note" id="euRoleSum">' + esc(roleSummary(s.admin_role)) + '</p>' +
+        '<p class="qbo-note" id="euRoleSum">' + esc(comboSummary(s.admin_role, extrasOf(s))) + '</p>' +
         '<button type="button" class="qbo-link" id="euSeeRole">View this role’s screens →</button>' +
+        '<div class="qbo-sec">Extra roles</div>' + EXTRA_NOTE + '<div id="euXWrap">' + extraChecks('euXRole', s.admin_role, extrasOf(s)) + '</div>' +
         '<div class="qbo-sec">Staff categories</div>' + catChecks('euCat', catIds) },
       { key: 'perms', label: 'Permissions', html: permBlocks(s) },
       { key: 'pinned', label: 'Pinned screens', html: favChecks(Array.isArray(s.forced_favs) ? s.forced_favs : [], !!s.favs_locked) },
     ], '<button class="qbo-btn ghost qbo-close">Cancel</button><span class="qbo-msg" id="euMsg"></span><span class="sp"></span><button class="qbo-btn" id="euSave">Save</button>');
     d.querySelectorAll('.qbo-cat-hd').forEach(function(h){ h.addEventListener('click', function(){ h.parentNode.classList.toggle('open'); }); });
+    var extrasPicked = wireExtras(d, '#euRole', '#euXWrap', '#euRoleSum', 'euXRole');
     d.querySelector('#euRole').addEventListener('change', function(){
       var full = roleIsFull(this.value);
-      d.querySelector('#euRoleSum').textContent = roleSummary(this.value);
       d.querySelectorAll('.qbo-pv').forEach(function(x){ x.disabled = full; });
     });
+    var rb = d.querySelector('#euRestore');
+    if (rb) rb.addEventListener('click', function(){ restore(id); });
     d.querySelector('#euSeeRole').addEventListener('click', function(){
       QBO_OPEN_ROLE = d.querySelector('#euRole').value; show('roles');
     });
@@ -13842,12 +13907,14 @@ async function renderStaff(panel){
         phone: d.querySelector('#euPhone').value.trim() || null,
         employee_no: d.querySelector('#euEmp').value.trim() || null,
         admin_role: d.querySelector('#euRole').value,
-        is_staff: d.querySelector('#euActive').value === 'true',
+        extra_roles: extrasPicked(),
         categories: Array.prototype.map.call(d.querySelectorAll('.euCat:checked'), function(c){ return parseInt(c.value, 10); }),
         forced_favs: Array.prototype.map.call(d.querySelectorAll('.qbo-fav:checked'), function(c){ return c.value; }),
         favs_locked: d.querySelector('.qbo-favlock').checked,
       };
       if (nid) body.national_id = nid.value.trim() || null;
+      // An archived person's staff flag belongs to Archive and Restore.
+      if (!archived) body.is_staff = d.querySelector('#euActive').value === 'true';
       var perms = {};
       d.querySelectorAll('.qbo-pv').forEach(function(sel){
         if (sel.value === 'allow') perms[sel.getAttribute('data-cap')] = true;
@@ -13892,6 +13959,54 @@ async function renderStaff(panel){
         renderStaff(panel);
       } catch (e) { alert(e.message); }
     });
+  });
+  // Archive: for someone who has left. Nothing is deleted; the server signs
+  // them out, turns sign-in off, removes the till PIN and takes them off the
+  // staff pickers, and keeps the day they left with the reason.
+  function openArchive(id){
+    var who = nameOf(id);
+    var d = qboDrawer(root, 'Archive ' + who, 'For someone who has left. Nothing is deleted.', [
+      { key: 'archive', label: 'Archive', html:
+        '<div class="qbo-grid">' +
+          '<div><label class="lbl">Last day</label><input type="date" class="fld" id="arLeft" value="' + todayLocal() + '"/></div>' +
+          '<div><label class="lbl">Reason</label><select class="fld" id="arWhy">' +
+            ['Resigned', 'Contract ended', 'Dismissed', 'Retired', 'Moved to another branch'].map(function(x){ return '<option>' + x + '</option>'; }).join('') +
+            '<option value="">Other / not given</option></select></div>' +
+        '</div>' +
+        '<label class="lbl" style="display:block;margin-top:12px">Note <small style="color:var(--muted)">optional</small></label><input class="fld" id="arNote" maxlength="200"/>' +
+        '<div class="qbo-sec">What happens</div>' +
+        '<ul class="qbo-note" style="padding-left:18px;margin:0">' +
+          '<li>They are signed out and cannot sign in, by password or PIN. Their till PIN is removed.</li>' +
+          '<li>They come off the staff list and the sales-rep and mechanic pickers.</li>' +
+          '<li>Their sales, time cards, pay and commission history stay, under their name.</li>' +
+          '<li>Find them under Status › Archived. Restore brings the record back; sign-in stays off until you enable it.</li>' +
+        '</ul>' },
+    ], '<button class="qbo-btn ghost qbo-close">Cancel</button><span class="qbo-msg" id="arMsg"></span><span class="sp"></span><button class="qbo-btn danger" id="arGo">Archive</button>');
+    d.querySelector('#arGo').addEventListener('click', async function(){
+      var btn = this, msg = d.querySelector('#arMsg');
+      var reason = [d.querySelector('#arWhy').value, d.querySelector('#arNote').value.trim()].filter(Boolean).join(' — ');
+      btn.disabled = true; qboSay(msg, 'Archiving…');
+      try {
+        await api('/api/admin/staff/' + id, { method: 'PATCH', body: { archived: true, left_on: d.querySelector('#arLeft').value || null, archive_reason: reason } });
+        renderStaff(panel);
+        posToast('Archived ' + who);
+      } catch (e) { btn.disabled = false; qboSay(msg, e.message, 'bad'); }
+    });
+  }
+  async function restore(id){
+    var who = nameOf(id);
+    if (!confirm('Restore ' + who + '?\n\nTheir record comes back to the staff list. Sign-in stays off: use Enable sign-in when they should be able to sign in again, and give them a new till PIN.')) return;
+    try {
+      await api('/api/admin/staff/' + id, { method: 'PATCH', body: { archived: false } });
+      renderStaff(panel);
+      posToast('Restored ' + who);
+    } catch (e) { alert(e.message); }
+  }
+  panel.querySelectorAll('[data-archive]').forEach(function(b){
+    b.addEventListener('click', function(){ openArchive(this.getAttribute('data-archive')); });
+  });
+  panel.querySelectorAll('[data-restore]').forEach(function(b){
+    b.addEventListener('click', function(){ restore(this.getAttribute('data-restore')); });
   });
   // Reset password: the everyday lockout, where the person is standing at the
   // counter. Not an emailed link -- half the roster has no working email.
@@ -14224,7 +14339,8 @@ async function renderRoles(panel, openCode){
         '<span class="d">Passes the manager-only checks on the server — receiving stock, editing pricing, issuing refunds, managing staff. The screens tab still controls the sidebar.</span></span>' +
       '</label>' +
       (role ? '<div class="qbo-sec">People with this role</div><p class="qbo-note" style="margin-top:0">' + role.member_count + ' ' + (role.member_count === 1 ? 'person' : 'people') +
-        (role.member_count ? ' · <button type="button" class="qbo-link qbo-seeusers">See them in Users →</button>' : '') + '</p>' : '');
+        (role.extra_count ? ', plus ' + role.extra_count + ' who hold it as an extra role' : '') +
+        (role.member_count || role.extra_count ? ' · <button type="button" class="qbo-link qbo-seeusers">See them in Users →</button>' : '') + '</p>' : '');
   }
   function screensHtml(hidden){
     return '<p class="qbo-note" style="margin:0 0 12px">Tick the screens this role can open. Unticked screens are left out of their menu.</p>' +
@@ -14254,14 +14370,14 @@ async function renderRoles(panel, openCode){
         '<td><div class="qbo-rolename">' + esc(role.label) + (role.is_system ? '<span class="qbo-pill sys">Built in</span>' : '') + '</div>' +
             '<div class="qbo-code">' + esc(role.code) + ' · seniority ' + role.rank + '</div></td>' +
         '<td>' + access + '<div class="qbo-code">' + (locked ? 'Everything, always' : 'Sees ' + shown + ' of ' + totalScreens + ' screens') + '</div></td>' +
-        '<td>' + role.member_count + '</td>' +
+        '<td>' + role.member_count + (role.extra_count ? '<div class="qbo-code">+' + role.extra_count + ' as an extra role</div>' : '') + '</td>' +
         '<td class="qbo-act">' + (locked
           ? '<span style="color:var(--muted);font-size:12px">Locked</span>'
           : '<button class="qbo-link" data-edit="' + esc(role.code) + '">Edit</button>' +
             '<button class="qbo-caret" aria-label="More actions">▾</button>' +
             '<div class="qbo-menu" hidden>' +
               '<button data-dup="' + esc(role.code) + '">Duplicate</button>' +
-              (role.member_count ? '<button data-users="' + esc(role.code) + '">See users</button>' : '') +
+              (role.member_count || role.extra_count ? '<button data-users="' + esc(role.code) + '">See users</button>' : '') +
               (role.is_system ? '' : '<button class="bad" data-del="' + esc(role.code) + '">Delete role</button>') +
             '</div>') + '</td>' +
       '</tr>';
@@ -14288,7 +14404,7 @@ async function renderRoles(panel, openCode){
   // starts with; editing: true to save over it rather than create a new one.
   function openEditor(from, editing){
     var hidden = from && Array.isArray(from.hidden_tabs) ? from.hidden_tabs : [];
-    var base = from && !editing ? Object.assign({}, from, { label: 'Copy of ' + from.label, is_system: false, member_count: 0, rank: from.rank }) : from;
+    var base = from && !editing ? Object.assign({}, from, { label: 'Copy of ' + from.label, is_system: false, member_count: 0, extra_count: 0, rank: from.rank }) : from;
     var d = qboDrawer(root,
       editing ? 'Edit role: ' + from.label : from ? 'Duplicate ' + from.label : 'Add a role',
       editing ? esc(from.code) + ' · ' + from.member_count + ' staff' : 'Starts ' + (from ? 'as a copy — change what differs.' : 'with every screen ticked.'),
@@ -14386,6 +14502,7 @@ async function submitStaff(){
     admin_role: document.getElementById('sfRole').value,
     is_admin: document.getElementById('sfIsAdmin').checked,
     categories: Array.prototype.map.call(document.querySelectorAll('.sfNewCat:checked'), function(c){ return parseInt(c.value, 10); }),
+    extra_roles: Array.prototype.map.call(document.querySelectorAll('.sfXRole:checked'), function(c){ return c.value; }),
   };
   var pin = document.getElementById('sfPin').value.trim();
   if (pin) body.pin = pin;
