@@ -13498,8 +13498,100 @@ async function renderMessages(panel){
 //
 //  Split out of the Customers screen deliberately -- staff and customers are
 //  different kinds of record and were previously managed on the same page.
+//
+//  USERS & STAFF — laid out like QuickBooks' "Manage users"
+//
+//  One header shared with Roles and Staff Categories (a tab strip across the
+//  three), a searchable users table with an "Edit ▾" action menu on each row,
+//  and a panel that slides in from the right for adding or editing someone,
+//  split into tabs instead of one long form. Same endpoints as before.
 // =============================================================================
 var STAFF_CATS = [];
+
+// Set by another screen before show() to land on a filtered list / open role.
+var QBO_ROLE_FILTER = null, QBO_OPEN_ROLE = null;
+
+// The Users / Roles / Staff categories strip. A tab this role cannot open is
+// left out, the same as in the sidebar.
+function qboTabs(on){
+  var hide = (MY_ROLE && Array.isArray(MY_ROLE.hidden_tabs)) ? MY_ROLE.hidden_tabs : [];
+  return '<div class="qbo-tabs">' +
+    [['staff', 'Users'], ['roles', 'Roles'], ['staffcategories', 'Staff categories']]
+      .filter(function(t){ return t[0] === on || hide.indexOf(t[0]) < 0; })
+      .map(function(t){ return '<button type="button" data-qbtab="' + t[0] + '"' + (t[0] === on ? ' class="on"' : '') + '>' + t[1] + '</button>'; }).join('') +
+  '</div>';
+}
+function qboWireTabs(root){
+  root.querySelectorAll('[data-qbtab]').forEach(function(b){
+    b.addEventListener('click', function(){ if (!this.classList.contains('on')) show(this.getAttribute('data-qbtab')); });
+  });
+}
+
+// The slide-in panel. tabs: [{ key, label, html }]; one tab shows no strip.
+// Lives inside the screen, so leaving the screen removes it too.
+function qboDrawer(root, title, sub, tabs, foot){
+  qboCloseDrawer(root);
+  var d = document.createElement('div');
+  d.className = 'qbo-dr-wrap';
+  d.innerHTML = '<div class="qbo-dr" role="dialog" aria-label="' + esc(title) + '">' +
+      '<div class="qbo-dr-hd"><div><h3>' + esc(title) + '</h3>' + (sub ? '<div class="qbo-code">' + sub + '</div>' : '') + '</div>' +
+        '<button type="button" class="qbo-x" aria-label="Close">&times;</button></div>' +
+      (tabs.length > 1
+        ? '<div class="qbo-dr-tabs">' + tabs.map(function(t, i){ return '<button type="button" data-dt="' + t.key + '"' + (i ? '' : ' class="on"') + '>' + esc(t.label) + '</button>'; }).join('') + '</div>'
+        : '') +
+      '<div class="qbo-dr-bd">' + tabs.map(function(t, i){ return '<div class="qbo-dr-pane" data-dp="' + t.key + '"' + (i ? ' hidden' : '') + '>' + t.html + '</div>'; }).join('') + '</div>' +
+      '<div class="qbo-dr-ft">' + foot + '</div>' +
+    '</div>';
+  root.appendChild(d);
+  var close = function(){ qboCloseDrawer(root); };
+  d.addEventListener('click', function(e){ if (e.target === d) close(); });
+  d.querySelector('.qbo-x').addEventListener('click', close);
+  d.querySelectorAll('.qbo-close').forEach(function(b){ b.addEventListener('click', close); });
+  d.querySelectorAll('[data-dt]').forEach(function(b){
+    b.addEventListener('click', function(){ qboDrawerTab(d, this.getAttribute('data-dt')); });
+  });
+  d._esc = function(e){ if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', d._esc);
+  requestAnimationFrame(function(){ d.classList.add('in'); });
+  return d;
+}
+function qboDrawerTab(d, key){
+  d.querySelectorAll('[data-dt]').forEach(function(x){ x.classList.toggle('on', x.getAttribute('data-dt') === key); });
+  d.querySelectorAll('[data-dp]').forEach(function(x){ x.hidden = x.getAttribute('data-dp') !== key; });
+}
+function qboCloseDrawer(root){
+  var d = (root || document).querySelector('.qbo-dr-wrap');
+  if (!d) return;
+  document.removeEventListener('keydown', d._esc);
+  d.remove();
+}
+function qboSay(el, text, kind){
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = kind === 'bad' ? 'var(--red)' : kind === 'ok' ? 'var(--ok, #15803d)' : 'var(--muted)';
+}
+// Initials for the round badge beside a name.
+function qboInitials(s){
+  var p = String(s || '?').replace(/@.*/, '').split(/[\s._-]+/).filter(Boolean);
+  return ((p[0] || '?')[0] + (p.length > 1 ? p[p.length - 1][0] : '')).toUpperCase();
+}
+// The "Edit ▾" menus: one open at a time, closed by a click anywhere else.
+var QBO_MENU_WIRED = false;
+function qboWireMenus(root){
+  root.querySelectorAll('.qbo-caret').forEach(function(b){
+    b.addEventListener('click', function(e){
+      e.stopPropagation();
+      var m = this.parentNode.querySelector('.qbo-menu');
+      var was = !m.hidden;
+      document.querySelectorAll('.qbo-menu').forEach(function(x){ x.hidden = true; });
+      m.hidden = was;
+    });
+  });
+  if (!QBO_MENU_WIRED) {
+    QBO_MENU_WIRED = true;
+    document.addEventListener('click', function(){ document.querySelectorAll('.qbo-menu').forEach(function(x){ x.hidden = true; }); });
+  }
+}
 
 async function renderStaff(panel){
   panel.innerHTML = '<div class="empty">Loading…</div>';
@@ -13515,234 +13607,297 @@ async function renderStaff(panel){
   // The server still refuses anyone creating a role more senior than their own.
   var ROLES = rolesRes.roles || [];
   var CAPS = capsRes.capabilities || [];
+  var STAFF = r.staff || [];
+  var screens = 0;
+  SIDEBAR_GROUPS.forEach(function(g){ screens += g.items.length; });
+  function roleOf(code){ return ROLES.find(function(x){ return x.code === code; }); }
   function roleIsFull(code){
     if (code === 'owner') return true;
-    var rr = ROLES.find(function(x){ return x.code === code; });
+    var rr = roleOf(code);
     return !!(rr && rr.can_manage);
   }
-  // Per-user function permission toggles for one staff row. can_manage roles
-  // are always full access, so the block is shown read-only for them.
+  function roleLabel(code){ var rr = roleOf(code); return rr ? rr.label : (code || '—'); }
+  // What a role gives, in a line, for under the role picker.
+  function roleSummary(code){
+    var rr = roleOf(code);
+    if (code === 'owner') return 'Full access to everything. The owner role cannot be limited.';
+    if (!rr) return '';
+    var h = Array.isArray(rr.hidden_tabs) ? rr.hidden_tabs.length : 0;
+    return (rr.can_manage ? 'Manager rights — passes the manager-only checks. ' : 'Limited — no manager-only actions. ') +
+      'Sees ' + Math.max(0, screens - h) + ' of ' + screens + ' screens.';
+  }
   // Categories carry their own function-permission denies; a staff member
   // inherits the union of their categories' denies, then their own record
   // can re-grant (Allow) or force-deny (Deny) on top.
   var CAT_BY_ID = {}; (cats.categories || []).forEach(function(c){ CAT_BY_ID[c.id] = c; });
-  function catDeniesFor(s){
+  function catDeniesFor(catIds){
     var d = {};
-    (s.categories || []).forEach(function(cc){
-      var full = CAT_BY_ID[cc.id];
+    catIds.forEach(function(id){
+      var full = CAT_BY_ID[id];
       var p = (full && full.perms && typeof full.perms === 'object') ? full.perms : {};
       Object.keys(p).forEach(function(k){ if (p[k] === false) d[k] = full.label; });
     });
     return d;
   }
-  function permChecks(prefix, s){
+  // Function permissions for one person, grouped the way QuickBooks groups a
+  // role's rights: a collapsible block per area with a count of what is on.
+  function permBlocks(s){
     var full = roleIsFull(s.admin_role);
     var ov = (s.perms && typeof s.perms === 'object') ? s.perms : {};
-    var catD = catDeniesFor(s);
+    var catD = catDeniesFor((s.categories || []).map(function(c){ return c.id; }));
     var groups = {};
     CAPS.forEach(function(c){ (groups[c.group] = groups[c.group] || []).push(c); });
-    var body = Object.keys(groups).map(function(g){
-      return '<div style="margin-bottom:8px"><div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:800;margin-bottom:4px">' + esc(g) + '</div>' +
-        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:6px 16px">' +
-        groups[g].map(function(c){
-          var cur = ov[c.key] === true ? 'allow' : ov[c.key] === false ? 'deny' : 'inherit';
-          var catNote = catD[c.key] ? ' <small style="color:#b45309">— “' + esc(catD[c.key]) + '” blocks this</small>' : '';
-          return '<label style="display:flex;align-items:center;gap:7px;font-size:12.5px' + (full ? ';opacity:.55' : '') + '">' +
-            '<select class="' + prefix + 'Perm" data-cap="' + esc(c.key) + '"' + (full ? ' disabled' : '') + ' style="padding:3px 5px;border:1px solid var(--line);border-radius:5px;font-size:12px;background:var(--card);color:var(--ink)">' +
-              '<option value="inherit"' + (cur === 'inherit' ? ' selected' : '') + '>Inherit</option>' +
-              '<option value="allow"' + (cur === 'allow' ? ' selected' : '') + '>Allow</option>' +
-              '<option value="deny"' + (cur === 'deny' ? ' selected' : '') + '>Deny</option>' +
-            '</select><span>' + esc(c.label) + catNote + '</span>' +
-          '</label>';
-        }).join('') + '</div></div>';
-    }).join('');
-    return '<div style="grid-column:1/-1">' +
-      '<label class="lbl">Function permissions' + (full ? ' <small style="color:var(--muted)">— this role counts as a manager, so it always has full access</small>' : ' <small style="color:var(--muted)">— Inherit = follow this person’s categories; Allow overrides a category block; Deny turns it off outright</small>') + '</label>' +
-      '<div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--card)">' + body + '</div>' +
-      (full ? '' : '<button class="btn" data-permsave="' + s.id + '" style="margin-top:8px">Save permissions</button> <span id="p' + s.id + 'Msg" style="font-size:12.5px;margin-left:8px"></span>') +
-    '</div>';
+    return '<p class="qbo-note qbo-permnote">' + (full
+        ? 'This person’s role counts as a manager, so they always have full access. Change the role to limit them.'
+        : '<b>Inherit</b> follows this person’s staff categories. <b>Allow</b> overrides a category block. <b>Deny</b> turns it off outright.') + '</p>' +
+      Object.keys(groups).map(function(g){
+        var on = groups[g].filter(function(c){ return ov[c.key] !== false && !(catD[c.key] && ov[c.key] !== true); }).length;
+        return '<div class="qbo-cat">' +
+          '<div class="qbo-cat-hd"><span class="chev">▶</span><span class="qbo-cat-nm">' + esc(g) + '</span>' +
+            '<span class="qbo-cat-ct">' + (full ? 'All' : on + ' of ' + groups[g].length) + ' allowed</span></div>' +
+          '<div class="qbo-cat-bd">' + groups[g].map(function(c){
+            var cur = ov[c.key] === true ? 'allow' : ov[c.key] === false ? 'deny' : 'inherit';
+            return '<div class="qbo-perm"><span style="flex:1">' + esc(c.label) +
+                (catD[c.key] ? ' <small style="color:#b45309">— “' + esc(catD[c.key]) + '” blocks this</small>' : '') + '</span>' +
+              '<select class="qbo-pv" data-cap="' + esc(c.key) + '"' + (full ? ' disabled' : '') + '>' +
+                '<option value="inherit"' + (cur === 'inherit' ? ' selected' : '') + '>Inherit</option>' +
+                '<option value="allow"' + (cur === 'allow' ? ' selected' : '') + '>Allow</option>' +
+                '<option value="deny"' + (cur === 'deny' ? ' selected' : '') + '>Deny</option>' +
+              '</select></div>';
+          }).join('') + '</div></div>';
+      }).join('');
   }
   function roleOptions(sel){
     return ROLES.map(function(x){
       return '<option value="' + esc(x.code) + '"' + (x.code === sel ? ' selected' : '') + '>' + esc(x.label) + '</option>';
     }).join('');
   }
-
-  function catChecks(prefix, selected){
+  function catChecks(cls, selected){
     var sel = selected || [];
-    if (!STAFF_CATS.length) return '<small style="color:var(--muted)">No categories yet — add one under Staff Categories.</small>';
-    return STAFF_CATS.map(function(c){
-      var on = sel.indexOf(c.id) >= 0 ? ' checked' : '';
-      return '<label style="display:inline-flex;align-items:center;gap:5px;margin:0 12px 6px 0;font-size:13px">' +
-        '<input type="checkbox" class="' + prefix + 'Cat" value="' + c.id + '"' + on + '/>' + esc(c.label) +
-        (c.department ? '<small style="color:var(--muted)"> · ' + esc(c.department) + '</small>' : '') +
-      '</label>';
-    }).join('');
+    if (!STAFF_CATS.length) return '<small style="color:var(--muted)">No categories yet — add one under Staff categories.</small>';
+    return '<div class="qbo-chips">' + STAFF_CATS.map(function(c){
+      return '<label class="qbo-chip"><input type="checkbox" class="' + cls + '" value="' + c.id + '"' + (sel.indexOf(c.id) >= 0 ? ' checked' : '') + '/>' + esc(c.label) +
+        (c.department ? '<small> · ' + esc(c.department) + '</small>' : '') + '</label>';
+    }).join('') + '</div>';
   }
-
-  // Manager-preset pinned screens for one staff member: a checkbox per sidebar
-  // tab plus a Lock toggle. Saved to users.forced_favs / users.favs_locked.
-  function favPresetChecks(prefix, selected, locked){
+  // Manager-preset pinned screens: a box per sidebar tab plus a Lock.
+  // Saved to users.forced_favs / users.favs_locked.
+  function favChecks(selected, locked){
     var sel = selected || [];
-    var body = SIDEBAR_GROUPS.map(function(g){
-      return '<div style="margin-bottom:6px"><div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:800;margin-bottom:3px">' + esc(g.title) + '</div>' +
-        g.items.map(function(it){
-          return '<label style="display:inline-flex;align-items:center;gap:5px;margin:0 12px 4px 0;font-size:12.5px">' +
-            '<input type="checkbox" class="' + prefix + 'Fav" value="' + esc(it.tab) + '"' + (sel.indexOf(it.tab) >= 0 ? ' checked' : '') + '/>' + esc(it.label) + '</label>';
-        }).join('') + '</div>';
-    }).join('');
-    return '<div style="grid-column:1/-1">' +
-      '<label class="lbl">Pinned screens (preset) <small style="color:var(--muted)">— what this person sees under ⭐ Favourites</small></label>' +
-      '<div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--card)">' + body +
-        '<label style="display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;border-top:1px solid var(--line);padding-top:8px;margin-top:4px">' +
-          '<input type="checkbox" class="' + prefix + 'FavLock"' + (locked ? ' checked' : '') + '/> 🔒 Lock — this person cannot pin or unpin screens themselves</label>' +
+    return '<p class="qbo-note">What this person sees under ⭐ Favourites.</p>' +
+      SIDEBAR_GROUPS.map(function(g){
+        return '<div class="qbo-sec">' + esc(g.title.replace(/^[^A-Za-z0-9]+\s*/, '')) + '</div><div class="qbo-chips">' +
+          g.items.map(function(it){
+            return '<label class="qbo-chip"><input type="checkbox" class="qbo-fav" value="' + esc(it.tab) + '"' + (sel.indexOf(it.tab) >= 0 ? ' checked' : '') + '/>' + esc(it.label) + '</label>';
+          }).join('') + '</div>';
+      }).join('') +
+      '<label class="qbo-switch" style="margin-top:16px"><input type="checkbox" class="qbo-favlock"' + (locked ? ' checked' : '') + '/>' +
+        '<span><span class="t">🔒 Lock pinned screens</span><span class="d">This person cannot pin or unpin screens themselves.</span></span></label>';
+  }
+  function statusOf(s){ return s.disabled ? 'disabled' : !s.is_staff ? 'inactive' : 'active'; }
+  var ST = { active: ['ok', 'Active'], disabled: ['bad', 'Disabled'], inactive: ['ltd', 'No longer staff'] };
+  var counts = { active: 0, disabled: 0, inactive: 0 };
+  STAFF.forEach(function(s){ counts[statusOf(s)]++; });
+
+  var rows = STAFF.map(function(s){
+    var st = statusOf(s), isSelf = String(s.id) === String(CURRENT_ADMIN_ID);
+    var cl = (s.categories || []).map(function(c){ return esc(c.label); }).join(', ');
+    var hay = [s.name, s.email, s.phone, s.employee_no, cl].join(' ').toLowerCase();
+    return '<tr class="qbo-urow" data-id="' + s.id + '" data-st="' + st + '" data-role="' + esc(s.is_admin ? s.admin_role : '') + '" data-hay="' + esc(hay) + '">' +
+      '<td><div class="qbo-who"><span class="qbo-av">' + esc(qboInitials(s.name || s.email)) + '</span><div>' +
+        '<div class="qbo-rolename">' + esc(s.name || '—') + (isSelf ? ' <span class="qbo-pill sys">You</span>' : '') + '</div>' +
+        '<div class="qbo-code">' + esc([s.employee_no, cl].filter(Boolean).join(' · ') || '—') + '</div></div></div></td>' +
+      '<td>' + esc(s.email) + (s.phone ? '<div class="qbo-code">' + esc(s.phone) + '</div>' : '') + '</td>' +
+      '<td>' + (s.is_admin
+        ? esc(roleLabel(s.admin_role)) + (roleIsFull(s.admin_role) && ['owner', 'manager'].indexOf(s.admin_role) < 0 ? ' <span class="qbo-pill mgr">Manager rights</span>' : '')
+        : '<span style="color:var(--muted)">Till PIN only</span>') + '</td>' +
+      '<td>' + (s.has_pin ? '<span class="qbo-pill mgr">Set</span>' : '<span style="color:var(--muted);font-size:12px">Not set</span>') + '</td>' +
+      '<td><span class="qbo-pill ' + ST[st][0] + '">' + ST[st][1] + '</span></td>' +
+      '<td class="qbo-act"><button class="qbo-link" data-edit="' + s.id + '">Edit</button>' +
+        '<button class="qbo-caret" aria-label="More actions">▾</button>' +
+        '<div class="qbo-menu" hidden>' +
+          '<button data-pin="' + s.id + '">Change till PIN</button>' +
+          '<button data-pw="' + s.id + '">Reset password</button>' +
+          (isSelf ? '' : '<button data-disable="' + s.id + '"' + (s.disabled ? '' : ' class="bad"') + '>' + (s.disabled ? 'Enable sign-in' : 'Disable sign-in') + '</button>') +
+        '</div></td>' +
+    '</tr>';
+  }).join('');
+
+  panel.innerHTML = QBO_ROLES_CSS +
+    '<div class="qbo">' +
+      '<div class="qbo-hd">' +
+        '<div><h2>Manage users</h2><p>Everyone who works here: who can sign in to the admin panel, what their role lets them do, and who uses only a PIN at the till.</p></div>' +
+        '<button class="qbo-btn" id="qboAdd">Add user</button>' +
       '</div>' +
+      qboTabs('staff') +
+      '<div class="qbo-bar">' +
+        '<input id="quSearch" class="fld" type="search" placeholder="Find by name, email, phone or employee no."/>' +
+        '<select id="quStatus" class="fld">' +
+          '<option value="">All statuses (' + STAFF.length + ')</option>' +
+          '<option value="active">Active (' + counts.active + ')</option>' +
+          '<option value="disabled">Disabled (' + counts.disabled + ')</option>' +
+          '<option value="inactive">No longer staff (' + counts.inactive + ')</option>' +
+        '</select>' +
+        '<select id="quRole" class="fld"><option value="">All roles</option>' + roleOptions(QBO_ROLE_FILTER || '') + '<option value="-">Till PIN only</option></select>' +
+        '<span class="qbo-code" id="quCount"></span>' +
+      '</div>' +
+      (STAFF.length
+        ? '<div class="qbo-scroll"><table class="qbo-table"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Till PIN</th><th>Status</th><th style="text-align:right">Action</th></tr></thead><tbody>' +
+            rows + '</tbody></table></div><div class="empty" id="quNone" hidden>No one matches.</div>'
+        : '<div class="empty">No staff yet. Press Add user to add the first one.</div>') +
     '</div>';
-  }
+  var root = panel.querySelector('.qbo');
+  qboWireTabs(root);
+  qboWireMenus(root);
+  if (QBO_ROLE_FILTER) panel.querySelector('#quRole').value = QBO_ROLE_FILTER;
+  QBO_ROLE_FILTER = null;
 
-  panel.innerHTML =
-    '<details style="border-bottom:1px solid var(--line);background:var(--card-soft)">' +
-      '<summary style="padding:12px 16px;cursor:pointer;font-weight:700;color:var(--heading)">+ New staff member</summary>' +
-      '<form id="newStaff" style="padding:14px 18px;display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:820px" onsubmit="event.preventDefault();submitStaff();">' +
-        '<div><label class="lbl">Name *</label><input id="sfName" required class="fld"/></div>' +
-        '<div><label class="lbl">Email (login) *</label><input id="sfEmail" type="email" required class="fld"/></div>' +
-        '<div><label class="lbl">Phone</label><input id="sfPhone" class="fld"/></div>' +
-        '<div><label class="lbl">Temporary password *</label><input id="sfPass" required class="fld"/></div>' +
-        '<div><label class="lbl">Employee no.</label><input id="sfEmpNo" class="fld" placeholder="EMP-001"/></div>' +
-        '<div><label class="lbl">National ID (TRN)</label><input id="sfNid" class="fld"/></div>' +
-        '<div><label class="lbl">Till PIN <small style="color:var(--muted)">4–8 digits, optional</small></label><input id="sfPin" class="fld" inputmode="numeric" maxlength="8"/></div>' +
-        '<div><label class="lbl">Admin panel role</label><select id="sfRole" class="fld">' + roleOptions('cashier') + '</select></div>' +
-        '<div style="grid-column:1/-1"><label class="lbl">Categories</label><div>' + catChecks('sfNew', []) + '</div></div>' +
-        '<div style="grid-column:1/-1"><label style="display:inline-flex;align-items:center;gap:6px;font-size:13px">' +
-          '<input type="checkbox" id="sfIsAdmin" checked/> Can sign in to the admin panel' +
-          '<small style="color:var(--muted)">— uncheck for staff who only need a PIN at the till</small></label></div>' +
-        '<div id="sfMsg" style="grid-column:1/-1;display:none;padding:10px 12px;border-radius:6px;font-size:13px"></div>' +
-        '<button type="submit" style="grid-column:1/-1;background:var(--red);color:#fff;border:0;padding:11px 22px;border-radius:7px;font-weight:700;cursor:pointer">Create staff member</button>' +
-      '</form>' +
-    '</details>' +
-    (r.staff.length
-      ? '<table><thead><tr><th>Name</th><th>Contact</th><th>Employee no.</th><th>Categories</th><th>Panel role</th><th>PIN</th><th></th></tr></thead><tbody>' +
-        r.staff.map(function(s){
-          var cl = (s.categories || []).map(function(c){
-            return '<span style="display:inline-block;background:var(--card-soft);border:1px solid var(--line);border-radius:10px;padding:1px 8px;font-size:11.5px;margin:1px 3px 1px 0">' + esc(c.label) + '</span>';
-          }).join('') || '<small style="color:var(--muted)">—</small>';
-          var isSelf = String(s.id) === String(CURRENT_ADMIN_ID);
-          return '<tr' + ((!s.is_staff || s.disabled) ? ' style="opacity:.55"' : '') + '>' +
-            '<td><b>' + esc(s.name || '—') + '</b>' +
-              (s.disabled ? ' ' + badge('disabled', 'bad') : '') +
-              (s.national_id ? '<br/><small style="color:var(--muted)">TRN ' + esc(s.national_id) + '</small>' : '') + '</td>' +
-            '<td><small>' + esc(s.email) + (s.phone ? '<br/>' + esc(s.phone) : '') + '</small></td>' +
-            '<td>' + esc(s.employee_no || '—') + '</td>' +
-            '<td>' + cl + '</td>' +
-            '<td>' + (s.is_admin ? esc(s.admin_role) : '<small style="color:var(--muted)">no panel access</small>') + '</td>' +
-            '<td>' + (s.has_pin ? badge('set', 'ok') : '<small style="color:var(--muted)">not set</small>') + '</td>' +
-            '<td class="actions">' +
-              '<button class="btn" data-edit="' + s.id + '">Edit</button> ' +
-              '<button class="btn" data-pin="' + s.id + '" data-name="' + esc(s.name || s.email) + '" data-haspin="' + (s.has_pin ? 1 : 0) + '">PIN</button> ' +
-              '<button class="btn" data-pw="' + s.id + '" data-name="' + esc(s.name || s.email) + '">Reset password</button>' +
-              (isSelf ? ''
-                : ' <button class="btn" data-disable="' + s.id + '" data-on="' + (s.disabled ? 1 : 0) + '" data-name="' + esc(s.name || s.email) + '"' +
-                  (s.disabled ? ' style="background:var(--ok);color:#fff"' : ' style="background:#fee2e2;color:#b91c1c"') + '>' +
-                  (s.disabled ? 'Enable' : 'Disable') + '</button>') +
-            '</td></tr>' +
-            '<tr id="sfRow' + s.id + '" style="display:none"><td colspan="7" style="background:var(--card-soft)">' +
-              '<div style="padding:12px 4px;display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:820px">' +
-                '<div><label class="lbl">Name</label><input class="fld" id="e' + s.id + 'Name" value="' + esc(s.name || '') + '"/></div>' +
-                '<div><label class="lbl">Phone</label><input class="fld" id="e' + s.id + 'Phone" value="' + esc(s.phone || '') + '"/></div>' +
-                '<div><label class="lbl">Employee no.</label><input class="fld" id="e' + s.id + 'Emp" value="' + esc(s.employee_no || '') + '"/></div>' +
-                (r.national_id_visible
-                  ? '<div><label class="lbl">National ID (TRN)</label><input class="fld" id="e' + s.id + 'Nid" value="' + esc(s.national_id || '') + '"/></div>'
-                  : '<div><label class="lbl">National ID</label><input class="fld" disabled value="hidden for your role"/></div>') +
-                '<div><label class="lbl">Admin panel role</label><select class="fld" id="e' + s.id + 'Role">' + roleOptions(s.admin_role) + '</select></div>' +
-                '<div><label class="lbl">Status</label><select class="fld" id="e' + s.id + 'Active">' +
-                  '<option value="true"' + (s.is_staff ? ' selected' : '') + '>active staff</option>' +
-                  '<option value="false"' + (!s.is_staff ? ' selected' : '') + '>no longer staff</option>' +
-                '</select></div>' +
-                '<div style="grid-column:1/-1"><label class="lbl">Categories</label><div>' +
-                  catChecks('e' + s.id, (s.categories || []).map(function(c){ return c.id; })) + '</div></div>' +
-                permChecks('e' + s.id, s) +
-                favPresetChecks('e' + s.id, Array.isArray(s.forced_favs) ? s.forced_favs : [], !!s.favs_locked) +
-                '<div style="grid-column:1/-1"><button class="btn" data-save="' + s.id + '">Save changes</button> ' +
-                  '<span id="e' + s.id + 'Msg" style="font-size:12.5px;margin-left:8px"></span></div>' +
-              '</div></td></tr>';
-        }).join('') + '</tbody></table>'
-      : '<div class="empty">No staff yet. Add the first one above.</div>');
-
-  panel.querySelectorAll('[data-edit]').forEach(function(b){
-    b.addEventListener('click', function(){
-      var row = document.getElementById('sfRow' + this.getAttribute('data-edit'));
-      row.style.display = row.style.display === 'none' ? '' : 'none';
+  function filter(){
+    var q = panel.querySelector('#quSearch').value.trim().toLowerCase();
+    var st = panel.querySelector('#quStatus').value, ro = panel.querySelector('#quRole').value;
+    var n = 0;
+    panel.querySelectorAll('.qbo-urow').forEach(function(tr){
+      var ok = (!q || tr.getAttribute('data-hay').indexOf(q) >= 0) &&
+               (!st || tr.getAttribute('data-st') === st) &&
+               (!ro || (ro === '-' ? !tr.getAttribute('data-role') : tr.getAttribute('data-role') === ro));
+      tr.hidden = !ok; if (ok) n++;
     });
+    panel.querySelector('#quCount').textContent = STAFF.length ? 'Showing ' + n + ' of ' + STAFF.length : '';
+    var none = panel.querySelector('#quNone'); if (none) none.hidden = n > 0 || !STAFF.length;
+  }
+  ['#quSearch', '#quStatus', '#quRole'].forEach(function(sel){ panel.querySelector(sel).addEventListener('input', filter); });
+  filter();
+
+  // ---- Add user -----------------------------------------------------------
+  panel.querySelector('#qboAdd').addEventListener('click', function(){
+    var d = qboDrawer(root, 'Add a user', 'Fill in the details, then choose what they can do.', [
+      { key: 'details', label: '1  Details', html:
+        '<div class="qbo-grid">' +
+          '<div><label class="lbl">Name *</label><input id="sfName" class="fld"/></div>' +
+          '<div><label class="lbl">Email (sign-in) *</label><input id="sfEmail" type="email" class="fld"/></div>' +
+          '<div><label class="lbl">Phone</label><input id="sfPhone" class="fld"/></div>' +
+          '<div><label class="lbl">Temporary password *</label><input id="sfPass" class="fld"/></div>' +
+          '<div><label class="lbl">Employee no.</label><input id="sfEmpNo" class="fld" placeholder="EMP-001"/></div>' +
+          '<div><label class="lbl">National ID (TRN)</label><input id="sfNid" class="fld"/></div>' +
+          '<div><label class="lbl">Till PIN <small style="color:var(--muted)">4–8 digits, optional</small></label><input id="sfPin" class="fld" inputmode="numeric" maxlength="8"/></div>' +
+        '</div>' },
+      { key: 'access', label: '2  Role & access', html:
+        '<label class="qbo-switch"><input type="checkbox" id="sfIsAdmin" checked/>' +
+          '<span><span class="t">Can sign in to the admin panel</span><span class="d">Untick for staff who only need a PIN at the till.</span></span></label>' +
+        '<div class="qbo-sec">Role</div><select id="sfRole" class="fld">' + roleOptions('cashier') + '</select>' +
+        '<p class="qbo-note" id="sfRoleSum">' + esc(roleSummary('cashier')) + '</p>' +
+        '<div class="qbo-sec">Staff categories</div>' + catChecks('sfNewCat', []) },
+    ], '<button class="qbo-btn ghost qbo-close">Cancel</button><span class="qbo-msg" id="sfMsg"></span><span class="sp"></span>' +
+       '<button class="qbo-btn ghost" id="sfNext">Next</button><button class="qbo-btn" id="sfGo">Add user</button>');
+    d.querySelector('#sfRole').addEventListener('change', function(){ d.querySelector('#sfRoleSum').textContent = roleSummary(this.value); });
+    d.querySelector('#sfIsAdmin').addEventListener('change', function(){ d.querySelector('#sfRole').disabled = !this.checked; });
+    d.querySelector('#sfNext').addEventListener('click', function(){ qboDrawerTab(d, 'access'); });
+    d.querySelector('#sfGo').addEventListener('click', function(){ submitStaff(); });
+    d.querySelector('#sfName').focus();
   });
-  panel.querySelectorAll('[data-permsave]').forEach(function(b){
-    b.addEventListener('click', async function(){
-      var id = this.getAttribute('data-permsave');
-      var msg = document.getElementById('p' + id + 'Msg');
+
+  // ---- Edit user ----------------------------------------------------------
+  function openEdit(id){
+    var s = STAFF.find(function(x){ return String(x.id) === String(id); });
+    if (!s) return;
+    var catIds = (s.categories || []).map(function(c){ return c.id; });
+    var d = qboDrawer(root, s.name || s.email, esc(s.email) + (s.created_at ? ' · added ' + esc(String(s.created_at).slice(0, 10)) : ''), [
+      { key: 'profile', label: 'Profile', html:
+        '<div class="qbo-grid">' +
+          '<div><label class="lbl">Name</label><input class="fld" id="euName" value="' + esc(s.name || '') + '"/></div>' +
+          '<div><label class="lbl">Email (sign-in)</label><input class="fld" disabled value="' + esc(s.email) + '"/></div>' +
+          '<div><label class="lbl">Phone</label><input class="fld" id="euPhone" value="' + esc(s.phone || '') + '"/></div>' +
+          '<div><label class="lbl">Employee no.</label><input class="fld" id="euEmp" value="' + esc(s.employee_no || '') + '"/></div>' +
+          (r.national_id_visible
+            ? '<div><label class="lbl">National ID (TRN)</label><input class="fld" id="euNid" value="' + esc(s.national_id || '') + '"/></div>'
+            : '<div><label class="lbl">National ID</label><input class="fld" disabled value="hidden for your role"/></div>') +
+          '<div><label class="lbl">Status</label><select class="fld" id="euActive">' +
+            '<option value="true"' + (s.is_staff ? ' selected' : '') + '>Active staff</option>' +
+            '<option value="false"' + (!s.is_staff ? ' selected' : '') + '>No longer staff</option>' +
+          '</select></div>' +
+        '</div>' },
+      { key: 'role', label: 'Role', html:
+        (s.is_admin ? '' : '<p class="qbo-note">Signs in at the till with a PIN only. The role applies if they are given admin panel access.</p>') +
+        '<div class="qbo-sec" style="margin-top:0">Role</div><select class="fld" id="euRole">' + roleOptions(s.admin_role) + '</select>' +
+        '<p class="qbo-note" id="euRoleSum">' + esc(roleSummary(s.admin_role)) + '</p>' +
+        '<button type="button" class="qbo-link" id="euSeeRole">View this role’s screens →</button>' +
+        '<div class="qbo-sec">Staff categories</div>' + catChecks('euCat', catIds) },
+      { key: 'perms', label: 'Permissions', html: permBlocks(s) },
+      { key: 'pinned', label: 'Pinned screens', html: favChecks(Array.isArray(s.forced_favs) ? s.forced_favs : [], !!s.favs_locked) },
+    ], '<button class="qbo-btn ghost qbo-close">Cancel</button><span class="qbo-msg" id="euMsg"></span><span class="sp"></span><button class="qbo-btn" id="euSave">Save</button>');
+    d.querySelectorAll('.qbo-cat-hd').forEach(function(h){ h.addEventListener('click', function(){ h.parentNode.classList.toggle('open'); }); });
+    d.querySelector('#euRole').addEventListener('change', function(){
+      var full = roleIsFull(this.value);
+      d.querySelector('#euRoleSum').textContent = roleSummary(this.value);
+      d.querySelectorAll('.qbo-pv').forEach(function(x){ x.disabled = full; });
+    });
+    d.querySelector('#euSeeRole').addEventListener('click', function(){
+      QBO_OPEN_ROLE = d.querySelector('#euRole').value; show('roles');
+    });
+    d.querySelector('#euSave').addEventListener('click', async function(){
+      var msg = d.querySelector('#euMsg'), btn = this;
+      var nid = d.querySelector('#euNid');
+      var body = {
+        name: d.querySelector('#euName').value.trim(),
+        phone: d.querySelector('#euPhone').value.trim() || null,
+        employee_no: d.querySelector('#euEmp').value.trim() || null,
+        admin_role: d.querySelector('#euRole').value,
+        is_staff: d.querySelector('#euActive').value === 'true',
+        categories: Array.prototype.map.call(d.querySelectorAll('.euCat:checked'), function(c){ return parseInt(c.value, 10); }),
+        forced_favs: Array.prototype.map.call(d.querySelectorAll('.qbo-fav:checked'), function(c){ return c.value; }),
+        favs_locked: d.querySelector('.qbo-favlock').checked,
+      };
+      if (nid) body.national_id = nid.value.trim() || null;
       var perms = {};
-      panel.querySelectorAll('.e' + id + 'Perm').forEach(function(sel){
+      d.querySelectorAll('.qbo-pv').forEach(function(sel){
         if (sel.value === 'allow') perms[sel.getAttribute('data-cap')] = true;
         else if (sel.value === 'deny') perms[sel.getAttribute('data-cap')] = false;
         // 'inherit' -> leave the key out
       });
-      msg.textContent = 'Saving…'; msg.style.color = 'var(--muted)';
+      btn.disabled = true; qboSay(msg, 'Saving…');
       try {
-        await api('/api/admin/users/' + id + '/perms', { method: 'PATCH', body: { perms: perms } });
-        msg.textContent = 'Saved. They see the change on their next page load.'; msg.style.color = 'var(--ok, #15803d)';
-      } catch (e) { msg.textContent = e.message; msg.style.color = 'var(--red)'; }
+        await api('/api/admin/staff/' + id, { method: 'PATCH', body: body });
+        // A manager role always has full access, so its overrides are not kept.
+        if (!roleIsFull(body.admin_role)) await api('/api/admin/users/' + id + '/perms', { method: 'PATCH', body: { perms: perms } });
+        renderStaff(panel);
+      } catch (e) { btn.disabled = false; qboSay(msg, e.message, 'bad'); }
     });
+  }
+  panel.querySelectorAll('[data-edit]').forEach(function(b){
+    b.addEventListener('click', function(e){ e.stopPropagation(); openEdit(this.getAttribute('data-edit')); });
   });
-  panel.querySelectorAll('[data-save]').forEach(function(b){
-    b.addEventListener('click', async function(){
-      var id = this.getAttribute('data-save');
-      var msg = document.getElementById('e' + id + 'Msg');
-      var nid = document.getElementById('e' + id + 'Nid');
-      var body = {
-        name: document.getElementById('e' + id + 'Name').value.trim(),
-        phone: document.getElementById('e' + id + 'Phone').value.trim() || null,
-        employee_no: document.getElementById('e' + id + 'Emp').value.trim() || null,
-        admin_role: document.getElementById('e' + id + 'Role').value,
-        is_staff: document.getElementById('e' + id + 'Active').value === 'true',
-        categories: Array.prototype.map.call(panel.querySelectorAll('.e' + id + 'Cat:checked'), function(c){ return parseInt(c.value, 10); }),
-        forced_favs: Array.prototype.map.call(panel.querySelectorAll('.e' + id + 'Fav:checked'), function(c){ return c.value; }),
-        favs_locked: !!(document.querySelector('.e' + id + 'FavLock') && document.querySelector('.e' + id + 'FavLock').checked),
-      };
-      if (nid && !nid.disabled) body.national_id = nid.value.trim() || null;
-      msg.textContent = 'Saving…'; msg.style.color = 'var(--muted)';
-      try { await api('/api/admin/staff/' + id, { method: 'PATCH', body: body }); renderStaff(panel); }
-      catch (e) { msg.textContent = e.message; msg.style.color = 'var(--red)'; }
-    });
+  panel.querySelectorAll('.qbo-urow').forEach(function(tr){
+    tr.addEventListener('click', function(e){ if (!e.target.closest('.qbo-act')) openEdit(tr.getAttribute('data-id')); });
   });
+  function nameOf(id){ var s = STAFF.find(function(x){ return String(x.id) === String(id); }); return s ? (s.name || s.email) : ''; }
   panel.querySelectorAll('[data-pin]').forEach(function(b){
     b.addEventListener('click', function(){
-      staffPinModal(b.getAttribute('data-pin'), b.getAttribute('data-name'),
-                    b.getAttribute('data-haspin') === '1', function(){ renderStaff(panel); });
+      var id = b.getAttribute('data-pin'), s = STAFF.find(function(x){ return String(x.id) === String(id); });
+      staffPinModal(id, nameOf(id), !!(s && s.has_pin), function(){ renderStaff(panel); });
     });
   });
   // Disable / re-enable an account. A disabled user cannot sign in by password
   // or PIN, and any open session is dropped on its next admin request.
   panel.querySelectorAll('[data-disable]').forEach(function(b){
     b.addEventListener('click', async function(){
-      var id = this.getAttribute('data-disable');
-      var on = this.getAttribute('data-on') === '1';   // currently disabled?
-      var who = this.getAttribute('data-name');
+      var id = this.getAttribute('data-disable'), who = nameOf(id);
+      var on = !!(STAFF.find(function(x){ return String(x.id) === String(id); }) || {}).disabled;   // currently disabled?
       if (on) {
         if (!confirm('Re-enable ' + who + '? They will be able to sign in again.')) return;
       } else if (!confirm('Disable ' + who + '?\n\nThey will be signed out and cannot sign in — by password or PIN — until re-enabled. Their record, history and PIN are kept.')) {
         return;
       }
-      this.disabled = true;
       try {
         await api('/api/admin/staff/' + id, { method: 'PATCH', body: { disabled: !on } });
         renderStaff(panel);
-      } catch (e) { alert(e.message); this.disabled = false; }
+      } catch (e) { alert(e.message); }
     });
   });
   // Reset password: the everyday lockout, where the person is standing at the
   // counter. Not an emailed link -- half the roster has no working email.
   panel.querySelectorAll('[data-pw]').forEach(function(b){
     b.addEventListener('click', async function(){
-      var id = this.getAttribute('data-pw');
-      var who = this.getAttribute('data-name');
+      var id = this.getAttribute('data-pw'), who = nameOf(id);
       var pw = prompt('New password for ' + who + ' (at least 6 characters).\n\n' +
                       'Tell it to them directly — they can change it from their account page.');
       if (pw === null) return;
@@ -13950,46 +14105,76 @@ async function renderMyPrefs(panel){
 //  requireManager() and MANAGER_ONLY_TABS here. Now they are rows, so a shop
 //  can add a supervisor who receives stock without also handing them pricing.
 // =============================================================================
-// QuickBooks-style: a clean roles table (Role / Access / Users) with a
-// per-row inline editor. The editor groups every screen into collapsible
-// permission categories with a "select all" per category and a running
-// "N of M" count, a manager-access switch, and — for custom roles — editable
-// name and seniority. Behaviour and the /api/admin/roles endpoints are
-// unchanged; hidden_tabs is still the set of screens whose box is unticked.
+// QuickBooks-style: a clean roles table (Role / Access / Users / Action) under
+// the same Users / Roles / Staff categories header as Users & Staff. Edit
+// opens the role in the slide-in panel: name and seniority for a role the shop
+// added, a manager-access switch, and every screen grouped into collapsible
+// categories with a "select all" per category and a running "N of M" count.
+// The /api/admin/roles endpoints are unchanged; hidden_tabs is still the set
+// of screens whose box is unticked.
 var QBO_ROLES_CSS =
   '<style>' +
   '.qbo{--qb-green:#2ca01c;--qb-green-d:#238a15;color:var(--ink);font-family:inherit}' +
-  '.qbo-hd{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:18px 20px;border-bottom:1px solid var(--line)}' +
-  '.qbo-hd h2{margin:0 0 4px;font-size:18px;color:var(--heading)}' +
-  '.qbo-hd p{margin:0;font-size:13px;color:var(--muted);max-width:600px;line-height:1.5}' +
+  '.qbo-hd{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:18px 20px 10px}' +
+  '.qbo-hd h2{margin:0 0 4px;font-size:20px;color:var(--heading)}' +
+  '.qbo-hd p{margin:0;font-size:13px;color:var(--muted);max-width:640px;line-height:1.5}' +
+  '.qbo-tabs{display:flex;gap:4px;padding:0 20px;border-bottom:1px solid var(--line);overflow-x:auto}' +
+  '.qbo-tabs button{background:none;border:0;border-bottom:3px solid transparent;padding:10px 14px;font:inherit;font-size:13.5px;font-weight:700;color:var(--muted);cursor:pointer;white-space:nowrap}' +
+  '.qbo-tabs button:hover{color:var(--heading)}.qbo-tabs button.on{color:var(--heading);border-bottom-color:var(--qb-green)}' +
+  '.qbo-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:14px 20px}' +
+  '.qbo-bar .fld{width:auto;max-width:100%}.qbo-bar #quSearch{flex:1;min-width:200px;max-width:340px}' +
   '.qbo-btn{background:var(--qb-green);color:#fff;border:0;border-radius:4px;padding:9px 16px;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit;white-space:nowrap}' +
   '.qbo-btn:hover{background:var(--qb-green-d)}.qbo-btn:disabled{opacity:.5;cursor:default}' +
   '.qbo-btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}' +
   '.qbo-btn.ghost:hover{background:var(--card-soft2)}' +
   '.qbo-btn.danger{background:transparent;color:var(--red);border:1px solid var(--line)}' +
   '.qbo-btn.danger:hover{background:rgba(214,40,40,.08)}' +
-  '.qbo-new{padding:16px 20px;border-bottom:1px solid var(--line);background:var(--card-soft)}' +
-  '.qbo-new .row{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}' +
+  '.qbo-scroll{overflow-x:auto}' +
   '.qbo-table{width:100%;border-collapse:collapse}' +
-  '.qbo-table thead th{font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);text-align:left;padding:11px 20px;border-bottom:2px solid var(--line);font-weight:700;background:var(--card)}' +
-  '.qbo-table td{padding:15px 20px;border-bottom:1px solid var(--line);vertical-align:middle;font-size:13.5px}' +
-  '.qbo-row{cursor:pointer}.qbo-row:hover td{background:var(--card-soft)}.qbo-row.open td{background:var(--card-soft2)}' +
+  '.qbo-table thead th{font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);text-align:left;padding:11px 20px;border-bottom:2px solid var(--line);font-weight:700;background:var(--card);white-space:nowrap}' +
+  '.qbo-table td{padding:13px 20px;border-bottom:1px solid var(--line);vertical-align:middle;font-size:13.5px}' +
+  '.qbo-row,.qbo-urow{cursor:pointer}.qbo-row:hover td,.qbo-urow:hover td{background:var(--card-soft)}' +
   '.qbo-rolename{font-weight:700;color:var(--heading);font-size:14px}' +
   '.qbo-code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;color:var(--muted);margin-top:2px}' +
+  '.qbo-who{display:flex;align-items:center;gap:11px}' +
+  '.qbo-av{width:34px;height:34px;border-radius:50%;background:rgba(44,160,28,.15);color:var(--qb-green-d);display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:12.5px;flex:none}' +
   '.qbo-link{color:var(--qb-green);font-weight:700;cursor:pointer;background:none;border:0;font-family:inherit;font-size:13px;padding:0}' +
   '.qbo-link:hover{text-decoration:underline}' +
-  '.qbo-pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:999px}' +
-  '.qbo-pill.mgr{background:rgba(44,160,28,.13);color:var(--qb-green-d)}' +
+  '.qbo-act{text-align:right;white-space:nowrap;position:relative}' +
+  '.qbo-caret{background:none;border:0;color:var(--qb-green);font-size:13px;cursor:pointer;padding:2px 4px 2px 8px;margin-left:4px;border-left:1px solid var(--line)}' +
+  '.qbo-menu{position:absolute;right:16px;top:calc(100% - 8px);z-index:30;background:var(--card);border:1px solid var(--line);border-radius:6px;box-shadow:0 10px 28px rgba(0,0,0,.18);min-width:180px;padding:4px 0;text-align:left}' +
+  '.qbo-menu button{display:block;width:100%;background:none;border:0;text-align:left;padding:9px 14px;font:inherit;font-size:13px;color:var(--ink);cursor:pointer}' +
+  '.qbo-menu button:hover{background:var(--card-soft2)}.qbo-menu button.bad{color:var(--red)}' +
+  '.qbo-pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap}' +
+  '.qbo-pill.mgr,.qbo-pill.ok{background:rgba(44,160,28,.13);color:var(--qb-green-d)}' +
   '.qbo-pill.ltd{background:var(--card-soft2);color:var(--muted)}' +
+  '.qbo-pill.bad{background:rgba(214,40,40,.1);color:var(--red)}' +
   '.qbo-pill.sys{background:var(--card-soft2);color:var(--muted);font-weight:600;margin-left:8px}' +
-  '.qbo-editor{padding:18px 20px;background:var(--card)}' +
-  '.qbo-editor h3{margin:0 0 2px;font-size:15px;color:var(--heading)}' +
+  '.qbo-dr-wrap{position:fixed;inset:0;z-index:9990;background:rgba(11,27,43,0);transition:background .2s}' +
+  '.qbo-dr-wrap.in{background:rgba(11,27,43,.45)}' +
+  '.qbo-dr{position:absolute;top:0;right:0;bottom:0;width:min(620px,100%);background:var(--card);box-shadow:-12px 0 40px rgba(0,0,0,.25);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s ease}' +
+  '.qbo-dr-wrap.in .qbo-dr{transform:none}' +
+  '.qbo-dr-hd{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:18px 22px 12px}' +
+  '.qbo-dr-hd h3{margin:0;font-size:18px;color:var(--heading)}' +
+  '.qbo-x{background:none;border:0;font-size:28px;line-height:1;color:var(--muted);cursor:pointer;padding:0 4px}' +
+  '.qbo-dr-tabs{display:flex;gap:2px;padding:0 22px;border-bottom:1px solid var(--line);overflow-x:auto;flex:none}' +
+  '.qbo-dr-tabs button{background:none;border:0;border-bottom:3px solid transparent;padding:9px 12px;font:inherit;font-size:13px;font-weight:700;color:var(--muted);cursor:pointer;white-space:pre}' +
+  '.qbo-dr-tabs button.on{color:var(--heading);border-bottom-color:var(--qb-green)}' +
+  '.qbo-dr-bd{flex:1;overflow:auto;padding:18px 22px}' +
+  '.qbo-dr-ft{display:flex;gap:10px;align-items:center;padding:14px 22px;border-top:1px solid var(--line);background:var(--card-soft);flex:none;flex-wrap:wrap}' +
+  '.qbo-dr-ft .sp{flex:1}.qbo-msg{font-size:12.5px}' +
+  '.qbo-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}' +
+  '@media (max-width:560px){.qbo-grid{grid-template-columns:1fr}.qbo-hd{flex-direction:column}.qbo-table td,.qbo-table thead th{padding-left:12px;padding-right:12px}}' +
+  '.qbo-note{font-size:12.5px;color:var(--muted);line-height:1.5;margin:8px 0 0}' +
+  '.qbo-chips{display:flex;flex-wrap:wrap;gap:6px}' +
+  '.qbo-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:5px 11px;font-size:12.5px;cursor:pointer;background:var(--card)}' +
+  '.qbo-chip small{color:var(--muted)}' +
   '.qbo-sec{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:700;margin:18px 0 8px}' +
-  '.qbo-switch{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--card-soft);max-width:640px}' +
+  '.qbo-switch{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--card-soft);cursor:pointer}' +
   '.qbo-switch input{width:16px;height:16px;margin-top:1px;flex:none}' +
-  '.qbo-switch .t{font-weight:700;font-size:13px;color:var(--heading)}' +
-  '.qbo-switch .d{font-size:12px;color:var(--muted);margin-top:2px;line-height:1.45}' +
-  '.qbo-cat{border:1px solid var(--line);border-radius:8px;margin-bottom:8px;overflow:hidden;max-width:640px}' +
+  '.qbo-switch .t{display:block;font-weight:700;font-size:13px;color:var(--heading)}' +
+  '.qbo-switch .d{display:block;font-size:12px;color:var(--muted);margin-top:2px;line-height:1.45}' +
+  '.qbo-cat{border:1px solid var(--line);border-radius:8px;margin-bottom:8px;overflow:hidden}' +
   '.qbo-cat-hd{display:flex;align-items:center;gap:10px;padding:11px 14px;background:var(--card-soft);cursor:pointer;user-select:none}' +
   '.qbo-cat-hd:hover{background:var(--card-soft2)}' +
   '.qbo-cat-hd .chev{color:var(--muted);font-size:10px;transition:transform .15s;width:10px;flex:none}' +
@@ -14000,14 +14185,14 @@ var QBO_ROLES_CSS =
   '.qbo-perm{display:flex;align-items:center;gap:10px;padding:8px 0;font-size:13px;border-top:1px solid var(--line);color:var(--ink)}' +
   '.qbo-perm:first-child{border-top:0}.qbo-perm.all{font-weight:700;color:var(--heading)}' +
   '.qbo-perm input{width:15px;height:15px;flex:none}' +
-  '.qbo-foot{display:flex;gap:10px;align-items:center;margin-top:20px;padding-top:16px;border-top:1px solid var(--line);max-width:640px}' +
-  '.qbo-foot .sp{flex:1}.qbo-msg{font-size:12.5px}' +
-  '.qbo input[type=checkbox]{accent-color:var(--qb-green);cursor:pointer}' +
-  '.qbo .fld{max-width:240px}' +
+  '.qbo-pv{padding:4px 6px;border:1px solid var(--line);border-radius:5px;font-size:12px;background:var(--card);color:var(--ink)}' +
+  '.qbo input[type=checkbox],.qbo-dr input[type=checkbox]{accent-color:var(--qb-green);cursor:pointer}' +
   '</style>';
 
 async function renderRoles(panel, openCode){
   panel.innerHTML = '<div class="empty">Loading…</div>';
+  openCode = openCode || QBO_OPEN_ROLE;
+  QBO_OPEN_ROLE = null;
   var r;
   try { r = await api('/api/admin/roles'); }
   catch (e) { panel.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return; }
@@ -14022,54 +14207,41 @@ async function renderRoles(panel, openCode){
     groups.forEach(function(g){ g.items.forEach(function(t){ if (h.indexOf(t.tab) >= 0) n++; }); });
     return n;
   }
+  function roleOf(code){ return r.roles.find(function(x){ return x.code === code; }); }
 
-  function editorHtml(role){
-    var hidden = Array.isArray(role.hidden_tabs) ? role.hidden_tabs : [];
-    var cats = groups.map(function(g, gi){
-      var shownInGrp = g.items.filter(function(t){ return hidden.indexOf(t.tab) < 0; }).length;
-      var perms = g.items.map(function(t){
-        var on = hidden.indexOf(t.tab) < 0 ? ' checked' : '';
-        return '<label class="qbo-perm"><input type="checkbox" class="qbo-tab" value="' + esc(t.tab) + '"' + on + '/> ' + esc(t.label) + '</label>';
-      }).join('');
-      return '<div class="qbo-cat" data-gi="' + gi + '">' +
-          '<div class="qbo-cat-hd">' +
-            '<span class="chev">▶</span>' +
-            '<span class="qbo-cat-nm">' + esc(plainTitle(g.title)) + '</span>' +
-            '<span class="qbo-cat-ct"><span class="qbo-cat-n">' + shownInGrp + '</span> of ' + g.items.length + '</span>' +
-          '</div>' +
-          '<div class="qbo-cat-bd">' +
-            '<label class="qbo-perm all"><input type="checkbox" class="qbo-catall"' + (shownInGrp === g.items.length ? ' checked' : '') + '/> Select all</label>' +
-            perms +
-          '</div>' +
-        '</div>';
-    }).join('');
-
-    return '<div class="qbo-editor" data-role="' + esc(role.code) + '">' +
-      '<h3>' + esc(role.label) + '</h3>' +
-      '<div class="qbo-code">' + esc(role.code) + ' · ' + role.member_count + ' staff · seniority ' + role.rank + '</div>' +
-      (role.is_system
-        ? ''
-        : '<div class="qbo-sec">Role details</div>' +
-          '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">' +
-            '<div><label class="lbl">Name</label><input class="fld qbo-elabel" value="' + esc(role.label) + '"/></div>' +
-            '<div><label class="lbl">Seniority</label><input class="fld qbo-erank" type="number" value="' + role.rank + '" style="width:100px"/></div>' +
+  // The editor's two tabs. role is null for a new one.
+  function detailsHtml(role){
+    return (role && role.is_system
+        ? '<p class="qbo-note" style="margin-top:0">A built-in role: its name and seniority are fixed, but what it can do is yours to set.</p>'
+        : '<div class="qbo-grid">' +
+            '<div><label class="lbl">Role name</label><input class="fld qbo-elabel" value="' + esc(role ? role.label : '') + '" placeholder="e.g. Supervisor"/></div>' +
+            '<div><label class="lbl">Seniority <small style="color:var(--muted)">lower = more senior</small></label><input class="fld qbo-erank" type="number" value="' + (role ? role.rank : 50) + '"/></div>' +
           '</div>') +
       '<div class="qbo-sec">Manager access</div>' +
       '<label class="qbo-switch">' +
-        '<input type="checkbox" class="qbo-emanage"' + (role.can_manage ? ' checked' : '') + '/>' +
+        '<input type="checkbox" class="qbo-emanage"' + (role && role.can_manage ? ' checked' : '') + '/>' +
         '<span><span class="t">Counts as a manager</span>' +
-        '<span class="d">Passes the manager-only checks on the server — receiving stock, editing pricing, issuing refunds, managing staff. The screen list below still controls the sidebar.</span></span>' +
+        '<span class="d">Passes the manager-only checks on the server — receiving stock, editing pricing, issuing refunds, managing staff. The screens tab still controls the sidebar.</span></span>' +
       '</label>' +
-      '<div class="qbo-sec">Screens this role can open</div>' +
-      cats +
-      '<div class="qbo-foot">' +
-        '<button class="qbo-btn qbo-save" data-code="' + esc(role.code) + '">Save changes</button>' +
-        '<button class="qbo-btn ghost qbo-cancel">Cancel</button>' +
-        '<span class="qbo-msg"></span>' +
-        '<span class="sp"></span>' +
-        (role.is_system ? '' : '<button class="qbo-btn danger qbo-del" data-code="' + esc(role.code) + '">Delete role</button>') +
-      '</div>' +
-    '</div>';
+      (role ? '<div class="qbo-sec">People with this role</div><p class="qbo-note" style="margin-top:0">' + role.member_count + ' ' + (role.member_count === 1 ? 'person' : 'people') +
+        (role.member_count ? ' · <button type="button" class="qbo-link qbo-seeusers">See them in Users →</button>' : '') + '</p>' : '');
+  }
+  function screensHtml(hidden){
+    return '<p class="qbo-note" style="margin:0 0 12px">Tick the screens this role can open. Unticked screens are left out of their menu.</p>' +
+      groups.map(function(g){
+        var shownInGrp = g.items.filter(function(t){ return hidden.indexOf(t.tab) < 0; }).length;
+        return '<div class="qbo-cat">' +
+            '<div class="qbo-cat-hd"><span class="chev">▶</span>' +
+              '<span class="qbo-cat-nm">' + esc(plainTitle(g.title)) + '</span>' +
+              '<span class="qbo-cat-ct"><span class="qbo-cat-n">' + shownInGrp + '</span> of ' + g.items.length + '</span></div>' +
+            '<div class="qbo-cat-bd">' +
+              '<label class="qbo-perm all"><input type="checkbox" class="qbo-catall"' + (shownInGrp === g.items.length ? ' checked' : '') + '/> Select all</label>' +
+              g.items.map(function(t){
+                return '<label class="qbo-perm"><input type="checkbox" class="qbo-tab" value="' + esc(t.tab) + '"' + (hidden.indexOf(t.tab) < 0 ? ' checked' : '') + '/> ' + esc(t.label) + '</label>';
+              }).join('') +
+            '</div>' +
+          '</div>';
+      }).join('');
   }
 
   var rowsHtml = r.roles.map(function(role){
@@ -14077,70 +14249,55 @@ async function renderRoles(panel, openCode){
     var shown = totalScreens - realHidden(role);
     var access = role.can_manage
       ? '<span class="qbo-pill mgr">✓ Manager rights</span>'
-      : '<span class="qbo-pill ltd">Limited</span> <span style="color:var(--muted);font-size:12px;margin-left:6px">sees ' + shown + ' of ' + totalScreens + ' screens</span>';
-    return '<tbody>' +
-      '<tr class="qbo-row' + (role.code === openCode ? ' open' : '') + '" data-code="' + esc(role.code) + '">' +
+      : '<span class="qbo-pill ltd">Limited</span>';
+    return '<tr class="qbo-row" data-code="' + esc(role.code) + '"' + (locked ? ' style="cursor:default"' : '') + '>' +
         '<td><div class="qbo-rolename">' + esc(role.label) + (role.is_system ? '<span class="qbo-pill sys">Built in</span>' : '') + '</div>' +
-            '<div class="qbo-code">' + esc(role.code) + '</div></td>' +
-        '<td>' + access + '</td>' +
+            '<div class="qbo-code">' + esc(role.code) + ' · seniority ' + role.rank + '</div></td>' +
+        '<td>' + access + '<div class="qbo-code">' + (locked ? 'Everything, always' : 'Sees ' + shown + ' of ' + totalScreens + ' screens') + '</div></td>' +
         '<td>' + role.member_count + '</td>' +
-        '<td style="text-align:right">' + (locked
+        '<td class="qbo-act">' + (locked
           ? '<span style="color:var(--muted);font-size:12px">Locked</span>'
-          : '<button class="qbo-link">Edit</button>') + '</td>' +
-      '</tr>' +
-      (locked ? '' :
-        '<tr class="qbo-editrow" data-code="' + esc(role.code) + '"' + (role.code === openCode ? '' : ' hidden') + '>' +
-          '<td colspan="4" style="padding:0">' + editorHtml(role) + '</td>' +
-        '</tr>') +
-    '</tbody>';
+          : '<button class="qbo-link" data-edit="' + esc(role.code) + '">Edit</button>' +
+            '<button class="qbo-caret" aria-label="More actions">▾</button>' +
+            '<div class="qbo-menu" hidden>' +
+              '<button data-dup="' + esc(role.code) + '">Duplicate</button>' +
+              (role.member_count ? '<button data-users="' + esc(role.code) + '">See users</button>' : '') +
+              (role.is_system ? '' : '<button class="bad" data-del="' + esc(role.code) + '">Delete role</button>') +
+            '</div>') + '</td>' +
+      '</tr>';
   }).join('');
 
   panel.innerHTML =
     QBO_ROLES_CSS +
     '<div class="qbo">' +
       '<div class="qbo-hd">' +
-        '<div><h2>Roles &amp; permissions</h2>' +
+        '<div><h2>Manage users</h2>' +
           '<p>A role is a set of screens plus whether it clears the manager bar. Add one to hand out part of a manager’s access without the rest. The Owner role is fixed — it is the way back in if a permission is set wrong.</p></div>' +
-        '<button class="qbo-btn" id="qboNewToggle">＋ New role</button>' +
+        '<button class="qbo-btn" id="qboNewToggle">Add role</button>' +
       '</div>' +
-      '<div class="qbo-new" id="qboNewForm" hidden>' +
-        '<form class="row" onsubmit="event.preventDefault();submitRole();">' +
-          '<div><label class="lbl">Role name</label><input id="nrLabel" class="fld" placeholder="e.g. Supervisor"/></div>' +
-          '<div><label class="lbl">Seniority <span style="text-transform:none;letter-spacing:0;font-weight:400">(lower = more senior)</span></label><input id="nrRank" type="number" class="fld" value="50" style="width:120px"/></div>' +
-          '<label style="display:inline-flex;align-items:center;gap:7px;font-size:13px;padding-bottom:9px"><input type="checkbox" id="nrManage"/> Counts as a manager</label>' +
-          '<button class="qbo-btn" id="nrCreate" type="submit" style="margin-bottom:1px">Create role</button>' +
-          '<button class="qbo-btn ghost" id="nrCancel" type="button" style="margin-bottom:1px">Cancel</button>' +
-          '<span id="nrMsg" class="qbo-msg" style="margin-left:4px"></span>' +
-        '</form>' +
-      '</div>' +
-      '<table class="qbo-table"><thead><tr><th>Role</th><th>Access</th><th>Users</th><th></th></tr></thead>' +
+      qboTabs('roles') +
+      '<div class="qbo-scroll"><table class="qbo-table"><thead><tr><th>Role</th><th>Access</th><th>Users</th><th style="text-align:right">Action</th></tr></thead><tbody>' +
         rowsHtml +
-      '</table>' +
+      '</tbody></table></div>' +
     '</div>';
+  var root = panel.querySelector('.qbo');
+  qboWireTabs(root);
+  qboWireMenus(root);
 
-  // ---- New-role form toggle -------------------------------------------------
-  var newForm = panel.querySelector('#qboNewForm');
-  panel.querySelector('#qboNewToggle').addEventListener('click', function(){
-    newForm.hidden = !newForm.hidden;
-    if (!newForm.hidden) panel.querySelector('#nrLabel').focus();
-  });
-  panel.querySelector('#nrCancel').addEventListener('click', function(){ newForm.hidden = true; });
+  // One editor for edit, duplicate and new. from: the role whose settings it
+  // starts with; editing: true to save over it rather than create a new one.
+  function openEditor(from, editing){
+    var hidden = from && Array.isArray(from.hidden_tabs) ? from.hidden_tabs : [];
+    var base = from && !editing ? Object.assign({}, from, { label: 'Copy of ' + from.label, is_system: false, member_count: 0, rank: from.rank }) : from;
+    var d = qboDrawer(root,
+      editing ? 'Edit role: ' + from.label : from ? 'Duplicate ' + from.label : 'Add a role',
+      editing ? esc(from.code) + ' · ' + from.member_count + ' staff' : 'Starts ' + (from ? 'as a copy — change what differs.' : 'with every screen ticked.'),
+      [ { key: 'details', label: 'Details', html: detailsHtml(editing ? from : (from ? base : null)) },
+        { key: 'screens', label: 'Screens', html: screensHtml(hidden) } ],
+      '<button class="qbo-btn ghost qbo-close">Cancel</button><span class="qbo-msg"></span><span class="sp"></span>' +
+      (editing && !from.is_system ? '<button class="qbo-btn danger qbo-del">Delete</button>' : '') +
+      '<button class="qbo-btn qbo-save">' + (editing ? 'Save' : 'Create role') + '</button>');
 
-  // ---- Row expand / collapse (one editor open at a time) ------------------
-  panel.querySelectorAll('.qbo-row').forEach(function(row){
-    row.addEventListener('click', function(){
-      var code = row.getAttribute('data-code');
-      var edit = panel.querySelector('.qbo-editrow[data-code="' + code + '"]');
-      if (!edit) return;
-      var wasOpen = !edit.hidden;
-      panel.querySelectorAll('.qbo-editrow').forEach(function(e){ e.hidden = true; });
-      panel.querySelectorAll('.qbo-row').forEach(function(r2){ r2.classList.remove('open'); });
-      if (!wasOpen) { edit.hidden = false; row.classList.add('open'); }
-    });
-  });
-
-  // ---- Inside each editor -------------------------------------------------
-  panel.querySelectorAll('.qbo-editor').forEach(function(ed){
     function syncCat(cat){
       var boxes = cat.querySelectorAll('.qbo-tab');
       var on = 0;
@@ -14150,12 +14307,9 @@ async function renderRoles(panel, openCode){
       all.checked = on === boxes.length;
       all.indeterminate = on > 0 && on < boxes.length;
     }
-    ed.querySelectorAll('.qbo-cat').forEach(function(cat){
-      cat.querySelector('.qbo-cat-hd').addEventListener('click', function(e){
-        if (e.target.classList.contains('qbo-catall')) return;   // let the checkbox act
-        cat.classList.toggle('open');
-      });
-      cat.querySelector('.qbo-catall').addEventListener('click', function(e){ e.stopPropagation(); });
+    d.querySelectorAll('.qbo-cat').forEach(function(cat){
+      syncCat(cat);
+      cat.querySelector('.qbo-cat-hd').addEventListener('click', function(){ cat.classList.toggle('open'); });
       cat.querySelector('.qbo-catall').addEventListener('change', function(){
         var want = this.checked;
         cat.querySelectorAll('.qbo-tab').forEach(function(b){ b.checked = want; });
@@ -14163,58 +14317,61 @@ async function renderRoles(panel, openCode){
       });
       cat.querySelectorAll('.qbo-tab').forEach(function(b){ b.addEventListener('change', function(){ syncCat(cat); }); });
     });
+    var see = d.querySelector('.qbo-seeusers');
+    if (see) see.addEventListener('click', function(){ QBO_ROLE_FILTER = from.code; show('staff'); });
 
-    ed.querySelector('.qbo-cancel').addEventListener('click', function(){
-      var er = ed.closest('.qbo-editrow');
-      er.hidden = true;
-      panel.querySelector('.qbo-row[data-code="' + er.getAttribute('data-code') + '"]').classList.remove('open');
-    });
-
-    ed.querySelector('.qbo-save').addEventListener('click', async function(){
-      var code = this.getAttribute('data-code');
-      var msg = ed.querySelector('.qbo-msg');
+    var msg = d.querySelector('.qbo-msg');
+    d.querySelector('.qbo-save').addEventListener('click', async function(){
+      var btn = this;
       var body = {
-        can_manage: ed.querySelector('.qbo-emanage').checked,
-        hidden_tabs: Array.prototype.filter.call(ed.querySelectorAll('.qbo-tab'), function(x){ return !x.checked; })
+        can_manage: d.querySelector('.qbo-emanage').checked,
+        hidden_tabs: Array.prototype.filter.call(d.querySelectorAll('.qbo-tab'), function(x){ return !x.checked; })
                           .map(function(x){ return x.value; }),
       };
-      var elabel = ed.querySelector('.qbo-elabel');
+      var elabel = d.querySelector('.qbo-elabel');
       if (elabel && elabel.value.trim()) body.label = elabel.value.trim();
-      var erank = ed.querySelector('.qbo-erank');
+      var erank = d.querySelector('.qbo-erank');
       if (erank && erank.value !== '') body.rank = parseInt(erank.value, 10) || 50;
-      msg.textContent = 'Saving…'; msg.style.color = 'var(--muted)';
+      if (!editing && !body.label) { qboDrawerTab(d, 'details'); return qboSay(msg, 'Give it a name', 'bad'); }
+      btn.disabled = true; qboSay(msg, 'Saving…');
       try {
-        await api('/api/admin/roles/' + encodeURIComponent(code), { method: 'PATCH', body: body });
+        var code = editing ? from.code : null;
+        if (editing) await api('/api/admin/roles/' + encodeURIComponent(code), { method: 'PATCH', body: body });
+        else { var res = await api('/api/admin/roles', { method: 'POST', body: body }); code = res && res.role && res.role.code; }
         // The sidebar is built from the signed-in user's own role, so re-read it.
         await loadMyRole();
         buildSidebar();
-        renderRoles(panel, code);
-      } catch (e) { msg.textContent = e.message; msg.style.color = 'var(--red)'; }
+        renderRoles(panel);
+        if (code) posToast((editing ? 'Saved ' : 'Created ') + (body.label || from.label));
+      } catch (e) { btn.disabled = false; qboSay(msg, e.message, 'bad'); }
     });
+    var del = d.querySelector('.qbo-del');
+    if (del) del.addEventListener('click', function(){ deleteRole(from.code, msg); });
+  }
+  async function deleteRole(code, msg){
+    if (!confirm('Delete this role? Staff must be moved off it first.')) return;
+    try { await api('/api/admin/roles/' + encodeURIComponent(code), { method: 'DELETE' }); renderRoles(panel); }
+    catch (e) { if (msg) qboSay(msg, e.message, 'bad'); else alert(e.message); }
+  }
 
-    var del = ed.querySelector('.qbo-del');
-    if (del) del.addEventListener('click', async function(){
-      if (!confirm('Delete this role? Staff must be moved off it first.')) return;
-      try { await api('/api/admin/roles/' + encodeURIComponent(this.getAttribute('data-code')), { method: 'DELETE' }); renderRoles(panel); }
-      catch (e) { ed.querySelector('.qbo-msg').textContent = e.message; ed.querySelector('.qbo-msg').style.color = 'var(--red)'; }
+  panel.querySelector('#qboNewToggle').addEventListener('click', function(){ openEditor(null, false); });
+  panel.querySelectorAll('.qbo-row').forEach(function(tr){
+    tr.addEventListener('click', function(e){
+      var role = roleOf(tr.getAttribute('data-code'));
+      if (role.code === 'owner' || (e.target.closest('.qbo-act') && !e.target.hasAttribute('data-edit'))) return;
+      openEditor(role, true);
     });
   });
-}
-
-async function submitRole(panel){
-  panel = panel || document.getElementById('panel') || document.querySelector('.content-area');
-  var msg = document.getElementById('nrMsg');
-  var label = document.getElementById('nrLabel').value.trim();
-  if (!label) { msg.textContent = 'Give it a name'; msg.style.color = 'var(--red)'; return; }
-  msg.textContent = 'Adding…'; msg.style.color = 'var(--muted)';
-  try {
-    var res = await api('/api/admin/roles', { method: 'POST', body: {
-      label: label,
-      rank: parseInt(document.getElementById('nrRank').value, 10) || 50,
-      can_manage: document.getElementById('nrManage').checked,
-    }});
-    renderRoles(panel, res && res.role && res.role.code);
-  } catch (e) { msg.textContent = e.message; msg.style.color = 'var(--red)'; }
+  panel.querySelectorAll('[data-dup]').forEach(function(b){
+    b.addEventListener('click', function(e){ e.stopPropagation(); openEditor(roleOf(this.getAttribute('data-dup')), false); });
+  });
+  panel.querySelectorAll('[data-users]').forEach(function(b){
+    b.addEventListener('click', function(e){ e.stopPropagation(); QBO_ROLE_FILTER = this.getAttribute('data-users'); show('staff'); });
+  });
+  panel.querySelectorAll('[data-del]').forEach(function(b){
+    b.addEventListener('click', function(e){ e.stopPropagation(); deleteRole(this.getAttribute('data-del')); });
+  });
+  if (openCode && roleOf(openCode) && openCode !== 'owner') openEditor(roleOf(openCode), true);
 }
 
 async function submitStaff(){
@@ -14232,14 +14389,18 @@ async function submitStaff(){
   };
   var pin = document.getElementById('sfPin').value.trim();
   if (pin) body.pin = pin;
-  msg.style.display = 'block'; msg.textContent = 'Creating…';
-  msg.style.background = 'var(--card-soft)'; msg.style.color = 'var(--muted)';
+  // The required fields sit on the first tab; go back to it if one is empty.
+  if (!body.name || !body.email || !body.password) {
+    var d = msg.closest('.qbo-dr-wrap');
+    if (d) qboDrawerTab(d, 'details');
+    return qboSay(msg, 'Name, email and a temporary password are needed', 'bad');
+  }
+  qboSay(msg, 'Adding…');
   try {
     await api('/api/admin/staff', { method: 'POST', body: body });
     renderStaff(document.getElementById('panel') || document.querySelector('.content-area'));
-  } catch (e) {
-    msg.textContent = e.message; msg.style.background = '#fee2e2'; msg.style.color = '#991b1b';
-  }
+    posToast('Added ' + body.name);
+  } catch (e) { qboSay(msg, e.message, 'bad'); }
 }
 
 // =============================================================================
@@ -14278,7 +14439,9 @@ async function renderStaffCategories(panel){
       '</div></td></tr>';
   }
 
-  panel.innerHTML =
+  // Same header and tab strip as Users and Roles; the list itself is unchanged.
+  panel.innerHTML = QBO_ROLES_CSS +
+    '<div class="qbo"><div class="qbo-hd"><div><h2>Manage users</h2><p>What each person does here. A category can block functions for everyone in it; a person’s own permissions can allow them back.</p></div></div>' + qboTabs('staffcategories') + '</div>' +
     '<div style="padding:12px 16px;border-bottom:1px solid var(--line);background:var(--card-soft)">' +
       '<form id="newCat" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end" onsubmit="event.preventDefault();submitCategory();">' +
         '<div><label class="lbl">New category</label><input id="ncLabel" class="fld" placeholder="e.g. Tyre fitter" style="width:200px"/></div>' +
@@ -14308,6 +14471,7 @@ async function renderStaffCategories(panel){
         '</td></tr>' + catPermGrid(c);
     }).join('') + '</tbody></table>';
 
+  qboWireTabs(panel);
   panel.querySelectorAll('[data-catperm]').forEach(function(b){
     b.addEventListener('click', function(){
       var row = document.getElementById('catP' + this.getAttribute('data-catperm'));

@@ -566,9 +566,13 @@ Stock to cash: All modules > Stock to cash shows stock that is not selling (over
   {
     key: 'people', title: 'Staff, roles, payroll and attendance', sort: 135, quiz: false, roles: ['owner', 'manager'],
     summary: 'Adding staff, roles and permissions, staff categories, attendance, payroll, commission, hiring and training.',
-    body: `Adding staff: Settings > Users & Staff > "+ New staff member": name, email (login), phone, temporary password, employee number, national ID (TRN), till PIN (4 to 8 digits), admin panel role (Owner, Manager, Cashier, Freelance rep) and categories (sales rep, cashier, mechanic, service advisor, driver, parts clerk). Untick "Can sign in to the admin panel" for staff who only need a PIN at the till. Each row has Edit, PIN, Reset password and Disable.
+    body: `Manage users: Settings > Users & Staff opens Manage users, laid out like QuickBooks. Tabs across the top switch between Users, Roles and Staff categories. The Users list can be searched by name, email, phone or employee number, and filtered by status (active, disabled, no longer staff) and by role.
 
-Roles and permissions: Settings > Roles & Permissions. A role is a set of screens and functions, plus whether it has manager rights. Add a role to hand out part of a manager's access without the rest. The Owner role is fixed - it is the way back in if a permission is set wrong. Nobody can create a role more senior than their own.
+Adding staff: press "Add user". A panel opens on the right in two steps. 1 Details: name, email (sign-in), phone, temporary password, employee number, national ID (TRN) and till PIN (4 to 8 digits). 2 Role & access: the role (Owner, Manager, Cashier, Freelance rep or one you added) and categories (sales rep, cashier, mechanic, service advisor, driver, parts clerk). Untick "Can sign in to the admin panel" for staff who only need a PIN at the till.
+
+Editing staff: click the person, or Edit on their row. The panel has tabs for Profile, Role, Permissions (Inherit, Allow or Deny for each function) and Pinned screens, and one Save keeps all of them. The arrow beside Edit has Change till PIN, Reset password and Disable sign-in.
+
+Roles and permissions: the Roles tab (also Settings > Roles & Permissions). A role is a set of screens, plus whether it has manager rights. Add a role to hand out part of a manager's access without the rest. Click a role to edit it: Details (name, seniority, manager rights) and Screens (ticked by area, with Select all). The arrow beside Edit has Duplicate (start a new role as a copy), See users and Delete. The Owner role is fixed - it is the way back in if a permission is set wrong. Nobody can create a role more senior than their own, and a role cannot be deleted while people still have it.
 
 Staff categories: Settings > Staff Categories lists what people do (sales rep, cashier, driver...). Each category has a permission grid: unticked functions are denied to its members, and a person's own record can re-allow or deny on top.
 
