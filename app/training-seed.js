@@ -638,7 +638,7 @@ Security screen: the Security screen (fleet wall) is a full-screen live driver m
   },
   {
     key: 'team-chat', title: 'Team chat, calls and the staff calendar', sort: 144, quiz: false,
-    summary: 'Messaging other staff, groups, the All staff group, memos, voice and video calls, the calendar, and what management can see.',
+    summary: 'Messaging other staff, groups, the All staff group, the 🚨 emergency alarm, memos, voice and video calls, the calendar, and what management can see.',
     body: `The chat button: every staff screen has a green 💬 tab on its right edge. It opens the team chat over whatever you are doing, so you can answer without leaving the till. Drag the tab up or down if it is in your way. A red number on it counts unread messages and alerts. All modules > Team chat opens the same chat full screen, with the calendar beside it.
 
 Chatting: People lists every member of staff, who is online (green dot) and when the others were last on. Tap someone to message them; the 📞 and 🎥 buttons call them. Type and press Enter to send (Shift+Enter for a new line). 📎 sends a photo, PDF, Word, Excel or PowerPoint file, a short MP4 clip or a CSV (up to 15 MB); you can also paste a picture or drag a file onto the chat. Hold a conversation with 🎤: press it, speak, then ➤ to send a voice note, or 🗑 to throw it away.
@@ -648,6 +648,8 @@ Messages: one tick means sent, two blue ticks mean read (in a group, read by eve
 Groups: 👥 starts a group: give it a name, pick the people, and choose whether only group admins can post. Group admins add and remove people, make others admins, rename the group and close it (it stays readable but nobody can post). Anyone can leave a group. Pin or mute a chat from its ⋯ menu or its info page.
 
 All staff: everyone on the staff list is in the All staff group automatically; people who leave drop off. Only managers post there, so it stays for announcements.
+
+Emergency alarm (🚨): for a real emergency only. Press 🚨 at the top of the chat, choose what is happening (fire, medical, robbery, evacuate, other), say where, and press "Sound the alarm for all staff". Every staff screen that is signed in flashes red with a siren until that person answers "I'm safe", "On my way to help" or "I need help" (with where they are). After that a red bar stays along the top with the roll call: who is safe, on the way, needing help, or has not answered, with people who are clocked in and silent listed first. Staff who are not at a screen get it under Alerts, and by text and email when the till sends them. For a robbery, tick Silent: no siren, just a small dark bar, so nobody near the till is alerted. Only the person who raised it, or a manager, can end it as "All clear" or "False alarm"; everyone is told. It does not call the police or ambulance: call 119 for police, 110 for fire or ambulance as well. Management sees every alarm, the answers and how it ended in Team chat > Manage correspondence > Emergencies.
 
 Memos and announcements: a manager's 📢 button sends an announcement to all staff, or a memo to a group. It stands out in the chat, pops up on everyone's screen (in the middle of the screen if marked urgent) and waits under Alerts until each person presses "I have read this". Management sees who has read and acknowledged it and can send a reminder to the rest.
 

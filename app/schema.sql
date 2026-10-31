@@ -6514,3 +6514,32 @@ CREATE TABLE IF NOT EXISTS training_views (       -- who opened which lesson
   views      INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (user_id, module_id)
 );
+
+-- =============================================================================
+--  Emergency alarm (team.js): the staff 911. Any staff member raises one; it
+--  sounds on every staff screen until each person answers, and stays up until
+--  the person who raised it or a manager gives the all clear.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS team_emergencies (
+  id          SERIAL PRIMARY KEY,
+  kind        TEXT NOT NULL,                      -- fire | medical | robbery | evacuate | other
+  location    TEXT,                               -- where in the shop
+  details     TEXT,
+  silent      BOOLEAN NOT NULL DEFAULT FALSE,     -- banner only, no siren (a robbery)
+  raised_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  raised_at   TIMESTAMPTZ DEFAULT NOW(),
+  raised_ip   TEXT,
+  ended_at    TIMESTAMPTZ,
+  ended_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  outcome     TEXT,                               -- all_clear | false_alarm
+  end_note    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_team_emergencies_open ON team_emergencies (id) WHERE ended_at IS NULL;
+CREATE TABLE IF NOT EXISTS team_emergency_replies (  -- the roll call
+  emergency_id  INTEGER NOT NULL REFERENCES team_emergencies(id) ON DELETE CASCADE,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status        TEXT NOT NULL CHECK (status IN ('safe', 'responding', 'help')),
+  note          TEXT,
+  at            TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (emergency_id, user_id)
+);

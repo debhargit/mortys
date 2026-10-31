@@ -12,7 +12,7 @@
   if (window.__visionStaffAssist) return;
   window.__visionStaffAssist = true;
   // The team chat button sits on the same staff screens (assets/team-chat.js).
-  if (!document.querySelector('script[src^="/assets/team-chat.js"]')) { var tc = document.createElement('script'); tc.src = '/assets/team-chat.js?v=2'; tc.defer = true; document.head.appendChild(tc); }
+  if (!document.querySelector('script[src^="/assets/team-chat.js"]')) { var tc = document.createElement('script'); tc.src = '/assets/team-chat.js?v=3'; tc.defer = true; document.head.appendChild(tc); }
   var css = '.vsa-btn{position:fixed;left:14px;bottom:14px;z-index:9980;background:#0b1b2b;color:#fff;border:0;border-radius:999px;padding:9px 15px;font:600 14px system-ui,sans-serif;box-shadow:0 3px 12px rgba(0,0,0,.3);cursor:pointer}' +
     '.vsa{position:fixed;left:14px;bottom:14px;z-index:9981;width:min(390px,calc(100vw - 28px));max-height:min(620px,calc(100vh - 28px));background:#fff;color:#0f1720;border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,.35);display:flex;flex-direction:column;overflow:hidden;font:14px/1.45 system-ui,sans-serif}' +
     '.vsa header{background:#0b1b2b;color:#fff;padding:9px 12px;display:flex;gap:6px;align-items:center}.vsa header button{background:none;border:1px solid #ffffff55;color:#fff;border-radius:999px;padding:3px 11px;font:inherit;cursor:pointer}.vsa header button.on{background:#fff;color:#0b1b2b}.vsa header .x{margin-left:auto;border:0;font-size:18px}' +

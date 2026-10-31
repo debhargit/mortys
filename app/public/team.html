@@ -136,13 +136,13 @@
     <div class="kpis" id="mKpis"></div>
     <div class="mtabs" id="mTabs">
       <button data-m="convs" class="on">Conversations</button><button data-m="search">Search messages</button><button data-m="memos">Memos and announcements</button>
-      <button data-m="online">Who is online</button><button data-m="calls">Call log</button><button data-m="audit">Management access log</button><button data-m="settings">Settings</button>
+      <button data-m="online">Who is online</button><button data-m="calls">Call log</button><button data-m="sos">Emergencies</button><button data-m="audit">Management access log</button><button data-m="settings">Settings</button>
     </div>
     <div id="mBody"></div>
   </section>
 </main>
 
-<script src="/assets/team-chat.js?v=2"></script>
+<script src="/assets/team-chat.js?v=3"></script>
 <script>
 (function(){
   'use strict';
@@ -411,7 +411,7 @@
       sub = s;
       document.querySelectorAll('#mTabs [data-m]').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-m') === s); });
       var host = $('#mBody'); host.innerHTML = '<p class="muted">Loading…</p>';
-      ({ convs: convs, search: search, memos: memos, online: online, calls: calls, audit: audit, settings: settings })[s](host);
+      ({ convs: convs, search: search, memos: memos, online: online, calls: calls, sos: sos, audit: audit, settings: settings })[s](host);
     }
     function convs(host){
       host.innerHTML = '<div class="split"><div class="card"><div class="row" style="margin-bottom:8px"><input type="search" id="mQ" placeholder="Group or person" style="flex:1"><select id="mK"><option value="">All kinds</option><option value="direct">One-to-one</option><option value="group">Groups</option><option value="company">All staff</option></select></div><div class="scroll" id="mList" style="max-height:62vh"></div></div>' +
@@ -494,6 +494,16 @@
         host.innerHTML = '<div class="card"><p class="sub">Calls go directly between the staff browsers. Nothing is recorded; this is only who called whom and for how long.</p>' + (r.calls.length ? '<div class="scroll"><table><tr><th>When</th><th>Type</th><th>Conversation</th><th>Started by</th><th>Joined</th><th>Length</th></tr>' + r.calls.map(function(c){
           return '<tr><td class="small">' + esc(when(c.started_at)) + '</td><td>' + (c.media === 'video' ? '🎥 video' : '📞 voice') + '</td><td>' + esc(c.conv_title || '') + '</td><td>' + esc(c.started_by_name || '') + '</td><td class="small">' + esc(c.joined_names) + '</td><td>' + (c.live ? '<span class="pill g">live</span>' : c.answered ? (c.seconds < 60 ? c.seconds + ' s' : Math.round(c.seconds / 60) + ' min') : '<span class="pill r">missed</span>') + '</td></tr>';
         }).join('') + '</table></div>' : '<p class="muted">No calls yet.</p>') + '</div>';
+      }).catch(function(e){ host.innerHTML = esc(e.message); });
+    }
+    function sos(host){
+      api('GET', '/api/team/admin/emergencies').then(function(r){
+        host.innerHTML = '<div class="card"><div class="row" style="margin-bottom:8px"><p class="sub" style="flex:1;margin:0">Every emergency alarm raised from the 🚨 button in the chat, who answered and how it ended.</p><button class="primary" id="sosNew">🚨 Raise an emergency</button></div>' + (r.emergencies.length ? '<div class="scroll"><table><tr><th>Raised</th><th>What</th><th>Where</th><th>Answers</th><th>Ended</th></tr>' + r.emergencies.map(function(e){
+          return '<tr><td class="small">' + esc(when(e.raised_at)) + '<div class="muted">' + esc(e.raised_by_name || '') + (e.raised_ip ? ' · ' + esc(e.raised_ip) : '') + '</div></td><td><b>' + esc(e.label) + '</b>' + (e.silent ? ' <span class="pill">silent</span>' : '') + (e.details ? '<div class="small">' + esc(e.details) + '</div>' : '') + '</td><td>' + esc(e.location || '') + '</td>' +
+            '<td><span class="pill g">' + e.safe + ' safe</span> ' + (e.responding ? '<span class="pill">' + e.responding + ' on the way</span> ' : '') + (e.help ? '<span class="pill r">' + e.help + ' needed help</span>' : '') + (e.replies ? '<div class="small muted">' + esc(e.replies) + '</div>' : '') + '</td>' +
+            '<td>' + (e.ended_at ? '<span class="pill ' + (e.outcome === 'false_alarm' ? 'y' : 'g') + '">' + (e.outcome === 'false_alarm' ? 'false alarm' : 'all clear') + '</span><div class="small muted">' + esc(when(e.ended_at)) + ' · ' + esc(e.ended_by_name || '') + (e.end_note ? '<br>' + esc(e.end_note) : '') + '</div>' : '<span class="pill r">still on</span>') + '</td></tr>';
+        }).join('') + '</table></div>' : '<p class="muted">No emergencies raised yet.</p>') + '</div>';
+        $('#sosNew').onclick = function(){ T.emergency(); };
       }).catch(function(e){ host.innerHTML = esc(e.message); });
     }
     function audit(host){

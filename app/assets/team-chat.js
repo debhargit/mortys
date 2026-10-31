@@ -55,7 +55,18 @@
     '.vtc-call .ctl{display:flex;gap:14px;justify-content:center;padding:14px;flex-wrap:wrap}.vtc-call .ctl button{width:54px;height:54px;border-radius:50%;border:0;background:#ffffff26;color:#fff;font-size:22px;cursor:pointer}.vtc-call .ctl button.off{background:#fff;color:#111}.vtc-call .ctl .end{background:#d62828}.vtc-call.mini .ctl{padding:8px;gap:8px}.vtc-call.mini .ctl button{width:40px;height:40px;font-size:17px}' +
     '.vtc-ring{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:10045;background:#111b21;color:#fff;border-radius:16px;padding:14px 16px;box-shadow:0 10px 40px rgba(0,0,0,.5);display:flex;gap:12px;align-items:center;width:min(420px,calc(100vw - 24px))}.vtc-ring .m{flex:1;min-width:0}.vtc-ring button{width:46px;height:46px;border-radius:50%;border:0;color:#fff;font-size:20px;cursor:pointer}' +
     '.vtc-rec{display:flex;align-items:center;gap:10px;flex:1;color:#d62828;font-weight:700;padding:0 8px}.vtc-rec i{width:10px;height:10px;border-radius:50%;background:#d62828;animation:vtcbl 1s infinite}@keyframes vtcbl{50%{opacity:.2}}' +
-    '.vtc-drop{outline:3px dashed var(--g);outline-offset:-8px}';
+    '.vtc-drop{outline:3px dashed var(--g);outline-offset:-8px}' +
+    '.vtc-sos{position:fixed;inset:0;z-index:10060;color:#fff;background:#b91c1c;animation:vtcsos 1s steps(2) infinite;overflow:auto;display:flex;align-items:center;justify-content:center;padding:16px}@keyframes vtcsos{50%{background:#7f1d1d}}' +
+    '.vtc-sos .in{max-width:620px;width:100%;text-align:center}.vtc-sos .big{font-size:72px;line-height:1}.vtc-sos .k{font:800 15px system-ui;letter-spacing:.3em;opacity:.85;margin-top:6px}.vtc-sos h1{font-size:clamp(28px,7vw,52px);margin:4px 0 6px;line-height:1.1}' +
+    '.vtc-sos .loc{font-size:clamp(18px,4vw,26px);font-weight:700}.vtc-sos .det{font-size:16px;margin-top:6px;white-space:pre-wrap}.vtc-sos .by{opacity:.85;margin-top:8px}' +
+    '.vtc-sos input{width:100%;margin:16px 0 8px;padding:12px;border-radius:10px;border:0;font-size:16px;color:#111}.vtc-sos .ans{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}' +
+    '.vtc-sos .ans button{padding:18px 10px;border-radius:12px;border:3px solid #fff;background:#fff;color:#7f1d1d;font:800 18px system-ui;cursor:pointer}.vtc-sos .ans button[data-r=help]{background:#fde047;border-color:#fde047;color:#111}.vtc-sos .ans button:disabled{opacity:.6}' +
+    '.vtc-sos .rc{margin-top:14px;font-weight:600}.vtc-sos .hint{opacity:.85;font-size:13px;margin-top:10px}' +
+    '.vtc-sosbar{position:fixed;top:0;left:0;right:0;z-index:10050;display:flex;flex-direction:column}.vtc-sosbar>div{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;padding:7px 12px;background:#b91c1c;color:#fff;font:600 13.5px system-ui;box-shadow:0 2px 10px rgba(0,0,0,.35)}' +
+    '.vtc-sosbar>div.silent{background:#1f2937;border-left:6px solid #dc2626}.vtc-sosbar .c{font-weight:400;opacity:.95}.vtc-sosbar button{background:#ffffff24;border:1px solid #ffffff80;color:#fff;border-radius:7px;padding:4px 10px;font:600 13px system-ui;cursor:pointer}.vtc-sosbar .sp{flex:1}' +
+    '.vtc-kinds{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:10px 0}.vtc-kinds button{padding:14px 8px;border:2px solid var(--line);border-radius:10px;background:var(--chip);color:var(--ink);font:700 14px system-ui;cursor:pointer}.vtc-kinds button span{display:block;font-size:28px}.vtc-kinds button.on{border-color:#d62828;background:#fee2e2;color:#7f1d1d}' +
+    '.vtc-roll .p{display:flex;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)}.vtc-roll .p .m{flex:1;min-width:0}.vtc-roll .pill{border-radius:999px;padding:2px 9px;font:700 12px system-ui;white-space:nowrap}' +
+    '.vtc-roll .safe{background:#dcfce7;color:#166534}.vtc-roll .responding{background:#dbeafe;color:#1e40af}.vtc-roll .help{background:#fde047;color:#111}.vtc-roll .none{background:var(--chip);color:var(--mut)}';
   var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
 
   // ------------------------------------------------------------- helpers --
@@ -210,16 +221,17 @@
     else if (type === 'notice') onNotice(data);
     else if (type === 'call') Call.onCall(data);
     else if (type === 'signal') Call.onSignal(data);
+    else if (type === 'emergency') Sos.onEvent(data);
     fire(type, data);
   }
-  var TYPES = ['msg', 'msg-update', 'read', 'typing', 'presence', 'conv', 'notice', 'call', 'signal', 'event'];
+  var TYPES = ['msg', 'msg-update', 'read', 'typing', 'presence', 'conv', 'notice', 'call', 'signal', 'event', 'emergency'];
   function connect() {
     if (!window.EventSource) return startPolling();
     es = new EventSource('/api/team/stream');
     es.addEventListener('hello', function (e) {
       streamOk = true; fails = 0;
       var seq = (JSON.parse(e.data) || {}).seq;
-      if (S.lastSeq && seq && S.lastSeq < seq - 0) { /* reconnected: catch up on anything the ring did not cover */ loadConvsSoon(); }
+      if (S.lastSeq && seq && S.lastSeq < seq - 0) { /* reconnected: catch up on anything the ring did not cover */ loadConvsSoon(); Sos.load(); }
       if (!S.lastSeq) S.lastSeq = seq;
     });
     TYPES.forEach(function (t) { es.addEventListener(t, function (e) { try { handle(t, JSON.parse(e.data), e.lastEventId); } catch (err) { console.error(err); } }); });
@@ -304,7 +316,7 @@
     if (n.kind === 'memo' && n.message_id) loadNotices().catch(function () {});
     updateBadges(); if (S.leftView === 'alerts') renderLeft();
     var go = function () { readNotices([n.id]); if (n.link) location.href = n.link; else if (n.event_id && !n.conversation_id) location.href = '/team.html#calendar=' + n.event_id; else if (n.conversation_id) openChat(n.conversation_id, n.message_id); };
-    if (n.kind === 'call') return;
+    if (n.kind === 'call' || n.kind === 'emergency') return;   // the call ringer and the emergency alarm show these themselves
     beep();
     if (document.hidden) desktop(n.title, n.body, go, n.urgent);
     if (n.kind === 'memo' && n.urgent) memoModal(n);
@@ -382,6 +394,7 @@
   function leftHeader() {
     var c = S.cfg.caps;
     return '<div class="vtc-hd"><div class="t"><b>' + (FULL ? 'Chats' : 'Team chat') + '</b><small>' + esc(S.cfg.me.name) + ' · ' + esc(statusLabel(S.peopleById[S.cfg.me.id])) + '</small></div>' +
+      '<button class="vtc-ib" data-a="sos" title="Emergency alarm: alert all staff">🚨</button>' +
       (c.announce ? '<button class="vtc-ib" data-a="announce" title="Announcement to all staff">📢</button>' : '') +
       '<button class="vtc-ib" data-a="newgroup" title="New group">👥</button>' +
       (FULL ? '' : '<button class="vtc-ib" data-a="calendar" title="Staff calendar">📅</button><button class="vtc-ib" data-a="full" title="Open full screen">⤢</button><button class="vtc-ib" data-a="close" title="Close">✕</button>') +
@@ -473,6 +486,7 @@
     else if (a === 'calendar') location.href = '/team.html#calendar';
     else if (a === 'newgroup') { S.view = 'group'; S.groupFor = null; renderRight(); }
     else if (a === 'announce') announceForm();
+    else if (a === 'sos') Sos.raise();
   }
   function setStatus(status, text) {
     api('PUT', '/api/team/presence', { status: status, status_text: text }).then(function (r) { var p = S.peopleById[S.cfg.me.id]; if (p) { p.status = r.presence.status; p.status_text = r.presence.status_text; } renderLeft(); }).catch(function (e) { toast('Could not change your status', e.message); });
@@ -1094,6 +1108,189 @@
     return { start: start, join: join, onCall: onCall, onSignal: onSignal, active: active, hangUp: hangUp };
   })();
 
+  // ------------------------------------------------------------ emergency --
+  // The staff 911 (team.js). Until you answer: a flashing full-screen alarm
+  // with a siren. After: a red bar along the top with the roll call, until the
+  // all clear. A silent alarm (robbery) is the bar only, with no sound.
+  var Sos = (function () {
+    var KINDS = [['fire', '🔥', 'Fire'], ['medical', '🚑', 'Medical'], ['robbery', '🚨', 'Robbery / armed threat'], ['evacuate', '🚪', 'Evacuate now'], ['other', '⚠️', 'Other danger']];
+    var REPLY = { safe: '✅ I’m safe', responding: '🏃 On my way to help', help: '🆘 I need help' };
+    var SHORT = { safe: 'Safe', responding: 'On the way', help: 'Needs help' };
+    var HINT = 'Call 119 for police, 110 for fire or ambulance.';
+    var list = {}, overlay = null, overlayId = null, bar = null, rollBox = null, rollId = null, sirenTimer = null, flashTimer = null, pollTimer = null;
+    function me() { return S.cfg.me.id; }
+    function myAnswer(e) { var p = e.people.find(function (x) { return x.id === me(); }); return p && p.status; }
+    function canEnd(e) { return e.raised_by === me() || !!S.cfg.caps.announce; }
+    function name(e) { return e.label.replace(/^\S+\s/, ''); }
+    function icon(e) { return e.label.split(' ')[0]; }
+    function counts(c) { return [c.help ? c.help + ' need help' : '', c.responding ? c.responding + ' on the way' : '', c.safe + ' safe', c.none + ' no answer'].filter(Boolean).join(' · '); }
+    function siren(on) {
+      if (on === !!sirenTimer) return;
+      clearInterval(sirenTimer); sirenTimer = null;
+      if (navigator.vibrate) try { navigator.vibrate(0); } catch (_) {}
+      if (!on) return;
+      var play = function () {
+        if (navigator.vibrate) try { navigator.vibrate([500, 400]); } catch (_) {}
+        var a = audio(); if (!a) return;
+        var t0 = a.currentTime, o = a.createOscillator(), g = a.createGain();
+        o.type = 'sawtooth'; o.frequency.setValueAtTime(650, t0); o.frequency.linearRampToValueAtTime(1300, t0 + 0.45); o.frequency.linearRampToValueAtTime(650, t0 + 0.9);
+        g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(0.2, t0 + 0.03); g.gain.setValueAtTime(0.2, t0 + 0.85); g.gain.linearRampToValueAtTime(0.0001, t0 + 0.9);
+        o.connect(g); g.connect(a.destination); o.start(t0); o.stop(t0 + 0.92);
+      };
+      play(); sirenTimer = setInterval(play, 950);
+    }
+    function titleFlash(on) {
+      clearInterval(flashTimer); flashTimer = null;
+      if (!on) { updateBadges(); return; }
+      var odd = false;
+      flashTimer = setInterval(function () { odd = !odd; document.title = odd ? '🚨 EMERGENCY 🚨' : baseTitle; }, 900);
+    }
+    function onEvent(d) {
+      var e = d && d.emergency; if (!e) return;
+      if (d.type === 'ended' || e.ended_at) {
+        if (!list[e.id]) return;
+        delete list[e.id];
+        var t = e.outcome === 'false_alarm' ? '✅ False alarm' : '✅ All clear';
+        toast(t, name(e) + (e.end_note ? ' · ' + e.end_note : '') + (e.ended_by_name ? ' · ' + e.ended_by_name : ''), null, 20000);
+        desktop(t, name(e));
+      } else {
+        var isNew = !list[e.id];
+        list[e.id] = e;
+        if (isNew && d.type === 'raised' && e.raised_by !== me() && !e.silent) desktop('🚨 EMERGENCY: ' + name(e), [e.location, 'Raised by ' + e.raised_by_name].filter(Boolean).join(' · '), function () { draw(); }, true);
+      }
+      draw();
+    }
+    function load() {
+      return api('GET', '/api/team/emergency').then(function (r) {
+        var now = {}; r.emergencies.forEach(function (e) { now[e.id] = true; list[e.id] = e; });
+        Object.keys(list).forEach(function (id) { if (!now[id]) delete list[id]; });
+        draw();
+      }).catch(function () {});
+    }
+    function active() { return Object.keys(list).map(function (k) { return list[k]; }).sort(function (a, b) { return a.id - b.id; }); }
+    function draw() {
+      var all = active();
+      // The alarm: the first emergency I have not answered and did not raise.
+      var alarm = all.find(function (e) { return !e.silent && !myAnswer(e) && e.raised_by !== me(); });
+      if (alarm) showAlarm(alarm); else hideAlarm();
+      siren(!!alarm); titleFlash(!!alarm);
+      drawBar(all);
+      if (rollBox && !document.body.contains(rollBox)) rollBox = null;
+      if (rollBox) { var r = list[rollId]; if (r) drawRoll(r); else rollBox.querySelector('[data-rb]').innerHTML = '<p class="vtc-mut">This emergency is over.</p>'; }
+      clearInterval(pollTimer); pollTimer = all.length ? setInterval(load, 60000) : null;
+    }
+    function answer(e, status, note, btns) {
+      if (btns) btns.forEach(function (b) { b.disabled = true; });
+      audio();
+      return api('POST', '/api/team/emergency/' + e.id + '/reply', { status: status, note: note || '' }).then(function (r) { list[e.id] = r.emergency; draw(); })
+        .catch(function (err) { if (btns) btns.forEach(function (b) { b.disabled = false; }); toast('Not sent', err.message); if (err.status === 409) load(); });
+    }
+    function showAlarm(e) {
+      if (overlay && overlayId === e.id) { overlay.querySelector('.rc').textContent = counts(e.counts); return; }
+      hideAlarm();
+      overlayId = e.id;
+      overlay = el('<div class="vtc vtc-sos" role="alertdialog" aria-modal="true" aria-labelledby="vtcSosT"><div class="in">' +
+        '<div class="big">' + esc(icon(e)) + '</div><div class="k">EMERGENCY</div><h1 id="vtcSosT">' + esc(name(e)) + '</h1>' +
+        (e.location ? '<div class="loc">📍 ' + esc(e.location) + '</div>' : '') + (e.details ? '<div class="det">' + esc(e.details) + '</div>' : '') +
+        '<div class="by">Raised by ' + esc(e.raised_by_name || 'staff') + ' at ' + esc(hm(e.raised_at)) + '</div>' +
+        '<input type="text" data-note maxlength="300" placeholder="Where are you? Anything others should know (optional)">' +
+        '<div class="ans">' + ['safe', 'responding', 'help'].map(function (s) { return '<button type="button" data-r="' + s + '">' + REPLY[s] + '</button>'; }).join('') + '</div>' +
+        '<div class="rc">' + esc(counts(e.counts)) + '</div><div class="hint">' + HINT + '</div></div></div>');
+      document.body.appendChild(overlay);
+      // Browsers keep sound off until the page is touched: any tap starts the siren.
+      overlay.addEventListener('pointerdown', function () { audio(); });
+      overlay.addEventListener('keydown', function (ev) { ev.stopPropagation(); if (ev.key === 'Enter' && ev.target.matches('[data-note]')) ev.preventDefault(); });
+      var btns = [].slice.call(overlay.querySelectorAll('[data-r]'));
+      btns.forEach(function (b) { b.onclick = function () { answer(e, b.getAttribute('data-r'), overlay.querySelector('[data-note]').value, btns); }; });
+      setTimeout(function () { if (btns[0]) btns[0].focus(); }, 30);
+    }
+    function hideAlarm() { if (overlay) overlay.remove(); overlay = null; overlayId = null; }
+    function drawBar(all) {
+      if (!all.length) { if (bar) bar.remove(); bar = null; return; }
+      if (!bar) { bar = el('<div class="vtc vtc-sosbar" role="status"></div>'); document.body.appendChild(bar); }
+      bar.innerHTML = all.map(function (e) {
+        var mine = myAnswer(e);
+        return '<div class="' + (e.silent ? 'silent' : '') + '" data-e="' + e.id + '"><b>' + esc(icon(e)) + ' ' + esc(name(e).toUpperCase()) + (e.silent ? ' (silent)' : '') + '</b>' +
+          (e.location ? '<span>📍 ' + esc(e.location) + '</span>' : '') + '<span class="c">' + esc(counts(e.counts)) + '</span><span class="sp"></span>' +
+          (mine ? '<span>You: ' + SHORT[mine] + '</span><button type="button" data-ans>Change</button>'
+            : ['safe', 'responding', 'help'].map(function (s) { return '<button type="button" data-q="' + s + '">' + REPLY[s] + '</button>'; }).join('')) +
+          '<button type="button" data-roll>Roll call</button>' + (canEnd(e) ? '<button type="button" data-end>All clear…</button>' : '') + '</div>';
+      }).join('');
+      bar.querySelectorAll('[data-e]').forEach(function (row) {
+        var e = list[row.getAttribute('data-e')];
+        row.querySelectorAll('[data-q]').forEach(function (b) { b.onclick = function () { answer(e, b.getAttribute('data-q'), '', [b]); }; });
+        var a = row.querySelector('[data-ans]'); if (a) a.onclick = function () { changeAnswer(e); };
+        row.querySelector('[data-roll]').onclick = function () { openRoll(e); };
+        var x = row.querySelector('[data-end]'); if (x) x.onclick = function () { endForm(e); };
+      });
+    }
+    function changeAnswer(e) {
+      var p = e.people.find(function (x) { return x.id === me(); }) || {};
+      modal('<h3>' + esc(icon(e) + ' ' + name(e)) + '</h3><p class="vtc-mut">Change your answer.</p><input type="text" data-note maxlength="300" placeholder="Where are you? Anything others should know (optional)" value="' + esc(p.note || '') + '" style="margin-bottom:10px">' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end"><button class="vtc-btn ghost" data-close>Cancel</button>' + ['safe', 'responding', 'help'].map(function (s) { return '<button class="vtc-btn' + (s === 'help' ? ' red' : '') + '" data-r="' + s + '">' + REPLY[s] + '</button>'; }).join('') + '</div>', function (box, close) {
+        box.querySelectorAll('[data-r]').forEach(function (b) { b.onclick = function () { answer(e, b.getAttribute('data-r'), box.querySelector('[data-note]').value).then(close); }; });
+      });
+    }
+    function drawRoll(e) {
+      rollBox.querySelector('[data-rb]').innerHTML = '<p class="vtc-mut" style="margin:0 0 6px">' + esc(counts(e.counts)) + '. Raised by ' + esc(e.raised_by_name || 'staff') + ' at ' + esc(hm(e.raised_at)) + (e.location ? ' · 📍 ' + esc(e.location) : '') + '</p>' +
+        e.people.map(function (p) {
+          var s = p.status || 'none';
+          return '<div class="p">' + avatar(p.id, p.name, { small: true, dot: p.online ? 'on' : 'off' }) + '<div class="m"><b>' + esc(p.name) + '</b> <small class="vtc-mut">' + esc(p.role || '') + (p.clocked_in ? ' · clocked in' : '') + '</small>' +
+            (p.note ? '<div><small>' + esc(p.note) + '</small></div>' : '') + '</div><span class="pill ' + s + '">' + (SHORT[s] || 'No answer') + (p.at ? ' · ' + esc(hm(p.at)) : '') + '</span></div>';
+        }).join('');
+    }
+    function openRoll(e) {
+      rollId = e.id;
+      modal('<h3>' + esc(icon(e) + ' ' + name(e)) + ': roll call</h3><div class="vtc-roll" data-rb></div><div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="vtc-btn ghost" data-close>Close</button></div>', function (box) { rollBox = box; drawRoll(e); });
+    }
+    function endForm(e) {
+      modal('<h3>End the emergency</h3><p class="vtc-mut">Stops the alarm on every screen and tells everyone.</p>' +
+        '<label style="display:flex;gap:8px;margin:6px 0"><input type="radio" name="vtcout" value="all_clear" checked> ✅ All clear: it is over and everyone can go back</label>' +
+        '<label style="display:flex;gap:8px;margin:6px 0 10px"><input type="radio" name="vtcout" value="false_alarm"> False alarm: there was no emergency</label>' +
+        '<label class="vtc-mut">Note for everyone (optional)</label><input type="text" data-note maxlength="300" style="margin:3px 0 14px">' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="vtc-btn ghost" data-close>Cancel</button><button class="vtc-btn" data-go>Send to everyone</button></div>', function (box, close) {
+        box.querySelector('[data-go]').onclick = function () {
+          var b = this; b.disabled = true;
+          api('POST', '/api/team/emergency/' + e.id + '/end', { outcome: box.querySelector('[name=vtcout]:checked').value, note: box.querySelector('[data-note]').value })
+            .then(function (r) { close(); onEvent({ type: 'ended', emergency: r.emergency }); }).catch(function (err) { b.disabled = false; toast('Not sent', err.message); if (err.status === 409) load(); });
+        };
+      });
+    }
+    function raise() {
+      var loc = ''; try { loc = localStorage.getItem('vtc-sos-loc') || ''; } catch (_) {}
+      modal('<h3>🚨 Emergency alarm</h3><p class="vtc-mut">Sounds an alarm on every staff screen and asks everyone to say if they are safe. For real emergencies only. ' + HINT + '</p>' +
+        '<div class="vtc-kinds">' + KINDS.map(function (k) { return '<button type="button" data-k="' + k[0] + '"><span>' + k[1] + '</span>' + esc(k[2]) + '</button>'; }).join('') + '</div>' +
+        '<label class="vtc-mut">Where</label><input type="text" data-loc maxlength="120" placeholder="Front counter, warehouse, car park…" value="' + esc(loc) + '" style="margin:3px 0 10px">' +
+        '<label class="vtc-mut">What is happening (optional)</label><textarea data-det rows="2" maxlength="600" style="margin-top:3px"></textarea>' +
+        '<label style="display:flex;gap:8px;margin:10px 0 14px"><input type="checkbox" data-silent> Silent: no siren, just a small bar on staff screens (for a robbery)</label>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="vtc-btn ghost" data-close>Cancel</button><button class="vtc-btn red" data-go disabled>Choose what is happening</button></div>', function (box, close) {
+        var kind = null, go = box.querySelector('[data-go]'), quiet = box.querySelector('[data-silent]');
+        var label = function () { if (kind) go.textContent = quiet.checked ? '🚨 Send the silent alarm to all staff' : '🚨 Sound the alarm for all staff'; };
+        quiet.onchange = label;
+        box.querySelectorAll('[data-k]').forEach(function (b) {
+          b.onclick = function () {
+            kind = b.getAttribute('data-k');
+            box.querySelectorAll('[data-k]').forEach(function (x) { x.classList.toggle('on', x === b); });
+            quiet.checked = kind === 'robbery';
+            go.disabled = false; label();
+          };
+        });
+        go.onclick = function () {
+          go.disabled = true;
+          var where = box.querySelector('[data-loc]').value.trim();
+          try { localStorage.setItem('vtc-sos-loc', where); } catch (_) {}
+          api('POST', '/api/team/emergency', { kind: kind, location: where, details: box.querySelector('[data-det]').value, silent: quiet.checked })
+            .then(function (r) {
+              close();
+              list[r.emergency.id] = r.emergency; draw();
+              toast(r.existing ? 'Already raised' : r.emergency.silent ? '🚨 Silent alarm sent to all staff' : '🚨 Alarm sent to all staff', r.existing ? r.emergency.raised_by_name + ' raised this ' + hm(r.emergency.raised_at) + '. You are on it too.' : 'Everyone is being asked if they are safe. ' + HINT, null, 15000);
+            }).catch(function (err) { go.disabled = false; toast('Alarm not sent', err.message); });
+        };
+      });
+    }
+    return { onEvent: onEvent, load: load, raise: raise };
+  })();
+
   // ---------------------------------------------------------------- start --
   // Signed out (the admin screen signs in without reloading): try again every
   // 30 seconds. The full-screen page reports it instead.
@@ -1109,6 +1306,7 @@
     if (!FULL) buildDock();
     return Promise.all([loadPeople(), loadConvs(), loadNotices()]).then(function () {
       connect();
+      Sos.load();
       // A call still running in one of my chats (after a reload): offer to rejoin.
       api('GET', '/api/team/calls/active').then(function (r) { r.calls.forEach(function (c) { if (c.participants.indexOf(cfg.me.id) < 0 && c.started_by !== cfg.me.id) loadConvsSoon(); }); }).catch(function () {});
       if (S.toAck.length && !FULL && !sessionStorage.getItem('vtc-ack-shown')) {
@@ -1124,7 +1322,7 @@
     ready: ready, api: api, on: on, toast: toast, modal: modal, esc: esc, avatar: avatar, state: S,
     mount: function (host) { return ready.then(function () { mountFull(host); var m = /chat=(\d+)/.exec(location.hash); if (m) openChat(Number(m[1])); }); },
     openChat: openChat, startDirect: startDirect, call: function (convId, media) { Call.start(convId, media); },
-    joinCall: function (callId, media) { Call.join(callId, media); }, announce: function () { announceForm(); },
+    joinCall: function (callId, media) { Call.join(callId, media); }, announce: function () { announceForm(); }, emergency: function () { Sos.raise(); },
     // team.html: false while the Calendar or Manage tab is showing, so messages there count as unread.
     setVisible: function (v) { S.fullHidden = !v; if (v) markRead(); },
     refresh: function () { return Promise.all([loadConvs(), loadPeople(), loadNotices()]); },

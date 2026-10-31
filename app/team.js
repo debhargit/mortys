@@ -29,6 +29,10 @@
 //  leave, public holidays, your own shifts and (hr.manage) interviews are
 //  shown alongside.
 //
+//  Emergency alarm: any staff member can raise one (fire, medical, robbery,
+//  evacuate); it sounds on every staff screen until each person answers, with
+//  a live roll call, until the all clear.
+//
 //  Management (team.oversee): every conversation including one-to-one chats,
 //  deleted messages, search, memo acknowledgements, call log, export. Each
 //  time a manager opens a conversation they are not in, it is logged.
@@ -39,6 +43,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const mailer = require('./mailer');
+const sms = require('./sms');
 
 const FILE_RE = /^[0-9a-f]{32}\.[a-z0-9]{2,5}$/;
 const TYPES = {
@@ -1017,6 +1022,130 @@ function register(app, deps) {
     } catch (e) { if (!/does not exist/.test(e.message)) console.warn('[team] reminders', e.message); }
   }
   setInterval(reminders, 60000).unref();
+
+  // ----------------------------------------------------------- emergency --
+  // The staff 911: anyone signed in can raise one. It sounds on every staff
+  // screen until each person answers (safe, on my way, need help), shows who
+  // has answered, goes into All staff and everyone's alerts, and by text and
+  // email when those are set up. It stays up until the person who raised it
+  // or a manager (team.announce) gives the all clear or calls it a false alarm.
+  // A silent one (a robbery) shows a small banner with no siren.
+  const EMERGENCY = { fire: '🔥 Fire', medical: '🚑 Medical emergency', robbery: '🚨 Robbery / armed threat', evacuate: '🚪 Evacuate now', other: '⚠️ Emergency' };
+  const REPLIES = ['safe', 'responding', 'help'];
+  const raisedBy = new Map();   // userId -> recent raise times, to stop a stuck button flooding everyone
+  const staffIds = async () => (await query(`SELECT u.id FROM users u WHERE ${ACTIVE}`)).rows.map((r) => r.id);
+  async function emergencyView(id) {
+    const { rows } = await query(`SELECT e.id, e.kind, e.location, e.details, e.silent, e.raised_by, e.outcome, e.end_note, u.name AS raised_by_name, eu.name AS ended_by_name,
+        to_char(e.raised_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS raised_at, to_char(e.ended_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS ended_at
+      FROM team_emergencies e LEFT JOIN users u ON u.id = e.raised_by LEFT JOIN users eu ON eu.id = e.ended_by WHERE e.id = $1`, [id]);
+    const e = rows[0];
+    if (!e) return null;
+    // Everyone on the staff list (and anyone who answered since leaving it), the
+    // ones who need help first, then those clocked in who have not answered.
+    const { rows: people } = await query(`SELECT u.id, u.name, COALESCE(ro.label, u.admin_role) AS role, r.status, r.note,
+        to_char(r.at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at,
+        EXISTS (SELECT 1 FROM attendance a WHERE a.user_id = u.id AND a.clock_out_at IS NULL AND a.clock_in_at > NOW() - INTERVAL '16 hours') AS clocked_in
+      FROM users u LEFT JOIN roles ro ON ro.code = u.admin_role LEFT JOIN team_emergency_replies r ON r.emergency_id = $1 AND r.user_id = u.id
+      WHERE (${ACTIVE}) OR r.user_id IS NOT NULL
+      ORDER BY CASE r.status WHEN 'help' THEN 0 WHEN 'responding' THEN 3 WHEN 'safe' THEN 4 ELSE 1 END, (r.status IS NULL AND EXISTS (SELECT 1 FROM attendance a WHERE a.user_id = u.id AND a.clock_out_at IS NULL AND a.clock_in_at > NOW() - INTERVAL '16 hours')) DESC, u.name`, [id]);
+    for (const p of people) p.online = online(p.id);
+    const count = (s) => people.filter((p) => p.status === s).length;
+    return Object.assign(e, { label: EMERGENCY[e.kind] || EMERGENCY.other, people,
+      counts: { safe: count('safe'), responding: count('responding'), help: count('help'), none: people.filter((p) => !p.status).length } });
+  }
+  async function emergencyFor(req, id) {
+    const e = await emergencyView(id);
+    if (!e) throw httpError(404, 'Emergency not found');
+    e.can_end = e.raised_by === me(req) || (await userCan(req, 'team.announce'));
+    return e;
+  }
+  // Text and email go to staff who are not at a screen. Neither is waited for.
+  function emergencyOut(ids, subject, text) {
+    (async () => {
+      const { rows } = await query(`SELECT phone, email FROM users WHERE id = ANY($1::int[])`, [ids]);
+      if (sms.isActive()) for (const r of rows) if (r.phone && String(r.phone).replace(/\D/g, '').length >= 7) sms.sendSMS({ to: r.phone, body: (subject + ': ' + text).slice(0, 300) }).catch(() => {});
+      if (mailer.isActive && mailer.isActive()) for (const r of rows) if (r.email && !/\.local$/i.test(r.email)) mailer.sendEmail({ to: r.email, subject, text: text + '\n\nOpen the staff screens to answer.' }).catch(() => {});
+    })().catch((e) => console.warn('[team] emergency text/email', e.message));
+  }
+  app.get('/api/team/emergency', requireAdmin, async (req, res) => {
+    try {
+      const { rows } = await query(`SELECT id FROM team_emergencies WHERE ended_at IS NULL ORDER BY id`);
+      const list = [];
+      for (const r of rows) list.push(await emergencyFor(req, r.id));
+      res.json({ emergencies: list });
+    } catch (e) { fail(res, e); }
+  });
+  app.post('/api/team/emergency', requireAdmin, async (req, res) => {
+    try {
+      const b = req.body || {};
+      const kind = EMERGENCY[b.kind] ? b.kind : null;
+      if (!kind) throw httpError(400, 'Choose what kind of emergency it is');
+      // Several people pressing it for the same thing: they all join the first one.
+      const { rows: same } = await query(`SELECT id FROM team_emergencies WHERE ended_at IS NULL AND kind = $1 AND raised_at > NOW() - INTERVAL '10 minutes' ORDER BY id DESC LIMIT 1`, [kind]);
+      if (same.length) return res.json({ emergency: await emergencyFor(req, same[0].id), existing: true });
+      const recent = (raisedBy.get(me(req)) || []).filter((x) => Date.now() - x < 10 * 60000);
+      if (recent.length >= 3) throw httpError(429, 'You have raised 3 emergencies in 10 minutes. Ask a manager to give the all clear first.');
+      raisedBy.set(me(req), recent.concat(Date.now()));
+      const location = t(b.location, 120), details = t(b.details, 600);
+      const { rows } = await query(`INSERT INTO team_emergencies (kind, location, details, silent, raised_by, raised_ip) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+        [kind, location, details, !!b.silent, me(req), String(req.ip || '').slice(0, 60)]);
+      const id = rows[0].id;
+      const ev = await emergencyFor(req, id);
+      const ids = await staffIds();
+      emit(ids, 'emergency', { type: 'raised', emergency: ev });
+      const where = [location, details].filter(Boolean).join(' · ');
+      const others = ids.filter((u) => u !== me(req));
+      await notice(others, { kind: 'emergency', title: ev.label + ' (raised by ' + ev.raised_by_name + ')', body: where || null, urgent: true });
+      await systemMsg(await company(), me(req), '🚨 EMERGENCY: ' + ev.label + (where ? ' · ' + where : '') + '. Raised by ' + ev.raised_by_name + '.').catch(() => {});
+      await query(`INSERT INTO team_audit (user_id, action, detail) VALUES ($1, 'raised emergency', $2)`, [me(req), ev.label + (where ? ': ' + where : '')]).catch(() => {});
+      emergencyOut(others, 'EMERGENCY at Vision Auto: ' + ev.label.replace(/^\S+\s/, ''), (where ? where + '. ' : '') + 'Raised by ' + ev.raised_by_name + '.');
+      res.json({ emergency: ev });
+    } catch (e) { fail(res, e); }
+  });
+  app.post('/api/team/emergency/:id/reply', requireAdmin, async (req, res) => {
+    try {
+      const b = req.body || {};
+      if (!REPLIES.includes(b.status)) throw httpError(400, 'Choose safe, on my way or need help');
+      const { rows } = await query(`SELECT id FROM team_emergencies WHERE id = $1 AND ended_at IS NULL`, [n(req.params.id)]);
+      if (!rows.length) throw httpError(409, 'This emergency is over');
+      await query(`INSERT INTO team_emergency_replies (emergency_id, user_id, status, note) VALUES ($1, $2, $3, $4)
+        ON CONFLICT (emergency_id, user_id) DO UPDATE SET status = EXCLUDED.status, note = EXCLUDED.note, at = NOW()`, [rows[0].id, me(req), b.status, t(b.note, 300)]);
+      const ev = await emergencyFor(req, rows[0].id);
+      emit(await staffIds(), 'emergency', { type: 'update', emergency: ev });
+      res.json({ emergency: ev });
+    } catch (e) { fail(res, e); }
+  });
+  app.post('/api/team/emergency/:id/end', requireAdmin, async (req, res) => {
+    try {
+      const ev = await emergencyFor(req, n(req.params.id));
+      if (ev.ended_at) throw httpError(409, 'This emergency is already over');
+      if (!ev.can_end) throw httpError(403, 'Only the person who raised it or a manager can give the all clear');
+      const b = req.body || {}, outcome = b.outcome === 'false_alarm' ? 'false_alarm' : 'all_clear';
+      await query(`UPDATE team_emergencies SET ended_at = NOW(), ended_by = $2, outcome = $3, end_note = $4 WHERE id = $1 AND ended_at IS NULL`, [ev.id, me(req), outcome, t(b.note, 300)]);
+      const done = await emergencyFor(req, ev.id);
+      const ids = await staffIds();
+      emit(ids, 'emergency', { type: 'ended', emergency: done });
+      const line = (outcome === 'false_alarm' ? 'False alarm: ' : 'All clear: ') + done.label.replace(/^\S+\s/, '') + (done.end_note ? ' · ' + done.end_note : '') + ' (' + done.ended_by_name + ')';
+      const others = ids.filter((u) => u !== me(req));
+      await notice(others, { kind: 'emergency', title: '✅ ' + line });
+      await systemMsg(await company(), me(req), '✅ ' + line).catch(() => {});
+      emergencyOut(others, 'Vision Auto: ' + (outcome === 'false_alarm' ? 'false alarm' : 'all clear'), line);
+      res.json({ emergency: done });
+    } catch (e) { fail(res, e); }
+  });
+  app.get('/api/team/admin/emergencies', ...can('team.oversee'), async (req, res) => {
+    try {
+      const { rows } = await query(`SELECT e.id, e.kind, e.location, e.details, e.silent, e.outcome, e.end_note, e.raised_ip, u.name AS raised_by_name, eu.name AS ended_by_name,
+          to_char(e.raised_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS raised_at, to_char(e.ended_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS ended_at,
+          (SELECT COUNT(*)::int FROM team_emergency_replies r WHERE r.emergency_id = e.id AND r.status = 'safe') AS safe,
+          (SELECT COUNT(*)::int FROM team_emergency_replies r WHERE r.emergency_id = e.id AND r.status = 'responding') AS responding,
+          (SELECT COUNT(*)::int FROM team_emergency_replies r WHERE r.emergency_id = e.id AND r.status = 'help') AS help,
+          (SELECT string_agg(ru.name || ': ' || r.status || COALESCE(' (' || r.note || ')', ''), ', ' ORDER BY r.at) FROM team_emergency_replies r JOIN users ru ON ru.id = r.user_id WHERE r.emergency_id = e.id) AS replies
+        FROM team_emergencies e LEFT JOIN users u ON u.id = e.raised_by LEFT JOIN users eu ON eu.id = e.ended_by ORDER BY e.id DESC LIMIT 200`);
+      for (const r of rows) r.label = EMERGENCY[r.kind] || EMERGENCY.other;
+      res.json({ emergencies: rows });
+    } catch (e) { fail(res, e); }
+  });
 
   // ---------------------------------------------------------- management --
   app.get('/api/team/admin/overview', ...can('team.oversee'), async (req, res) => {
