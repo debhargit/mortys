@@ -9,6 +9,9 @@
 //  order and takes payment, it is priced by the real till code as a dry run
 //  (nothing is saved, no stock moves), and the result is checked.
 //  Managers see who is certified, and edit lessons and questions.
+//  Each employee's record: lessons opened, every quiz attempt, the practice
+//  till, training done elsewhere (courses, certificates and licences, with the
+//  file and expiry), training assigned with a due date; all searchable.
 // =============================================================================
 const crypto = require('crypto');
 
@@ -19,6 +22,7 @@ function register(app, deps) {
   const r2 = (v) => Math.round(n(v) * 100) / 100;
   function httpError(status, msg) { const e = new Error(msg); e.status = status; e.publicMessage = msg; return e; }
   function fail(res, e) { const s = e.status || 500; if (s >= 500) console.error('[training]', e); res.status(s).json({ error: e.publicMessage || e.message }); }
+  let notice = null;   // team.js notice(), for assigned training and reminders
   const shuffle = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = crypto.randomInt(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
   require('./training-seed').seed(query).then((k) => { if (k) console.log('[training] added or updated ' + k + ' lesson(s)'); }).catch((e) => console.warn('[training] seed', e.message));
@@ -77,6 +81,8 @@ function register(app, deps) {
       if (!rows.length) throw httpError(404, 'Module not found');
       if (!applies(rows[0], u.admin_role) && !(await userCan(req, 'training.manage'))) throw httpError(403, 'This module is not for your role');
       const { rows: c } = await query(`SELECT COUNT(*)::int AS n FROM training_questions WHERE module_id = $1 AND active`, [rows[0].id]);
+      // Opening a lesson is recorded (first time, last time, how often).
+      await query(`INSERT INTO training_views (user_id, module_id) VALUES ($1, $2) ON CONFLICT (user_id, module_id) DO UPDATE SET last_at = NOW(), views = training_views.views + 1`, [u.id, rows[0].id]);
       res.json(Object.assign({}, rows[0], { id: undefined, questions: c[0].n }));
     } catch (e) { fail(res, e); }
   });
@@ -299,6 +305,344 @@ function register(app, deps) {
   app.delete('/api/training/admin/questions/:id', ...M, async (req, res) => {
     try { await query(`UPDATE training_questions SET active = false WHERE id = $1`, [parseInt(req.params.id, 10)]); res.json({ ok: true }); } catch (e) { fail(res, e); }
   });
+
+  // ============================================= each employee's training record --
+  //  Lessons and quizzes (status, every attempt, which lessons they opened), the
+  //  practice till, training done elsewhere (training_records, with the
+  //  certificate file), and training assigned with a due date. Searchable across
+  //  everyone, with a CSV.
+  const fs = require('fs');
+  const path = require('path');
+  const FILES = path.join(__dirname, '..', 'data', 'training-files');
+  fs.mkdirSync(FILES, { recursive: true });
+  let upload = null;
+  try {
+    const multer = require('multer');
+    upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 30 } });
+  } catch (e) { console.warn('[training] multer missing: records without files'); }
+  const withFile = (req, res, next) => (upload ? upload.single('file')(req, res, (err) => (err ? fail(res, httpError(400, err.code === 'LIMIT_FILE_SIZE' ? 'The file is over 10 MB' : 'Could not read the file')) : next())) : next());
+  // Certificates: PDF or a photo, recognised by their first bytes, not the name.
+  function sniff(buf) {
+    if (!buf || buf.length < 8) return null;
+    if (buf.slice(0, 5).toString('latin1') === '%PDF-') return { ext: '.pdf', mime: 'application/pdf' };
+    if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return { ext: '.jpg', mime: 'image/jpeg' };
+    if (buf.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return { ext: '.png', mime: 'image/png' };
+    return null;
+  }
+  const KINDS = { course: 'Course', certification: 'Certificate / licence', on_the_job: 'On-the-job training', induction: 'Induction', safety: 'Health and safety', external: 'External training', other: 'Other' };
+  const RESULTS = ['completed', 'passed', 'failed', 'attended', 'in progress'];
+  const day = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null);
+  const jmToday = () => new Date(Date.now() - 5 * 3600000).toISOString().slice(0, 10);
+  const plusDays = (d, k) => new Date(new Date(d + 'T12:00:00Z').getTime() + k * 86400000).toISOString().slice(0, 10);
+  const SOON = 60;   // days: "expiring soon"
+
+  async function person(uid) {
+    const { rows } = await query(
+      `SELECT u.id, u.name, u.email, u.admin_role AS role, u.employee_no, u.disabled, u.archived_at, u.left_on,
+              COALESCE((SELECT string_agg(d.name, ', ' ORDER BY d.name) FROM user_departments ud JOIN departments d ON d.id = ud.department_id WHERE ud.user_id = u.id), '') AS departments
+         FROM users u WHERE u.id = $1 AND (u.is_staff OR u.is_admin)`, [uid]);
+    return rows[0] || null;
+  }
+  const recOut = (r) => ({ id: r.id, kind: r.kind, kind_label: KINDS[r.kind] || r.kind, title: r.title, provider: r.provider, trainer_user_id: r.trainer_user_id, trainer: r.trainer_full || r.trainer_name || null,
+    trainer_name: r.trainer_name, completed_on: r.completed_on, hours: r.hours == null ? null : Number(r.hours), result: r.result, score: r.score, expires_on: r.expires_on, certificate_no: r.certificate_no,
+    notes: r.notes, has_file: !!r.file_storage, file_name: r.file_name, created_at: r.created_at, created_by: r.created_by_name || null });
+  function recStatus(r, today) {
+    if (r.result === 'failed' || r.result === 'in progress') return r.result;
+    if (r.expires_on && r.expires_on < today) return 'expired';
+    if (r.expires_on && r.expires_on <= plusDays(today, SOON)) return 'expiring';
+    return r.result === 'passed' ? 'passed' : r.result === 'attended' ? 'attended' : 'completed';
+  }
+  // Everything about one person's training.
+  async function profileFor(uid) {
+    const p = await person(uid);
+    if (!p) throw httpError(404, 'Employee not found');
+    const today = jmToday();
+    const mods = await statusFor(uid, p.role);
+    const { rows: views } = await query(`SELECT m.key, v.first_at, v.last_at, v.views FROM training_views v JOIN training_modules m ON m.id = v.module_id WHERE v.user_id = $1`, [uid]);
+    const { rows: tries } = await query(`SELECT COUNT(*)::int AS n, module_id FROM training_attempts WHERE user_id = $1 AND finished_at IS NOT NULL GROUP BY module_id`, [uid]);
+    const { rows: mids } = await query(`SELECT id, key FROM training_modules`);
+    const lessons = mods.map((m) => {
+      const v = views.find((x) => x.key === m.key), mid = (mids.find((x) => x.key === m.key) || {}).id, t = tries.find((x) => x.module_id === mid);
+      let status = m.status;
+      if (status === 'passed' && m.expires && new Date(m.expires) <= new Date(plusDays(today, SOON) + 'T23:59:59Z')) status = 'expiring';
+      if (status === 'reference') status = v ? 'read' : 'not read';
+      return { key: m.key, title: m.title, quiz: m.quiz, required: m.required, for_role: m.for_me, status, best: m.best, passed_at: m.passed_at, expires: m.expires,
+        attempts: t ? t.n : 0, last: m.last, first_opened: v ? v.first_at : null, last_opened: v ? v.last_at : null, opened: v ? v.views : 0 };
+    });
+    const { rows: attempts } = await query(
+      `SELECT a.id, m.key, m.title, a.score_pct::float AS score, a.passed, a.finished_at FROM training_attempts a JOIN training_modules m ON m.id = a.module_id
+        WHERE a.user_id = $1 AND a.finished_at IS NOT NULL ORDER BY a.finished_at DESC LIMIT 300`, [uid]);
+    const { rows: prac } = await query(`SELECT COUNT(*) FILTER (WHERE done_at IS NOT NULL)::int AS done, COUNT(*) FILTER (WHERE passed)::int AS passed, MAX(done_at) AS last FROM training_practice WHERE user_id = $1`, [uid]);
+    const { rows: recs } = await query(
+      `SELECT r.*, to_char(r.completed_on, 'YYYY-MM-DD') AS completed_on, to_char(r.expires_on, 'YYYY-MM-DD') AS expires_on, t.name AS trainer_full, c.name AS created_by_name
+         FROM training_records r LEFT JOIN users t ON t.id = r.trainer_user_id LEFT JOIN users c ON c.id = r.created_by
+        WHERE r.user_id = $1 AND r.deleted_at IS NULL ORDER BY r.completed_on DESC NULLS FIRST, r.id DESC`, [uid]);
+    const records = recs.map((r) => Object.assign(recOut(r), { status: recStatus(r, today) }));
+    const { rows: asg } = await query(
+      `SELECT a.id, a.module_id, m.key, COALESCE(m.title, a.title) AS title, m.quiz, to_char(a.due_on, 'YYYY-MM-DD') AS due_on, a.note, a.assigned_at, b.name AS assigned_by, a.done_at, d.name AS done_by,
+              (SELECT MIN(x.finished_at) FROM training_attempts x WHERE x.user_id = a.user_id AND x.module_id = a.module_id AND x.passed AND x.finished_at >= a.assigned_at) AS passed_at,
+              (SELECT v.last_at FROM training_views v WHERE v.user_id = a.user_id AND v.module_id = a.module_id AND v.last_at >= a.assigned_at) AS read_at
+         FROM training_assignments a LEFT JOIN training_modules m ON m.id = a.module_id LEFT JOIN users b ON b.id = a.assigned_by LEFT JOIN users d ON d.id = a.done_by
+        WHERE a.user_id = $1 AND a.cancelled_at IS NULL ORDER BY a.assigned_at DESC`, [uid]);
+    const assignments = asg.map((a) => {
+      const done = a.done_at || a.passed_at || (a.module_id && a.quiz === false ? a.read_at : null);
+      return { id: a.id, key: a.key, title: a.title, lesson: !!a.module_id, due_on: a.due_on, note: a.note, assigned_at: a.assigned_at, assigned_by: a.assigned_by,
+        done_at: done, done_by: a.done_by, status: done ? 'done' : a.due_on && a.due_on < today ? 'overdue' : 'due' };
+    });
+    const yearStart = today.slice(0, 4) + '-01-01';
+    const summary = {
+      required: lessons.filter((l) => l.required).length,
+      required_passed: lessons.filter((l) => l.required && (l.status === 'passed' || l.status === 'expiring')).length,
+      expired: lessons.filter((l) => l.status === 'expired').length + records.filter((r) => r.status === 'expired').length,
+      expiring: lessons.filter((l) => l.status === 'expiring').length + records.filter((r) => r.status === 'expiring').length,
+      not_passed: lessons.filter((l) => l.required && l.status === 'not passed').length,
+      not_started: lessons.filter((l) => l.required && l.status === 'not started').length,
+      overdue: assignments.filter((a) => a.status === 'overdue').length,
+      due: assignments.filter((a) => a.status === 'due').length,
+      records: records.length,
+      hours_year: Math.round(records.filter((r) => r.completed_on && r.completed_on >= yearStart).reduce((t, r) => t + (r.hours || 0), 0) * 10) / 10,
+      last_activity: [attempts[0] && attempts[0].finished_at, records[0] && records[0].completed_on, prac[0].last].filter(Boolean).map((x) => new Date(x)).sort((a, b) => b - a)[0] || null,
+    };
+    return { person: p, summary, lessons, attempts, practice: prac[0], records, assignments, kinds: KINDS };
+  }
+
+  // Staff: their own record.
+  app.get('/api/training/me/record', requireAdmin, async (req, res) => {
+    try { res.json(await profileFor(req.session.userId)); } catch (e) { fail(res, e); }
+  });
+
+  // Managers: everyone, with a summary each.
+  async function staffList(f) {
+    const { rows } = await query(
+      `SELECT u.id FROM users u WHERE u.is_staff AND u.admin_role <> 'rep'
+          AND ($1::boolean OR (NOT u.disabled AND u.archived_at IS NULL))
+          AND ($2::int IS NULL OR u.id = $2)
+          AND ($3::text IS NULL OR u.admin_role = $3)
+          AND ($4::int IS NULL OR EXISTS (SELECT 1 FROM user_departments ud WHERE ud.user_id = u.id AND ud.department_id = $4))
+        ORDER BY u.name`, [!!f.past, f.user || null, f.role || null, f.dept || null]);
+    return rows.map((r) => r.id);
+  }
+  app.get('/api/training/people', ...M, async (req, res) => {
+    try {
+      const q = String(req.query.q || '').trim().toLowerCase();
+      const ids = await staffList({ past: req.query.past === '1', role: req.query.role || null, dept: parseInt(req.query.dept, 10) || null });
+      const out = [];
+      for (const id of ids) {
+        const p = await profileFor(id);
+        if (q && ![p.person.name, p.person.email, p.person.employee_no, p.person.departments, p.person.role].some((x) => String(x || '').toLowerCase().includes(q))) continue;
+        out.push(Object.assign({ id, name: p.person.name, role: p.person.role, departments: p.person.departments, employee_no: p.person.employee_no, past: !!(p.person.archived_at || p.person.disabled) }, p.summary));
+      }
+      const { rows: depts } = await query(`SELECT id, name FROM departments WHERE is_active ORDER BY name`);
+      const { rows: mods } = await query(`SELECT key, title, quiz FROM training_modules WHERE active ORDER BY sort, id`);
+      res.json({ people: out, departments: depts, modules: mods, kinds: KINDS });
+    } catch (e) { fail(res, e); }
+  });
+  app.get('/api/training/people/:id', ...M, async (req, res) => {
+    try { res.json(await profileFor(parseInt(req.params.id, 10) || 0)); } catch (e) { fail(res, e); }
+  });
+
+  // Training done elsewhere.
+  function cleanRecord(b) {
+    const title = String(b.title || '').trim().slice(0, 200);
+    if (!title) throw httpError(400, 'What was the training?');
+    const kind = KINDS[b.kind] ? b.kind : 'course', result = RESULTS.includes(b.result) ? b.result : 'completed';
+    const hours = b.hours === '' || b.hours == null ? null : Number(b.hours);
+    if (hours != null && !(hours >= 0 && hours <= 2000)) throw httpError(400, 'Hours: 0 to 2000');
+    const completed = day(b.completed_on), expires = day(b.expires_on);
+    if (b.completed_on && !completed) throw httpError(400, 'Completed: a date');
+    if (b.expires_on && !expires) throw httpError(400, 'Expires: a date');
+    if (completed && expires && expires < completed) throw httpError(400, 'It cannot expire before it was done');
+    const t = (v, n) => String(v == null ? '' : v).trim().slice(0, n) || null;
+    return { kind, title, result, hours, completed, expires, provider: t(b.provider, 200), trainer_user_id: parseInt(b.trainer_user_id, 10) || null, trainer_name: t(b.trainer_name, 120),
+      score: t(b.score, 40), certificate_no: t(b.certificate_no, 80), notes: t(b.notes, 2000) };
+  }
+  function saveFile(req) {
+    if (!req.file) return null;
+    const kind = sniff(req.file.buffer);
+    if (!kind) throw httpError(400, 'The certificate must be a PDF, JPG or PNG');
+    const name = crypto.randomBytes(16).toString('hex') + kind.ext;
+    fs.writeFileSync(path.join(FILES, name), req.file.buffer, { flag: 'wx' });
+    return { storage: name, mime: kind.mime, name: String(req.file.originalname || 'certificate' + kind.ext).replace(/[\\/\r\n"]/g, '_').slice(0, 120) };
+  }
+  app.post('/api/training/people/:id/records', ...M, withFile, async (req, res) => {
+    try {
+      const uid = parseInt(req.params.id, 10) || 0;
+      if (!(await person(uid))) throw httpError(404, 'Employee not found');
+      const r = cleanRecord(req.body || {}), f = saveFile(req);
+      const { rows } = await query(
+        `INSERT INTO training_records (user_id, kind, title, provider, trainer_user_id, trainer_name, completed_on, hours, result, score, expires_on, certificate_no, notes, file_name, file_mime, file_storage, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
+        [uid, r.kind, r.title, r.provider, r.trainer_user_id, r.trainer_name, r.completed, r.hours, r.result, r.score, r.expires, r.certificate_no, r.notes, f && f.name, f && f.mime, f && f.storage, req.session.userId]);
+      res.json({ ok: true, id: rows[0].id });
+    } catch (e) { fail(res, e); }
+  });
+  app.put('/api/training/records/:id', ...M, withFile, async (req, res) => {
+    try {
+      const r = cleanRecord(req.body || {}), f = saveFile(req);
+      const { rowCount } = await query(
+        `UPDATE training_records SET kind = $2, title = $3, provider = $4, trainer_user_id = $5, trainer_name = $6, completed_on = $7, hours = $8, result = $9, score = $10, expires_on = $11,
+                certificate_no = $12, notes = $13, file_name = COALESCE($14, file_name), file_mime = COALESCE($15, file_mime), file_storage = COALESCE($16, file_storage),
+                expiry_reminded = CASE WHEN expires_on IS DISTINCT FROM $11 THEN NULL ELSE expiry_reminded END, updated_by = $17, updated_at = NOW()
+          WHERE id = $1 AND deleted_at IS NULL`,
+        [parseInt(req.params.id, 10) || 0, r.kind, r.title, r.provider, r.trainer_user_id, r.trainer_name, r.completed, r.hours, r.result, r.score, r.expires, r.certificate_no, r.notes, f && f.name, f && f.mime, f && f.storage, req.session.userId]);
+      if (!rowCount) throw httpError(404, 'Record not found');
+      res.json({ ok: true });
+    } catch (e) { fail(res, e); }
+  });
+  app.delete('/api/training/records/:id', ...M, async (req, res) => {
+    try {
+      const { rowCount } = await query(`UPDATE training_records SET deleted_at = NOW(), deleted_by = $2 WHERE id = $1 AND deleted_at IS NULL`, [parseInt(req.params.id, 10) || 0, req.session.userId]);
+      if (!rowCount) throw httpError(404, 'Record not found');
+      res.json({ ok: true });
+    } catch (e) { fail(res, e); }
+  });
+  // The certificate: the employee themself, or a manager.
+  app.get('/api/training/records/:id/file', requireAdmin, async (req, res) => {
+    try {
+      const { rows } = await query(`SELECT user_id, file_name, file_mime, file_storage FROM training_records WHERE id = $1 AND deleted_at IS NULL`, [parseInt(req.params.id, 10) || 0]);
+      if (!rows.length || !rows[0].file_storage) throw httpError(404, 'No file');
+      if (rows[0].user_id !== req.session.userId && !(await userCan(req, 'training.manage'))) throw httpError(403, 'Not your record');
+      if (!/^[0-9a-f]{32}\.(pdf|jpg|png)$/.test(rows[0].file_storage)) throw httpError(404, 'No file');
+      res.set('Content-Type', rows[0].file_mime);
+      res.set('X-Content-Type-Options', 'nosniff');
+      res.set('Cache-Control', 'private, no-store');
+      res.set('Content-Disposition', (req.query.download === '1' ? 'attachment' : 'inline') + '; filename="' + String(rows[0].file_name || 'certificate').replace(/["\\\r\n]/g, '_') + '"');
+      res.sendFile(path.join(FILES, rows[0].file_storage), (err) => { if (err && !res.headersSent) res.status(404).end(); });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Assigning training: a lesson (done when its quiz is passed) or anything else.
+  app.post('/api/training/assign', ...M, async (req, res) => {
+    try {
+      const b = req.body || {};
+      const ids = [...new Set((Array.isArray(b.user_ids) ? b.user_ids : [b.user_id]).map((x) => parseInt(x, 10)).filter(Boolean))];
+      if (!ids.length) throw httpError(400, 'Choose who');
+      let mod = null;
+      if (b.module_key) {
+        const { rows } = await query(`SELECT id, key, title, quiz FROM training_modules WHERE key = $1 AND active`, [String(b.module_key)]);
+        if (!rows.length) throw httpError(404, 'Lesson not found');
+        mod = rows[0];
+      }
+      const title = mod ? null : String(b.title || '').trim().slice(0, 200);
+      if (!mod && !title) throw httpError(400, 'Choose a lesson or say what the training is');
+      const due = day(b.due_on);
+      if (b.due_on && !due) throw httpError(400, 'Due: a date');
+      const note = String(b.note || '').trim().slice(0, 500) || null;
+      let n = 0;
+      for (const uid of ids) {
+        if (!(await person(uid))) continue;
+        if (mod) {
+          const { rows: open } = await query(`SELECT 1 FROM training_assignments WHERE user_id = $1 AND module_id = $2 AND cancelled_at IS NULL AND done_at IS NULL
+              AND NOT EXISTS (SELECT 1 FROM training_attempts x WHERE x.user_id = $1 AND x.module_id = $2 AND x.passed AND x.finished_at >= training_assignments.assigned_at)`, [uid, mod.id]);
+          if (open.length) continue;   // already waiting for this lesson
+        }
+        await query(`INSERT INTO training_assignments (user_id, module_id, title, due_on, note, assigned_by) VALUES ($1,$2,$3,$4,$5,$6)`, [uid, mod ? mod.id : null, title, due, note, req.session.userId]);
+        n++;
+        if (notice) notice([uid], { kind: 'training', title: '📚 Training for you: ' + (mod ? mod.title : title) + (due ? ', by ' + new Date(due + 'T12:00:00Z').toLocaleDateString('en-JM', { day: 'numeric', month: 'short', timeZone: 'UTC' }) : ''),
+          body: note || (mod ? (mod.quiz ? 'Read the lesson and pass its quiz.' : 'Read the lesson.') : 'Your manager will mark it done.'), link: mod ? '/training.html#lesson=' + mod.key : '/training.html#record' }).catch(() => {});
+      }
+      res.json({ ok: true, assigned: n, skipped: ids.length - n });
+    } catch (e) { fail(res, e); }
+  });
+  app.post('/api/training/assignments/:id/done', ...M, async (req, res) => {
+    try {
+      const { rowCount } = await query(`UPDATE training_assignments SET done_at = NOW(), done_by = $2 WHERE id = $1 AND module_id IS NULL AND done_at IS NULL AND cancelled_at IS NULL`, [parseInt(req.params.id, 10) || 0, req.session.userId]);
+      if (!rowCount) throw httpError(409, 'Lessons are done when the quiz is passed; or this is already done');
+      res.json({ ok: true });
+    } catch (e) { fail(res, e); }
+  });
+  app.delete('/api/training/assignments/:id', ...M, async (req, res) => {
+    try {
+      const { rowCount } = await query(`UPDATE training_assignments SET cancelled_at = NOW(), cancelled_by = $2 WHERE id = $1 AND cancelled_at IS NULL`, [parseInt(req.params.id, 10) || 0, req.session.userId]);
+      if (!rowCount) throw httpError(404, 'Not found');
+      res.json({ ok: true });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Search: one row per person and lesson, training record or assignment.
+  const ATTENTION = ['expired', 'expiring', 'not passed', 'not started', 'overdue', 'failed'];
+  const ATTENTION_RANK = { expired: 0, overdue: 1, expiring: 2, failed: 3, 'not passed': 4, 'not started': 5 };   // most urgent first
+  app.get('/api/training/search', ...M, async (req, res) => {
+    try {
+      const f = req.query;
+      const q = String(f.q || '').trim().toLowerCase();
+      const type = ['lesson', 'record', 'assignment'].includes(f.type) ? f.type : null;
+      const status = String(f.status || ''), from = day(f.from), to = day(f.to), kind = KINDS[f.kind] ? f.kind : null, module = f.module ? String(f.module) : null;
+      const expiring = parseInt(f.expiring, 10) || null, today = jmToday();
+      const ids = await staffList({ past: f.past === '1', user: parseInt(f.user, 10) || null, role: f.role || null, dept: parseInt(f.dept, 10) || null });
+      const rows = [];
+      for (const id of ids) {
+        const p = await profileFor(id), who = { user_id: id, name: p.person.name, role: p.person.role, departments: p.person.departments, employee_no: p.person.employee_no };
+        if (!type || type === 'lesson') for (const l of p.lessons) {
+          if (!l.required && !l.attempts && !l.opened) continue;   // not for them and never touched
+          rows.push(Object.assign({ type: 'lesson', type_label: l.quiz ? 'Lesson and quiz' : 'Lesson', key: l.key, title: l.title, status: l.status, date: l.passed_at || (l.last && l.last.at) || l.last_opened,
+            expires: l.expires ? new Date(l.expires).toISOString().slice(0, 10) : null, score: l.best != null ? l.best + '%' : l.last ? l.last.score + '%' : null, detail: l.attempts + ' attempt(s), opened ' + l.opened + ' time(s)' + (l.required ? '' : ' · not required for the role') }, who));
+        }
+        if (!type || type === 'record') for (const r of p.records) {
+          rows.push(Object.assign({ type: 'record', type_label: r.kind_label, kind: r.kind, id: r.id, title: r.title, status: r.status, date: r.completed_on, expires: r.expires_on, score: r.score, hours: r.hours,
+            provider: r.provider, trainer: r.trainer, certificate_no: r.certificate_no, has_file: r.has_file, detail: r.notes }, who));
+        }
+        if (!type || type === 'assignment') for (const a of p.assignments) {
+          rows.push(Object.assign({ type: 'assignment', type_label: 'Assigned', id: a.id, key: a.key, title: a.title, status: a.status, date: a.done_at || a.assigned_at, due: a.due_on, detail: (a.assigned_by ? 'by ' + a.assigned_by : '') + (a.note ? ' · ' + a.note : '') }, who));
+        }
+      }
+      const d10 = (v) => (v ? (typeof v === 'string' && v.length === 10 ? v : new Date(new Date(v).getTime() - 5 * 3600000).toISOString().slice(0, 10)) : null);
+      const out = rows.filter((r) => {
+        if (status === 'attention' ? !ATTENTION.includes(r.status) : status && r.status !== status) return false;
+        if (kind && r.kind !== kind) return false;
+        if (module && r.key !== module) return false;
+        const dd = d10(r.date);
+        if (from && (!dd || dd < from)) return false;
+        if (to && (!dd || dd > to)) return false;
+        if (expiring && !(r.expires && r.expires >= today && r.expires <= plusDays(today, expiring))) return false;
+        if (q && ![r.name, r.employee_no, r.departments, r.title, r.type_label, r.provider, r.trainer, r.certificate_no, r.detail, r.status].some((x) => String(x || '').toLowerCase().includes(q))) return false;
+        return true;
+      });
+      if (status === 'attention') out.sort((a, b) => ATTENTION_RANK[a.status] - ATTENTION_RANK[b.status] || a.name.localeCompare(b.name));
+      // Lessons whose text mentions the words (what the training says about a subject).
+      let lessons = [];
+      if (q.length >= 3) {
+        const { rows: ls } = await query(`SELECT key, title, summary, body FROM training_modules WHERE active AND (title ILIKE $1 OR summary ILIKE $1 OR body ILIKE $1) ORDER BY sort, id LIMIT 20`, ['%' + q.replace(/[%_\\]/g, '\\$&') + '%']);
+        lessons = ls.map((l) => { const i = l.body.toLowerCase().indexOf(q); return { key: l.key, title: l.title, snippet: i >= 0 ? (i > 60 ? '…' : '') + l.body.slice(Math.max(0, i - 60), i + q.length + 100) + '…' : l.summary }; });
+      }
+      if (f.format === 'csv') {
+        const cols = [['name', 'Employee'], ['employee_no', 'Employee no'], ['role', 'Role'], ['departments', 'Departments'], ['type_label', 'Type'], ['title', 'Training'], ['status', 'Status'], ['date', 'Date'], ['due', 'Due'], ['expires', 'Expires'],
+          ['score', 'Score'], ['hours', 'Hours'], ['provider', 'Provider'], ['trainer', 'Trainer'], ['certificate_no', 'Certificate no'], ['detail', 'Notes']];
+        const cell = (v) => { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+        res.set('Content-Type', 'text/csv; charset=utf-8');
+        res.set('Content-Disposition', 'attachment; filename="training-' + today + '.csv"');
+        return res.send([cols.map((c) => c[1]).join(',')].concat(out.map((r) => cols.map((c) => cell(c[0] === 'date' ? d10(r.date) : r[c[0]])).join(','))).join('\n'));
+      }
+      res.json({ rows: out.slice(0, 2000), total: out.length, lessons });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Reminders, once a day: certificates expiring within 30 days; assigned
+  // training due tomorrow or overdue (once).
+  async function remind() {
+    if (!notice) return;
+    const today = jmToday();
+    const { rows: exp } = await query(
+      `SELECT r.id, r.user_id, r.title, to_char(r.expires_on, 'YYYY-MM-DD') AS expires_on FROM training_records r JOIN users u ON u.id = r.user_id
+        WHERE r.deleted_at IS NULL AND NOT u.disabled AND u.archived_at IS NULL AND r.expires_on BETWEEN $1::date AND $1::date + 30 AND r.expiry_reminded IS DISTINCT FROM r.expires_on`, [today]);
+    for (const r of exp) {
+      await query(`UPDATE training_records SET expiry_reminded = expires_on WHERE id = $1`, [r.id]);
+      notice([r.user_id], { kind: 'training', title: '📜 ' + r.title + ' expires on ' + r.expires_on, body: 'Arrange the renewal with your manager.', link: '/training.html#record' }).catch(() => {});
+    }
+    const { rows: due } = await query(
+      `SELECT a.id, a.user_id, COALESCE(m.title, a.title) AS title, m.key, to_char(a.due_on, 'YYYY-MM-DD') AS due_on FROM training_assignments a LEFT JOIN training_modules m ON m.id = a.module_id
+        WHERE a.cancelled_at IS NULL AND a.done_at IS NULL AND a.due_on IS NOT NULL AND a.due_on <= $1::date + 1 AND a.reminded_on IS NULL
+          AND NOT EXISTS (SELECT 1 FROM training_attempts x WHERE x.user_id = a.user_id AND x.module_id = a.module_id AND x.passed AND x.finished_at >= a.assigned_at)`, [today]);
+    for (const a of due) {
+      await query(`UPDATE training_assignments SET reminded_on = $2 WHERE id = $1`, [a.id, today]);
+      notice([a.user_id], { kind: 'training', title: '📚 ' + a.title + (a.due_on < today ? ' was due on ' : ' is due on ') + a.due_on, body: a.key ? 'Open the lesson and pass its quiz.' : 'Talk to your manager.', link: a.key ? '/training.html#lesson=' + a.key : '/training.html#record' }).catch(() => {});
+    }
+  }
+  const remindTimer = setInterval(() => remind().catch((e) => console.warn('[training] reminders', e.message)), 3600000);
+  if (remindTimer.unref) remindTimer.unref();
+  setTimeout(() => remind().catch(() => {}), 60000).unref();
+
+  return { useNotices(fn) { notice = fn; }, remind };
 }
 
 module.exports = { register };

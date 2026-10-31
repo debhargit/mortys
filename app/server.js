@@ -6556,8 +6556,9 @@ require('./commission').register(app, { query, getPool: () => pool, requireAdmin
 // Careers page and applicant tracking (careers.js).
 require('./careers').register(app, { query, requireAdmin, requireCap, bcrypt });
 // Team chat, voice and video calls, notices and the staff calendar (team.js).
-// The time clock's lateness letters and requests reach people as team notices.
-timeclock.useNotices(require('./team').register(app, { query, requireAdmin, requireCap, userCan }).notice);
+// Team notices also carry the time clock's lateness letters and requests, and assigned training.
+const teamApi = require('./team').register(app, { query, requireAdmin, requireCap, userCan });
+timeclock.useNotices(teamApi.notice);
 const reps = require('./reps').register(app, {
   query, getPool: () => pool, requireAdmin, requireCap, bcrypt, posSaleHandler, nextQuoteNumber, notify,
   getEpoch: () => SESSION_EPOCH, totp: require('./security')._totp,
@@ -6574,7 +6575,7 @@ require('./deptstore').register(app, { query, getPool: () => pool, requireCap, u
 // Stock to cash: stock classes, clearance ladder, open box / damaged, return
 // grading, supplier claims, liquidation lots, offer campaigns (stockcash.js).
 // Staff training: lessons, quizzes, practice till, team progress (training.js).
-require('./training').register(app, { query, requireAdmin, requireCap, userCan, posSaleHandler });
+require('./training').register(app, { query, requireAdmin, requireCap, userCan, posSaleHandler }).useNotices(teamApi.notice);
 // AI counter sales agent: website chat and counter kiosk on the Claude API (ai.js).
 require('./ai').register(app, {
   query, getPool: () => pool, requireAdmin, requireCap, posSaleHandler, mailer, isLocal: security.isLocal, nextAccountNumber, devMode: DEV_MODE, urlencoded: express.urlencoded({ extended: false, limit: "64kb" }),

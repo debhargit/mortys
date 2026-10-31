@@ -227,6 +227,8 @@ The till and the website: the till (the shop server) is the main system. The web
 
 The full manual: Training > Manual shows every lesson for your role on one page, with contents. Press "Print / save as PDF" for a printed or PDF copy. The Help panel links to it too.
 
+Your training record: Training > My record shows the training assigned to you and when it is due, every lesson with your best score and when a pass expires, your other training and certificates, and every quiz you have taken. Training your manager assigns also arrives as a notice in team chat.
+
 Something broken? Raise a help desk ticket under All modules > System management > Help desk, saying what you did and what happened. Do not keep retrying a payment or a save that gave an error - report it.`,
     questions: [
       ['Where do you find Accounting, Payroll and the Document centre?', ['They are hidden', 'Overview > All modules', 'Settings > Company', 'Only on the website'], 1, 'All modules has a tile for every part of the system.'],
@@ -609,7 +611,11 @@ Hiring: All modules > Hiring and careers.
 - Emails & settings: edit the wording of the automatic reply and each stage email, and how long applicants who are not hired are kept. If the till has no email set up, emails are recorded but not sent, and the screen says so.
 - Hire makes a staff login, switched off until a manager sets the role and password. Applicants not hired are deleted (details, CV and documents) after the retention period.
 
-Training: All modules > Training. Each person reads the lessons for their role and takes the quizzes (a pass lasts a year). The practice till lets new staff ring up practice sales safely. Managers see the Team view and edit lessons and questions.`,
+Training: All modules > Training. Each person reads the lessons for their role and takes the quizzes (a pass lasts a year). The practice till lets new staff ring up practice sales safely. Managers see the Team view and edit lessons and questions.
+
+Each employee's training record: Training > Employees lists everyone with how many required lessons they have passed, what has expired or expires soon, what is overdue, other training and hours this year. Tick people and press "Assign training" to give them a lesson (done when they pass its quiz) or any other training with a due date: they get a notice in team chat and a reminder when it is due. Click a name for the full record: assigned training, every lesson (status, best score, when it was opened), other training, certificates and licences, and every quiz attempt. "Add training record" logs training done elsewhere - a course, a certificate or licence, on-the-job training with the trainer, an induction, health and safety - with hours, result, expiry and the certificate (PDF or photo). People are reminded 30 days before a certificate expires. Print gives a training record for the staff file.
+
+Searching training: Training > Search finds training across everyone - by words (a name, a course, a certificate number, or what a lesson says), employee, department, role, lesson, type of training, status (for example "Needs attention": expired, expiring, not passed, not started, overdue), dates and what expires within a period. Download CSV gives the same list as a spreadsheet. Staff see their own record under Training > My record.`,
     questions: [],
   },
   {

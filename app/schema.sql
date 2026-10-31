@@ -6450,3 +6450,67 @@ INSERT INTO warehouse_settings (key, value) VALUES
   ('clock_shop_radius_m', '200')        -- farther than this from the shop is flagged
 ON CONFLICT (key) DO NOTHING;
 ALTER TABLE team_notices ADD COLUMN IF NOT EXISTS link TEXT;   -- a page in the system the notice opens (lateness letter, a request)
+
+-- =============================================================================
+--  Training record per employee (training.js)
+--
+--  Besides the lessons and quizzes: training done anywhere else (a course, a
+--  certificate or licence, on-the-job training signed off by a trainer, an
+--  induction, health and safety), with hours, result, expiry and the
+--  certificate file; training assigned to someone with a due date (a lesson,
+--  which is done when they pass its quiz, or anything else, marked done); and
+--  which lessons each person has opened. All of it can be searched.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS training_records (
+  id              SERIAL PRIMARY KEY,
+  user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL DEFAULT 'course',   -- course | certification | on_the_job | induction | safety | external | other
+  title           TEXT NOT NULL,
+  provider        TEXT,                             -- school, supplier, body that issued it
+  trainer_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  trainer_name    TEXT,                             -- someone outside the system
+  completed_on    DATE,
+  hours           NUMERIC(6,2),
+  result          TEXT NOT NULL DEFAULT 'completed', -- completed | passed | failed | attended | in progress
+  score           TEXT,
+  expires_on      DATE,
+  certificate_no  TEXT,
+  notes           TEXT,
+  file_name       TEXT,
+  file_mime       TEXT,
+  file_storage    TEXT,                             -- under data/training-files
+  expiry_reminded DATE,                             -- the expiry this reminder was sent for
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at      TIMESTAMPTZ,
+  deleted_at      TIMESTAMPTZ,
+  deleted_by      INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_training_records_user ON training_records (user_id) WHERE deleted_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS training_assignments (
+  id            SERIAL PRIMARY KEY,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  module_id     INTEGER REFERENCES training_modules(id) ON DELETE CASCADE,  -- a lesson; done when its quiz is passed (or read, for reference lessons)
+  title         TEXT,                                                       -- anything else
+  due_on        DATE,
+  note          TEXT,
+  assigned_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  assigned_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  done_at       TIMESTAMPTZ,                                                -- marked done (not a lesson)
+  done_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  cancelled_at  TIMESTAMPTZ,
+  cancelled_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reminded_on   DATE
+);
+CREATE INDEX IF NOT EXISTS idx_training_assignments_user ON training_assignments (user_id) WHERE cancelled_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS training_views (       -- who opened which lesson
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  module_id  INTEGER NOT NULL REFERENCES training_modules(id) ON DELETE CASCADE,
+  first_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  views      INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (user_id, module_id)
+);
