@@ -303,7 +303,7 @@
     S.notices.unshift(Object.assign({ read: false }, n)); S.noticeUnread++;
     if (n.kind === 'memo' && n.message_id) loadNotices().catch(function () {});
     updateBadges(); if (S.leftView === 'alerts') renderLeft();
-    var go = function () { readNotices([n.id]); if (n.event_id && !n.conversation_id) location.href = '/team.html#calendar=' + n.event_id; else if (n.conversation_id) openChat(n.conversation_id, n.message_id); };
+    var go = function () { readNotices([n.id]); if (n.link) location.href = n.link; else if (n.event_id && !n.conversation_id) location.href = '/team.html#calendar=' + n.event_id; else if (n.conversation_id) openChat(n.conversation_id, n.message_id); };
     if (n.kind === 'call') return;
     beep();
     if (document.hidden) desktop(n.title, n.body, go, n.urgent);
@@ -417,7 +417,7 @@
       r.onclick = function () {
         var n = S.notices.find(function (x) { return String(x.id) === r.getAttribute('data-notice'); }); if (!n) return;
         readNotices([n.id]);
-        if (n.event_id && !(n.kind === 'reminder' && n.conversation_id)) location.href = '/team.html#calendar=' + n.event_id; else if (n.conversation_id) openChat(n.conversation_id, n.message_id);
+        if (n.link) location.href = n.link; else if (n.event_id && !(n.kind === 'reminder' && n.conversation_id)) location.href = '/team.html#calendar=' + n.event_id; else if (n.conversation_id) openChat(n.conversation_id, n.message_id);
       };
     });
     host.querySelectorAll('[data-ackopen]').forEach(function (r) { r.onclick = function () { openChat(Number(r.getAttribute('data-c')), Number(r.getAttribute('data-ackopen'))); }; });

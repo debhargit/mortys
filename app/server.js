@@ -926,7 +926,7 @@ require('./fleet').register(app, { query, requireCap, userCan, permState: (id) =
 // Time clock: attendance, the clocked-in-on-site rule for taking money, shifts,
 // overtime and extensions, timesheets (timeclock.js). Before every money route.
 const timeclock = require('./timeclock').register(app, {
-  query, getPool: () => pool, requireAdmin, requireCap, bcrypt, mailer, publicUser, isLocal: security.isLocal,
+  query, getPool: () => pool, requireAdmin, requireCap, bcrypt, mailer, publicUser, isLocal: security.isLocal, docs: docsCentre,
   getShopName: async () => { try { const s = shopSettingsToShop(await getShopSettings()); return s && (s.name || s.shop_name); } catch (_) { return null; } },
 });
 
@@ -6556,7 +6556,8 @@ require('./commission').register(app, { query, getPool: () => pool, requireAdmin
 // Careers page and applicant tracking (careers.js).
 require('./careers').register(app, { query, requireAdmin, requireCap, bcrypt });
 // Team chat, voice and video calls, notices and the staff calendar (team.js).
-require('./team').register(app, { query, requireAdmin, requireCap, userCan });
+// The time clock's lateness letters and requests reach people as team notices.
+timeclock.useNotices(require('./team').register(app, { query, requireAdmin, requireCap, userCan }).notice);
 const reps = require('./reps').register(app, {
   query, getPool: () => pool, requireAdmin, requireCap, bcrypt, posSaleHandler, nextQuoteNumber, notify,
   getEpoch: () => SESSION_EPOCH, totp: require('./security')._totp,

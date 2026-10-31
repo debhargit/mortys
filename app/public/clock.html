@@ -39,8 +39,14 @@
     <div class="actions" id="acts">
       <button class="in" data-a="in">Clock in</button><button class="out" data-a="out">Clock out</button>
       <button data-a="break_start">Break</button><button data-a="lunch_start">Lunch</button>
-      <button data-a="break_end" style="grid-column:span 2">Back from break / lunch</button>
+      <button data-a="break_end">Back from break / lunch</button><button data-a="extra">Log extra time</button>
     </div>
+  </div>
+  <div class="card" id="extra" style="display:none">
+    <p class="sub">Kept working after you were clocked out? Say when you finished and what you were doing; the manager approves it like overtime.</p>
+    <label class="sub">I finished work at</label><input id="exUntil" type="datetime-local" style="margin:4px 0 8px">
+    <textarea id="exReason" rows="2" placeholder="What were you working on?"></textarea>
+    <p class="sub">Then pick how to identify yourself below.</p>
   </div>
   <div class="card" id="who">
     <div class="tabs" id="tabs"><button data-m="pin" class="on">PIN</button><button data-m="badge">Badge</button><button data-m="biometric">Fingerprint / face</button><button data-m="password">Email</button></div>
@@ -55,7 +61,9 @@
   </div>
   <div class="card" id="cam" style="display:none"><p class="sub">A photo is taken when you clock in or out.</p><video id="vid" autoplay playsinline muted></video><button class="go" id="snap">Take photo and continue</button></div>
   <p class="sub" style="text-align:center">Badge scan: clocks you in, or out if you are in. Payments at the till need you clocked in here, at the shop.</p>
+  <p class="sub" style="text-align:center">Each punch records this device, its address and, if allowed, its location. This device: <b id="devName"></b> · <a href="#" id="devRename">name it</a></p>
 </main>
+<script src="/assets/clock-ctx.js"></script>
 <script>
 (function () {
   'use strict';
@@ -64,10 +72,14 @@
   var action = null, method = 'pin', pin = '', pending = null, photo = null;
   setInterval(function () { $('#now').textContent = new Date().toLocaleTimeString('en-JM', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }, 1000);
   function msg(t, ok) { var m = $('#msg'); m.textContent = t; m.className = 'msg ' + (ok ? 'ok' : 'bad'); clearTimeout(msg.h); msg.h = setTimeout(function () { m.className = 'msg'; }, ok ? 6000 : 9000); window.scrollTo(0, 0); }
-  function reset() { action = null; pin = ''; pending = null; photo = null; dots(); $('#ot').style.display = 'none'; $('#cam').style.display = 'none'; all('#acts button').forEach(function (b) { b.classList.remove('sel'); }); stopCam(); setTimeout(function () { if (method === 'badge') $('#badge').focus(); }, 50); }
+  function reset() { action = null; pin = ''; pending = null; photo = null; dots(); $('#ot').style.display = 'none'; $('#cam').style.display = 'none'; $('#extra').style.display = 'none'; $('#exReason').value = ''; all('#acts button').forEach(function (b) { b.classList.remove('sel'); }); stopCam(); setTimeout(function () { if (method === 'badge') $('#badge').focus(); }, 50); }
   function dots() { $('#dots').textContent = '•'.repeat(pin.length) || ' '; }
   all('#acts button').forEach(function (b) {
-    b.onclick = function () { action = b.getAttribute('data-a'); all('#acts button').forEach(function (x) { x.classList.toggle('sel', x === b); }); $('#who').style.display = ''; showMethod(method); };
+    b.onclick = function () {
+      action = b.getAttribute('data-a'); all('#acts button').forEach(function (x) { x.classList.toggle('sel', x === b); }); $('#who').style.display = ''; showMethod(method);
+      $('#extra').style.display = action === 'extra' ? '' : 'none';
+      if (action === 'extra') { var d = new Date(Date.now() - new Date().getTimezoneOffset() * 60000); $('#exUntil').value = d.toISOString().slice(0, 16); $('#exReason').focus(); }
+    };
   });
   function showMethod(m) {
     method = m;
@@ -106,16 +118,26 @@
   function send(id, act) {
     pending = Object.assign({}, id, { action: act || action });
     if (!pending.action) return msg('Choose Clock in, Clock out or Break first.', false);
+    if (pending.action === 'extra') {
+      if (!$('#exUntil').value || $('#exReason').value.trim().length < 3) { pin = ''; dots(); return msg('Give the time you finished and what you were doing.', false); }
+      pending.until = new Date($('#exUntil').value).toISOString(); pending.reason = $('#exReason').value.trim();
+    }
     post();
   }
   function post(extra) {
     var body = Object.assign({}, pending, extra || {}, photo ? { photo: photo } : {});
-    fetch('/api/clock/punch', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    var h = { 'Content-Type': 'application/json' }, key = VisionClockCtx.stationKey();
+    if (key) h['X-Station-Key'] = key;
+    VisionClockCtx.get().then(function (ctx) {
+      body.ctx = ctx;
+      return fetch('/api/clock/punch', { method: 'POST', credentials: 'same-origin', headers: h, body: JSON.stringify(body) });
+    })
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (r) {
         if (r.ok) { msg((r.j.name ? r.j.name.split(' ')[0] + ': ' : '') + r.j.message, true); reset(); return; }
         if (r.j.need_photo) return startCam();
         if (r.j.need_overtime) { $('#otText').textContent = r.j.error; $('#ot').style.display = ''; $('#otReason').focus(); return; }
+        if (r.j.need_location) { msg(r.j.error + ' (In the browser: the padlock or ⓘ by the address, then Location: Allow.)', false); pin = ''; dots(); return; }
         msg(r.j.error || 'Could not do that', false); pin = ''; dots();
       }).catch(function () { msg('No connection to the shop system.', false); });
   }
@@ -131,6 +153,9 @@
     var v = $('#vid'), c = document.createElement('canvas'); c.width = 320; c.height = Math.round(320 * (v.videoHeight || 240) / (v.videoWidth || 320));
     c.getContext('2d').drawImage(v, 0, 0, c.width, c.height); photo = c.toDataURL('image/jpeg', 0.7); stopCam(); $('#cam').style.display = 'none'; post();
   };
+  function devShow() { $('#devName').textContent = VisionClockCtx.deviceName() || 'not named (' + String(VisionClockCtx.deviceId() || '').slice(0, 8) + ')'; }
+  $('#devRename').onclick = function (e) { e.preventDefault(); var n = prompt('Name this device for the clock-in log (e.g. "Front till", "Warehouse tablet")', VisionClockCtx.deviceName()); if (n !== null) { VisionClockCtx.setDeviceName(n); devShow(); } };
+  devShow();
   reset();
 })();
 </script>

@@ -96,14 +96,22 @@ Breaks and lunch: press Break or Lunch when you go and "Back from break" when yo
 
 Outside your shift: clocking in early or late, or on a day off, counts as overtime. The clock asks you to confirm and give the reason; a manager approves or rejects it. Unapproved overtime is not paid.
 
-End of shift: the till warns you 15 and 5 minutes before your shift ends. If you need more time (for example a customer is still at the counter), press "Ask for more time" and give the reason; a manager is asked by email. At the end of your shift you are clocked out and signed out automatically, unless your drawer is still open.
+End of shift: the till warns you 15 and 5 minutes before your shift ends. If you need more time (for example a customer is still at the counter), press "Ask for more time" and give the reason; a manager is asked. When the shift ends you have a short leaving time (15 minutes unless your manager changed it) to finish and clock out. If you have not clocked out by then, you are clocked out at the end of your shift and signed out, unless your drawer is still open.
 
-Forgot to clock in or out? Ask for a correction with the right times and the reason. A manager approves it and the original record is kept.`,
+Worked on after that? Log the extra time: All modules > My time (or "Log extra time" at the time clock). Say when you finished and what you were doing; a manager approves it like overtime.
+
+Being late: clocking in more than a few minutes after your shift starts is recorded as late. Late on 3 days in one month (your manager may set another number) and you get a lateness letter: it pops up as a notice, is emailed to you and is kept in your staff file. Read it on My time and press "I have received and read this letter"; you can add a reply. If you had a good reason for a late day, tell your manager: they can excuse it, and it then does not count.
+
+What each punch records: who, the time, how you identified yourself, the device you used, its internet (IP) address, the browser, the till, and the location if the device allows it (phones ask once). The phone's own clock is recorded too, so changing it does not change your times. Managers see all of this in Attendance > Clock-in log, including tries that were refused.
+
+Forgot to clock in or out? Ask for a correction with the right times and the reason, on My time. A manager approves it and the original record is kept.`,
     questions: [
       ['You arrive 2 hours before your shift to help with a delivery. What happens when you clock in?', ['Nothing special', 'You confirm overtime with a reason; a manager approves it', 'You cannot clock in', 'You are marked absent'], 1, 'Outside the shift needs an overtime confirmation and approval.'],
       ['A colleague asks you to clock them in with your badge. What do you do?', ['Do it', 'Refuse - badges and PINs are personal', 'Do it only once', 'Use their PIN instead'], 1, 'Clocking in for someone else is not allowed.'],
       ['Your shift ends in 5 minutes and a customer still needs help. What do you do?', ['Leave', 'Press "Ask for more time" with the reason', 'Clock out and keep working', 'Ignore the warning'], 1, 'Ask for more time; a manager approves it.'],
       ['You forgot to clock out yesterday. What do you do?', ['Nothing', 'Ask for a correction with the right time and the reason', 'Clock out twice today', 'Tell a colleague'], 1, 'Corrections are approved by a manager and the original is kept.'],
+      ['You were clocked out automatically at 5:00 but finished a job at 5:40. What do you do?', ['Nothing, it is lost', 'Log the extra time on My time with what you were doing', 'Clock in again tomorrow earlier', 'Change the phone clock'], 1, 'Extra time is logged on My time and approved by a manager.'],
+      ['You get a lateness letter. What do you do?', ['Ignore it', 'Read it on My time and acknowledge it, adding a reply if you want', 'Delete the notice', 'Ask a colleague to acknowledge it'], 1, 'Each letter must be read and acknowledged by you; your reply goes to your manager.'],
     ],
   },
   {

@@ -5,14 +5,25 @@
      - not clocked in (with a Clock in button) when the time clock applies
      - 15 and 5 minute warnings before the shift ends, with "Ask for more time"
      - why taking money is blocked right now
+     - after the shift: clock out now, or when the automatic clock out comes
+     - a lateness letter to read, and extra time to log after an automatic
+       clock out (both on My time)
    When the system clocks the person out at the end of the shift it signs them
    out too; the next call answers 401 and the page reloads to its sign-in.
+   Punches send the device id and location (clock-ctx.js) for the punch log.
    ============================================================================= */
 (function () {
   'use strict';
   if (window.__visionClockBanner) return;
   window.__visionClockBanner = true;
   var bar = null, last = null, dismissed = {};
+  if (!window.VisionClockCtx) { var cs = document.createElement('script'); cs.src = '/assets/clock-ctx.js'; document.head.appendChild(cs); }
+  var hm = function (t) { return new Date(t).toLocaleTimeString('en-JM', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Jamaica' }); };
+  // A punch, with where it comes from.
+  function punch(body) {
+    var ctx = window.VisionClockCtx ? VisionClockCtx.get() : Promise.resolve({});
+    return ctx.then(function (c) { return req('/api/clock/me/punch', Object.assign({ ctx: c }, body)); });
+  }
   function req(url, body) {
     var h = { Accept: 'application/json' };
     if (body) h['Content-Type'] = 'application/json';
@@ -48,28 +59,35 @@
     }).catch(function (e) { alert(e.message); });
   }
   function clockIn() {
-    req('/api/clock/me/punch', { action: 'in' }).then(function (r) { alert(r.message); tick(); }).catch(function (e) {
+    punch({ action: 'in' }).then(function (r) { alert(r.message); tick(); }).catch(function (e) {
       if (/overtime/i.test(e.message)) {
         var why = prompt(e.message + '\n\nReason:');
         if (!why) return;
-        req('/api/clock/me/punch', { action: 'in', confirm_overtime: true, ot_reason: why }).then(function (r) { alert(r.message); tick(); }).catch(function (e2) { alert(e2.message); });
+        punch({ action: 'in', confirm_overtime: true, ot_reason: why }).then(function (r) { alert(r.message); tick(); }).catch(function (e2) { alert(e2.message); });
       } else alert(e.message + (/photo|fingerprint/i.test(e.message) ? '\nUse the time clock page.' : ''));
     });
   }
+  function clockOut() {
+    punch({ action: 'out' }).then(function (r) { alert(r.message); tick(); }).catch(function (e) { alert(e.message); });
+  }
+  var myTime = function (hash) { return function () { location.href = '/my-time.html' + (hash || ''); }; };
   function tick() {
     req('/api/clock/me').then(function (d) {
       last = d;
+      if (d.letters) return show('#7c2d12', 'You have a lateness letter to read and acknowledge.', [btn('Read it', myTime('#letters'))], 'letters');
       if (d.exempt) return hide();
+      if (!d.clocked_in && d.last_auto) return show('#475569', 'You were clocked out automatically at ' + hm(d.last_auto.clock_out_at) + '. Worked later than that?', [btn('Log extra time', myTime('#extra'))], 'auto' + d.last_auto.id);
       if (!d.clocked_in) {
         if (d.enforce) return show('#b45309', 'You are not clocked in: you cannot take payments.', [btn('Clock in', clockIn), btn('Time clock', function () { window.open('/clock.html', '_blank'); })]);
         return show('#475569', 'You are not clocked in.', [btn('Clock in', clockIn)], 'notin');
       }
       if (d.enforce && !d.can_bill) return show('#d62828', d.reason, d.pending ? [] : [btn('Ask for more time', askMore)]);
       if (d.pending && d.pending.kind === 'extension') return show('#1d4ed8', 'Waiting for the manager to answer your request for more time.', []);
-      if (d.warn === 5) return show('#d62828', 'Your shift ends in ' + Math.max(0, d.minutes_left) + ' minutes. You will be clocked out and signed out then.', [btn('Ask for more time', askMore)]);
+      if (d.minutes_left != null && d.minutes_left < 0) return show('#d62828', 'Your shift has ended. Clock out now, or you will be clocked out and signed out at ' + hm(d.auto_out_at) + '.', [btn('Clock out', clockOut), btn('Ask for more time', askMore)]);
+      if (d.warn === 5) return show('#d62828', 'Your shift ends in ' + Math.max(0, d.minutes_left) + ' minutes. You will be clocked out and signed out at ' + hm(d.auto_out_at) + '.', [btn('Ask for more time', askMore)]);
       if (d.warn === 15) return show('#b45309', 'Your shift ends in ' + d.minutes_left + ' minutes.', [btn('Ask for more time', askMore)], 'w15');
       if (d.entry && d.entry.mode === 'remote') return show('#475569', 'Clocked in as Remote: quotes and orders only, no payments.', [], 'remote');
-      if (d.on_break) return show('#475569', 'You are on ' + d.on_break.kind + '.', [btn('Back', function () { req('/api/clock/me/punch', { action: 'break_end' }).then(tick).catch(function (e) { alert(e.message); }); })]);
+      if (d.on_break) return show('#475569', 'You are on ' + d.on_break.kind + '.', [btn('Back', function () { punch({ action: 'break_end' }).then(tick).catch(function (e) { alert(e.message); }); })]);
       hide();
     }).catch(function (e) {
       if (e.status === 401 && last && last.clocked_in) location.reload();   // signed out at the end of the shift

@@ -38,9 +38,9 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 </head>
 <body>
-<header><h1>Attendance</h1><nav><a href="/clock.html" target="_blank" rel="noopener">Time clock ↗</a><a href="/admin.html">Admin</a></nav></header>
+<header><h1>Attendance</h1><nav><a href="/clock.html" target="_blank" rel="noopener">Time clock ↗</a><a href="/my-time.html">My time</a><a href="/admin.html">Admin</a></nav></header>
 <main>
-  <div class="tabs" id="tabs"><button data-t="now" class="on">Who's in</button><button data-t="today">Today</button><button data-t="req">Requests</button><button data-t="ts">Timesheets</button><button data-t="staff">Staff &amp; shifts</button><button data-t="leave">Leave &amp; holidays</button><button data-t="sph">Sales per hour</button><button data-t="set">Settings</button></div>
+  <div class="tabs" id="tabs"><button data-t="now" class="on">Who's in</button><button data-t="today">Today</button><button data-t="late">Lateness</button><button data-t="log">Clock-in log</button><button data-t="req">Requests</button><button data-t="ts">Timesheets</button><button data-t="staff">Staff &amp; shifts</button><button data-t="leave">Leave &amp; holidays</button><button data-t="sph">Sales per hour</button><button data-t="set">Settings</button></div>
   <div id="out"><div class="empty">Loading…</div></div>
 </main>
 <div id="modal"></div>
@@ -57,9 +57,12 @@
   var tm = function (t) { return t ? new Date(t).toLocaleTimeString('en-JM', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Jamaica' }) : ''; };
   var dt = function (t) { return t ? new Date(t).toLocaleString('en-JM', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Jamaica' }) : ''; };
   var DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  var KIND = { extension: 'Extra time', overtime: 'Overtime', correction: 'Time correction' };
-  var tab = 'now', week = null, staffCache = null;
+  var KIND = { extension: 'More time', overtime: 'Overtime', correction: 'Time correction', extra: 'Extra time after the shift' };
+  var ACTION = { in: 'Clock in', out: 'Clock out', break_start: 'Break', lunch_start: 'Lunch', break_end: 'Back from break', auto_out: 'Clocked out automatically', extra_time: 'Logged extra time', toggle: 'Badge scan', extra: 'Logged extra time' };
+  var tab = 'now', week = null, staffCache = null, lateMonth = null;
   try { tab = localStorage.getItem('vision.attTab') || 'now'; } catch (_) {}
+  var hashTab = /^#(now|today|late|log|req|ts|staff|leave|sph|set)$/.exec(location.hash);
+  if (hashTab) tab = hashTab[1];
   function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 3200); }
   function api(url, method, body) {
     return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
@@ -91,7 +94,8 @@
     return api('/api/clock/requests').then(function (d) {
       $('#out').innerHTML = '<div class="card"><h2>Requests</h2><p class="sub">Overtime, extra time and corrections. Approvers also get each one by email with a one-use link.</p><div class="scroll"><table><thead><tr><th>Asked</th><th>Who</th><th>What</th><th>Reason</th><th>Status</th><th></th></tr></thead><tbody>' +
         (d.requests.length ? d.requests.map(function (r) {
-          var what = r.kind === 'extension' ? r.minutes + ' more minutes' : r.kind === 'overtime' ? 'Clocked in ' + dt(r.clock_in_at) + ' outside the shift' : 'In ' + dt(r.wanted && r.wanted.clock_in_at) + ', out ' + dt(r.wanted && r.wanted.clock_out_at) + (r.original ? '<br><small>was ' + esc(dt(r.original.clock_in_at)) + ' – ' + esc(dt(r.original.clock_out_at)) + '</small>' : '<br><small>missed day</small>');
+          var what = r.kind === 'extension' ? r.minutes + ' more minutes' : r.kind === 'overtime' ? 'Clocked in ' + dt(r.clock_in_at) + ' outside the shift'
+            : r.kind === 'extra' ? 'Worked until ' + esc(dt(r.wanted && r.wanted.clock_out_at)) + ' (' + r.minutes + ' min)<br><small>was clocked out ' + esc(dt(r.original && r.original.clock_out_at)) + '</small>' : 'In ' + dt(r.wanted && r.wanted.clock_in_at) + ', out ' + dt(r.wanted && r.wanted.clock_out_at) + (r.original ? '<br><small>was ' + esc(dt(r.original.clock_in_at)) + ' – ' + esc(dt(r.original.clock_out_at)) + '</small>' : '<br><small>missed day</small>');
           return '<tr><td>' + esc(dt(r.created_at)) + '</td><td>' + esc(r.name) + '</td><td><b>' + esc(KIND[r.kind]) + '</b><br>' + what + '</td><td>' + esc(r.reason) + '</td>' +
             '<td><span class="pill ' + (r.status === 'approved' ? 'ok' : r.status === 'pending' ? 'warn' : 'bad') + '">' + esc(r.status) + '</span>' + (r.decided_by_name ? '<br><small>' + esc(r.decided_by_name) + ' (' + esc(r.decided_via) + ')</small>' : '') + '</td>' +
             '<td style="white-space:nowrap">' + (r.status === 'pending' ? '<button class="sm primary" data-ap="' + r.id + '">Approve</button> <button class="sm" data-rj="' + r.id + '">Reject</button>' : '') + '</td></tr>';
@@ -122,7 +126,8 @@
           api('/api/clock/timesheet?week=' + week + '&user=' + a.getAttribute('data-user')).then(function (r) {
             var s = r.staff[0];
             modal('<h2>' + esc(s.name) + ' · week of ' + esc(week) + '</h2><table><thead><tr><th>Day</th><th>Shift</th><th>Times</th><th class="n">Hours</th><th class="n">Day OT</th><th>Notes</th></tr></thead><tbody>' + s.days.map(function (dd) {
-              return '<tr><td>' + esc(dd.day) + '</td><td>' + esc(dd.shift) + '</td><td>' + dd.entries.map(function (e2) { return esc(tm(e2.in)) + '–' + esc(e2.out ? tm(e2.out) : 'now') + (e2.mode === 'remote' ? ' (remote)' : '') + (e2.outside ? ' <span class="pill ' + (e2.ot === 'approved' ? 'ok' : 'warn') + '">OT ' + esc(e2.ot) + '</span>' : '') + (e2.auto ? ' <small>auto out</small>' : '') + (e2.edited ? ' <small>corrected</small>' : '') + (e2.photo_in ? ' <a target="_blank" href="/api/clock/photo/' + esc(e2.photo_in) + '">photo in</a>' : '') + (e2.photo_out ? ' <a target="_blank" href="/api/clock/photo/' + esc(e2.photo_out) + '">photo out</a>' : ''); }).join('<br>') + '</td>' +
+              return '<tr><td>' + esc(dd.day) + '</td><td>' + esc(dd.shift) + '</td><td>' + dd.entries.map(function (e2) { return esc(tm(e2.in)) + '–' + esc(e2.out ? tm(e2.out) : 'now') + (e2.mode === 'remote' ? ' (remote)' : '') + (e2.outside ? ' <span class="pill ' + (e2.ot === 'approved' ? 'ok' : 'warn') + '">OT ' + esc(e2.ot) + '</span>' : '') + (e2.auto ? ' <small>auto out</small>' : '') + (e2.edited ? ' <small>corrected</small>' : '') + (e2.late ? ' <span class="pill ' + (e2.late_excused ? '' : 'bad') + '">late ' + e2.late + (e2.late_excused ? ', excused' : '') + '</span>' : '') +
+                  ((e2.ip_in || e2.loc_in) ? '<br><small>in: ' + esc(e2.ip_in || '') + (e2.loc_in ? ' · ' + mapLink(e2.loc_in.lat, e2.loc_in.lng, e2.loc_in.acc) + (e2.loc_in.dist != null ? ' ' + e2.loc_in.dist + ' m from the shop' : '') : '') + (e2.ip_out ? ' · out: ' + esc(e2.ip_out) : '') + (e2.loc_out ? ' ' + mapLink(e2.loc_out.lat, e2.loc_out.lng, e2.loc_out.acc) : '') + '</small>' : '') + (e2.photo_in ? ' <a target="_blank" href="/api/clock/photo/' + esc(e2.photo_in) + '">photo in</a>' : '') + (e2.photo_out ? ' <a target="_blank" href="/api/clock/photo/' + esc(e2.photo_out) + '">photo out</a>' : ''); }).join('<br>') + '</td>' +
                 '<td class="n">' + dd.hours + '</td><td class="n">' + (dd.day_ot || '') + '</td><td>' + [dd.late ? 'late' : '', dd.early ? 'left early' : '', dd.absent ? '<b>absent</b>' : '', dd.auto_break_min ? dd.auto_break_min + ' min break taken off' : '', dd.ot_pending_h ? dd.ot_pending_h + 'h OT waiting' : '', dd.ot_rejected_h ? dd.ot_rejected_h + 'h OT rejected' : ''].filter(Boolean).join(', ') + '</td></tr>';
             }).join('') + '</tbody></table><p><b>Regular ' + s.totals.regular_h + ' h · Overtime ' + s.totals.overtime_h + ' h</b> (rate ' + J(s.totals.rate) + '/h, overtime ×' + s.totals.ot_rate + ', after ' + s.totals.ot_daily + ' h a day or ' + s.totals.ot_weekly + ' h a week) · Gross ' + J(s.totals.gross) + '</p><button id="cx">Close</button>');
             $('#cx').onclick = close;
@@ -215,10 +220,27 @@
         '<div><label>Extension grace (min)</label><input id="s3" type="number" value="' + s.grace + '" style="width:90px"></div><div><label>Paid break allowance (min)</label><input id="s4" type="number" value="' + s.paid_break + '" style="width:90px"></div></div>' +
         '<div class="controls"><div style="flex:1"><label>Shop Wi-Fi public address(es): phones on these count as "at the shop"</label><input id="sI" value="' + esc(s.shop_ips) + '" style="width:100%"></div></div>' +
         '<p class="sub">This device\'s address: <b>' + esc(addr.address) + '</b>' + (addr.on_shop_network ? ' (shop network)' : '') + '. Open this page on a phone connected to the shop Wi-Fi (through the shop\'s public website address) to see the address to add.</p>' +
+        '<h2 style="margin-top:16px">Lateness and leaving</h2>' +
+        '<div class="controls"><div><label>Late on this many days in a month</label><input id="sLc" type="number" min="1" max="31" value="' + s.late_count + '" style="width:90px"></div>' +
+        '<div><label>then</label><select id="sLw"><option value="letter"' + (s.late_warn === 'letter' ? ' selected' : '') + '>issue a lateness letter and a notice</option><option value="notice"' + (s.late_warn === 'notice' ? ' selected' : '') + '>send a notice only</option><option value="off"' + (s.late_warn === 'off' ? ' selected' : '') + '>do nothing</option></select></div>' +
+        '<div><label>Leaving time before the automatic clock out (min)</label><input id="sLv" type="number" min="0" max="120" value="' + s.leave + '" style="width:90px"></div></div>' +
+        '<p class="sub">The letter goes to the person (as a notice they must acknowledge, and by email), is filed in their staff file, and their manager is told. Another letter follows at twice the number, and so on. At the end of a shift people have the leaving time to finish and clock out; after that they are clocked out at the shift end and can log extra time on My time, for a manager to approve.</p>' +
+        '<h2 style="margin-top:16px">Where punches come from</h2>' +
+        '<p class="sub">Every punch records the device, its IP address, the browser and the till station. The location is recorded when the device gives it (phones and laptops ask once; the page must be on https or this computer).</p>' +
+        '<div class="controls"><div><label>Location</label><select id="sLo"><option value="ask"' + (s.location === 'ask' ? ' selected' : '') + '>record it when the device allows</option><option value="required"' + (s.location === 'required' ? ' selected' : '') + '>required away from the shop network</option><option value="off"' + (s.location === 'off' ? ' selected' : '') + '>do not ask</option></select></div>' +
+        '<div><label>Shop latitude</label><input id="sLa" value="' + (s.shop_lat == null ? '' : s.shop_lat) + '" style="width:120px"></div><div><label>Shop longitude</label><input id="sLn" value="' + (s.shop_lng == null ? '' : s.shop_lng) + '" style="width:120px"></div>' +
+        '<button id="sHere">Use this device\'s location</button><div><label>Flag punches farther than (m)</label><input id="sRa" type="number" value="' + s.radius + '" style="width:100px"></div></div>' +
         '<button class="primary" id="sSave">Save</button></div>';
+      $('#sHere').onclick = function () {
+        if (!navigator.geolocation) return toast('This device cannot give its location');
+        toast('Finding this device…');
+        navigator.geolocation.getCurrentPosition(function (p) { $('#sLa').value = p.coords.latitude.toFixed(6); $('#sLn').value = p.coords.longitude.toFixed(6); toast('Accurate to about ' + Math.round(p.coords.accuracy) + ' m. Save to keep it.'); },
+          function (e) { toast(e.code === 1 ? 'Location was refused for this page' : 'Location is not available here (it needs https or this computer)'); }, { enableHighAccuracy: true, timeout: 15000 });
+      };
       $('#sSave').onclick = function () {
         if ($('#sE').checked && !s.enforce && !confirm('Switch on the rule? Staff not clocked in will not be able to take payments.')) return;
-        api('/api/clock/settings', 'PUT', { enforce: $('#sE').checked, exempt: $('#sX').value, photo: $('#sP').checked, early: $('#s1').value, late: $('#s2').value, grace: $('#s3').value, paid_break: $('#s4').value, shop_ips: $('#sI').value })
+        api('/api/clock/settings', 'PUT', { enforce: $('#sE').checked, exempt: $('#sX').value, photo: $('#sP').checked, early: $('#s1').value, late: $('#s2').value, grace: $('#s3').value, paid_break: $('#s4').value, shop_ips: $('#sI').value,
+          late_count: $('#sLc').value, late_warn: $('#sLw').value, leave: $('#sLv').value, location: $('#sLo').value, shop_lat: $('#sLa').value.trim(), shop_lng: $('#sLn').value.trim(), radius: $('#sRa').value })
           .then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); });
       };
     });
@@ -235,12 +257,96 @@
     $("#hGo").onclick = run;
     return run();
   }
+  function mapLink(lat, lng, acc) {
+    if (lat == null) return '';
+    return '<a target="_blank" rel="noopener noreferrer" href="https://www.openstreetmap.org/?mlat=' + lat + '&mlon=' + lng + '#map=18/' + lat + '/' + lng + '">📍 map</a>' + (acc != null ? ' <small>±' + acc + ' m</small>' : '');
+  }
+  var monthLabel = function (m) { return new Date(m + 'T12:00:00Z').toLocaleDateString('en-JM', { month: 'long', year: 'numeric', timeZone: 'UTC' }); };
+
+  // Lateness: per person for a month, the letters, excusing a late day.
+  function late() {
+    if (!lateMonth) lateMonth = new Date(Date.now() - 5 * 3600000).toISOString().slice(0, 7);
+    return api('/api/clock/lateness?month=' + lateMonth).then(function (d) {
+      var rule = d.action === 'off' ? 'No letters are sent automatically.' : 'Late on ' + d.threshold + ' days in a month ' + (d.action === 'letter' ? 'issues a lateness letter' : 'sends a lateness notice') + ' (late = more than ' + d.late_allowance + ' minutes after the shift starts). Excused days do not count.';
+      $('#out').innerHTML = '<div class="card"><h2>Lateness · <input type="month" id="lm" value="' + esc(lateMonth) + '"></h2><p class="sub">' + esc(rule) + ' Change it under Settings.</p><div class="scroll"><table><thead><tr><th>Name</th><th class="n">Late days</th><th class="n">Minutes late</th><th class="n">Left early</th><th class="n">Absent</th><th class="n">Auto clocked out</th><th class="n">Extra time</th><th>Letters</th><th></th></tr></thead><tbody>' +
+        (d.staff.length ? d.staff.map(function (s, i) {
+          return '<tr><td><b>' + esc(s.name) + '</b></td><td class="n">' + (s.late >= d.threshold ? '<span class="pill bad">' + s.late + '</span>' : s.late) + (s.late_excused ? ' <small>+' + s.late_excused + ' excused</small>' : '') + '</td><td class="n">' + s.late_minutes + '</td><td class="n">' + s.early + '</td><td class="n">' + (s.absent ? '<span class="pill warn">' + s.absent + '</span>' : 0) + '</td><td class="n">' + s.auto_out + '</td>' +
+            '<td class="n">' + (s.extra_requests ? s.extra_requests + ' <small>(' + s.extra_approved_min + ' min approved)</small>' : '0') + '</td>' +
+            '<td>' + (s.warnings.map(function (w) { return '<a href="#" data-lw="' + w.id + '"><span class="pill ' + (w.status === 'acknowledged' ? 'ok' : w.status === 'withdrawn' ? '' : 'bad') + '">' + esc(w.has_letter ? 'Letter ' + w.level : 'Notice ' + w.level) + ': ' + esc(w.status) + '</span></a>'; }).join(' ') || '–') + '</td>' +
+            '<td style="white-space:nowrap">' + (s.days.length ? '<button class="sm" data-ld="' + i + '">Late days</button> ' : '') + (s.late ? '<button class="sm" data-li="' + s.user_id + '">Issue letter</button>' : '') + '</td></tr>' +
+            '<tr id="ld' + i + '" style="display:none"><td colspan="9"><table><tbody>' + s.days.map(function (x) {
+              return '<tr><td>' + esc(new Date(x.day + 'T12:00:00Z').toLocaleDateString('en-JM', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })) + '</td><td>shift ' + esc(tm(x.shift_start)) + ', clocked in ' + esc(tm(x.clock_in_at)) + '</td><td>' + x.minutes + ' min late</td>' +
+                '<td>' + (x.excused ? '<span class="pill">excused: ' + esc(x.excuse || '') + '</span> <button class="sm" data-un="' + x.attendance_id + '">Undo</button>' : '<button class="sm" data-ex="' + x.attendance_id + '">Excuse</button>') + '</td></tr>';
+            }).join('') + '</tbody></table></td></tr>';
+        }).join('') : '<tr><td colspan="9" class="empty">Nobody was late, left early, was absent or was clocked out automatically in ' + esc(monthLabel(d.month)) + '.</td></tr>') + '</tbody></table></div></div>';
+      $('#lm').onchange = function () { lateMonth = this.value || lateMonth; late(); };
+      all('[data-ld]').forEach(function (b) { b.onclick = function () { var r = $('#ld' + b.getAttribute('data-ld')); r.style.display = r.style.display ? '' : 'none'; }; });
+      all('[data-ex]').forEach(function (b) { b.onclick = function () { var why = prompt('Why is this late day excused? (it stops counting towards a letter)'); if (!why) return; api('/api/clock/attendance/' + b.getAttribute('data-ex') + '/excuse', 'POST', { reason: why }).then(function () { toast('Excused'); late(); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-un]').forEach(function (b) { b.onclick = function () { api('/api/clock/attendance/' + b.getAttribute('data-un') + '/excuse', 'POST', { undo: true }).then(function () { toast('Counts again'); late(); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-li]').forEach(function (b) { b.onclick = function () { if (!confirm('Issue a lateness letter now for ' + monthLabel(d.month) + '? It goes to them, to their staff file, and you are recorded as issuing it.')) return; api('/api/clock/lateness/issue', 'POST', { user_id: b.getAttribute('data-li'), month: d.month }).then(function () { toast('Letter issued'); late(); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-lw]').forEach(function (a) { a.onclick = function (e) { e.preventDefault(); letter(+a.getAttribute('data-lw')); }; });
+    });
+  }
+  function letter(id) {
+    api('/api/clock/warnings/' + id).then(function (r) {
+      var w = r.warning;
+      modal('<h2>' + esc(w.name) + ' · ' + esc(w.title) + '</h2><p class="sub">' + esc(monthLabel(w.month)) + ' · late ' + w.late_count + ' times · issued ' + esc(dt(w.issued_at)) + ' ' + (w.issued_by_name ? 'by ' + esc(w.issued_by_name) : 'automatically') + (w.document_id ? ' · filed in the staff file' : '') + '</p>' +
+        '<p>' + (w.status === 'acknowledged' ? '<span class="pill ok">acknowledged ' + esc(dt(w.acknowledged_at)) + '</span>' + (w.ack_note ? ' Their reply: ' + esc(w.ack_note) : '') : w.status === 'withdrawn' ? '<span class="pill">withdrawn ' + esc(dt(w.withdrawn_at)) + ': ' + esc(w.withdrawn_reason) + '</span>' : '<span class="pill bad">not acknowledged yet</span>') + '</p>' +
+        (r.html ? '<iframe sandbox="allow-modals allow-same-origin" id="lf" style="width:100%;height:55vh;border:1px solid var(--line);border-radius:8px;background:#fff"></iframe>' : '<p>A notice only (no letter).</p>') +
+        '<div class="controls" style="margin-top:10px">' + (r.html ? '<button id="lp">Print</button>' : '') + (w.status !== 'withdrawn' ? '<button id="lwd">Withdraw</button>' : '') + '<button id="lx">Close</button></div>');
+      if (r.html) $('#lf').srcdoc = r.html;
+      $('#lx').onclick = close;
+      if ($('#lp')) $('#lp').onclick = function () { try { $('#lf').contentWindow.print(); } catch (_) { toast('Could not print here'); } };
+      if ($('#lwd')) $('#lwd').onclick = function () { var why = prompt('Why is the letter withdrawn? (they are told)'); if (!why) return; api('/api/clock/warnings/' + id + '/withdraw', 'POST', { reason: why }).then(function () { toast('Withdrawn'); close(); late(); }).catch(function (e) { toast(e.message); }); };
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // The clock-in log: every punch and refused try, with device, address and location.
+  var logF = null;
+  function log() {
+    var today = new Date(Date.now() - 5 * 3600000).toISOString().slice(0, 10);
+    if (!logF) logF = { from: new Date(Date.now() - 5 * 3600000 - 6 * 86400000).toISOString().slice(0, 10), to: today, user: '', action: '', result: '', q: '' };
+    var people = staffCache ? Promise.resolve(staffCache) : api('/api/clock/staff').catch(function () { return { staff: [] }; });
+    return people.then(function (st) {
+      if (st.staff.length) staffCache = st;
+      $('#out').innerHTML = '<div class="card"><h2>Clock-in log</h2><p class="sub">Every clock in, clock out, break and refused try (a wrong PIN, clocking in off site when not allowed), with the device, its IP address, the browser, the till station and the location the device gave. Click a device or address to see everything from it.</p>' +
+        '<div class="controls"><div><label>From</label><input type="date" id="gF" value="' + logF.from + '"></div><div><label>To</label><input type="date" id="gT" value="' + logF.to + '"></div>' +
+        '<div><label>Person</label><select id="gU"><option value="">Everyone</option>' + st.staff.map(function (s) { return '<option value="' + s.id + '"' + (String(s.id) === logF.user ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join('') + '</select></div>' +
+        '<div><label>What</label><select id="gA"><option value="">Everything</option>' + ['in', 'out', 'break_start', 'lunch_start', 'break_end', 'auto_out', 'extra_time'].map(function (a) { return '<option value="' + a + '"' + (a === logF.action ? ' selected' : '') + '>' + ACTION[a] + '</option>'; }).join('') + '</select></div>' +
+        '<div><label>Result</label><select id="gR"><option value="">All</option><option value="ok"' + (logF.result === 'ok' ? ' selected' : '') + '>Done</option><option value="refused"' + (logF.result === 'refused' ? ' selected' : '') + '>Refused</option></select></div>' +
+        '<div><label>Device id or IP</label><input id="gQ" value="' + esc(logF.q) + '" style="width:170px"></div><button class="primary" id="gGo">Show</button><a id="gCsv" class="sm" href="#">Download CSV</a></div><div id="gOut" class="scroll"><div class="empty">Loading…</div></div></div>';
+      var qs = function () { return 'from=' + logF.from + '&to=' + logF.to + (logF.user ? '&user=' + logF.user : '') + (logF.action ? '&action=' + logF.action : '') + (logF.result ? '&result=' + logF.result : '') + (logF.q ? '&q=' + encodeURIComponent(logF.q) : ''); };
+      var read = function () { logF = { from: $('#gF').value, to: $('#gT').value, user: $('#gU').value, action: $('#gA').value, result: $('#gR').value, q: $('#gQ').value.trim() }; };
+      $('#gGo').onclick = function () { read(); run(); };
+      $('#gCsv').onclick = function (e) { e.preventDefault(); read(); location.href = '/api/clock/events?format=csv&' + qs(); };
+      function run() {
+        return api('/api/clock/events?' + qs()).then(function (d) {
+          $('#gOut').innerHTML = '<table><thead><tr><th>When</th><th>Who</th><th>What</th><th>How</th><th>Where</th><th>Device</th><th>Location</th></tr></thead><tbody>' + (d.events.length ? d.events.map(function (e) {
+            var skew = e.client_time ? Math.round((new Date(e.client_time) - new Date(e.at)) / 60000) : null;
+            var loc = e.lat != null ? mapLink(e.lat, e.lng, e.accuracy_m) + (e.distance_m != null ? '<br><span class="pill ' + (e.distance_m > d.radius ? 'bad' : 'ok') + '">' + (e.distance_m >= 1000 ? (e.distance_m / 1000).toFixed(1) + ' km' : e.distance_m + ' m') + ' from the shop</span>' : '')
+              : e.location_status ? '<small>' + esc({ denied: 'refused by the device', unavailable: 'not available', off: 'not asked' }[e.location_status] || e.location_status) + '</small>' : '';
+            return '<tr><td style="white-space:nowrap">' + esc(dt(e.at)) + (skew != null && Math.abs(skew) >= 3 ? '<br><span class="pill warn">device clock ' + (skew > 0 ? '+' : '') + skew + ' min</span>' : '') + '</td>' +
+              '<td>' + (e.name ? esc(e.name) : '<small>not recognised</small>') + '</td>' +
+              '<td>' + (e.result === 'refused' ? '<span class="pill bad">refused</span> ' : '') + '<b>' + esc(ACTION[e.action] || e.action) + '</b>' + (e.late_minutes ? ' <span class="pill bad">late ' + e.late_minutes + ' min</span>' : '') + (e.message ? '<br><small>' + esc(e.message) + '</small>' : '') + (e.photo ? ' <a target="_blank" href="/api/clock/photo/' + esc(e.photo) + '">photo</a>' : '') + '</td>' +
+              '<td>' + esc(e.method || '') + '</td>' +
+              '<td>' + (e.on_site === true ? '<span class="pill ok">shop</span> ' : e.on_site === false ? '<span class="pill warn">off site</span> ' : '') + (e.station ? esc(e.station) + '<br>' : '') + (e.ip ? '<a href="#" data-q="' + esc(e.ip) + '">' + esc(e.ip) + '</a>' : '') + '</td>' +
+              '<td>' + (e.device_id ? '<a href="#" data-q="' + esc(e.device_id) + '">' + esc(e.device_name || e.device_id.slice(0, 8)) + '</a><br>' : '') + '<small>' + esc(e.platform || '') + '</small></td>' +
+              '<td>' + loc + '</td></tr>';
+          }).join('') : '<tr><td colspan="7" class="empty">Nothing in these dates.</td></tr>') + '</tbody></table>' + (d.more ? '<p class="sub">Showing the latest 1,000. Narrow the dates or download the CSV for all of them.</p>' : '');
+          all('[data-q]', $('#gOut')).forEach(function (a) { a.onclick = function (ev) { ev.preventDefault(); $('#gQ').value = a.getAttribute('data-q'); read(); run(); }; });
+        }).catch(function (e) { $('#gOut').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+      }
+      return run();
+    });
+  }
+
   function show() {
     all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); });
     try { localStorage.setItem('vision.attTab', tab); } catch (_) {}
-    ({ now: now, today: today, req: reqs, ts: ts, staff: staffTab, leave: leave, sph: sph, set: settingsTab }[tab] || now)().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+    ({ now: now, today: today, late: late, log: log, req: reqs, ts: ts, staff: staffTab, leave: leave, sph: sph, set: settingsTab }[tab] || now)().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
   }
   all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
+  window.addEventListener('hashchange', function () { var m = /^#(now|today|late|log|req|ts|staff|leave|sph|set)$/.exec(location.hash); if (m && m[1] !== tab) { tab = m[1]; show(); } });
   show();
 })();
 </script>

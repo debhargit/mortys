@@ -6358,3 +6358,95 @@ INSERT INTO warehouse_settings (key, value) VALUES
   ('team_ice_servers', ''),       -- JSON list of STUN/TURN servers for calls; blank for the default
   ('team_retention_days', '0')    -- delete chat messages older than this (memos kept); 0 keeps them
 ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Time clock (cont.) -- the punch log, lateness letters, leaving time
+--
+--  clock_events: every clock in / out / break, and every refused try (a wrong
+--  PIN, someone not allowed off site), with where it came from: the device id
+--  (a random id the browser keeps), IP address, the browser, the till station,
+--  the location the device gave (and how far that is from the shop), and the
+--  device's own clock beside the server's. attendance keeps the in / out
+--  summary of the same.
+--  clock_warnings: lateness letters. Late on N days in a month (3 by default)
+--  issues a letter, filed in the person's staff file and sent to them (and the
+--  managers) as a notice and by email; they acknowledge it. Excused late days
+--  do not count; a manager can withdraw a letter.
+--  At the end of the shift people get a leaving window before the automatic
+--  clock out; whoever stayed on can log the extra time afterwards (approved
+--  like overtime).
+-- =============================================================================
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS ip_in        TEXT;
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS ip_out       TEXT;
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS device_in    TEXT;
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS device_out   TEXT;
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS loc_in       JSONB;     -- {lat, lng, acc, dist}
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS loc_out      JSONB;
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS late_minutes INTEGER;   -- first clock-in of the day, past the late allowance
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS late_excused BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS late_excused_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS late_excuse  TEXT;
+
+CREATE TABLE IF NOT EXISTS clock_events (
+  id             BIGSERIAL PRIMARY KEY,
+  at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  user_id        INTEGER REFERENCES users(id) ON DELETE SET NULL,   -- null: not recognised
+  attendance_id  BIGINT REFERENCES attendance(id) ON DELETE SET NULL,
+  action         TEXT NOT NULL,          -- in | out | break_start | lunch_start | break_end | auto_out | extra_time
+  result         TEXT NOT NULL DEFAULT 'ok',   -- ok | refused
+  message        TEXT,
+  method         TEXT,                   -- pin | password | badge | biometric | session | auto
+  mode           TEXT,                   -- onsite | remote
+  on_site        BOOLEAN,
+  ip             TEXT,
+  forwarded_for  TEXT,
+  device_id      TEXT,
+  device_name    TEXT,
+  user_agent     TEXT,
+  platform       TEXT,                   -- e.g. "Windows · Chrome"
+  station        TEXT,                   -- the bound till station, or the terminal name
+  lat            DOUBLE PRECISION,
+  lng            DOUBLE PRECISION,
+  accuracy_m     INTEGER,
+  distance_m     INTEGER,                -- from the shop, when the shop's location is set
+  location_status TEXT,                  -- given | denied | unavailable | off
+  client_time    TIMESTAMPTZ,            -- the device's clock
+  client_tz      TEXT,
+  shift_start    TIMESTAMPTZ,
+  shift_end      TIMESTAMPTZ,
+  late_minutes   INTEGER,
+  photo          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_clock_events_at ON clock_events (at DESC);
+CREATE INDEX IF NOT EXISTS idx_clock_events_user ON clock_events (user_id, at DESC);
+
+CREATE TABLE IF NOT EXISTS clock_warnings (
+  id              SERIAL PRIMARY KEY,
+  user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  month           DATE NOT NULL,             -- first day of the month
+  level           INTEGER NOT NULL DEFAULT 1, -- 1 at N late days, 2 at 2N, ...
+  late_count      INTEGER NOT NULL,
+  late_days       JSONB NOT NULL,            -- [{day, minutes, clock_in_at, shift_start}]
+  letter_html     TEXT,
+  document_id     INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  status          TEXT NOT NULL DEFAULT 'issued',   -- issued | acknowledged | withdrawn
+  issued_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,  -- null: issued automatically
+  issued_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  acknowledged_at TIMESTAMPTZ,
+  ack_note        TEXT,
+  withdrawn_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  withdrawn_at    TIMESTAMPTZ,
+  withdrawn_reason TEXT,
+  UNIQUE (user_id, month, level)
+);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('clock_late_warn', 'letter'),        -- letter: letter + notice | notice: notice only | off
+  ('clock_late_warn_count', '3'),       -- late days in a month before a letter
+  ('clock_leave_minutes', '15'),        -- after the shift ends, time to finish and leave before the automatic clock out
+  ('clock_location', 'ask'),            -- off | ask (record it when the device allows) | required
+  ('clock_shop_lat', ''),
+  ('clock_shop_lng', ''),
+  ('clock_shop_radius_m', '200')        -- farther than this from the shop is flagged
+ON CONFLICT (key) DO NOTHING;
+ALTER TABLE team_notices ADD COLUMN IF NOT EXISTS link TEXT;   -- a page in the system the notice opens (lateness letter, a request)

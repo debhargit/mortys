@@ -652,14 +652,15 @@ function register(app, deps) {
   async function notice(userIds, n0) {
     const ids = [...new Set(userIds)].filter(Boolean);
     if (!ids.length) return;
-    const { rows } = await query(`INSERT INTO team_notices (user_id, kind, title, body, conversation_id, message_id, event_id, urgent)
-      SELECT u, $2, $3, $4, $5, $6, $7, $8 FROM unnest($1::int[]) u RETURNING id, user_id`,
-      [ids, n0.kind, String(n0.title).slice(0, 200), n0.body ? String(n0.body).slice(0, 600) : null, n0.conversation_id || null, n0.message_id || null, n0.event_id || null, !!n0.urgent]);
-    for (const r of rows) emit([r.user_id], 'notice', { id: r.id, kind: n0.kind, title: n0.title, body: n0.body || null, conversation_id: n0.conversation_id || null, message_id: n0.message_id ? Number(n0.message_id) : null, event_id: n0.event_id || null, urgent: !!n0.urgent, created_at: new Date().toISOString() });
+    const link = /^\/[^/\\]/.test(String(n0.link || '')) ? String(n0.link).slice(0, 300) : null;   // a page of this system only
+    const { rows } = await query(`INSERT INTO team_notices (user_id, kind, title, body, conversation_id, message_id, event_id, urgent, link)
+      SELECT u, $2, $3, $4, $5, $6, $7, $8, $9 FROM unnest($1::int[]) u RETURNING id, user_id`,
+      [ids, n0.kind, String(n0.title).slice(0, 200), n0.body ? String(n0.body).slice(0, 600) : null, n0.conversation_id || null, n0.message_id || null, n0.event_id || null, !!n0.urgent, link]);
+    for (const r of rows) emit([r.user_id], 'notice', { id: r.id, kind: n0.kind, title: n0.title, body: n0.body || null, conversation_id: n0.conversation_id || null, message_id: n0.message_id ? Number(n0.message_id) : null, event_id: n0.event_id || null, urgent: !!n0.urgent, link, created_at: new Date().toISOString() });
   }
   app.get('/api/team/notices', requireAdmin, async (req, res) => {
     try {
-      const { rows } = await query(`SELECT id, kind, title, body, conversation_id, message_id, event_id, urgent, read_at IS NOT NULL AS read,
+      const { rows } = await query(`SELECT id, kind, title, body, conversation_id, message_id, event_id, urgent, link, read_at IS NOT NULL AS read,
           to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at
         FROM team_notices WHERE user_id = $1 ORDER BY id DESC LIMIT 60`, [me(req)]);
       // Memos still waiting for this person's acknowledgement.
