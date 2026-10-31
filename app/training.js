@@ -14,6 +14,7 @@
 //  file and expiry), training assigned with a due date; all searchable.
 // =============================================================================
 const crypto = require('crypto');
+const { figuresFor, coverFor } = require('./training-figures');
 
 function register(app, deps) {
   const { query, requireAdmin, requireCap, userCan, posSaleHandler } = deps;
@@ -52,7 +53,7 @@ function register(app, deps) {
         expires = new Date(new Date(b.finished_at).getTime() + m.valid_months * 30.44 * 86400000);
         status = expires < new Date() ? 'expired' : 'passed';
       } else if (l) status = 'not passed';
-      return { key: m.key, title: m.title, summary: m.summary, quiz: m.quiz, practice: m.practice, questions: m.questions, pass_pct: m.pass_pct,
+      return { key: m.key, title: m.title, summary: m.summary, cover: coverFor(m.key), quiz: m.quiz, practice: m.practice, questions: m.questions, pass_pct: m.pass_pct,
         for_me: applies(m, role), required: m.quiz && applies(m, role), status, passed_at: b ? b.finished_at : null, expires, best: b ? b.score : null,
         last: l ? { score: l.score, passed: l.passed, at: l.finished_at } : null, practice_passed: m.practice ? prac[0].passed : undefined };
     });
@@ -71,7 +72,7 @@ function register(app, deps) {
     try {
       const u = await me(req), manage = await userCan(req, 'training.manage');
       const { rows } = await query(`SELECT key, title, summary, body, roles FROM training_modules WHERE active ORDER BY sort, id`);
-      res.json({ name: u.name, lessons: rows.filter((m) => manage || applies(m, u.admin_role)).map((m) => ({ key: m.key, title: m.title, summary: m.summary, body: m.body, roles: m.roles })) });
+      res.json({ name: u.name, lessons: rows.filter((m) => manage || applies(m, u.admin_role)).map((m) => ({ key: m.key, title: m.title, summary: m.summary, body: m.body, roles: m.roles, figures: figuresFor(m) })) });
     } catch (e) { fail(res, e); }
   });
   // A lesson this person may open: active, and for their role (managers: any).
@@ -91,7 +92,7 @@ function register(app, deps) {
       const { rows: c } = await query(`SELECT COUNT(*)::int AS n FROM training_questions WHERE module_id = $1 AND active`, [rows[0].id]);
       // Opening a lesson is recorded (first time, last time, how often).
       await query(`INSERT INTO training_views (user_id, module_id) VALUES ($1, $2) ON CONFLICT (user_id, module_id) DO UPDATE SET last_at = NOW(), views = training_views.views + 1`, [u.id, rows[0].id]);
-      res.json(Object.assign({}, rows[0], { id: undefined, questions: c[0].n }));
+      res.json(Object.assign({}, rows[0], { id: undefined, questions: c[0].n, figures: figuresFor(rows[0]) }));
     } catch (e) { fail(res, e); }
   });
 

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 360" font-family="Segoe UI, system-ui, -apple-system, sans-serif">
+  <rect width="860" height="360" rx="18" fill="#ffffff"/>
+  <text x="30" y="44" font-size="22" font-weight="700" fill="#0b1b2b">Example: receiving a delivery against the order</text>
+  <text x="30" y="70" font-size="15" fill="#6b7280">Count what is actually in the boxes. The paperwork is what was promised, not what arrived.</text>
+  <rect x="30" y="88" width="800" height="40" rx="8" fill="#0b1b2b"/>
+  <g font-size="13" font-weight="700" fill="#fff" letter-spacing=".5">
+    <text x="48" y="113">PART</text><text x="262" y="113" text-anchor="middle">ORDERED</text><text x="352" y="113" text-anchor="middle">NOTE SAYS</text><text x="442" y="113" text-anchor="middle">COUNTED</text><text x="500" y="113">WHAT YOU DO</text>
+  </g>
+  <g font-size="15" fill="#0f1720">
+    <rect x="30" y="132" width="800" height="62" fill="#f6f7f9"/>
+    <text x="48" y="160" font-weight="700">Brake pads, front</text><text x="48" y="180" font-size="13" fill="#6b7280">BP-1001</text>
+    <text x="262" y="168" text-anchor="middle">10</text><text x="352" y="168" text-anchor="middle">10</text><text x="442" y="168" text-anchor="middle" font-weight="700" fill="#d62828">8</text>
+    <text x="500" y="160">Receive <tspan font-weight="700">8</tspan>. The 2 short are</text><text x="500" y="180">recorded on the receipt.</text>
+
+    <rect x="30" y="198" width="800" height="62" fill="#ffffff"/>
+    <text x="48" y="226" font-weight="700">Oil filter</text><text x="48" y="246" font-size="13" fill="#6b7280">OF-2002</text>
+    <text x="262" y="234" text-anchor="middle">12</text><text x="352" y="234" text-anchor="middle">12</text><text x="442" y="226" text-anchor="middle" font-weight="700">12</text><text x="442" y="246" text-anchor="middle" font-size="13" fill="#b45309">2 crushed</text>
+    <text x="500" y="226">Receive 12; mark the 2 damaged or claim</text><text x="500" y="246">them. Keep box and packaging, take a photo.</text>
+
+    <rect x="30" y="264" width="800" height="62" fill="#f6f7f9"/>
+    <text x="48" y="292" font-weight="700">Wiper blade 22"</text><text x="48" y="312" font-size="13" fill="#6b7280">WB-0022</text>
+    <text x="262" y="300" text-anchor="middle">6</text><text x="352" y="300" text-anchor="middle">6</text><text x="442" y="300" text-anchor="middle" font-weight="700" fill="#16a34a">6</text>
+    <text x="500" y="292">Receive 6. No barcode? Print labels,</text><text x="500" y="312">then put away: scan the bin, then the items.</text>
+  </g>
+</svg>

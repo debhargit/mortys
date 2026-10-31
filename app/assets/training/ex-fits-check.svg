@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 400" font-family="Segoe UI, system-ui, -apple-system, sans-serif">
+  <rect width="860" height="400" rx="18" fill="#ffffff"/>
+  <text x="30" y="44" font-size="22" font-weight="700" fill="#0b1b2b">Example: does the part fit the customer's car?</text>
+  <text x="30" y="70" font-size="15" fill="#6b7280">Read the "fits" line on the part and compare it with the vehicle, one item at a time.</text>
+
+  <!-- the part -->
+  <rect x="30" y="92" width="370" height="280" rx="14" fill="#f6f7f9" stroke="#e5e7eb"/>
+  <text x="50" y="124" font-size="13" font-weight="700" fill="#6b7280" letter-spacing="1">THE PART</text>
+  <text x="50" y="154" font-size="20" font-weight="700" fill="#0b1b2b">Brake pads, front</text>
+  <text x="50" y="178" font-size="14" fill="#6b7280">BP-1001 · bin A1</text>
+  <rect x="50" y="194" width="330" height="160" rx="10" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="66" y="222" font-size="13" font-weight="700" fill="#0891b2">FITS</text>
+  <text x="66" y="250" font-size="16" fill="#0f1720">Make: Toyota</text>
+  <text x="66" y="278" font-size="16" fill="#0f1720">Model: Corolla</text>
+  <text x="66" y="306" font-size="16" fill="#0f1720">Years: 2009 – 2013</text>
+  <text x="66" y="334" font-size="16" fill="#0f1720">Engine: 1.8 L</text>
+
+  <!-- customer A -->
+  <rect x="430" y="92" width="400" height="132" rx="14" fill="#16a34a12" stroke="#16a34a"/>
+  <text x="450" y="122" font-size="13" font-weight="700" fill="#16a34a" letter-spacing="1">CUSTOMER 1 · 2012 COROLLA 1.8 L</text>
+  <g font-size="15" fill="#0f1720">
+    <text x="450" y="152">✔ Toyota</text><text x="560" y="152">✔ Corolla</text>
+    <text x="450" y="178">✔ 2012 is in 2009–2013</text><text x="660" y="178">✔ 1.8 L</text>
+  </g>
+  <rect x="450" y="192" width="120" height="24" rx="12" fill="#16a34a"/>
+  <text x="510" y="209" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">Sell it</text>
+
+  <!-- customer B -->
+  <rect x="430" y="240" width="400" height="132" rx="14" fill="#d6282812" stroke="#d62828"/>
+  <text x="450" y="270" font-size="13" font-weight="700" fill="#d62828" letter-spacing="1">CUSTOMER 2 · 2015 COROLLA 1.8 L</text>
+  <g font-size="15" fill="#0f1720">
+    <text x="450" y="300">✔ Toyota</text><text x="560" y="300">✔ Corolla</text>
+    <text x="450" y="326">✘ 2015 is not in 2009–2013</text><text x="680" y="326">✔ 1.8 L</text>
+  </g>
+  <rect x="450" y="340" width="340" height="24" rx="12" fill="#d62828"/>
+  <text x="620" y="357" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">Say so, and check with a senior colleague</text>
+</svg>

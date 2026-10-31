@@ -18,12 +18,59 @@
   input,select,button,textarea{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
   button{cursor:pointer;background:var(--card)} button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600} button.sm{padding:3px 9px;font-size:13px}
   .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 12px} .tabs button{border-radius:999px;padding:6px 14px;font-size:14px} .tabs button.on{background:var(--navy);border-color:var(--navy);color:#fff}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
-  .mod{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;cursor:pointer;display:flex;flex-direction:column;gap:6px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+  .mod{background:var(--card);border:1px solid var(--line);border-radius:14px;cursor:pointer;display:flex;flex-direction:column;overflow:hidden;transition:transform .15s,box-shadow .15s}
+  .mod:hover{transform:translateY(-2px);box-shadow:0 10px 24px -12px rgba(11,27,43,.35)}
+  .mod .cv{height:118px;position:relative;background:linear-gradient(135deg,var(--h),var(--navy));overflow:hidden}
+  .mod .cv img{width:100%;height:100%;object-fit:cover;object-position:left top;opacity:.92;display:block}
+  .mod .cv::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,transparent 20%,var(--h) 135%);opacity:.75;pointer-events:none}
+  .mod .cv .ic{z-index:1}
+  .mod .cv .ic{position:absolute;left:12px;bottom:-1px;width:42px;height:42px;border-radius:12px 12px 0 0;background:var(--card);display:grid;place-items:center;font-size:22px}
+  .mod .cv .big{position:absolute;inset:0;display:grid;place-items:center;font-size:46px;filter:drop-shadow(0 4px 10px rgba(0,0,0,.3))}
+  .mod .bd{padding:10px 14px 14px;display:flex;flex-direction:column;gap:6px;flex:1} .mod .bd div:last-child{margin-top:auto}
   .mod b{font-size:15.5px} .mod small{color:var(--muted)}
+  .prog{height:8px;background:var(--chip);border-radius:99px;overflow:hidden;margin:4px 0 14px} .prog i{display:block;height:100%;background:linear-gradient(90deg,var(--ok),#4ade80);border-radius:99px}
+  /* a lesson */
+  .hero{--h:var(--navy);position:relative;border-radius:16px;padding:22px 24px 20px;margin-bottom:12px;color:#fff;background:radial-gradient(120% 140% at 100% 0,rgba(255,255,255,.14),transparent 55%),linear-gradient(135deg,var(--h),var(--navy) 85%);overflow:hidden}
+  .hero .crumb{font-size:12.5px;opacity:.75;margin-bottom:8px} .hero .crumb a{color:#fff}
+  .hero .icon{position:absolute;right:18px;top:12px;font-size:76px;opacity:.9;filter:drop-shadow(0 6px 14px rgba(0,0,0,.35))}
+  .hero h1{margin:0;font-size:26px;line-height:1.2;max-width:calc(100% - 100px)} .hero p{margin:6px 0 12px;opacity:.88;max-width:62ch}
+  .hero .meta{display:flex;gap:6px;flex-wrap:wrap} .hero .meta span{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.22);border-radius:999px;padding:2px 10px;font-size:12.5px}
+  .hero.reading,.hero h1.reading{box-shadow:none;background-color:transparent} .hero h1.reading{text-decoration:underline 3px #fde68a;text-underline-offset:6px}
+  .inl{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px;padding:10px 12px;background:var(--bg);border-radius:10px;font-size:13px} .inl b{color:var(--muted);font-weight:600;margin-right:2px}
+  .inl a{color:inherit;text-decoration:none;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:1px 10px} .inl a:hover{border-color:var(--h,var(--navy))}
+  .doc{max-width:780px;line-height:1.65;font-size:15.5px;overflow-wrap:anywhere}
+  @media (max-width:600px){ .hero{padding:18px 16px} .hero .icon{font-size:40px;right:12px;top:10px} .hero h1{font-size:22px;max-width:calc(100% - 52px)} .cover{padding:30px 20px} .cover h2{font-size:28px} }
+  .doc [data-pi],.doc .sec{scroll-margin-top:16px;border-radius:8px}
+  .doc h3{font-size:16.5px;margin:0 0 4px;display:flex;gap:9px;align-items:center} .doc h3::before{content:"";width:4px;height:18px;border-radius:4px;background:var(--h,var(--red));flex:none}
+  .doc p{margin:0} .doc p+p{margin-top:6px}
+  .doc ul{margin:6px 0 0;padding:0;list-style:none} .doc li{position:relative;padding:3px 0 3px 22px} .doc li::before{content:"";position:absolute;left:6px;top:.8em;width:7px;height:7px;border-radius:50%;background:var(--h,var(--red))}
+  .doc li b.k{display:inline-grid;place-items:center;min-width:22px;height:22px;border-radius:6px;background:var(--navy);color:#fff;font-size:12px;margin-right:4px}
+  .doc kbd{font:600 12px/1 ui-monospace,Consolas,monospace;padding:2px 6px;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;background:var(--card)}
+  .doc .sep{color:var(--h,var(--red));font-weight:700;padding:0 1px} .doc .q{background:var(--chip);border-radius:5px;padding:0 5px;font-weight:600;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+  .doc .warn{background:#d6282812;border-left:4px solid var(--red);padding:10px 14px;border-radius:0 10px 10px 0}  .fig{margin:16px 0 4px;max-width:780px} .fig .fr{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--card);box-shadow:0 12px 30px -18px rgba(11,27,43,.45);cursor:zoom-in}
+  .fig .bar{display:flex;gap:5px;align-items:center;padding:7px 10px;background:var(--chip);border-bottom:1px solid var(--line);font-size:11.5px;color:var(--muted)} .fig .bar i{width:9px;height:9px;border-radius:50%;background:#f87171} .fig .bar i+i{background:#fbbf24} .fig .bar i+i+i{background:#4ade80;margin-right:6px}
+  .fig img{display:block;width:100%;height:auto} .fig.ex .fr{border-color:transparent;background:#fff}
+  .fig.phone .fr{max-width:270px;margin:0 auto;border:8px solid #111827;border-radius:30px}
+  .fig figcaption{font-size:13px;color:var(--muted);padding:7px 2px 0;display:flex;gap:6px;align-items:baseline;flex-wrap:wrap} .fig.phone figcaption{justify-content:center;text-align:center}
+  .fig figcaption .tag{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:1px 7px;border-radius:999px;background:var(--chip);color:var(--ink)} .fig.ex figcaption .tag{background:#f59e0b2e;color:var(--warn)}
+  .fig figcaption b{color:var(--ink)}
+  .lb{position:fixed;inset:0;background:rgba(5,10,18,.86);z-index:70;display:flex;align-items:center;justify-content:center;padding:3vh 3vw;cursor:zoom-out;flex-direction:column;gap:10px}
+  .lb img{max-width:100%;max-height:88vh;border-radius:10px;background:#fff;box-shadow:0 20px 60px rgba(0,0,0,.5)} .lb div{color:#e5e7eb;font-size:14px;text-align:center;max-width:900px}
+  .bottom{position:sticky;bottom:0;background:linear-gradient(transparent,var(--bg) 35%);padding:18px 0 10px;z-index:5}
+  /* the manual */
+  .cover{border-radius:18px;padding:44px 32px;color:#fff;background:radial-gradient(90% 120% at 100% 0,rgba(214,40,40,.55),transparent 60%),linear-gradient(140deg,#13283f,var(--navy));margin-bottom:12px;position:relative;overflow:hidden}
+  .cover .k{font-size:12px;letter-spacing:3px;text-transform:uppercase;opacity:.7} .cover h2{font-size:34px;margin:6px 0 8px;line-height:1.15} .cover p{opacity:.85;margin:0 0 4px;max-width:60ch}
+  .cover .bk{position:absolute;right:28px;bottom:-14px;font-size:120px;opacity:.18}
+  .toc2{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:6px;margin:0;padding:0;list-style:none;counter-reset:ch}
+  .toc2 a{display:flex;gap:10px;align-items:center;padding:8px 10px;border-radius:10px;color:inherit;text-decoration:none;border:1px solid var(--line);background:var(--card)} .toc2 a:hover{border-color:var(--h)}
+  .toc2 .n{flex:none;width:30px;height:30px;border-radius:9px;display:grid;place-items:center;color:#fff;background:var(--h);font-weight:700;font-size:13px} .toc2 .e{margin-left:auto;font-size:18px}
+  .chap{border-top:6px solid var(--h)} .chap .ch{display:flex;gap:14px;align-items:center;margin-bottom:6px} .chap .ch .e{font-size:40px;line-height:1}
+  .chap .ch small{display:block;color:var(--h);font-weight:700;letter-spacing:1.5px;text-transform:uppercase;font-size:11.5px} .chap .ch h2{font-size:22px;margin:2px 0 0}
   .pill{display:inline-block;font-size:12px;padding:1px 9px;border-radius:999px;background:var(--chip);white-space:nowrap}
   .pill.ok{background:#16a34a22;color:var(--ok)} .pill.bad{background:#d6282822;color:var(--red)} .pill.warn{background:#f59e0b22;color:var(--warn)}
-  .lesson{white-space:pre-wrap;line-height:1.6}
+  .doc>*+*{margin-top:1.15em} .reading{background:#fde68a55;box-shadow:0 0 0 8px #fde68a55;border-radius:4px}
+  .voice{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 12px} .voice select{padding:5px 6px} .voice small{color:var(--muted)}
   .q{border-top:1px solid var(--line);padding:12px 0} .q b{display:block;margin-bottom:6px}
   .q label{display:flex;gap:8px;align-items:flex-start;padding:5px 8px;border-radius:8px;cursor:pointer} .q label:hover{background:var(--chip)}
   table{width:100%;border-collapse:collapse} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
@@ -35,6 +82,17 @@
   .results div{padding:6px 8px;border-bottom:1px solid var(--line);cursor:pointer} .results div:hover{background:var(--chip)}
   .empty{color:var(--muted);text-align:center;padding:20px}
   .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60}
+  .modal{position:fixed;inset:0;background:rgba(10,15,25,.55);display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow:auto;z-index:40} .modal .card{max-width:760px;width:100%}
+  details summary{cursor:pointer}
+  @media print{
+    header,.tabs,.no-print,.vsa,.vsa-btn,.toast,.modal,.lb,.bottom{display:none!important}
+    html,body{background:#fff;color:#000;font-size:11pt} main{max-width:none;padding:0}
+    *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .card{border:0;padding:0;margin:0 0 14pt;break-inside:auto} .chap{break-before:page;border-top-width:4pt;padding-top:8pt} .cover{break-after:page;padding:60pt 30pt}
+    .pill{border:1px solid #999;background:none} .doc{max-width:none;font-size:10.5pt} .doc h3{break-after:avoid}
+    .fig{break-inside:avoid} .fig .fr{box-shadow:none} .fig img{max-height:9cm;width:auto;max-width:100%;margin:0 auto} .fig.phone .fr{max-width:5cm}
+    .toc2 a{border:0;padding:3pt 0}
+  }
 </style>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
@@ -44,7 +102,7 @@
 <body>
 <header><h1>Training</h1><nav><a href="/admin.html">Admin</a></nav></header>
 <main>
-  <div class="tabs" id="tabs"><button data-t="mine" class="on">My training</button><button data-t="till">Practice till</button></div>
+  <div class="tabs" id="tabs"><button data-t="mine" class="on">My training</button><button data-t="record">My record</button><button data-t="manual">Manual</button><button data-t="till">Practice till</button></div>
   <div id="out"><div class="empty">Loading…</div></div>
 </main>
 <div class="toast" id="toast"></div>
@@ -68,27 +126,200 @@
     return '<span class="pill ' + (ST[m.status] || '') + '">' + esc(t) + '</span>' + (m.required && m.status !== 'passed' ? ' <span class="pill warn">required</span>' : '');
   }
 
+  // ---------------------------------------------------- how lessons look --
+  // Each lesson's picture and colour; a new lesson gets the book.
+  var LOOK = {
+    'getting-around': ['🧭', '#0891b2'], 'pos-sale': ['🛒', '#d62828'], 'quotes-orders': ['🧾', '#7c3aed'], 'returns': ['↩️', '#b45309'], 'after-sale': ['🔁', '#9333ea'],
+    'drawer': ['💵', '#16a34a'], 'pos-addons': ['🎁', '#db2777'], 'timeclock': ['⏰', '#0284c7'], 'cash-office': ['🏦', '#15803d'], 'customers': ['🤝', '#2563eb'],
+    'customer-records': ['📇', '#4f46e5'], 'parts-stock': ['🔩', '#475569'], 'purchasing': ['📦', '#c2410c'], 'receiving': ['🚚', '#ea580c'], 'warehouse-mobile': ['📱', '#0d9488'],
+    'counts': ['🔢', '#0f766e'], 'clearance': ['🏷️', '#e11d48'], 'ai-assistant': ['🤖', '#6d28d9'], 'receivables': ['📥', '#0369a1'], 'payables-banking': ['📤', '#1d4ed8'],
+    'loans-rent': ['🏠', '#a16207'], 'accounting': ['📒', '#334155'], 'budget-forecast': ['📈', '#059669'], 'reports-planning': ['📊', '#9a3412'], 'people': ['👥', '#be185d'],
+    'delivery-drivers': ['🛵', '#ca8a04'], 'team-chat': ['💬', '#16a34a'], 'documents-forms': ['🗂️', '#57534e'], 'stores-suppliers': ['🏬', '#0e7490'], 'settings-security': ['🛡️', '#1e293b'],
+    'management-sops': ['📋', '#44403c'],
+  };
+  var look = function (key) { return LOOK[key] || ['📘', '#0b1b2b']; };
+  var minutes = function (m) { return Math.max(1, Math.round(String(m.body || '').split(/\s+/).length / 200)); };
+  // A line of lesson text: menu paths (Sales & POS > Quotes), keys (F9) and
+  // "button names" stand out.
+  function fmt(t) {
+    return esc(t).replace(/\s&gt;\s/g, ' <span class="sep">›</span> ')
+      .replace(/\b(F\d{1,2}|Ctrl\+[A-Z])\b/g, '<kbd>$1</kbd>')
+      .replace(/&quot;([^&<]{2,40}?)&quot;/g, '<span class="q">$1</span>');
+  }
+  // One paragraph: a "Label: ..." start becomes its heading, "- " lines a
+  // list, and "Never ..." a warning.
+  function para(t) {
+    var lines = t.split('\n'), h = '', out = [], list = [], warn = /^(Never|Do not|Don't)\b/.test(t);
+    var lead = /^([A-Z0-9][^:.\n]{1,58}):\s+(.*)$/.exec(lines[0]);
+    if (lead && lead[1].split(/\s+/).length <= 10) { h = '<h3>' + fmt(lead[1]) + '</h3>'; lines[0] = lead[2].charAt(0).toUpperCase() + lead[2].slice(1); }
+    var flush = function () { if (list.length) { out.push('<ul>' + list.join('') + '</ul>'); list = []; } };
+    lines.forEach(function (l) {
+      var b = /^\s*-\s+(.*)$/.exec(l);
+      if (b) { var k = /^([A-Z0-9]{1,2}):\s+(.*)$/.exec(b[1]); list.push('<li>' + (k ? '<b class="k">' + esc(k[1]) + '</b>' + fmt(k[2]) : fmt(b[1])) + '</li>'); return; }
+      flush(); if (l.trim()) out.push('<p>' + (warn && !out.length ? '⚠️ ' : '') + fmt(l.trim()) + '</p>');
+    });
+    flush();
+    return { html: h + out.join(''), lead: lead ? lead[1] : '', warn: warn };
+  }
+  // The whole lesson body with its pictures. `pi`: tag paragraphs for the
+  // read-aloud highlight. Returns { html, sections } (sections: headings).
+  function body(m, pi, prefix) {
+    var figs = m.figures || [], n = 0, sections = [];
+    var fig = function (f) {
+      n++;
+      return '<figure class="fig' + (f.kind === 'example' ? ' ex' : '') + (f.phone ? ' phone' : '') + '"><div class="fr" data-zoom="' + esc(f.src) + '" data-cap="' + esc(f.title + ': ' + f.caption) + '">' +
+        (f.kind === 'screen' && !f.phone ? '<div class="bar"><i></i><i></i><i></i>' + esc(f.title) + '</div>' : '') +
+        '<img src="' + esc(f.src) + '" alt="' + esc(f.title) + '"' + (pi ? ' loading="lazy"' : '') + '></div><figcaption><span class="tag">' + (f.kind === 'example' ? 'Example' : 'Screen') + '</span><b>Figure ' + n + '.</b> ' + esc(f.caption) + '</figcaption></figure>';
+    };
+    var h = String(m.body || '').split(/\n\s*\n/).map(function (t, i) {
+      if (!t.trim()) return '';
+      var p = para(t.trim()), id = (prefix || 's') + '-' + i;
+      if (p.lead) sections.push({ id: id, label: p.lead });
+      return '<div class="sec' + (p.warn ? ' warn' : '') + '" id="' + id + '"' + (pi ? ' data-pi="' + i + '"' : '') + '>' + p.html + '</div>' +
+        figs.filter(function (f) { return f.after === i; }).map(fig).join('');
+    }).join('') + figs.filter(function (f) { return f.after < 0; }).map(fig).join('');
+    return { html: h, sections: sections };
+  }
+  function zoom(root) {
+    all('[data-zoom]', root).forEach(function (el) {
+      el.onclick = function () {
+        document.body.insertAdjacentHTML('beforeend', '<div class="lb" id="lb"><img src="' + esc(el.getAttribute('data-zoom')) + '" alt=""><div>' + esc(el.getAttribute('data-cap')) + '</div></div>');
+        var lb = $('#lb'), close = function () { lb.remove(); document.removeEventListener('keydown', key); }, key = function (e) { if (e.key === 'Escape') close(); };
+        lb.onclick = close; document.addEventListener('keydown', key);
+      };
+    });
+  }
+  function jump(root) {
+    all('[data-go]', root).forEach(function (a) { a.onclick = function (e) { e.preventDefault(); var t = document.getElementById(a.getAttribute('data-go')); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }; });
+  }
+
   // ------------------------------------------------------------ my training --
   function mine() {
     return api('/api/training/me').then(function (d) {
       canManage = d.can_manage;
-      if (canManage && !$('[data-t="team"]')) { $('#tabs').insertAdjacentHTML('beforeend', '<button data-t="team">Team</button><button data-t="edit">Lessons and questions</button>'); wire(); }
+      if (canManage && !$('[data-t="team"]')) { $('#tabs').insertAdjacentHTML('beforeend', '<button data-t="team">Team</button><button data-t="people">Employees</button><button data-t="search">Search</button><button data-t="edit">Lessons and questions</button>'); wire(); }
       var req = d.modules.filter(function (m) { return m.required; }), done = req.filter(function (m) { return m.status === 'passed'; }).length;
-      $('#out').innerHTML = '<div class="card"><h2>' + esc(d.name) + ': ' + done + ' of ' + req.length + ' required modules passed</h2><p class="sub">Read the lesson, then take the quiz. A pass lasts a year; you can retake a quiz any time.</p><div class="grid">' +
-        d.modules.map(function (m) { return '<div class="mod" data-k="' + esc(m.key) + '"><b>' + esc(m.title) + '</b><small>' + esc(m.summary || '') + '</small><div>' + statusPill(m) + '</div></div>'; }).join('') + '</div></div>';
+      $('#out').innerHTML = '<div class="card"><h2>' + esc(d.name) + ': ' + done + ' of ' + req.length + ' required modules passed</h2><div class="prog"><i style="width:' + (req.length ? Math.round(done / req.length * 100) : 100) + '%"></i></div><p class="sub">Read the lesson, then take the quiz. A pass lasts a year; you can retake a quiz any time.</p><div class="grid">' +
+        d.modules.map(function (m) {
+          var lk = look(m.key);
+          return '<div class="mod" data-k="' + esc(m.key) + '" style="--h:' + lk[1] + '"><div class="cv">' + (m.cover ? '<img src="' + esc(m.cover) + '" alt="" loading="lazy"><span class="ic">' + lk[0] + '</span>' : '<span class="big">' + lk[0] + '</span>') + '</div>' +
+            '<div class="bd"><b>' + esc(m.title) + '</b><small>' + esc(m.summary || '') + '</small><div>' + statusPill(m) + '</div></div></div>';
+        }).join('') + '</div></div>';
       all('[data-k]').forEach(function (x) { x.onclick = function () { lesson(x.getAttribute('data-k')); }; });
     });
   }
   function lesson(key) {
+    Voice.stop();
     api('/api/training/modules/' + encodeURIComponent(key)).then(function (m) {
-      $('#out').innerHTML = '<div class="card"><h2>' + esc(m.title) + '</h2><p class="sub">' + esc(m.summary || '') + '</p><div class="lesson">' + esc(m.body) + '</div></div>' +
-        '<div class="controls"><button id="bk">Back</button>' + (m.quiz && m.questions ? '<button class="primary" id="qz">Take the quiz (' + Math.min(12, m.questions) + ' questions, pass ' + m.pass_pct + '%)</button>' : '') + (m.practice ? '<button id="pt">Practise on the till</button>' : '') + '</div>';
+      // One block per paragraph, so the one being read aloud can be highlighted.
+      var lk = look(m.key), b = body(m, true), figs = (m.figures || []).length;
+      $('#out').innerHTML = '<div class="hero" style="--h:' + lk[1] + '"><span class="icon">' + lk[0] + '</span><div class="crumb"><a href="#" id="bk0">Training</a> › Lesson</div>' +
+        '<h1 data-pi="-1">' + esc(m.title) + '</h1><p>' + esc(m.summary || '') + '</p><div class="meta"><span>⏱ about ' + minutes(m) + ' min read</span>' + (figs ? '<span>🖼 ' + figs + ' picture' + (figs === 1 ? '' : 's') + '</span>' : '') +
+        (m.quiz && m.questions ? '<span>📝 quiz: ' + Math.min(12, m.questions) + ' questions, pass ' + m.pass_pct + '%</span>' : '<span>📖 reading, no quiz</span>') + (m.practice ? '<span>🛒 practice till</span>' : '') + '</div></div>' +
+        '<div class="card" style="--h:' + lk[1] + '"><div class="voice"><button id="vPlay">🔊 Listen</button><button id="vPrev" title="Back a paragraph" hidden>⏮</button><button id="vNext" title="Next paragraph" hidden>⏭</button>' +
+        '<select id="vRate" title="Speed"><option value="0.8">Slower</option><option value="1" selected>Normal speed</option><option value="1.2">Faster</option><option value="1.4">Fastest</option></select><small id="vMsg"></small></div>' +
+        (b.sections.length > 2 ? '<div class="inl"><b>In this lesson:</b>' + b.sections.map(function (s) { return '<a href="#" data-go="' + s.id + '">' + esc(s.label) + '</a>'; }).join('') + '</div>' : '') +
+        '<div class="lesson doc">' + b.html + '</div></div>' +
+        '<div class="controls bottom"><button id="bk">Back</button>' + (m.quiz && m.questions ? '<button class="primary" id="qz">Take the quiz (' + Math.min(12, m.questions) + ' questions, pass ' + m.pass_pct + '%)</button>' : '') + (m.practice ? '<button id="pt">Practise on the till</button>' : '') + '</div>';
+      window.scrollTo(0, 0);
+      zoom($('#out')); jump($('#out'));
+      $('#bk0').onclick = function (e) { e.preventDefault(); show(); };
       $('#bk').onclick = show;
       if ($('#qz')) $('#qz').onclick = function () { quiz(key); };
       if ($('#pt')) $('#pt').onclick = function () { tab = 'till'; show(); };
+      Voice.wire(key);
     }).catch(function (e) { toast(e.message); });
   }
+
+  // 🔊 Listen: the server reads the lesson with a Gemini or Google voice
+  // (voice.js), or, with neither set up, this computer's own voice does. It is
+  // read a part at a time, the paragraph being read is highlighted, and
+  // clicking a paragraph jumps there.
+  var Voice = (function () {
+    var cur = null;   // { key, provider, parts, i, playing, token, audio }
+    var NAME = { gemini: 'Gemini voice', google: 'Google voice', browser: 'this computer’s voice' };
+    function rate() { return parseFloat(($('#vRate') || {}).value) || 1; }
+    function url(i) { return '/api/training/modules/' + encodeURIComponent(cur.key) + '/voice/' + i; }
+    function msg(t) { var m = $('#vMsg'); if (m) m.textContent = t || ''; }
+    function mark(p) {
+      all('[data-pi]').forEach(function (el) { el.classList.toggle('reading', +el.getAttribute('data-pi') === p); });
+      var el = p == null ? null : $('[data-pi="' + p + '"]');
+      if (el) { var r = el.getBoundingClientRect(); if (r.top < 60 || r.bottom > innerHeight - 40) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+    }
+    function buttons() {
+      var b = $('#vPlay'); if (!b || !cur) return;
+      b.textContent = cur.playing ? '⏸ Pause' : cur.i > 0 && cur.i < cur.parts.length ? '▶ Carry on' : '🔊 Listen';
+      $('#vPrev').hidden = $('#vNext').hidden = !(cur.playing || cur.i > 0);
+    }
+    function halt() {
+      if (!cur) return;
+      cur.token++;
+      if (cur.audio) { cur.audio.onended = cur.audio.onerror = null; cur.audio.pause(); cur.audio = null; }
+      if (window.speechSynthesis) speechSynthesis.cancel();
+    }
+    function stop() { if (!cur) return; halt(); cur.playing = false; mark(null); cur = null; }
+    function pause() { halt(); cur.playing = false; buttons(); msg(''); }
+    function finished() { halt(); cur.playing = false; cur.i = 0; mark(null); buttons(); msg('Finished. Take the quiz below when you are ready.'); }
+    function play(i) {
+      halt();
+      if (i >= cur.parts.length) return finished();
+      cur.i = Math.max(0, i); cur.playing = true; buttons();
+      var token = cur.token, part = cur.parts[cur.i];
+      mark(part.p);
+      var next = function () { if (cur && cur.token === token && cur.playing) play(cur.i + 1); };
+      if (cur.provider === 'browser') {
+        if (!window.speechSynthesis) { pause(); msg('This browser cannot read aloud.'); return; }
+        var u = new SpeechSynthesisUtterance(part.text);
+        u.rate = rate(); u.lang = 'en-US';
+        u.onend = next;
+        u.onerror = function (e) { if (e.error !== 'interrupted' && e.error !== 'canceled') { pause(); msg('Could not read aloud: ' + e.error); } };
+        speechSynthesis.speak(u);
+        msg('Reading with ' + NAME.browser);
+        return;
+      }
+      var a = cur.audio = new Audio(url(cur.i));
+      a.playbackRate = rate();
+      a.onended = next;
+      a.onerror = function () {
+        if (!cur || cur.token !== token) return;
+        // Find out why, then carry on with the computer's own voice.
+        fetch(url(cur.i), { credentials: 'same-origin' }).then(function (r) { return r.json(); }).catch(function () { return {}; }).then(function (j) {
+          if (!cur || cur.token !== token) return;
+          cur.provider = 'browser'; play(cur.i);
+          msg(String(j.error || 'The voice service did not answer').replace(/[.\s]*$/, '.') + ' Using ' + NAME.browser + ' instead.');
+        });
+      };
+      msg(cur.i === 0 ? 'Getting the ' + NAME[cur.provider] + ' ready…' : 'Reading with the ' + NAME[cur.provider]);
+      a.onplaying = function () { if (cur && cur.token === token) msg('Reading with the ' + NAME[cur.provider]); };
+      a.play().catch(function () {});
+      // Have the next part made while this one plays, so there is no gap.
+      if (cur.i + 1 < cur.parts.length) fetch(url(cur.i + 1), { credentials: 'same-origin' }).catch(function () {});
+    }
+    function wire(key) {
+      $('#vPlay').onclick = function () {
+        if (cur && cur.key === key) { if (cur.playing) pause(); else play(cur.i); return; }
+        msg('Loading…');
+        api('/api/training/modules/' + encodeURIComponent(key) + '/voice').then(function (v) {
+          cur = { key: key, provider: v.provider, parts: v.parts, i: 0, playing: false, token: 0, audio: null };
+          play(0);
+        }).catch(function (e) { msg(e.message); });
+      };
+      $('#vPrev').onclick = function () { if (!cur) return; var p = cur.parts[cur.i].p, i = cur.i; while (i > 0 && cur.parts[i].p === p) i--; var q = cur.parts[i].p; while (i > 0 && cur.parts[i - 1].p === q) i--; play(i); };
+      $('#vNext').onclick = function () { if (!cur) return; var p = cur.parts[cur.i].p, i = cur.i; while (i < cur.parts.length && cur.parts[i].p === p) i++; play(i); };
+      $('#vRate').onchange = function () { if (cur && cur.audio) cur.audio.playbackRate = rate(); else if (cur && cur.playing && cur.provider === 'browser') play(cur.i); };
+      all('.lesson [data-pi]').forEach(function (el) {
+        el.onclick = function () {
+          if (!cur || !cur.playing) return;
+          var p = +el.getAttribute('data-pi'), i = cur.parts.findIndex(function (x) { return x.p === p; });
+          if (i >= 0) play(i);
+        };
+      });
+    }
+    window.addEventListener('pagehide', stop);
+    return { wire: wire, stop: stop };
+  })();
   function quiz(key) {
+    Voice.stop();
     api('/api/training/modules/' + encodeURIComponent(key) + '/quiz', 'POST').then(function (q) {
       $('#out').innerHTML = '<div class="card"><h2>Quiz: ' + esc(q.title) + '</h2><p class="sub">Pass mark ' + q.pass_pct + '%. Choose one answer for each question.</p>' +
         q.questions.map(function (x, i) { return '<div class="q"><b>' + (i + 1) + '. ' + esc(x.question) + '</b>' + x.choices.map(function (c, j) { return '<label><input type="radio" name="q' + x.id + '" value="' + j + '"> ' + esc(c) + '</label>'; }).join('') + '</div>'; }).join('') +
@@ -189,15 +420,218 @@
     };
   }
 
+  // ------------------------------------------------- training records --
+  // My record (everyone), Employees and Search (managers).
+  var STC = { passed: 'ok', completed: 'ok', attended: 'ok', done: 'ok', read: 'ok', expiring: 'warn', due: 'warn', 'in progress': 'warn', expired: 'bad', 'not passed': 'bad', failed: 'bad', overdue: 'bad' };
+  var pill = function (s) { return '<span class="pill ' + (STC[s] || '') + '">' + esc(s) + '</span>'; };
+  var dd = function (v) { if (!v) return ''; var s = String(v); return (s.length === 10 ? new Date(s + 'T12:00:00Z') : new Date(s)).toLocaleDateString('en-JM', { day: 'numeric', month: 'short', year: 'numeric', timeZone: s.length === 10 ? 'UTC' : 'America/Jamaica' }); };
+  var meta = null, peopleCache = null, current = null;
+  function modal(h) { closeModal(); document.body.insertAdjacentHTML('beforeend', '<div class="modal" id="mdl"><div class="card">' + h + '</div></div>'); $('#mdl').addEventListener('mousedown', function (e) { if (e.target.id === 'mdl') closeModal(); }); }
+  function closeModal() { var m = $('#mdl'); if (m) m.remove(); }
+  function loadMeta() { return meta ? Promise.resolve(meta) : api('/api/training/people').then(function (d) { meta = d; peopleCache = d.people; return d; }); }
+
+  function profileHtml(p, manage) {
+    var s = p.summary, u = p.person;
+    var chip = function (label, v, cls) { return '<span class="pill ' + (cls || '') + '" style="font-size:13px;padding:3px 10px">' + label + ': <b>' + v + '</b></span>'; };
+    var h = '<div class="card"><h2>' + esc(u.name) + (u.archived_at || u.disabled ? ' <span class="pill">past employee</span>' : '') + '</h2><p class="sub">' + esc(u.role) + (u.departments ? ' · ' + esc(u.departments) : '') + (u.employee_no ? ' · employee no ' + esc(u.employee_no) : '') + ' · printed ' + esc(dd(new Date().toISOString())) + '</p>' +
+      '<div class="controls">' + chip('Required lessons passed', s.required_passed + ' of ' + s.required, s.required_passed === s.required ? 'ok' : 'warn') + (s.expired ? chip('Expired', s.expired, 'bad') : '') + (s.expiring ? chip('Expiring soon', s.expiring, 'warn') : '') +
+      (s.not_passed ? chip('Not passed', s.not_passed, 'bad') : '') + (s.overdue ? chip('Overdue', s.overdue, 'bad') : '') + (s.due ? chip('Assigned, to do', s.due, 'warn') : '') + chip('Hours this year', s.hours_year) + chip('Other training', s.records) +
+      (s.last_activity ? chip('Last training', esc(dd(s.last_activity))) : '') + '</div>' +
+      '<div class="controls no-print">' + (manage ? '<button class="primary" id="pAdd">Add training record</button><button id="pAsg">Assign training</button>' : '') + '<button id="pPrt">Print</button>' + (manage ? '<button id="pBack">Back to employees</button>' : '') + '</div></div>';
+    h += '<div class="card"><h2>Assigned training</h2>' + (p.assignments.length ? '<div class="scroll"><table><thead><tr><th>Training</th><th>Assigned</th><th>Due</th><th>Status</th><th class="no-print"></th></tr></thead><tbody>' + p.assignments.map(function (a) {
+      return '<tr><td>' + (a.lesson ? '<a href="#" data-les="' + esc(a.key) + '">' + esc(a.title) + '</a>' : esc(a.title)) + (a.note ? '<br><small class="sub">' + esc(a.note) + '</small>' : '') + '</td><td>' + esc(dd(a.assigned_at)) + (a.assigned_by ? '<br><small>' + esc(a.assigned_by) + '</small>' : '') + '</td><td>' + esc(dd(a.due_on)) + '</td>' +
+        '<td>' + pill(a.status) + (a.done_at ? '<br><small>' + esc(dd(a.done_at)) + '</small>' : '') + '</td><td class="no-print" style="white-space:nowrap">' + (manage && a.status !== 'done' ? (a.lesson ? '' : '<button class="sm" data-adone="' + a.id + '">Mark done</button> ') + '<button class="sm" data-acan="' + a.id + '">Cancel</button>' : '') + '</td></tr>';
+    }).join('') + '</tbody></table></div>' : '<p class="sub">Nothing assigned.</p>') + '</div>';
+    h += '<div class="card"><h2>Lessons and quizzes</h2><div class="scroll"><table><thead><tr><th>Lesson</th><th>Status</th><th class="n">Best</th><th>Passed</th><th>Expires</th><th class="n">Attempts</th><th>Opened</th></tr></thead><tbody>' + p.lessons.filter(function (l) { return l.required || l.attempts || l.opened || l.for_role; }).map(function (l) {
+      return '<tr style="' + (l.required || !l.quiz ? '' : 'opacity:.6') + '"><td><a href="#" data-les="' + esc(l.key) + '">' + esc(l.title) + '</a>' + (l.quiz && !l.required ? ' <small>(not required)</small>' : '') + '</td><td>' + pill(l.status) + '</td><td class="n">' + (l.best != null ? Math.round(l.best) + '%' : l.last ? Math.round(l.last.score) + '%' : '') + '</td>' +
+        '<td>' + esc(dd(l.passed_at)) + '</td><td>' + esc(dd(l.expires)) + '</td><td class="n">' + (l.attempts || '') + '</td><td>' + (l.opened ? l.opened + '×, last ' + esc(dd(l.last_opened)) : '<small class="sub">never</small>') + '</td></tr>';
+    }).join('') + '</tbody></table></div></div>';
+    h += '<div class="card"><h2>Other training, certificates and licences</h2>' + (p.records.length ? '<div class="scroll"><table><thead><tr><th>Date</th><th>Training</th><th>Provider / trainer</th><th class="n">Hours</th><th>Result</th><th>Expires</th><th>Certificate</th><th class="no-print"></th></tr></thead><tbody>' + p.records.map(function (r) {
+      return '<tr><td>' + esc(dd(r.completed_on)) + '</td><td><b>' + esc(r.title) + '</b><br><small>' + esc(r.kind_label) + '</small>' + (r.notes ? '<br><small class="sub">' + esc(r.notes) + '</small>' : '') + '</td><td>' + esc(r.provider || '') + (r.trainer ? (r.provider ? '<br>' : '') + '<small>trainer: ' + esc(r.trainer) + '</small>' : '') + '</td>' +
+        '<td class="n">' + (r.hours != null ? r.hours : '') + '</td><td>' + pill(r.status) + (r.score ? ' <small>' + esc(r.score) + '</small>' : '') + '</td><td>' + esc(dd(r.expires_on)) + '</td><td>' + esc(r.certificate_no || '') + (r.has_file ? ' <a target="_blank" href="/api/training/records/' + r.id + '/file">📄 view</a>' : '') + '</td>' +
+        '<td class="no-print" style="white-space:nowrap">' + (manage ? '<button class="sm" data-redit="' + r.id + '">Edit</button> <button class="sm" data-rdel="' + r.id + '">Delete</button>' : '') + '</td></tr>';
+    }).join('') + '</tbody></table></div>' : '<p class="sub">None recorded.' + (manage ? ' Add courses, certificates and licences, on-the-job training and inductions with "Add training record".' : '') + '</p>') + '</div>';
+    h += '<div class="card"><details><summary><b>Every quiz attempt (' + p.attempts.length + ')</b> · practice till: ' + (p.practice.done || 0) + ' done, ' + (p.practice.passed || 0) + ' right</summary>' + (p.attempts.length ? '<table><thead><tr><th>When</th><th>Lesson</th><th class="n">Score</th><th>Result</th></tr></thead><tbody>' + p.attempts.map(function (a) {
+      return '<tr><td>' + esc(new Date(a.finished_at).toLocaleString('en-JM', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Jamaica' })) + '</td><td>' + esc(a.title) + '</td><td class="n">' + Math.round(a.score) + '%</td><td>' + pill(a.passed ? 'passed' : 'not passed') + '</td></tr>';
+    }).join('') + '</tbody></table>' : '<p class="sub">No quizzes taken yet.</p>') + '</details></div>';
+    return h;
+  }
+  function wireProfile(p, manage) {
+    current = p;
+    all('[data-les]').forEach(function (a) { a.onclick = function (e) { e.preventDefault(); lesson(a.getAttribute('data-les')); }; });
+    $('#pPrt').onclick = function () { all('details').forEach(function (d) { d.open = true; }); window.print(); };
+    if (!manage) return;
+    var again = function () { meta = null; openPerson(p.person.id); };
+    $('#pBack').onclick = function () { tab = 'people'; show(); };
+    $('#pAdd').onclick = function () { recordForm(p, null, again); };
+    $('#pAsg').onclick = function () { assignForm([p.person.id], p.person.name, again); };
+    all('[data-redit]').forEach(function (b) { b.onclick = function () { recordForm(p, p.records.find(function (r) { return String(r.id) === b.getAttribute('data-redit'); }), again); }; });
+    all('[data-rdel]').forEach(function (b) { b.onclick = function () { if (confirm('Delete this training record?')) api('/api/training/records/' + b.getAttribute('data-rdel'), 'DELETE').then(function () { toast('Deleted'); again(); }).catch(function (e) { toast(e.message); }); }; });
+    all('[data-adone]').forEach(function (b) { b.onclick = function () { api('/api/training/assignments/' + b.getAttribute('data-adone') + '/done', 'POST').then(function () { toast('Marked done'); again(); }).catch(function (e) { toast(e.message); }); }; });
+    all('[data-acan]').forEach(function (b) { b.onclick = function () { if (confirm('Cancel this assignment?')) api('/api/training/assignments/' + b.getAttribute('data-acan'), 'DELETE').then(function () { toast('Cancelled'); again(); }).catch(function (e) { toast(e.message); }); }; });
+  }
+  function myRecord() {
+    return api('/api/training/me/record').then(function (p) { $('#out').innerHTML = profileHtml(p, false); wireProfile(p, false); });
+  }
+  function openPerson(id) {
+    return api('/api/training/people/' + id).then(function (p) { $('#out').innerHTML = profileHtml(p, true); wireProfile(p, true); window.scrollTo(0, 0); }).catch(function (e) { toast(e.message); });
+  }
+
+  function recordForm(p, r, done) {
+    r = r || {};
+    loadMeta().then(function (m) {
+      var opt = function (v, l, sel) { return '<option value="' + esc(v) + '"' + (sel ? ' selected' : '') + '>' + esc(l) + '</option>'; };
+      modal('<h2>' + (r.id ? 'Edit training record' : 'Add training record') + ' · ' + esc(p.person.name) + '</h2>' +
+        '<div class="controls"><div><label>Type</label><select id="rK">' + Object.keys(m.kinds).map(function (k) { return opt(k, m.kinds[k], r.kind === k); }).join('') + '</select></div><div style="flex:1;min-width:220px"><label>Training</label><input id="rT" value="' + esc(r.title || '') + '" placeholder="e.g. Forklift operator, First aid, Bosch diagnostics course" style="width:100%"></div></div>' +
+        '<div class="controls"><div style="flex:1;min-width:180px"><label>Provider / issued by</label><input id="rP" value="' + esc(r.provider || '') + '" style="width:100%"></div><div><label>Trainer (staff)</label><select id="rTu"><option value="">—</option>' + m.people.map(function (x) { return opt(x.id, x.name, r.trainer_user_id === x.id); }).join('') + '</select></div><div><label>or trainer name</label><input id="rTn" value="' + esc(r.trainer_name || '') + '"></div></div>' +
+        '<div class="controls"><div><label>Completed</label><input id="rD" type="date" value="' + esc(r.completed_on || '') + '"></div><div><label>Hours</label><input id="rH" type="number" step="0.5" min="0" value="' + (r.hours != null ? r.hours : '') + '" style="width:90px"></div>' +
+        '<div><label>Result</label><select id="rR">' + ['completed', 'passed', 'attended', 'in progress', 'failed'].map(function (x) { return opt(x, x, (r.result || 'completed') === x); }).join('') + '</select></div><div><label>Score / grade</label><input id="rS" value="' + esc(r.score || '') + '" style="width:100px"></div>' +
+        '<div><label>Expires</label><input id="rE" type="date" value="' + esc(r.expires_on || '') + '"></div><div><label>Certificate no</label><input id="rC" value="' + esc(r.certificate_no || '') + '" style="width:140px"></div></div>' +
+        '<label class="sub">Notes</label><textarea id="rN" rows="2" style="width:100%">' + esc(r.notes || '') + '</textarea>' +
+        '<div class="controls" style="margin-top:8px"><div><label>Certificate (PDF, JPG or PNG, up to 10 MB)' + (r.has_file ? ': one is attached; a new file replaces it' : '') + '</label><input id="rF" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"></div></div>' +
+        '<div class="controls"><button class="primary" id="rSave">Save</button><button id="rX">Cancel</button></div>');
+      $('#rX').onclick = closeModal;
+      $('#rSave').onclick = function () {
+        var fd = new FormData();
+        [['kind', '#rK'], ['title', '#rT'], ['provider', '#rP'], ['trainer_user_id', '#rTu'], ['trainer_name', '#rTn'], ['completed_on', '#rD'], ['hours', '#rH'], ['result', '#rR'], ['score', '#rS'], ['expires_on', '#rE'], ['certificate_no', '#rC'], ['notes', '#rN']].forEach(function (x) { fd.append(x[0], $(x[1]).value); });
+        if ($('#rF').files[0]) fd.append('file', $('#rF').files[0]);
+        this.disabled = true; var btn = this;
+        fetch(r.id ? '/api/training/records/' + r.id : '/api/training/people/' + p.person.id + '/records', { method: r.id ? 'PUT' : 'POST', credentials: 'same-origin', body: fd })
+          .then(function (res) { return res.json().catch(function () { return {}; }).then(function (j) { if (!res.ok) throw new Error(j.error || 'Error ' + res.status); return j; }); })
+          .then(function () { closeModal(); toast('Saved'); done(); }).catch(function (e) { btn.disabled = false; toast(e.message); });
+      };
+    });
+  }
+  function assignForm(ids, who, done) {
+    loadMeta().then(function (m) {
+      modal('<h2>Assign training</h2><p class="sub">To: ' + esc(who) + '. They get a notice in team chat (and a reminder when it is due). A lesson counts as done when they pass its quiz.</p>' +
+        '<div class="controls"><div style="flex:1;min-width:220px"><label>A lesson</label><select id="aM" style="width:100%"><option value="">— something else (type it) —</option>' + m.modules.map(function (x) { return '<option value="' + esc(x.key) + '">' + esc(x.title) + (x.quiz ? '' : ' (reading)') + '</option>'; }).join('') + '</select></div>' +
+        '<div style="flex:1;min-width:220px"><label>or other training</label><input id="aT" placeholder="e.g. Shadow the parts counter for a week" style="width:100%"></div></div>' +
+        '<div class="controls"><div><label>Due by</label><input id="aD" type="date"></div><div style="flex:1;min-width:220px"><label>Note to them</label><input id="aN" style="width:100%"></div></div>' +
+        '<div class="controls"><button class="primary" id="aGo">Assign</button><button id="aX">Cancel</button></div>');
+      $('#aX').onclick = closeModal;
+      $('#aGo').onclick = function () {
+        api('/api/training/assign', 'POST', { user_ids: ids, module_key: $('#aM').value || null, title: $('#aT').value, due_on: $('#aD').value || null, note: $('#aN').value })
+          .then(function (r) { closeModal(); toast('Assigned to ' + r.assigned + (r.skipped ? ' (' + r.skipped + ' already had it)' : '')); done(); }).catch(function (e) { toast(e.message); });
+      };
+    });
+  }
+
+  var pf = { q: '', dept: '', role: '', past: false };
+  function people() {
+    var qs = 'q=' + encodeURIComponent(pf.q) + (pf.dept ? '&dept=' + pf.dept : '') + (pf.role ? '&role=' + encodeURIComponent(pf.role) : '') + (pf.past ? '&past=1' : '');
+    return api('/api/training/people?' + qs).then(function (d) {
+      meta = d; if (!pf.q && !pf.dept && !pf.role) peopleCache = d.people;
+      var roles = []; (peopleCache || d.people).forEach(function (x) { if (roles.indexOf(x.role) < 0) roles.push(x.role); });
+      $('#out').innerHTML = '<div class="card"><h2>Employees</h2><p class="sub">Each person\'s training: lessons and quizzes, other training and certificates, and what is assigned. Click a name for the full record.</p>' +
+        '<div class="controls"><div style="flex:1;min-width:200px"><label>Find a person</label><input id="fQ" value="' + esc(pf.q) + '" placeholder="Name, email, employee no" style="width:100%"></div>' +
+        '<div><label>Department</label><select id="fD"><option value="">All</option>' + d.departments.map(function (x) { return '<option value="' + x.id + '"' + (String(x.id) === String(pf.dept) ? ' selected' : '') + '>' + esc(x.name) + '</option>'; }).join('') + '</select></div>' +
+        '<div><label>Role</label><select id="fR"><option value="">All</option>' + roles.map(function (x) { return '<option' + (x === pf.role ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('') + '</select></div>' +
+        '<label style="display:flex;gap:5px;align-items:center;color:inherit;font-size:13px"><input type="checkbox" id="fP"' + (pf.past ? ' checked' : '') + '> past employees too</label><button class="primary" id="fGo">Find</button></div>' +
+        '<div class="controls"><button id="fAsg" disabled>Assign training to the ticked people</button></div>' +
+        '<div class="scroll"><table><thead><tr><th><input type="checkbox" id="fAll"></th><th>Name</th><th>Required passed</th><th class="n">Expired</th><th class="n">Expiring</th><th class="n">Overdue</th><th class="n">To do</th><th class="n">Other training</th><th class="n">Hours this year</th><th>Last training</th></tr></thead><tbody>' +
+        (d.people.length ? d.people.map(function (x) {
+          return '<tr><td><input type="checkbox" data-pick="' + x.id + '" data-name="' + esc(x.name) + '"></td><td><a href="#" data-p="' + x.id + '"><b>' + esc(x.name) + '</b></a>' + (x.past ? ' <span class="pill">past</span>' : '') + '<br><small>' + esc(x.role) + (x.departments ? ' · ' + esc(x.departments) : '') + '</small></td>' +
+            '<td><span class="pill ' + (x.required_passed === x.required ? 'ok' : x.required_passed ? 'warn' : 'bad') + '">' + x.required_passed + ' of ' + x.required + '</span></td><td class="n">' + (x.expired ? '<span class="pill bad">' + x.expired + '</span>' : '') + '</td><td class="n">' + (x.expiring ? '<span class="pill warn">' + x.expiring + '</span>' : '') + '</td>' +
+            '<td class="n">' + (x.overdue ? '<span class="pill bad">' + x.overdue + '</span>' : '') + '</td><td class="n">' + (x.due || '') + '</td><td class="n">' + (x.records || '') + '</td><td class="n">' + (x.hours_year || '') + '</td><td>' + esc(dd(x.last_activity)) + '</td></tr>';
+        }).join('') : '<tr><td colspan="10" class="empty">Nobody found.</td></tr>') + '</tbody></table></div></div>';
+      var go = function () { pf = { q: $('#fQ').value.trim(), dept: $('#fD').value, role: $('#fR').value, past: $('#fP').checked }; people(); };
+      $('#fGo').onclick = go; $('#fQ').onkeydown = function (e) { if (e.key === 'Enter') go(); };
+      $('#fD').onchange = go; $('#fR').onchange = go; $('#fP').onchange = go;
+      var picks = function () { return all('[data-pick]:checked'); };
+      var upd = function () { $('#fAsg').disabled = !picks().length; $('#fAsg').textContent = 'Assign training to the ticked people' + (picks().length ? ' (' + picks().length + ')' : ''); };
+      all('[data-pick]').forEach(function (c) { c.onchange = upd; });
+      $('#fAll').onchange = function () { var on = this.checked; all('[data-pick]').forEach(function (c) { c.checked = on; }); upd(); };
+      $('#fAsg').onclick = function () { var p = picks(); assignForm(p.map(function (c) { return +c.getAttribute('data-pick'); }), p.map(function (c) { return c.getAttribute('data-name'); }).join(', '), people); };
+      all('[data-p]').forEach(function (a) { a.onclick = function (e) { e.preventDefault(); openPerson(a.getAttribute('data-p')); }; });
+    });
+  }
+
+  var sf = { q: '', user: '', dept: '', role: '', type: '', status: '', module: '', kind: '', from: '', to: '', expiring: '', past: false };
+  function search() {
+    return loadMeta().then(function (m) {
+      var roles = []; m.people.forEach(function (x) { if (roles.indexOf(x.role) < 0) roles.push(x.role); });
+      var sel = function (id, label, opts, val) { return '<div><label>' + label + '</label><select id="' + id + '">' + opts.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (String(o[0]) === String(val) ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select></div>'; };
+      $('#out').innerHTML = '<div class="card"><h2>Search training</h2><p class="sub">Across everyone: lessons and quizzes, other training and certificates, and assigned training. Words also search what the lessons say.</p>' +
+        '<div class="controls"><div style="flex:1;min-width:220px"><label>Words</label><input id="sQ" value="' + esc(sf.q) + '" placeholder="e.g. forklift, first aid, returns, a name, a certificate no" style="width:100%"></div>' +
+        sel('sU', 'Employee', [['', 'Everyone']].concat(m.people.map(function (x) { return [x.id, x.name]; })), sf.user) +
+        sel('sD', 'Department', [['', 'All']].concat(m.departments.map(function (x) { return [x.id, x.name]; })), sf.dept) +
+        sel('sR', 'Role', [['', 'All']].concat(roles.map(function (x) { return [x, x]; })), sf.role) + '</div>' +
+        '<div class="controls">' + sel('sT', 'What', [['', 'Everything'], ['lesson', 'Lessons and quizzes'], ['record', 'Other training and certificates'], ['assignment', 'Assigned training']], sf.type) +
+        sel('sS', 'Status', [['', 'Any'], ['attention', 'Needs attention'], ['passed', 'Passed'], ['completed', 'Completed'], ['expiring', 'Expiring soon'], ['expired', 'Expired'], ['not passed', 'Not passed'], ['not started', 'Not started'], ['failed', 'Failed'], ['in progress', 'In progress'], ['due', 'Assigned, to do'], ['overdue', 'Overdue'], ['done', 'Assigned, done'], ['read', 'Read'], ['not read', 'Not read']], sf.status) +
+        sel('sM', 'Lesson', [['', 'Any']].concat(m.modules.map(function (x) { return [x.key, x.title]; })), sf.module) +
+        sel('sK', 'Type of training', [['', 'Any']].concat(Object.keys(m.kinds).map(function (k) { return [k, m.kinds[k]]; })), sf.kind) + '</div>' +
+        '<div class="controls"><div><label>Date from</label><input id="sF" type="date" value="' + esc(sf.from) + '"></div><div><label>to</label><input id="sTo" type="date" value="' + esc(sf.to) + '"></div>' +
+        sel('sE', 'Expiring within', [['', '—'], [30, '30 days'], [60, '60 days'], [90, '90 days'], [180, '6 months'], [365, 'a year']], sf.expiring) +
+        '<label style="display:flex;gap:5px;align-items:center;color:inherit;font-size:13px"><input type="checkbox" id="sP"' + (sf.past ? ' checked' : '') + '> past employees too</label><button class="primary" id="sGo">Search</button><button id="sClr">Clear</button><a href="#" id="sCsv">Download CSV</a></div>' +
+        '<div id="sOut"></div></div>';
+      var read = function () { sf = { q: $('#sQ').value.trim(), user: $('#sU').value, dept: $('#sD').value, role: $('#sR').value, type: $('#sT').value, status: $('#sS').value, module: $('#sM').value, kind: $('#sK').value, from: $('#sF').value, to: $('#sTo').value, expiring: $('#sE').value, past: $('#sP').checked }; };
+      var qs = function () { return Object.keys(sf).filter(function (k) { return sf[k] !== '' && sf[k] !== false; }).map(function (k) { return k + '=' + encodeURIComponent(sf[k] === true ? '1' : sf[k]); }).join('&'); };
+      var run = function () {
+        $('#sOut').innerHTML = '<div class="empty">Searching…</div>';
+        api('/api/training/search?' + qs()).then(function (d) {
+          $('#sOut').innerHTML = (d.lessons.length ? '<div class="note info"><b>Lessons that mention "' + esc(sf.q) + '":</b> ' + d.lessons.map(function (l) { return '<div style="margin-top:4px"><a href="#" data-les="' + esc(l.key) + '">' + esc(l.title) + '</a> <small class="sub">' + esc(l.snippet || '') + '</small></div>'; }).join('') + '</div>' : '') +
+            '<p class="sub">' + d.total + ' result' + (d.total === 1 ? '' : 's') + (d.total > d.rows.length ? ' (showing ' + d.rows.length + '; the CSV has all)' : '') + '</p>' +
+            '<div class="scroll"><table><thead><tr><th>Employee</th><th>Type</th><th>Training</th><th>Status</th><th>Date</th><th>Due / expires</th><th>Score / hours</th><th>Provider / trainer</th><th>Notes</th></tr></thead><tbody>' +
+            (d.rows.length ? d.rows.map(function (r) {
+              return '<tr><td><a href="#" data-p="' + r.user_id + '">' + esc(r.name) + '</a><br><small>' + esc(r.role) + (r.departments ? ' · ' + esc(r.departments) : '') + '</small></td><td><small>' + esc(r.type_label) + '</small></td><td>' + (r.key && r.type === 'lesson' ? '<a href="#" data-les="' + esc(r.key) + '">' + esc(r.title) + '</a>' : esc(r.title)) + (r.has_file ? ' 📄' : '') + '</td><td>' + pill(r.status) + '</td>' +
+                '<td>' + esc(dd(r.date)) + '</td><td>' + (r.due ? 'due ' + esc(dd(r.due)) : '') + (r.expires ? 'expires ' + esc(dd(r.expires)) : '') + '</td><td>' + esc(r.score || '') + (r.hours != null ? ' ' + r.hours + ' h' : '') + '</td><td>' + esc(r.provider || '') + (r.trainer ? ' <small>' + esc(r.trainer) + '</small>' : '') + (r.certificate_no ? '<br><small>no ' + esc(r.certificate_no) + '</small>' : '') + '</td><td><small>' + esc(r.detail || '') + '</small></td></tr>';
+            }).join('') : '<tr><td colspan="9" class="empty">Nothing matches.</td></tr>') + '</tbody></table></div>';
+          all('[data-p]', $('#sOut')).forEach(function (a) { a.onclick = function (e) { e.preventDefault(); openPerson(a.getAttribute('data-p')); }; });
+          all('[data-les]', $('#sOut')).forEach(function (a) { a.onclick = function (e) { e.preventDefault(); lesson(a.getAttribute('data-les')); }; });
+        }).catch(function (e) { $('#sOut').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+      };
+      $('#sGo').onclick = function () { read(); run(); };
+      $('#sQ').onkeydown = function (e) { if (e.key === 'Enter') { read(); run(); } };
+      $('#sClr').onclick = function () { sf = { q: '', user: '', dept: '', role: '', type: '', status: '', module: '', kind: '', from: '', to: '', expiring: '', past: false }; search(); };
+      $('#sCsv').onclick = function (e) { e.preventDefault(); read(); location.href = '/api/training/search?format=csv&' + qs(); };
+      run();
+    });
+  }
+
   function wire() { all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; }); }
+  // ---------------------------------------------------------------- manual --
+  // Every lesson for this person's role, one after another, with contents,
+  // to read through or print (Print, then "Save as PDF" for a file).
+  function manual() {
+    return api('/api/training/manual').then(function (d) {
+      var roleNote = function (m) { return m.roles && m.roles.length ? ' <span class="pill">' + esc(m.roles.join(', ')) + '</span>' : ''; };
+      var pics = d.lessons.reduce(function (s, m) { return s + (m.figures || []).length; }, 0);
+      $('#out').innerHTML = '<div class="cover"><span class="bk">📘</span><div class="k">Vision Auto Solutions</div><h2>Staff manual</h2>' +
+        '<p>Every lesson for your role, in order, with ' + pics + ' pictures of the screens and worked examples. The Help button answers from the same text.</p>' +
+        '<p style="opacity:.7">' + d.lessons.length + ' chapters · prepared ' + esc(new Date().toLocaleDateString('en-JM', { timeZone: 'America/Jamaica', day: 'numeric', month: 'long', year: 'numeric' })) + ' for ' + esc(d.name || '') + '</p></div>' +
+        '<div class="card"><h2>Contents</h2><div class="controls no-print"><button class="primary" id="pm">Print / save as PDF</button></div><ol class="toc2">' +
+        d.lessons.map(function (m, i) { var lk = look(m.key); return '<li><a href="#" data-go="m-' + esc(m.key) + '" style="--h:' + lk[1] + '"><span class="n">' + (i + 1) + '</span>' + esc(m.title) + '<span class="e">' + lk[0] + '</span></a></li>'; }).join('') + '</ol></div>' +
+        d.lessons.map(function (m, i) {
+          var lk = look(m.key);
+          return '<div class="card chap" id="m-' + esc(m.key) + '" style="--h:' + lk[1] + '"><div class="ch"><span class="e">' + lk[0] + '</span><div><small>Chapter ' + (i + 1) + ' · about ' + minutes(m) + ' min</small><h2>' + esc(m.title) + roleNote(m) + '</h2></div></div>' +
+            '<p class="sub">' + esc(m.summary || '') + '</p><div class="doc">' + body(m, false, 'm' + i).html + '</div></div>';
+        }).join('');
+      $('#pm').onclick = function () { window.print(); };
+      zoom($('#out')); jump($('#out'));
+    });
+  }
   function show() {
+    Voice.stop();
     all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); });
-    var f = { mine: mine, till: function () { till(); return Promise.resolve(); }, team: team, edit: edit }[tab] || mine;
+    var f = { mine: mine, record: myRecord, people: people, search: search, manual: manual, till: function () { till(); return Promise.resolve(); }, team: team, edit: edit }[tab] || mine;
     f().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
   }
   wire();
-  if (tab !== 'mine') show(); else mine().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  if (location.hash === '#manual') tab = 'manual';
+  var hashTab = /^#(record|people|search)$/.exec(location.hash), hashLesson = /^#lesson=([a-z0-9-]+)$/.exec(location.hash);
+  if (hashTab) tab = hashTab[1];
+  // My training first (it adds the managers' tabs), then the tab the link asked for.
+  var want = tab; tab = 'mine';
+  var first = mine().then(function () { if (want !== 'mine') { tab = want; show(); } }).catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  if (hashLesson) Promise.resolve(first).then(function () { lesson(hashLesson[1]); });
+  // A notice link to this page while it is open.
+  window.addEventListener('hashchange', function () {
+    var t = /^#(record|people|search|manual)$/.exec(location.hash), l = /^#lesson=([a-z0-9-]+)$/.exec(location.hash);
+    if (l) lesson(l[1]); else if (t) { tab = t[1]; show(); }
+  });
 })();
 </script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
 </body>
 </html>

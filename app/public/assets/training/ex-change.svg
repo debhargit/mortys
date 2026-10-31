@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 420" font-family="Segoe UI, system-ui, -apple-system, sans-serif">
+  <rect width="860" height="420" rx="18" fill="#ffffff"/>
+  <text x="30" y="44" font-size="22" font-weight="700" fill="#0b1b2b">Example: taking cash and counting back the change</text>
+  <text x="30" y="70" font-size="15" fill="#6b7280">The till shows the change. Count it back to the customer, from the total up to what they gave you.</text>
+
+  <!-- receipt -->
+  <path d="M40 92 h260 v290 l-13 -10 -13 10 -13 -10 -13 10 -13 -10 -13 10 -13 -10 -13 10 -13 -10 -13 10 -13 -10 -13 10 -13 -10 -13 10 -13 -10 -13 10 -13 -10 -13 10 -13 -10 -13 10 z" fill="#f6f7f9" stroke="#e5e7eb"/>
+  <text x="170" y="122" font-size="15" font-weight="700" fill="#0b1b2b" text-anchor="middle">VISION AUTO SOLUTIONS</text>
+  <line x1="58" y1="136" x2="282" y2="136" stroke="#cbd5e1" stroke-dasharray="4 4"/>
+  <g font-size="14" fill="#0f1720">
+    <text x="58" y="162">Brake pads, front</text><text x="282" y="162" text-anchor="end">3,782.61</text>
+    <text x="58" y="188">GCT 15%</text><text x="282" y="188" text-anchor="end">567.39</text>
+  </g>
+  <line x1="58" y1="202" x2="282" y2="202" stroke="#cbd5e1"/>
+  <text x="58" y="228" font-size="16" font-weight="700" fill="#0b1b2b">TOTAL</text><text x="282" y="228" font-size="16" font-weight="700" fill="#0b1b2b" text-anchor="end">J$4,350.00</text>
+  <text x="58" y="258" font-size="14" fill="#0f1720">Cash received</text><text x="282" y="258" font-size="14" fill="#0f1720" text-anchor="end">J$5,000.00</text>
+  <rect x="52" y="272" width="236" height="34" rx="8" fill="#16a34a1f"/>
+  <text x="62" y="295" font-size="16" font-weight="700" fill="#16a34a">CHANGE</text><text x="280" y="295" font-size="16" font-weight="700" fill="#16a34a" text-anchor="end">J$650.00</text>
+  <text x="170" y="336" font-size="12" fill="#6b7280" text-anchor="middle">Returns within 14 days with this receipt</text>
+
+  <!-- count back -->
+  <text x="340" y="112" font-size="13" font-weight="700" fill="#6b7280" letter-spacing="1">COUNT IT BACK</text>
+  <g font-size="15" fill="#0f1720">
+    <circle cx="356" cy="146" r="16" fill="#0b1b2b"/><text x="356" y="151" fill="#fff" font-weight="700" text-anchor="middle">1</text>
+    <text x="384" y="141">Say the total: "That's four thousand three hundred and fifty."</text>
+    <circle cx="356" cy="196" r="16" fill="#0b1b2b"/><text x="356" y="201" fill="#fff" font-weight="700" text-anchor="middle">2</text>
+    <rect x="384" y="180" width="66" height="34" rx="6" fill="#c7a76b"/><text x="417" y="202" font-size="14" font-weight="700" fill="#3f2d0f" text-anchor="middle">$50</text>
+    <text x="464" y="202">"… four thousand four hundred,"</text>
+    <circle cx="356" cy="250" r="16" fill="#0b1b2b"/><text x="356" y="255" fill="#fff" font-weight="700" text-anchor="middle">3</text>
+    <rect x="384" y="234" width="66" height="34" rx="6" fill="#8fb3d9"/><text x="417" y="256" font-size="14" font-weight="700" fill="#10304f" text-anchor="middle">$100</text>
+    <text x="464" y="256">"… four thousand five hundred,"</text>
+    <circle cx="356" cy="304" r="16" fill="#0b1b2b"/><text x="356" y="309" fill="#fff" font-weight="700" text-anchor="middle">4</text>
+    <rect x="384" y="288" width="66" height="34" rx="6" fill="#9cc79a"/><text x="417" y="310" font-size="14" font-weight="700" fill="#1e3d1c" text-anchor="middle">$500</text>
+    <text x="464" y="310">"… and five thousand. Thank you!"</text>
+  </g>
+  <rect x="340" y="340" width="490" height="52" rx="10" fill="#eef2f7"/>
+  <text x="356" y="362" font-size="14" fill="#0f1720">50 + 100 + 500 = <tspan font-weight="700">J$650</tspan>, the change the till showed.</text>
+  <text x="356" y="382" font-size="14" fill="#0f1720">Keep their J$5,000 note on the drawer until the change is counted.</text>
+</svg>

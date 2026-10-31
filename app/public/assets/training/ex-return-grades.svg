@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 360" font-family="Segoe UI, system-ui, -apple-system, sans-serif">
+  <rect width="860" height="360" rx="18" fill="#ffffff"/>
+  <text x="30" y="44" font-size="22" font-weight="700" fill="#0b1b2b">Example: grading what came back</text>
+  <text x="30" y="70" font-size="15" fill="#6b7280">Stock to cash › Returns to grade. Look at the part and the box, then pick one grade.</text>
+  <g>
+    <rect x="30" y="92" width="255" height="240" rx="14" fill="#16a34a10" stroke="#16a34a"/>
+    <circle cx="74" cy="136" r="26" fill="#16a34a"/><text x="74" y="146" font-size="28" font-weight="800" fill="#fff" text-anchor="middle">A</text>
+    <text x="112" y="132" font-size="18" font-weight="700" fill="#0b1b2b">As new</text>
+    <text x="112" y="154" font-size="13" fill="#6b7280">sealed, nothing missing</text>
+    <g font-size="14" fill="#0f1720"><text x="50" y="196">Example: oil filter, box still</text><text x="50" y="216">sealed, customer bought</text><text x="50" y="236">the wrong size.</text></g>
+    <rect x="50" y="268" width="215" height="44" rx="10" fill="#16a34a"/>
+    <text x="157" y="295" font-size="14" font-weight="700" fill="#fff" text-anchor="middle">Stays in normal stock</text>
+  </g>
+  <g>
+    <rect x="302" y="92" width="255" height="240" rx="14" fill="#f59e0b14" stroke="#b45309"/>
+    <circle cx="346" cy="136" r="26" fill="#b45309"/><text x="346" y="146" font-size="28" font-weight="800" fill="#fff" text-anchor="middle">B</text>
+    <text x="384" y="132" font-size="18" font-weight="700" fill="#0b1b2b">Open box</text>
+    <text x="384" y="154" font-size="13" fill="#6b7280">opened, but sound</text>
+    <g font-size="14" fill="#0f1720"><text x="322" y="196">Example: brake pads, box</text><text x="322" y="216">opened for a test fit, pads</text><text x="322" y="236">unused.</text></g>
+    <rect x="322" y="268" width="215" height="44" rx="10" fill="#b45309"/>
+    <text x="429" y="288" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">Moves to an "open box"</text>
+    <text x="429" y="305" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">copy at a lower price</text>
+  </g>
+  <g>
+    <rect x="574" y="92" width="256" height="240" rx="14" fill="#d6282810" stroke="#d62828"/>
+    <circle cx="618" cy="136" r="26" fill="#d62828"/><text x="618" y="146" font-size="28" font-weight="800" fill="#fff" text-anchor="middle">C</text>
+    <text x="656" y="132" font-size="18" font-weight="700" fill="#0b1b2b">Not sellable</text>
+    <text x="656" y="154" font-size="13" fill="#6b7280">damaged or faulty</text>
+    <g font-size="14" fill="#0f1720"><text x="594" y="196">Example: alternator that</text><text x="594" y="216">failed after two days, a</text><text x="594" y="236">factory fault.</text></g>
+    <rect x="594" y="268" width="216" height="44" rx="10" fill="#d62828"/>
+    <text x="702" y="288" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">Written off, or claimed</text>
+    <text x="702" y="305" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">from the supplier</text>
+  </g>
+</svg>

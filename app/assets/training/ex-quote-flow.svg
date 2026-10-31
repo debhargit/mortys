@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 330" font-family="Segoe UI, system-ui, -apple-system, sans-serif">
+  <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/></marker></defs>
+  <rect width="860" height="330" rx="18" fill="#ffffff"/>
+  <text x="30" y="44" font-size="22" font-weight="700" fill="#0b1b2b">Example: two ways an order reaches payment</text>
+  <text x="30" y="70" font-size="15" fill="#6b7280">A quote waits for the customer to decide. A counter order waits at the cashier.</text>
+  <text x="30" y="108" font-size="13" font-weight="700" fill="#6b7280" letter-spacing="1">CUSTOMER WANTS A PRICE FIRST</text>
+  <g font-size="14" text-anchor="middle">
+    <rect x="30" y="120" width="150" height="62" rx="12" fill="#0b1b2b"/><text x="105" y="147" fill="#fff" font-weight="700">Build the cart</text><text x="105" y="166" fill="#cbd5e1" font-size="12">POS terminal</text>
+    <line x1="184" y1="151" x2="214" y2="151" stroke="#94a3b8" stroke-width="2" marker-end="url(#ar)"/>
+    <rect x="218" y="120" width="130" height="62" rx="12" fill="#eef2f7" stroke="#0b1b2b"/><text x="283" y="157" fill="#0b1b2b" font-weight="800">QUOTE</text>
+    <line x1="352" y1="151" x2="382" y2="151" stroke="#94a3b8" stroke-width="2" marker-end="url(#ar)"/>
+    <rect x="386" y="120" width="160" height="62" rx="12" fill="#eef2f7"/><text x="466" y="147" fill="#0b1b2b" font-weight="700">Sales &amp; POS › Quotes</text><text x="466" y="166" fill="#6b7280" font-size="12">print, accepted / declined</text>
+    <line x1="550" y1="151" x2="580" y2="151" stroke="#94a3b8" stroke-width="2" marker-end="url(#ar)"/>
+    <rect x="584" y="120" width="120" height="62" rx="12" fill="#eef2f7"/><text x="644" y="157" fill="#0b1b2b" font-weight="700">Load into POS</text>
+    <line x1="708" y1="151" x2="738" y2="151" stroke="#94a3b8" stroke-width="2" marker-end="url(#ar)"/>
+    <rect x="742" y="120" width="88" height="62" rx="12" fill="#d62828"/><text x="786" y="148" fill="#fff" font-weight="800">CHECK</text><text x="786" y="166" fill="#fff" font-weight="800">OUT F9</text>
+  </g>
+  <text x="30" y="226" font-size="13" font-weight="700" fill="#6b7280" letter-spacing="1">SHOP WITH A SEPARATE CASHIER</text>
+  <g font-size="14" text-anchor="middle">
+    <rect x="30" y="238" width="150" height="62" rx="12" fill="#0b1b2b"/><text x="105" y="265" fill="#fff" font-weight="700">Build the cart</text><text x="105" y="284" fill="#cbd5e1" font-size="12">at the counter</text>
+    <line x1="184" y1="269" x2="214" y2="269" stroke="#94a3b8" stroke-width="2" marker-end="url(#ar)"/>
+    <rect x="218" y="238" width="160" height="62" rx="12" fill="#eef2f7" stroke="#0b1b2b"/><text x="298" y="265" fill="#0b1b2b" font-weight="700">Send to cashier</text><text x="298" y="284" fill="#6b7280" font-size="12">tell them the order no.</text>
+    <line x1="382" y1="269" x2="412" y2="269" stroke="#94a3b8" stroke-width="2" marker-end="url(#ar)"/>
+    <rect x="416" y="238" width="160" height="62" rx="12" fill="#eef2f7"/><text x="496" y="265" fill="#0b1b2b" font-weight="700">Cashier queue</text><text x="496" y="284" fill="#6b7280" font-size="12">due for payment</text>
+    <line x1="580" y1="269" x2="610" y2="269" stroke="#94a3b8" stroke-width="2" marker-end="url(#ar)"/>
+    <rect x="614" y="238" width="216" height="62" rx="12" fill="#d62828"/><text x="722" y="274" fill="#fff" font-weight="800">Take payment &amp; invoice</text>
+  </g>
+</svg>
