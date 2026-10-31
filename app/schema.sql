@@ -6216,3 +6216,145 @@ INSERT INTO warehouse_settings (key, value) VALUES
   ('careers_notify_email', ''),   -- told about every new application; blank for none
   ('careers_templates', '{}')     -- edited email templates; blank ones use the defaults in careers.js
 ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Team chat, calls and staff calendar (team.js). Staff only. The All staff
+--  group (kind 'company') follows the active staff list automatically.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS team_conversations (
+  id               SERIAL PRIMARY KEY,
+  kind             TEXT NOT NULL CHECK (kind IN ('direct', 'group', 'company')),
+  title            TEXT,
+  description      TEXT,
+  direct_key       TEXT,                           -- "lowId:highId" for one-to-one chats
+  only_admins_post BOOLEAN NOT NULL DEFAULT FALSE,
+  event_id         INTEGER,                        -- the calendar event this group was made for
+  created_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  last_message_at  TIMESTAMPTZ,
+  archived_at      TIMESTAMPTZ                     -- closed by a group admin or management
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_team_conv_direct ON team_conversations (direct_key) WHERE direct_key IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_team_conv_company ON team_conversations (kind) WHERE kind = 'company';
+CREATE TABLE IF NOT EXISTS team_members (
+  conversation_id  INTEGER NOT NULL REFERENCES team_conversations(id) ON DELETE CASCADE,
+  user_id          INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role             TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member', 'admin')),
+  joined_at        TIMESTAMPTZ DEFAULT NOW(),
+  left_at          TIMESTAMPTZ,
+  last_read_id     BIGINT NOT NULL DEFAULT 0,
+  muted            BOOLEAN NOT NULL DEFAULT FALSE,
+  pinned           BOOLEAN NOT NULL DEFAULT FALSE,
+  PRIMARY KEY (conversation_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members (user_id) WHERE left_at IS NULL;
+CREATE TABLE IF NOT EXISTS team_messages (
+  id               BIGSERIAL PRIMARY KEY,
+  conversation_id  INTEGER NOT NULL REFERENCES team_conversations(id) ON DELETE CASCADE,
+  sender_id        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  kind             TEXT NOT NULL DEFAULT 'text' CHECK (kind IN ('text', 'file', 'memo', 'call', 'system')),
+  body             TEXT,
+  subject          TEXT,                           -- memos
+  require_ack      BOOLEAN NOT NULL DEFAULT FALSE,
+  meta             JSONB,                          -- calls: media, seconds, missed; voice notes: seconds
+  file_path        TEXT,                           -- random name in data/team-files (never served directly)
+  file_name        TEXT,
+  file_type        TEXT,
+  file_size        INTEGER,
+  reply_to         BIGINT REFERENCES team_messages(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  edited_at        TIMESTAMPTZ,
+  original_body    TEXT,                           -- the first wording of an edited message, for management
+  deleted_at       TIMESTAMPTZ,                    -- hidden from members, still visible to management
+  deleted_by       INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_team_messages_conv ON team_messages (conversation_id, id);
+CREATE INDEX IF NOT EXISTS idx_team_messages_sender ON team_messages (sender_id, created_at);
+CREATE TABLE IF NOT EXISTS team_reactions (
+  message_id  BIGINT NOT NULL REFERENCES team_messages(id) ON DELETE CASCADE,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  emoji       TEXT NOT NULL,
+  PRIMARY KEY (message_id, user_id, emoji)
+);
+CREATE TABLE IF NOT EXISTS team_acks (            -- memo acknowledgements
+  message_id  BIGINT NOT NULL REFERENCES team_messages(id) ON DELETE CASCADE,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  at          TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (message_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS team_presence (
+  user_id      INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  status       TEXT NOT NULL DEFAULT 'available',  -- available | busy | away | dnd
+  status_text  TEXT,
+  last_seen    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS team_notices (
+  id               SERIAL PRIMARY KEY,
+  user_id          INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind             TEXT NOT NULL,                  -- memo | event | reminder | call
+  title            TEXT NOT NULL,
+  body             TEXT,
+  conversation_id  INTEGER REFERENCES team_conversations(id) ON DELETE CASCADE,
+  message_id       BIGINT REFERENCES team_messages(id) ON DELETE CASCADE,
+  event_id         INTEGER,
+  urgent           BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  read_at          TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_team_notices_user ON team_notices (user_id, id DESC);
+CREATE TABLE IF NOT EXISTS team_calls (
+  id               SERIAL PRIMARY KEY,
+  conversation_id  INTEGER NOT NULL REFERENCES team_conversations(id) ON DELETE CASCADE,
+  started_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  media            TEXT NOT NULL DEFAULT 'audio',  -- audio | video
+  started_at       TIMESTAMPTZ DEFAULT NOW(),
+  ended_at         TIMESTAMPTZ,
+  answered         BOOLEAN NOT NULL DEFAULT FALSE,
+  seconds          INTEGER NOT NULL DEFAULT 0,
+  joined           JSONB NOT NULL DEFAULT '[]'::jsonb
+);
+CREATE TABLE IF NOT EXISTS team_audit (           -- management reading, searching, deleting, exporting
+  id               SERIAL PRIMARY KEY,
+  user_id          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  action           TEXT NOT NULL,
+  conversation_id  INTEGER REFERENCES team_conversations(id) ON DELETE SET NULL,
+  message_id       BIGINT,
+  detail           TEXT,
+  at               TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS team_events (
+  id               SERIAL PRIMARY KEY,
+  title            TEXT NOT NULL,
+  description      TEXT,
+  location         TEXT,
+  kind             TEXT NOT NULL DEFAULT 'meeting',  -- meeting | training | shift | deadline | leave | holiday | social | other
+  all_day          BOOLEAN NOT NULL DEFAULT FALSE,
+  starts_at        TIMESTAMPTZ NOT NULL,
+  ends_at          TIMESTAMPTZ NOT NULL,
+  visibility       TEXT NOT NULL DEFAULT 'invitees' CHECK (visibility IN ('company', 'invitees', 'private')),
+  recurrence       TEXT NOT NULL DEFAULT 'none',     -- none | daily | weekdays | weekly | monthly
+  recur_until      DATE,
+  remind_minutes   INTEGER NOT NULL DEFAULT 15,
+  video            BOOLEAN NOT NULL DEFAULT FALSE,   -- online: join a call in the event's chat
+  conversation_id  INTEGER REFERENCES team_conversations(id) ON DELETE SET NULL,
+  created_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ,
+  cancelled_at     TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_team_events_start ON team_events (starts_at);
+CREATE TABLE IF NOT EXISTS team_event_attendees (
+  event_id   INTEGER NOT NULL REFERENCES team_events(id) ON DELETE CASCADE,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  response   TEXT NOT NULL DEFAULT 'pending',      -- pending | yes | no | maybe
+  PRIMARY KEY (event_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS team_event_reminders ( -- one reminder per occurrence
+  event_id   INTEGER NOT NULL REFERENCES team_events(id) ON DELETE CASCADE,
+  occurs_at  TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (event_id, occurs_at)
+);
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('team_ice_servers', ''),       -- JSON list of STUN/TURN servers for calls; blank for the default
+  ('team_retention_days', '0')    -- delete chat messages older than this (memos kept); 0 keeps them
+ON CONFLICT (key) DO NOTHING;

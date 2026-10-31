@@ -1230,6 +1230,8 @@ const CAPABILITIES = [
   { key: 'docs.approve',        group: 'Documents',     label: 'Approve or reject submitted forms (leave, warnings, SOPs)' },
   { key: 'comms.journal',       group: 'Documents',     label: 'Read the communications journal (every email, SMS, chat and inquiry)' },
   { key: 'suppliers.manage',    group: 'Suppliers',     label: 'Run the supplier portal: logins, credit, consignment, orders, training' },
+  { key: 'team.announce',       group: 'Team chat & calendar', label: 'Send memos and announcements to all staff, post in All staff, put events on everyone’s calendar' },
+  { key: 'team.oversee',        group: 'Team chat & calendar', label: 'Management view: read every staff chat (including one-to-one), deleted messages, memo sign-off, call log, export' },
   { key: 'fleet.drive',         group: 'Deliveries & drivers', label: 'Driver app: take assigned jobs, share location while on shift' },
   { key: 'fleet.view',          group: 'Deliveries & drivers', label: 'See the dispatch board, live driver map and history' },
   { key: 'fleet.dispatch',      group: 'Deliveries & drivers', label: 'Create and assign driver jobs, set routes, clear alerts, make security-screen links' },
@@ -1246,7 +1248,7 @@ const RESTRICTED_CAPS = new Set([
   'comm.view', 'comm.rules', 'comm.approve', 'reps.manage', 'hr.manage', 'clock.manage', 'clock.approve', 'mkt.manage', 'ai.manage', 'training.manage',
   'ar.manage', 'ap.manage', 'bank.manage', 'payroll.view', 'payroll.run', 'payroll.approve', 'sys.audit', 'sys.security', 'sys.support', 'sys.network',
   'docs.manage', 'docs.confidential', 'docs.restricted', 'docs.approve', 'comms.journal',
-  'fleet.drive', 'fleet.view', 'fleet.dispatch', 'suppliers.manage',
+  'fleet.drive', 'fleet.view', 'fleet.dispatch', 'suppliers.manage', 'team.announce', 'team.oversee',
 ]);
 
 // Resolve a user's effective capability map across all three layers:
@@ -6553,6 +6555,8 @@ require('./commission').register(app, { query, getPool: () => pool, requireAdmin
 // Freelance reps (portal, invites, quotes, orders), tracked links, referrals (reps.js).
 // Careers page and applicant tracking (careers.js).
 require('./careers').register(app, { query, requireAdmin, requireCap, bcrypt });
+// Team chat, voice and video calls, notices and the staff calendar (team.js).
+require('./team').register(app, { query, requireAdmin, requireCap, userCan });
 const reps = require('./reps').register(app, {
   query, getPool: () => pool, requireAdmin, requireCap, bcrypt, posSaleHandler, nextQuoteNumber, notify,
   getEpoch: () => SESSION_EPOCH, totp: require('./security')._totp,

@@ -623,6 +623,30 @@ Security screen: the Security screen (fleet wall) is a full-screen live driver m
     questions: [],
   },
   {
+    key: 'team-chat', title: 'Team chat, calls and the staff calendar', sort: 144, quiz: false,
+    summary: 'Messaging other staff, groups, the All staff group, memos, voice and video calls, the calendar, and what management can see.',
+    body: `The chat button: every staff screen has a green 💬 tab on its right edge. It opens the team chat over whatever you are doing, so you can answer without leaving the till. Drag the tab up or down if it is in your way. A red number on it counts unread messages and alerts. All modules > Team chat opens the same chat full screen, with the calendar beside it.
+
+Chatting: People lists every member of staff, who is online (green dot) and when the others were last on. Tap someone to message them; the 📞 and 🎥 buttons call them. Type and press Enter to send (Shift+Enter for a new line). 📎 sends a photo, PDF, Word, Excel or PowerPoint file, a short MP4 clip or a CSV (up to 15 MB); you can also paste a picture or drag a file onto the chat. Hold a conversation with 🎤: press it, speak, then ➤ to send a voice note, or 🗑 to throw it away.
+
+Messages: one tick means sent, two blue ticks mean read (in a group, read by everyone). The ⌄ on a message (or a right-click) lets you react, reply, copy, download a file, edit your own message for 24 hours, or delete it for everyone. You can see that a message was deleted, but not what it said.
+
+Groups: 👥 starts a group: give it a name, pick the people, and choose whether only group admins can post. Group admins add and remove people, make others admins, rename the group and close it (it stays readable but nobody can post). Anyone can leave a group. Pin or mute a chat from its ⋯ menu or its info page.
+
+All staff: everyone on the staff list is in the All staff group automatically; people who leave drop off. Only managers post there, so it stays for announcements.
+
+Memos and announcements: a manager's 📢 button sends an announcement to all staff, or a memo to a group. It stands out in the chat, pops up on everyone's screen (in the middle of the screen if marked urgent) and waits under Alerts until each person presses "I have read this". Management sees who has read and acknowledged it and can send a reminder to the rest.
+
+Alerts: the Alerts tab collects memos, calendar invitations, reminders and missed calls. "Turn on desktop alerts" makes the computer pop up a notice when a message or call comes in while you are on another window. Set your status under People (Available, Busy, Away, Do not disturb, with a note such as "At the warehouse until 2"); Do not disturb stops the sounds, pop-ups and ringing.
+
+Calls: press 📞 for a voice call or 🎥 for video, in any chat or group (up to 8 people). The others ring wherever they are in the system; they answer with sound only or with video, or decline. In the call: 🎤 mutes you, 📷 turns your camera on or off, 🖥 shares your screen, ▁ shrinks the call so you can keep working on the same screen, and the red button hangs up. A call ends for you if you go to another page, so shrink it instead. The call goes straight between the computers; nothing is recorded. Calls need the till's secure address (https), or the computer the till runs on, because browsers only allow the microphone and camera there. Missed calls show in the chat with a "Call back" link.
+
+The staff calendar: All modules > Staff calendar. Month, Week and List views show meetings and events, plus who is off (from Attendance > Leave), public holidays and, if you tick it, your own shifts. Hiring staff also see interviews. Click a day or a time to add an event: title, type, start and end (or all day), where, details, a reminder and whether it repeats. Choose who it is for: people you invite, just you, or (managers) everyone. Tick "Online meeting" to give it a chat group with a 🎥 Join button for the call. Invited people get an invitation under Alerts (and by email when the till sends email), reply Yes, Maybe or No, and get a reminder before it starts. Only the person who made an event, or a manager, can change or cancel it, and everyone invited is told.
+
+What management can see: staff chats belong to the company. Managers with the "Management view" permission can read every conversation, including one-to-one chats and deleted or edited messages, search all messages, restore or delete messages, export a chat, see the call log and who is online, and close groups. Each time they do, it is written in the management access log. The two permissions are in Roles & Permissions under "Team chat & calendar": sending memos and posting to everyone, and the management view.`,
+    questions: [],
+  },
+  {
     key: 'documents-forms', title: 'Documents, forms and leave', sort: 145, quiz: false,
     summary: 'Filing documents, finding them, forms such as leave requests, approvals and the communications journal.',
     body: `The Document centre: All modules > Document centre keeps every paper the business holds - templates and forms, policies and manuals, government and tax papers, staff files, supplier bills, customer documents, contracts, insurance, banking, assets and product images - in folders, each with a number (DOC-000123).

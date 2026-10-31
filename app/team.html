@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team chat and calendar · Vision Auto Solutions</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; --g:#128c7e; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;height:100%}
+  body{display:flex;flex-direction:column}
+  header{background:var(--navy);color:#fff;padding:10px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;flex:none}
+  header h1{font-size:17px;margin:0}
+  header nav{margin-left:auto;display:flex;gap:14px;font-size:13px}
+  header a{color:#fff;opacity:.85}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;padding:10px 16px 0;flex:none;max-width:1400px;width:100%;margin:0 auto}
+  .tabs button{border-radius:999px;padding:6px 14px;font:inherit;font-size:13.5px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+  .tabs button.on{background:var(--navy);border-color:var(--navy);color:#fff}
+  main{flex:1;min-height:0;max-width:1400px;width:100%;margin:0 auto;padding:10px 16px 16px;display:flex;flex-direction:column}
+  section{display:none;flex:1;min-height:0;flex-direction:column}
+  section.on{display:flex}
+  #chatHost{flex:1;min-height:420px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  input,select,button,textarea{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  textarea{width:100%;resize:vertical}
+  button{cursor:pointer;background:var(--card)}
+  button.primary{background:var(--g);border-color:var(--g);color:#fff;font-weight:600}
+  button.danger{background:var(--red);border-color:var(--red);color:#fff}
+  button.sm{padding:3px 9px;font-size:12.5px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .muted{color:var(--muted)} .small{font-size:12.5px}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600}
+  .scroll{overflow:auto}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip);white-space:nowrap}
+  .pill.g{background:#16a34a22;color:var(--ok)} .pill.r{background:#d6282822;color:var(--red)} .pill.y{background:#f59e0b22;color:var(--warn)}
+  .kpis{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 14px;font-size:12.5px;min-width:110px}
+  .kpi b{font-size:20px;display:block}
+  /* calendar */
+  .cal-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  .cal-bar h2{margin:0 8px;font-size:18px;min-width:180px}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{border:0;border-radius:0;padding:6px 12px}
+  .seg button.on{background:var(--navy);color:#fff}
+  .filters{display:flex;gap:12px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-bottom:8px}
+  .filters label{display:flex;gap:4px;align-items:center}
+  .month{display:grid;grid-template-columns:repeat(7,1fr);border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--card);flex:1;min-height:520px;grid-auto-rows:1fr}
+  .month .dow{padding:6px;font-size:11.5px;text-transform:uppercase;color:var(--muted);text-align:center;border-bottom:1px solid var(--line);background:var(--chip)}
+  .day{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:4px;min-height:92px;cursor:pointer;overflow:hidden;min-width:0}
+  .day:nth-child(7n){border-right:0}
+  .day .n{font-size:12.5px;font-weight:600;display:inline-block;width:24px;height:24px;line-height:24px;text-align:center;border-radius:50%}
+  .day.out{background:var(--bg)} .day.out .n{color:var(--muted)}
+  .day.today .n{background:var(--red);color:#fff}
+  .ev{display:block;font-size:12px;border-radius:5px;padding:1px 6px;margin:2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#fff;cursor:pointer;border:0;width:100%;text-align:left}
+  .ev.timed{background:none!important;color:var(--ink);padding-left:4px}
+  .ev.timed::before{content:'';display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--c);margin-right:4px}
+  .ev.pending{opacity:.75;font-style:italic}
+  .more{font-size:12px;color:var(--muted);padding:0 4px}
+  .week{display:grid;grid-template-columns:52px repeat(7,1fr);border:1px solid var(--line);border-radius:12px;overflow:auto;background:var(--card);flex:1;min-height:520px;align-content:start}
+  .week .hd{position:sticky;top:0;background:var(--chip);z-index:2;padding:6px;text-align:center;font-size:12.5px;border-bottom:1px solid var(--line)}
+  .week .hd.today{color:var(--red);font-weight:700}
+  .week .ad{border-bottom:2px solid var(--line);padding:2px;min-height:26px;border-left:1px solid var(--line)}
+  .week .hrs{position:relative}
+  .week .hr{height:44px;border-bottom:1px solid var(--line);font-size:11px;color:var(--muted);text-align:right;padding:0 4px}
+  .week .col{position:relative;border-left:1px solid var(--line)}
+  .week .slot{height:44px;border-bottom:1px solid var(--line);cursor:pointer}
+  .week .slot:hover{background:var(--chip)}
+  .week .tev{position:absolute;border-radius:6px;color:#fff;font-size:12px;padding:2px 5px;overflow:hidden;cursor:pointer;border:1px solid #fff4;box-shadow:0 1px 2px #0003}
+  .week .now{position:absolute;left:0;right:0;border-top:2px solid var(--red);z-index:1}
+  .agenda .d{font-weight:700;margin:14px 0 6px;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .agenda .it{display:flex;gap:12px;align-items:center;padding:8px 10px;background:var(--card);border:1px solid var(--line);border-radius:10px;margin-bottom:6px;cursor:pointer}
+  .agenda .it .bar{width:5px;align-self:stretch;border-radius:3px}
+  .agenda .it .tm{width:120px;font-size:12.5px;color:var(--muted);flex:none}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9990;padding:16px}
+  .modal>div{background:var(--card);border-radius:14px;max-width:620px;width:100%;max-height:92vh;overflow:auto;padding:18px;box-shadow:0 10px 40px rgba(0,0,0,.4)}
+  .modal h3{margin:0 0 10px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px}
+  .grid2 label,.fld{display:flex;flex-direction:column;gap:3px;font-size:12.5px;color:var(--muted)}
+  .grid2 input,.grid2 select,.fld input,.fld select,.fld textarea{color:var(--ink)}
+  .full{grid-column:1/-1}
+  .pick{max-height:200px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+  .pick label{display:flex;flex-direction:row;gap:8px;align-items:center;padding:5px 9px;border-bottom:1px solid var(--line);color:var(--ink);font-size:13.5px}
+  .att{display:flex;gap:6px;flex-wrap:wrap}
+  @media (max-width:640px){ .grid2{grid-template-columns:1fr} .day{min-height:64px} .ev{font-size:10.5px} .agenda .it .tm{width:80px} }
+  /* management */
+  .mtabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px}
+  .mtabs button{border-radius:999px;padding:4px 12px;font-size:13px}
+  .mtabs button.on{background:var(--g);border-color:var(--g);color:#fff}
+  .tx{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;max-height:62vh;overflow:auto}
+  .tx .m{padding:6px 8px;border-bottom:1px solid var(--line)}
+  .tx .m.del{background:#d6282812}
+  .tx .m .h{font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:center}
+  .tx .m .b{white-space:pre-wrap}
+  .split{display:grid;grid-template-columns:minmax(300px,1fr) 1.4fr;gap:12px}
+  @media (max-width:900px){ .split{grid-template-columns:1fr} }
+  tr.click{cursor:pointer} tr.click:hover{background:var(--chip)} tr.sel{background:var(--chip)}
+</style>
+</head>
+<body>
+<header>
+  <h1>💬 Team chat and calendar</h1>
+  <nav><a href="/admin.html">Back office</a><a href="/training.html#manual" target="_blank" rel="noopener">Help</a></nav>
+</header>
+<div class="tabs" id="tabs">
+  <button data-t="chat" class="on">💬 Chats<span id="cntChat"></span></button>
+  <button data-t="calendar">📅 Calendar</button>
+  <button data-t="manage" id="tabManage" hidden>🛡 Manage correspondence</button>
+</div>
+<main>
+  <section id="s-chat" class="on"><div id="chatHost" data-team-full><p class="muted" style="padding:20px">Loading the chat…</p></div></section>
+
+  <section id="s-calendar">
+    <div class="cal-bar">
+      <button id="calPrev" title="Previous">‹</button><button id="calToday">Today</button><button id="calNext" title="Next">›</button>
+      <h2 id="calTitle"></h2>
+      <span class="seg" id="calView"><button data-v="month">Month</button><button data-v="week">Week</button><button data-v="list">List</button></span>
+      <button class="primary" id="calNew" style="margin-left:auto">+ New event</button>
+    </div>
+    <div class="filters" id="calFilters">
+      <label><input type="checkbox" data-f="events" checked> Events</label>
+      <label><input type="checkbox" data-f="leave" checked> Who is off</label>
+      <label><input type="checkbox" data-f="holiday" checked> Public holidays</label>
+      <label><input type="checkbox" data-f="shifts"> My shifts</label>
+      <label id="fInterviews" hidden><input type="checkbox" data-f="interview" checked> Interviews</label>
+      <span id="calNote"></span>
+    </div>
+    <div id="calBody" style="flex:1;display:flex;flex-direction:column;min-height:0"></div>
+  </section>
+
+  <section id="s-manage" style="overflow:auto">
+    <div class="kpis" id="mKpis"></div>
+    <div class="mtabs" id="mTabs">
+      <button data-m="convs" class="on">Conversations</button><button data-m="search">Search messages</button><button data-m="memos">Memos and announcements</button>
+      <button data-m="online">Who is online</button><button data-m="calls">Call log</button><button data-m="audit">Management access log</button><button data-m="settings">Settings</button>
+    </div>
+    <div id="mBody"></div>
+  </section>
+</main>
+
+<script src="/assets/team-chat.js?v=1"></script>
+<script>
+(function(){
+  'use strict';
+  var T = null, CFG = null;
+  function esc(v){ return String(v == null ? '' : v).replace(/[&<>"']/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]; }); }
+  function $(s, r){ return (r || document).querySelector(s); }
+  function api(m, u, b){ return T.api(m, u, b); }
+  function toast(t, b){ T.toast(t, b); }
+  function dt(x){ return new Date(x); }
+  function pad(n){ return ('0' + n).slice(-2); }
+  function ymd(d){ return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  function hhmm(d){ return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+  function tm(d){ return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
+  function when(x){ var d = dt(x); return d.toLocaleDateString([], { day: 'numeric', month: 'short' }) + ' ' + tm(d); }
+  function addDays(d, n){ var x = new Date(d); x.setDate(x.getDate() + n); return x; }
+  function startOfDay(d){ var x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
+  function sameDay(a, b){ return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
+  function modal(html, wire){
+    var m = document.createElement('div'); m.className = 'modal'; m.innerHTML = '<div>' + html + '</div>';
+    document.body.appendChild(m);
+    m.addEventListener('click', function(e){ if (e.target === m || e.target.closest('[data-close]')) m.remove(); });
+    m.addEventListener('keydown', function(e){ if (e.key === 'Escape') m.remove(); });
+    if (wire) wire(m.firstElementChild, function(){ m.remove(); });
+    return m;
+  }
+
+  // ---------------------------------------------------------------- tabs --
+  var tab = 'chat';
+  function show(t){
+    if (t === 'manage' && !(CFG && CFG.caps.oversee)) t = 'chat';
+    tab = t;
+    document.querySelectorAll('#tabs [data-t]').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-t') === t); });
+    document.querySelectorAll('main section').forEach(function(s){ s.classList.toggle('on', s.id === 's-' + t); });
+    if (T) T.setVisible(t === 'chat');
+    if (t === 'calendar') Cal.load();
+    if (t === 'manage') Mg.load();
+  }
+  document.querySelectorAll('#tabs [data-t]').forEach(function(b){ b.onclick = function(){ var t = b.getAttribute('data-t'); history.replaceState(null, '', t === 'chat' ? location.pathname : '#' + t); show(t); }; });
+
+  function boot(){
+    T = window.VisionTeam;
+    T.ready.then(function(cfg){
+      CFG = cfg;
+      $('#tabManage').hidden = !cfg.caps.oversee;
+      $('#fInterviews').hidden = !cfg.caps.hr;
+      T.on('badges', function(b){ $('#cntChat').textContent = b.chats ? ' (' + b.chats + ')' : ''; });
+      T.on('event', function(){ if (tab === 'calendar') Cal.load(); });
+      T.mount($('#chatHost'));
+      var h = location.hash;
+      if (/^#calendar/.test(h)) { show('calendar'); var m = /calendar=(\d+)/.exec(h); if (m) Cal.detail(Number(m[1])); }
+      else if (/^#manage/.test(h)) { show('manage'); var mm = /manage=(\w+)/.exec(h); if (mm) Mg.go(mm[1]); }
+      else show('chat');
+    }).catch(function(e){
+      $('#chatHost').innerHTML = '<div class="card" style="margin:20px">' + (e.status === 401 ? 'Please <a href="/admin.html">sign in to the back office</a> first, then come back to this page.' : esc(e.message)) + '</div>';
+    });
+  }
+  window.addEventListener('hashchange', function(){ var m = /calendar=(\d+)/.exec(location.hash); if (m) { show('calendar'); Cal.detail(Number(m[1])); } });
+
+  // ------------------------------------------------------------ calendar --
+  var COLORS = { meeting:'#2563eb', training:'#7c3aed', shift:'#475569', deadline:'#dc2626', leave:'#d97706', holiday:'#16a34a', social:'#db2777', other:'#6b7280', interview:'#0d9488' };
+  var KIND_LABEL = { meeting:'Meeting', training:'Training', shift:'Shift / roster', deadline:'Deadline', leave:'Time off', holiday:'Holiday / closure', social:'Staff social', other:'Other' };
+  var Cal = (function(){
+    var view = (function(){ try { return localStorage.getItem('vtc-cal-view') || 'month'; } catch(_) { return 'month'; } })();
+    var cursor = startOfDay(new Date()), items = [], filters = { events: true, leave: true, holiday: true, shifts: false, interview: true }, loading = 0;
+    function range(){
+      if (view === 'month') { var f = new Date(cursor.getFullYear(), cursor.getMonth(), 1); f = addDays(f, -f.getDay()); return [f, addDays(f, 42)]; }
+      if (view === 'week') { var w = addDays(cursor, -cursor.getDay()); return [w, addDays(w, 7)]; }
+      return [startOfDay(cursor), addDays(startOfDay(cursor), 60)];
+    }
+    function title(){
+      if (view === 'month') return cursor.toLocaleDateString([], { month: 'long', year: 'numeric' });
+      var r = range(), e = addDays(r[1], -1);
+      return r[0].toLocaleDateString([], { day: 'numeric', month: 'short' }) + ' – ' + e.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+    function load(){
+      var r = range(), n = ++loading;
+      $('#calTitle').textContent = title();
+      document.querySelectorAll('#calView [data-v]').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-v') === view); });
+      return api('GET', '/api/team/events?from=' + encodeURIComponent(r[0].toISOString()) + '&to=' + encodeURIComponent(r[1].toISOString())).then(function(res){
+        if (n !== loading) return;
+        items = [];
+        res.events.forEach(function(e){
+          var s = dt(e.start), en = dt(e.end);
+          items.push({ key: 'e' + e.id + '-' + e.start, id: e.id, title: e.title, start: s, end: en, allDay: e.all_day || (en - s >= 86400000 * 0.99 && s.getHours() === 0), kind: e.kind, color: COLORS[e.kind] || COLORS.other, src: 'events', ev: e, pending: e.my_response === 'pending' });
+        });
+        res.extra.forEach(function(x){
+          if (x.source === 'shifts') {
+            for (var d = new Date(r[0]); d < r[1]; d = addDays(d, 1)) x.pattern.forEach(function(p){
+              if (p.weekday !== d.getDay()) return;
+              var s = new Date(ymd(d) + 'T' + p.s), e = new Date(ymd(d) + 'T' + p.e);
+              items.push({ key: 'sh' + ymd(d), title: 'My shift', start: s, end: e, allDay: false, kind: 'shift', color: COLORS.shift, src: 'shifts' });
+            });
+            return;
+          }
+          var s2 = x.all_day ? new Date(x.start + 'T00:00') : dt(x.start), e2 = x.all_day ? new Date(x.end + 'T23:59') : dt(x.end);
+          items.push({ key: x.id, title: x.title, start: s2, end: e2, allDay: !!x.all_day, kind: x.kind, color: COLORS[x.source] || COLORS[x.kind], src: x.source, link: x.link });
+        });
+        items.sort(function(a, b){ return (b.allDay - a.allDay) || (a.start - b.start); });
+        draw();
+      }).catch(function(e){ $('#calBody').innerHTML = '<div class="card">' + esc(e.message) + '</div>'; });
+    }
+    function shown(){ return items.filter(function(i){ return filters[i.src] !== false; }); }
+    function onDay(d){ var a = startOfDay(d), b = addDays(a, 1); return shown().filter(function(i){ return i.start < b && i.end > a || (sameDay(i.start, a)); }); }
+    function chip(i){
+      var t = i.allDay ? '' : tm(i.start) + ' ';
+      return '<button class="ev' + (i.allDay ? '' : ' timed') + (i.pending ? ' pending' : '') + '" style="background:' + i.color + ';--c:' + i.color + '" data-k="' + esc(i.key) + '" title="' + esc(t + i.title + (i.pending ? ' (you have not replied)' : '')) + '">' + esc(t + i.title) + '</button>';
+    }
+    function draw(){
+      var host = $('#calBody'), r = range(), today = new Date();
+      if (view === 'month') {
+        var html = '<div class="month">' + ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(function(x){ return '<div class="dow">' + x + '</div>'; }).join('');
+        for (var d = new Date(r[0]); d < r[1]; d = addDays(d, 1)) {
+          var list = onDay(d), max = 3;
+          html += '<div class="day' + (d.getMonth() !== cursor.getMonth() ? ' out' : '') + (sameDay(d, today) ? ' today' : '') + '" data-day="' + ymd(d) + '"><span class="n">' + d.getDate() + '</span>' +
+            list.slice(0, max).map(chip).join('') + (list.length > max ? '<div class="more">+' + (list.length - max) + ' more</div>' : '') + '</div>';
+        }
+        host.innerHTML = html + '</div>';
+      } else if (view === 'week') {
+        var H0 = 6, H1 = 22, PX = 44;
+        var w = '<div class="week"><div class="hd"></div>';
+        for (var i = 0; i < 7; i++) { var dd = addDays(r[0], i); w += '<div class="hd' + (sameDay(dd, today) ? ' today' : '') + '">' + dd.toLocaleDateString([], { weekday: 'short', day: 'numeric' }) + '</div>'; }
+        w += '<div class="ad" style="border-left:0;font-size:11px;color:var(--muted);text-align:right;padding-right:4px">all day</div>';
+        for (i = 0; i < 7; i++) w += '<div class="ad" data-day="' + ymd(addDays(r[0], i)) + '">' + onDay(addDays(r[0], i)).filter(function(x){ return x.allDay; }).map(chip).join('') + '</div>';
+        w += '<div class="hrs">'; for (var h = H0; h < H1; h++) w += '<div class="hr">' + (h % 12 || 12) + (h < 12 ? 'am' : 'pm') + '</div>'; w += '</div>';
+        for (i = 0; i < 7; i++) {
+          var day = addDays(r[0], i), col = '<div class="col">';
+          for (h = H0; h < H1; h++) col += '<div class="slot" data-slot="' + ymd(day) + 'T' + pad(h) + ':00"></div>';
+          var timed = onDay(day).filter(function(x){ return !x.allDay; }), lanes = [];
+          timed.forEach(function(x){ var l = 0; while (lanes[l] && lanes[l] > x.start) l++; lanes[l] = x.end; x.lane = l; });
+          var nl = Math.max(1, lanes.length);
+          timed.forEach(function(x){
+            var a = Math.max(H0 * 60, x.start.getHours() * 60 + x.start.getMinutes() + (sameDay(x.start, day) ? 0 : -1440)), b = Math.min(H1 * 60, sameDay(x.end, day) ? x.end.getHours() * 60 + x.end.getMinutes() : H1 * 60);
+            if (b <= a) b = a + 30;
+            col += '<div class="tev" data-k="' + esc(x.key) + '" style="background:' + x.color + ';top:' + ((a - H0 * 60) / 60 * PX) + 'px;height:' + Math.max(20, (b - a) / 60 * PX - 2) + 'px;left:' + (x.lane / nl * 100) + '%;width:calc(' + (100 / nl) + '% - 3px)' + (x.pending ? ';opacity:.75' : '') + '"><b>' + esc(tm(x.start)) + '</b> ' + esc(x.title) + '</div>';
+          });
+          if (sameDay(day, today)) { var nm = today.getHours() * 60 + today.getMinutes(); if (nm >= H0 * 60 && nm < H1 * 60) col += '<div class="now" style="top:' + ((nm - H0 * 60) / 60 * PX) + 'px"></div>'; }
+          w += col + '</div>';
+        }
+        host.innerHTML = w + '</div>';
+      } else {
+        var out = '<div class="agenda scroll">', any = false;
+        for (var x = new Date(r[0]); x < r[1]; x = addDays(x, 1)) {
+          var l2 = onDay(x); if (!l2.length) continue; any = true;
+          out += '<div class="d">' + (sameDay(x, today) ? 'Today · ' : '') + x.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }) + '</div>' + l2.map(function(i){
+            return '<div class="it" data-k="' + esc(i.key) + '"><span class="bar" style="background:' + i.color + '"></span><span class="tm">' + (i.allDay ? 'All day' : esc(tm(i.start) + ' – ' + tm(i.end))) + '</span><div style="flex:1;min-width:0"><b>' + esc(i.title) + '</b>' +
+              (i.ev ? '<div class="small muted">' + esc([KIND_LABEL[i.kind], i.ev.location, i.ev.video ? '🎥 online' : '', i.ev.visibility === 'company' ? 'everyone' : i.ev.invited ? i.ev.going + ' of ' + i.ev.invited + ' going' : ''].filter(Boolean).join(' · ')) + '</div>' : '') + '</div>' +
+              (i.pending ? '<span class="pill y">reply</span>' : i.ev && i.ev.my_response === 'yes' ? '<span class="pill g">going</span>' : '') + '</div>';
+          }).join('');
+        }
+        host.innerHTML = out + (any ? '' : '<div class="card muted">Nothing on the calendar for the next 60 days.</div>') + '</div>';
+      }
+      host.querySelectorAll('[data-k]').forEach(function(b){ b.onclick = function(e){ e.stopPropagation(); open(b.getAttribute('data-k')); }; });
+      host.querySelectorAll('[data-day]').forEach(function(c){ c.onclick = function(e){ if (e.target.closest('[data-k]')) return; if (view === 'month' && onDay(new Date(c.getAttribute('data-day') + 'T00:00')).length > 3 && e.target.closest('.more')) return dayList(c.getAttribute('data-day')); form(null, c.getAttribute('data-day') + 'T09:00'); }; });
+      host.querySelectorAll('[data-slot]').forEach(function(c){ c.onclick = function(){ form(null, c.getAttribute('data-slot')); }; });
+      var pend = items.filter(function(i){ return i.pending; }).length;
+      $('#calNote').innerHTML = pend ? '<span class="pill y">' + pend + ' invitation' + (pend === 1 ? '' : 's') + ' waiting for your reply</span>' : '';
+    }
+    function dayList(day){
+      var list = onDay(new Date(day + 'T00:00'));
+      modal('<h3>' + esc(new Date(day + 'T00:00').toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })) + '</h3>' + list.map(chip).join('') + '<div class="row" style="justify-content:flex-end;margin-top:12px"><button data-close>Close</button><button class="primary" data-new>+ New event this day</button></div>', function(box, close){
+        box.querySelectorAll('[data-k]').forEach(function(b){ b.onclick = function(){ close(); open(b.getAttribute('data-k')); }; });
+        box.querySelector('[data-new]').onclick = function(){ close(); form(null, day + 'T09:00'); };
+      });
+    }
+    function open(key){
+      var i = items.find(function(x){ return x.key === key; }); if (!i) return;
+      if (i.ev) return detail(i.id, i);
+      modal('<h3>' + esc(i.title) + '</h3><p class="muted">' + (i.allDay ? esc(i.start.toLocaleDateString()) + (sameDay(i.start, i.end) ? '' : ' – ' + esc(i.end.toLocaleDateString())) : esc(when(i.start)) + ' – ' + esc(tm(i.end))) + '</p>' +
+        '<p class="small muted">' + ({ leave: 'Time off from the attendance records.', holiday: 'Public holiday.', shifts: 'Your usual shift from the attendance set-up.', interview: 'Interview from Hiring.' })[i.src] + '</p>' +
+        '<div class="row" style="justify-content:flex-end">' + (i.link ? '<a href="' + esc(i.link) + '"><button>Open</button></a>' : '') + '<button data-close>Close</button></div>');
+    }
+    function detail(id, occ){
+      api('GET', '/api/team/events/' + id).then(function(r){
+        var e = r.event, s = occ ? occ.start : dt(e.starts_at), en = occ ? occ.end : dt(e.ends_at);
+        var me = CFG.me.id, mine = e.attendees.find(function(a){ return a.user_id === me; });
+        var canRsvp = e.created_by !== me && (mine || e.visibility === 'company');
+        var resp = mine ? mine.response : null;
+        var ppl = e.attendees.map(function(a){ return '<span class="pill ' + (a.response === 'yes' ? 'g' : a.response === 'no' ? 'r' : a.response === 'maybe' ? 'y' : '') + '">' + esc(a.name) + ' · ' + ({ yes: 'going', no: 'not going', maybe: 'maybe', pending: 'no reply' })[a.response] + '</span>'; }).join(' ');
+        modal('<h3><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:' + (COLORS[e.kind] || COLORS.other) + '"></span> ' + esc(e.title) + (e.cancelled_at ? ' <span class="pill r">cancelled</span>' : '') + '</h3>' +
+          '<p><b>' + (e.all_day ? esc(s.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })) + (sameDay(s, en) ? '' : ' – ' + esc(en.toLocaleDateString([], { day: 'numeric', month: 'long' }))) : esc(s.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })) + ', ' + esc(tm(s)) + ' – ' + esc(tm(en))) + '</b>' +
+          (e.recurrence !== 'none' ? '<br><span class="small muted">Repeats ' + esc({ daily: 'every day', weekdays: 'every weekday', weekly: 'every week', monthly: 'every month' }[e.recurrence]) + (e.recur_until ? ' until ' + esc(String(e.recur_until).slice(0, 10)) : '') + '</span>' : '') + '</p>' +
+          '<p class="small muted">' + esc([KIND_LABEL[e.kind], e.location, e.video ? '🎥 Online meeting' : '', e.visibility === 'company' ? 'On everyone’s calendar' : e.visibility === 'private' ? 'Private' : 'Invited people', 'Made by ' + (e.created_by_name || 'someone')].filter(Boolean).join(' · ')) + '</p>' +
+          (e.description ? '<div style="white-space:pre-wrap;margin:8px 0">' + esc(e.description) + '</div>' : '') +
+          (e.attendees.length ? '<div class="small muted" style="margin:8px 0 4px">Who</div><div class="att">' + ppl + '</div>' : '') +
+          (canRsvp && !e.cancelled_at ? '<div class="row" style="margin-top:12px"><span class="small muted">Going?</span>' + ['yes', 'maybe', 'no'].map(function(x){ return '<button class="sm' + (resp === x ? ' primary' : '') + '" data-rsvp="' + x + '">' + ({ yes: 'Yes', maybe: 'Maybe', no: 'No' })[x] + '</button>'; }).join('') + '</div>' : '') +
+          '<div class="row" style="justify-content:flex-end;margin-top:14px">' +
+          (e.video && e.conversation_id && !e.cancelled_at ? '<button class="primary" data-join>🎥 Join the call</button><button data-chat>💬 Chat</button>' : '') +
+          (e.can_edit && !e.cancelled_at ? '<button data-edit>Edit' + (e.recurrence !== 'none' ? ' (all repeats)' : '') + '</button><button class="danger" data-cancel>Cancel event</button>' : '') + '<button data-close>Close</button></div>', function(box, close){
+          box.querySelectorAll('[data-rsvp]').forEach(function(b){ b.onclick = function(){ api('POST', '/api/team/events/' + e.id + '/rsvp', { response: b.getAttribute('data-rsvp') }).then(function(){ close(); load(); toast('Reply sent'); }).catch(function(err){ toast('Not sent', err.message); }); }; });
+          var j = box.querySelector('[data-join]'); if (j) j.onclick = function(){ close(); show('chat'); history.replaceState(null, '', location.pathname); T.openChat(e.conversation_id).then(function(){ T.call(e.conversation_id, 'video'); }); };
+          var c = box.querySelector('[data-chat]'); if (c) c.onclick = function(){ close(); show('chat'); T.openChat(e.conversation_id); };
+          var ed = box.querySelector('[data-edit]'); if (ed) ed.onclick = function(){ close(); form(e); };
+          var cn = box.querySelector('[data-cancel]'); if (cn) cn.onclick = function(){ if (!confirm('Cancel ' + e.title + (e.recurrence !== 'none' ? ' and all its repeats' : '') + '? Everyone invited is told.')) return; api('DELETE', '/api/team/events/' + e.id).then(function(){ close(); load(); toast('Event cancelled'); }).catch(function(err){ toast('Not cancelled', err.message); }); };
+        });
+      }).catch(function(e){ toast('Could not open the event', e.message); });
+    }
+    function form(e, at){
+      var ppl = T.state.people.filter(function(p){ return p.id !== CFG.me.id; });
+      var s = e ? dt(e.starts_at) : new Date(at || ymd(new Date()) + 'T09:00'), en = e ? dt(e.ends_at) : new Date(s.getTime() + 3600000);
+      var inv = e ? e.attendees.map(function(a){ return a.user_id; }) : [];
+      var vis = e ? e.visibility : 'invitees';
+      modal('<h3>' + (e ? 'Edit event' : 'New event') + '</h3><div class="grid2">' +
+        '<label class="full">Title<input data-f="title" maxlength="140" value="' + esc(e ? e.title : '') + '" placeholder="e.g. Monday team meeting"></label>' +
+        '<label>Type<select data-f="kind">' + Object.keys(KIND_LABEL).map(function(k){ return '<option value="' + k + '"' + ((e ? e.kind : 'meeting') === k ? ' selected' : '') + '>' + KIND_LABEL[k] + '</option>'; }).join('') + '</select></label>' +
+        '<label style="justify-content:flex-end"><span style="display:flex;gap:6px;align-items:center;color:var(--ink)"><input type="checkbox" data-f="all_day"' + (e && e.all_day ? ' checked' : '') + '> All day</span></label>' +
+        '<label>Starts<span class="row"><input type="date" data-f="sd" value="' + ymd(s) + '"><input type="time" data-f="st" value="' + hhmm(s) + '" data-time></span></label>' +
+        '<label>Ends<span class="row"><input type="date" data-f="ed" value="' + ymd(en) + '"><input type="time" data-f="et" value="' + hhmm(en) + '" data-time></span></label>' +
+        '<label>Where<input data-f="location" maxlength="160" value="' + esc(e && e.location || '') + '" placeholder="e.g. Showroom, warehouse office"></label>' +
+        '<label style="justify-content:flex-end"><span style="display:flex;gap:6px;align-items:center;color:var(--ink)"><input type="checkbox" data-f="video"' + (e && e.video ? ' checked' : '') + '> 🎥 Online meeting (call in the team chat)</span></label>' +
+        '<label>Reminder<select data-f="remind">' + [[0, 'No reminder'], [5, '5 minutes before'], [10, '10 minutes before'], [15, '15 minutes before'], [30, '30 minutes before'], [60, '1 hour before'], [120, '2 hours before'], [1440, '1 day before']].map(function(o){ return '<option value="' + o[0] + '"' + ((e ? e.remind_minutes : 15) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
+        '<label>Repeats<span class="row"><select data-f="rec">' + [['none', 'Does not repeat'], ['daily', 'Every day'], ['weekdays', 'Every weekday (Mon–Fri)'], ['weekly', 'Every week'], ['monthly', 'Every month']].map(function(o){ return '<option value="' + o[0] + '"' + ((e ? e.recurrence : 'none') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select><input type="date" data-f="until" title="Until (optional)" value="' + esc(e && e.recur_until ? String(e.recur_until).slice(0, 10) : '') + '"></span></label>' +
+        '<label class="full">Details<textarea data-f="description" rows="3" maxlength="4000">' + esc(e && e.description || '') + '</textarea></label>' +
+        '<div class="full fld">Who is it for?<div class="row" style="color:var(--ink)">' +
+          '<label style="flex-direction:row;gap:5px;color:var(--ink)"><input type="radio" name="vis" value="invitees"' + (vis === 'invitees' ? ' checked' : '') + '> People I invite</label>' +
+          (CFG.caps.announce ? '<label style="flex-direction:row;gap:5px;color:var(--ink)"><input type="radio" name="vis" value="company"' + (vis === 'company' ? ' checked' : '') + '> Everyone (all staff)</label>' : '') +
+          '<label style="flex-direction:row;gap:5px;color:var(--ink)"><input type="radio" name="vis" value="private"' + (vis === 'private' ? ' checked' : '') + '> Just me</label></div>' +
+          '<div data-who><input type="search" data-pf placeholder="Search staff" style="margin:6px 0 4px;width:100%"><div class="pick">' + ppl.map(function(p){ return '<label data-pn="' + esc(p.name.toLowerCase()) + '"><input type="checkbox" value="' + p.id + '"' + (inv.indexOf(p.id) >= 0 ? ' checked' : '') + '>' + esc(p.name) + ' <span class="small muted">' + esc(p.role || '') + '</span></label>'; }).join('') + '</div></div></div>' +
+        '</div><p class="small muted">' + (e && e.recurrence !== 'none' ? 'Changes apply to every repeat. ' : '') + 'Invited people get a notice in the team chat' + (CFG.mail_on ? ' and an email' : '') + ', and a reminder before it starts.</p>' +
+        '<div class="row" style="justify-content:flex-end"><button data-close>Cancel</button><button class="primary" data-save>' + (e ? 'Save changes' : 'Add to calendar') + '</button></div>', function(box, close){
+        var f = function(k){ return box.querySelector('[data-f="' + k + '"]'); };
+        var sync = function(){
+          var ad = f('all_day').checked; box.querySelectorAll('[data-time]').forEach(function(t){ t.style.display = ad ? 'none' : ''; });
+          var v = (box.querySelector('input[name=vis]:checked') || {}).value; box.querySelector('[data-who]').style.display = v === 'invitees' ? '' : 'none';
+          f('until').style.display = f('rec').value === 'none' ? 'none' : '';
+        };
+        box.querySelectorAll('input,select').forEach(function(i){ i.addEventListener('change', sync); }); sync();
+        f('sd').addEventListener('change', function(){ if (f('ed').value < f('sd').value) f('ed').value = f('sd').value; });
+        f('st').addEventListener('change', function(){ if (f('ed').value === f('sd').value && f('et').value <= f('st').value) { var t = new Date(f('sd').value + 'T' + f('st').value); f('et').value = hhmm(new Date(t.getTime() + 3600000)); } });
+        var pf = box.querySelector('[data-pf]'); pf.oninput = function(){ var q = pf.value.toLowerCase(); box.querySelectorAll('[data-pn]').forEach(function(l){ l.style.display = l.getAttribute('data-pn').indexOf(q) >= 0 ? '' : 'none'; }); };
+        setTimeout(function(){ f('title').focus(); }, 30);
+        box.querySelector('[data-save]').onclick = function(){
+          var ad = f('all_day').checked;
+          var st = ad ? new Date(f('sd').value + 'T00:00') : new Date(f('sd').value + 'T' + f('st').value);
+          var et = ad ? new Date(f('ed').value + 'T23:59') : new Date(f('ed').value + 'T' + f('et').value);
+          if (isNaN(st) || isNaN(et)) return toast('Choose when it starts and ends');
+          var body = { title: f('title').value, kind: f('kind').value, all_day: ad, starts_at: st.toISOString(), ends_at: et.toISOString(), location: f('location').value, video: f('video').checked,
+            remind_minutes: Number(f('remind').value), recurrence: f('rec').value, recur_until: f('rec').value === 'none' ? null : f('until').value || null, description: f('description').value,
+            visibility: (box.querySelector('input[name=vis]:checked') || {}).value || 'invitees',
+            attendee_ids: [].map.call(box.querySelectorAll('.pick input:checked'), function(i){ return Number(i.value); }) };
+          var b = this; b.disabled = true;
+          api(e ? 'PUT' : 'POST', '/api/team/events' + (e ? '/' + e.id : ''), body).then(function(){ close(); toast(e ? 'Event saved' : 'Added to the calendar', body.visibility === 'invitees' && body.attendee_ids.length ? body.attendee_ids.length + (body.attendee_ids.length === 1 ? ' person' : ' people') + ' invited' : ''); load(); })
+            .catch(function(err){ b.disabled = false; toast('Not saved', err.message); });
+        };
+      });
+    }
+    $('#calPrev').onclick = function(){ cursor = view === 'month' ? new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1) : addDays(cursor, view === 'week' ? -7 : -30); load(); };
+    $('#calNext').onclick = function(){ cursor = view === 'month' ? new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1) : addDays(cursor, view === 'week' ? 7 : 30); load(); };
+    $('#calToday').onclick = function(){ cursor = startOfDay(new Date()); load(); };
+    $('#calNew').onclick = function(){ form(null); };
+    document.querySelectorAll('#calView [data-v]').forEach(function(b){ b.onclick = function(){ view = b.getAttribute('data-v'); try { localStorage.setItem('vtc-cal-view', view); } catch(_) {} load(); }; });
+    document.querySelectorAll('#calFilters [data-f]').forEach(function(c){ c.onchange = function(){ filters[c.getAttribute('data-f')] = c.checked; draw(); }; });
+    return { load: load, detail: function(id){ detail(id); } };
+  })();
+
+  // ---------------------------------------------------------- management --
+  var Mg = (function(){
+    var sub = 'convs', sel = null;
+    function kpis(){
+      api('GET', '/api/team/admin/overview').then(function(o){
+        $('#mKpis').innerHTML = [['Staff', o.staff], ['Online now', o.online], ['Messages today', o.msgs_today], ['Messages (7 days)', o.msgs_week], ['Groups', o.groups], ['One-to-one chats', o.directs], ['Calls today', o.calls_today], ['Deleted (7 days)', o.deleted_week], ['Live calls', o.live_calls.length]]
+          .map(function(k){ return '<div class="kpi"><b>' + esc(k[1]) + '</b>' + esc(k[0]) + '</div>'; }).join('');
+      }).catch(function(){});
+    }
+    function load(){ kpis(); go(sub); }
+    function go(s){
+      sub = s;
+      document.querySelectorAll('#mTabs [data-m]').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-m') === s); });
+      var host = $('#mBody'); host.innerHTML = '<p class="muted">Loading…</p>';
+      ({ convs: convs, search: search, memos: memos, online: online, calls: calls, audit: audit, settings: settings })[s](host);
+    }
+    function convs(host){
+      host.innerHTML = '<div class="split"><div class="card"><div class="row" style="margin-bottom:8px"><input type="search" id="mQ" placeholder="Group or person" style="flex:1"><select id="mK"><option value="">All kinds</option><option value="direct">One-to-one</option><option value="group">Groups</option><option value="company">All staff</option></select></div><div class="scroll" id="mList" style="max-height:62vh"></div></div>' +
+        '<div class="card" id="mView"><p class="muted">Choose a conversation to read it. Opening a conversation you are not in is recorded in the management access log.</p></div></div>';
+      var t = null;
+      var list = function(){
+        api('GET', '/api/team/admin/conversations?q=' + encodeURIComponent($('#mQ').value) + '&kind=' + $('#mK').value).then(function(r){
+          $('#mList').innerHTML = '<table><tr><th>Conversation</th><th>Msgs</th><th>Last</th></tr>' + r.conversations.map(function(c){
+            return '<tr class="click' + (sel === c.id ? ' sel' : '') + '" data-c="' + c.id + '"><td><b>' + esc(c.title) + '</b> ' + (c.kind === 'direct' ? '<span class="pill">1:1</span>' : c.kind === 'company' ? '<span class="pill g">all staff</span>' : '<span class="pill">group</span>') + (c.archived ? ' <span class="pill">closed</span>' : '') + (c.call ? ' <span class="pill g">📞 live</span>' : '') + (c.deleted ? ' <span class="pill r">' + c.deleted + ' deleted</span>' : '') +
+              (c.kind === 'group' ? '<div class="small muted">' + esc(c.members || '') + '</div>' : '') + '</td><td>' + c.messages + '</td><td class="small">' + esc(c.last_at ? when(c.last_at) : '') + '</td></tr>';
+          }).join('') + '</table>' + (r.conversations.length ? '' : '<p class="muted">No conversations yet.</p>');
+          $('#mList').querySelectorAll('[data-c]').forEach(function(tr){ tr.onclick = function(){ sel = Number(tr.getAttribute('data-c')); $('#mList').querySelectorAll('tr').forEach(function(x){ x.classList.toggle('sel', x === tr); }); transcript(sel); }; });
+        }).catch(function(e){ $('#mList').innerHTML = esc(e.message); });
+      };
+      $('#mQ').oninput = function(){ clearTimeout(t); t = setTimeout(list, 300); }; $('#mK').onchange = list;
+      list(); if (sel) transcript(sel);
+    }
+    function transcript(id, older, acc){
+      var v = $('#mView'); if (!v) return;
+      Promise.all([api('GET', '/api/team/conversations/' + id), api('GET', '/api/team/conversations/' + id + '/messages?limit=200' + (older ? '&before=' + older : ''))]).then(function(r){
+        var c = r[0].conversation, msgs = r[1].messages.concat(acc || []);
+        v.innerHTML = '<div class="row" style="margin-bottom:8px"><div style="flex:1"><b style="font-size:16px">' + esc(c.title) + '</b><div class="small muted">' + esc(r[0].members.map(function(m){ return m.name + (m.role === 'admin' && c.kind === 'group' ? ' (admin)' : ''); }).join(', ')) + '</div></div>' +
+          (c.kind === 'group' ? '<button class="sm" data-arch>' + (c.archived_at ? 'Reopen group' : 'Close group') + '</button>' : '') + (c.kind === 'company' ? '<button class="sm" data-oap>' + (c.only_admins_post ? 'Let everyone post' : 'Only managers post') + '</button>' : '') +
+          (c.is_member ? '<button class="sm" data-open>Open in chat</button>' : '') + '<a href="/api/team/admin/conversations/' + id + '/export"><button class="sm">⬇ CSV</button></a></div>' +
+          '<div class="tx">' + (r[1].more ? '<div style="text-align:center"><button class="sm" data-older>Load older</button></div>' : '') + msgs.map(function(m){
+            if (m.kind === 'system' || m.kind === 'call') return '<div class="m small muted" style="text-align:center">' + esc(m.body) + ' · ' + esc(when(m.created_at)) + '</div>';
+            return '<div class="m' + (m.deleted ? ' del' : '') + '"><div class="h"><b style="color:var(--ink)">' + esc(m.sender_name) + '</b>' + esc(when(m.created_at)) + (m.edited ? ' <span class="pill y">edited</span>' : '') + (m.deleted ? ' <span class="pill r">deleted' + (m.deleted_by_name ? ' by ' + esc(m.deleted_by_name) : '') + '</span>' : '') + (m.kind === 'memo' ? ' <span class="pill y">memo · ' + m.ack_count + ' acknowledged</span>' : '') +
+              '<span style="margin-left:auto"></span>' + (m.deleted ? '<button class="sm" data-restore="' + m.id + '">Restore</button>' : '<button class="sm" data-del="' + m.id + '">Delete</button>') + '</div>' +
+              (m.subject ? '<div><b>' + esc(m.subject) + '</b></div>' : '') + (m.body ? '<div class="b">' + esc(m.body) + '</div>' : '') + (m.file ? '<div><a href="' + esc(m.file.url) + '" target="_blank" rel="noopener">📎 ' + esc(m.file.name) + '</a></div>' : '') + '</div>';
+          }).join('') + (msgs.length ? '' : '<p class="muted">No messages.</p>') + '</div>';
+        if (!older) { var tx = v.querySelector('.tx'); tx.scrollTop = tx.scrollHeight; }
+        var o = v.querySelector('[data-older]'); if (o) o.onclick = function(){ transcript(id, msgs[0].id, msgs); };
+        var a = v.querySelector('[data-arch]'); if (a) a.onclick = function(){ api('PATCH', '/api/team/conversations/' + id, { archived: !c.archived_at }).then(function(){ transcript(id); }).catch(function(e){ toast('Not changed', e.message); }); };
+        var p = v.querySelector('[data-oap]'); if (p) p.onclick = function(){ api('PATCH', '/api/team/conversations/' + id, { only_admins_post: !c.only_admins_post }).then(function(){ transcript(id); }).catch(function(e){ toast('Not changed', e.message); }); };
+        var op = v.querySelector('[data-open]'); if (op) op.onclick = function(){ show('chat'); history.replaceState(null, '', location.pathname); T.openChat(id); };
+        v.querySelectorAll('[data-del]').forEach(function(b){ b.onclick = function(){ var why = prompt('Delete this message for everyone? Reason (kept in the access log):'); if (why === null) return; api('DELETE', '/api/team/messages/' + b.getAttribute('data-del'), { reason: why }).then(function(){ transcript(id); }).catch(function(e){ toast('Not deleted', e.message); }); }; });
+        v.querySelectorAll('[data-restore]').forEach(function(b){ b.onclick = function(){ api('POST', '/api/team/messages/' + b.getAttribute('data-restore') + '/restore').then(function(){ transcript(id); }).catch(function(e){ toast('Not restored', e.message); }); }; });
+      }).catch(function(e){ v.innerHTML = esc(e.message); });
+    }
+    function search(host){
+      var ppl = T.state.people;
+      host.innerHTML = '<div class="card"><div class="row"><input type="search" id="sQ" placeholder="Words to find (also finds edited and deleted wording)" style="flex:1;min-width:220px"><select id="sU"><option value="">Anyone</option>' + ppl.map(function(p){ return '<option value="' + p.id + '">' + esc(p.name) + '</option>'; }).join('') + '</select>' +
+        '<input type="date" id="sF" title="From"><input type="date" id="sT" title="To"><button class="primary" id="sGo">Search</button></div><div id="sOut" style="margin-top:10px"></div></div>';
+      var go2 = function(){
+        api('GET', '/api/team/admin/search?q=' + encodeURIComponent($('#sQ').value) + '&user=' + $('#sU').value + '&from=' + $('#sF').value + '&to=' + $('#sT').value).then(function(r){
+          $('#sOut').innerHTML = r.results.length ? '<div class="scroll"><table><tr><th>When</th><th>From</th><th>Conversation</th><th>Message</th></tr>' + r.results.map(function(m){
+            return '<tr class="click" data-c="' + m.conversation_id + '"><td class="small">' + esc(when(m.created_at)) + '</td><td>' + esc(m.sender_name || '') + '</td><td>' + esc(m.conv_title || '') + '</td><td>' + (m.subject ? '<b>' + esc(m.subject) + '</b> ' : '') + esc(m.body || '') + (m.file_name ? ' 📎 ' + esc(m.file_name) : '') +
+              (m.edited && m.original_body ? '<div class="small muted">First written: ' + esc(m.original_body) + '</div>' : '') + (m.deleted ? ' <span class="pill r">deleted</span>' : '') + '</td></tr>';
+          }).join('') + '</table></div>' : '<p class="muted">Nothing found.</p>';
+          $('#sOut').querySelectorAll('[data-c]').forEach(function(tr){ tr.onclick = function(){ sel = Number(tr.getAttribute('data-c')); go('convs'); }; });
+        }).catch(function(e){ $('#sOut').innerHTML = '<p class="muted">' + esc(e.message) + '</p>'; });
+      };
+      $('#sGo').onclick = go2; $('#sQ').onkeydown = function(e){ if (e.key === 'Enter') go2(); };
+    }
+    function memos(host){
+      api('GET', '/api/team/admin/memos').then(function(r){
+        host.innerHTML = '<div class="card"><div class="row" style="margin-bottom:8px"><b style="flex:1">Memos and announcements</b>' + (CFG.caps.announce ? '<button class="primary" id="mAnn">📢 New announcement to all staff</button>' : '') + '</div>' +
+          (r.memos.length ? '<div class="scroll"><table><tr><th>Sent</th><th>Subject</th><th>To</th><th>Seen</th><th>Acknowledged</th><th>Still to acknowledge</th><th></th></tr>' + r.memos.map(function(m){
+            return '<tr><td class="small">' + esc(when(m.created_at)) + '<div class="muted">' + esc(m.sender_name || '') + '</div></td><td><b>' + esc(m.subject) + '</b></td><td>' + esc(m.conv_title || 'one-to-one') + '</td><td>' + m.seen + ' / ' + m.recipients + '</td>' +
+              '<td>' + (m.require_ack ? '<span class="pill ' + (m.acks >= m.recipients ? 'g' : 'y') + '">' + m.acks + ' / ' + m.recipients + '</span>' : '<span class="muted small">not asked</span>') + '</td><td class="small">' + (m.require_ack ? esc(m.waiting || '—') : '') + '</td>' +
+              '<td>' + (m.require_ack && m.acks < m.recipients ? '<button class="sm" data-nudge="' + m.id + '">Remind them</button>' : '') + '</td></tr>';
+          }).join('') + '</table></div>' : '<p class="muted">No memos yet. Send one from the 📢 button in the chat.</p>') + '</div>';
+        var a = $('#mAnn'); if (a) a.onclick = function(){ T.announce(); };
+        host.querySelectorAll('[data-nudge]').forEach(function(b){ b.onclick = function(){ api('POST', '/api/team/admin/memos/' + b.getAttribute('data-nudge') + '/nudge').then(function(x){ toast('Reminder sent', 'To ' + x.reminded + ' staff'); }).catch(function(e){ toast('Not sent', e.message); }); }; });
+      }).catch(function(e){ host.innerHTML = esc(e.message); });
+    }
+    function online(host){
+      api('GET', '/api/team/people').then(function(r){
+        var ppl = r.people.slice().sort(function(a, b){ return (b.online - a.online) || a.name.localeCompare(b.name); });
+        host.innerHTML = '<div class="card"><p class="sub">' + ppl.filter(function(p){ return p.online; }).length + ' of ' + ppl.length + ' staff have the chat open right now.</p><div class="scroll"><table><tr><th>Staff</th><th>Role</th><th>Chat</th><th>Status</th><th>Today</th><th>Last seen</th><th></th></tr>' + ppl.map(function(p){
+          return '<tr><td>' + T.avatar(p.id, p.name, { small: true, dot: p.online ? 'on' : 'off' }) + ' <b>' + esc(p.name) + '</b></td><td>' + esc(p.role || '') + '</td><td>' + (p.online ? '<span class="pill g">online</span>' : '<span class="pill">offline</span>') + '</td>' +
+            '<td>' + esc({ available: 'Available', busy: 'Busy', away: 'Away', dnd: 'Do not disturb' }[p.status] || '') + (p.status_text ? ' · ' + esc(p.status_text) : '') + '</td><td>' + (p.on_leave ? '<span class="pill y">on leave</span>' : p.clocked_in ? '<span class="pill g">clocked in' + (p.clocked_in === 'remote' ? ' (remote)' : '') + '</span>' : '') + '</td>' +
+            '<td class="small">' + esc(p.last_seen ? when(p.last_seen) : '—') + '</td><td>' + (p.id !== CFG.me.id ? '<button class="sm" data-dm="' + p.id + '">💬</button>' : '') + '</td></tr>';
+        }).join('') + '</table></div></div>';
+        host.querySelectorAll('[data-dm]').forEach(function(b){ b.onclick = function(){ show('chat'); history.replaceState(null, '', location.pathname); T.startDirect(Number(b.getAttribute('data-dm'))); }; });
+      }).catch(function(e){ host.innerHTML = esc(e.message); });
+    }
+    function calls(host){
+      api('GET', '/api/team/admin/calls').then(function(r){
+        host.innerHTML = '<div class="card"><p class="sub">Calls go directly between the staff browsers. Nothing is recorded; this is only who called whom and for how long.</p>' + (r.calls.length ? '<div class="scroll"><table><tr><th>When</th><th>Type</th><th>Conversation</th><th>Started by</th><th>Joined</th><th>Length</th></tr>' + r.calls.map(function(c){
+          return '<tr><td class="small">' + esc(when(c.started_at)) + '</td><td>' + (c.media === 'video' ? '🎥 video' : '📞 voice') + '</td><td>' + esc(c.conv_title || '') + '</td><td>' + esc(c.started_by_name || '') + '</td><td class="small">' + esc(c.joined_names) + '</td><td>' + (c.live ? '<span class="pill g">live</span>' : c.answered ? (c.seconds < 60 ? c.seconds + ' s' : Math.round(c.seconds / 60) + ' min') : '<span class="pill r">missed</span>') + '</td></tr>';
+        }).join('') + '</table></div>' : '<p class="muted">No calls yet.</p>') + '</div>';
+      }).catch(function(e){ host.innerHTML = esc(e.message); });
+    }
+    function audit(host){
+      api('GET', '/api/team/admin/audit').then(function(r){
+        host.innerHTML = '<div class="card"><p class="sub">Every time management reads a conversation they are not in, searches, deletes or restores a message, or exports a chat.</p>' + (r.entries.length ? '<div class="scroll"><table><tr><th>When</th><th>Manager</th><th>Did</th><th>Conversation</th><th>Detail</th></tr>' + r.entries.map(function(a){
+          return '<tr><td class="small">' + esc(when(a.at)) + '</td><td>' + esc(a.name || '') + '</td><td>' + esc(a.action) + '</td><td>' + esc(a.conv_title || '') + '</td><td class="small">' + esc(a.detail || '') + '</td></tr>';
+        }).join('') + '</table></div>' : '<p class="muted">Nothing yet.</p>') + '</div>';
+      }).catch(function(e){ host.innerHTML = esc(e.message); });
+    }
+    function settings(host){
+      api('GET', '/api/team/settings').then(function(r){
+        host.innerHTML = '<div class="card"><h3 style="margin-top:0">Calls across the internet</h3><p class="sub">Calls on the shop network work as they are. For staff calling in from outside (phones on mobile data, home), the browsers find each other through a STUN server, and a few networks also need a TURN relay. Leave blank for the default (Google’s public STUN server).</p>' +
+          '<textarea id="ice" rows="6" style="font-family:ui-monospace,monospace;font-size:12.5px" placeholder=\'[{"urls":"stun:stun.l.google.com:19302"},{"urls":"turn:turn.example.com:3478","username":"…","credential":"…"}]\'>' + esc(r.custom ? JSON.stringify(r.ice_servers, null, 1) : '') + '</textarea>' +
+          '<h3>Keep messages</h3><p class="sub">Delete chat messages and files older than this many days (memos are kept). 0 keeps everything.</p><input type="number" id="ret" min="0" max="3650" value="' + r.retention_days + '" style="width:120px"> days' +
+          '<div class="row" style="margin-top:12px"><button class="primary" id="sv">Save</button></div></div>';
+        $('#sv').onclick = function(){
+          var raw = $('#ice').value.trim(), list = null;
+          if (raw) { try { list = JSON.parse(raw); } catch(_) { return toast('The server list is not valid JSON'); } }
+          api('PUT', '/api/team/settings', { ice_servers: list, retention_days: Number($('#ret').value) || 0 }).then(function(){ toast('Saved'); }).catch(function(e){ toast('Not saved', e.message); });
+        };
+      }).catch(function(e){ host.innerHTML = esc(e.message); });
+    }
+    document.querySelectorAll('#mTabs [data-m]').forEach(function(b){ b.onclick = function(){ go(b.getAttribute('data-m')); }; });
+    return { load: load, go: go };
+  })();
+
+  boot();
+})();
+</script>
+<script src="/assets/staff-assist.js?v=20261030" defer></script>
+</body>
+</html>

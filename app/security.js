@@ -214,13 +214,18 @@ function register(app, deps) {
     settings().then((s) => {
       const now = Date.now(), seen = req.session.seen || 0;
       if (s.idleMinutes && seen && now - seen > s.idleMinutes * 60000) { req.session = null; return next(); }
+      // The team chat's live stream and poll run in the background on every
+      // screen; they must not count as someone using the till.
+      if (/^\/api\/team\/(stream|poll)$/.test(req.path)) return next();
       if (!seen || now - seen > 60000) req.session.seen = now;   // rewrite the cookie at most once a minute
       next();
     }).catch(() => next());
   }
 
   // -------------------------------------------------------------- audit --
-  const SKIP = /\/(heartbeat|ping|presence|ui-prefs|prefs|telemetry)(\/|$)|^\/api\/(auth|public)\//;
+  // Team chat traffic (messages, typing, read receipts, call set-up) has its own
+  // record in team.js; only its management actions and settings come here.
+  const SKIP = /\/(heartbeat|ping|presence|ui-prefs|prefs|telemetry)(\/|$)|^\/api\/(auth|public)\/|^\/api\/team\/(?!admin\/|settings$)/;
   const SECRET = /pass|pin|code|token|secret|otp|cvv|card_?number|signature/i;
   const staffCache = new Map();
   async function staffName(uid) {
