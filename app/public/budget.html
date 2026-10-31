@@ -54,6 +54,11 @@
   input.amt{width:96px;text-align:right;padding:5px 7px}
   input.amt.tot{width:116px;font-weight:600}
   .bgrid td{padding:3px 4px} .bgrid td:first-child{min-width:200px;padding-left:8px}
+  .kb{display:inline-block;font-size:10.5px;font-weight:600;padding:0 7px;border-radius:999px;margin-left:4px;vertical-align:1px;white-space:nowrap;background:var(--chip);color:var(--muted)}
+  .kb.growth{background:#2563eb1f;color:var(--bar)} .kb.fixed{background:#64748b26} .kb.disc{background:#f59e0b26;color:var(--warn)} .kb.estimate{background:#7c3aed1f;color:#8b5cf6} .kb.none{opacity:.7}
+  .bgrid td.acc{cursor:pointer} .bgrid td.acc:hover{text-decoration:underline dotted}
+  .bgrid tr.nrow td{background:var(--bg);padding:8px 10px 10px} .nrow .basis{font-size:12.5px;color:var(--muted);margin-bottom:6px} .nrow textarea{width:100%;min-height:54px}
+  .bnotes h3{font-size:13px;margin:12px 0 4px} .bnotes .ln{padding:5px 0;border-bottom:1px solid var(--line);font-size:13px} .bnotes .ln b{display:inline-block;min-width:240px} .bnotes .ln small{display:block;color:var(--muted)}
   .bgrid td:first-child,.bgrid th:first-child{position:sticky;left:0;background:var(--card);z-index:1}
   .fgrid td:first-child,.fgrid th:first-child{position:sticky;left:0;background:var(--card);z-index:1;min-width:190px}
   .fgrid tr.head td:first-child{background:var(--chip)}
@@ -62,7 +67,7 @@
   .slider{display:flex;align-items:center;gap:8px;margin:6px 0} .slider span{flex:0 1 170px} .slider input[type=range]{flex:1;min-width:0} .slider b{min-width:46px;text-align:right}
   .form label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px} .form input,.form select,.form textarea{width:100%}
   svg text{fill:var(--muted);font-size:11px}
-  @media print{ header,.tabs,.controls,button{display:none!important} .card{border:0} }
+  @media print{ header,.tabs,.controls,button,.nrow{display:none!important} .card{border:0} .bnotes{break-before:page} }
 </style>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
@@ -167,7 +172,7 @@
     return loadMeta().then(function () {
       if (!bq) bq = { year: fyYear(), cls: '', mode: 'enter', upto: 'ytd', ver: '' };
       var yc = 'year=' + bq.year + (bq.cls ? '&class_id=' + bq.cls : '');
-      return Promise.all([api('/api/budget?' + (bq.ver ? 'version_id=' + bq.ver : yc)).catch(function (e) { bq.ver = ''; toast(e.message); return api('/api/budget?' + yc); }), api('/api/budget/versions?' + yc)])
+      return Promise.all([api('/api/budget?' + (bq.ver ? 'version_id=' + bq.ver : yc + '&auto=1')).catch(function (e) { bq.ver = ''; toast(e.message); return api('/api/budget?' + yc); }), api('/api/budget/versions?' + yc)])
         .then(function (r) { bdata = r[0]; versions = r[1].versions; drawBudget(); });
     });
   }
@@ -207,24 +212,121 @@
     var h = '<div class="card">' + (v
       ? '<div class="note info">A saved version, kept ' + esc(v.saved_at) + (v.saved_by ? ' by ' + esc(v.saved_by) : '') + '. It cannot be changed; put it back as the working budget to work on it.' + (v.notes ? '<br>' + esc(v.notes) : '') + '</div>' +
         '<div class="controls"><button class="primary" id="vrestore">Put back as the working budget</button><button id="vdel" style="color:var(--red)">Delete version</button><button id="vback">Back to the working budget</button></div>'
-      : '<div class="controls"><button id="bcopy">Fill from last year\'s actuals…</button><button id="bzero">Clear all</button><span class="sub" style="margin:0">Type a yearly amount in the Year column to spread it evenly over the 12 months.</span><span style="margin-left:auto"></span><button id="bkeep">Keep as a version…</button><button class="primary" id="bsave">Save budget</button></div>') +
+      : genBanner() + '<div class="controls"><button id="bcopy">Fill from last year\'s actuals…</button><button id="bzero">Clear all</button><span class="sub" style="margin:0">Type a yearly amount in the Year column to spread it evenly over the 12 months.</span><span style="margin-left:auto"></span><button id="bkeep">Keep as a version…</button><button class="primary" id="bsave">Save budget</button></div>') +
       '<div class="scroll"><table class="bgrid"><thead><tr><th>Account</th>' + bdata.months.map(function (m) { return '<th class="n">' + mlabel(m) + '</th>'; }).join('') + '<th class="n">Year</th></tr></thead><tbody>';
     TYPES.forEach(function (t) {
       var list = accountsOf(t[0]); if (!list.length) return;
       h += '<tr class="head"><td colspan="14">' + t[1] + '</td></tr>';
       list.forEach(function (a) {
         var r = bRow(a.id);
-        h += '<tr data-acct="' + a.id + '"><td>' + esc(a.code + ' ' + a.name) + '</td>' + r.budget.map(function (v, i) { return '<td><input class="amt" inputmode="decimal" data-i="' + i + '" data-j="' + (v || '') + '" value="' + (v ? moneyIn(v) : '') + '"' + ro + '></td>'; }).join('') +
+        var nt = noteOf(a.id);
+        h += '<tr data-acct="' + a.id + '"><td class="acc" title="Notes on this line">' + esc(a.code + ' ' + a.name) + (nt ? ' <span class="kb ' + esc(nt.kind) + '" title="' + esc(bdata.kinds[nt.kind] || '') + '">' + esc(KSHORT[nt.kind] || nt.kind) + '</span>' + (nt.edited && nt.note ? ' <span title="A note was written on this line">📝</span>' : '') : '') + '</td>' + r.budget.map(function (v, i) { return '<td><input class="amt" inputmode="decimal" data-i="' + i + '" data-j="' + (v || '') + '" value="' + (v ? moneyIn(v) : '') + '"' + ro + '></td>'; }).join('') +
           '<td><input class="amt tot" inputmode="decimal" data-tot="1" value=""' + ro + '></td></tr>';
       });
       h += '<tr class="total" data-sum="' + t[0] + '"><td>Total ' + t[1].toLowerCase() + '</td>' + bdata.months.map(function () { return '<td class="n"></td>'; }).join('') + '<td class="n"></td></tr>';
     });
     h += '<tr class="total" data-sum="net"><td>Net profit</td>' + bdata.months.map(function () { return '<td class="n"></td>'; }).join('') + '<td class="n"></td></tr></tbody></table></div></div>';
+    h += notesCard();
     if (!v) h += '<div class="card"><h2>Saved versions</h2><p class="sub">Named copies of this year\'s budget, such as the original and each revision. Choose one under Budget to look at it, compare it with actual, or put it back.</p>' +
       (versions.length ? '<div class="scroll"><table><thead><tr><th>Version</th><th>Kept</th><th class="n">Income</th><th class="n">Net profit</th><th></th></tr></thead><tbody>' + versions.map(function (x) {
         return '<tr class="click" data-ver="' + x.id + '"><td><b>' + esc(x.name) + '</b>' + (x.notes ? '<br><small class="sub">' + esc(x.notes) + '</small>' : '') + '</td><td>' + esc(x.saved_at) + (x.saved_by ? '<br><small class="sub">' + esc(x.saved_by) + '</small>' : '') + '</td><td class="n">' + J(x.income) + '</td><td class="n">' + J(x.net) + '</td><td class="n"><button class="sm">Open</button></td></tr>';
       }).join('') + '</tbody></table></div>' : '<p class="sub">None yet. Press "Keep as a version" to keep the budget as it stands.</p>') + '</div>';
     return h;
+  }
+  // ------------------------------------------------ made from history, notes --
+  var KSHORT = { growth: '↗ with sales', fixed: 'fixed', disc: 'discretionary', estimate: 'estimate', none: 'not budgeted', manual: 'by hand' };
+  var KORDER = ['growth', 'fixed', 'disc', 'estimate', 'manual', 'none'];
+  var KHELP = {
+    growth: 'Sales, and the costs that rise and fall with them. Last year\'s figure plus the growth target.',
+    fixed: 'Set by a contract or steady month to month (rent, pay, insurance). Last year\'s figure plus inflation; replace with the contract amount where you know it.',
+    disc: 'Spending management chooses (advertising, repairs that can wait, consultants). The first place to cut if sales fall short.',
+    estimate: 'No history in the books yet, so a guide figure from the usual share of sales or pay. Replace it with a real figure when you have one.',
+    manual: 'Entered by hand.',
+    none: 'Clearing accounts that should come to zero, so they are not budgeted.',
+  };
+  function noteOf(id) { return (bdata.notes || []).filter(function (n) { return n.account_id === id; })[0] || null; }
+  var dt = function (iso) { return new Date(iso).toLocaleString('en-JM', { timeZone: 'America/Jamaica', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }); };
+  function genBanner() {
+    var g = bdata.generated;
+    if (!bdata.saved) {
+      return '<div class="note ' + (bdata.cannot_generate ? 'warn' : 'info') + '"><b>There is no budget for this year.</b> ' + (bdata.deleted ? 'It was deleted, so it is not made again automatically. ' : '') +
+        (bdata.cannot_generate ? esc(bdata.cannot_generate) : 'Make one from the books: the last 12 months, with ' + bdata.growth_pct + '% growth on sales.') + '</div>' +
+        (bdata.cannot_generate ? '' : '<div class="controls"><button class="primary" id="bgen">Create from history…</button></div>');
+    }
+    return '<div class="note info">' + (g
+      ? '<b>Made from history</b> ' + esc(dt(g.at)) + (g.by ? ' by ' + esc(g.by) : ', automatically, as there was no budget') + ': the books ' + mlabel(g.from) + ' to ' + mlabel(g.to) + ' (' + g.months_of_books + ' months), sales and the costs that move with them +' + g.growth + '%, fixed and discretionary costs +' + g.inflation + '% inflation, guide figures where there is no history.' + (g.changed ? ' <b>Changed by hand since.</b>' : '') + ' Click an account for how its line was worked out.'
+      : '<b>Entered by hand.</b> Click an account to add a note to its line.') +
+      '</div><div class="controls"><button id="bgen">Recreate from history…</button><button id="bdel" style="color:var(--red)">Delete budget…</button></div>';
+  }
+  function notesCard() {
+    var notes = bdata.notes || [], acc = {};
+    meta.accounts.forEach(function (a) { acc[a.id] = a; });
+    if (!notes.length) return '';
+    // Lines with no history and nothing budgeted are only listed by name at the end.
+    var empty = function (n) { return !n.edited && /^No history in the books and no usual guide/.test(n.basis || ''); };
+    var idle = notes.filter(function (n) { return empty(n) && acc[n.account_id]; });
+    notes = notes.filter(function (n) { return !empty(n); });
+    return '<div class="card bnotes"><h2>Budget notes</h2><p class="sub">How each line was set, by kind of cost. Click an account in the grid to change its note.</p>' +
+      KORDER.map(function (k) {
+        var list = notes.filter(function (n) { return n.kind === k && acc[n.account_id]; }).sort(function (x, y) { return acc[x.account_id].code < acc[y.account_id].code ? -1 : 1; });
+        if (!list.length) return '';
+        return '<h3><span class="kb ' + k + '">' + esc(KSHORT[k]) + '</span> ' + esc(bdata.kinds[k] || k) + '</h3><p class="sub" style="margin:0 0 4px">' + esc(KHELP[k]) + '</p>' +
+          list.map(function (n) { var a = acc[n.account_id]; return '<div class="ln"><b>' + esc(a.code + ' ' + a.name) + '</b> ' + esc(n.note || '') + (n.basis ? '<small>' + esc(n.basis) + '</small>' : '') + '</div>'; }).join('');
+      }).join('') +
+      (idle.length ? '<h3>No history, nothing budgeted</h3><p class="sub" style="margin:0">' + idle.map(function (n) { var a = acc[n.account_id]; return esc(a.code + ' ' + a.name); }).join(' · ') + '. Enter an amount on any of these if you expect it this year.</p>' : '') + '</div>';
+  }
+  function genForm() {
+    var again = bdata.saved;
+    modal('<h2>' + (again ? 'Recreate the budget from history' : 'Create the budget from history') + '</h2>' +
+      '<p class="sub">Each account starts from the books for the last 12 complete months, month by month, so busy and quiet months carry over. Months before the books started take the account\'s average month.</p>' +
+      '<ul class="sub" style="padding-left:18px;margin:0 0 10px"><li>Sales, and the costs that move with them (cost of sales, commission, card fees, fuel): <b>+ growth</b></li><li>Fixed and discretionary costs (rent, pay, insurance, advertising): <b>+ inflation</b></li><li>Accounts with no history: a guide figure where there is a usual one (for example statutory contributions at 12.5% of pay)</li><li>Suspense, cash over and short and other clearing accounts: not budgeted</li></ul>' +
+      '<div class="controls"><div><label>Growth on sales (%)</label><input id="gg" type="number" step="0.5" value="' + bdata.growth_pct + '" style="width:120px"></div><div><label>Inflation on costs (%)</label><input id="gi" type="number" step="0.5" value="' + bdata.inflation_pct + '" style="width:120px"></div></div>' +
+      (again ? '<div class="note warn">This replaces every amount in this year\'s working budget. The budget as it stands is kept as a saved version first, and notes you wrote yourself are kept.</div>' : '') +
+      '<div class="controls"><button class="primary" id="ggo">' + (again ? 'Recreate' : 'Create') + '</button><button id="gx">Cancel</button></div>');
+    $('#gx').onclick = closeModal;
+    $('#ggo').onclick = function () {
+      var b = this; b.disabled = true;
+      api('/api/budget/generate', 'POST', { year: bq.year, class_id: bq.cls || null, growth_pct: $('#gg').value, inflation_pct: $('#gi').value })
+        .then(function (r) { closeModal(); toast('Budget made from history: ' + r.rows + ' lines' + (r.kept ? '; the old one is kept as a version' : '')); return budgetTab(); })
+        .catch(function (e) { b.disabled = false; toast(e.message); });
+    };
+  }
+  function wireNotes() {
+    if ($('#bgen')) $('#bgen').onclick = genForm;
+    if ($('#bdel')) $('#bdel').onclick = function () {
+      if (!confirm('Delete the whole budget for this year? It is kept as a saved version first, so it can be put back. It will not be made again automatically.')) return;
+      api('/api/budget?year=' + bq.year + (bq.cls ? '&class_id=' + bq.cls : ''), 'DELETE').then(function () { toast('Budget deleted; a copy is kept under saved versions'); return budgetTab(); }).catch(function (e) { toast(e.message); });
+    };
+    all('tr[data-acct] td.acc').forEach(function (td) {
+      td.onclick = function () {
+        var tr = td.parentNode, id = +tr.getAttribute('data-acct'), open = tr.nextElementSibling && tr.nextElementSibling.classList.contains('nrow');
+        all('tr.nrow').forEach(function (x) { x.remove(); });
+        if (open) return;
+        var n = noteOf(id) || { kind: 'manual', note: '', basis: '' }, ro = bdata.version ? ' disabled' : '';
+        tr.insertAdjacentHTML('afterend', '<tr class="nrow"><td colspan="14">' + (n.basis ? '<div class="basis"><b>How it was worked out:</b> ' + esc(n.basis) + '</div>' : '') +
+          '<div class="controls" style="margin-bottom:6px"><div><label>Kind of cost</label><select id="nk"' + ro + '>' + KORDER.map(function (k) { return '<option value="' + k + '"' + (n.kind === k ? ' selected' : '') + '>' + esc(bdata.kinds[k] || k) + '</option>'; }).join('') + '</select></div>' +
+          '<small class="sub" style="margin:0 0 8px;max-width:520px" id="nkh">' + esc(KHELP[n.kind] || '') + '</small></div>' +
+          '<label class="sub" style="display:block;margin:0 0 3px">Note</label><textarea id="nn" maxlength="2000"' + ro + '>' + esc(n.note || '') + '</textarea>' +
+          (bdata.version ? '' : '<div class="controls" style="margin:6px 0 0"><button class="primary sm" id="nsv">Save note</button><button class="sm" id="ncl">Close</button></div>') + '</td></tr>');
+        if (bdata.version) return;
+        $('#nk').onchange = function () { $('#nkh').textContent = KHELP[this.value] || ''; };
+        $('#ncl').onclick = function () { all('tr.nrow').forEach(function (x) { x.remove(); }); };
+        $('#nsv').onclick = function () {
+          api('/api/budget/notes', 'PUT', { year: bq.year, class_id: bq.cls || null, account_id: id, kind: $('#nk').value, note: $('#nn').value })
+            .then(function () {
+              // Only the note changes on screen, so amounts typed but not saved stay.
+              var k = $('#nk').value, txt = $('#nn').value.trim(), cur = noteOf(id);
+              if (cur) { cur.kind = k; cur.note = txt; cur.edited = true; } else (bdata.notes = bdata.notes || []).push({ account_id: id, kind: k, basis: null, note: txt, edited: true });
+              var a = meta.accounts.filter(function (x) { return x.id === id; })[0];
+              td.innerHTML = esc(a.code + ' ' + a.name) + ' <span class="kb ' + esc(k) + '" title="' + esc(bdata.kinds[k] || '') + '">' + esc(KSHORT[k]) + '</span>' + (txt ? ' <span title="A note was written on this line">📝</span>' : '');
+              all('tr.nrow').forEach(function (x) { x.remove(); });
+              var card = $('.bnotes'), fresh = notesCard();
+              if (card) card.outerHTML = fresh; else $('.bgrid').closest('.card').insertAdjacentHTML('afterend', fresh);
+              toast('Note saved');
+            }).catch(function (e) { toast(e.message); });
+        };
+      };
+    });
   }
   function gridValues() {
     return all('tr[data-acct]').map(function (tr) { return { account_id: +tr.getAttribute('data-acct'), amounts: all('input[data-i]', tr).map(function (i) { return moneyOut(i.value, i.getAttribute('data-j')) || 0; }) }; });
@@ -244,6 +346,7 @@
   }
   function wireEnter() {
     sumGrid();
+    wireNotes();
     var v = bdata.version;
     if (v) {
       $('#vback').onclick = function () { bq.ver = ''; budgetTab(); };

@@ -121,22 +121,36 @@ function register(app, deps) {
   // With version_id, the budget is that saved version (its own year, class and months).
   app.get('/api/budget', ...VIEW, async (req, res) => {
     try {
-      let year = parseInt(req.query.year, 10), cls = classArg(req.query.class_id), months, budget, version = null;
+      let year = parseInt(req.query.year, 10), cls = classArg(req.query.class_id), months, budget, version = null, vnotes = null;
       const vid = parseInt(req.query.version_id, 10);
       if (vid > 0) {
         const v = await versionRow(vid);
         year = v.year; cls = v.class_id; months = v.data.months; budget = v.data.rows;
         version = { id: v.id, name: v.name, notes: v.notes, saved_by: v.saved_by, saved_at: v.saved_at };
+        vnotes = v.data.notes || [];
       } else {
         if (!(year >= 2000 && year <= 2100)) throw httpError(400, 'Choose a year');
         ({ months, rows: budget } = await workingBudget(year, cls));
+        // No budget for this year or next: make one from history, unless one was deleted on purpose.
+        if (!budget.length && req.query.auto === '1') {
+          const now = await fyNow();
+          if ((year === now || year === now + 1) && !(await setting(offKey(year, cls), null))) {
+            const g = await generate(year, cls, Number(await setting('budget_growth_pct', '10')), Number(await setting('budget_inflation_pct', '5')), null);
+            if (g.ok) ({ months, rows: budget } = await workingBudget(year, cls));
+          }
+        }
       }
       const actual = await monthly(months[0], addDays(monthAdd(months[11], 1), -1), cls);
       const by = {};
       const slot = (id) => (by[id] = by[id] || { account_id: id, budget: Array(12).fill(0), actual: Array(12).fill(0) });
       for (const b of budget) slot(b.account_id).budget = b.amounts.map(r2);
       for (const a of actual) { const i = months.indexOf(a.month); if (i >= 0) slot(a.account_id).actual[i] = r2(a.amount); }
-      res.json({ year, class_id: cls, months, rows: Object.values(by), saved: budget.length > 0, version });
+      const notes = version ? vnotes : await budgetNotes(year, cls);
+      const gen = version ? null : await setting(genKey(year, cls), null);
+      const why = !version && !budget.length ? await fromHistory(year, cls, 10, 5).then((r) => (r.ok ? null : r.reason)) : null;
+      res.json({ year, class_id: cls, months, rows: Object.values(by), saved: budget.length > 0, version, notes, kinds: KIND,
+        generated: gen ? JSON.parse(gen) : null, deleted: !version && !budget.length && !!(await setting(offKey(year, cls), null)), cannot_generate: why,
+        growth_pct: Number(await setting('budget_growth_pct', '10')), inflation_pct: Number(await setting('budget_inflation_pct', '5')) });
     } catch (e) { fail(res, e); }
   });
   // Saves the whole grid for one year and class: rows [{account_id, amounts[12]}].
@@ -164,7 +178,219 @@ function register(app, deps) {
          SELECT a, $4::int, m, v, $5 FROM unnest($1::int[], $2::date[], $3::numeric[]) AS x(a, m, v)
          ON CONFLICT (account_id, COALESCE(class_id, 0), month) DO UPDATE SET amount = EXCLUDED.amount, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
         [ids, ms, vs, cls, me(req)]);
+      const gk = genKey(year, cls), gen = await setting(gk, null);
+      if (gen) { const g = JSON.parse(gen); if (!g.changed) await setSetting(gk, JSON.stringify(Object.assign(g, { changed: true }))); }
       res.json({ ok: true, saved: ids.length });
+    } catch (e) { fail(res, e); }
+  });
+
+  // ================================================== BUDGET FROM HISTORY ==
+  // A year's budget worked out from the books: each account's last 12 complete
+  // months, month by month (so the busy and quiet months carry over), then
+  //   sales, and the costs that move with them     + the growth % (10%)
+  //   fixed (contract) and discretionary costs     + inflation (5%)
+  //   accounts with no history                     a guide % of sales where there is a usual one
+  //   clearing accounts (suspense, over / short)   nothing: they should come to zero
+  // A month with no books (before the ledger started) takes the account's
+  // average month. Each line keeps a note of how it was worked out and what
+  // kind of cost it is, and managers add their own words to it.
+  // When this year or next has no budget, opening it makes one this way;
+  // deleting a budget stops that until someone makes one again.
+  const KIND = { growth: 'Moves with sales', fixed: 'Fixed / contract', disc: 'Discretionary', estimate: 'Estimate (guide figure)', none: 'Not budgeted', manual: 'Entered by hand' };
+  // By account code (the standard chart); `est`: a guide when there is no history, [share, of what].
+  const RULES = {
+    4000: { kind: 'growth', note: 'Counter, account and online parts sales: the main income line. The growth target applies here first, and the costs that move with sales follow it.' },
+    4050: { kind: 'growth', note: 'Workshop labour and services.' },
+    4090: { kind: 'growth', est: [-0.02, 'sales'], note: 'Returns, shown as a minus. Guide when there is no history: about 2% of sales (parts counters commonly see 2-5%).' },
+    4100: { kind: 'growth', est: [-0.01, 'sales'], note: 'Discounts given, shown as a minus. Guide: about 1% of sales. Keep it within the discount rules.' },
+    4200: { kind: 'growth', note: 'Delivery charges to customers; moves with sales.' },
+    5000: { kind: 'growth', est: [0.65, 'parts'], note: 'Cost of the parts sold. It grows with sales, so the gross margin stays where it was. Guide: 65% of parts sales, a 35% gross margin (auto parts retail commonly runs 30-45%).' },
+    5050: { kind: 'growth', note: 'Differences between the order price and the supplier\'s bill. Should stay small; look into any large month.' },
+    5060: { kind: 'growth', est: [0.02, 'parts'], note: 'Freight, duty and clearing on stock bought in. Guide: about 2% of parts sales; more where most stock is imported.' },
+    5100: { kind: 'growth', est: [0.015, 'sales'], note: 'Stock lost, damaged or miscounted. Retail guide: about 1.5% of sales (the usual retail range is 1-2%). Good counts and returns grading keep it down.' },
+    5150: { kind: 'growth', note: 'Parts used on workshop jobs; moves with labour sales.' },
+    6000: { kind: 'none', note: 'Cash over and short should come to zero, so it is not budgeted. Look into any month that is not small.' },
+    6100: { kind: 'disc', note: 'Small cash spending from the tills. Discretionary: keep it in check.' },
+    6200: { kind: 'growth', note: 'Sales commission; moves with sales.' },
+    6300: { kind: 'growth', note: 'Loyalty rewards given; moves with sales.' },
+    6400: { kind: 'fixed', note: 'Set by the lease. Replace with the lease amount, including any increase due this year.' },
+    6410: { kind: 'fixed', est: [0.01, 'sales'], note: 'Electricity: steady from month to month, rising with JPS rates. Guide when there is no history: about 1% of sales.' },
+    6420: { kind: 'fixed', note: 'Water: steady from month to month.' },
+    6430: { kind: 'fixed', est: [0.003, 'sales'], note: 'Phone and internet plans, set by contract.' },
+    6500: { kind: 'fixed', note: 'Pay for the current staff, plus inflation for pay rises. Add any new posts planned for the year.' },
+    6510: { kind: 'fixed', est: [0.125, 'payroll'], note: 'Employer\'s statutory contributions. Standard: about 12.5% of gross pay (NIS 3%, NHT 3%, Education Tax 3.5%, HEART/NSTA 3%); check the current rates and ceilings.' },
+    6520: { kind: 'fixed', note: 'Employer\'s pension contributions; follows the scheme rules and the pay bill.' },
+    6530: { kind: 'disc', note: 'Contract labour, brought in when needed: discretionary.' },
+    6540: { kind: 'fixed', note: 'Staff health and life insurance premiums.' },
+    6600: { kind: 'disc', est: [0.005, 'sales'], note: 'Repairs and maintenance: urgent repairs cannot wait, the rest can. Guide: about 0.5% of sales.' },
+    6700: { kind: 'fixed', note: 'Set by the insurance policies; use the renewal quotes.' },
+    6800: { kind: 'disc', note: 'Accountants, lawyers and consultants. The audit fee is fixed; the rest is discretionary.' },
+    6850: { kind: 'growth', note: 'Fuel and vehicles: moves with deliveries, and so with sales.' },
+    6870: { kind: 'disc', est: [0.015, 'sales'], note: 'Advertising and promotion: discretionary. Retail guide: 1-3% of sales; 1.5% is used when there is no history.' },
+    6880: { kind: 'disc', est: [0.002, 'sales'], note: 'Office supplies and stationery: discretionary.' },
+    6890: { kind: 'fixed', note: 'Security, set by contract.' },
+    6900: { kind: 'none', note: 'Suspense holds postings waiting to be sorted out. It should be empty, so it is not budgeted.' },
+    6950: { kind: 'growth', est: [0.015, 'sales'], note: 'Bank charges and card fees; card fees move with card sales. Guide: about 1.5% of sales (fees of 2.5-3% on about half the sales).' },
+    6960: { kind: 'none', note: 'Reconciliation differences should be zero, so they are not budgeted.' },
+    7100: { kind: 'fixed', note: 'Rent from tenants, as the leases say.' },
+    7200: { kind: 'fixed', note: 'Interest earned on deposits.' },
+    7300: { kind: 'fixed', note: 'Late fees on overdue accounts. Better collections make this smaller, which is good.' },
+    8100: { kind: 'fixed', note: 'Loan interest: take it from the loan schedules; it falls as the loans are paid down.' },
+  };
+  function ruleFor(a) {
+    if (RULES[a.code]) return RULES[a.code];
+    const n = String(a.name).toLowerCase();
+    if (/suspense|clearing|over and short|discrepanc/.test(n)) return { kind: 'none', note: 'A clearing account: it should come to zero, so it is not budgeted.' };
+    if (a.type === 'income' || a.type === 'cogs') return { kind: 'growth', note: 'Moves with sales.' };
+    if (/advert|market|promo|travel|entertain|meal|donat|gift|training|welfare|consult|subscri|bonus/.test(n)) return { kind: 'disc', note: 'Discretionary: management decides how much to spend.' };
+    if (/commission|freight|fuel|card|merchant|packag|deliver/.test(n)) return { kind: 'growth', note: 'Moves with sales.' };
+    return { kind: 'fixed', note: 'Treated as a steady cost: last year plus inflation. Change the kind of cost in the note if it is not.' };
+  }
+  const genKey = (year, cls) => `budget_gen:${year}:${cls || 0}`, offKey = (year, cls) => `budget_auto_off:${year}:${cls || 0}`;
+  const money = (v) => (v < 0 ? '-' : '') + 'J$' + Math.round(Math.abs(v)).toLocaleString('en-US');
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const mname = (m) => MON[+m.slice(5, 7) - 1] + ' ' + m.slice(0, 4);
+  async function fyNow() { const s = (await fyMonths(2000)).start, t = today(); return +t.slice(5, 7) >= s ? +t.slice(0, 4) : +t.slice(0, 4) - 1; }
+
+  // Works the budget out (nothing saved): { ok, rows, notes, info } or { ok: false, reason }.
+  async function fromHistory(year, cls, growth, inflation) {
+    const { months } = await fyMonths(year);
+    const thisMonth = today().slice(0, 8) + '01', from = monthAdd(thisMonth, -12), to = addDays(thisMonth, -1);
+    const window = Array.from({ length: 12 }, (_, i) => monthAdd(from, i));
+    const startRaw = await setting('gl_start_at', null);
+    if (!startRaw) return { ok: false, reason: 'The ledger has not been started, so there is no history to build a budget from.' };
+    const start = new Date(Date.parse(startRaw) - 5 * 3600000).toISOString().slice(0, 10);
+    const act = await monthly(from, to, cls);
+    // A month counts when the books cover all of it, or when it has sales in it (history brought in from before).
+    const withSales = new Set(act.filter((r) => r.amount).map((r) => r.month));
+    const covered = window.filter((m) => m >= start || withSales.has(m));
+    if (covered.length < 3) return { ok: false, reason: 'The books cover fewer than 3 full months, which is too little history for a budget. Enter it by hand for now.' };
+    const { rows: accts } = await query(`SELECT id, code, name, type FROM gl_accounts WHERE is_active AND type = ANY($1) ORDER BY code`, [PL_TYPES]);
+    const hist = {};
+    for (const r of act) if (covered.includes(r.month)) (hist[r.account_id] = hist[r.account_id] || {})[r.month] = r.amount;
+    const g = 1 + growth / 100, inf = 1 + inflation / 100;
+    const out = {}, notes = [];
+    const base = (m) => window.find((w) => w.slice(5, 7) === m.slice(5, 7));   // the same calendar month in the last 12
+    // First pass: everything with history.
+    for (const a of accts) {
+      const rule = ruleFor(a), h = hist[a.id];
+      if (rule.kind === 'none') { notes.push({ account_id: a.id, kind: 'none', basis: 'Not budgeted.', note: rule.note }); continue; }
+      if (!h || !Object.values(h).some((v) => Math.abs(v) >= 0.5)) continue;
+      const avg = covered.reduce((s, m) => s + (h[m] || 0), 0) / covered.length;
+      const factor = rule.kind === 'growth' ? g : inf;
+      let filled = 0, baseTotal = 0;
+      out[a.id] = months.map((m) => {
+        const b = base(m), v = covered.includes(b) ? (h[b] || 0) : (filled++, avg);
+        baseTotal += v;
+        return Math.round(v * factor);
+      });
+      const total = out[a.id].reduce((s, v) => s + v, 0);
+      notes.push({ account_id: a.id, kind: rule.kind, note: rule.note,
+        basis: `The books, ${mname(covered[0])} to ${mname(covered[covered.length - 1])}: ${money(baseTotal - filled * avg)}` +
+          (filled ? ` over ${12 - filled} months, with the other ${filled} taken as the average month (${money(avg)})` : '') +
+          `. ${rule.kind === 'growth' ? `+${growth}% growth` : `+${inflation}% inflation`} = ${money(total)} for the year.` });
+    }
+    // Second pass: guide figures for accounts with no history, from the budgeted sales and pay.
+    const sumOf = (pred) => months.map((_, i) => accts.filter(pred).reduce((s, a) => s + (out[a.id] && out[a.id].reduce((x, y) => x + y, 0) > 0 ? out[a.id][i] : 0), 0));
+    const sales = sumOf((a) => a.type === 'income' && ruleFor(a).kind === 'growth');
+    const partsAcct = accts.find((a) => a.code === '4000');
+    const parts = partsAcct && out[partsAcct.id] ? out[partsAcct.id] : sales;
+    const payroll = sumOf((a) => a.type === 'expense' && /salar|wage/i.test(a.name));
+    const OF = { sales: [sales, 'budgeted sales'], parts: [parts, 'budgeted parts sales'], payroll: [payroll, 'budgeted pay'] };
+    for (const a of accts) {
+      if (out[a.id]) continue;
+      const rule = ruleFor(a);
+      if (rule.kind === 'none') continue;
+      if (rule.est && OF[rule.est[1]][0].some((v) => v)) {
+        const [share, of] = rule.est;
+        out[a.id] = OF[of][0].map((v) => Math.round(v * share));
+        const total = out[a.id].reduce((s, v) => s + v, 0);
+        notes.push({ account_id: a.id, kind: 'estimate', note: rule.note,
+          basis: `No history in the books. Guide figure: ${Math.abs(share * 100).toFixed(1).replace(/\.0$/, '')}% of ${OF[of][1]} = ${money(total)} for the year. Replace it with your own figure when you have one.` });
+      } else {
+        notes.push({ account_id: a.id, kind: rule.kind, note: rule.note, basis: 'No history in the books and no usual guide figure, so nothing is budgeted. Enter an amount if you expect any.' });
+      }
+    }
+    const rows = Object.entries(out).map(([id, amounts]) => ({ account_id: +id, amounts })).filter((r) => r.amounts.some((v) => v));
+    if (!rows.length) return { ok: false, reason: 'The books have no income or costs in the last 12 months to build a budget from.' };
+    return { ok: true, rows, notes, info: { growth, inflation, from: covered[0], to: covered[covered.length - 1], months_of_books: covered.length } };
+  }
+  // Makes the budget and puts it in place of the working budget (kept as a version first by the caller).
+  async function generate(year, cls, growth, inflation, userId) {
+    const r = await fromHistory(year, cls, growth, inflation);
+    if (!r.ok) return r;
+    const { months } = await fyMonths(year);
+    const { rows: cur } = await query(`SELECT DISTINCT account_id FROM gl_budgets WHERE month = ANY($1::date[]) AND class_id IS NOT DISTINCT FROM $2`, [months, cls]);
+    const by = {};
+    for (const c of cur) by[c.account_id] = Array(12).fill(0);
+    for (const x of r.rows) by[x.account_id] = x.amounts;
+    const ids = [], ms = [], vs = [];
+    for (const [id, amounts] of Object.entries(by)) for (let i = 0; i < 12; i++) { ids.push(+id); ms.push(months[i]); vs.push(amounts[i]); }
+    await query(
+      `INSERT INTO gl_budgets (account_id, class_id, month, amount, updated_by)
+       SELECT a, $4::int, m, v, $5 FROM unnest($1::int[], $2::date[], $3::numeric[]) AS x(a, m, v)
+       ON CONFLICT (account_id, COALESCE(class_id, 0), month) DO UPDATE SET amount = EXCLUDED.amount, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+      [ids, ms, vs, cls, userId]);
+    // Notes: the basis is redone; words a manager wrote are kept.
+    await query(
+      `INSERT INTO gl_budget_notes (year, class_id, account_id, kind, basis, note)
+       SELECT $1, $2::int, a, k, b, n FROM unnest($3::int[], $4::text[], $5::text[], $6::text[]) AS x(a, k, b, n)
+       ON CONFLICT (year, COALESCE(class_id, 0), account_id) DO UPDATE SET kind = EXCLUDED.kind, basis = EXCLUDED.basis,
+         note = CASE WHEN gl_budget_notes.edited THEN gl_budget_notes.note ELSE EXCLUDED.note END, updated_at = NOW()`,
+      [year, cls, r.notes.map((x) => x.account_id), r.notes.map((x) => x.kind), r.notes.map((x) => x.basis), r.notes.map((x) => x.note)]);
+    let byName = null;
+    if (userId) byName = ((await query(`SELECT name FROM users WHERE id = $1`, [userId])).rows[0] || {}).name || null;
+    await setSetting(genKey(year, cls), JSON.stringify(Object.assign({ at: new Date().toISOString(), by: byName }, r.info)));
+    await setSetting(offKey(year, cls), null);
+    return r;
+  }
+  async function budgetNotes(year, cls) {
+    return (await query(`SELECT account_id, kind, basis, note, edited FROM gl_budget_notes WHERE year = $1 AND class_id IS NOT DISTINCT FROM $2`, [year, cls])).rows;
+  }
+  const pctArg = (v, dflt, lo, hi) => { if (v === '' || v == null) return dflt; const n = Number(v); if (!Number.isFinite(n) || n < lo || n > hi) throw httpError(400, 'Give a % between ' + lo + ' and ' + hi); return Math.round(n * 100) / 100; };
+
+  // Recreates the year's budget from history (the working budget is kept as a version first).
+  app.post('/api/budget/generate', ...EDIT, async (req, res) => {
+    try {
+      const b = req.body || {}, year = parseInt(b.year, 10), cls = classArg(b.class_id);
+      if (!(year >= 2000 && year <= 2100)) throw httpError(400, 'Choose a year');
+      const growth = pctArg(b.growth_pct, Number(await setting('budget_growth_pct', '10')), -50, 200);
+      const inflation = pctArg(b.inflation_pct, Number(await setting('budget_inflation_pct', '5')), -20, 100);
+      const kept = await keepVersion(year, cls, `Before it was recreated from history (${today()})`, null, me(req));
+      const r = await generate(year, cls, growth, inflation, me(req));
+      if (!r.ok) throw httpError(400, r.reason);
+      await setSetting('budget_growth_pct', growth); await setSetting('budget_inflation_pct', inflation);
+      res.json({ ok: true, kept, rows: r.rows.length });
+    } catch (e) { fail(res, e); }
+  });
+  // Deletes the year's working budget and its notes (kept as a version first). It is not made again automatically.
+  app.delete('/api/budget', ...EDIT, async (req, res) => {
+    try {
+      const year = parseInt(req.query.year, 10), cls = classArg(req.query.class_id);
+      if (!(year >= 2000 && year <= 2100)) throw httpError(400, 'Choose a year');
+      const { months } = await fyMonths(year);
+      const kept = await keepVersion(year, cls, `Deleted ${today()}`, null, me(req));
+      const { rowCount } = await query(`DELETE FROM gl_budgets WHERE month = ANY($1::date[]) AND class_id IS NOT DISTINCT FROM $2`, [months, cls]);
+      await query(`DELETE FROM gl_budget_notes WHERE year = $1 AND class_id IS NOT DISTINCT FROM $2`, [year, cls]);
+      await setSetting(genKey(year, cls), null);
+      await setSetting(offKey(year, cls), '1');
+      res.json({ ok: true, kept, deleted: rowCount });
+    } catch (e) { fail(res, e); }
+  });
+  // A manager's own words on one line of the budget.
+  app.put('/api/budget/notes', ...EDIT, async (req, res) => {
+    try {
+      const b = req.body || {}, year = parseInt(b.year, 10), cls = classArg(b.class_id), acct = parseInt(b.account_id, 10);
+      if (!(year >= 2000 && year <= 2100)) throw httpError(400, 'Choose a year');
+      const a = (await query(`SELECT id, code, name, type FROM gl_accounts WHERE id = $1 AND type = ANY($2)`, [acct, PL_TYPES])).rows[0];
+      if (!a) throw httpError(400, 'Unknown account');
+      const kind = b.kind && KIND[b.kind] ? b.kind : null, note = String(b.note == null ? '' : b.note).trim().slice(0, 2000);
+      await query(
+        `INSERT INTO gl_budget_notes (year, class_id, account_id, kind, basis, note, edited, updated_by)
+         VALUES ($1, $2, $3, COALESCE($4, $5), NULL, $6, true, $7)
+         ON CONFLICT (year, COALESCE(class_id, 0), account_id) DO UPDATE SET kind = COALESCE($4, gl_budget_notes.kind), note = EXCLUDED.note, edited = true, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+        [year, cls, acct, kind, ruleFor(a).kind, note, me(req)]);
+      res.json({ ok: true });
     } catch (e) { fail(res, e); }
   });
 
@@ -454,6 +680,7 @@ function register(app, deps) {
   async function keepVersion(year, cls, name, notes, userId) {
     const w = await workingBudget(year, cls);
     if (!w.rows.length) return null;
+    w.notes = await budgetNotes(year, cls);
     const { rows } = await query(`INSERT INTO gl_budget_versions (year, class_id, name, notes, data, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
       [year, cls, name, notes, JSON.stringify(w), userId]);
     return rows[0].id;
@@ -499,6 +726,10 @@ function register(app, deps) {
          SELECT a, $4::int, m, v, $5 FROM unnest($1::int[], $2::date[], $3::numeric[]) AS x(a, m, v)
          ON CONFLICT (account_id, COALESCE(class_id, 0), month) DO UPDATE SET amount = EXCLUDED.amount, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
         [ids, ms, vs, v.class_id, me(req)]);
+      if (v.data.notes) {
+        await query(`DELETE FROM gl_budget_notes WHERE year = $1 AND class_id IS NOT DISTINCT FROM $2`, [v.year, v.class_id]);
+        for (const n of v.data.notes) if (types[n.account_id]) await query(`INSERT INTO gl_budget_notes (year, class_id, account_id, kind, basis, note, edited) VALUES ($1,$2,$3,$4,$5,$6,$7)`, [v.year, v.class_id, n.account_id, n.kind, n.basis, n.note, !!n.edited]);
+      }
       res.json({ ok: true, kept, year: v.year, class_id: v.class_id });
     } catch (e) { fail(res, e); }
   });

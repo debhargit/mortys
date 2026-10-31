@@ -6151,6 +6151,23 @@ CREATE TABLE IF NOT EXISTS gl_budget_versions (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_gl_budget_versions_year ON gl_budget_versions (year, class_id);
+-- Notes on each line of a year's budget (budget.js "BUDGET FROM HISTORY"):
+-- the kind of cost (growth, fixed, disc, estimate, none, manual), how a budget
+-- made from history worked the figure out (basis), and the words on it (note).
+-- edited: a manager wrote the note, so recreating the budget keeps it.
+CREATE TABLE IF NOT EXISTS gl_budget_notes (
+  id          SERIAL PRIMARY KEY,
+  year        INTEGER NOT NULL,
+  class_id    INTEGER REFERENCES gl_classes(id) ON DELETE CASCADE,
+  account_id  INTEGER NOT NULL REFERENCES gl_accounts(id) ON DELETE CASCADE,
+  kind        TEXT NOT NULL CHECK (kind IN ('growth', 'fixed', 'disc', 'estimate', 'none', 'manual')),
+  basis       TEXT,
+  note        TEXT,
+  edited      BOOLEAN NOT NULL DEFAULT false,
+  updated_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_gl_budget_notes ON gl_budget_notes (year, COALESCE(class_id, 0), account_id);
 -- Financial health reports kept for comparison over time: the report exactly as
 -- it was worked out from the books that day (budget.js buildHealth).
 CREATE TABLE IF NOT EXISTS financial_health_reports (
