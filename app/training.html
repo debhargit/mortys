@@ -24,6 +24,8 @@
   .pill{display:inline-block;font-size:12px;padding:1px 9px;border-radius:999px;background:var(--chip);white-space:nowrap}
   .pill.ok{background:#16a34a22;color:var(--ok)} .pill.bad{background:#d6282822;color:var(--red)} .pill.warn{background:#f59e0b22;color:var(--warn)}
   .lesson{white-space:pre-wrap;line-height:1.6}
+  .lesson [data-pi]+[data-pi]{margin-top:1.1em} .reading{background:#fde68a55;box-shadow:0 0 0 6px #fde68a55;border-radius:4px}
+  .voice{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 12px} .voice select{padding:5px 6px} .voice small{color:var(--muted)}
   .q{border-top:1px solid var(--line);padding:12px 0} .q b{display:block;margin-bottom:6px}
   .q label{display:flex;gap:8px;align-items:flex-start;padding:5px 8px;border-radius:8px;cursor:pointer} .q label:hover{background:var(--chip)}
   table{width:100%;border-collapse:collapse} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
@@ -90,15 +92,111 @@
     });
   }
   function lesson(key) {
+    Voice.stop();
     api('/api/training/modules/' + encodeURIComponent(key)).then(function (m) {
-      $('#out').innerHTML = '<div class="card"><h2>' + esc(m.title) + '</h2><p class="sub">' + esc(m.summary || '') + '</p><div class="lesson">' + esc(m.body) + '</div></div>' +
+      // One block per paragraph, so the one being read aloud can be highlighted.
+      var paras = String(m.body || '').split(/\n\s*\n/).map(function (t, i) { return t.trim() ? '<div data-pi="' + i + '">' + esc(t.trim()) + '</div>' : ''; }).join('');
+      $('#out').innerHTML = '<div class="card"><h2 data-pi="-1">' + esc(m.title) + '</h2><p class="sub">' + esc(m.summary || '') + '</p>' +
+        '<div class="voice"><button id="vPlay">🔊 Listen</button><button id="vPrev" title="Back a paragraph" hidden>⏮</button><button id="vNext" title="Next paragraph" hidden>⏭</button>' +
+        '<select id="vRate" title="Speed"><option value="0.8">Slower</option><option value="1" selected>Normal speed</option><option value="1.2">Faster</option><option value="1.4">Fastest</option></select><small id="vMsg"></small></div>' +
+        '<div class="lesson">' + paras + '</div></div>' +
         '<div class="controls"><button id="bk">Back</button>' + (m.quiz && m.questions ? '<button class="primary" id="qz">Take the quiz (' + Math.min(12, m.questions) + ' questions, pass ' + m.pass_pct + '%)</button>' : '') + (m.practice ? '<button id="pt">Practise on the till</button>' : '') + '</div>';
       $('#bk').onclick = show;
       if ($('#qz')) $('#qz').onclick = function () { quiz(key); };
       if ($('#pt')) $('#pt').onclick = function () { tab = 'till'; show(); };
+      Voice.wire(key);
     }).catch(function (e) { toast(e.message); });
   }
+
+  // 🔊 Listen: the server reads the lesson with a Gemini or Google voice
+  // (voice.js), or, with neither set up, this computer's own voice does. It is
+  // read a part at a time, the paragraph being read is highlighted, and
+  // clicking a paragraph jumps there.
+  var Voice = (function () {
+    var cur = null;   // { key, provider, parts, i, playing, token, audio }
+    var NAME = { gemini: 'Gemini voice', google: 'Google voice', browser: 'this computer’s voice' };
+    function rate() { return parseFloat(($('#vRate') || {}).value) || 1; }
+    function url(i) { return '/api/training/modules/' + encodeURIComponent(cur.key) + '/voice/' + i; }
+    function msg(t) { var m = $('#vMsg'); if (m) m.textContent = t || ''; }
+    function mark(p) {
+      all('[data-pi]').forEach(function (el) { el.classList.toggle('reading', +el.getAttribute('data-pi') === p); });
+      var el = p == null ? null : $('[data-pi="' + p + '"]');
+      if (el) { var r = el.getBoundingClientRect(); if (r.top < 60 || r.bottom > innerHeight - 40) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+    }
+    function buttons() {
+      var b = $('#vPlay'); if (!b || !cur) return;
+      b.textContent = cur.playing ? '⏸ Pause' : cur.i > 0 && cur.i < cur.parts.length ? '▶ Carry on' : '🔊 Listen';
+      $('#vPrev').hidden = $('#vNext').hidden = !(cur.playing || cur.i > 0);
+    }
+    function halt() {
+      if (!cur) return;
+      cur.token++;
+      if (cur.audio) { cur.audio.onended = cur.audio.onerror = null; cur.audio.pause(); cur.audio = null; }
+      if (window.speechSynthesis) speechSynthesis.cancel();
+    }
+    function stop() { if (!cur) return; halt(); cur.playing = false; mark(null); cur = null; }
+    function pause() { halt(); cur.playing = false; buttons(); msg(''); }
+    function finished() { halt(); cur.playing = false; cur.i = 0; mark(null); buttons(); msg('Finished. Take the quiz below when you are ready.'); }
+    function play(i) {
+      halt();
+      if (i >= cur.parts.length) return finished();
+      cur.i = Math.max(0, i); cur.playing = true; buttons();
+      var token = cur.token, part = cur.parts[cur.i];
+      mark(part.p);
+      var next = function () { if (cur && cur.token === token && cur.playing) play(cur.i + 1); };
+      if (cur.provider === 'browser') {
+        if (!window.speechSynthesis) { pause(); msg('This browser cannot read aloud.'); return; }
+        var u = new SpeechSynthesisUtterance(part.text);
+        u.rate = rate(); u.lang = 'en-US';
+        u.onend = next;
+        u.onerror = function (e) { if (e.error !== 'interrupted' && e.error !== 'canceled') { pause(); msg('Could not read aloud: ' + e.error); } };
+        speechSynthesis.speak(u);
+        msg('Reading with ' + NAME.browser);
+        return;
+      }
+      var a = cur.audio = new Audio(url(cur.i));
+      a.playbackRate = rate();
+      a.onended = next;
+      a.onerror = function () {
+        if (!cur || cur.token !== token) return;
+        // Find out why, then carry on with the computer's own voice.
+        fetch(url(cur.i), { credentials: 'same-origin' }).then(function (r) { return r.json(); }).catch(function () { return {}; }).then(function (j) {
+          if (!cur || cur.token !== token) return;
+          cur.provider = 'browser'; play(cur.i);
+          msg(String(j.error || 'The voice service did not answer').replace(/[.\s]*$/, '.') + ' Using ' + NAME.browser + ' instead.');
+        });
+      };
+      msg(cur.i === 0 ? 'Getting the ' + NAME[cur.provider] + ' ready…' : 'Reading with the ' + NAME[cur.provider]);
+      a.onplaying = function () { if (cur && cur.token === token) msg('Reading with the ' + NAME[cur.provider]); };
+      a.play().catch(function () {});
+      // Have the next part made while this one plays, so there is no gap.
+      if (cur.i + 1 < cur.parts.length) fetch(url(cur.i + 1), { credentials: 'same-origin' }).catch(function () {});
+    }
+    function wire(key) {
+      $('#vPlay').onclick = function () {
+        if (cur && cur.key === key) { if (cur.playing) pause(); else play(cur.i); return; }
+        msg('Loading…');
+        api('/api/training/modules/' + encodeURIComponent(key) + '/voice').then(function (v) {
+          cur = { key: key, provider: v.provider, parts: v.parts, i: 0, playing: false, token: 0, audio: null };
+          play(0);
+        }).catch(function (e) { msg(e.message); });
+      };
+      $('#vPrev').onclick = function () { if (!cur) return; var p = cur.parts[cur.i].p, i = cur.i; while (i > 0 && cur.parts[i].p === p) i--; var q = cur.parts[i].p; while (i > 0 && cur.parts[i - 1].p === q) i--; play(i); };
+      $('#vNext').onclick = function () { if (!cur) return; var p = cur.parts[cur.i].p, i = cur.i; while (i < cur.parts.length && cur.parts[i].p === p) i++; play(i); };
+      $('#vRate').onchange = function () { if (cur && cur.audio) cur.audio.playbackRate = rate(); else if (cur && cur.playing && cur.provider === 'browser') play(cur.i); };
+      all('.lesson [data-pi]').forEach(function (el) {
+        el.onclick = function () {
+          if (!cur || !cur.playing) return;
+          var p = +el.getAttribute('data-pi'), i = cur.parts.findIndex(function (x) { return x.p === p; });
+          if (i >= 0) play(i);
+        };
+      });
+    }
+    window.addEventListener('pagehide', stop);
+    return { wire: wire, stop: stop };
+  })();
   function quiz(key) {
+    Voice.stop();
     api('/api/training/modules/' + encodeURIComponent(key) + '/quiz', 'POST').then(function (q) {
       $('#out').innerHTML = '<div class="card"><h2>Quiz: ' + esc(q.title) + '</h2><p class="sub">Pass mark ' + q.pass_pct + '%. Choose one answer for each question.</p>' +
         q.questions.map(function (x, i) { return '<div class="q"><b>' + (i + 1) + '. ' + esc(x.question) + '</b>' + x.choices.map(function (c, j) { return '<label><input type="radio" name="q' + x.id + '" value="' + j + '"> ' + esc(c) + '</label>'; }).join('') + '</div>'; }).join('') +
@@ -385,6 +483,7 @@
     });
   }
   function show() {
+    Voice.stop();
     all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); });
     var f = { mine: mine, record: myRecord, people: people, search: search, manual: manual, till: function () { till(); return Promise.resolve(); }, team: team, edit: edit }[tab] || mine;
     f().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });

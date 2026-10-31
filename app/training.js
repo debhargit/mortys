@@ -74,12 +74,20 @@ function register(app, deps) {
       res.json({ name: u.name, lessons: rows.filter((m) => manage || applies(m, u.admin_role)).map((m) => ({ key: m.key, title: m.title, summary: m.summary, body: m.body, roles: m.roles })) });
     } catch (e) { fail(res, e); }
   });
+  // A lesson this person may open: active, and for their role (managers: any).
+  async function lessonFor(req, key) {
+    const u = await me(req);
+    const { rows } = await query(`SELECT id, key, title, summary, body, pass_pct, valid_months, quiz, practice, roles FROM training_modules WHERE key = $1 AND active`, [String(key)]);
+    if (!rows.length) throw httpError(404, 'Module not found');
+    if (!applies(rows[0], u.admin_role) && !(await userCan(req, 'training.manage'))) throw httpError(403, 'This module is not for your role');
+    return Object.assign(rows[0], { user: u });
+  }
+  // Reading a lesson aloud (voice.js): Gemini or Google voices, or the browser's.
+  require('./voice').register(app, { requireAdmin, lessonFor, fail });
   app.get('/api/training/modules/:key', requireAdmin, async (req, res) => {
     try {
-      const u = await me(req);
-      const { rows } = await query(`SELECT id, key, title, summary, body, pass_pct, valid_months, quiz, practice, roles FROM training_modules WHERE key = $1 AND active`, [String(req.params.key)]);
-      if (!rows.length) throw httpError(404, 'Module not found');
-      if (!applies(rows[0], u.admin_role) && !(await userCan(req, 'training.manage'))) throw httpError(403, 'This module is not for your role');
+      const m = await lessonFor(req, req.params.key), u = m.user, rows = [m];
+      delete m.user;
       const { rows: c } = await query(`SELECT COUNT(*)::int AS n FROM training_questions WHERE module_id = $1 AND active`, [rows[0].id]);
       // Opening a lesson is recorded (first time, last time, how often).
       await query(`INSERT INTO training_views (user_id, module_id) VALUES ($1, $2) ON CONFLICT (user_id, module_id) DO UPDATE SET last_at = NOW(), views = training_views.views + 1`, [u.id, rows[0].id]);

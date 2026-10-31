@@ -227,6 +227,8 @@ The till and the website: the till (the shop server) is the main system. The web
 
 The full manual: Training > Manual shows every lesson for your role on one page, with contents. Press "Print / save as PDF" for a printed or PDF copy. The Help panel links to it too.
 
+Listening to a lesson: press 🔊 Listen at the top of any lesson to have it read to you. The paragraph being read is highlighted; ⏮ and ⏭ go back or forward a paragraph, clicking a paragraph jumps to it, and you can make it slower or faster. Pause stops it and "Carry on" picks up where it stopped. When the shop has a Gemini or Google voice set up, that voice reads it; otherwise the computer's own voice does. Use headphones on the shop floor.
+
 Your training record: Training > My record shows the training assigned to you and when it is due, every lesson with your best score and when a pass expires, your other training and certificates, and every quiz you have taken. Training your manager assigns also arrives as a notice in team chat.
 
 Something broken? Raise a help desk ticket under All modules > System management > Help desk, saying what you did and what happened. Do not keep retrying a payment or a save that gave an error - report it.`,
