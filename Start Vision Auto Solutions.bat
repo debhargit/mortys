@@ -21,7 +21,8 @@ cd /d "%~dp0"
 title Vision Auto Solutions
 
 set "PORT=3056"
-set /a HTTPS_PORT=PORT+1
+rem 3057 belongs to the MelthaHonda till on this PC; app\.env sets the same.
+set "HTTPS_PORT=3059"
 set "BOOT=%~dp0app\boot.js"
 set "CFG=%~dp0app\server-config.json"
 set "LOGS=%~dp0data\logs"
