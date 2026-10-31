@@ -90,7 +90,7 @@ Your drawer must be closed or handed over before you clock out. The time clock w
   {
     key: 'timeclock', title: 'Time clock and shifts', sort: 40,
     summary: 'Clocking in and out, breaks, overtime and corrections.',
-    body: `Clock in at the time clock when you start, with your PIN, badge, fingerprint / face or email and password - whichever your manager set for you. Your badge and PIN are yours alone: clocking in for someone else is not allowed and photos may be taken.
+    body: `Clock in at the time clock when you start, with your PIN, badge, fingerprint / face or email and password - whichever your manager set for you. With a PIN, type it, press OK, then tap your own name on the list: the PIN is checked against the person you pick. Your badge and PIN are yours alone: clocking in for someone else is not allowed and photos may be taken.
 
 Breaks and lunch: press Break or Lunch when you go and "Back from break" when you return.
 
@@ -207,7 +207,7 @@ Orders from the assistant appear in the cashier queue like any other order; chec
   {
     key: 'getting-around', title: 'Getting around the system', sort: 5,
     summary: 'Signing in, the menu, pinned screens, your preferences, phones and the Help button.',
-    body: `Signing in: open the admin page on the till (or visionautosolutions.com/admin on the website) and sign in with your email and password, or press "Sign in with PIN" at a shared counter. Your password and PIN are yours alone. Sign out when you leave a shared till.
+    body: `Signing in: open the admin page on the till (or visionautosolutions.com/admin on the website) and sign in with your email and password, or press "Sign in with PIN" at a shared counter, type your PIN and tap your name on the staff list. Your password and PIN are yours alone. To change your password, press "Change password" on the sign-in screen and give your current password and the new one twice; if you have forgotten it and the shop has Google set up, confirm your email with Google instead. Sign out when you leave a shared till.
 
 2-step sign-in: if your manager has switched it on, after the password you type the 6-digit code from the authenticator app on your phone. Set it up under All modules > Security and audit log > My sign-in. Keep the recovery codes somewhere safe.
 

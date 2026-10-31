@@ -21,6 +21,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const pins = require('./pins');
 const TZ = 'America/Jamaica';
 const KINDS = ['item_added', 'item_removed', 'qty_changed', 'price_changed', 'discount_changed', 'cart_cleared', 'hold_recalled', 'dept_blocked'];
 
@@ -157,9 +158,10 @@ function register(app, deps) {
       if (!p.length) throw httpError(404, 'Part not found');
       const pin = String((req.body || {}).pin || '').trim();
       if (!/^\d{4,8}$/.test(pin)) throw httpError(400, 'Enter the manager PIN');
-      const { rows: staff } = await query(`SELECT id, name, admin_role, pin_hash FROM users WHERE pin_hash IS NOT NULL AND is_staff AND NOT disabled`);
-      let hit = null;
-      for (const s of staff) if (await bcrypt.compare(pin, s.pin_hash)) { hit = s; break; }
+      // The manager picked on the keypad's staff list, when the till sends one.
+      const picked = pins.pickedId(req.body);
+      const { rows: staff } = await query(`SELECT id, name, admin_role, pin_hash FROM users WHERE pin_hash IS NOT NULL AND is_staff AND NOT disabled` + (picked ? ' AND id = $1' : ''), picked ? [picked] : []);
+      const hit = await pins.pick(staff, pin);
       if (!hit) { t.n++; PIN_TRIES.set(key, t); throw httpError(401, 'PIN not recognised'); }
       if (!(await roleCanManage(hit.admin_role))) { t.n++; PIN_TRIES.set(key, t); throw httpError(403, (hit.name || 'That person') + ' cannot approve this: a manager is needed.'); }
       PIN_TRIES.delete(key);

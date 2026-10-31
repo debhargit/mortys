@@ -64,6 +64,7 @@
   <p class="sub" style="text-align:center">Each punch records this device, its address and, if allowed, its location. This device: <b id="devName"></b> · <a href="#" id="devRename">name it</a></p>
 </main>
 <script src="/assets/clock-ctx.js"></script>
+<script src="/assets/pin-staff.js"></script>
 <script>
 (function () {
   'use strict';
@@ -93,13 +94,13 @@
   all('#pad button').forEach(function (b) {
     b.onclick = function () {
       var k = b.getAttribute('data-k');
-      if (k === '⌫') pin = pin.slice(0, -1); else if (k === 'OK') { if (pin) send({ method: 'pin', pin: pin }); return; } else if (pin.length < 8) pin += k;
+      if (k === '⌫') pin = pin.slice(0, -1); else if (k === 'OK') { if (pin) pinSend(); return; } else if (pin.length < 8) pin += k;
       dots();
     };
   });
   document.addEventListener('keydown', function (e) {
     if (method !== 'pin' || !action || document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
-    if (/^\d$/.test(e.key) && pin.length < 8) { pin += e.key; dots(); } else if (e.key === 'Backspace') { pin = pin.slice(0, -1); dots(); } else if (e.key === 'Enter' && pin) send({ method: 'pin', pin: pin });
+    if (/^\d$/.test(e.key) && pin.length < 8) { pin += e.key; dots(); } else if (e.key === 'Backspace') { pin = pin.slice(0, -1); dots(); } else if (e.key === 'Enter' && pin) pinSend();
   });
   // Badge: works even without choosing an action first.
   $('#badge').addEventListener('keydown', function (e) { if (e.key === 'Enter' && this.value.trim()) { var v = this.value.trim(); this.value = ''; send({ method: 'badge', badge: v }, action || 'toggle'); } });
@@ -115,6 +116,14 @@
     }).catch(function (e) { msg(e && e.name === 'NotAllowedError' ? 'Cancelled or not recognised.' : (e.message || 'Could not check'), false); });
   };
 
+  // After the PIN, the person taps their name (assets/pin-staff.js); the PIN is checked against them only.
+  function pinSend() {
+    if (!action) return msg('Choose Clock in, Clock out or Break first.', false);
+    window.pickPinStaff().then(function (who) {
+      if (!who) { pin = ''; dots(); return; }
+      send(who.id ? { method: 'pin', pin: pin, user_id: who.id } : { method: 'pin', pin: pin });
+    });
+  }
   function send(id, act) {
     pending = Object.assign({}, id, { action: act || action });
     if (!pending.action) return msg('Choose Clock in, Clock out or Break first.', false);

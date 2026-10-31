@@ -216,7 +216,11 @@
     api(url, { method: 'POST', body: body }).then(step)
       .catch(function (e) { $('#loginErr').textContent = e.message; });
   }
-  $('#pinGo').onclick = function () { doLogin('/api/auth/pin-signin', { pin: $('#pin').value }); };
+  // PIN, then the person taps their name (assets/pin-staff.js).
+  $('#pinGo').onclick = function () {
+    var p = $('#pin').value; if (!p) return;
+    pickPinStaff().then(function (who) { if (who) doLogin('/api/auth/pin-signin', who.id ? { pin: p, user_id: who.id } : { pin: p }); });
+  };
   $('#pin').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('#pinGo').click(); });
   $('#pwGo').onclick = function () { doLogin('/api/auth/signin', { email: $('#em').value, password: $('#pw').value }); };
   $('#pw').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('#pwGo').click(); });
@@ -646,6 +650,8 @@
 <script src="/assets/wh-inbound.js"></script>
 <script src="/assets/wh-outbound.js"></script>
 <script src="/assets/wh-count.js"></script>
+<script src="/assets/pin-staff.js"></script>
+<script src="/assets/pw-change.js"></script>
 <script src="/assets/clock-banner.js" defer></script>
 <script src="/assets/staff-assist.js" defer></script>
 </body>

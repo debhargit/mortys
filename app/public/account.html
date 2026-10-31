@@ -164,7 +164,7 @@
     </div>
     <button type="submit" id="authBtn">Sign In</button>
     <div class="hint" id="authToggle">No account yet? <a href="#" onclick="event.preventDefault();setAuthMode('signup')">Create one</a>.</div>
-    <div class="hint" id="forgotRow"><a href="#" onclick="event.preventDefault();forgotPassword()">Forgot your password?</a></div>
+    <div class="hint" id="forgotRow"><a href="#" onclick="event.preventDefault();forgotPassword()">Forgot your password?</a> · <a href="#" onclick="event.preventDefault();changePasswordFromSignin()">Change password</a></div>
     <div id="altAuth" style="margin-top:14px">
       <div style="display:flex;align-items:center;gap:10px;color:var(--muted);font-size:13px;margin:4px 0 12px"><span style="flex:1;height:1px;background:var(--line,#e5e7eb)"></span>or<span style="flex:1;height:1px;background:var(--line,#e5e7eb)"></span></div>
       <button type="button" id="passkeyBtn" onclick="doPasskeySignin()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:#111827;color:#fff;border:0;border-radius:10px;padding:12px;font-size:15px;font-weight:600;cursor:pointer;margin-bottom:8px">🔑 Sign in with a passkey</button>
@@ -670,6 +670,13 @@ function loadGoogle(clientId){
   sc.onload=function(){ try{ google.accounts.id.initialize({client_id:clientId,callback:window.handleGoogleCredential}); google.accounts.id.renderButton(wrap,{theme:"outline",size:"large",text:"continue_with",width:300}); }catch(e){} };
   document.head.appendChild(sc);
 }
+// Change password before signing in (assets/pw-change.js): current password, or Google.
+function changePasswordFromSignin(){
+  if (!window.openPasswordChange) return;
+  window.openPasswordChange({ email: document.getElementById("acEmail").value.trim() }).then(function(em){
+    if (em) { document.getElementById("acEmail").value = em; var p = document.getElementById("acPass"); p.value = ""; p.focus(); }
+  });
+}
 async function doPasskeySignin(){
   var err=document.getElementById("signinErr"); err.classList.remove("show");
   if(!window.PublicKeyCredential){ err.textContent="This device does not support passkeys."; err.classList.add("show"); return; }
@@ -711,5 +718,6 @@ loadProviders();
   }
 })();
 </script>
+<script src="/assets/pw-change.js"></script>
 </body>
 </html>

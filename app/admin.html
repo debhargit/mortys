@@ -563,6 +563,7 @@
          the whole shift. -->
     <button type="button" id="pinSignInBtn" style="margin-top:8px;background:transparent;border:1px solid var(--line);color:var(--ink)">🔑 Sign in with PIN</button>
     <button type="button" id="signinCancel" class="signin-cancel">Cancel</button>
+    <a href="#" id="pwChangeLink" style="display:block;text-align:center;margin-top:10px;font-size:13px;color:inherit;opacity:.8">Change password</a>
   </form>
 </div>
 
@@ -756,6 +757,16 @@ document.addEventListener('DOMContentLoaded', function(){
     var wl = document.getElementById('whoLabel');
     if (wl) wl.textContent = (who.name || who.email) + ' · ' + CURRENT_ADMIN_ROLE;
     init();
+  });
+
+  // Change password from the sign-in screen (assets/pw-change.js): with the
+  // current one, or with Google when it is forgotten.
+  var pwLink = document.getElementById('pwChangeLink');
+  if (pwLink) pwLink.addEventListener('click', async function(e){
+    e.preventDefault();
+    if (!window.openPasswordChange) return;
+    var email = await window.openPasswordChange({ email: document.getElementById('adEmail').value.trim() });
+    if (email) { document.getElementById('adEmail').value = email; var p = document.getElementById('adPass'); p.value = ''; p.focus(); }
   });
 
   var tog = document.getElementById('adPassToggle');
@@ -4417,7 +4428,7 @@ async function posRenderLockScreen(panel){
     if (!pin.value.trim()) { msg.textContent = 'Enter your PIN.'; return; }
     go.disabled = true; msg.style.color = 'var(--muted)'; msg.textContent = 'Checking…';
     try {
-      var res = await api('/api/admin/staff/pin-verify', { method: 'POST', body: { pin: pin.value.trim(), purpose: 'pos' } });
+      var res = await api('/api/admin/staff/pin-verify', { method: 'POST', body: { pin: pin.value.trim(), purpose: 'pos', user_id: uid } });
       if (!res.user || res.user.id !== uid) {
         msg.style.color = '#b91c1c';
         msg.textContent = 'That PIN does not match ' + (sel.options[sel.selectedIndex].text) + '.';
@@ -12610,14 +12621,23 @@ function posPinPrompt(opts){
     async function submit(){
       if (!digits) return;
       err.style.display = 'none';
+      // Then who it is: the person picks their name (assets/pin-staff.js) and
+      // the PIN is checked against that one account.
+      var approving = o.purpose === 'override' || /^\/api\/dept\/override/.test(o.endpoint || '');
+      var who = window.pickPinStaff
+        ? await window.pickPinStaff({ managersFirst: approving, title: approving ? 'Who is approving?' : 'Who are you?' })
+        : { id: null };
+      if (!who) { digits = ''; paint(); return; }
+      var body = { pin: digits };
+      if (who.id) body.user_id = who.id;
       try {
         // Two endpoints, same keypad. pin-verify identifies someone who is
         // already signed in (crediting a ticket, approving an override);
         // pin-signin IS the sign-in and is the only one reachable without a
         // session. Keeping one keypad means the counter learns one thing.
         var r = o.endpoint
-          ? await api(o.endpoint, { method: 'POST', body: { pin: digits } })
-          : await api('/api/admin/staff/pin-verify', { method: 'POST', body: { pin: digits, purpose: o.purpose || 'signin' } });
+          ? await api(o.endpoint, { method: 'POST', body: body })
+          : await api('/api/admin/staff/pin-verify', { method: 'POST', body: Object.assign(body, { purpose: o.purpose || 'signin' }) });
         close(r.user);
       } catch (e) { fail(e.message); }
     }
@@ -13891,7 +13911,7 @@ async function renderStaff(panel){
           '<div><label class="lbl">Temporary password *</label><input id="sfPass" class="fld"/></div>' +
           '<div><label class="lbl">Employee no.</label><input id="sfEmpNo" class="fld" placeholder="EMP-001"/></div>' +
           '<div><label class="lbl">National ID (TRN)</label><input id="sfNid" class="fld"/></div>' +
-          '<div><label class="lbl">Till PIN <small style="color:var(--muted)">4–8 digits, optional</small></label><input id="sfPin" class="fld" inputmode="numeric" maxlength="8"/></div>' +
+          '<div><label class="lbl">Till PIN <small style="color:var(--muted)">4–8 digits, optional</small></label><input id="sfPin" class="fld" type="password" autocomplete="new-password" inputmode="numeric" maxlength="8"/></div>' +
         '</div>' },
       { key: 'access', label: '2  Role & access', html:
         '<label class="qbo-switch"><input type="checkbox" id="sfIsAdmin" checked/>' +
@@ -14098,7 +14118,7 @@ function staffPinModal(id, name, hasPin, after){
       '<button type="button" class="btn ok" id="spGen" style="width:100%;padding:10px;margin-bottom:14px">🎲 Generate a new random PIN</button>' +
       '<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:10px">' +
         '<div style="flex:1"><label class="lbl">Or set a specific PIN (4–8 digits)</label>' +
-          '<input id="spPin" class="fld" inputmode="numeric" maxlength="8" placeholder="e.g. 4729"/></div>' +
+          '<input id="spPin" class="fld" type="password" autocomplete="new-password" inputmode="numeric" maxlength="8" placeholder="e.g. 4729"/></div>' +
         '<button type="button" class="btn" id="spSet">Set</button>' +
       '</div>' +
       (hasPin ? '<button type="button" class="btn" id="spClear" style="background:#fee2e2;color:#b91c1c">Remove PIN entirely</button>' : '') +
@@ -19972,6 +19992,8 @@ document.addEventListener('DOMContentLoaded', async function(){
 });
 
 </script>
+<script src="/assets/pin-staff.js"></script>
+<script src="/assets/pw-change.js"></script>
 <script src="/assets/clock-banner.js" defer></script>
 <script src="/assets/staff-assist.js?v=20261020" defer></script>
 <script>

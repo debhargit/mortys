@@ -26,6 +26,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const pins = require('./pins');
 
 // Jamaican dollar notes and coins, largest first.
 const DENOMS = [5000, 1000, 500, 100, 50, 20, 10, 5, 1];
@@ -131,15 +132,13 @@ function register(app, deps) {
     });
   }
 
-  async function verifyManagerPin(pin) {
+  // userId: the manager picked from the keypad's staff list (the PIN is checked against them only).
+  async function verifyManagerPin(pin, userId) {
     if (!pin) return null;
-    const { rows } = await query(`SELECT id, name, pin_hash FROM users WHERE pin_hash IS NOT NULL AND is_staff = true AND NOT disabled`);
-    for (const u of rows) {
-      if (await bcrypt.compare(String(pin), u.pin_hash)) {
-        if (await userCan({ session: { userId: u.id } }, 'cashier.manage')) return u;
-        return null;
-      }
-    }
+    const picked = pins.pickedId({ user_id: userId });
+    const { rows } = await query(`SELECT id, name, pin_hash FROM users WHERE pin_hash IS NOT NULL AND is_staff = true AND NOT disabled` + (picked ? ' AND id = $1' : ''), picked ? [picked] : []);
+    const u = await pins.pick(rows, String(pin));
+    if (u && await userCan({ session: { userId: u.id } }, 'cashier.manage')) return u;
     return null;
   }
 
@@ -570,7 +569,7 @@ function register(app, deps) {
       let approver = null;
       const limit = Number(await setting('cash_payout_limit', '5000')) || 5000;
       if (b.kind === 'payout' && amount > limit) {
-        approver = await verifyManagerPin(b.manager_pin);
+        approver = await verifyManagerPin(b.manager_pin, b.manager_user_id);
         if (!approver) throw httpError(403, 'Payouts over J$' + limit + ' need a manager PIN');
       }
       await query(`INSERT INTO till_movements (session_id, kind, amount, reason, by_user, approved_by) VALUES ($1, $2, $3, $4, $5, $6)`,

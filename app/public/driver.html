@@ -70,12 +70,20 @@
     $('#main').innerHTML = '<div class="card"><h2>Sign in</h2><p class="sub">Use your PIN, or your email and password.</p>' +
       '<label>PIN</label><input id="pin" type="password" inputmode="numeric" autocomplete="one-time-code"><button class="big primary" id="pinGo">Sign in with PIN</button>' +
       '<details style="margin-top:12px"><summary class="sub">Email and password instead</summary><label>Email</label><input id="em" type="email" autocomplete="username"><label>Password</label><input id="pw" type="password" autocomplete="current-password"><button class="big dark" id="pwGo">Sign in</button></details>' +
-      '<div class="err" id="lerr">' + esc(msg || '') + '</div></div><a class="big light" href="/mobile.html">◀ App menu</a>';
+      '<div class="err" id="lerr">' + esc(msg || '') + '</div><a href="#" id="pwChange" style="display:block;text-align:center;margin-top:10px;font-size:13px;color:inherit;opacity:.8">Change password</a></div><a class="big light" href="/mobile.html">◀ App menu</a>';
     var done = function (r) {
       if (r && r.need_2fa) { var code = prompt('6-digit code from your authenticator app'); if (!code) return; return api('/api/auth/2fa', 'POST', { code: code.trim() }).then(done).catch(function (e) { $('#lerr').textContent = e.message; }); }
       start();
     };
-    $('#pinGo').onclick = function () { api('/api/auth/pin-signin', 'POST', { pin: $('#pin').value }).then(done).catch(function (e) { $('#lerr').textContent = e.message; }); };
+    // PIN, then the person taps their name (assets/pin-staff.js).
+    $('#pinGo').onclick = function () {
+      var p = $('#pin').value; if (!p) return;
+      pickPinStaff().then(function (who) {
+        if (!who) return;
+        return api('/api/auth/pin-signin', 'POST', who.id ? { pin: p, user_id: who.id } : { pin: p }).then(done);
+      }).catch(function (e) { $('#lerr').textContent = e.message; });
+    };
+    $('#pwChange').onclick = function (e) { e.preventDefault(); openPasswordChange({ email: $('#em').value }).then(function (em) { if (em) { $('#em').value = em; $('#pw').value = ''; } }); };
     $('#pin').onkeydown = function (e) { if (e.key === 'Enter') $('#pinGo').click(); };
     $('#pwGo').onclick = function () { api('/api/auth/signin', 'POST', { email: $('#em').value, password: $('#pw').value }).then(done).catch(function (e) { $('#lerr').textContent = e.message; }); };
   }
@@ -283,5 +291,7 @@
   start();
 })();
 </script>
+<script src="/assets/pin-staff.js"></script>
+<script src="/assets/pw-change.js"></script>
 </body>
 </html>

@@ -11,6 +11,8 @@
 //  * Google sign-in: verifies a Google ID token server-side against
 //    GOOGLE_CLIENT_ID; signs in an existing account or creates a customer one.
 //    Off unless GOOGLE_CLIENT_ID is set (the owner creates the OAuth client).
+//  * Changing a password from the sign-in screen, with the current one, or
+//    with Google when the current one is forgotten.
 //
 //  All of this runs on the shop's own server (where the database is). A till
 //  pointed at another PC signs in through that PC as it always did.
@@ -206,6 +208,77 @@ exports.register = function register(app, deps) {
       }
       signInSession(req, rows[0].id);
       res.json({ ok: true, user: publicUser(rows[0]) });
+    } catch (e) { fail(res, e); }
+  });
+
+  // ------------------------------------------------ change your password --
+  // From the sign-in screen, before signing in: email, current password, new
+  // password. A wrong current password counts towards the same lockout as a
+  // wrong sign-in, so this is no softer a door than signing in. Nobody is
+  // signed in by it: the next sign-in uses the new password, and 2-step where
+  // that is on.
+  function newPassword(pw, old) {
+    if (pw.length < 8) throw httpError(400, 'Use at least 8 characters for your new password');
+    if (pw.length > 200) throw httpError(400, 'That password is too long');
+    if (old && pw === old) throw httpError(400, 'The new password has to be different from the old one');
+  }
+  async function setPassword(userId, pw) {
+    const hash = await bcrypt.hash(pw, 10);
+    try {
+      await query(`UPDATE users SET password_hash = $2, failed_logins = 0, locked_until = NULL WHERE id = $1`, [userId, hash]);
+    } catch (e) {
+      // A till that is not the main PC may not write passwords (see schema.sql).
+      if (e.code === '42501') throw httpError(409, 'Change your password on the main PC, or ask a manager.');
+      throw e;
+    }
+    await query(`DELETE FROM password_resets WHERE user_id = $1 AND used_at IS NULL`, [userId]).catch(() => {});
+  }
+  app.post('/api/auth/change-password', async (req, res) => {
+    try {
+      const b = req.body || {};
+      const email = String(b.email || '').trim().toLowerCase();
+      const cur = String(b.current_password || ''), pw = String(b.new_password || '');
+      if (!email || !cur) throw httpError(400, 'Enter your email and your current password');
+      newPassword(pw, cur);
+      const { rows } = await query(`SELECT id, name, email, password_hash, disabled FROM users WHERE lower(email) = lower($1) LIMIT 1`, [email]);
+      const sec = deps.security;
+      const locked = sec ? await sec.checkLocked(req, rows[0]) : null;
+      if (locked) throw httpError(423, locked);
+      if (!rows.length || !(await bcrypt.compare(cur, rows[0].password_hash || ''))) {
+        const msg = sec ? await sec.failed(req, rows[0] || null, email) : null;
+        throw httpError(401, msg || 'Email or current password not right');
+      }
+      if (rows[0].disabled) throw httpError(403, 'This account has been disabled. Ask a manager.');
+      await setPassword(rows[0].id, pw);
+      console.log('[auth-extra] password changed at sign-in:', rows[0].email);
+      res.json({ ok: true, email: rows[0].email });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Set a new password by proving the email with Google instead of a reset
+  // email -- for someone who forgot it and whose account email is a Google
+  // one. Only for an account that already exists; nobody is created or signed
+  // in by it.
+  app.post('/api/auth/google/password', async (req, res) => {
+    try {
+      const clientId = process.env.GOOGLE_CLIENT_ID;
+      if (!clientId) throw httpError(503, 'Google is not set up on this shop yet.');
+      if (!throttle(req, 10, 15 * 60000)) throw httpError(429, 'Too many tries. Wait a few minutes.');
+      const b = req.body || {};
+      const pw = String(b.new_password || '');
+      newPassword(pw, null);
+      const idToken = String(b.credential || '');
+      if (!idToken) throw httpError(400, 'No Google sign-in came through');
+      const info = await verifyGoogleIdToken(idToken);
+      if (info.aud !== clientId) throw httpError(401, 'This Google sign-in was for a different site');
+      if (!info.email || String(info.email_verified) !== 'true') throw httpError(401, 'Google could not confirm your email');
+      const email = String(info.email).toLowerCase();
+      const { rows } = await query(`SELECT id, email, disabled FROM users WHERE lower(email) = lower($1) LIMIT 1`, [email]);
+      if (!rows.length) throw httpError(404, 'There is no account here for ' + email + '.');
+      if (rows[0].disabled) throw httpError(403, 'This account has been disabled. Ask a manager.');
+      await setPassword(rows[0].id, pw);
+      console.log('[auth-extra] password set with Google:', email);
+      res.json({ ok: true, email });
     } catch (e) { fail(res, e); }
   });
 

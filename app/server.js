@@ -243,6 +243,22 @@ function upstreamPost(up, urlPath, body) {
   });
 }
 
+// Staff PINs are sealed with a key only the main PC holds (pins.js). A till
+// without it asks the main PC to check or seal one, as it does for passwords.
+const pins = require('./pins');
+pins.configure({
+  query: (...a) => query(...a),
+  isMain: () => ownsSchema(),
+  remote: {
+    enabled: () => !isLoopbackDbHost() && !!loadUpstream(),
+    post: async (body) => {
+      const r = await upstreamPost(loadUpstream(), '/api/terminal/pin', body);
+      if (r._status >= 400 && r._status !== 401) throw new Error(r.error || 'The main PC refused the PIN check');
+      return r;
+    },
+  },
+});
+
 // This server's own PostgreSQL certificate, to hand to a till at enrolment so
 // it can pin it. Looks where the portable layout puts it, then at an explicit
 // override for an operator-managed Postgres.
@@ -2732,6 +2748,31 @@ app.post('/api/terminal/auth/verify', async (req, res) => {
   }
 });
 
+// A till without the PIN key asks here (see pins.js). Same terminal token and
+// throttle as the password check above; it answers yes or no for one person,
+// or seals a PIN that is being set.
+app.post('/api/terminal/pin', async (req, res) => {
+  const ip = req.ip || '';
+  if (enrolRateLimited('pin:' + ip)) return res.status(429).json({ error: 'Too many attempts.' });
+  const token = String(req.headers['x-terminal-token'] || '').trim();
+  if (!token) return res.status(401).json({ error: 'Terminal token required' });
+  const b = req.body || {};
+  const pin = String(b.pin || '').trim();
+  if (!/^\d{4,8}$/.test(pin)) return res.status(400).json({ error: 'PIN must be 4 to 8 digits' });
+  try {
+    const t = await query("SELECT status FROM terminals WHERE api_token_hash = $1", [hashEnrolToken(token)]);
+    if (!t.rows.length) return res.status(401).json({ error: 'Unknown terminal' });
+    if (t.rows[0].status !== 'approved') return res.status(403).json({ error: 'This terminal is not allowed to connect.' });
+    if (b.op === 'hash') return res.json({ ok: true, hash: await pins.hash(pin) });
+    const { rows } = await query('SELECT id, pin_hash FROM users WHERE id = $1 AND NOT disabled', [parseInt(b.user_id, 10) || 0]);
+    const ok = await pins.matches(rows[0], pin);
+    res.status(ok ? 200 : 401).json({ ok });
+  } catch (e) {
+    console.error('[terminal-pin]', e.message);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.post('/api/auth/signin', async (req, res) => {
   try {
     const { email, password } = req.body || {};
@@ -2824,8 +2865,10 @@ function isDbUnreachable(e) {
 //      script walks the whole space in minutes.
 //    * Only staff with a PIN are considered. A customer account cannot be
 //      reached this way however the PIN is guessed.
-//    * PINs are unique across staff (enforced when set), so a match identifies
-//      exactly one person -- there is no "first bcrypt hit wins".
+//    * The keypad asks who you are after the PIN (the staff list below), and
+//      the PIN is checked against that one account. A request without a
+//      picked person (an older page) still works: PINs are unique across staff
+//      (enforced when set), so a match identifies exactly one person.
 //    * The terminal gate above applies to /api/auth/*, so a till that has not
 //      been approved cannot PIN its way in either.
 //
@@ -2841,20 +2884,19 @@ app.post('/api/auth/pin-signin', async (req, res) => {
   }
   const pin = String((req.body && req.body.pin) || '').trim();
   if (!pin) return res.status(400).json({ error: 'PIN required' });
+  const picked = pins.pickedId(req.body);
 
   try {
     const { rows } = await query(
       `SELECT id, email, name, is_admin, admin_role, pin_hash
          FROM users
-        WHERE pin_hash IS NOT NULL AND is_staff = true AND NOT disabled`
+        WHERE pin_hash IS NOT NULL AND is_staff = true AND NOT disabled` + (picked ? ' AND id = $1' : ''),
+      picked ? [picked] : []
     );
-    let hit = null;
-    for (const r of rows) {
-      if (await bcrypt.compare(pin, r.pin_hash)) { hit = r; break; }
-    }
+    const hit = await pins.pick(rows, pin);
     if (!hit) {
       pinFail(key, gate.rec);
-      return res.status(401).json({ error: 'PIN not recognised' });
+      return res.status(401).json({ error: picked ? 'That PIN is not right for the name picked' : 'PIN not recognised' });
     }
     if (!hit.is_admin) {
       // Staff who are not admins hold PINs for the till keypad and the time
@@ -2874,6 +2916,23 @@ app.post('/api/auth/pin-signin', async (req, res) => {
       });
     }
     console.error('[pin-signin]', e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// The staff list the PIN keypad shows once a PIN is typed: the person picks
+// their own name and the PIN is checked against that one account. Names and
+// roles only, of staff who have a PIN; behind the same terminal gate as the
+// rest of /api/auth.
+app.get('/api/auth/pin-staff', async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT id, name, admin_role FROM users
+        WHERE pin_hash IS NOT NULL AND is_staff = true AND NOT disabled AND NOT COALESCE(is_archived, false)
+        ORDER BY lower(name)`);
+    res.json({ staff: rows.map((r) => ({ id: r.id, name: r.name || ('Staff #' + r.id), role: r.admin_role || '' })) });
+  } catch (e) {
+    console.error('[pin-staff]', e.message);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -4423,10 +4482,7 @@ async function pinCollides(pin, exceptUserId) {
     `SELECT id, pin_hash FROM users WHERE pin_hash IS NOT NULL AND id <> $1`,
     [exceptUserId || 0]
   );
-  for (const r of rows) {
-    if (await bcrypt.compare(pin, r.pin_hash)) return true;
-  }
-  return false;
+  return !!(await pins.pick(rows, pin));
 }
 
 // Split from setStaffPin so a create can check the PIN before writing anything.
@@ -4443,7 +4499,7 @@ async function validateAndHashPin(pin, exceptUserId) {
     const e = new Error('Another staff member already uses that PIN. PINs identify the person on their own, so each has to be different.');
     e.userFacing = true; throw e;
   }
-  return bcrypt.hash(clean, 10);
+  return pins.hash(clean);
 }
 
 async function setStaffPin(userId, pin) {
@@ -4519,6 +4575,7 @@ app.post('/api/admin/staff/pin-verify', requireAdmin, async (req, res) => {
   }
   const pin = String((req.body && req.body.pin) || '').trim();
   if (!pin) return res.status(400).json({ error: 'PIN required' });
+  const picked = pins.pickedId(req.body);
 
   const { rows } = await query(
     `SELECT u.id, u.name, u.email, u.admin_role, u.pin_hash, u.is_staff,
@@ -4526,16 +4583,14 @@ app.post('/api/admin/staff/pin-verify', requireAdmin, async (req, res) => {
        FROM users u
        LEFT JOIN user_category_members m ON m.user_id = u.id
        LEFT JOIN user_categories c ON c.id = m.category_id AND c.is_active = true
-      WHERE u.pin_hash IS NOT NULL AND u.is_staff = true
-      GROUP BY u.id`
+      WHERE u.pin_hash IS NOT NULL AND u.is_staff = true` + (picked ? ' AND u.id = $1' : '') + `
+      GROUP BY u.id`,
+    picked ? [picked] : []
   );
-  let hit = null;
-  for (const r of rows) {
-    if (await bcrypt.compare(pin, r.pin_hash)) { hit = r; break; }
-  }
+  const hit = await pins.pick(rows, pin);
   if (!hit) {
     pinFail(key, gate.rec);
-    return res.status(401).json({ error: 'PIN not recognised' });
+    return res.status(401).json({ error: picked ? 'That PIN is not right for the name picked' : 'PIN not recognised' });
   }
   PIN_ATTEMPTS.delete(key);
 
@@ -6565,7 +6620,7 @@ const reps = require('./reps').register(app, {
   getShopName: async () => { try { const s = shopSettingsToShop(await getShopSettings()); return s && (s.name || s.shop_name); } catch (_) { return null; } },
 });
 // Extra sign-in: password reset by email, customer passkeys, Google sign-in (auth-extra.js).
-require('./auth-extra').register(app, { query, bcrypt, mailer, publicUser, getEpoch: () => SESSION_EPOCH, nextAccountNumber, reps, devMode: DEV_MODE });
+require('./auth-extra').register(app, { query, bcrypt, mailer, publicUser, getEpoch: () => SESSION_EPOCH, nextAccountNumber, reps, devMode: DEV_MODE, security });
 // Supplier portal: supplier logins, items, consignment, orders, reports (supplierportal.js).
 require('./supplierportal').register(app, { query, requireCap, userCan, bcrypt, mailer, devMode: DEV_MODE });
 // Department store: store locations, inventory & sales by department, stock
@@ -10038,7 +10093,7 @@ async function initDb() {
       if (taken) {
         console.warn('[initDb] default PIN ' + DEFAULT_ADMIN_PIN + ' is already used by another staff member — admin left without one');
       } else {
-        const pinHash = await bcrypt.hash(DEFAULT_ADMIN_PIN, 10);
+        const pinHash = await pins.hash(DEFAULT_ADMIN_PIN);
         await query(
           `UPDATE users SET pin_hash = $1, pin_set_at = NOW(), is_staff = true WHERE id = $2`,
           [pinHash, pinRow[0].id]

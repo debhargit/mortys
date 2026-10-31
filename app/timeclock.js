@@ -45,6 +45,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const wa = require('./webauthn');
+const pins = require('./pins');
 
 const TZ = 'America/Jamaica';
 const OFFSET = '-05:00';   // Jamaica keeps no daylight saving
@@ -340,9 +341,12 @@ function register(app, deps) {
     if (method === 'pin') {
       const pin = String(b.pin || '').trim();
       if (!/^\d{4,8}$/.test(pin)) throw httpError(400, 'Type your PIN');
-      const { rows } = await query(`SELECT id, pin_hash FROM users WHERE pin_hash IS NOT NULL AND is_staff AND NOT disabled`);
-      for (const r of rows) if (await bcrypt.compare(pin, r.pin_hash)) { uid = r.id; break; }
-      if (!uid) { bump(); throw httpError(401, 'PIN not recognised'); }
+      // The keypad sends the name picked from its staff list; the PIN is then checked against that person only.
+      const picked = pins.pickedId(b);
+      const { rows } = await query(`SELECT id, pin_hash FROM users WHERE pin_hash IS NOT NULL AND is_staff AND NOT disabled` + (picked ? ' AND id = $1' : ''), picked ? [picked] : []);
+      const hit = await pins.pick(rows, pin);
+      if (!hit) { bump(); throw httpError(401, picked ? 'That PIN is not right for the name picked' : 'PIN not recognised'); }
+      uid = hit.id;
     } else if (method === 'password') {
       const { rows } = await query(`SELECT id, password_hash, locked_until > NOW() AS locked FROM users WHERE lower(email) = lower($1) AND NOT disabled AND (is_staff OR is_admin)`, [String(b.email || '')]);
       if (!rows.length || rows[0].locked || !(await bcrypt.compare(String(b.password || ''), rows[0].password_hash || ''))) { bump(); throw httpError(401, 'Email or password not right'); }

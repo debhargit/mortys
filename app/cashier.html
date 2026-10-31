@@ -247,8 +247,13 @@
     }
     if (a === 'openDrawer') { var o = readDenoms('o'); api('/api/cash/till/open', { method: 'POST', body: { count: o.count } }).then(function () { toast('Drawer open with ' + J(o.total)); refreshMe().then(loadDrawer); }).catch(function (er) { toast(er.message, true); }); }
     if (a === 'movement') {
-      api('/api/cash/till/movement', { method: 'POST', body: { kind: $('#mvKind').value, amount: $('#mvAmt').value, reason: $('#mvWhy').value, manager_pin: $('#mvPin').value } })
-        .then(function () { toast('Recorded'); loadDrawer(); }).catch(function (er) { toast(er.message, true); });
+      // A manager PIN is followed by the manager tapping their name (assets/pin-staff.js).
+      var mp = $('#mvPin').value;
+      (mp ? pickPinStaff({ managersFirst: true, title: 'Who is approving?' }) : Promise.resolve({ id: null })).then(function (who) {
+        if (!who) return;
+        return api('/api/cash/till/movement', { method: 'POST', body: { kind: $('#mvKind').value, amount: $('#mvAmt').value, reason: $('#mvWhy').value, manager_pin: mp, manager_user_id: who.id || undefined } })
+          .then(function () { toast('Recorded'); loadDrawer(); });
+      }).catch(function (er) { toast(er.message, true); });
     }
     if (a === 'closeDrawer') {
       var c = readDenoms('c');
@@ -282,6 +287,7 @@
   }).catch(function (e) { $('#main').innerHTML = '<div class="card">' + esc(e.message) + '</div>'; });
 })();
 </script>
+<script src="/assets/pin-staff.js"></script>
 <script src="/assets/clock-banner.js" defer></script>
 <script src="/assets/staff-assist.js?v=20261020" defer></script>
 </body>
