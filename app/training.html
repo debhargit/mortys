@@ -67,6 +67,19 @@
   .toc2 .n{flex:none;width:30px;height:30px;border-radius:9px;display:grid;place-items:center;color:#fff;background:var(--h);font-weight:700;font-size:13px} .toc2 .e{margin-left:auto;font-size:18px}
   .chap{border-top:6px solid var(--h)} .chap .ch{display:flex;gap:14px;align-items:center;margin-bottom:6px} .chap .ch .e{font-size:40px;line-height:1}
   .chap .ch small{display:block;color:var(--h);font-weight:700;letter-spacing:1.5px;text-transform:uppercase;font-size:11.5px} .chap .ch h2{font-size:22px;margin:2px 0 0}
+  /* every other tab: a banner and section cards, as in the manual */
+  .band{--h:#13283f;border-radius:18px;padding:24px 26px;color:#fff;background:radial-gradient(90% 120% at 100% 0,rgba(214,40,40,.55),transparent 60%),linear-gradient(140deg,#13283f,var(--navy));margin-bottom:12px;position:relative;overflow:hidden}
+  .band.lk{background:radial-gradient(120% 140% at 100% 0,rgba(255,255,255,.14),transparent 55%),linear-gradient(135deg,var(--h),var(--navy) 85%)}
+  .band .k{font-size:12px;letter-spacing:3px;text-transform:uppercase;opacity:.7} .band h2{font-size:28px;margin:4px 0 6px;line-height:1.15;max-width:calc(100% - 90px)} .band p{opacity:.88;margin:0;max-width:66ch}
+  .band .bk{position:absolute;right:24px;top:14px;font-size:86px;opacity:.22;line-height:1;pointer-events:none}
+  .band .prog{background:rgba(255,255,255,.18);margin:14px 0 0;max-width:520px}
+  .band .stats{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px} .band .stat{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);border-radius:12px;padding:7px 14px;min-width:92px}
+  .band .stat b{display:block;font-size:20px;line-height:1.2} .band .stat small{opacity:.8;font-size:12px} .band .stat.ok b{color:#86efac} .band .stat.warn b{color:#fcd34d} .band .stat.bad b{color:#fca5a5}
+  .band .controls{margin:16px 0 0} .band button{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.3);color:#fff} .band button.primary{background:var(--red);border-color:var(--red)} .band .pill{background:rgba(255,255,255,.18);color:#fff}
+  .chap.s{border-top-width:4px} .chap.s .ch .e{font-size:28px} .chap.s .ch h2{font-size:18px} .chap th{background:var(--chip)}
+  .ln{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:7px;background:color-mix(in srgb,var(--h) 18%,transparent);margin-right:7px;font-size:13px;vertical-align:middle;flex:none}
+  .q b.qh{display:flex;align-items:flex-start;gap:9px} .q .qn{flex:none;display:inline-grid;place-items:center;width:26px;height:26px;border-radius:8px;background:var(--h,var(--navy));color:#fff;font-size:13px}
+  @media (max-width:600px){ .band{padding:20px 16px} .band h2{font-size:22px;max-width:calc(100% - 50px)} .band .bk{font-size:48px;right:12px} }
   .pill{display:inline-block;font-size:12px;padding:1px 9px;border-radius:999px;background:var(--chip);white-space:nowrap}
   .pill.ok{background:#16a34a22;color:var(--ok)} .pill.bad{background:#d6282822;color:var(--red)} .pill.warn{background:#f59e0b22;color:var(--warn)}
   .doc>*+*{margin-top:1.15em} .reading{background:#fde68a55;box-shadow:0 0 0 8px #fde68a55;border-radius:4px}
@@ -92,6 +105,7 @@
     .pill{border:1px solid #999;background:none} .doc{max-width:none;font-size:10.5pt} .doc h3{break-after:avoid}
     .fig{break-inside:avoid} .fig .fr{box-shadow:none} .fig img{max-height:9cm;width:auto;max-width:100%;margin:0 auto} .fig.phone .fr{max-width:5cm}
     .toc2 a{border:0;padding:3pt 0}
+    .band{break-inside:avoid;padding:14pt 16pt} .chap.s{break-before:auto}
   }
 </style>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -141,6 +155,18 @@
   };
   var look = function (key) { return LOOK[key] || ['📘', '#0b1b2b']; };
   var minutes = function (m) { return Math.max(1, Math.round(String(m.body || '').split(/\s+/).length / 200)); };
+  // The banner and section cards every tab shares, in the manual's style.
+  // title and text are HTML (escape before); stats: [value, label, ok|warn|bad].
+  function band(o) {
+    return '<div class="band' + (o.color ? ' lk' : '') + '"' + (o.color ? ' style="--h:' + o.color + '"' : '') + '><span class="bk">' + o.icon + '</span><div class="k">' + esc(o.kicker || 'Vision Auto Solutions · Training') + '</div>' +
+      '<h2>' + o.title + '</h2>' + (o.text ? '<p>' + o.text + '</p>' : '') + (o.prog != null ? '<div class="prog"><i style="width:' + o.prog + '%"></i></div>' : '') +
+      (o.stats && o.stats.length ? '<div class="stats">' + o.stats.map(function (s) { return '<div class="stat ' + (s[2] || '') + '"><b>' + s[0] + '</b><small>' + esc(s[1]) + '</small></div>'; }).join('') + '</div>' : '') + (o.extra || '') + '</div>';
+  }
+  function sec(icon, kicker, title, inner, color, id) {
+    return '<div class="card chap s"' + (id ? ' id="' + id + '"' : '') + ' style="--h:' + (color || 'var(--red)') + '"><div class="ch"><span class="e">' + icon + '</span><div><small>' + esc(kicker) + '</small><h2>' + title + '</h2></div></div>' + inner + '</div>';
+  }
+  // A lesson's name with its icon, for lists and tables.
+  var lname = function (key, title) { var lk = look(key); return '<span class="ln" style="--h:' + lk[1] + '">' + lk[0] + '</span>' + esc(title); };
   // A line of lesson text: menu paths (Sales & POS > Quotes), keys (F9) and
   // "button names" stand out.
   function fmt(t) {
@@ -201,12 +227,21 @@
       canManage = d.can_manage;
       if (canManage && !$('[data-t="team"]')) { $('#tabs').insertAdjacentHTML('beforeend', '<button data-t="team">Team</button><button data-t="people">Employees</button><button data-t="search">Search</button><button data-t="edit">Lessons and questions</button>'); wire(); }
       var req = d.modules.filter(function (m) { return m.required; }), done = req.filter(function (m) { return m.status === 'passed'; }).length;
-      $('#out').innerHTML = '<div class="card"><h2>' + esc(d.name) + ': ' + done + ' of ' + req.length + ' required modules passed</h2><div class="prog"><i style="width:' + (req.length ? Math.round(done / req.length * 100) : 100) + '%"></i></div><p class="sub">Read the lesson, then take the quiz. A pass lasts a year; you can retake a quiz any time.</p><div class="grid">' +
-        d.modules.map(function (m) {
+      var count = function (s) { return req.filter(function (m) { return m.status === s; }).length; }, pct = req.length ? Math.round(done / req.length * 100) : 100;
+      var grid = function (list) {
+        return '<div class="grid">' + list.map(function (m) {
           var lk = look(m.key);
           return '<div class="mod" data-k="' + esc(m.key) + '" style="--h:' + lk[1] + '"><div class="cv">' + (m.cover ? '<img src="' + esc(m.cover) + '" alt="" loading="lazy"><span class="ic">' + lk[0] + '</span>' : '<span class="big">' + lk[0] + '</span>') + '</div>' +
             '<div class="bd"><b>' + esc(m.title) + '</b><small>' + esc(m.summary || '') + '</small><div>' + statusPill(m) + '</div></div></div>';
-        }).join('') + '</div></div>';
+        }).join('') + '</div>';
+      };
+      var rest = d.modules.filter(function (m) { return !m.required; });
+      $('#out').innerHTML = band({ icon: '🎓', title: 'My training', prog: pct,
+          text: esc(d.name) + ': ' + done + ' of ' + req.length + ' required modules passed. Read the lesson, then take the quiz. A pass lasts a year; you can retake a quiz any time.',
+          stats: [[done + ' / ' + req.length, 'required passed', done === req.length ? 'ok' : ''], [pct + '%', 'complete'], [req.length - done, 'still to pass', req.length - done ? 'warn' : 'ok']]
+            .concat(count('expired') ? [[count('expired'), 'expired', 'bad']] : []).concat(count('not passed') ? [[count('not passed'), 'not passed yet', 'bad']] : []) }) +
+        (req.length ? sec('📚', 'Required for your role', 'Your lessons', grid(req), '#d62828') : '') +
+        (rest.length ? sec('📖', req.length ? 'Reading and other roles' : 'Lessons', req.length ? 'Also available' : 'Your lessons', grid(rest), '#0891b2') : '');
       all('[data-k]').forEach(function (x) { x.onclick = function () { lesson(x.getAttribute('data-k')); }; });
     });
   }
@@ -323,18 +358,23 @@
   function quiz(key) {
     Voice.stop();
     api('/api/training/modules/' + encodeURIComponent(key) + '/quiz', 'POST').then(function (q) {
-      $('#out').innerHTML = '<div class="card"><h2>Quiz: ' + esc(q.title) + '</h2><p class="sub">Pass mark ' + q.pass_pct + '%. Choose one answer for each question.</p>' +
-        q.questions.map(function (x, i) { return '<div class="q"><b>' + (i + 1) + '. ' + esc(x.question) + '</b>' + x.choices.map(function (c, j) { return '<label><input type="radio" name="q' + x.id + '" value="' + j + '"> ' + esc(c) + '</label>'; }).join('') + '</div>'; }).join('') +
-        '<div class="controls"><button class="primary" id="sb">Hand in</button><button id="cx">Cancel</button></div></div>';
+      var lk = look(key);
+      $('#out').innerHTML = band({ icon: lk[0], color: lk[1], kicker: 'Quiz', title: esc(q.title), text: 'Choose one answer for each question, then hand it in. You can retake it any time.',
+          stats: [[q.questions.length, 'questions'], [q.pass_pct + '%', 'to pass']] }) +
+        sec('📝', 'Questions', 'Choose one answer each', q.questions.map(function (x, i) { return '<div class="q"><b class="qh"><span class="qn">' + (i + 1) + '</span>' + esc(x.question) + '</b>' + x.choices.map(function (c, j) { return '<label><input type="radio" name="q' + x.id + '" value="' + j + '"> ' + esc(c) + '</label>'; }).join('') + '</div>'; }).join('') +
+          '<div class="controls"><button class="primary" id="sb">Hand in</button><button id="cx">Cancel</button></div>', lk[1]);
       $('#cx').onclick = function () { lesson(key); };
       $('#sb').onclick = function () {
         var answers = {}, missing = 0;
         q.questions.forEach(function (x) { var c = $('input[name="q' + x.id + '"]:checked'); if (c) answers[x.id] = +c.value; else missing++; });
         if (missing && !confirm(missing + ' question(s) not answered. Hand in anyway?')) return;
         api('/api/training/attempts/' + q.attempt, 'POST', { answers: answers }).then(function (r) {
-          $('#out').innerHTML = '<div class="card"><div class="note ' + (r.passed ? 'ok' : 'bad') + '"><b>' + (r.passed ? 'Passed' : 'Not passed yet') + ': ' + r.score + '%</b> (' + r.right + ' of ' + r.total + ' right; pass mark ' + r.pass_pct + '%)</div>' +
-            (r.review.length ? '<h2>To go over</h2>' + r.review.map(function (w) { return '<div class="q"><b>' + esc(w.question) + '</b>' + esc(w.explain || '') + '</div>'; }).join('') : '<p>Every answer right.</p>') +
-            '<div class="controls"><button id="bk">Back to my training</button>' + (r.passed ? '' : '<button class="primary" id="rl">Read the lesson again</button>') + '</div></div>';
+          $('#out').innerHTML = band({ icon: r.passed ? '🏆' : '📖', color: r.passed ? '#15803d' : '#b45309', kicker: 'Quiz result · ' + q.title, title: (r.passed ? 'Passed' : 'Not passed yet') + ': ' + r.score + '%',
+              text: r.passed ? 'Well done. The pass lasts a year.' : 'Read the lesson again, then retake the quiz.',
+              stats: [[r.score + '%', 'your score', r.passed ? 'ok' : 'bad'], [r.right + ' of ' + r.total, 'right'], [r.pass_pct + '%', 'pass mark']],
+              extra: '<div class="controls"><button id="bk">Back to my training</button>' + (r.passed ? '' : '<button class="primary" id="rl">Read the lesson again</button>') + '</div>' }) +
+            sec(r.review.length ? '🔎' : '✅', r.review.length ? r.review.length + ' to go over' : 'All correct', r.review.length ? 'What you missed' : 'Every answer right',
+              r.review.length ? r.review.map(function (w, i) { return '<div class="q"><b class="qh"><span class="qn">' + (i + 1) + '</span>' + esc(w.question) + '</b>' + esc(w.explain || '') + '</div>'; }).join('') : '<p class="sub">Nothing to go over.</p>', lk[1]);
           $('#bk').onclick = show; if ($('#rl')) $('#rl').onclick = function () { lesson(key); };
         }).catch(function (e) { toast(e.message); });
       };
@@ -344,7 +384,10 @@
   // ------------------------------------------------------------ practice till --
   var task = null, cart = [];
   function till() {
-    $('#out').innerHTML = '<div class="note info">The practice till prices orders exactly like the real one, but nothing is saved, no stock moves and no money is taken. A "customer" asks for parts: find them, ring them up, take the payment and work out the change.</div><div class="card" id="tk"><button class="primary" id="nw">New customer</button></div>';
+    $('#out').innerHTML = band({ icon: '🛒', color: '#d62828', kicker: 'Practice', title: 'Practice till',
+        text: 'It prices orders exactly like the real till, but nothing is saved, no stock moves and no money is taken. A "customer" asks for parts: find them, ring them up, take the payment and work out the change.',
+        stats: [['1', 'find the parts'], ['2', 'ring them up'], ['3', 'take the payment'], ['4', 'work out the change']] }) +
+      sec('🧑‍🔧', 'Your customer', 'At the counter', '<div id="tk"><button class="primary" id="nw">New customer</button></div>', '#d62828');
     $('#nw').onclick = newTask;
   }
   function newTask() {
@@ -380,14 +423,17 @@
   // ------------------------------------------------------------- team --
   function team() {
     return api('/api/training/team').then(function (d) {
-      $('#out').innerHTML = '<div class="card"><h2>Team training</h2><p class="sub">Green: passed and current. Amber: expired. Red: tried, not passed. Blank: not started. Grey cells are not required for that person\'s role.</p><div class="scroll"><table><thead><tr><th>Name</th>' +
-        d.modules.map(function (m) { return '<th>' + esc(m.title) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+      var tally = function (st) { return d.staff.reduce(function (n, s) { return n + s.modules.filter(function (x) { return x.status === st && x.required; }).length; }, 0); };
+      $('#out').innerHTML = band({ icon: '👥', kicker: 'Managers', title: 'Team training', text: 'Who has passed which lesson, person by person.',
+          stats: [[d.staff.length, 'staff'], [d.modules.length, 'lessons'], [tally('passed'), 'passes current', 'ok'], [tally('expired'), 'expired', tally('expired') ? 'warn' : ''], [tally('not passed'), 'not passed', tally('not passed') ? 'bad' : '']] }) +
+        sec('🗓️', 'Lesson by lesson', 'Who has passed what', '<p class="sub">Green: passed and current. Amber: expired. Red: tried, not passed. Blank: not started. Grey cells are not required for that person\'s role.</p><div class="scroll"><table><thead><tr><th>Name</th>' +
+        d.modules.map(function (m) { return '<th>' + lname(m.key, m.title) + '</th>'; }).join('') + '</tr></thead><tbody>' +
         d.staff.map(function (s) {
           return '<tr><td><b>' + esc(s.name) + '</b><br><small>' + esc(s.role) + '</small></td>' + d.modules.map(function (m) {
             var x = s.modules.find(function (y) { return y.key === m.key; }) || {};
             return '<td style="' + (x.required ? '' : 'opacity:.45') + '">' + (x.status === 'passed' ? '<span class="pill ok">' + Math.round(x.best) + '%</span>' : x.status === 'expired' ? '<span class="pill warn">expired</span>' : x.status === 'not passed' ? '<span class="pill bad">not passed</span>' : '') + '</td>';
           }).join('') + '</tr>';
-        }).join('') + '</tbody></table></div></div>';
+        }).join('') + '</tbody></table></div>', '#be185d');
     });
   }
 
@@ -396,19 +442,26 @@
   function edit() {
     return api('/api/training/admin/modules').then(function (d) {
       mods = d.modules;
-      $('#out').innerHTML = '<div class="card"><h2>Lessons and questions</h2><p class="sub">The lessons are also what the staff assistant answers "how do I" questions from - keep them accurate.</p><table><tbody>' +
-        mods.map(function (m, i) { return '<tr><td><b>' + esc(m.title) + '</b><br><small>' + esc(m.key) + (m.active ? '' : ' · hidden') + (m.quiz ? ' · ' + m.qs.filter(function (q) { return q.active; }).length + ' questions' : ' · reference') + '</small></td><td><button class="sm" data-e="' + i + '">Edit</button></td></tr>'; }).join('') +
-        '</tbody></table><div class="controls" style="margin-top:10px"><div><label>New module key</label><input id="nk" placeholder="e.g. delivery"></div><div><label>Title</label><input id="nt"></div><button id="na">Add module</button></div></div>';
+      var nq = function (m) { return m.qs.filter(function (q) { return q.active; }).length; };
+      $('#out').innerHTML = band({ icon: '✏️', kicker: 'Managers', title: 'Lessons and questions', text: 'The lessons are also what the staff assistant answers "how do I" questions from - keep them accurate.',
+          stats: [[mods.length, 'lessons'], [mods.filter(function (m) { return m.quiz; }).length, 'with a quiz'], [mods.reduce(function (s, m) { return s + nq(m); }, 0), 'questions'], [mods.filter(function (m) { return !m.active; }).length, 'hidden']] }) +
+        sec('📚', 'Every lesson', 'Choose one to edit', '<table><tbody>' +
+        mods.map(function (m, i) { return '<tr style="' + (m.active ? '' : 'opacity:.55') + '"><td style="display:flex;align-items:center"><span>' + lname(m.key, '') + '</span><span><b>' + esc(m.title) + '</b><br><small>' + esc(m.key) + (m.active ? '' : ' · hidden') + (m.quiz ? ' · ' + nq(m) + ' questions' : ' · reference') + '</small></span></td><td class="n"><button class="sm" data-e="' + i + '">Edit</button></td></tr>'; }).join('') +
+        '</tbody></table>', '#7c3aed') +
+        sec('➕', 'New', 'Add a lesson', '<div class="controls"><div><label>New module key</label><input id="nk" placeholder="e.g. delivery"></div><div><label>Title</label><input id="nt"></div><button id="na">Add module</button></div>', '#16a34a');
       all('[data-e]').forEach(function (b) { b.onclick = function () { editModule(mods[+b.getAttribute('data-e')]); }; });
       $('#na').onclick = function () { api('/api/training/admin/modules', 'POST', { key: $('#nk').value, title: $('#nt').value }).then(function () { toast('Added'); edit(); }).catch(function (e) { toast(e.message); }); };
     });
   }
   function editModule(m) {
-    $('#out').innerHTML = '<div class="card"><h2>' + esc(m.title) + '</h2><div class="controls"><div style="flex:1"><label>Title</label><input id="et" value="' + esc(m.title) + '" style="width:100%"></div><div><label>Pass mark %</label><input id="ep" type="number" value="' + m.pass_pct + '" style="width:80px"></div><div><label>Valid (months)</label><input id="ev" type="number" value="' + m.valid_months + '" style="width:80px"></div>' +
+    var lk = look(m.key), head = function (e, k, t) { return '<div class="card chap s" style="--h:' + lk[1] + '"><div class="ch"><span class="e">' + e + '</span><div><small>' + k + '</small><h2>' + t + '</h2></div></div>'; };
+    $('#out').innerHTML = band({ icon: lk[0], color: lk[1], kicker: 'Editing a lesson · ' + m.key, title: esc(m.title), text: esc(m.summary || ''),
+        stats: [[m.quiz ? m.qs.filter(function (q) { return q.active; }).length : '—', 'questions'], [m.pass_pct + '%', 'pass mark'], [m.valid_months, 'months valid'], [m.active ? 'shown' : 'hidden', 'to staff', m.active ? 'ok' : 'warn']] }) +
+      head('📝', 'The lesson', 'Text and settings') + '<div class="controls"><div style="flex:1"><label>Title</label><input id="et" value="' + esc(m.title) + '" style="width:100%"></div><div><label>Pass mark %</label><input id="ep" type="number" value="' + m.pass_pct + '" style="width:80px"></div><div><label>Valid (months)</label><input id="ev" type="number" value="' + m.valid_months + '" style="width:80px"></div>' +
       '<div><label>For roles (blank = everyone)</label><input id="er" value="' + esc((m.roles || []).join(',')) + '" style="width:160px"></div><label style="display:flex;gap:5px;align-items:center;color:inherit"><input type="checkbox" id="ea"' + (m.active ? ' checked' : '') + '> shown</label></div>' +
       '<label class="sub">Summary</label><input id="es" value="' + esc(m.summary || '') + '" style="width:100%;margin-bottom:8px"><label class="sub">Lesson</label><textarea id="eb" rows="14" style="width:100%">' + esc(m.body) + '</textarea>' +
       '<div class="controls" style="margin-top:8px"><button class="primary" id="esv">Save lesson</button><button id="ebk">Back</button></div></div>' +
-      (m.quiz ? '<div class="card"><h2>Questions</h2>' + m.qs.map(function (q, i) { return '<div class="q" style="' + (q.active ? '' : 'opacity:.5') + '"><b>' + esc(q.question) + '</b>' + q.choices.map(function (c, j) { return '<div>' + (j === q.answer ? '✔ ' : '· ') + esc(c) + '</div>'; }).join('') + '<small class="sub">' + esc(q.explain || '') + '</small><div>' + (q.active ? '<button class="sm" data-dq="' + q.id + '">Remove</button>' : 'removed') + '</div></div>'; }).join('') +
+      (m.quiz ? head('❓', 'Quiz', 'Questions') + m.qs.map(function (q, i) { return '<div class="q" style="' + (q.active ? '' : 'opacity:.5') + '"><b class="qh"><span class="qn">' + (i + 1) + '</span>' + esc(q.question) + '</b>' + q.choices.map(function (c, j) { return '<div>' + (j === q.answer ? '✔ ' : '· ') + esc(c) + '</div>'; }).join('') + '<small class="sub">' + esc(q.explain || '') + '</small><div>' + (q.active ? '<button class="sm" data-dq="' + q.id + '">Remove</button>' : 'removed') + '</div></div>'; }).join('') +
         '<h2 style="margin-top:12px">Add a question</h2><input id="qq" placeholder="Question" style="width:100%;margin-bottom:6px">' + [0, 1, 2, 3].map(function (i) { return '<div class="controls" style="margin-bottom:4px"><label style="display:flex;gap:5px;align-items:center;color:inherit"><input type="radio" name="qa" value="' + i + '"' + (i === 0 ? ' checked' : '') + '> right</label><input data-qc="' + i + '" placeholder="Answer ' + (i + 1) + (i > 1 ? ' (optional)' : '') + '" style="flex:1"></div>'; }).join('') +
         '<input id="qe" placeholder="Why (shown when someone gets it wrong)" style="width:100%;margin:6px 0"><button class="primary" id="qadd">Add question</button></div>' : '');
     $('#ebk').onclick = edit;
@@ -428,32 +481,32 @@
   var pill = function (s) { return '<span class="pill ' + (STC[s] || '') + '">' + esc(s) + '</span>'; };
   var dd = function (v) { if (!v) return ''; var s = String(v); return (s.length === 10 ? new Date(s + 'T12:00:00Z') : new Date(s)).toLocaleDateString('en-JM', { day: 'numeric', month: 'short', year: 'numeric', timeZone: s.length === 10 ? 'UTC' : 'America/Jamaica' }); };
   var meta = null, peopleCache = null, current = null;
-  function modal(h) { closeModal(); document.body.insertAdjacentHTML('beforeend', '<div class="modal" id="mdl"><div class="card">' + h + '</div></div>'); $('#mdl').addEventListener('mousedown', function (e) { if (e.target.id === 'mdl') closeModal(); }); }
+  function modal(h) { closeModal(); document.body.insertAdjacentHTML('beforeend', '<div class="modal" id="mdl"><div class="card chap s" style="--h:var(--red)">' + h + '</div></div>'); $('#mdl').addEventListener('mousedown', function (e) { if (e.target.id === 'mdl') closeModal(); }); }
   function closeModal() { var m = $('#mdl'); if (m) m.remove(); }
   function loadMeta() { return meta ? Promise.resolve(meta) : api('/api/training/people').then(function (d) { meta = d; peopleCache = d.people; return d; }); }
 
   function profileHtml(p, manage) {
     var s = p.summary, u = p.person;
-    var chip = function (label, v, cls) { return '<span class="pill ' + (cls || '') + '" style="font-size:13px;padding:3px 10px">' + label + ': <b>' + v + '</b></span>'; };
-    var h = '<div class="card"><h2>' + esc(u.name) + (u.archived_at || u.disabled ? ' <span class="pill">past employee</span>' : '') + '</h2><p class="sub">' + esc(u.role) + (u.departments ? ' · ' + esc(u.departments) : '') + (u.employee_no ? ' · employee no ' + esc(u.employee_no) : '') + ' · printed ' + esc(dd(new Date().toISOString())) + '</p>' +
-      '<div class="controls">' + chip('Required lessons passed', s.required_passed + ' of ' + s.required, s.required_passed === s.required ? 'ok' : 'warn') + (s.expired ? chip('Expired', s.expired, 'bad') : '') + (s.expiring ? chip('Expiring soon', s.expiring, 'warn') : '') +
-      (s.not_passed ? chip('Not passed', s.not_passed, 'bad') : '') + (s.overdue ? chip('Overdue', s.overdue, 'bad') : '') + (s.due ? chip('Assigned, to do', s.due, 'warn') : '') + chip('Hours this year', s.hours_year) + chip('Other training', s.records) +
-      (s.last_activity ? chip('Last training', esc(dd(s.last_activity))) : '') + '</div>' +
-      '<div class="controls no-print">' + (manage ? '<button class="primary" id="pAdd">Add training record</button><button id="pAsg">Assign training</button>' : '') + '<button id="pPrt">Print</button>' + (manage ? '<button id="pBack">Back to employees</button>' : '') + '</div></div>';
-    h += '<div class="card"><h2>Assigned training</h2>' + (p.assignments.length ? '<div class="scroll"><table><thead><tr><th>Training</th><th>Assigned</th><th>Due</th><th>Status</th><th class="no-print"></th></tr></thead><tbody>' + p.assignments.map(function (a) {
+    var stats = [[s.required_passed + ' / ' + s.required, 'required passed', s.required_passed === s.required ? 'ok' : 'warn']].concat(s.expired ? [[s.expired, 'expired', 'bad']] : [], s.expiring ? [[s.expiring, 'expiring soon', 'warn']] : [],
+      s.not_passed ? [[s.not_passed, 'not passed', 'bad']] : [], s.overdue ? [[s.overdue, 'overdue', 'bad']] : [], s.due ? [[s.due, 'assigned, to do', 'warn']] : [], [[s.hours_year || 0, 'hours this year'], [s.records || 0, 'other training']], s.last_activity ? [[esc(dd(s.last_activity)), 'last training']] : []);
+    var h = band({ icon: manage ? '🎓' : '🪪', kicker: manage ? 'Employee training record' : 'My training record', title: esc(u.name) + (u.archived_at || u.disabled ? ' <span class="pill">past employee</span>' : ''),
+      text: esc(u.role) + (u.departments ? ' · ' + esc(u.departments) : '') + (u.employee_no ? ' · employee no ' + esc(u.employee_no) : '') + ' · printed ' + esc(dd(new Date().toISOString())), stats: stats,
+      extra: '<div class="controls no-print">' + (manage ? '<button class="primary" id="pAdd">Add training record</button><button id="pAsg">Assign training</button>' : '') + '<button id="pPrt">Print</button>' + (manage ? '<button id="pBack">Back to employees</button>' : '') + '</div>' });
+    var head = function (e, k, t, c) { return '<div class="card chap s" style="--h:' + c + '"><div class="ch"><span class="e">' + e + '</span><div><small>' + k + '</small><h2>' + t + '</h2></div></div>'; };
+    h += head('📌', manage ? 'Given to them' : 'Given to you', 'Assigned training', '#b45309') + (p.assignments.length ? '<div class="scroll"><table><thead><tr><th>Training</th><th>Assigned</th><th>Due</th><th>Status</th><th class="no-print"></th></tr></thead><tbody>' + p.assignments.map(function (a) {
       return '<tr><td>' + (a.lesson ? '<a href="#" data-les="' + esc(a.key) + '">' + esc(a.title) + '</a>' : esc(a.title)) + (a.note ? '<br><small class="sub">' + esc(a.note) + '</small>' : '') + '</td><td>' + esc(dd(a.assigned_at)) + (a.assigned_by ? '<br><small>' + esc(a.assigned_by) + '</small>' : '') + '</td><td>' + esc(dd(a.due_on)) + '</td>' +
         '<td>' + pill(a.status) + (a.done_at ? '<br><small>' + esc(dd(a.done_at)) + '</small>' : '') + '</td><td class="no-print" style="white-space:nowrap">' + (manage && a.status !== 'done' ? (a.lesson ? '' : '<button class="sm" data-adone="' + a.id + '">Mark done</button> ') + '<button class="sm" data-acan="' + a.id + '">Cancel</button>' : '') + '</td></tr>';
     }).join('') + '</tbody></table></div>' : '<p class="sub">Nothing assigned.</p>') + '</div>';
-    h += '<div class="card"><h2>Lessons and quizzes</h2><div class="scroll"><table><thead><tr><th>Lesson</th><th>Status</th><th class="n">Best</th><th>Passed</th><th>Expires</th><th class="n">Attempts</th><th>Opened</th></tr></thead><tbody>' + p.lessons.filter(function (l) { return l.required || l.attempts || l.opened || l.for_role; }).map(function (l) {
-      return '<tr style="' + (l.required || !l.quiz ? '' : 'opacity:.6') + '"><td><a href="#" data-les="' + esc(l.key) + '">' + esc(l.title) + '</a>' + (l.quiz && !l.required ? ' <small>(not required)</small>' : '') + '</td><td>' + pill(l.status) + '</td><td class="n">' + (l.best != null ? Math.round(l.best) + '%' : l.last ? Math.round(l.last.score) + '%' : '') + '</td>' +
+    h += head('📚', 'In this system', 'Lessons and quizzes', '#d62828') + '<div class="scroll"><table><thead><tr><th>Lesson</th><th>Status</th><th class="n">Best</th><th>Passed</th><th>Expires</th><th class="n">Attempts</th><th>Opened</th></tr></thead><tbody>' + p.lessons.filter(function (l) { return l.required || l.attempts || l.opened || l.for_role; }).map(function (l) {
+      return '<tr style="' + (l.required || !l.quiz ? '' : 'opacity:.6') + '"><td><a href="#" data-les="' + esc(l.key) + '">' + lname(l.key, l.title) + '</a>' + (l.quiz && !l.required ? ' <small>(not required)</small>' : '') + '</td><td>' + pill(l.status) + '</td><td class="n">' + (l.best != null ? Math.round(l.best) + '%' : l.last ? Math.round(l.last.score) + '%' : '') + '</td>' +
         '<td>' + esc(dd(l.passed_at)) + '</td><td>' + esc(dd(l.expires)) + '</td><td class="n">' + (l.attempts || '') + '</td><td>' + (l.opened ? l.opened + '×, last ' + esc(dd(l.last_opened)) : '<small class="sub">never</small>') + '</td></tr>';
     }).join('') + '</tbody></table></div></div>';
-    h += '<div class="card"><h2>Other training, certificates and licences</h2>' + (p.records.length ? '<div class="scroll"><table><thead><tr><th>Date</th><th>Training</th><th>Provider / trainer</th><th class="n">Hours</th><th>Result</th><th>Expires</th><th>Certificate</th><th class="no-print"></th></tr></thead><tbody>' + p.records.map(function (r) {
+    h += head('📜', 'Outside this system', 'Other training, certificates and licences', '#0369a1') + (p.records.length ? '<div class="scroll"><table><thead><tr><th>Date</th><th>Training</th><th>Provider / trainer</th><th class="n">Hours</th><th>Result</th><th>Expires</th><th>Certificate</th><th class="no-print"></th></tr></thead><tbody>' + p.records.map(function (r) {
       return '<tr><td>' + esc(dd(r.completed_on)) + '</td><td><b>' + esc(r.title) + '</b><br><small>' + esc(r.kind_label) + '</small>' + (r.notes ? '<br><small class="sub">' + esc(r.notes) + '</small>' : '') + '</td><td>' + esc(r.provider || '') + (r.trainer ? (r.provider ? '<br>' : '') + '<small>trainer: ' + esc(r.trainer) + '</small>' : '') + '</td>' +
         '<td class="n">' + (r.hours != null ? r.hours : '') + '</td><td>' + pill(r.status) + (r.score ? ' <small>' + esc(r.score) + '</small>' : '') + '</td><td>' + esc(dd(r.expires_on)) + '</td><td>' + esc(r.certificate_no || '') + (r.has_file ? ' <a target="_blank" href="/api/training/records/' + r.id + '/file">📄 view</a>' : '') + '</td>' +
         '<td class="no-print" style="white-space:nowrap">' + (manage ? '<button class="sm" data-redit="' + r.id + '">Edit</button> <button class="sm" data-rdel="' + r.id + '">Delete</button>' : '') + '</td></tr>';
     }).join('') + '</tbody></table></div>' : '<p class="sub">None recorded.' + (manage ? ' Add courses, certificates and licences, on-the-job training and inductions with "Add training record".' : '') + '</p>') + '</div>';
-    h += '<div class="card"><details><summary><b>Every quiz attempt (' + p.attempts.length + ')</b> · practice till: ' + (p.practice.done || 0) + ' done, ' + (p.practice.passed || 0) + ' right</summary>' + (p.attempts.length ? '<table><thead><tr><th>When</th><th>Lesson</th><th class="n">Score</th><th>Result</th></tr></thead><tbody>' + p.attempts.map(function (a) {
+    h += head('🧾', 'History', 'Quiz attempts and practice', '#475569') + '<details><summary><b>Every quiz attempt (' + p.attempts.length + ')</b> · practice till: ' + (p.practice.done || 0) + ' done, ' + (p.practice.passed || 0) + ' right</summary>' + (p.attempts.length ? '<table><thead><tr><th>When</th><th>Lesson</th><th class="n">Score</th><th>Result</th></tr></thead><tbody>' + p.attempts.map(function (a) {
       return '<tr><td>' + esc(new Date(a.finished_at).toLocaleString('en-JM', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Jamaica' })) + '</td><td>' + esc(a.title) + '</td><td class="n">' + Math.round(a.score) + '%</td><td>' + pill(a.passed ? 'passed' : 'not passed') + '</td></tr>';
     }).join('') + '</tbody></table>' : '<p class="sub">No quizzes taken yet.</p>') + '</details></div>';
     return h;
@@ -525,7 +578,10 @@
     return api('/api/training/people?' + qs).then(function (d) {
       meta = d; if (!pf.q && !pf.dept && !pf.role) peopleCache = d.people;
       var roles = []; (peopleCache || d.people).forEach(function (x) { if (roles.indexOf(x.role) < 0) roles.push(x.role); });
-      $('#out').innerHTML = '<div class="card"><h2>Employees</h2><p class="sub">Each person\'s training: lessons and quizzes, other training and certificates, and what is assigned. Click a name for the full record.</p>' +
+      var sum = function (k) { return d.people.reduce(function (n, x) { return n + (x[k] || 0); }, 0); }, full = d.people.filter(function (x) { return x.required && x.required_passed === x.required; }).length;
+      $('#out').innerHTML = band({ icon: '🧑‍🤝‍🧑', kicker: 'Managers', title: 'Employees', text: 'Each person\'s training: lessons and quizzes, other training and certificates, and what is assigned. Click a name for the full record.',
+          stats: [[d.people.length, 'people'], [full, 'fully trained', 'ok'], [sum('expired'), 'expired', sum('expired') ? 'bad' : ''], [sum('overdue'), 'overdue', sum('overdue') ? 'bad' : ''], [sum('due'), 'assigned, to do', sum('due') ? 'warn' : '']] }) +
+        '<div class="card chap s" style="--h:#1d4ed8"><div class="ch"><span class="e">🔎</span><div><small>Find and assign</small><h2>Everyone</h2></div></div>' +
         '<div class="controls"><div style="flex:1;min-width:200px"><label>Find a person</label><input id="fQ" value="' + esc(pf.q) + '" placeholder="Name, email, employee no" style="width:100%"></div>' +
         '<div><label>Department</label><select id="fD"><option value="">All</option>' + d.departments.map(function (x) { return '<option value="' + x.id + '"' + (String(x.id) === String(pf.dept) ? ' selected' : '') + '>' + esc(x.name) + '</option>'; }).join('') + '</select></div>' +
         '<div><label>Role</label><select id="fR"><option value="">All</option>' + roles.map(function (x) { return '<option' + (x === pf.role ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('') + '</select></div>' +
@@ -554,7 +610,9 @@
     return loadMeta().then(function (m) {
       var roles = []; m.people.forEach(function (x) { if (roles.indexOf(x.role) < 0) roles.push(x.role); });
       var sel = function (id, label, opts, val) { return '<div><label>' + label + '</label><select id="' + id + '">' + opts.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (String(o[0]) === String(val) ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select></div>'; };
-      $('#out').innerHTML = '<div class="card"><h2>Search training</h2><p class="sub">Across everyone: lessons and quizzes, other training and certificates, and assigned training. Words also search what the lessons say.</p>' +
+      $('#out').innerHTML = band({ icon: '🔍', kicker: 'Managers', title: 'Search training', text: 'Across everyone: lessons and quizzes, other training and certificates, and assigned training. Words also search what the lessons say.',
+          stats: [[m.people.length, 'people'], [m.modules.length, 'lessons'], [Object.keys(m.kinds).length, 'types of training']] }) +
+        '<div class="card chap s" style="--h:#0d9488"><div class="ch"><span class="e">🎛️</span><div><small>Filters and results</small><h2>What to look for</h2></div></div>' +
         '<div class="controls"><div style="flex:1;min-width:220px"><label>Words</label><input id="sQ" value="' + esc(sf.q) + '" placeholder="e.g. forklift, first aid, returns, a name, a certificate no" style="width:100%"></div>' +
         sel('sU', 'Employee', [['', 'Everyone']].concat(m.people.map(function (x) { return [x.id, x.name]; })), sf.user) +
         sel('sD', 'Department', [['', 'All']].concat(m.departments.map(function (x) { return [x.id, x.name]; })), sf.dept) +
@@ -576,7 +634,7 @@
             '<p class="sub">' + d.total + ' result' + (d.total === 1 ? '' : 's') + (d.total > d.rows.length ? ' (showing ' + d.rows.length + '; the CSV has all)' : '') + '</p>' +
             '<div class="scroll"><table><thead><tr><th>Employee</th><th>Type</th><th>Training</th><th>Status</th><th>Date</th><th>Due / expires</th><th>Score / hours</th><th>Provider / trainer</th><th>Notes</th></tr></thead><tbody>' +
             (d.rows.length ? d.rows.map(function (r) {
-              return '<tr><td><a href="#" data-p="' + r.user_id + '">' + esc(r.name) + '</a><br><small>' + esc(r.role) + (r.departments ? ' · ' + esc(r.departments) : '') + '</small></td><td><small>' + esc(r.type_label) + '</small></td><td>' + (r.key && r.type === 'lesson' ? '<a href="#" data-les="' + esc(r.key) + '">' + esc(r.title) + '</a>' : esc(r.title)) + (r.has_file ? ' 📄' : '') + '</td><td>' + pill(r.status) + '</td>' +
+              return '<tr><td><a href="#" data-p="' + r.user_id + '">' + esc(r.name) + '</a><br><small>' + esc(r.role) + (r.departments ? ' · ' + esc(r.departments) : '') + '</small></td><td><small>' + esc(r.type_label) + '</small></td><td>' + (r.key && r.type === 'lesson' ? '<a href="#" data-les="' + esc(r.key) + '">' + lname(r.key, r.title) + '</a>' : esc(r.title)) + (r.has_file ? ' 📄' : '') + '</td><td>' + pill(r.status) + '</td>' +
                 '<td>' + esc(dd(r.date)) + '</td><td>' + (r.due ? 'due ' + esc(dd(r.due)) : '') + (r.expires ? 'expires ' + esc(dd(r.expires)) : '') + '</td><td>' + esc(r.score || '') + (r.hours != null ? ' ' + r.hours + ' h' : '') + '</td><td>' + esc(r.provider || '') + (r.trainer ? ' <small>' + esc(r.trainer) + '</small>' : '') + (r.certificate_no ? '<br><small>no ' + esc(r.certificate_no) + '</small>' : '') + '</td><td><small>' + esc(r.detail || '') + '</small></td></tr>';
             }).join('') : '<tr><td colspan="9" class="empty">Nothing matches.</td></tr>') + '</tbody></table></div>';
           all('[data-p]', $('#sOut')).forEach(function (a) { a.onclick = function (e) { e.preventDefault(); openPerson(a.getAttribute('data-p')); }; });
