@@ -18,6 +18,8 @@ const FIGURES = {
     P('admin-home.webp', 'Admin: the dashboard', 'The menu on the left opens every part of the system; the dashboard shows today\'s sales and what needs attention.', 'The menu'),
     P('mobile-home.webp', 'Mobile app home screen', 'On a phone the same work is laid out as big tiles.', 'Phones and tablets', { phone: true }),
     P('training.webp', 'Training: My training', 'Your lessons, which are required for your role, and how far you have got.', 'Your training record'),
+    P('all-modules.webp', 'All modules with Favourites', 'Starred modules sit in ⭐ Favourites at the top; click ☆ on any tile to add it.', 'Favourites'),
+    P('menu-setup.webp', 'Set up staff menus', 'One column per group on their menu. Drag cards, or use the arrows; ✕ moves a card to Not on their menu.', 'Staff menus (managers)'),
   ],
   'pos-sale': [
     P('ex-fits-check.svg', 'Checking the fit', 'Compare the part\'s "fits" line with the customer\'s vehicle, item by item, before you sell.', 'Find the part'),
@@ -58,6 +60,14 @@ const FIGURES = {
     P('ex-quote-flow.svg', 'From cart to payment', 'A quote waits for the customer; a counter order waits at the cashier.', 'Making a quote'),
     P('cashier-queue.webp', 'The Cashier page', 'Orders due for payment on the left; open one and take payment.', 'The cashier queue'),
   ],
+  'after-sale': [
+    P('pos-sales.webp', 'POS Sales & Returns', 'The day\'s tickets with what was taken by tender; "Show voided" includes voided sales.', 'Finding a ticket'),
+    P('ex-after-sale.svg', 'Void, return or reprint?', 'Pick by what happened: a mistake, parts coming back, or a lost receipt.', 'Voiding'),
+  ],
+  'pos-addons': [
+    P('gift-cards.webp', 'POS Add-ons: Gift cards', 'Each card with its code, balance, who it was issued to and when it was last used.', 'Gift cards'),
+    P('coupons.webp', 'POS Add-ons: Coupons', 'Codes the till accepts, with the discount, minimum order, uses and expiry.', 'Coupons'),
+  ],
   'parts-stock': [
     P('products.webp', 'Parts', 'Search parts by number, name or vehicle; stock, bin and price on each line.', 'Finding a part'),
     P('low-stock.webp', 'Low stock', 'Parts at or below their reorder level, with a box to restock.', 'Low stock'),
@@ -96,10 +106,33 @@ const FIGURES = {
   'reports-planning': [
     P('reports.webp', 'Reports', 'Report groups on the left, each report as a card.', 'Reports'),
     P('planning.webp', 'Planning', 'What needs attention, sales and profit, and whether we had what customers asked for.', 'Planning and lost sales'),
+    P('balancing.webp', 'Balancing report', 'Each check either balances or shows the difference to explain, starting with the inventory balance.', 'Balancing report'),
+    P('terminal-journal.webp', 'Terminal journal: live feed', 'Every sale, void, refund and drawer event from the tills, as it happens.', 'Terminal journal'),
   ],
   'people': [
     P('staff.webp', 'Manage users', 'Everyone who works here, their role, till PIN and status.', 'Manage users'),
     P('roles.webp', 'Roles', 'Each role\'s screens and whether it clears the manager bar.', 'Roles and permissions'),
+  ],
+  'hr-files': [
+    P('hr-staff-files.webp', 'People & HR: Staff files', 'Everyone with their job, manager, contract and status, and what needs attention.', 'Staff files'),
+    P('hr-file.webp', 'A staff member\'s HR file', 'The tabs along the top: profile, contacts, job & pay, probation & conduct, leave, reviews, contracts, to sign, documents, checklists, leaving and history.', 'Profile'),
+    P('ex-staff-sign.svg', 'Sending a contract to sign', 'From "Send to sign" to a sealed, signed copy in their staff file.', 'To sign'),
+    P('hr-import.webp', 'QuickBooks import', 'Employees and payroll items from QuickBooks; you see every change before anything is saved.', 'QuickBooks'),
+    P('hr-org.webp', 'Org chart', 'Who reports to whom, from each person\'s manager.', 'Org chart'),
+    P('hr-reports.webp', 'HR reports', 'Head count, starters and leavers, turnover and time to hire.', 'Reports'),
+  ],
+  'hiring': [
+    P('ex-hiring-flow.svg', 'Hiring one person, start to finish', 'Requisition to hire, with the panel\'s scorecards and an approved offer.', 'The order'),
+    P('hiring.webp', 'Hiring: requisitions and job postings', 'Requisitions waiting for approval or to be posted, then each posting with how many applicants are at each stage.', 'Requisitions'),
+  ],
+  'payroll-attendance': [
+    P('attendance.webp', 'Attendance: clock-in log', 'Every clock-in attempt, with how, where and why any was refused.', 'Time clock and attendance'),
+    P('ex-timesheet-pay.svg', 'From the time clock to a payslip', 'Approved hours become the pay run; Payroll works out the deductions.', 'Payroll'),
+    P('payroll.webp', 'Payroll: overview', 'Who is on payroll, draft runs, wages approved but not paid, and what is owed to TAJ.', 'Payroll'),
+    P('payroll-employees.webp', 'Payroll: employees', 'Pay, how they are paid, TRN and NIS for each person, and their linked staff login.', 'Payroll'),
+  ],
+  'training-records': [
+    P('training-employees.webp', 'Training: Employees', 'Required lessons passed, what has expired or is overdue, and other training, person by person.', 'Each employee\'s training record'),
   ],
   'delivery-drivers': [
     P('dispatch.webp', 'Dispatch: the live board', 'The queue of jobs, drivers on shift and the live map.', 'Dispatch'),
@@ -109,9 +142,34 @@ const FIGURES = {
     P('team-chat.webp', 'Team chat', 'Chats on the left, with the 🚨 alarm, 📢 announcement and group buttons at the top.', 'The chat button'),
     P('emergency-alarm.webp', 'An emergency alarm on a phone', 'Everyone sees this until they answer: I\'m safe, On my way to help, or I need help.', 'Emergency alarm', { phone: true }),
     P('emergency-bar.webp', 'After you answer', 'A red bar stays at the top with the counts, Roll call and All clear.', 'Emergency alarm'),
+    P('staff-calendar.webp', 'The staff calendar', 'Events, who is off, public holidays, your shifts and interviews, by month, week or list.', 'The staff calendar'),
+  ],
+  'my-hr-file': [
+    P('my-hr-file.webp', 'My HR file', 'Your vacation and sick days left, your status, your contact details and anything waiting for you to sign.', 'What it shows'),
+    P('ex-staff-sign.svg', 'How signing works', 'What you sign is sealed, so nobody can change it afterwards.', 'Documents to sign'),
   ],
   'documents-forms': [
     P('documents.webp', 'Documents: forms and templates', 'Fill in a form; the ones that need approval go to a manager.', 'Forms and leave'),
+  ],
+  'franchise': [
+    P('franchise-dash.webp', 'Franchise: overview', 'Leads in the pipeline, open franchises, money owed and what needs attention.', 'Open it'),
+    P('ex-franchise-path.svg', 'From enquiry to an open store', 'The order the till keeps, with the waiting period before the agreement.', 'The order'),
+    P('franchise-enquiry.webp', 'The franchise enquiry form', 'What a prospect fills in on the website; it arrives under Enquiries & leads.', 'The order'),
+    P('franchise-leads.webp', 'Enquiries & leads', 'Each lead with its area, source, score and stage.', 'The order'),
+    P('franchise-franchisees.webp', 'Franchisees', 'Every franchise with its status, opening date, term and opening checklist.', 'Opening checklist'),
+    P('franchise-royalties.webp', 'Royalties & fees', 'The monthly run: one invoice per franchisee from their sales report.', 'Every month'),
+    P('franchise-templates.webp', 'Templates & manual', 'Each franchise document, who signs it, and whether an attorney has reviewed it.', 'The templates are a starting point'),
+  ],
+  'franchise-network': [
+    P('franchise-network.webp', 'Stores & DCs', 'Every store with its kind, role (hub or spoke), format, DC and hub.', 'Three kinds of store'),
+    P('ex-hub-spoke.svg', '"Can we get it?"', 'The store, its hub, its DC, then the rest of the network.', 'Hubs and spokes'),
+    P('franchise-catalogue.webp', 'Catalogue & lookup', 'One parts list for the network: part numbers, what fits, dealer cost, list price and where it is stocked.', 'The catalogue'),
+  ],
+  'franchise-commercial': [
+    P('franchise-commercial.webp', 'Commercial accounts and delivery routes', 'Garage and fleet accounts with their tier, credit and route; each store\'s routes below.', 'Commercial (do-it-for-me)'),
+    P('franchise-rebates.webp', 'Rebates, co-op & loyalty', 'Each store\'s purchases through the DC against its commitment, the rebate earned and co-op left.', 'Purchasing commitment'),
+    P('franchise-certs.webp', 'Certification', 'What each store\'s staff are certified in, against what the store needs.', 'Certification'),
+    P('franchise-scorecard.webp', 'The store scorecard', 'Network figures across the top, then each store against the targets.', 'The scorecard'),
   ],
   'stores-suppliers': [
     P('stores.webp', 'Stores and branches', 'Each store with its departments, tills and stock.', 'Stores and branches'),
@@ -119,6 +177,8 @@ const FIGURES = {
   ],
   'settings-security': [
     P('system.webp', 'System management', 'Security score, threats, audit exceptions and the problems to fix.', 'System management'),
+    P('network-map.webp', 'The live network map', 'The router in the middle; a red, pulsing device has stopped answering. Click one for its details.', 'Network map'),
+    P('security.webp', 'Security: sign-in', 'Set up 2-step sign-in for your own account; managers also see staff sign-ins, the rules and the audit log.', 'Sign-in security'),
   ],
 };
 

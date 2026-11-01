@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 340" font-family="Segoe UI, system-ui, -apple-system, sans-serif">
+  <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/></marker></defs>
+  <rect width="860" height="340" rx="18" fill="#ffffff"/>
+  <text x="30" y="44" font-size="22" font-weight="700" fill="#0b1b2b">Example: which one do I use after a sale?</text>
+  <text x="30" y="70" font-size="15" fill="#6b7280">Open the ticket in POS Sales &amp; Returns first. Every option below is recorded.</text>
+  <g font-size="14" text-anchor="middle">
+    <rect x="30" y="104" width="250" height="94" rx="12" fill="#eef2f7" stroke="#0b1b2b"/><text x="155" y="147.5" fill="#0b1b2b" font-weight="700">Rung up by mistake</text><text x="155" y="164.5" fill="#6b7280" font-size="12">whole sale never happened</text>
+    <rect x="305" y="104" width="250" height="94" rx="12" fill="#eef2f7" stroke="#0b1b2b"/><text x="430" y="147.5" fill="#0b1b2b" font-weight="700">Some parts came back</text><text x="430" y="164.5" fill="#6b7280" font-size="12">customer returns lines</text>
+    <rect x="580" y="104" width="250" height="94" rx="12" fill="#eef2f7" stroke="#0b1b2b"/><text x="705" y="147.5" fill="#0b1b2b" font-weight="700">Customer lost the receipt</text><text x="705" y="164.5" fill="#6b7280" font-size="12">or wants an invoice copy</text>
+    <line x1="155" y1="202" x2="155" y2="226" stroke="#94a3b8" stroke-width="2" marker-end="url(#ar)"/><line x1="430" y1="202" x2="430" y2="226" stroke="#94a3b8" stroke-width="2" marker-end="url(#ar)"/><line x1="705" y1="202" x2="705" y2="226" stroke="#94a3b8" stroke-width="2" marker-end="url(#ar)"/>
+    <rect x="30" y="230" width="250" height="70" rx="12" fill="#d62828"/><text x="155" y="261.5" fill="#fff" font-weight="700">Void sale</text><text x="155" y="278.5" fill="#fff" font-size="12">cannot be undone</text>
+    <rect x="305" y="230" width="250" height="70" rx="12" fill="#0b1b2b"/><text x="430" y="261.5" fill="#fff" font-weight="700">Return items</text><text x="430" y="278.5" fill="#cbd5e1" font-size="12">credit note printed</text>
+    <rect x="580" y="230" width="250" height="70" rx="12" fill="#eef2f7"/><text x="705" y="261.5" fill="#0b1b2b" font-weight="700">Reprint</text><text x="705" y="278.5" fill="#6b7280" font-size="12">receipt, invoice, gift receipt</text>
+  </g>
+<text x="30" y="326" font-size="13" fill="#6b7280">After a void, print the "Credit note (full reversal)". After a return, grade the parts in Stock to cash.</text>
+</svg>
