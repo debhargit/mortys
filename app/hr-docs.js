@@ -672,6 +672,8 @@ function register(app, deps) {
       res.json({ ok: true, added });
     } catch (e) { fail(res, e); }
   });
+
+  return { newStaffUser };
 }
 
 module.exports = { register };

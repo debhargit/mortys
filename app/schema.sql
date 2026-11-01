@@ -7535,3 +7535,66 @@ INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
   ('4610', 'Franchise Supply Sales',  'income',    'Franchise Supply Sales',  'INC',    'franchise_supply'),
   ('2175', 'Franchise Loyalty Fund',  'liability', 'Franchise Loyalty Fund',  'OCLIAB', 'franchise_loyalty')
 ON CONFLICT DO NOTHING;
+
+-- =============================================================================
+--  People & HR, part 3: the employee centre, as in the QuickBooks Employee
+--  Center (Jamaica: TRN, NIS, NHT and TAJ). Personal and employment details,
+--  manager-defined fields, notes and to do's with reminders, a photo,
+--  inactive / released / rehired. Pay stays in Payroll (linked, not copied).
+-- =============================================================================
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS salutation            TEXT;          -- Mr / Mrs / Ms / Miss / Dr
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS legal_name            TEXT;          -- as on the TRN card, for TAJ and NIS
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS preferred_name        TEXT;          -- what they are called at work
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS marital_status        TEXT;          -- single | married | common_law | divorced | widowed
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS town                  TEXT;
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS adjusted_service_date DATE;          -- service counted from (after a break or a rehire)
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS job_description       TEXT;
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS rehire_eligible       BOOLEAN;       -- blank: not decided
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS release_reason        TEXT;
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS inactive              BOOLEAN NOT NULL DEFAULT false;   -- off the active list, not released (long leave)
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS inactive_reason       TEXT;
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS leave_accrual         TEXT NOT NULL DEFAULT 'year';     -- year (all on 1 January) | monthly (a twelfth each month worked)
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS photo                 BYTEA;         -- small JPEG
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS photo_at              TIMESTAMPTZ;
+
+-- Additional info: fields a manager defines (QuickBooks "Define fields").
+CREATE TABLE IF NOT EXISTS hr_custom_fields (
+  id          SERIAL PRIMARY KEY,
+  label       TEXT NOT NULL,
+  kind        TEXT NOT NULL DEFAULT 'text' CHECK (kind IN ('text', 'number', 'date', 'list', 'yesno')),
+  options     TEXT[] NOT NULL DEFAULT '{}',          -- the choices for a list
+  sort        INTEGER NOT NULL DEFAULT 100,
+  is_active   BOOLEAN NOT NULL DEFAULT true,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS hr_custom_values (
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  field_id    INTEGER NOT NULL REFERENCES hr_custom_fields(id) ON DELETE CASCADE,
+  value       TEXT,
+  updated_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at  TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (user_id, field_id)
+);
+
+-- Notes and To Do's on an employee. A to do can remind someone (a notice) at a time.
+CREATE TABLE IF NOT EXISTS hr_notes (
+  id           SERIAL PRIMARY KEY,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind         TEXT NOT NULL DEFAULT 'note' CHECK (kind IN ('note', 'todo')),
+  todo_type    TEXT,                                  -- call | meeting | email | task | follow_up
+  priority     TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high')),
+  body         TEXT NOT NULL,
+  due_on       DATE,
+  remind_at    TIMESTAMPTZ,
+  reminded_at  TIMESTAMPTZ,
+  assignee_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  pinned       BOOLEAN NOT NULL DEFAULT false,
+  done_at      TIMESTAMPTZ,
+  done_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_notes_user ON hr_notes (user_id, kind);
+CREATE INDEX IF NOT EXISTS idx_hr_notes_remind ON hr_notes (remind_at) WHERE kind = 'todo' AND done_at IS NULL AND reminded_at IS NULL;

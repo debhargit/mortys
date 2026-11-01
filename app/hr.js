@@ -26,7 +26,9 @@ const CONTRACTS = ['permanent', 'fixed_term', 'part_time', 'casual', 'contractor
 const STATUSES = ['probation', 'active', 'notice', 'left'];
 // As in the QuickBooks employee list: officers and owners are paid differently.
 const EMP_TYPES = ['regular', 'officer', 'owner', 'statutory'];
-const JOB_KINDS = ['start', 'promotion', 'transfer', 'pay_change', 'title_change', 'confirmation', 'demotion', 'other'];
+const JOB_KINDS = ['start', 'promotion', 'transfer', 'pay_change', 'title_change', 'confirmation', 'demotion', 'rehire', 'other'];
+const SALUTATIONS = ['Mr', 'Mrs', 'Ms', 'Miss', 'Dr'];
+const MARITAL = ['single', 'married', 'common_law', 'divorced', 'widowed'];
 const CASE_KINDS = ['counselling', 'verbal_warning', 'written_warning', 'final_warning', 'suspension', 'dismissal', 'commendation'];
 const CASE_LABEL = { counselling: 'Counselling', verbal_warning: 'Verbal warning', written_warning: 'Written warning', final_warning: 'Final written warning', suspension: 'Suspension', dismissal: 'Dismissal', commendation: 'Commendation' };
 const EXIT_KINDS = ['resignation', 'termination', 'redundancy', 'end_of_contract', 'retirement', 'other'];
@@ -131,8 +133,10 @@ function register(app, deps) {
   async function fileFor(uid, opts) {
     const u = await staffRow(uid);
     const { rows: h } = await query(`SELECT h.*, ${DATE('h.start_date')} AS start_date, ${DATE('h.contract_end')} AS contract_end, ${DATE('h.probation_end')} AS probation_end,
-        ${DATE('h.confirmed_on')} AS confirmed_on, ${DATE('h.date_of_birth')} AS date_of_birth, ${DATE('h.release_date')} AS release_date, dp.name AS department, COALESCE(NULLIF(m.name, ''), m.email) AS manager
+        ${DATE('h.confirmed_on')} AS confirmed_on, ${DATE('h.date_of_birth')} AS date_of_birth, ${DATE('h.release_date')} AS release_date, ${DATE('h.adjusted_service_date')} AS adjusted_service_date, dp.name AS department, COALESCE(NULLIF(m.name, ''), m.email) AS manager
       FROM hr_employees h LEFT JOIN departments dp ON dp.id = h.department_id LEFT JOIN users m ON m.id = h.manager_user_id WHERE h.user_id = $1`, [uid]);
+    // The photo is fetched on its own (/photo).
+    if (h[0]) { h[0].has_photo = !!h[0].photo; delete h[0].photo; }
     const { rows: pay } = await query(`SELECT id, employee_no, pay_type, frequency, salary_annual::float, hourly_rate::float, is_active, ${DATE('hire_date')} AS hire_date, department, job_title,
         vacation_days::float, sick_days::float FROM payroll_employees WHERE user_id = $1`, [uid]);
     const { rows: contacts } = await query(`SELECT * FROM hr_contacts WHERE user_id = $1 ORDER BY is_primary DESC, id`, [uid]);
@@ -164,15 +168,17 @@ function register(app, deps) {
     try { res.json(await fileFor(n(req.params.id), {})); } catch (e) { fail(res, e); }
   });
 
-  const PROFILE_TEXT = { job_title: 120, work_location: 80, personal_email: 160, personal_phone: 40, mobile: 40, address: 300, parish: 40, notes: 4000 };
+  const PROFILE_TEXT = { job_title: 120, work_location: 80, personal_email: 160, personal_phone: 40, mobile: 40, address: 300, parish: 40, notes: 4000,
+    legal_name: 160, preferred_name: 80, town: 80, job_description: 4000, release_reason: 300 };
   app.put('/api/people/staff/:id/profile', ...P, async (req, res) => {
     try {
-      const uid = n(req.params.id); await staffRow(uid); await ensureFile(uid);
+      const uid = n(req.params.id); const u = await staffRow(uid); await ensureFile(uid);
       const b = req.body || {};
       const { rows: cur } = await query(`SELECT * FROM hr_employees WHERE user_id = $1`, [uid]);
+      delete cur[0].photo;
       const c = cur[0], v = {};
       for (const k of Object.keys(PROFILE_TEXT)) v[k] = k in b ? t(b[k], PROFILE_TEXT[k]) : c[k];
-      for (const k of ['start_date', 'contract_end', 'probation_end', 'date_of_birth', 'release_date']) v[k] = k in b ? d(b[k]) : c[k];
+      for (const k of ['start_date', 'contract_end', 'probation_end', 'date_of_birth', 'release_date', 'adjusted_service_date']) v[k] = k in b ? d(b[k]) : c[k];
       v.department_id = 'department_id' in b ? n(b.department_id) : c.department_id;
       v.manager_user_id = 'manager_user_id' in b ? n(b.manager_user_id) : c.manager_user_id;
       if (v.manager_user_id === uid) throw httpError(400, 'Someone cannot be their own manager');
@@ -180,6 +186,10 @@ function register(app, deps) {
       v.status = 'status' in b ? one(b.status, STATUSES, c.status) : c.status;
       v.gender = 'gender' in b ? one(b.gender, ['female', 'male', 'other'], null) : c.gender;
       v.employee_type = 'employee_type' in b ? one(b.employee_type, EMP_TYPES, 'regular') : c.employee_type;
+      v.salutation = 'salutation' in b ? one(b.salutation, SALUTATIONS, null) : c.salutation;
+      v.marital_status = 'marital_status' in b ? one(b.marital_status, MARITAL, null) : c.marital_status;
+      v.leave_accrual = 'leave_accrual' in b ? one(b.leave_accrual, ['year', 'monthly'], 'year') : c.leave_accrual;
+      v.rehire_eligible = 'rehire_eligible' in b ? (b.rehire_eligible == null || b.rehire_eligible === '' ? null : b.rehire_eligible === true || b.rehire_eligible === 'yes') : c.rehire_eligible;
       v.probation_months = 'probation_months' in b ? Math.max(0, Math.min(12, parseInt(b.probation_months, 10) || 0)) : c.probation_months;
       // Probation end follows the start date unless it was typed in.
       if (!('probation_end' in b) && v.start_date && (!c.probation_end || 'start_date' in b || 'probation_months' in b) && v.status === 'probation') {
@@ -202,6 +212,14 @@ function register(app, deps) {
       if (changed.some((k) => ['job_title', 'department_id', 'start_date'].includes(k))) {
         await query(`UPDATE payroll_employees SET job_title = $2, department = COALESCE((SELECT name FROM departments WHERE id = $3), department), hire_date = COALESCE($4::date, hire_date), updated_at = NOW() WHERE user_id = $1`,
           [uid, v.job_title, v.department_id, v.start_date]);
+      }
+      // The name is the staff record's (Users & Staff); Payroll's copy follows when it was the same.
+      const name = 'name' in b ? t(b.name, 120) : null;
+      if (name && name !== u.name) {
+        if (name.length < 3) throw httpError(400, 'Their full name');
+        await query(`UPDATE users SET name = $2 WHERE id = $1`, [uid, name]);
+        await query(`UPDATE payroll_employees SET name = $2, updated_at = NOW() WHERE user_id = $1 AND name = $3`, [uid, name, u.name || '']);
+        changed.push('name');
       }
       if (changed.length) await audit({ user_id: uid, entity: 'profile', action: 'updated', detail: 'Changed: ' + changed.join(', ').replace(/_/g, ' '), by: me(req) });
       res.json({ ok: true, changed });
@@ -454,22 +472,36 @@ function register(app, deps) {
   // The allowance is Payroll's (the person's own days, else the shop's
   // setting), plus or minus adjustments here; days taken are Attendance's
   // leave records, Monday to Saturday, as Payroll counts them.
+  const halves = (x) => Math.floor(x * 2) / 2;
+  function earnedPart(accrual, since, year) {
+    if (accrual !== 'monthly') return 1;
+    const now = today(), cy = Number(now.slice(0, 4));
+    if (year > cy) return 0;
+    const end = year < cy ? 12 : Number(now.slice(5, 7)) - 1;          // whole months gone this year
+    let first = 0;
+    if (since && Number(since.slice(0, 4)) === year) first = Number(since.slice(5, 7)) - 1 + (since.slice(8) === '01' ? 0 : 1);
+    else if (since && Number(since.slice(0, 4)) > year) return 0;
+    return Math.max(0, end - first) / 12;
+  }
   async function leaveFor(uids, year) {
     if (!uids.length) return {};
     const { rows: s } = await query(`SELECT key, value FROM warehouse_settings WHERE key IN ('payroll_vacation_days', 'payroll_sick_days')`);
     const st = Object.fromEntries(s.map((r) => [r.key, Number(r.value)]));
     const dv = Number.isFinite(st.payroll_vacation_days) ? st.payroll_vacation_days : 10, ds = Number.isFinite(st.payroll_sick_days) ? st.payroll_sick_days : 10;
-    const { rows } = await query(`SELECT u.id, p.vacation_days::float AS pv, p.sick_days::float AS ps,
+    const { rows } = await query(`SELECT u.id, p.vacation_days::float AS pv, p.sick_days::float AS ps, COALESCE(h.leave_accrual, 'year') AS accrual, ${DATE('COALESCE(h.adjusted_service_date, h.start_date, p.hire_date)')} AS since,
         COALESCE((SELECT SUM(days) FROM hr_leave_adjustments a WHERE a.user_id = u.id AND a.year = $2 AND a.kind = 'vacation'), 0)::float AS adj_v,
         COALESCE((SELECT SUM(days) FROM hr_leave_adjustments a WHERE a.user_id = u.id AND a.year = $2 AND a.kind = 'sick'), 0)::float AS adj_s
-      FROM users u LEFT JOIN payroll_employees p ON p.user_id = u.id WHERE u.id = ANY($1::int[])`, [uids, year]);
+      FROM users u LEFT JOIN payroll_employees p ON p.user_id = u.id LEFT JOIN hr_employees h ON h.user_id = u.id WHERE u.id = ANY($1::int[])`, [uids, year]);
     const { rows: taken } = await query(`SELECT l.user_id, l.kind, COUNT(*)::int AS days FROM staff_leave l, generate_series(GREATEST(l.from_date, $2::date), LEAST(l.to_date, $3::date), interval '1 day') g(d)
       WHERE l.user_id = ANY($1::int[]) AND l.to_date >= $2::date AND l.from_date <= $3::date AND EXTRACT(DOW FROM g.d) <> 0 GROUP BY l.user_id, l.kind`, [uids, year + '-01-01', year + '-12-31']);
     const out = {};
     for (const r of rows) {
       const tk = (k) => (taken.find((x) => x.user_id === r.id && x.kind === k) || { days: 0 }).days;
       const ve = (r.pv != null ? r.pv : dv) + r.adj_v, se = (r.ps != null ? r.ps : ds) + r.adj_s;
-      out[r.id] = { year, vacation_entitled: ve, vacation_taken: tk('vacation'), vacation_left: ve - tk('vacation'), sick_entitled: se, sick_taken: tk('sick'), sick_left: se - tk('sick'),
+      // Monthly accrual: a twelfth of the year's days for each whole month worked so far; days added or taken off count in full.
+      const part = earnedPart(r.accrual, r.since, year);
+      const vEarn = part === 1 ? ve : halves((ve - r.adj_v) * part) + r.adj_v, sEarn = part === 1 ? se : halves((se - r.adj_s) * part) + r.adj_s;
+      out[r.id] = { year, accrual: r.accrual, vacation_entitled: ve, vacation_earned: vEarn, vacation_taken: tk('vacation'), vacation_left: vEarn - tk('vacation'), sick_entitled: se, sick_earned: sEarn, sick_taken: tk('sick'), sick_left: sEarn - tk('sick'),
         unpaid_taken: tk('unpaid'), other_taken: tk('other'), adjusted_vacation: r.adj_v, adjusted_sick: r.adj_s, own_allowance: r.pv != null };
     }
     return out;
@@ -596,7 +628,8 @@ function register(app, deps) {
       }
       if (b.complete) {
         await query(`UPDATE hr_exits SET status = 'done', completed_by = $2, completed_at = NOW() WHERE id = $1`, [id, me(req)]);
-        await query(`UPDATE hr_employees SET status = 'left', updated_by = $2, updated_at = NOW() WHERE user_id = $1`, [x.user_id, me(req)]);
+        await query(`UPDATE hr_employees SET status = 'left', release_date = COALESCE(release_date, $3::date, (SELECT last_day FROM hr_exits WHERE id = $6)), release_reason = COALESCE(release_reason, $4), rehire_eligible = COALESCE($5, rehire_eligible), updated_by = $2, updated_at = NOW() WHERE user_id = $1`,
+          [x.user_id, me(req), d(b.last_day), x.kind.replace(/_/g, ' '), 'rehire' in b ? (b.rehire == null ? null : !!b.rehire) : x.rehire, id]);
       }
       await audit({ user_id: x.user_id, entity: 'exit', entity_id: id, action: b.cancel ? 'exit cancelled (staying on)' : b.complete ? 'exit completed' : 'exit updated', detail: [d(b.last_day) ? 'last day ' + d(b.last_day) : null, 'rehire' in b ? 'would rehire: ' + (b.rehire ? 'yes' : 'no') : null, t(b.note, 300)].filter(Boolean).join(' · '), by: me(req) });
       const { rows: left } = await query(`SELECT COUNT(*)::int AS n FROM hr_tasks WHERE exit_id = $1 AND done_at IS NULL`, [id]);
@@ -754,7 +787,9 @@ function register(app, deps) {
   }
 
   // Contracts, documents to sign, adding staff and the QuickBooks import (hr-docs.js).
-  require('./hr-docs').register(app, Object.assign({}, deps, { audit, ensureFile, staffRow, httpError, fail }));
+  const hrDocs = require('./hr-docs').register(app, Object.assign({}, deps, { audit, ensureFile, staffRow, httpError, fail }));
+  // The employee centre: list, record, transactions, wizard, release and rehire, lists (hr-centre.js).
+  require('./hr-centre').register(app, Object.assign({}, deps, { audit, ensureFile, staffRow, httpError, fail, leaveFor, addTasks, ONBOARDING, newStaffUser: hrDocs.newStaffUser }));
 
   return { audit, onHire, ONBOARDING, OFFBOARDING };
 }
