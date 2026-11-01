@@ -141,6 +141,7 @@
      shell to whatever is left. */
   body.pos-fullscreen header.top,
   body.pos-fullscreen .tiles { display:none !important; }
+  body.on-pos .tiles { display:none !important; }   /* the POS terminal, full screen or not (show()) */
   body.pos-fullscreen .wrap { max-width:none; }
   body.pos-fullscreen .content-area { padding:0 8px 8px; }
 
@@ -1309,6 +1310,7 @@ async function show(tab){
   // in renderPOS). Hide it there; every other tab keeps it as-is.
   var tiles = document.getElementById('tiles');
   if (tiles) tiles.style.display = (tab === 'pos') ? 'none' : '';
+  document.body.classList.toggle('on-pos', tab === 'pos');   // .tiles is display:grid !important, so the inline style alone loses
   try { await renderers[tab](panel); }
   catch(e){ panel.innerHTML = '<div class="empty">Error: ' + esc(e.message) + '</div>'; }
 }
