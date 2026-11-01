@@ -1222,6 +1222,7 @@ const CAPABILITIES = [
   { key: 'hr.manage',    group: 'Careers', label: 'Post jobs, read applications and CVs, hire' },
   { key: 'hr.approve',   group: 'Careers', label: 'Approve job requisitions and job offers' },
   { key: 'hr.people',    group: 'People & HR', label: 'Staff HR files: personal details, job and pay history, probation, warnings, reviews, leave allowance, exits, HR reports' },
+  { key: 'franchise.manage', group: 'Franchise', label: 'Franchise: enquiries and leads, NDAs, disclosure documents and agreements, franchisees, royalty invoices, audits, renewals, transfers and terminations' },
   { key: 'clock.manage',  group: 'Time clock', label: 'Set shifts, overtime rules, badges, fingerprints; timesheets and payroll' },
   { key: 'clock.approve', group: 'Time clock', label: 'See who is in; approve overtime, extensions and time corrections' },
   { key: 'mkt.manage',          group: 'Stock to cash', label: 'Clearance prices, stock classes, lots, supplier claims and offer campaigns' },
@@ -1263,7 +1264,7 @@ const CAPABILITY_KEYS = new Set(CAPABILITIES.map((c) => c.key));
 const RESTRICTED_CAPS = new Set([
   'purchasing.approve_bills', 'purchasing.settings', 'fulfil.manage', 'cashier.manage', 'count.approve', 'planning.targets', 'notify.manage',
   'acct.view', 'acct.post', 'acct.setup', 'acct.close', 'acct.export', 'acct.budget', 'sec.manage', 'audit.view', 'dept.manage', 'tj.view',
-  'comm.view', 'comm.rules', 'comm.approve', 'reps.manage', 'hr.manage', 'hr.approve', 'hr.people', 'clock.manage', 'clock.approve', 'mkt.manage', 'ai.manage', 'training.manage',
+  'comm.view', 'comm.rules', 'comm.approve', 'reps.manage', 'hr.manage', 'hr.approve', 'hr.people', 'franchise.manage', 'clock.manage', 'clock.approve', 'mkt.manage', 'ai.manage', 'training.manage',
   'ar.manage', 'ap.manage', 'bank.manage', 'payroll.view', 'payroll.run', 'payroll.approve', 'sys.audit', 'sys.security', 'sys.support', 'sys.network',
   'docs.manage', 'docs.confidential', 'docs.restricted', 'docs.approve', 'comms.journal',
   'fleet.drive', 'fleet.view', 'fleet.dispatch', 'suppliers.manage', 'team.announce', 'team.oversee',
@@ -6615,6 +6616,9 @@ require('./commission').register(app, { query, getPool: () => pool, requireAdmin
 // looked up when sent: team.js is registered just below.
 const hrApi = require('./hr').register(app, { query, requireAdmin, requireCap, userCan, docs: docsCentre, notice: (...a) => teamApi.notice(...a) });
 require('./careers').register(app, { query, requireAdmin, requireCap, bcrypt, userCan, getPool: () => pool, hr: hrApi, docs: docsCentre, notice: (...a) => teamApi.notice(...a) });
+// Franchise: leads, NDA, disclosure, agreement and signing, franchisees, royalties, audits, renewals and exits (franchise.js).
+require('./franchise').register(app, { query, getPool: () => pool, requireAdmin, requireCap, userCan, mailer, docs: docsCentre, devMode: DEV_MODE, nextAccountNumber,
+  notice: (...a) => teamApi.notice(...a) });
 // Team chat, voice and video calls, notices and the staff calendar (team.js).
 // Team notices also carry the time clock's lateness letters and requests, and assigned training.
 const teamApi = require('./team').register(app, { query, requireAdmin, requireCap, userCan });

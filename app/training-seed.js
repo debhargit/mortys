@@ -733,6 +733,40 @@ Communications journal: Communications shows every email, SMS, portal chat, AI /
     questions: [],
   },
   {
+    key: 'franchise', title: 'Franchising: from enquiry to opening and beyond', sort: 152, quiz: true, roles: ['owner', 'manager'],
+    summary: 'Running the franchise system: leads, NDA, disclosure document, agreement and signing, opening checklist, royalties, audits, renewals, transfers and terminations.',
+    body: `Open it: All modules > Franchise (franchise.html). You need the Franchise permission. People ask about a franchise on the enquiry form (franchisee.html); each one arrives under Enquiries & leads.
+
+The order, as the franchise industry does it:
+1. Enquiry: record who they are, the area they want, their cash to invest and net worth.
+2. Qualify: tick experience, territory free, timeline and interview; the till scores it out of 100 (cash and net worth come from the details). Qualified at the score set in Settings.
+3. NDA: make the confidentiality agreement and send the signing link (or sign it on the screen with them). Nothing confidential is shown before it is signed. The till will not make the disclosure document until it is.
+4. Disclosure document: the 23-item franchise disclosure document. They sign for receiving it. This starts the waiting period (14 days by default).
+5. Application: type in their application, or send the application form to sign.
+6. Approve or decline. Give a fair reason for a decline; it is kept on file.
+7. Make the franchisee record: it opens their account in Receivables and the opening checklist.
+8. Franchise agreement: made from the record (territory, term, fees). The till refuses to let it be signed before the waiting period ends. Both sides sign: the franchisee from the link, then a manager presses "Sign for us".
+
+Signatures: each signed document keeps a fingerprint of the page and a seal. If the page or the signature is changed later, it shows as "seal broken". The signed copy is filed in the Document centre.
+
+Opening checklist: business set-up (company, TRN, GCT, NIS, NHT, bank), site selection and approval, lease, fit-out, permits, till and CCTV, insurance, opening stock, training, the operations manual (issued as a numbered copy they sign for), the pre-opening audit and launch. Then "Mark the shop open".
+
+Every month: the franchisee sends the month's sales from their franchisee link (or you type it in). Net sales = gross sales less refunds and GCT. Royalties & fees makes one invoice per shop: royalty, brand fund and technology fee plus GCT, due on the day set in Settings. It goes on their account in Receivables, where payments are taken. A month can only be invoiced once.
+
+Audits: score each item 2, 1, 0 or N/A. Pass, conditional (follow-up within 30 days) or fail. Two failed audits in 12 months are a ground for ending the franchise.
+
+Renewal, transfer and exit: a renewal adds years to the term. A transfer makes a new franchisee for the buyer and closes the seller's record. A notice of default gives a date to put things right. A suspension stops trading until it is lifted. A termination closes the franchise, opens the territory and adds the after-termination checklist. Make the matching letter under Agreement & documents. Take legal advice before any termination.
+
+The templates are a starting point, not legal advice. Every copy carries a notice until a manager records that a Jamaican attorney has reviewed that template (Templates & manual). Change the wording in the Document centre.`,
+    questions: [
+      ['What must be signed before the disclosure document is given?', ['The franchise agreement', 'The confidentiality agreement (NDA)', 'The opening checklist', 'Nothing'], 1, 'The NDA protects the confidential information in the disclosure document.'],
+      ['The franchisee signed for the disclosure document yesterday. Can they sign the agreement today?', ['Yes', 'No: the waiting period (14 days by default) must pass first', 'Only in person', 'Only if they pay first'], 1, 'Industry practice gives them time to take advice; the till enforces it.'],
+      ['How are net sales worked out for the royalty?', ['Gross sales', 'Gross sales less refunds and GCT', 'Profit', 'Cash banked'], 1, 'Royalty and brand fund are percentages of net sales.'],
+      ['Where does the franchisee pay their royalty invoice?', ['It is taken in Receivables, on their account', 'At the till as a sale', 'In Payables', 'It is not recorded'], 0, 'Royalty invoices are A/R invoices on their customer account.'],
+      ['A document shows "seal broken". What does it mean?', ['The link expired', 'The page or the signature was changed after signing', 'It was signed in person', 'It is waiting for our signature'], 1, 'The fingerprint and seal no longer match what was signed.'],
+    ],
+  },
+  {
     key: 'stores-suppliers', title: 'Branches, departments and the supplier portal', sort: 150, quiz: false, roles: ['owner', 'manager'],
     summary: 'Store locations, departments, stock transfers and giving suppliers a portal login.',
     body: `Stores and branches: All modules > Department store. Each store holds its own stock and contains departments. One store is the default - existing stock and tills live there. New stores start empty; move stock in with a transfer.

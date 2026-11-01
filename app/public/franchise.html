@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Franchise · Vision Auto Solutions</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0} header nav{margin-left:auto;display:flex;gap:14px;font-size:13px;align-items:center;flex-wrap:wrap} header a{color:#fff;opacity:.85}
+  main{max-width:1250px;margin:0 auto;padding:14px 16px 60px}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px} .tabs button{border-radius:999px} .tabs button.on{background:var(--red);border-color:var(--red);color:#fff}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  input,select,button,textarea{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  textarea{width:100%} button{cursor:pointer;background:var(--card)} button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600} button.sm{padding:3px 9px;font-size:12.5px}
+  button:disabled{opacity:.5;cursor:default} button.link{border:0;background:none;color:var(--red);padding:0;font-weight:600}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px} .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px 12px;margin-bottom:10px} .grid label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px} .grid input,.grid select,.grid textarea{width:100%}
+  .grid .wide{grid-column:1/-1}
+  .scroll{overflow-x:auto}
+  table{width:100%;border-collapse:collapse} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top} td.n,th.n{text-align:right;white-space:nowrap}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600}
+  tr.row{cursor:pointer} tr.row:hover td{background:var(--chip)}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip)} .pill.ok{background:#16a34a22;color:var(--ok)} .pill.warn{background:#f59e0b22;color:var(--warn)} .pill.bad{background:#d6282822;color:var(--red)}
+  .modal{position:fixed;inset:0;background:rgba(10,15,25,.55);display:flex;align-items:flex-start;justify-content:center;padding:4vh 12px;overflow:auto;z-index:9990} .modal .card{max-width:980px;width:100%}
+  .modal.top{z-index:9995} .modal.top .card{max-width:720px}
+  .empty{color:var(--muted);text-align:center;padding:20px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:9999;max-width:90vw}
+  .ftabs{display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:8px 0 12px} .ftabs button{border:0;border-bottom:2px solid transparent;border-radius:0;background:none;padding:6px 10px} .ftabs button.on{border-bottom-color:var(--red);font-weight:600}
+  .item{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:6px} .item small{color:var(--muted)}
+  .warn{background:#f59e0b18;border-left:3px solid var(--warn);padding:8px 10px;border-radius:8px;margin:8px 0}
+  h4{margin:14px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:12px} .kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px} .kpi b{display:block;font-size:22px} .kpi span{color:var(--muted);font-size:12px}
+  .bar{height:8px;background:var(--chip);border-radius:4px;overflow:hidden;min-width:60px} .bar i{display:block;height:100%;background:var(--red)}
+  .task{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid var(--line)} .task span{flex:1} .task.done span{color:var(--muted);text-decoration:line-through}
+  .funnel{display:flex;gap:6px;flex-wrap:wrap} .funnel div{flex:1;min-width:110px;background:var(--chip);border-radius:8px;padding:8px;text-align:center} .funnel b{display:block;font-size:20px}
+  iframe.doc{width:100%;height:60vh;border:1px solid var(--line);border-radius:8px;background:#fff}
+  .padbox canvas{width:100%;height:160px;border:1px dashed var(--muted);border-radius:8px;background:#fff;touch-action:none}
+  .score button{padding:2px 9px;font-size:12.5px} .score button.on{background:var(--red);border-color:var(--red);color:#fff}
+  @media print{ header,.tabs,.controls,button{display:none!important} .card{border:0} }
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Franchise</h1><nav><a href="/receivables.html">Receivables</a><a href="/documents.html">Documents</a><a href="/training.html">Training</a><a href="/franchisee.html" target="_blank" rel="noopener">Enquiry form</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"></div>
+  <div id="view"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div><div id="modal2"></div>
+<div class="toast" id="toast"></div>
+<script src="/assets/invoice-scan.js?v=20261028"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var day = function (t) { return t ? new Date(String(t).length === 10 ? t + 'T12:00:00' : t).toLocaleDateString('en-JM') : ''; };
+  var when = function (t) { return t ? new Date(t).toLocaleString('en-JM', { dateStyle: 'short', timeStyle: 'short' }) : ''; };
+  var jmd = function (v) { return v == null ? '' : 'J$' + Number(v).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+  var today = function () { var d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+  var lastMonth = function () { var d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); };
+  var monthName = function (p) { return p ? new Date(p.slice(0, 7) + '-15T12:00:00').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) : ''; };
+  var META = null, tab = 'dash';
+  var STATUS = { onboarding: 'Setting up', open: 'Open', suspended: 'Suspended', terminated: 'Terminated', expired: 'Expired', transferred: 'Transferred' };
+  var DOCSTATUS = { draft: 'Draft', sent: 'Sent for signing', signed: 'Signed', countersigned: 'Signed by both', declined: 'Declined', cancelled: 'Cancelled', filed: 'Filed' };
+  var ACTK = { renewal: 'Renewal', transfer: 'Transfer', 'default': 'Notice of default', suspension: 'Suspension', termination: 'Termination' };
+  var AUDK = { pre_opening: 'Pre-opening', routine: 'Routine visit', mystery_shop: 'Mystery shop', follow_up: 'Follow-up' };
+
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 4000); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); }
+        return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; });
+      });
+  }
+  function modal(h, layer) {
+    var host = $(layer === 2 ? '#modal2' : '#modal');
+    host.innerHTML = '<div class="modal' + (layer === 2 ? ' top' : '') + '"><div class="card">' + h + '</div></div>';
+    host.firstChild.addEventListener('mousedown', function (e) { if (e.target.classList.contains('modal')) close(layer); });
+    return host.firstChild;
+  }
+  function close(layer) { $(layer === 2 ? '#modal2' : '#modal').innerHTML = ''; if (layer !== 2 && /^#(lead|fr)=/.test(location.hash)) history.replaceState(null, '', '#' + tab); }
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { if ($('#modal2').innerHTML) close(2); else close(); } });
+  var opts = function (list, cur, blank) { return (blank != null ? '<option value="">' + esc(blank) + '</option>' : '') + list.map(function (p) { var id = p.id != null ? p.id : p[0], nm = p.name != null ? p.name : p[1]; return '<option value="' + esc(id) + '"' + (String(cur) === String(id) ? ' selected' : '') + '>' + esc(nm) + '</option>'; }).join(''); };
+  var field = function (label, html, wide) { return '<div' + (wide ? ' class="wide"' : '') + '><label>' + esc(label) + '</label>' + html + '</div>'; };
+  var inp = function (id, v, type, ph) { return '<input id="' + id + '" type="' + (type || 'text') + '" value="' + esc(v == null ? '' : v) + '"' + (ph ? ' placeholder="' + esc(ph) + '"' : '') + '>'; };
+  var area = function (id, v, rows) { return '<textarea id="' + id + '" rows="' + (rows || 3) + '">' + esc(v || '') + '</textarea>'; };
+  var val = function (id, root) { var el = $('#' + id, root); return el ? el.value : undefined; };
+  var terrOpts = function (cur) { return opts((META.territories || []).map(function (t) { return [t.id, t.code + ' ' + t.name + (t.status !== 'open' ? ' (' + t.status + ')' : '')]; }), cur, '-'); };
+  function frPill(s) { return '<span class="pill' + (s === 'open' ? ' ok' : s === 'onboarding' || s === 'suspended' ? ' warn' : ' bad') + '">' + esc(STATUS[s] || s) + '</span>'; }
+  function docPill(s) { return '<span class="pill' + (s === 'signed' || s === 'countersigned' || s === 'filed' ? ' ok' : s === 'sent' ? ' warn' : s === 'draft' ? '' : ' bad') + '">' + esc(DOCSTATUS[s] || s) + '</span>'; }
+  function stageLabel(k) { var s = (META.stages || []).find(function (x) { return x.key === k; }); return s ? s.label : k; }
+  // Disables the button while the call runs; on an error, says why and stops there (the .then after it never runs).
+  function guard(btn, p) { if (btn) btn.disabled = true; return p.finally(function () { if (btn) btn.disabled = false; }).catch(function (e) { toast(e.message); return new Promise(function () {}); }); }
+  function csv(name, rows) {
+    var text = rows.map(function (r) { return r.map(function (v) { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(','); }).join('\r\n');
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + text], { type: 'text/csv' })); a.download = name + '-' + today() + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  // ---------------------------------------------------------------- tabs --
+  var TABS = [['dash', '📊 Overview'], ['leads', '📥 Enquiries & leads'], ['franchisees', '🏪 Franchisees'], ['territories', '🗺 Territories'], ['billing', '🧾 Royalties & fees'],
+    ['performance', '📈 Performance'], ['audits', '✅ Audits'], ['templates', '📄 Templates & manual'], ['settings', '⚙ Settings']];
+  function drawTabs() {
+    $('#tabs').innerHTML = TABS.map(function (t) { return '<button data-t="' + t[0] + '"' + (t[0] === tab ? ' class="on"' : '') + '>' + t[1] + '</button>'; }).join('');
+    all('[data-t]').forEach(function (b) { b.onclick = function () { location.hash = b.getAttribute('data-t'); }; });
+  }
+  function show() {
+    var h = location.hash.replace(/^#/, '');
+    var m = /^(lead|fr)=(\d+)/.exec(h);
+    if (m) { if (!$('#view').getAttribute('data-shown')) { tab = m[1] === 'lead' ? 'leads' : 'franchisees'; drawTabs(); VIEWS[tab](); } if (m[1] === 'lead') openLead(+m[2]); else openFr(+m[2]); return; }
+    tab = VIEWS[h] ? h : 'dash'; drawTabs(); $('#view').setAttribute('data-shown', '1'); VIEWS[tab]();
+  }
+  window.addEventListener('hashchange', show);
+  function reloadMeta() { return api('/api/franchise/meta').then(function (m) { META = m; }); }
+
+  // ------------------------------------------------------------ overview --
+  function dash() {
+    $('#view').innerHTML = '<div class="empty">Loading…</div>';
+    api('/api/franchise/dashboard').then(function (d) {
+      var st = d.stages || {}, fs = d.statuses || {};
+      var active = ['enquiry', 'qualified', 'nda', 'disclosed', 'application', 'approved', 'agreement'];
+      var h = '<div class="kpis">' +
+        kpi(active.reduce(function (x, k) { return x + (st[k] || 0); }, 0), 'Leads in the pipeline') + kpi(fs.open || 0, 'Open franchises') + kpi(fs.onboarding || 0, 'Being set up') +
+        kpi(jmd(d.owed.owed), 'Owed by franchisees') + kpi(jmd(d.owed.overdue), 'Of which overdue') + kpi(d.tasks.overdue + ' / ' + d.tasks.open, 'Checklist items overdue / open') +
+        kpi(d.signatures.out, 'Documents out for signing') + kpi(d.signatures.countersign, 'Waiting for our signature') + '</div>';
+      h += '<div class="card"><h2>Pipeline</h2><div class="funnel">' + active.concat(['signed']).map(function (k) { return '<div><b>' + (st[k] || 0) + '</b>' + esc(stageLabel(k)) + '</div>'; }).join('') + '</div>' +
+        '<p class="sub" style="margin-top:8px">Declined ' + (st.declined || 0) + ' · withdrawn ' + (st.withdrawn || 0) + '. Industry order: enquiry → qualify → NDA → disclosure document → application → approve → agreement (no sooner than ' + META.settings.wait_days + ' days after the disclosure document) → opening.</p></div>';
+      h += '<div class="card"><h2>Needs attention</h2>';
+      var items = [];
+      d.missing_reports.forEach(function (r) { items.push('📄 <b>' + esc(r.name) + '</b> has not sent the sales report for ' + esc(monthName(d.last_period)) + ' <button class="sm" data-fr="' + r.id + '">Open</button>'); });
+      d.unbilled.forEach(function (r) { items.push('🧾 <b>' + esc(r.name) + '</b>: ' + esc(monthName(r.period)) + ' reported (' + jmd(r.net_sales) + ' net) but not invoiced <button class="sm" data-bill="' + r.franchisee_id + '" data-period="' + esc(r.period.slice(0, 7)) + '">Invoice now</button>'); });
+      d.renewals_due.forEach(function (r) { items.push('🔁 <b>' + esc(r.name) + '</b>: term ends ' + esc(day(r.term_end)) + ' <button class="sm" data-fr="' + r.id + '">Open</button>'); });
+      d.open_actions.forEach(function (a) { items.push('⚠ ' + esc(ACTK[a.kind]) + ': <b>' + esc(a.name) + '</b>' + (a.cure_by ? ', put right by ' + esc(day(a.cure_by)) : a.effective_date ? ', from ' + esc(day(a.effective_date)) : '') + ' <button class="sm" data-fr="' + a.franchisee_id + '">Open</button>'); });
+      d.audits_due.forEach(function (r) { items.push('✅ <b>' + esc(r.name) + '</b>: no audit in 100 days' + (r.last_audit ? ' (last ' + esc(day(r.last_audit)) + ')' : ' (never audited)') + ' <button class="sm" data-audit="' + r.id + '">Start audit</button>'); });
+      h += items.length ? items.map(function (x) { return '<div class="item">' + x + '</div>'; }).join('') : '<div class="empty">Nothing waiting.</div>';
+      h += '</div><div class="card"><h2>Recent activity</h2><table><tbody>' + (d.recent.map(function (l) { return '<tr><td>' + esc(when(l.at)) + '</td><td>' + esc(l.action) + (l.detail ? ' · ' + esc(l.detail) : '') + '</td><td>' + esc(l.by_name || '') + '</td></tr>'; }).join('') || '<tr><td class="empty">No activity yet.</td></tr>') + '</tbody></table></div>';
+      $('#view').innerHTML = h;
+      all('[data-fr]').forEach(function (b) { b.onclick = function () { location.hash = 'fr=' + b.getAttribute('data-fr'); }; });
+      all('[data-bill]').forEach(function (b) { b.onclick = function () { guard(b, api('/api/franchise/franchisees/' + b.getAttribute('data-bill') + '/bill', 'POST', { period: b.getAttribute('data-period') })).then(function (r) { toast('Invoice ' + r.invoice.number + ' for ' + jmd(r.invoice.total)); dash(); }); }; });
+      all('[data-audit]').forEach(function (b) { b.onclick = function () { auditForm(+b.getAttribute('data-audit')); }; });
+    }).catch(function (e) { $('#view').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  function kpi(v, l) { return '<div class="kpi"><b>' + esc(v) + '</b><span>' + esc(l) + '</span></div>'; }
+
+  // --------------------------------------------------------------- leads --
+  function leads() {
+    $('#view').innerHTML = '<div class="card"><div class="controls"><div><label>Stage</label><select id="lStage"><option value="active">Still in progress</option><option value="">All</option>' + opts(META.stages.map(function (s) { return [s.key, s.label]; })) + '</select></div>' +
+      '<div><label>Find</label><input id="lQ" placeholder="Name, phone, email, area"></div><button class="primary" id="lNew">+ New enquiry</button><button id="lCsv">Export</button></div><div class="scroll" id="lList"><div class="empty">Loading…</div></div></div>';
+    var rows = [];
+    var load = function () {
+      api('/api/franchise/leads?stage=' + encodeURIComponent(val('lStage')) + '&q=' + encodeURIComponent(val('lQ'))).then(function (d) {
+        rows = d.leads;
+        $('#lList').innerHTML = rows.length ? '<table><thead><tr><th>Received</th><th>Name</th><th>Area</th><th>Source</th><th class="n">Cash to invest</th><th>Score</th><th>Stage</th></tr></thead><tbody>' + rows.map(function (l) {
+          return '<tr class="row" data-l="' + l.id + '"><td>' + esc(day(l.created_day)) + '</td><td><b>' + esc(l.name) + '</b>' + (l.company ? '<br><small>' + esc(l.company) + '</small>' : '') + '<br><small>' + esc([l.phone, l.email].filter(Boolean).join(' · ')) + '</small></td><td>' + esc(l.territory_name || l.area_wanted || l.parish || '') + '</td><td>' + esc(l.source || '') + '</td><td class="n">' + (l.capital != null ? jmd(l.capital) : '') + '</td><td>' + (l.score != null ? l.score + '/100' : '') + '</td><td><span class="pill">' + esc(stageLabel(l.stage)) + '</span></td></tr>';
+        }).join('') + '</tbody></table>' : '<div class="empty">No leads here. Enquiries from the website form (franchisee.html) arrive here too.</div>';
+        all('[data-l]').forEach(function (tr) { tr.onclick = function () { location.hash = 'lead=' + tr.getAttribute('data-l'); }; });
+      }).catch(function (e) { toast(e.message); });
+    };
+    $('#lStage').onchange = load; $('#lQ').oninput = function () { clearTimeout(load.h); load.h = setTimeout(load, 300); };
+    $('#lNew').onclick = function () { leadForm(null); };
+    $('#lCsv').onclick = function () { csv('franchise-leads', [['Received', 'Name', 'Company', 'Phone', 'Email', 'Area', 'Source', 'Cash', 'Score', 'Stage']].concat(rows.map(function (l) { return [l.created_day, l.name, l.company, l.phone, l.email, l.territory_name || l.area_wanted, l.source, l.capital, l.score, stageLabel(l.stage)]; }))); };
+    load();
+  }
+  function leadFields(l) {
+    l = l || {};
+    return '<div class="grid">' + field('Name', inp('fName', l.name)) + field('Company (if any)', inp('fCompany', l.company)) + field('Phone', inp('fPhone', l.phone)) + field('Email', inp('fEmail', l.email, 'email')) +
+      field('Address', inp('fAddress', l.address)) + field('Parish', inp('fParish', l.parish)) + field('Area wanted', inp('fArea', l.area_wanted)) + field('Territory', '<select id="fTerr">' + terrOpts(l.territory_id) + '</select>') +
+      field('Where they heard of us', inp('fSource', l.source, 'text', 'walk-in, referral, expo, website…')) + field('Cash to invest (J$)', inp('fCapital', l.capital)) + field('Net worth (J$)', inp('fNet', l.net_worth)) +
+      field('When they want to open', inp('fTimeline', l.timeline)) + field('Handled by', '<select id="fOwner">' + opts(META.staff, l.owner_id, '-') + '</select>') +
+      field('Experience', area('fExp', l.experience, 2), true) + field('Their message', area('fMsg', l.message, 2), true) + field('Notes', area('fNotes', l.notes, 2), true) + '</div>';
+  }
+  function leadBody(root) {
+    return { name: val('fName', root), company: val('fCompany', root), phone: val('fPhone', root), email: val('fEmail', root), address: val('fAddress', root), parish: val('fParish', root), area_wanted: val('fArea', root),
+      territory_id: val('fTerr', root), source: val('fSource', root), capital: val('fCapital', root), net_worth: val('fNet', root), timeline: val('fTimeline', root), owner_id: val('fOwner', root),
+      experience: val('fExp', root), message: val('fMsg', root), notes: val('fNotes', root) };
+  }
+  function leadForm() {
+    var m = modal('<h2>New franchise enquiry</h2>' + leadFields(null) + '<div class="controls"><button class="primary" id="fSave">Save</button><button id="fX">Cancel</button></div>');
+    $('#fX', m).onclick = function () { close(); };
+    $('#fSave', m).onclick = function () { guard(this, api('/api/franchise/leads', 'POST', leadBody(m))).then(function (r) { close(); location.hash = 'lead=' + r.id; }); };
+  }
+  function openLead(id) {
+    api('/api/franchise/leads/' + id).then(function (d) {
+      var l = d.lead, sub = openLead.sub || 'details';
+      var closed = l.stage === 'declined' || l.stage === 'withdrawn';
+      var steps = [['Qualified', l.score != null && STAGE_I(l.stage) >= 1], ['NDA signed', !!l.nda_signed_at], ['Disclosure received', !!l.fdd_received_at], ['Applied', !!l.applied_at], ['Approved', STAGE_I(l.stage) >= 5], ['Franchisee record', !!l.franchisee_id]];
+      var h = '<h2>' + esc(l.name) + (l.company ? ' · ' + esc(l.company) : '') + ' <span class="pill">' + esc(stageLabel(l.stage)) + '</span><button class="sm" style="margin-left:auto" id="lX">Close</button></h2>' +
+        '<p class="sub">' + steps.map(function (s) { return (s[1] ? '✅ ' : '⬜ ') + esc(s[0]); }).join(' &nbsp; ') + (d.agreement_from ? '<br>The agreement can be signed from ' + esc(day(d.agreement_from)) + '.' : '') + '</p>' +
+        '<div class="ftabs">' + [['details', 'Details'], ['qualify', 'Qualify'], ['docs', 'NDA, disclosure & documents'], ['application', 'Application'], ['decide', 'Decision'], ['log', 'Log']].map(function (t) { return '<button data-s="' + t[0] + '"' + (t[0] === sub ? ' class="on"' : '') + '>' + t[1] + '</button>'; }).join('') + '</div><div id="lBody"></div>';
+      var m = modal(h);
+      $('#lX', m).onclick = function () { close(); };
+      all('[data-s]', m).forEach(function (b) { b.onclick = function () { openLead.sub = b.getAttribute('data-s'); openLead(id); }; });
+      var body = $('#lBody', m);
+      if (sub === 'details') {
+        body.innerHTML = leadFields(l) + '<div class="controls"><button class="primary" id="fSave">Save</button></div>';
+        $('#fSave', body).onclick = function () { guard(this, api('/api/franchise/leads/' + id, 'PUT', leadBody(body))).then(function () { toast('Saved'); openLead(id); }); };
+      } else if (sub === 'qualify') {
+        var q = (l.qualification && l.qualification.checks) || [];
+        var had = function (k) { var c = q.find(function (x) { return x.key === k; }); return c && c.ok; };
+        body.innerHTML = '<p class="sub">Cash and net worth are scored from the details (minimums ' + jmd(META.settings.min_capital) + ' and ' + jmd(META.settings.min_net_worth) + '). A score of ' + META.settings.qualify_score + ' or more qualifies.</p>' +
+          [['experience', 'Business, retail or motor-trade experience (15)'], ['territory', 'The area wanted is available (15)'], ['timeline', 'Ready to open within 12 months (10)'], ['interview', 'First interview held and went well (10)']].map(function (c) {
+            return '<label style="display:block;margin:6px 0"><input type="checkbox" data-q="' + c[0] + '"' + (had(c[0]) ? ' checked' : '') + '> ' + esc(c[1]) + '</label>'; }).join('') +
+          field('Notes', area('qNotes', l.qualification && l.qualification.notes, 2)) + '<div class="controls" style="margin-top:8px"><button class="primary" id="qGo"' + (closed ? ' disabled' : '') + '>Score it</button></div><div id="qOut">' +
+          (l.score != null ? '<p>Last score: <b>' + l.score + '/100</b></p>' + q.map(function (c) { return '<div>' + (c.ok ? '✅' : '❌') + ' ' + esc(c.label) + ' (' + c.points + ')</div>'; }).join('') : '') + '</div>';
+        $('#qGo', body).onclick = function () {
+          var checks = {}; all('[data-q]', body).forEach(function (x) { checks[x.getAttribute('data-q')] = x.checked; });
+          guard(this, api('/api/franchise/leads/' + id + '/qualify', 'POST', { checks: checks, notes: val('qNotes', body) })).then(function (r) { toast('Score ' + r.score + '/100' + (r.passed ? ': qualified' : ': not yet')); openLead(id); });
+        };
+      } else if (sub === 'docs') {
+        body.innerHTML = docsPanel(d.documents, ['nda', 'fdd', 'application'], closed) ;
+        wireDocs(body, { lead_id: id }, function () { openLead(id); });
+      } else if (sub === 'application') {
+        var a = l.application || {};
+        var f = META.templates.find(function (t) { return t.key === 'application'; }).fields;
+        body.innerHTML = '<p class="sub">' + (l.applied_at ? 'Recorded ' + esc(when(l.applied_at)) + '. ' : '') + 'Type in their application here, or send them the application form to sign under "NDA, disclosure & documents".</p><div class="grid">' +
+          f.map(function (x) { return field(x.label, x.type === 'textarea' ? area('a_' + x.key, a[x.key], 2) : inp('a_' + x.key, a[x.key] != null ? a[x.key] : (x.key === 'capital' ? l.capital : x.key === 'net_worth' ? l.net_worth : x.key === 'area' ? l.area_wanted : x.key === 'experience' ? l.experience : '')), x.type === 'textarea'); }).join('') +
+          '</div><div class="controls"><button class="primary" id="aGo"' + (closed ? ' disabled' : '') + '>Save application</button></div>';
+        $('#aGo', body).onclick = function () { var ans = {}; f.forEach(function (x) { ans[x.key] = val('a_' + x.key, body); }); guard(this, api('/api/franchise/leads/' + id + '/application', 'POST', { answers: ans })).then(function () { toast('Application saved'); openLead(id); }); };
+      } else if (sub === 'decide') {
+        body.innerHTML = closed ? '<p>' + esc(stageLabel(l.stage)) + (l.decline_reason ? ': ' + esc(l.decline_reason) : '') + '</p><button id="dRe">Reopen</button>' :
+          (l.franchisee_id ? '<p>Franchisee record made. <button class="sm" id="dFr">Open it</button></p>' :
+          '<p class="sub">Approve once they have applied and signed for the disclosure document. Then make the franchisee record: it opens their account in Receivables and the opening checklist.</p>' +
+          '<div class="controls"><button class="primary" id="dOk"' + (l.stage === 'approved' ? ' disabled' : '') + '>Approve</button><button id="dConv"' + (l.stage !== 'approved' ? ' disabled' : '') + '>Make the franchisee record</button></div>' +
+          '<h4>Decline or withdrawn</h4>' + field('Reason (kept on file)', area('dWhy', '', 2)) + '<div class="controls" style="margin-top:6px"><button id="dNo">Decline</button><button id="dW">They withdrew</button></div>');
+        var go = function (dec) { return api('/api/franchise/leads/' + id + '/decide', 'POST', { decision: dec, reason: val('dWhy', body) }).then(function () { toast('Done'); openLead(id); }).catch(function (e) { toast(e.message); }); };
+        if ($('#dRe', body)) $('#dRe', body).onclick = function () { go('reopen'); };
+        if ($('#dFr', body)) $('#dFr', body).onclick = function () { location.hash = 'fr=' + l.franchisee_id; };
+        if ($('#dOk', body)) $('#dOk', body).onclick = function () { go('approve'); };
+        if ($('#dNo', body)) $('#dNo', body).onclick = function () { go('decline'); };
+        if ($('#dW', body)) $('#dW', body).onclick = function () { go('withdrawn'); };
+        if ($('#dConv', body)) $('#dConv', body).onclick = function () { convertForm(l); };
+      } else {
+        body.innerHTML = logTable(d.log);
+      }
+    }).catch(function (e) { toast(e.message); });
+  }
+  function STAGE_I(s) { return ['enquiry', 'qualified', 'nda', 'disclosed', 'application', 'approved', 'agreement', 'signed'].indexOf(s); }
+  function logTable(rows) { return '<table><tbody>' + (rows.map(function (x) { return '<tr><td>' + esc(when(x.at)) + '</td><td>' + esc(x.action) + (x.detail ? ' · ' + esc(x.detail) : '') + '</td><td>' + esc(x.by_name || '') + '</td></tr>'; }).join('') || '<tr><td class="empty">Nothing yet.</td></tr>') + '</tbody></table>'; }
+  function frFields(f, s) {
+    f = f || {};
+    var dv = function (k) { return f[k] != null ? f[k] : ''; };
+    return '<div class="grid">' + field('Legal name (company or person signing)', inp('gLegal', f.legal_name)) + field('Trading name', inp('gTrade', f.trading_name, 'text', 'Vision Auto Solutions Mandeville')) +
+      field('Principal (who runs it)', inp('gPrin', f.principal)) + field('TRN', inp('gTrn', f.trn)) + field('Phone', inp('gPhone', f.phone)) + field('Email', inp('gEmail', f.email, 'email')) +
+      field('Address', inp('gAddr', f.address)) + field('Territory', '<select id="gTerr">' + terrOpts(f.territory_id) + '</select>') + field('Term (years)', inp('gTerm', f.term_years, 'number', s.term_years)) +
+      field('Initial fee (J$)', inp('gInit', dv('initial_fee'), 'text', s.initial_fee)) + field('Royalty % of net sales', inp('gRoy', dv('royalty_pct'), 'text', s.royalty_pct)) + field('Brand fund %', inp('gMkt', dv('marketing_pct'), 'text', s.marketing_pct)) +
+      field('Technology fee a month (J$)', inp('gTech', dv('tech_fee'), 'text', s.tech_fee)) + field('Minimum royalty a month (J$)', inp('gMin', dv('min_royalty'), 'text', s.min_royalty)) +
+      field('Renewal fee (J$)', inp('gRen', dv('renewal_fee'), 'text', s.renewal_fee)) + field('Transfer fee (J$)', inp('gTr', dv('transfer_fee'), 'text', s.transfer_fee)) + field('Notes', area('gNotes', f.notes, 2), true) + '</div>' +
+      '<p class="sub">Blank fee boxes take the current defaults (Settings).</p>';
+  }
+  function frBody(root) {
+    return { legal_name: val('gLegal', root), trading_name: val('gTrade', root), principal: val('gPrin', root), trn: val('gTrn', root), phone: val('gPhone', root), email: val('gEmail', root), address: val('gAddr', root),
+      territory_id: val('gTerr', root), term_years: val('gTerm', root), initial_fee: val('gInit', root), royalty_pct: val('gRoy', root), marketing_pct: val('gMkt', root), tech_fee: val('gTech', root),
+      min_royalty: val('gMin', root), renewal_fee: val('gRen', root), transfer_fee: val('gTr', root), notes: val('gNotes', root) };
+  }
+  function convertForm(l) {
+    var m = modal('<h2>Make the franchisee record</h2>' + frFields({ legal_name: l.company || l.name, principal: l.name, phone: l.phone, email: l.email, address: l.address, territory_id: l.territory_id }, META.settings) +
+      '<div class="controls"><button class="primary" id="cGo">Make it</button><button id="cX">Cancel</button></div>', 2);
+    $('#cX', m).onclick = function () { close(2); };
+    $('#cGo', m).onclick = function () { guard(this, api('/api/franchise/leads/' + l.id + '/convert', 'POST', frBody(m))).then(function (r) { close(2); close(); reloadMeta().then(function () { location.hash = 'fr=' + r.franchisee_id; }); }); };
+  }
+
+  // ------------------------------------------------- documents and signing --
+  function docsPanel(list, kinds, closed) {
+    var tpls = META.templates.filter(function (t) { return kinds.indexOf(t.key) >= 0; });
+    return '<div class="controls">' + tpls.map(function (t) { return '<button class="sm" data-mk="' + t.key + '"' + (closed ? ' disabled' : '') + '>+ ' + esc(t.title) + '</button>'; }).join('') + '</div>' +
+      (list.length ? '<table><thead><tr><th>Number</th><th>Document</th><th>Status</th><th>Signed</th><th></th></tr></thead><tbody>' + list.map(function (x) {
+        var acts = '<button class="sm" data-view="' + x.id + '">View</button> ';
+        if (x.status === 'draft' || x.status === 'sent') {
+          if (x.needs_signature) acts += '<button class="sm" data-send="' + x.id + '">' + (x.status === 'sent' ? 'New link' : 'Send link') + '</button> <button class="sm" data-sign="' + x.id + '">Sign here</button> ';
+          else acts += '<button class="sm" data-file="' + x.id + '">File it</button> ';
+          acts += '<button class="sm" data-cancel="' + x.id + '">Cancel</button>';
+        }
+        if (x.status === 'signed' && x.countersign) acts += '<button class="sm primary" data-counter="' + x.id + '">Sign for us</button>';
+        if (x.signed_document_id) acts += ' <a href="/documents.html#doc=' + x.signed_document_id + '" target="_blank" rel="noopener">Filed copy ›</a>';
+        var chk = x.signed_at ? (x.sealed && x.unchanged ? ' <span class="pill ok">seal checks out</span>' : ' <span class="pill bad">seal broken</span>') : '';
+        return '<tr><td>' + esc(x.number) + '</td><td>' + esc(x.title) + (x.sent_to ? '<br><small>to ' + esc(x.sent_to) + (x.viewed_at ? ', opened ' + esc(when(x.viewed_at)) : '') + '</small>' : '') + '</td><td>' + docPill(x.status) + chk + (x.decline_reason ? '<br><small>' + esc(x.decline_reason) + '</small>' : '') + '</td><td>' +
+          (x.signed_at ? esc(x.signer_name) + '<br><small>' + esc(when(x.signed_at)) + (x.method === 'in_person' ? ' (in person)' : ' (link)') + '</small>' : '') + (x.counter_at ? '<br><small>Us: ' + esc(x.counter_name) + '</small>' : '') + '</td><td>' + acts + '</td></tr>';
+      }).join('') + '</tbody></table>' : '<div class="empty">No documents yet.</div>');
+  }
+  function wireDocs(root, owner, refresh) {
+    all('[data-mk]', root).forEach(function (b) { b.onclick = function () { makeDoc(b.getAttribute('data-mk'), owner, refresh); }; });
+    all('[data-view]', root).forEach(function (b) { b.onclick = function () { viewDoc(+b.getAttribute('data-view')); }; });
+    all('[data-send]', root).forEach(function (b) { b.onclick = function () { sendDoc(+b.getAttribute('data-send'), refresh); }; });
+    all('[data-sign]', root).forEach(function (b) { b.onclick = function () { signDoc(+b.getAttribute('data-sign'), false, refresh); }; });
+    all('[data-counter]', root).forEach(function (b) { b.onclick = function () { signDoc(+b.getAttribute('data-counter'), true, refresh); }; });
+    all('[data-file]', root).forEach(function (b) { b.onclick = function () { guard(b, api('/api/franchise/documents/' + b.getAttribute('data-file') + '/file', 'POST', {})).then(function (r) { toast('Filed' + (r.document ? ' as ' + r.document.number : '')); refresh(); }); }; });
+    all('[data-cancel]', root).forEach(function (b) { b.onclick = function () { if (!confirm('Cancel this document? Any link sent stops working.')) return; guard(b, api('/api/franchise/documents/' + b.getAttribute('data-cancel') + '/cancel', 'POST', {})).then(refresh); }; });
+  }
+  function makeDoc(key, owner, refresh) {
+    var t = META.templates.find(function (x) { return x.key === key; });
+    var m = modal('<h2>' + esc(t.title) + '</h2>' + (t.reviewed_at ? '<p class="sub">Template reviewed by ' + esc(t.reviewer) + ' on ' + esc(day(t.reviewed_at)) + '.</p>' :
+      '<div class="warn">This template has not been reviewed by a Jamaican attorney yet, so the copy carries a "starting point only" notice. Record the review under Templates & manual once it is done.</div>') +
+      '<p class="sub">Names, addresses, territory, fees and dates are filled in from the records. Fill in the rest:</p><div class="grid">' +
+      (t.fields || []).map(function (f) { return field(f.label + (f.required ? ' *' : ''), f.type === 'textarea' ? area('v_' + f.key, f.default, 3) : inp('v_' + f.key, f.default, f.type === 'date' ? 'date' : f.type === 'number' ? 'number' : 'text'), f.type === 'textarea'); }).join('') +
+      '</div><div class="controls"><button class="primary" id="mGo">Make it</button><button id="mX">Cancel</button></div>', 2);
+    $('#mX', m).onclick = function () { close(2); };
+    $('#mGo', m).onclick = function () {
+      var values = {}; (t.fields || []).forEach(function (f) { values[f.key] = val('v_' + f.key, m); });
+      guard(this, api('/api/franchise/documents', 'POST', Object.assign({ kind: key, values: values }, owner))).then(function (r) { close(2); toast(r.number + ' made'); refresh(); viewDoc(r.id); });
+    };
+  }
+  function viewDoc(id) {
+    var m = modal('<h2>Document <button class="sm" style="margin-left:auto" id="vP">Print</button><button class="sm" id="vX">Close</button></h2><iframe class="doc" sandbox="allow-modals allow-same-origin" src="/api/franchise/documents/' + id + '/view"></iframe>', 2);
+    $('#vX', m).onclick = function () { close(2); };
+    $('#vP', m).onclick = function () { var f = $('iframe', m); try { f.contentWindow.print(); } catch (_) { window.open(f.src); } };
+  }
+  function sendDoc(id, refresh) {
+    var m = modal('<h2>Send for signing</h2><p class="sub">A one-time link. Only its fingerprint is kept, so copy it now if you will send it by WhatsApp.</p><div class="grid">' + field('Email it to (optional)', inp('sEmail', '', 'email')) + field('Link lasts (days)', inp('sDays', META.settings.link_days, 'number')) +
+      '</div><div class="controls"><button class="primary" id="sGo">Make the link</button><button id="sX">Close</button></div><div id="sOut"></div>', 2);
+    $('#sX', m).onclick = function () { close(2); };
+    $('#sGo', m).onclick = function () {
+      guard(this, api('/api/franchise/documents/' + id + '/send', 'POST', { email: val('sEmail', m), days: val('sDays', m) })).then(function (r) {
+        $('#sOut', m).innerHTML = '<div class="item"><input style="width:100%" readonly value="' + esc(r.link) + '"><small>' + (r.emailed ? 'Emailed. ' : 'Not emailed: copy the link. ') + 'Expires in ' + r.expires_in_days + ' days.</small></div>';
+        $('#sOut input', m).select(); refresh();
+      });
+    };
+  }
+  function signDoc(id, counter, refresh) {
+    var m = modal('<h2>' + (counter ? 'Sign for the franchisor' : 'Sign in person') + '</h2><p class="sub">' + (counter ? 'You sign for ' + esc('Vision Auto Solutions') + '. Read the document first.' : 'Hand the screen to the person signing. You are recorded as the witness.') +
+      ' <button class="link sm" id="pV">Read the document</button></p>' + field('Name of the person signing', inp('pName')) + '<div class="padbox" id="pPad" style="margin-top:8px"></div>' +
+      '<div class="controls" style="margin-top:8px"><button id="pClr">Clear</button><button class="primary" id="pGo">Sign</button><button id="pX">Cancel</button></div>', 2);
+    var pad = window.VAScan.pad($('#pPad', m));
+    $('#pV', m).onclick = function () { window.open('/api/franchise/documents/' + id + '/view', '_blank'); };
+    $('#pClr', m).onclick = pad.clear; $('#pX', m).onclick = function () { close(2); };
+    $('#pGo', m).onclick = function () {
+      if (pad.empty()) return toast('Sign in the box first');
+      guard(this, api('/api/franchise/documents/' + id + (counter ? '/countersign' : '/sign'), 'POST', { name: val('pName', m), image: pad.png() })).then(function (r) { close(2); toast('Signed' + (r.document ? ', filed as ' + r.document.number : '')); refresh(); });
+    };
+  }
+
+  // --------------------------------------------------------- franchisees --
+  function franchisees() {
+    $('#view').innerHTML = '<div class="card"><div class="controls"><button class="primary" id="nFr">+ Add an existing franchisee</button><span class="sub" style="margin:0">New franchisees normally come from an approved lead.</span></div><div class="scroll" id="fList"><div class="empty">Loading…</div></div></div>';
+    $('#nFr').onclick = function () {
+      var m = modal('<h2>Add a franchisee</h2>' + frFields(null, META.settings) + '<div class="controls"><button class="primary" id="nGo">Save</button><button id="nX">Cancel</button></div>');
+      $('#nX', m).onclick = function () { close(); };
+      $('#nGo', m).onclick = function () { guard(this, api('/api/franchise/franchisees', 'POST', frBody(m))).then(function (r) { close(); reloadMeta().then(function () { location.hash = 'fr=' + r.id; }); }); };
+    };
+    api('/api/franchise/franchisees').then(function (d) {
+      $('#fList').innerHTML = d.franchisees.length ? '<table><thead><tr><th>No.</th><th>Franchisee</th><th>Territory</th><th>Status</th><th>Opened</th><th>Term ends</th><th>Checklist</th><th>Last audit</th></tr></thead><tbody>' + d.franchisees.map(function (f) {
+        var pct = f.tasks_all ? Math.round((f.tasks_all - f.tasks_open) / f.tasks_all * 100) : 0;
+        return '<tr class="row" data-f="' + f.id + '"><td>' + esc(f.number) + '</td><td><b>' + esc(f.trading_name || f.legal_name) + '</b><br><small>' + esc(f.legal_name) + (f.principal ? ' · ' + esc(f.principal) : '') + '</small></td><td>' + esc(f.territory_name || '') + '</td><td>' + frPill(f.status) + '</td><td>' + esc(day(f.opened_on)) + '</td><td>' + esc(day(f.term_end)) + '</td>' +
+          '<td><div class="bar"><i style="width:' + pct + '%"></i></div><small>' + pct + '%</small></td><td>' + (f.last_audit != null ? f.last_audit + '%' : '') + '</td></tr>';
+      }).join('') + '</tbody></table>' : '<div class="empty">No franchisees yet.</div>';
+      all('[data-f]').forEach(function (tr) { tr.onclick = function () { location.hash = 'fr=' + tr.getAttribute('data-f'); }; });
+    }).catch(function (e) { toast(e.message); });
+  }
+  function openFr(id) {
+    api('/api/franchise/franchisees/' + id).then(function (d) {
+      var f = d.franchisee, sub = openFr.sub || 'overview', tr = d.terms;
+      var h = '<h2>' + esc(f.number) + ' · ' + esc(f.trading_name || f.legal_name) + ' ' + frPill(f.status) + '<button class="sm" style="margin-left:auto" id="fX">Close</button></h2>' +
+        '<p class="sub">' + esc(f.legal_name) + (f.territory_name ? ' · ' + esc(f.territory_name) : '') + (f.term_end ? ' · term ' + esc(day(f.term_start)) + ' to ' + esc(day(f.term_end)) : ' · agreement not yet signed') +
+        ' · balance owed ' + jmd(d.statement.balance) + (d.statement.overdue ? ' (<b>' + jmd(d.statement.overdue) + ' overdue</b>)' : '') + '</p>' +
+        '<div class="ftabs">' + [['overview', 'Overview'], ['checklist', 'Opening checklist'], ['docs', 'Agreement & documents'], ['sales', 'Sales & fees'], ['audits', 'Audits'], ['actions', 'Renewal, transfer & exit'], ['edit', 'Details & terms'], ['log', 'Log']].map(function (t) { return '<button data-s="' + t[0] + '"' + (t[0] === sub ? ' class="on"' : '') + '>' + t[1] + '</button>'; }).join('') + '</div><div id="fBody"></div>';
+      var m = modal(h);
+      $('#fX', m).onclick = function () { close(); };
+      all('[data-s]', m).forEach(function (b) { b.onclick = function () { openFr.sub = b.getAttribute('data-s'); openFr(id); }; });
+      var body = $('#fBody', m), again = function () { openFr(id); };
+      if (sub === 'overview') {
+        var open = d.tasks.filter(function (k) { return !k.done_at; }).length;
+        body.innerHTML = '<div class="kpis">' + kpi(tr.royalty_pct + '%', 'Royalty') + kpi(tr.marketing_pct + '%', 'Brand fund') + kpi(jmd(tr.tech_fee), 'Technology fee a month') + kpi(jmd(tr.min_royalty), 'Minimum royalty') +
+          kpi(open + ' of ' + d.tasks.length, 'Checklist items open') + kpi(d.audits[0] ? d.audits[0].score_pct + '%' : '-', 'Last audit') + '</div>' +
+          '<div class="item">Principal: <b>' + esc(f.principal || '') + '</b> · ' + esc([f.phone, f.email].filter(Boolean).join(' · ')) + '<br>Address: ' + esc(f.address || '') + ' · TRN ' + esc(f.trn || '-') +
+          '<br>Account in Receivables: ' + (f.customer_id ? '<a href="/receivables.html#customer=' + f.customer_id + '" target="_blank" rel="noopener">' + esc(f.account_number || f.customer_name) + ' ›</a>' : 'none yet') + '</div>' +
+          '<div class="controls">' + (f.status === 'onboarding' ? '<button class="primary" id="oOpen"' + (f.signed_on ? '' : ' disabled title="Sign the agreement first"') + '>Mark the shop open</button>' : '') +
+          (f.status === 'open' || f.status === 'expired' && f.term_end && f.term_end <= today() ? '' : '') + (f.term_end && f.term_end < today() && f.status === 'open' ? '<button id="oExp">Mark expired</button>' : '') +
+          '<button id="oLink">Franchisee link (reports, statement, manual)</button></div><div id="oOut"></div>' + (d.lead ? '<p class="sub">From lead <a href="#lead=' + d.lead.id + '">#' + d.lead.id + '</a>.</p>' : '');
+        if ($('#oOpen', body)) $('#oOpen', body).onclick = function () { var dt = prompt('Opening date (YYYY-MM-DD)', today()); if (!dt) return; guard(this, api('/api/franchise/franchisees/' + id + '/status', 'POST', { status: 'open', opened_on: dt })).then(again); };
+        if ($('#oExp', body)) $('#oExp', body).onclick = function () { if (!confirm('Mark this franchise expired? The territory opens again.')) return; guard(this, api('/api/franchise/franchisees/' + id + '/status', 'POST', { status: 'expired' })).then(again); };
+        $('#oLink', body).onclick = function () {
+          if (!confirm('Make a new link for the franchisee? Any earlier link stops working.')) return;
+          guard(this, api('/api/franchise/franchisees/' + id + '/portal-link', 'POST', {})).then(function (r) { $('#oOut', body).innerHTML = '<div class="item"><input style="width:100%" readonly value="' + esc(r.link) + '"><small>Shown once. Send it to the franchisee; it lets them send sales reports and see their statement.</small></div>'; $('#oOut input', body).select(); });
+        };
+      } else if (sub === 'checklist') {
+        var phases = Object.assign({}, META.phases, { exit: 'After the franchise ends' }), by = {};
+        d.tasks.forEach(function (k) { (by[k.phase] = by[k.phase] || []).push(k); });
+        body.innerHTML = Object.keys(phases).filter(function (p) { return by[p]; }).map(function (p) {
+          return '<h4>' + esc(phases[p]) + '</h4>' + by[p].map(function (k) { return '<div class="task' + (k.done_at ? ' done' : '') + '"><input type="checkbox" data-k="' + k.id + '"' + (k.done_at ? ' checked' : '') + '><span>' + esc(k.title) +
+            (k.note ? '<br><small>' + esc(k.note) + '</small>' : '') + '</span><small>' + (k.done_at ? 'done ' + esc(day(k.done_at)) + (k.done_by_name ? ' by ' + esc(k.done_by_name) : '') : (k.due_on ? (k.due_on < today() ? '<b style="color:var(--red)">due ' + esc(day(k.due_on)) + '</b>' : 'due ' + esc(day(k.due_on))) : '')) + '</small></div>'; }).join('');
+        }).join('') + '<h4>Add an item</h4><div class="controls"><select id="kPh">' + opts(Object.keys(phases).map(function (p) { return [p, phases[p]]; })) + '</select><input id="kT" placeholder="What needs doing" style="flex:1"><input id="kD" type="date"><button id="kAdd">Add</button></div>';
+        all('[data-k]', body).forEach(function (x) { x.onchange = function () { api('/api/franchise/tasks/' + x.getAttribute('data-k'), 'PUT', { done: x.checked }).then(again).catch(function (e) { toast(e.message); }); }; });
+        $('#kAdd', body).onclick = function () { guard(this, api('/api/franchise/franchisees/' + id + '/tasks', 'POST', { phase: val('kPh', body), title: val('kT', body), due_on: val('kD', body) })).then(again); };
+      } else if (sub === 'docs') {
+        body.innerHTML = '<p class="sub">The agreement can only be signed ' + META.settings.wait_days + ' days after the disclosure document was received. The NDA, agreement, renewal and transfer are signed by both sides.</p>' +
+          docsPanel(d.documents, ['agreement', 'manual', 'training', 'opening', 'nda', 'fdd', 'default_notice', 'termination', 'renewal', 'transfer'], ['terminated', 'transferred'].indexOf(f.status) >= 0);
+        wireDocs(body, { franchisee_id: id }, again);
+      } else if (sub === 'sales') {
+        var st = d.statement;
+        body.innerHTML = '<h4>Monthly sales report</h4><div class="grid">' + field('Month', inp('rP', lastMonth(), 'month')) + field('Gross sales incl. GCT (J$)', inp('rG')) + field('Refunds (J$)', inp('rR')) + field('GCT collected (J$)', inp('rT')) +
+          field('Number of sales', inp('rN', '', 'number')) + field('Local marketing spent (J$)', inp('rL')) + '</div><div class="controls"><button class="primary" id="rGo">Save report</button><span class="sub" style="margin:0">Net sales = gross − refunds − GCT.</span></div>' +
+          '<table><thead><tr><th>Month</th><th class="n">Gross</th><th class="n">Refunds</th><th class="n">GCT</th><th class="n">Net sales</th><th>From</th><th></th></tr></thead><tbody>' + (d.reports.map(function (r) {
+            return '<tr><td>' + esc(monthName(r.period)) + '</td><td class="n">' + jmd(r.gross_sales) + '</td><td class="n">' + jmd(r.refunds) + '</td><td class="n">' + jmd(r.gct_collected) + '</td><td class="n"><b>' + jmd(r.net_sales) + '</b></td><td>' + esc(r.source === 'portal' ? 'their link' : 'staff') + '</td><td>' +
+              (r.billed ? '<span class="pill ok">invoiced</span>' : '<button class="sm primary" data-bp="' + esc(r.period.slice(0, 7)) + '"' + (['open', 'suspended'].indexOf(f.status) < 0 ? ' disabled' : '') + '>Invoice fees</button>') + '</td></tr>'; }).join('') || '<tr><td colspan="7" class="empty">No reports yet.</td></tr>') + '</tbody></table>' +
+          '<h4>One-off charge</h4><div class="controls"><select id="cK">' + opts(META.charge_kinds.map(function (k) { return [k.key, k.label]; })) + '</select><input id="cA" placeholder="Amount before GCT (blank = their fee)"><input id="cD" placeholder="Description (optional)" style="flex:1"><label style="display:flex;gap:4px;align-items:center"><input type="checkbox" id="cG" checked> add GCT</label><button id="cGo">Invoice</button></div>' +
+          '<h4>Statement</h4><p>Billed ' + jmd(st.billed) + ' · paid ' + jmd(st.paid) + ' · <b>owed ' + jmd(st.balance) + '</b>' + (st.overdue ? ' · <b style="color:var(--red)">overdue ' + jmd(st.overdue) + '</b>' : '') + (f.customer_id ? ' · <a href="/receivables.html#customer=' + f.customer_id + '" target="_blank" rel="noopener">Take a payment in Receivables ›</a>' : '') + '</p>' +
+          '<table><thead><tr><th>Invoice</th><th>Date</th><th>Due</th><th>For</th><th class="n">Total</th><th class="n">Paid</th><th class="n">Owed</th></tr></thead><tbody>' + (st.invoices.map(function (i) {
+            return '<tr' + (i.voided_at ? ' style="opacity:.5"' : '') + '><td>' + esc(i.number) + (i.voided_at ? ' (void)' : '') + '</td><td>' + esc(day(i.invoice_date)) + '</td><td>' + esc(day(i.due_date)) + '</td><td>' + esc(i.memo || '') + '</td><td class="n">' + jmd(i.total) + '</td><td class="n">' + jmd(i.paid) + '</td><td class="n">' + jmd(i.balance) + '</td></tr>'; }).join('') || '<tr><td colspan="7" class="empty">No invoices yet.</td></tr>') + '</tbody></table>';
+        $('#rGo', body).onclick = function () { guard(this, api('/api/franchise/franchisees/' + id + '/reports', 'POST', { period: val('rP', body), gross_sales: val('rG', body), refunds: val('rR', body), gct_collected: val('rT', body), transactions: val('rN', body), local_marketing: val('rL', body) })).then(function (r) { toast('Saved: net ' + jmd(r.net_sales)); again(); }); };
+        all('[data-bp]', body).forEach(function (b) { b.onclick = function () { guard(b, api('/api/franchise/franchisees/' + id + '/bill', 'POST', { period: b.getAttribute('data-bp') })).then(function (r) { toast('Invoice ' + r.invoice.number + ' for ' + jmd(r.invoice.total) + ', due ' + day(r.invoice.due)); again(); }); }; });
+        $('#cGo', body).onclick = function () { guard(this, api('/api/franchise/franchisees/' + id + '/charge', 'POST', { kind: val('cK', body), amount: val('cA', body), description: val('cD', body), gct: $('#cG', body).checked })).then(function (r) { toast('Invoice ' + r.invoice.number + ' for ' + jmd(r.invoice.total)); again(); }); };
+      } else if (sub === 'audits') {
+        body.innerHTML = '<div class="controls"><button class="primary" id="aNew">+ New audit</button></div>' + auditTable(d.audits, false);
+        $('#aNew', body).onclick = function () { auditForm(id, again); };
+        wireAudits(body, again);
+      } else if (sub === 'actions') {
+        body.innerHTML = '<div class="controls">' + ['renewal', 'transfer', 'default', 'suspension', 'termination'].map(function (k) { return '<button class="sm" data-act="' + k + '">+ ' + esc(ACTK[k]) + '</button>'; }).join('') + '</div>' +
+          (d.actions.length ? d.actions.map(function (a) {
+            var x = a.details || {};
+            return '<div class="item"><b>' + esc(ACTK[a.kind]) + '</b> <span class="pill' + (a.status === 'open' ? ' warn' : ' ok') + '">' + esc(a.status) + '</span> <small>' + esc(when(a.created_at)) + ' by ' + esc(a.created_by_name || '') + '</small><br>' +
+              esc([x.reason, x.breach && ('Breach: ' + x.breach), x.remedy && ('To do: ' + x.remedy), x.buyer_name && ('Buyer: ' + x.buyer_name + (x.price ? ' for ' + jmd(x.price) : '')), x.new_term_years && (x.new_term_years + ' more years'), x.conditions].filter(Boolean).join(' · ')) +
+              (a.cure_by ? '<br>Put right by ' + esc(day(a.cure_by)) : '') + (a.effective_date ? '<br>Effective ' + esc(day(a.effective_date)) : '') + (a.close_note ? '<br><small>' + esc(a.close_note) + '</small>' : '') +
+              (a.status === 'open' ? '<div class="controls" style="margin:6px 0 0">' + (a.kind === 'default' ? '<button class="sm" data-close="' + a.id + '" data-st="cured">Put right</button>' : '<button class="sm primary" data-close="' + a.id + '" data-st="done">' + esc(a.kind === 'suspension' ? 'Lift the suspension' : a.kind === 'termination' ? 'Carry out the termination' : 'Complete') + '</button>') +
+                '<button class="sm" data-close="' + a.id + '" data-st="cancelled">Cancel</button></div>' : '') + '</div>';
+          }).join('') : '<div class="empty">No renewals, transfers or notices.</div>') +
+          '<p class="sub">Make the matching letter under "Agreement & documents" (notice of default, notice of termination, renewal letter, transfer consent). Invoice renewal and transfer fees under "Sales & fees".</p>';
+        all('[data-act]', body).forEach(function (b) { b.onclick = function () { actionForm(f, b.getAttribute('data-act'), again); }; });
+        all('[data-close]', body).forEach(function (b) { b.onclick = function () {
+          var st = b.getAttribute('data-st');
+          var note = prompt(st === 'done' ? 'Note (optional). This changes the franchise record.' : 'Note (optional)', ''); if (note === null) return;
+          guard(b, api('/api/franchise/actions/' + b.getAttribute('data-close') + '/close', 'POST', { status: st, note: note })).then(function (r) { toast('Done'); if (r.new_franchisee_id) { reloadMeta(); location.hash = 'fr=' + r.new_franchisee_id; } else again(); });
+        }; });
+      } else if (sub === 'edit') {
+        body.innerHTML = frFields(f, META.settings) + '<div class="controls"><button class="primary" id="eGo">Save</button></div>';
+        $('#eGo', body).onclick = function () { guard(this, api('/api/franchise/franchisees/' + id, 'PUT', frBody(body))).then(function () { toast('Saved'); reloadMeta().then(again); }); };
+      } else body.innerHTML = logTable(d.log);
+    }).catch(function (e) { toast(e.message); });
+  }
+  function actionForm(f, kind, done) {
+    var fl = {
+      renewal: field('Renewal term (years)', inp('xY', META.settings.term_years, 'number')) + field('Conditions (refit, training…)', area('xC', '', 2), true),
+      transfer: field('Buyer (legal name)', inp('xB')) + field('Buyer principal', inp('xBP')) + field('Buyer email', inp('xBE')) + field('Buyer phone', inp('xBPh')) + field('Buyer TRN', inp('xBT')) + field('Price (J$)', inp('xPr')) + field('Transfer date', inp('xE', '', 'date')) + field('Conditions', area('xC', '', 2), true),
+      'default': field('What is wrong (the breach)', area('xBr', '', 2), true) + field('Agreement section', inp('xCl')) + field('Put right by', inp('xCu', addDaysJs(30), 'date')) + field('What must be done', area('xRe', '', 2), true),
+      suspension: field('Reason', area('xR', '', 2), true),
+      termination: field('Reason', area('xR', '', 2), true) + field('Takes effect', inp('xE', today(), 'date')),
+    };
+    var m = modal('<h2>' + esc(ACTK[kind]) + ' · ' + esc(f.trading_name || f.legal_name) + '</h2>' + (kind === 'termination' ? '<div class="warn">Take legal advice before ending a franchise. Carrying it out closes the franchise, opens the territory and adds the after-termination checklist.</div>' : '') +
+      '<div class="grid">' + fl[kind] + '</div><div class="controls"><button class="primary" id="xGo">Save</button><button id="xX">Cancel</button></div>', 2);
+    $('#xX', m).onclick = function () { close(2); };
+    $('#xGo', m).onclick = function () {
+      var b = { kind: kind, effective_date: val('xE', m), cure_by: val('xCu', m), details: { new_term_years: val('xY', m), conditions: val('xC', m), buyer_name: val('xB', m), buyer_principal: val('xBP', m), buyer_email: val('xBE', m), buyer_phone: val('xBPh', m), buyer_trn: val('xBT', m),
+        price: val('xPr', m), breach: val('xBr', m), clause: val('xCl', m), remedy: val('xRe', m), reason: val('xR', m) } };
+      guard(this, api('/api/franchise/franchisees/' + f.id + '/actions', 'POST', b)).then(function () { close(2); done(); });
+    };
+  }
+  function addDaysJs(k) { var d = new Date(Date.now() + k * 86400000); return d.toISOString().slice(0, 10); }
+
+  // ---------------------------------------------------------- territories --
+  function territories() {
+    var t = META.territories;
+    $('#view').innerHTML = '<div class="card"><h2>Territories</h2><p class="sub">Exclusive areas: while a franchisee is not in default, no other Vision shop opens inside theirs.</p><div class="controls"><button class="primary" id="tNew">+ New territory</button></div>' +
+      (t.length ? '<table><thead><tr><th>Code</th><th>Name</th><th>Area</th><th class="n">Population</th><th>Status</th><th>Franchisee</th><th></th></tr></thead><tbody>' + t.map(function (x) {
+        return '<tr><td>' + esc(x.code) + '</td><td><b>' + esc(x.name) + '</b></td><td>' + esc(x.description || '') + '</td><td class="n">' + (x.population ? Number(x.population).toLocaleString() : '') + '</td><td><span class="pill' + (x.status === 'open' ? ' ok' : ' warn') + '">' + esc(x.status) + '</span>' + (x.exclusive ? '' : ' <small>not exclusive</small>') + '</td><td>' +
+          (x.franchisee_id ? '<a href="#fr=' + x.franchisee_id + '">' + esc(x.trading_name || x.legal_name) + '</a>' : '') + '</td><td><button class="sm" data-te="' + x.id + '">Edit</button></td></tr>'; }).join('') + '</tbody></table>' : '<div class="empty">No territories yet.</div>') + '</div>';
+    $('#tNew').onclick = function () { terrForm(null); };
+    all('[data-te]').forEach(function (b) { b.onclick = function () { terrForm(t.find(function (x) { return String(x.id) === b.getAttribute('data-te'); })); }; });
+  }
+  function terrForm(x) {
+    x = x || { exclusive: true, status: 'open' };
+    var m = modal('<h2>' + (x.id ? 'Territory ' + esc(x.code) : 'New territory') + '</h2><div class="grid">' + field('Code', inp('tC', x.code, 'text', 'MAN-01')) + field('Name', inp('tN', x.name, 'text', 'Mandeville')) + field('Population (about)', inp('tP', x.population, 'number')) +
+      field('Status', '<select id="tS">' + opts([['open', 'Open (for sale)'], ['reserved', 'Reserved'], ['sold', 'Sold'], ['company', 'Company-run']], x.status) + '</select>') + field('Area (parishes, towns, boundaries)', area('tD', x.description, 2), true) + field('Notes', area('tNo', x.notes, 2), true) +
+      '</div><label><input type="checkbox" id="tE"' + (x.exclusive ? ' checked' : '') + '> Exclusive</label><div class="controls" style="margin-top:8px"><button class="primary" id="tGo">Save</button><button id="tX">Cancel</button></div>');
+    $('#tX', m).onclick = function () { close(); };
+    $('#tGo', m).onclick = function () {
+      var b = { code: val('tC', m), name: val('tN', m), population: val('tP', m), status: val('tS', m), description: val('tD', m), notes: val('tNo', m), exclusive: $('#tE', m).checked };
+      guard(this, api('/api/franchise/territories' + (x.id ? '/' + x.id : ''), x.id ? 'PUT' : 'POST', b)).then(function () { close(); reloadMeta().then(territories); });
+    };
+  }
+
+  // ------------------------------------------------------ royalties & fees --
+  function billing() {
+    $('#view').innerHTML = '<div class="card"><h2>Monthly royalty run</h2><p class="sub">For each open franchise: the month\'s sales report, then one invoice for the royalty (' + META.settings.royalty_pct + '% by default), the brand fund (' + META.settings.marketing_pct + '%) and the technology fee, plus GCT at ' + META.settings.gct_rate +
+      '%. Invoices go on the franchisee\'s account in Receivables (royalties and fees to 4600, the brand fund to 2170) and post to the ledger like any invoice. Payment is due by day ' + META.settings.royalty_due_day + ' of the next month.</p>' +
+      '<div class="controls"><div><label>Month</label><input type="month" id="bP" value="' + lastMonth() + '"></div><button id="bLoad">Show</button></div><div id="bOut"></div></div>';
+    var load = function () {
+      var p = val('bP') + '-01';
+      Promise.all([api('/api/franchise/franchisees'), api('/api/franchise/dashboard')]).then(function (r) {
+        var list = r[0].franchisees.filter(function (f) { return f.status === 'open' || f.status === 'suspended'; });
+        return Promise.all(list.map(function (f) { return api('/api/franchise/franchisees/' + f.id).then(function (d) { return d; }); }));
+      }).then(function (ds) {
+        $('#bOut').innerHTML = ds.length ? '<table><thead><tr><th>Franchisee</th><th class="n">Net sales</th><th>Report</th><th>Invoice</th><th></th></tr></thead><tbody>' + ds.map(function (d) {
+          var f = d.franchisee, rep = d.reports.find(function (x) { return x.period === p; }), ch = d.charges.find(function (c) { return c.kind === 'royalty' && c.period === p; });
+          return '<tr><td><a href="#fr=' + f.id + '">' + esc(f.trading_name || f.legal_name) + '</a></td><td class="n">' + (rep ? jmd(rep.net_sales) : '') + '</td><td>' + (rep ? '<span class="pill ok">in</span> ' + esc(when(rep.submitted_at)) : '<span class="pill bad">missing</span>') + '</td><td>' + (ch ? esc(ch.invoice_number || '') : '') + '</td><td>' +
+            (rep && !ch ? '<button class="sm primary" data-b="' + f.id + '">Invoice</button>' : '') + '</td></tr>'; }).join('') + '</tbody></table><div class="controls" style="margin-top:8px"><button id="bAll">Invoice every report not yet invoiced</button></div>' : '<div class="empty">No open franchises.</div>';
+        var one = function (id) { return api('/api/franchise/franchisees/' + id + '/bill', 'POST', { period: val('bP') }); };
+        all('[data-b]').forEach(function (b) { b.onclick = function () { guard(b, one(b.getAttribute('data-b'))).then(function (r) { toast(r.invoice.number + ' ' + jmd(r.invoice.total)); load(); }); }; });
+        if ($('#bAll')) $('#bAll').onclick = function () {
+          var ids = all('[data-b]').map(function (b) { return b.getAttribute('data-b'); }); var n = 0;
+          ids.reduce(function (pr, id) { return pr.then(function () { return one(id).then(function () { n++; }).catch(function (e) { toast(e.message); }); }); }, Promise.resolve()).then(function () { toast(n + ' invoice(s) made'); load(); });
+        };
+      }).catch(function (e) { toast(e.message); });
+    };
+    $('#bLoad').onclick = load; load();
+  }
+
+  // --------------------------------------------------------- performance --
+  function performance() {
+    $('#view').innerHTML = '<div class="card"><h2>Performance by franchisee</h2><div class="controls"><div><label>Period</label><select id="pM">' + opts([[3, 'Last 3 months'], [6, 'Last 6 months'], [12, 'Last 12 months'], [24, 'Last 24 months']], 12) + '</select></div><button id="pCsv">Export</button></div><div id="pOut"><div class="empty">Loading…</div></div></div>';
+    var data = null;
+    var load = function () {
+      api('/api/franchise/performance?months=' + val('pM')).then(function (d) {
+        data = d;
+        var max = Math.max.apply(null, d.series.map(function (s) { return s.net_sales; }).concat([1]));
+        $('#pOut').innerHTML = '<div class="kpis">' + kpi(jmd(d.totals.net_sales), 'Network net sales') + kpi(jmd(d.totals.royalty), 'Royalty billed') + kpi(jmd(d.totals.fund), 'Brand fund billed') + kpi(jmd(d.totals.balance), 'Owed now') + '</div>' +
+          (d.series.length ? '<h4>Network net sales by month</h4><table><tbody>' + d.series.map(function (s) { return '<tr><td style="width:140px">' + esc(monthName(s.period)) + '</td><td><div class="bar"><i style="width:' + Math.round(s.net_sales / max * 100) + '%"></i></div></td><td class="n">' + jmd(s.net_sales) + '</td><td class="n">' + s.reports + ' shop(s)</td></tr>'; }).join('') + '</tbody></table>' : '') +
+          '<h4>Franchisees</h4><div class="scroll"><table><thead><tr><th>Franchisee</th><th class="n">Net sales</th><th class="n">vs before</th><th class="n">Share</th><th class="n">Avg / month</th><th class="n">Reports (late)</th><th class="n">Royalty</th><th class="n">Owed</th><th class="n">Overdue</th><th class="n">Last audit</th><th>Defaults</th></tr></thead><tbody>' +
+          (d.franchisees.map(function (r) {
+            return '<tr class="row" data-pf="' + r.id + '"><td><b>' + esc(r.name) + '</b><br><small>' + esc(r.territory_name || '') + '</small></td><td class="n">' + jmd(r.net_sales) + '</td><td class="n">' + (r.growth_pct == null ? '' : (r.growth_pct > 0 ? '+' : '') + r.growth_pct + '%') + '</td><td class="n">' + r.share_pct + '%</td><td class="n">' + jmd(r.avg_month) + '</td>' +
+              '<td class="n">' + r.reports + (r.late_reports ? ' (' + r.late_reports + ')' : '') + '</td><td class="n">' + jmd(r.royalty) + '</td><td class="n">' + jmd(r.balance) + '</td><td class="n">' + (r.overdue ? '<b style="color:var(--red)">' + jmd(r.overdue) + '</b>' : '') + '</td>' +
+              '<td class="n">' + (r.last_audit != null ? r.last_audit + '% <span class="pill' + (r.last_result === 'pass' ? ' ok' : r.last_result === 'fail' ? ' bad' : ' warn') + '">' + esc(r.last_result) + '</span>' : '') + '</td><td>' + (r.open_defaults ? '<span class="pill bad">' + r.open_defaults + ' open</span>' : '') + '</td></tr>'; }).join('') || '<tr><td colspan="11" class="empty">No trading franchises yet.</td></tr>') + '</tbody></table></div>';
+        all('[data-pf]').forEach(function (tr) { tr.onclick = function () { openFr.sub = 'sales'; location.hash = 'fr=' + tr.getAttribute('data-pf'); }; });
+      }).catch(function (e) { toast(e.message); });
+    };
+    $('#pM').onchange = load;
+    $('#pCsv').onclick = function () { if (data) csv('franchise-performance', [['Franchisee', 'Territory', 'Net sales', 'Growth %', 'Share %', 'Reports', 'Late reports', 'Royalty', 'Brand fund', 'Owed', 'Overdue', 'Last audit %', 'Open defaults']].concat(data.franchisees.map(function (r) { return [r.name, r.territory_name, r.net_sales, r.growth_pct, r.share_pct, r.reports, r.late_reports, r.royalty, r.fund, r.balance, r.overdue, r.last_audit, r.open_defaults]; }))); };
+    load();
+  }
+
+  // -------------------------------------------------------------- audits --
+  function auditTable(list, withName) {
+    return list.length ? '<table><thead><tr><th>Date</th>' + (withName ? '<th>Franchisee</th>' : '') + '<th>Kind</th><th class="n">Score</th><th>Result</th><th>Follow-up</th><th></th></tr></thead><tbody>' + list.map(function (a) {
+      return '<tr><td>' + esc(day(a.audit_date)) + '</td>' + (withName ? '<td><a href="#fr=' + a.franchisee_id + '">' + esc(a.name) + '</a></td>' : '') + '<td>' + esc(AUDK[a.kind] || a.kind) + '</td><td class="n">' + a.score_pct + '%</td><td><span class="pill' + (a.result === 'pass' ? ' ok' : a.result === 'fail' ? ' bad' : ' warn') + '">' + esc(a.result) + '</span></td><td>' +
+        (a.closed_at ? 'closed' : a.follow_up_on ? esc(day(a.follow_up_on)) : '') + '</td><td><button class="sm" data-av="' + a.id + '">Open</button>' + (!a.closed_at && a.result !== 'pass' ? ' <button class="sm" data-ac="' + a.id + '">Close actions</button>' : '') + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="empty">No audits yet.</div>';
+  }
+  function wireAudits(root, again) {
+    all('[data-av]', root).forEach(function (b) { b.onclick = function () { api('/api/franchise/audits/' + b.getAttribute('data-av')).then(function (r) { var a = r.audit;
+      var m = modal('<h2>' + esc(a.name) + ' · ' + esc(day(a.audit_date)) + ' · ' + a.score_pct + '% ' + esc(a.result) + '<button class="sm" style="margin-left:auto" id="avP">Print</button><button class="sm" id="avX">Close</button></h2><p class="sub">' + esc(AUDK[a.kind]) + ' by ' + esc(a.auditor || '') + '</p><table><tbody>' +
+        a.items.map(function (i) { return '<tr><td>' + esc(i.section) + '</td><td>' + esc(i.item) + (i.note ? '<br><small>' + esc(i.note) + '</small>' : '') + '</td><td class="n">' + (i.score == null ? 'N/A' : i.score + '/2') + '</td></tr>'; }).join('') + '</tbody></table>' +
+        (a.findings ? '<h4>Findings</h4><p>' + esc(a.findings) + '</p>' : '') + (a.actions ? '<h4>Actions</h4><p>' + esc(a.actions) + '</p>' : ''), 2);
+      $('#avX', m).onclick = function () { close(2); }; $('#avP', m).onclick = function () { window.print(); }; }).catch(function (e) { toast(e.message); }); }; });
+    all('[data-ac]', root).forEach(function (b) { b.onclick = function () { var note = prompt('How were the actions closed?', ''); if (note === null) return; guard(b, api('/api/franchise/audits/' + b.getAttribute('data-ac') + '/close', 'POST', { note: note })).then(again); }; });
+  }
+  function auditForm(frId, done) {
+    var sections = {};
+    META.audit_items.forEach(function (x, i) { (sections[x[0]] = sections[x[0]] || []).push([i, x[1]]); });
+    var m = modal('<h2>Field audit</h2><div class="grid">' + field('Kind', '<select id="auK">' + opts(META.audit_kinds.map(function (k) { return [k, AUDK[k]]; }), 'routine') + '</select>') + field('Date', inp('auD', today(), 'date')) +
+      field('Auditor', '<select id="auA">' + opts(META.staff, '', '(me)') + '</select>') + '</div><p class="sub">2 = meets the standard, 1 = partly, 0 = does not, N/A = does not apply. Pass ' + META.settings.pass_pct + '%+, conditional ' + META.settings.conditional_pct + '%+.</p>' +
+      Object.keys(sections).map(function (s) { return '<h4>' + esc(s) + '</h4>' + sections[s].map(function (it) { return '<div class="task"><span>' + esc(it[1]) + '<br><input data-note="' + it[0] + '" placeholder="Note" style="width:100%;margin-top:3px"></span><div class="score" data-i="' + it[0] + '">' +
+        ['2', '1', '0', 'N/A'].map(function (v) { return '<button type="button" data-v="' + v + '"' + (v === '2' ? ' class="on"' : '') + '>' + v + '</button>'; }).join(' ') + '</div></div>'; }).join(''); }).join('') +
+      '<div class="grid" style="margin-top:10px">' + field('Findings', area('auF', '', 3), true) + field('Actions agreed', area('auAc', '', 3), true) + field('Follow-up visit', inp('auFu', '', 'date')) + '</div>' +
+      '<div class="controls"><button class="primary" id="auGo">Save audit</button><button id="auX">Cancel</button></div>', 2);
+    all('.score', m).forEach(function (g) { all('button', g).forEach(function (b) { b.onclick = function () { all('button', g).forEach(function (x) { x.classList.remove('on'); }); b.classList.add('on'); }; }); });
+    $('#auX', m).onclick = function () { close(2); };
+    $('#auGo', m).onclick = function () {
+      var items = META.audit_items.map(function (x, i) { var on = $('.score[data-i="' + i + '"] button.on', m); var v = on ? on.getAttribute('data-v') : 'N/A'; return { section: x[0], item: x[1], score: v === 'N/A' ? null : +v, note: $('[data-note="' + i + '"]', m).value }; });
+      guard(this, api('/api/franchise/audits', 'POST', { franchisee_id: frId, kind: val('auK', m), audit_date: val('auD', m), auditor_id: val('auA', m), items: items, findings: val('auF', m), actions: val('auAc', m), follow_up_on: val('auFu', m) })).then(function (r) {
+        close(2); toast('Audit saved: ' + r.score_pct + '% (' + r.result + ')' + (r.fails_12m >= 2 ? '. Two failed audits in 12 months: a ground for termination.' : ''));
+        if (done) done(); else if (tab === 'audits') audits(); else dash();
+      });
+    };
+  }
+  function audits() {
+    $('#view').innerHTML = '<div class="card"><h2>Audits and inspections</h2><div class="controls"><div><label>Franchisee</label><select id="auFr"></select></div><button class="primary" id="auNew">+ New audit</button><button id="auPrint">Blank audit form</button></div><div id="auList"><div class="empty">Loading…</div></div></div>';
+    api('/api/franchise/franchisees').then(function (d) {
+      $('#auFr').innerHTML = opts(d.franchisees.filter(function (f) { return ['open', 'onboarding', 'suspended'].indexOf(f.status) >= 0; }).map(function (f) { return [f.id, f.trading_name || f.legal_name]; }), '', 'Choose…');
+    });
+    $('#auNew').onclick = function () { var id = +val('auFr'); if (!id) return toast('Choose the franchisee'); auditForm(id); };
+    $('#auPrint').onclick = function () { window.open('/api/franchise/templates/audit/preview', '_blank'); };
+    api('/api/franchise/audits').then(function (d) { $('#auList').innerHTML = auditTable(d.audits, true); wireAudits($('#auList'), audits); }).catch(function (e) { toast(e.message); });
+  }
+
+  // ----------------------------------------------------------- templates --
+  function templates() {
+    $('#view').innerHTML = '<div class="card"><h2>Franchise documents</h2><div class="warn"><b>These are starting points, not legal advice.</b> They follow common franchise practice (the 23-item disclosure document, the usual agreement terms, a standard operations manual) set to Jamaican terms. Jamaica has no franchise law of its own, so contract, competition, trade-mark, data-protection and tax law all apply. Have a Jamaican attorney review each one before use, then record the review here; until then every copy keeps the notice.</div>' +
+      (META.templates_in_docs ? '<p class="sub">Each template is kept in the Document centre (Templates), where a document manager can change the wording. {{words}} in double braces are filled in from the records.</p>' : '<p class="sub">The templates are added to the Document centre the first time it is opened; until then the built-in wording is used.</p>') +
+      '<table><thead><tr><th>Template</th><th>Signed by</th><th>Document centre</th><th>Attorney review</th><th></th></tr></thead><tbody>' + META.templates.map(function (t) {
+        return '<tr><td><b>' + esc(t.title) + '</b></td><td>' + (t.sign ? (t.countersign ? 'Both sides' : 'The franchisee') : 'Not signed (filed)') + '</td><td>' + (t.document_id ? '<a href="/documents.html#templates" target="_blank" rel="noopener">' + esc(t.doc_number || 'Edit') + ' ›</a>' : '') + '</td><td>' +
+          (t.reviewed_at ? '<span class="pill ok">reviewed</span> ' + esc(t.reviewer) + ', ' + esc(day(t.reviewed_at)) : '<span class="pill warn">not yet</span>') + '</td><td><button class="sm" data-pv="' + t.key + '">Preview</button> ' +
+          (t.reviewed_at ? '<button class="sm" data-un="' + t.key + '">Withdraw review</button>' : '<button class="sm" data-rv="' + t.key + '">Record review</button>') + '</td></tr>'; }).join('') + '</tbody></table>' +
+      '<p class="sub">The operations manual is issued to each franchisee as a numbered copy they sign for (Franchisee > Agreement & documents > Franchise operations manual), and they can read it from their franchisee link.</p></div>';
+    all('[data-pv]').forEach(function (b) { b.onclick = function () { window.open('/api/franchise/templates/' + b.getAttribute('data-pv') + '/preview', '_blank'); }; });
+    all('[data-rv]').forEach(function (b) { b.onclick = function () { var who = prompt('Which attorney or firm reviewed it?', ''); if (!who) return; guard(b, api('/api/franchise/templates/' + b.getAttribute('data-rv') + '/review', 'POST', { reviewer: who })).then(function () { reloadMeta().then(templates); }); }; });
+    all('[data-un]').forEach(function (b) { b.onclick = function () { guard(b, api('/api/franchise/templates/' + b.getAttribute('data-un') + '/review', 'POST', { reviewed: false })).then(function () { reloadMeta().then(templates); }); }; });
+  }
+
+  // ------------------------------------------------------------- settings --
+  function settingsView() {
+    var s = META.settings;
+    var F = [['initial_fee', 'Initial franchise fee (J$)'], ['royalty_pct', 'Royalty (% of net sales)'], ['marketing_pct', 'Brand marketing fund (%)'], ['tech_fee', 'Technology fee a month (J$)'], ['min_royalty', 'Minimum royalty a month (J$)'],
+      ['renewal_fee', 'Renewal fee (J$)'], ['transfer_fee', 'Transfer fee (J$)'], ['term_years', 'Term (years)'], ['local_marketing_pct', 'Local marketing spend (% of net sales)'], ['gct_rate', 'GCT rate (%)'],
+      ['wait_days', 'Days between disclosure and signing'], ['report_day', 'Sales report due (day of month)'], ['royalty_due_day', 'Payment due (day of month)'], ['opening_months', 'Months to open after signing'],
+      ['min_capital', 'Minimum cash to invest (J$)'], ['min_net_worth', 'Minimum net worth (J$)'], ['qualify_score', 'Score to qualify (of 100)'], ['renewal_notice_months', 'Warn of renewals (months ahead)'],
+      ['pass_pct', 'Audit pass mark (%)'], ['conditional_pct', 'Audit conditional mark (%)'], ['link_days', 'Signing links last (days)']];
+    $('#view').innerHTML = '<div class="card"><h2>Franchise settings</h2><p class="sub">The defaults for new franchisees and new documents. Each franchisee can have their own fees (their Details & terms). The starting figures are placeholders: set your own with your accountant and attorney.</p><div class="grid">' +
+      F.map(function (x) { return field(x[1], inp('s_' + x[0], s[x[0]])); }).join('') + '</div><div class="controls"><button class="primary" id="sGo">Save</button></div></div>';
+    $('#sGo').onclick = function () { var b = {}; F.forEach(function (x) { b[x[0]] = val('s_' + x[0]); }); guard(this, api('/api/franchise/settings', 'PUT', b)).then(function () { toast('Saved'); reloadMeta(); }); };
+  }
+
+  var VIEWS = { dash: dash, leads: leads, franchisees: franchisees, territories: territories, billing: billing, performance: performance, audits: audits, templates: templates, settings: settingsView };
+  reloadMeta().then(show).catch(function (e) { $('#view').innerHTML = '<div class="card empty">' + esc(/permission|403|not allowed/i.test(e.message) ? 'You need the Franchise permission (Users & Staff > Roles & Permissions).' : e.message) + '</div>'; });
+})();
+</script>
+</body>
+</html>

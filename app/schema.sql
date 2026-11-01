@@ -6948,3 +6948,256 @@ CREATE TABLE IF NOT EXISTS hr_signatures (
   cancelled_at        TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_hr_signatures_user ON hr_signatures (user_id, status);
+
+-- =============================================================================
+--  FRANCHISE (franchise.js, franchise.html, franchisee.html)
+--  Enquiries and leads, qualification and application, NDA, disclosure
+--  document, franchise agreement and signing, territories, franchisees,
+--  opening checklist, monthly sales reports, royalty and fee invoices (raised
+--  as A/R invoices), field audits, renewals, transfers and terminations.
+--  Templates live in the Document centre (documents, category 'template').
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS fr_settings (
+  key         TEXT PRIMARY KEY,
+  value       TEXT,
+  updated_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Which Document centre template is which franchise document, and whether a
+-- Jamaican attorney has reviewed it (until then every copy carries the notice).
+CREATE TABLE IF NOT EXISTS fr_templates (
+  key          TEXT PRIMARY KEY,                -- nda | fdd | agreement | manual | ...
+  document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  reviewed_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reviewed_at  TIMESTAMPTZ,
+  reviewer     TEXT,                            -- the attorney / firm
+  updated_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS fr_territories (
+  id           SERIAL PRIMARY KEY,
+  code         TEXT NOT NULL UNIQUE,
+  name         TEXT NOT NULL,
+  description  TEXT,                            -- boundaries, parishes, towns
+  population   INTEGER,
+  exclusive    BOOLEAN NOT NULL DEFAULT true,
+  status       TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'reserved', 'sold', 'company')),
+  notes        TEXT,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS fr_franchisees (
+  id                  SERIAL PRIMARY KEY,
+  number              TEXT UNIQUE,              -- FR-001
+  lead_id             INTEGER,
+  legal_name          TEXT NOT NULL,
+  trading_name        TEXT,
+  principal           TEXT,
+  email               TEXT,
+  phone               TEXT,
+  address             TEXT,
+  trn                 TEXT,
+  territory_id        INTEGER REFERENCES fr_territories(id) ON DELETE SET NULL,
+  customer_id         INTEGER REFERENCES users(id) ON DELETE SET NULL,   -- their account in Receivables
+  status              TEXT NOT NULL DEFAULT 'onboarding' CHECK (status IN ('onboarding', 'open', 'suspended', 'terminated', 'expired', 'transferred')),
+  signed_on           DATE,
+  opened_on           DATE,
+  term_start          DATE,
+  term_end            DATE,
+  term_years          INTEGER,
+  initial_fee         NUMERIC(14,2),
+  royalty_pct         NUMERIC(6,3),
+  marketing_pct       NUMERIC(6,3),
+  tech_fee            NUMERIC(14,2),
+  min_royalty         NUMERIC(14,2),
+  renewal_fee         NUMERIC(14,2),
+  transfer_fee        NUMERIC(14,2),
+  portal_token_sha256 TEXT UNIQUE,              -- the franchisee's own link (only its hash is kept)
+  transferred_to_id   INTEGER REFERENCES fr_franchisees(id) ON DELETE SET NULL,
+  ended_on            DATE,
+  end_reason          TEXT,
+  notes               TEXT,
+  created_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at          TIMESTAMPTZ DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS fr_leads (
+  id               SERIAL PRIMARY KEY,
+  name             TEXT NOT NULL,
+  company          TEXT,
+  email            TEXT,
+  phone            TEXT,
+  address          TEXT,
+  parish           TEXT,
+  area_wanted      TEXT,
+  territory_id     INTEGER REFERENCES fr_territories(id) ON DELETE SET NULL,
+  source           TEXT,                        -- website | walk-in | referral | expo | ...
+  capital          NUMERIC(16,2),
+  net_worth        NUMERIC(16,2),
+  experience       TEXT,
+  timeline         TEXT,
+  message          TEXT,
+  notes            TEXT,
+  stage            TEXT NOT NULL DEFAULT 'enquiry' CHECK (stage IN ('enquiry', 'qualified', 'nda', 'disclosed', 'application', 'approved', 'agreement', 'signed', 'declined', 'withdrawn')),
+  score            INTEGER,
+  qualification    JSONB,                       -- {checks: {...}, score}
+  application      JSONB,                       -- the application form answers
+  applied_at       TIMESTAMPTZ,
+  nda_signed_at    TIMESTAMPTZ,
+  fdd_received_at  TIMESTAMPTZ,
+  decided_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  decided_at       TIMESTAMPTZ,
+  decline_reason   TEXT,
+  owner_id         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  franchisee_id    INTEGER REFERENCES fr_franchisees(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fr_leads_stage ON fr_leads (stage, created_at);
+
+-- A franchise document made from a template and sent for signing (an envelope).
+CREATE TABLE IF NOT EXISTS fr_documents (
+  id                  SERIAL PRIMARY KEY,
+  lead_id             INTEGER REFERENCES fr_leads(id) ON DELETE CASCADE,
+  franchisee_id       INTEGER REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  kind                TEXT NOT NULL,            -- template key: nda | fdd | agreement | manual | renewal | ...
+  title               TEXT NOT NULL,
+  template_doc_id     INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  form_values         JSONB,
+  html                TEXT NOT NULL,
+  content_sha256      TEXT NOT NULL,            -- what is signed
+  needs_signature     BOOLEAN NOT NULL DEFAULT true,
+  status              TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'sent', 'signed', 'countersigned', 'declined', 'cancelled', 'filed')),
+  sent_to             TEXT,
+  sent_by             INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  sent_at             TIMESTAMPTZ,
+  token_sha256        TEXT UNIQUE,              -- the signing link (only its hash is kept)
+  expires_at          TIMESTAMPTZ,
+  viewed_at           TIMESTAMPTZ,
+  method              TEXT,                     -- in_person | link
+  signer_name         TEXT,
+  signer_email        TEXT,
+  image               TEXT,                     -- drawn signature (PNG data URL)
+  ip                  TEXT,
+  user_agent          TEXT,
+  witnessed_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  signed_at           TIMESTAMPTZ,
+  seal                TEXT,                     -- HMAC over what was signed and by whom
+  counter_name        TEXT,                     -- signed for the franchisor
+  counter_image       TEXT,
+  counter_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  counter_at          TIMESTAMPTZ,
+  counter_seal        TEXT,
+  signed_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL,  -- the signed copy in the Document centre
+  decline_reason      TEXT,
+  created_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at          TIMESTAMPTZ DEFAULT NOW(),
+  CHECK (lead_id IS NOT NULL OR franchisee_id IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS idx_fr_documents_lead ON fr_documents (lead_id);
+CREATE INDEX IF NOT EXISTS idx_fr_documents_fr ON fr_documents (franchisee_id);
+
+CREATE TABLE IF NOT EXISTS fr_tasks (
+  id             SERIAL PRIMARY KEY,
+  franchisee_id  INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  phase          TEXT NOT NULL DEFAULT 'setup',   -- setup | site | fitout | training | launch
+  title          TEXT NOT NULL,
+  due_on         DATE,
+  done_at        TIMESTAMPTZ,
+  done_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  note           TEXT,
+  sort           INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_fr_tasks_fr ON fr_tasks (franchisee_id, sort);
+
+-- The franchisee's monthly sales report (period = the first of the month).
+CREATE TABLE IF NOT EXISTS fr_reports (
+  id              SERIAL PRIMARY KEY,
+  franchisee_id   INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  period          DATE NOT NULL,
+  gross_sales     NUMERIC(16,2) NOT NULL DEFAULT 0 CHECK (gross_sales >= 0),
+  refunds         NUMERIC(16,2) NOT NULL DEFAULT 0 CHECK (refunds >= 0),
+  gct_collected   NUMERIC(16,2) NOT NULL DEFAULT 0 CHECK (gct_collected >= 0),
+  net_sales       NUMERIC(16,2) NOT NULL DEFAULT 0,
+  transactions    INTEGER,
+  local_marketing NUMERIC(14,2),
+  notes           TEXT,
+  source          TEXT NOT NULL DEFAULT 'staff',  -- staff | portal
+  submitted_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  submitted_at    TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (franchisee_id, period)
+);
+
+-- What a franchisee is charged. Monthly fees are unique per period, so a month
+-- cannot be billed twice; each charge points at the A/R invoice that bills it.
+CREATE TABLE IF NOT EXISTS fr_charges (
+  id             SERIAL PRIMARY KEY,
+  franchisee_id  INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL CHECK (kind IN ('initial', 'royalty', 'marketing', 'tech', 'renewal', 'transfer', 'training', 'audit', 'late', 'other')),
+  period         DATE,
+  description    TEXT,
+  base           NUMERIC(16,2),                 -- net sales the percentage was taken of
+  rate           NUMERIC(6,3),
+  amount         NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+  gct            NUMERIC(14,2) NOT NULL DEFAULT 0,
+  ar_invoice_id  INTEGER REFERENCES ar_invoices(id) ON DELETE SET NULL,
+  report_id      INTEGER REFERENCES fr_reports(id) ON DELETE SET NULL,
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fr_charges_period ON fr_charges (franchisee_id, kind, period) WHERE kind IN ('royalty', 'marketing', 'tech');
+CREATE INDEX IF NOT EXISTS idx_fr_charges_fr ON fr_charges (franchisee_id, created_at);
+
+CREATE TABLE IF NOT EXISTS fr_audits (
+  id             SERIAL PRIMARY KEY,
+  franchisee_id  INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL DEFAULT 'routine' CHECK (kind IN ('pre_opening', 'routine', 'mystery_shop', 'follow_up')),
+  audit_date     DATE NOT NULL,
+  auditor_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  items          JSONB NOT NULL DEFAULT '[]',   -- [{section, item, score: 0|1|2|null, note}]
+  score_pct      NUMERIC(5,1),
+  result         TEXT CHECK (result IN ('pass', 'conditional', 'fail')),
+  findings       TEXT,
+  actions        TEXT,
+  follow_up_on   DATE,
+  closed_at      TIMESTAMPTZ,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fr_audits_fr ON fr_audits (franchisee_id, audit_date);
+
+-- Renewals, transfers, notices of default, suspensions and terminations.
+CREATE TABLE IF NOT EXISTS fr_actions (
+  id              SERIAL PRIMARY KEY,
+  franchisee_id   INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL CHECK (kind IN ('renewal', 'transfer', 'default', 'suspension', 'termination')),
+  status          TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done', 'cured', 'cancelled')),
+  effective_date  DATE,
+  cure_by         DATE,
+  details         JSONB NOT NULL DEFAULT '{}',
+  document_id     INTEGER REFERENCES fr_documents(id) ON DELETE SET NULL,
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  closed_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  closed_at       TIMESTAMPTZ,
+  close_note      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_fr_actions_fr ON fr_actions (franchisee_id, created_at);
+
+CREATE TABLE IF NOT EXISTS fr_log (
+  id             SERIAL PRIMARY KEY,
+  lead_id        INTEGER REFERENCES fr_leads(id) ON DELETE CASCADE,
+  franchisee_id  INTEGER REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  action         TEXT NOT NULL,
+  detail         TEXT,
+  by_user        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  at             TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fr_log_fr ON fr_log (franchisee_id, at);
+CREATE INDEX IF NOT EXISTS idx_fr_log_lead ON fr_log (lead_id, at);
+
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('4600', 'Franchise Fees and Royalties',        'income',    'Franchise Fees and Royalties',        'INC',    'franchise_income'),
+  ('2170', 'Franchise Brand Fund',                'liability', 'Franchise Brand Fund',                'OCLIAB', 'franchise_fund')
+ON CONFLICT DO NOTHING;

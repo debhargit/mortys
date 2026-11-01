@@ -18513,7 +18513,7 @@ var TILL_ORIGIN = 'https://till.visionautosolutions.com';
 var ON_WEBSITE = location.hostname !== 'till.visionautosolutions.com' &&
   /(^|\.)visionautosolutions\.(com|pages\.dev)$/.test(location.hostname);
 var TILL_ONLY_PAGES = ['accounting', 'budget', 'documents', 'receivables', 'payables', 'banking', 'loans-rent', 'report-balancing', 'payroll',
-  'clock', 'attendance', 'commission', 'training', 'hiring', 'people', 'dispatch', 'fleet-wall', 'mobile',
+  'clock', 'attendance', 'commission', 'training', 'hiring', 'people', 'franchise', 'franchisee', 'dispatch', 'fleet-wall', 'mobile',
   'driver', 'cashier', 'warehouse', 'stockcash', 'report-planning', 'terminal', 'ai', 'system', 'security'];
 function tillHref(href) {
   if (!ON_WEBSITE || !href || href.charAt(0) !== '/' || href.charAt(1) === '/') return href;
@@ -18564,6 +18564,10 @@ var MODULE_GROUPS = [
     { href: '/commission.html',  icon: '💰', name: 'Commission', blurb: 'Sales commission and boosts' },
     { href: '/training.html',    icon: '🎓', name: 'Training', blurb: 'Lessons, quizzes, practice till' },
     { href: '/hiring.html',      icon: '🧑‍💼', name: 'Hiring and careers', blurb: 'Requisitions, job posts, applicants, interviews and scorecards, references, offers' },
+  ]},
+  { title: '🏪 Franchise', items: [
+    { href: '/franchise.html',  icon: '🏪', name: 'Franchise', blurb: 'Enquiries and leads, NDA, disclosure document, franchise agreement and signing, territories, opening checklist, royalties, audits, renewals and exits' },
+    { href: '/franchisee.html', icon: '📝', name: 'Franchise enquiry form', blurb: 'The public page people use to ask about a franchise (send them this link)', key: null },
   ]},
   { title: '🚚 Deliveries and mobile', items: [
     { href: '/dispatch.html', icon: '🗺️', name: 'Dispatch', blurb: 'Delivery and admin-run queue, assign drivers, routes, live map, alerts', key: 'fleet' },
