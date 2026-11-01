@@ -24,6 +24,8 @@
 
 const CONTRACTS = ['permanent', 'fixed_term', 'part_time', 'casual', 'contractor', 'intern'];
 const STATUSES = ['probation', 'active', 'notice', 'left'];
+// As in the QuickBooks employee list: officers and owners are paid differently.
+const EMP_TYPES = ['regular', 'officer', 'owner', 'statutory'];
 const JOB_KINDS = ['start', 'promotion', 'transfer', 'pay_change', 'title_change', 'confirmation', 'demotion', 'other'];
 const CASE_KINDS = ['counselling', 'verbal_warning', 'written_warning', 'final_warning', 'suspension', 'dismissal', 'commendation'];
 const CASE_LABEL = { counselling: 'Counselling', verbal_warning: 'Verbal warning', written_warning: 'Written warning', final_warning: 'Final written warning', suspension: 'Suspension', dismissal: 'Dismissal', commendation: 'Commendation' };
@@ -129,7 +131,7 @@ function register(app, deps) {
   async function fileFor(uid, opts) {
     const u = await staffRow(uid);
     const { rows: h } = await query(`SELECT h.*, ${DATE('h.start_date')} AS start_date, ${DATE('h.contract_end')} AS contract_end, ${DATE('h.probation_end')} AS probation_end,
-        ${DATE('h.confirmed_on')} AS confirmed_on, ${DATE('h.date_of_birth')} AS date_of_birth, dp.name AS department, COALESCE(NULLIF(m.name, ''), m.email) AS manager
+        ${DATE('h.confirmed_on')} AS confirmed_on, ${DATE('h.date_of_birth')} AS date_of_birth, ${DATE('h.release_date')} AS release_date, dp.name AS department, COALESCE(NULLIF(m.name, ''), m.email) AS manager
       FROM hr_employees h LEFT JOIN departments dp ON dp.id = h.department_id LEFT JOIN users m ON m.id = h.manager_user_id WHERE h.user_id = $1`, [uid]);
     const { rows: pay } = await query(`SELECT id, employee_no, pay_type, frequency, salary_annual::float, hourly_rate::float, is_active, ${DATE('hire_date')} AS hire_date, department, job_title,
         vacation_days::float, sick_days::float FROM payroll_employees WHERE user_id = $1`, [uid]);
@@ -162,7 +164,7 @@ function register(app, deps) {
     try { res.json(await fileFor(n(req.params.id), {})); } catch (e) { fail(res, e); }
   });
 
-  const PROFILE_TEXT = { job_title: 120, work_location: 80, personal_email: 160, personal_phone: 40, address: 300, parish: 40, notes: 4000 };
+  const PROFILE_TEXT = { job_title: 120, work_location: 80, personal_email: 160, personal_phone: 40, mobile: 40, address: 300, parish: 40, notes: 4000 };
   app.put('/api/people/staff/:id/profile', ...P, async (req, res) => {
     try {
       const uid = n(req.params.id); await staffRow(uid); await ensureFile(uid);
@@ -170,12 +172,14 @@ function register(app, deps) {
       const { rows: cur } = await query(`SELECT * FROM hr_employees WHERE user_id = $1`, [uid]);
       const c = cur[0], v = {};
       for (const k of Object.keys(PROFILE_TEXT)) v[k] = k in b ? t(b[k], PROFILE_TEXT[k]) : c[k];
-      for (const k of ['start_date', 'contract_end', 'probation_end', 'date_of_birth']) v[k] = k in b ? d(b[k]) : c[k];
+      for (const k of ['start_date', 'contract_end', 'probation_end', 'date_of_birth', 'release_date']) v[k] = k in b ? d(b[k]) : c[k];
       v.department_id = 'department_id' in b ? n(b.department_id) : c.department_id;
       v.manager_user_id = 'manager_user_id' in b ? n(b.manager_user_id) : c.manager_user_id;
       if (v.manager_user_id === uid) throw httpError(400, 'Someone cannot be their own manager');
       v.contract_type = 'contract_type' in b ? one(b.contract_type, CONTRACTS, 'permanent') : c.contract_type;
       v.status = 'status' in b ? one(b.status, STATUSES, c.status) : c.status;
+      v.gender = 'gender' in b ? one(b.gender, ['female', 'male', 'other'], null) : c.gender;
+      v.employee_type = 'employee_type' in b ? one(b.employee_type, EMP_TYPES, 'regular') : c.employee_type;
       v.probation_months = 'probation_months' in b ? Math.max(0, Math.min(12, parseInt(b.probation_months, 10) || 0)) : c.probation_months;
       // Probation end follows the start date unless it was typed in.
       if (!('probation_end' in b) && v.start_date && (!c.probation_end || 'start_date' in b || 'probation_months' in b) && v.status === 'probation') {
@@ -668,8 +672,8 @@ function register(app, deps) {
   app.put('/api/people/me/details', requireAdmin, async (req, res) => {
     try {
       const uid = me(req); await staffRow(uid); await ensureFile(uid); const b = req.body || {};
-      await query(`UPDATE hr_employees SET personal_phone = $2, personal_email = $3, address = $4, parish = $5, updated_by = $1, updated_at = NOW() WHERE user_id = $1`,
-        [uid, t(b.personal_phone, 40), t(b.personal_email, 160), t(b.address, 300), t(b.parish, 40)]);
+      await query(`UPDATE hr_employees SET personal_phone = $2, personal_email = $3, address = $4, parish = $5, mobile = $6, updated_by = $1, updated_at = NOW() WHERE user_id = $1`,
+        [uid, t(b.personal_phone, 40), t(b.personal_email, 160), t(b.address, 300), t(b.parish, 40), t(b.mobile, 40)]);
       await audit({ user_id: uid, entity: 'profile', action: 'own contact details updated', by: uid });
       res.json({ ok: true });
     } catch (e) { fail(res, e); }
@@ -748,6 +752,9 @@ function register(app, deps) {
     await audit({ user_id: uid, application_id: a.id, entity: 'hire', action: 'staff file opened from hiring', detail: [title, start ? 'starts ' + start : null, payrollId ? 'added to Payroll (switched off)' : null].filter(Boolean).join(' · '), by }, q);
     return { payroll_id: payrollId, probation_end: probEnd };
   }
+
+  // Contracts, documents to sign, adding staff and the QuickBooks import (hr-docs.js).
+  require('./hr-docs').register(app, Object.assign({}, deps, { audit, ensureFile, staffRow, httpError, fail }));
 
   return { audit, onHire, ONBOARDING, OFFBOARDING };
 }

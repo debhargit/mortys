@@ -105,6 +105,23 @@ function register(app, deps) {
   const { query, requireAdmin, requireCap, bcrypt, userCan, getPool, hr, docs } = deps;
   const notice = deps.notice || null;
   const can = (k) => [requireAdmin, requireCap(k)];
+  // A list of staff ids from a form (interviewers), cleaned.
+  const ids = (v) => [...new Set((Array.isArray(v) ? v : []).map((x) => parseInt(x, 10)).filter((x) => x > 0))].slice(0, 20);
+  // Who someone is for one job: hiring staff, its hiring manager, one of its interviewers, or nobody.
+  async function jobRole(req, jobId) {
+    if (await userCan(req, 'hr.manage')) return 'hr';
+    const { rows } = await query(`SELECT hiring_manager_id, interviewer_ids FROM job_posts WHERE id = $1`, [jobId || 0]);
+    if (!rows.length) return null;
+    if (rows[0].hiring_manager_id === req.session.userId) return 'manager';
+    return (rows[0].interviewer_ids || []).includes(req.session.userId) ? 'interviewer' : null;
+  }
+  // The full application (answers, CV, documents, history) is for hiring staff and the job's hiring manager.
+  async function canSeeApp(req, appId) {
+    const { rows } = await query(`SELECT job_id FROM job_applications WHERE id = $1`, [parseInt(appId, 10) || 0]);
+    const role = rows.length ? await jobRole(req, rows[0].job_id) : null;
+    if (!['hr', 'manager'].includes(role)) throw httpError(rows.length ? 403 : 404, rows.length ? 'Only hiring staff and the job’s hiring manager can open this application' : 'Application not found');
+    return role;
+  }
   const DIR = path.join(__dirname, '..', 'data', 'careers-cvs');
   fs.mkdirSync(DIR, { recursive: true });
   function httpError(status, msg) { const e = new Error(msg); e.status = status; e.publicMessage = msg; return e; }
@@ -331,6 +348,7 @@ function register(app, deps) {
         const tpl = (await templates()).ack;
         await sendToApplicant(a, fill(tpl.subject, v), fill(tpl.body, v), null);
         const inbox = t(await setting('careers_notify_email', ''), 160);
+        if (job.hiring_manager_id) await tell([job.hiring_manager_id], { kind: 'memo', title: '📥 New applicant for ' + job.title + ': ' + name, link: '/hiring.html#app=' + a.id });
         if (inbox) {
           const body = 'New application for ' + job.title + ' (' + a.ref + ')\n\n' + name + '\n' + email + ' · ' + phone + '\n' +
             (cvFile ? 'CV attached. ' : 'No CV. ') + (docs.length + other.length) + ' document(s).' +
@@ -438,10 +456,11 @@ function register(app, deps) {
     j.cv_required = !!b.cv_required;
     j.requisition_id = parseInt(b.requisition_id, 10) || null;
     j.hiring_manager_id = parseInt(b.hiring_manager_id, 10) || null;
+    j.interviewer_ids = ids(b.interviewer_ids);
     j.scorecard = JSON.stringify(cleanList((Array.isArray(b.scorecard) ? b.scorecard : []).map((x) => ({ key: x && x.key, label: x && x.label })), 'doc').map((x) => ({ key: x.key, label: x.label })));
     return j;
   }
-  const JOB_COLS = ['title', 'department', 'location', 'kind', 'pay', 'summary', 'description', 'requirements', 'is_open', 'closes_on', 'openings', 'documents', 'questions', 'cv_required', 'requisition_id', 'hiring_manager_id', 'scorecard'];
+  const JOB_COLS = ['title', 'department', 'location', 'kind', 'pay', 'summary', 'description', 'requirements', 'is_open', 'closes_on', 'openings', 'documents', 'questions', 'cv_required', 'requisition_id', 'hiring_manager_id', 'scorecard', 'interviewer_ids'];
   const JSONB_COLS = ['documents', 'questions', 'scorecard'];
   const jobVals = (j) => JOB_COLS.map((c) => j[c]);
   // With "postings need an approved requisition" on, a post opens only against one.
@@ -500,8 +519,9 @@ function register(app, deps) {
       res.json({ applications: rows, stages: STAGES });
     } catch (e) { fail(res, e); }
   });
-  app.get('/api/hr/applications/:id', ...can('hr.manage'), async (req, res) => {
+  app.get('/api/hr/applications/:id', requireAdmin, async (req, res) => {
     try {
+      const role = await canSeeApp(req, req.params.id);
       const { rows } = await query(`SELECT a.*, j.title AS job, j.documents AS job_documents FROM job_applications a LEFT JOIN job_posts j ON j.id = a.job_id WHERE a.id = $1 AND a.anonymised_at IS NULL`, [req.params.id]);
       if (!rows.length) throw httpError(404, 'Application not found');
       const { rows: notes } = await query(`SELECT n.*, u.name AS by_name FROM application_notes n LEFT JOIN users u ON u.id = n.by_user WHERE n.application_id = $1 ORDER BY n.at DESC`, [req.params.id]);
@@ -509,7 +529,7 @@ function register(app, deps) {
       const a = rows[0];
       const missing = await missingDocs(a.id, { documents: a.job_documents });
       delete a.cv_file; delete a.ip; delete a.token;
-      res.json(Object.assign({ application: a, notes, documents: docs, missing: missing.map((d) => d.label) }, await pipeline(a.id)));
+      res.json(Object.assign({ role, application: a, notes, documents: docs, missing: missing.map((d) => d.label) }, await pipeline(a.id)));
     } catch (e) { fail(res, e); }
   });
   function sendStored(res, file, shownName) {
@@ -522,16 +542,18 @@ function register(app, deps) {
     res.set('Cache-Control', 'private, no-store');
     res.sendFile(p);
   }
-  app.get('/api/hr/applications/:id/cv', ...can('hr.manage'), async (req, res) => {
+  app.get('/api/hr/applications/:id/cv', requireAdmin, async (req, res) => {
     try {
+      await canSeeApp(req, req.params.id);
       const { rows } = await query(`SELECT id, cv_file, cv_name FROM job_applications WHERE id = $1 AND anonymised_at IS NULL`, [req.params.id]);
       if (!rows.length || !rows[0].cv_file || !FILE_RE.test(rows[0].cv_file)) throw httpError(404, 'No CV');
       await query(`INSERT INTO application_notes (application_id, kind, note, by_user) VALUES ($1, 'cv_viewed', 'CV opened', $2)`, [rows[0].id, req.session.userId]);
       sendStored(res, rows[0].cv_file, rows[0].cv_name);
     } catch (e) { fail(res, e); }
   });
-  app.get('/api/hr/applications/:id/documents/:docId', ...can('hr.manage'), async (req, res) => {
+  app.get('/api/hr/applications/:id/documents/:docId', requireAdmin, async (req, res) => {
     try {
+      await canSeeApp(req, req.params.id);
       const { rows } = await query(
         `SELECT d.* FROM application_documents d JOIN job_applications a ON a.id = d.application_id
           WHERE d.id = $2 AND d.application_id = $1 AND a.anonymised_at IS NULL`, [req.params.id, req.params.docId]);
@@ -704,13 +726,13 @@ function register(app, deps) {
     const r = { title: t(b.title, 120), department: t(b.department, 60), kind: ['full_time', 'part_time', 'contract', 'freelance_rep'].includes(b.kind) ? b.kind : 'full_time',
       openings: Math.max(1, Math.min(99, parseInt(b.openings, 10) || 1)), reason: ['new', 'replacement', 'temporary'].includes(b.reason) ? b.reason : 'new',
       replaces_user_id: id(b.replaces_user_id) || null, salary_min: money(b.salary_min), salary_max: money(b.salary_max), start_by: isDate(b.start_by),
-      justification: t(b.justification, 4000), hiring_manager_id: id(b.hiring_manager_id) || null };
+      justification: t(b.justification, 4000), hiring_manager_id: id(b.hiring_manager_id) || null, interviewer_ids: ids(b.interviewer_ids) };
     if (!r.title) throw httpError(400, 'The job title');
     if (!r.justification) throw httpError(400, 'Why the shop needs this person (the approver reads this)');
     if (r.salary_min && r.salary_max && r.salary_min > r.salary_max) throw httpError(400, 'The lowest pay is more than the highest');
     return r;
   }
-  const REQ_COLS = ['title', 'department', 'kind', 'openings', 'reason', 'replaces_user_id', 'salary_min', 'salary_max', 'start_by', 'justification', 'hiring_manager_id'];
+  const REQ_COLS = ['title', 'department', 'kind', 'openings', 'reason', 'replaces_user_id', 'salary_min', 'salary_max', 'start_by', 'justification', 'hiring_manager_id', 'interviewer_ids'];
   async function reqRow(rid) {
     const { rows } = await query(`SELECT * FROM job_requisitions WHERE id = $1`, [rid]);
     if (!rows.length) throw httpError(404, 'Requisition not found');
@@ -789,16 +811,19 @@ function register(app, deps) {
       const r = await reqRow(id(req.params.id));
       if (r.status !== 'approved') throw httpError(409, 'Only an approved requisition can be posted');
       const pay = r.salary_min || r.salary_max ? [r.salary_min, r.salary_max].filter(Boolean).map((v) => 'J$' + Math.round(v).toLocaleString('en-JM')).join(' to ') + ' a year' : null;
-      const { rows } = await query(`INSERT INTO job_posts (title, department, kind, openings, pay, is_open, requisition_id, hiring_manager_id, location, created_by) VALUES ($1,$2,$3,$4,$5,false,$6,$7,'Kingston',$8) RETURNING *`,
-        [r.title, r.department, r.kind, r.openings, pay, r.id, r.hiring_manager_id, me(req)]);
+      const { rows } = await query(`INSERT INTO job_posts (title, department, kind, openings, pay, is_open, requisition_id, hiring_manager_id, interviewer_ids, location, created_by) VALUES ($1,$2,$3,$4,$5,false,$6,$7,$8,'Kingston',$9) RETURNING *`,
+        [r.title, r.department, r.kind, r.openings, pay, r.id, r.hiring_manager_id, r.interviewer_ids || [], me(req)]);
       if (hr) await hr.audit({ entity: 'job_post', entity_id: rows[0].id, action: 'posting made from requisition #' + r.id, detail: r.title, by: me(req) });
       res.json({ job: rows[0] });
     } catch (e) { fail(res, e); }
   });
 
   // ------------------------------------------------------- interviews --
+  // Hiring staff, the job's hiring manager, or someone on this interview's panel.
   async function panelOk(req, iv) {
     if (await userCan(req, 'hr.manage')) return true;
+    const { rows: j } = await query(`SELECT p.hiring_manager_id FROM job_applications a JOIN job_posts p ON p.id = a.job_id WHERE a.id = $1`, [iv.application_id]);
+    if (j.length && j[0].hiring_manager_id === me(req)) return true;
     const { rows } = await query(`SELECT 1 FROM hr_interview_panel WHERE interview_id = $1 AND user_id = $2`, [iv.id, me(req)]);
     return rows.length > 0;
   }
@@ -881,6 +906,30 @@ function register(app, deps) {
       res.json({ ok: true, moved });
     } catch (e) { fail(res, e); }
   });
+  // Jobs I am the hiring manager or an interviewer for, with their applicants
+  // (the hiring manager sees each one; interviewers see the ones they meet).
+  app.get('/api/hr/my-jobs', requireAdmin, async (req, res) => {
+    try {
+      const { rows: jobs } = await query(`SELECT j.id, j.title, j.is_open, j.openings, (j.hiring_manager_id = $1) AS is_manager, j.interviewer_ids,
+          ${STAGES.map((s) => `COUNT(a.id) FILTER (WHERE a.stage = '${s}' AND a.anonymised_at IS NULL)::int AS ${s}`).join(', ')}
+        FROM job_posts j LEFT JOIN job_applications a ON a.job_id = j.id WHERE j.hiring_manager_id = $1 OR $1 = ANY(j.interviewer_ids) GROUP BY j.id ORDER BY j.is_open DESC, j.created_at DESC`, [me(req)]);
+      const managed = jobs.filter((j) => j.is_manager).map((j) => j.id);
+      const { rows: apps } = managed.length ? await query(`SELECT a.id, a.job_id, a.ref, a.name, a.stage, a.screen_result, a.interview_at, a.created_at,
+          (SELECT ROUND(AVG(s.overall)::numeric, 1)::float FROM hr_interview_scores s JOIN hr_interviews i ON i.id = s.interview_id WHERE i.application_id = a.id) AS avg_overall
+        FROM job_applications a WHERE a.job_id = ANY($1::int[]) AND a.anonymised_at IS NULL ORDER BY a.created_at DESC LIMIT 500`, [managed]) : { rows: [] };
+      res.json({ jobs, applications: apps, stages: STAGES });
+    } catch (e) { fail(res, e); }
+  });
+  // The hiring manager's word on an applicant: a note on the history.
+  app.post('/api/hr/applications/:id/notes', requireAdmin, async (req, res) => {
+    try {
+      await canSeeApp(req, req.params.id);
+      const note = t((req.body || {}).note, 2000);
+      if (!note) throw httpError(400, 'Write the note');
+      await query(`INSERT INTO application_notes (application_id, kind, note, by_user) VALUES ($1, 'note', $2, $3)`, [id(req.params.id), note, me(req)]);
+      res.json({ ok: true });
+    } catch (e) { fail(res, e); }
+  });
   // Interviews I sit on: to prepare and to score. Any staff member on a panel.
   app.get('/api/hr/my-interviews', requireAdmin, async (req, res) => {
     try {
@@ -929,8 +978,9 @@ function register(app, deps) {
   });
 
   // Side by side: everyone past screening for one job, with the panel's view.
-  app.get('/api/hr/jobs/:id/compare', ...can('hr.manage'), async (req, res) => {
+  app.get('/api/hr/jobs/:id/compare', requireAdmin, async (req, res) => {
     try {
+      if (!['hr', 'manager'].includes(await jobRole(req, id(req.params.id)))) throw httpError(403, 'Only hiring staff and this job’s hiring manager can compare its candidates');
       const { rows: jr } = await query(`SELECT id, title, scorecard FROM job_posts WHERE id = $1`, [id(req.params.id)]);
       if (!jr.length) throw httpError(404, 'Job not found');
       const criteria = Array.isArray(jr[0].scorecard) && jr[0].scorecard.length ? jr[0].scorecard : SCORECARD;

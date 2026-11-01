@@ -6872,3 +6872,79 @@ CREATE TABLE IF NOT EXISTS hr_offers (
   updated_at       TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_hr_offers_app ON hr_offers (application_id);
+
+-- =============================================================================
+--  People & HR, part 2: interviewers on jobs, more employee fields (as in
+--  the QuickBooks employee list), employment contracts, and documents sent
+--  to staff for signature (hr.js; signed by the staff member in My HR file
+--  or from a one-time link, sealed like signed invoices, filed in the
+--  Document centre).
+-- =============================================================================
+ALTER TABLE job_requisitions ADD COLUMN IF NOT EXISTS interviewer_ids INTEGER[] NOT NULL DEFAULT '{}';
+ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS interviewer_ids INTEGER[] NOT NULL DEFAULT '{}';
+
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS gender TEXT;
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS employee_type TEXT NOT NULL DEFAULT 'regular';   -- regular | officer | owner | statutory
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS mobile TEXT;
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS release_date DATE;
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS qb_name TEXT;                                   -- the name in QuickBooks, for later imports
+
+CREATE TABLE IF NOT EXISTS hr_contracts (
+  id               SERIAL PRIMARY KEY,
+  user_id          INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind             TEXT NOT NULL DEFAULT 'employment',  -- employment | fixed_term | amendment | confidentiality | other
+  title            TEXT NOT NULL,
+  job_title        TEXT,
+  start_date       DATE,
+  end_date         DATE,
+  pay_type         TEXT NOT NULL DEFAULT 'salary',
+  salary_annual    NUMERIC(14,2),
+  hourly_rate      NUMERIC(10,2),
+  frequency        TEXT NOT NULL DEFAULT 'monthly',
+  hours            TEXT,
+  probation_months INTEGER NOT NULL DEFAULT 0,
+  notice_weeks     INTEGER NOT NULL DEFAULT 2,
+  vacation_days    NUMERIC(5,2),
+  terms            TEXT,                                -- anything else, in plain words
+  status           TEXT NOT NULL DEFAULT 'draft',       -- draft | sent | signed | declined | ended | cancelled
+  signature_id     INTEGER,
+  document_id      INTEGER REFERENCES documents(id) ON DELETE SET NULL,   -- the signed copy
+  created_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_contracts_user ON hr_contracts (user_id);
+
+-- One document sent to one staff member to sign (an "envelope").
+CREATE TABLE IF NOT EXISTS hr_signatures (
+  id                  SERIAL PRIMARY KEY,
+  user_id             INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title               TEXT NOT NULL,
+  kind                TEXT NOT NULL DEFAULT 'other',      -- contract | letter | policy | other
+  contract_id         INTEGER REFERENCES hr_contracts(id) ON DELETE SET NULL,
+  case_id             INTEGER REFERENCES hr_cases(id) ON DELETE SET NULL,
+  source_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL,  -- a file from the Document centre
+  html                TEXT,                               -- or the page itself (a contract written here)
+  content_sha256      TEXT NOT NULL,                      -- what is signed
+  message             TEXT,
+  sent_to             TEXT,
+  sent_by             INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  sent_at             TIMESTAMPTZ DEFAULT NOW(),
+  expires_at          TIMESTAMPTZ NOT NULL,
+  token_sha256        TEXT UNIQUE,                        -- the emailed link (only its hash is kept)
+  code_sha256         TEXT,                               -- access code given separately, if asked for
+  code_tries          INTEGER NOT NULL DEFAULT 0,
+  viewed_at           TIMESTAMPTZ,
+  status              TEXT NOT NULL DEFAULT 'sent',       -- sent | signed | declined | cancelled
+  signed_at           TIMESTAMPTZ,
+  method              TEXT,                               -- in_app | link
+  signer_name         TEXT,
+  image               TEXT,                               -- the drawn signature (PNG data URL)
+  ip                  TEXT,
+  user_agent          TEXT,
+  seal                TEXT,                               -- HMAC over what was signed and by whom
+  signed_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  decline_reason      TEXT,
+  cancelled_at        TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_hr_signatures_user ON hr_signatures (user_id, status);

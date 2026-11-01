@@ -70,6 +70,8 @@
   var JOBK = { start: 'Started', promotion: 'Promotion', transfer: 'Transfer', pay_change: 'Pay change', title_change: 'New job title', confirmation: 'Confirmed in post', demotion: 'Demotion', other: 'Other' };
   var CASEK = { counselling: 'Counselling', verbal_warning: 'Verbal warning', written_warning: 'Written warning', final_warning: 'Final written warning', suspension: 'Suspension', dismissal: 'Dismissal', commendation: 'Commendation' };
   var EXITK = { resignation: 'Resignation', termination: 'Termination', redundancy: 'Redundancy', end_of_contract: 'End of contract', retirement: 'Retirement', other: 'Other' };
+  var EMPTYPE = { regular: 'Regular', officer: 'Officer', owner: 'Owner', statutory: 'Statutory' };
+  var SIGNST = { sent: 'Waiting for signature', signed: 'Signed', declined: 'Declined', cancelled: 'Withdrawn' };
   var REVK = { probation: 'End of probation', annual: 'Yearly', midyear: 'Mid-year', other: 'Other' };
   var META = { departments: [], people: [], criteria: [] };
   var tab = 'staff', CAN = false, staff = [];
@@ -102,7 +104,7 @@
   }
 
   // ---------------------------------------------------------------- tabs --
-  var TABS = [['staff', '🗂 Staff files'], ['org', '🌳 Org chart'], ['leave', '🏖 Leave'], ['tasks', '✅ Checklists'], ['reports', '📊 Reports'], ['audit', '📜 HR log'], ['me', '🙂 My HR file']];
+  var TABS = [['staff', '🗂 Staff files'], ['org', '🌳 Org chart'], ['leave', '🏖 Leave'], ['tasks', '✅ Checklists'], ['reports', '📊 Reports'], ['audit', '📜 HR log'], ['import', '⇪ QuickBooks'], ['me', '🙂 My HR file']];
   function drawTabs() {
     $('#tabs').innerHTML = TABS.filter(function (t) { return CAN || t[0] === 'me'; }).map(function (t) { return '<button data-t="' + t[0] + '"' + (t[0] === tab ? ' class="on"' : '') + '>' + t[1] + '</button>'; }).join('');
     all('[data-t]').forEach(function (b) { b.onclick = function () { location.hash = b.getAttribute('data-t'); }; });
@@ -110,7 +112,7 @@
   function show() {
     drawTabs();
     var v = $('#view'); v.innerHTML = '<div class="empty">Loading…</div>';
-    var f = { staff: staffList, org: orgChart, leave: leaveView, tasks: tasksView, reports: reportsView, audit: auditView, me: myFile }[tab];
+    var f = { staff: staffList, org: orgChart, leave: leaveView, tasks: tasksView, reports: reportsView, audit: auditView, import: importView, me: myFile }[tab];
     Promise.resolve(f(v)).catch(function (e) { v.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
   }
 
@@ -122,7 +124,8 @@
       v.innerHTML = '<div class="card"><h2>Staff files</h2><p class="sub">One file per person: details, emergency contacts, job and pay history, probation, warnings, reviews and goals, leave, documents and checklists. Logins, roles and PINs are on <a href="/admin.html#tab=staff">Users &amp; Staff</a>; pay on <a href="/payroll.html">Payroll</a>; leave days on <a href="/attendance.html#leave">Attendance › Leave</a>.</p>' +
         '<div class="controls"><div style="flex:1;min-width:200px"><label>Find</label><input id="q" type="search" placeholder="Name, job, department or manager" style="width:100%"></div>' +
         '<div><label>Department</label><select id="dF">' + opts(META.departments, '', 'All') + '</select></div><div><label>Status</label><select id="sF">' + opts(pairs(STATUS), '', 'All') + '</select></div>' +
-        '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="showLeft"' + (leftOn ? ' checked' : '') + '> Include people who left</label><button id="csvB">Export CSV</button></div><div id="list"></div></div>';
+        '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="showLeft"' + (leftOn ? ' checked' : '') + '> Include people who left</label><button id="csvB">Export CSV</button><button class="primary" id="addB">+ Add staff</button>' +
+        (staff.some(function (s) { return !s.has_file; }) ? '<button id="startB">Start a file for everyone</button>' : '') + '</div><div id="list"></div></div>';
       function draw() {
         var q = $('#q').value.trim().toLowerCase(), df = $('#dF').value, sf = $('#sF').value;
         var rows = staff.filter(function (s) { return (!q || [s.name, s.job_title, s.department, s.manager, s.employee_no].join(' ').toLowerCase().indexOf(q) >= 0) && (!df || String(s.department_id) === df) && (!sf || s.status === sf); });
@@ -141,13 +144,15 @@
       }
       $('#q').oninput = draw; $('#dF').onchange = draw; $('#sF').onchange = draw;
       $('#showLeft').onchange = function () { staffList(v); };
+      $('#addB').onclick = addStaff;
+      if ($('#startB')) $('#startB').onclick = function () { api('/api/people/start-files', 'POST').then(function (r) { toast(r.started + ' file(s) started'); staffList(v); }).catch(function (e) { toast(e.message); }); };
       $('#csvB').onclick = function () { csv('staff', [['Name', 'Employee no', 'Job', 'Department', 'Manager', 'Started', 'Contract', 'Contract ends', 'Status', 'Probation ends', 'Open warnings', 'Emergency contacts']].concat(staff.map(function (s) { return [s.name, s.employee_no, s.job_title, s.department, s.manager, s.start_date, CONTRACT[s.contract_type], s.contract_end, STATUS[s.status], s.probation_end, s.open_cases, s.contacts]; }))); };
       draw();
     });
   }
 
   // ------------------------------------------------------------ the file --
-  var FT = [['profile', 'Profile'], ['contacts', 'Emergency contacts'], ['job', 'Job & pay'], ['conduct', 'Probation & conduct'], ['leave', 'Leave'], ['reviews', 'Reviews & goals'], ['docs', 'Documents'], ['tasks', 'Checklists'], ['exit', 'Leaving'], ['log', 'History']];
+  var FT = [['profile', 'Profile'], ['contacts', 'Emergency contacts'], ['job', 'Job & pay'], ['conduct', 'Probation & conduct'], ['leave', 'Leave'], ['reviews', 'Reviews & goals'], ['contracts', 'Contracts'], ['sign', 'To sign'], ['docs', 'Documents'], ['tasks', 'Checklists'], ['exit', 'Leaving'], ['log', 'History']];
   var fileTab = 'profile';
   function openFile(uid, keepTab) {
     if (!keepTab) fileTab = 'profile';
@@ -176,7 +181,9 @@
           field('Start date', inp('pS', p.start_date || (f.payroll && f.payroll.hire_date), 'date')) + field('Contract', '<select id="pC">' + opts(pairs(CONTRACT), p.contract_type || 'permanent') + '</select>') + field('Contract ends (fixed term)', inp('pCe', p.contract_end, 'date')) +
           field('Status', '<select id="pSt">' + opts(pairs(STATUS), p.status || 'active') + '</select>') + field('Probation (months)', inp('pPm', p.probation_months != null ? p.probation_months : 3, 'number')) + field('Probation ends', inp('pPe', p.probation_end, 'date')) +
           field('Works at', inp('pW', p.work_location)) + field('Date of birth', inp('pDob', p.date_of_birth, 'date')) + field('Personal phone', inp('pPh', p.personal_phone)) +
-          field('Personal email', inp('pEm', p.personal_email, 'email')) + field('Parish', inp('pPa', p.parish)) + '</div>' +
+          field('Personal email', inp('pEm', p.personal_email, 'email')) + field('Mobile', inp('pMo', p.mobile, 'tel')) + field('Parish', inp('pPa', p.parish)) +
+          field('Gender', '<select id="pG">' + opts([['female', 'Female'], ['male', 'Male'], ['other', 'Other']], p.gender, '–') + '</select>') + field('Employee type', '<select id="pTy">' + opts(pairs(EMPTYPE), p.employee_type || 'regular') + '</select>') +
+          field('Release date (last day worked)', inp('pRd', p.release_date, 'date')) + '</div>' +
           '<label class="sub">Home address</label><textarea id="pA" rows="2">' + esc(p.address || '') + '</textarea><label class="sub">HR notes (only HR sees these)</label><textarea id="pN" rows="3">' + esc(p.notes || '') + '</textarea>' +
           (p.confirmed_on ? '<p class="sub">Confirmed in post on ' + esc(day(p.confirmed_on)) + '.</p>' : '') +
           '<p class="sub">Pay, TRN, NIS and bank details are kept in <a href="/payroll.html">Payroll</a>' + (f.payroll ? ' (' + (f.payroll.is_active ? 'paid' : 'switched off') + ', ' + (f.payroll.pay_type === 'hourly' ? jmd(f.payroll.hourly_rate) + ' an hour' : jmd(f.payroll.salary_annual) + ' a year') + ')' : ': not added yet') + '. Training: <a href="/training.html#people">' + ((f.training && f.training.records) || 0) + ' records</a>' + (f.training && f.training.expiring ? ', ' + f.training.expiring + ' expiring soon' : '') + '.' +
@@ -184,7 +191,8 @@
           '<div class="controls"><button class="primary" id="pSave">Save profile</button></div>';
         $('#pSave').onclick = function () {
           var body = { job_title: $('#pT').value, department_id: $('#pD').value, manager_user_id: $('#pM').value, start_date: $('#pS').value, contract_type: $('#pC').value, contract_end: $('#pCe').value, status: $('#pSt').value,
-            probation_months: $('#pPm').value, work_location: $('#pW').value, date_of_birth: $('#pDob').value, personal_phone: $('#pPh').value, personal_email: $('#pEm').value, parish: $('#pPa').value, address: $('#pA').value, notes: $('#pN').value };
+            probation_months: $('#pPm').value, work_location: $('#pW').value, date_of_birth: $('#pDob').value, personal_phone: $('#pPh').value, personal_email: $('#pEm').value, parish: $('#pPa').value, address: $('#pA').value, notes: $('#pN').value,
+            mobile: $('#pMo').value, gender: $('#pG').value, employee_type: $('#pTy').value, release_date: $('#pRd').value };
           // A probation end typed in wins; left as it was, it follows the start date.
           if ($('#pPe').value !== (p.probation_end || '')) body.probation_end = $('#pPe').value;
           api('/api/people/staff/' + uid + '/profile', 'PUT', body).then(function (r) { reopen(f, r.changed.length ? 'Saved' : 'Nothing changed'); }).catch(fail);
@@ -220,7 +228,7 @@
             return '<div class="item"><b>' + esc(CASEK[c.kind]) + '</b> · ' + esc(day(c.incident_date)) + ' <span class="pill' + (c.kind === 'commendation' ? ' ok' : live ? ' bad' : '') + '">' + esc(c.status) + (c.expires_on ? ', until ' + esc(day(c.expires_on)) : '') + '</span>' +
               '<br>' + esc(c.summary) + (c.action ? '<br><small>Next: ' + esc(c.action) + '</small>' : '') +
               '<br><small>' + esc(c.issued_by_name || '') + (c.document_number ? ' · letter ' + esc(c.document_number) : '') + (c.acknowledged_at ? ' · received by them ' + esc(day(c.acknowledged_at)) : ' · not yet acknowledged') + (c.employee_response ? ' · their reply: “' + esc(c.employee_response) + '”' : '') + '</small>' +
-              '<div style="margin-top:4px">' + (c.status === 'open' ? '<button class="sm" data-cst="' + c.id + ':closed">Close</button> <button class="sm" data-cst="' + c.id + ':appealed">Appealed</button> <button class="sm" data-cst="' + c.id + ':withdrawn">Withdraw</button>' : '<button class="sm" data-cst="' + c.id + ':open">Reopen</button>') + '</div></div>';
+              '<div style="margin-top:4px">' + (c.document_id ? '<button class="sm" data-csign="' + c.id + '">✍ Send to sign</button> ' : '') + (c.status === 'open' ? '<button class="sm" data-cst="' + c.id + ':closed">Close</button> <button class="sm" data-cst="' + c.id + ':appealed">Appealed</button> <button class="sm" data-cst="' + c.id + ':withdrawn">Withdraw</button>' : '<button class="sm" data-cst="' + c.id + ':open">Reopen</button>') + '</div></div>';
           }).join('') : '<p class="sub">Nothing recorded.</p>');
         if ($('#prOk')) $('#prOk').onclick = function () { var n = prompt('A note for the file (optional)', 'Probation passed'); if (n === null) return; api('/api/people/staff/' + uid + '/probation', 'POST', { outcome: 'confirm', note: n }).then(function () { reopen(f, 'Confirmed in post'); }).catch(fail); };
         if ($('#prExt')) $('#prExt').onclick = function () { var u2 = prompt('Extend probation to (YYYY-MM-DD)', ''); if (!u2) return; api('/api/people/staff/' + uid + '/probation', 'POST', { outcome: 'extend', until: u2, note: prompt('Why?', '') || '' }).then(function () { reopen(f, 'Probation extended'); }).catch(fail); };
@@ -228,6 +236,7 @@
           api('/api/people/staff/' + uid + '/cases', 'POST', { kind: $('#cK').value, incident_date: $('#cD').value, expires_on: $('#cE').value, summary: $('#cS').value, details: $('#cDt').value, action: $('#cA').value, file_letter: $('#cL').checked, tell: $('#cT').checked })
             .then(function (r) { reopen(f, r.document ? 'Recorded; letter filed as ' + r.document.number : 'Recorded'); }).catch(fail);
         };
+        all('[data-csign]', el).forEach(function (b) { b.onclick = function () { sendToSign(f, { case_id: +b.getAttribute('data-csign'), kind: 'letter' }); }; });
         all('[data-cst]', el).forEach(function (b) { b.onclick = function () { var x = b.getAttribute('data-cst').split(':'); api('/api/people/staff/' + uid + '/cases/' + x[0], 'PATCH', { status: x[1], note: prompt('Note (optional)', '') || '' }).then(function () { reopen(f, 'Updated'); }).catch(fail); }; });
       },
       leave: function () {
@@ -319,6 +328,8 @@
           }).catch(fail);
         };
       },
+      contracts: function () { contractsPane(el, f); },
+      sign: function () { signPane(el, f); },
       log: function () {
         el.innerHTML = f.log.length ? '<table><thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead><tbody>' + f.log.map(function (x) { return '<tr><td><small>' + esc(when(x.at)) + '</small></td><td>' + esc(x.by_name || '') + '</td><td>' + esc(x.action) + (x.detail ? '<br><small class="sub">' + esc(x.detail) + '</small>' : '') + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="empty">No changes recorded yet.</div>';
       },
@@ -373,6 +384,187 @@
     if ($('#rvSave')) $('#rvSave').onclick = function () { put(body(false), 'Saved'); };
     if ($('#rvRe')) $('#rvRe').onclick = function () { put({ reopen: true }, 'Reopened'); };
     if ($('#rvDel')) $('#rvDel').onclick = function () { if (confirm('Delete this review?')) api('/api/people/staff/' + uid + '/reviews/' + r.id, 'DELETE').then(function () { close(2); reopen(f, 'Deleted'); }).catch(function (e) { toast(e.message); }); };
+  }
+
+  // ----------------------------------------------------------- add staff --
+  // A staff record with its HR file. The login stays off until a manager sets
+  // the role, password or PIN on Users & Staff.
+  function addStaff() {
+    modal('<h2>Add a staff member</h2><p class="sub">Makes their staff record and HR file. Their login is switched off until a manager gives them a role and a password or PIN on <a href="/admin.html#tab=staff">Users &amp; Staff</a>. No email? Leave it blank.</p>' +
+      '<div class="grid">' + field('Full name', inp('asN', '')) + field('Email (optional)', inp('asE', '', 'email')) + field('Phone', inp('asP', '', 'tel')) + field('Employee no.', inp('asNo', '')) +
+      field('Job title', inp('asT', '')) + field('Department', '<select id="asD">' + opts(META.departments, '', '–') + '</select>') + field('Manager', '<select id="asM">' + opts(META.people, '', '–') + '</select>') +
+      field('Start date', inp('asS', today(), 'date')) + field('Contract', '<select id="asC">' + opts(pairs(CONTRACT), 'permanent') + '</select>') + field('Probation (months)', inp('asPm', 3, 'number')) + '</div>' +
+      '<div class="controls"><button class="primary" id="asGo">Add</button><button id="asX">Cancel</button></div>');
+    $('#asX').onclick = function () { close(); };
+    $('#asGo').onclick = function () {
+      api('/api/people/staff', 'POST', { name: $('#asN').value, email: $('#asE').value, phone: $('#asP').value, employee_no: $('#asNo').value, job_title: $('#asT').value, department_id: $('#asD').value,
+        manager_user_id: $('#asM').value, start_date: $('#asS').value, contract_type: $('#asC').value, probation_months: $('#asPm').value })
+        .then(function (r) { toast('Added. ' + r.next); staffList($('#view')); openFile(r.id); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  // ----------------------------------------------------------- contracts --
+  var CKIND = { employment: 'Contract of employment', fixed_term: 'Fixed-term contract', amendment: 'Change to terms', confidentiality: 'Confidentiality agreement', other: 'Other agreement' };
+  var CST = { draft: 'Draft', sent: 'Sent to sign', signed: 'Signed', declined: 'Declined', ended: 'Ended', cancelled: 'Cancelled' };
+  function contractsPane(el, f) {
+    var uid = f.user.id;
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    api('/api/people/staff/' + uid + '/contracts').then(function (d) {
+      el.innerHTML = '<p class="sub">Contracts written from the file and sent to them to sign. The signed copy is filed in the Document centre (restricted). A change later is a new “change to terms”.</p>' +
+        '<div class="controls"><button class="primary" id="ctNew">+ New contract</button></div>' +
+        (d.contracts.length ? d.contracts.map(function (c) {
+          return '<div class="item"><b>' + esc(c.title) + '</b> <span class="pill' + (c.status === 'signed' ? ' ok' : c.status === 'declined' || c.status === 'cancelled' ? ' bad' : ' warn') + '">' + esc(CST[c.status]) + '</span>' +
+            '<br><small>' + esc([c.job_title, c.start_date ? 'from ' + day(c.start_date) : '', c.end_date ? 'to ' + day(c.end_date) : '', c.salary_annual ? jmd(c.salary_annual) + ' a year' : c.hourly_rate ? jmd(c.hourly_rate) + ' an hour' : '',
+              c.signed_at ? 'signed ' + day(c.signed_at) : c.viewed_at ? 'opened ' + day(c.viewed_at) : '', c.document_number ? 'filed ' + c.document_number : ''].filter(Boolean).join(' · ')) + '</small>' +
+            '<div style="margin-top:4px"><a href="/api/people/contracts/' + c.id + '/preview" target="_blank" rel="noopener"><button class="sm">Read</button></a> ' +
+            (c.status === 'draft' || c.status === 'declined' ? '<button class="sm" data-ced="' + c.id + '">Edit</button> <button class="sm primary" data-csend="' + c.id + '">✍ Send to sign</button> <button class="sm" data-cst2="' + c.id + ':cancelled">Cancel</button>' : '') +
+            (c.status === 'sent' ? '<button class="sm" data-cst2="' + c.id + ':cancelled">Withdraw</button>' : '') + (c.status === 'signed' ? '<button class="sm" data-cst2="' + c.id + ':ended">Mark ended</button>' : '') + '</div></div>';
+        }).join('') : '<p class="sub">No contracts yet.</p>');
+      var byId = function (x) { return d.contracts.filter(function (c) { return String(c.id) === String(x); })[0]; };
+      $('#ctNew').onclick = function () { contractForm(f, null); };
+      all('[data-ced]', el).forEach(function (b) { b.onclick = function () { contractForm(f, byId(b.getAttribute('data-ced'))); }; });
+      all('[data-csend]', el).forEach(function (b) { b.onclick = function () { sendToSign(f, { contract_id: +b.getAttribute('data-csend'), kind: 'contract' }); }; });
+      all('[data-cst2]', el).forEach(function (b) { b.onclick = function () {
+        var x = b.getAttribute('data-cst2').split(':');
+        if (!confirm(x[1] === 'ended' ? 'Mark this contract ended?' : 'Cancel this contract? A link already sent stops working.')) return;
+        api('/api/people/contracts/' + x[0] + '/status', 'POST', { status: x[1] }).then(function () { reopen(f, 'Done'); }).catch(function (e) { toast(e.message); });
+      }; });
+    }).catch(function (e) { el.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+  function contractForm(f, c) {
+    var p = f.profile || {}, pay = f.payroll || {};
+    c = c || { kind: p.contract_type === 'fixed_term' ? 'fixed_term' : 'employment', job_title: p.job_title, start_date: p.start_date, end_date: p.contract_end, pay_type: pay.pay_type === 'hourly' ? 'hourly' : 'salary',
+      salary_annual: pay.salary_annual, hourly_rate: pay.hourly_rate, frequency: pay.frequency || 'monthly', probation_months: p.status === 'probation' ? p.probation_months : 0, notice_weeks: 2,
+      vacation_days: pay.vacation_days != null ? pay.vacation_days : (f.leave && f.leave.vacation_entitled), hours: 'Monday to Saturday, 8:00 a.m. to 5:00 p.m., with a one-hour lunch' };
+    modal('<h2>' + (c.id ? 'Edit contract' : 'New contract') + ': ' + esc(f.user.name || '') + '</h2><p class="sub">Filled in from their file and Payroll. Pay is written as before PAYE, NIS, NHT and Education Tax.</p>' +
+      '<div class="grid">' + field('Kind', '<select id="kK">' + opts(pairs(CKIND), c.kind) + '</select>') + field('Title (optional)', inp('kTi', c.title)) + field('Job title', inp('kJ', c.job_title)) +
+      field('Start date', inp('kS', c.start_date, 'date')) + field('End date (fixed term)', inp('kE', c.end_date, 'date')) + field('Paid', '<select id="kPt">' + opts([['salary', 'Salary'], ['hourly', 'By the hour']], c.pay_type) + '</select>') +
+      field('Yearly salary (J$)', inp('kSa', c.salary_annual)) + field('Hourly rate (J$)', inp('kHr', c.hourly_rate)) + field('Pay day', '<select id="kF">' + opts([['weekly', 'Weekly'], ['fortnightly', 'Fortnightly'], ['monthly', 'Monthly']], c.frequency) + '</select>') +
+      field('Probation (months)', inp('kPm', c.probation_months, 'number')) + field('Notice (weeks)', inp('kN', c.notice_weeks, 'number')) + field('Vacation days a year', inp('kV', c.vacation_days, 'number')) + '</div>' +
+      '<label class="sub">Hours of work</label><input id="kH" value="' + esc(c.hours || '') + '" style="width:100%"><label class="sub">Other terms (or, for an agreement, what is agreed)</label><textarea id="kT" rows="5">' + esc(c.terms || '') + '</textarea>' +
+      '<div class="controls" style="margin-top:8px"><button class="primary" id="kGo">Save draft</button><button id="kX">Cancel</button></div>', 2);
+    $('#kX').onclick = function () { close(2); };
+    $('#kGo').onclick = function () {
+      var body = { kind: $('#kK').value, title: $('#kTi').value, job_title: $('#kJ').value, start_date: $('#kS').value, end_date: $('#kE').value, pay_type: $('#kPt').value, salary_annual: $('#kSa').value, hourly_rate: $('#kHr').value,
+        frequency: $('#kF').value, probation_months: $('#kPm').value, notice_weeks: $('#kN').value, vacation_days: $('#kV').value, hours: $('#kH').value, terms: $('#kT').value };
+      api(c.id ? '/api/people/contracts/' + c.id : '/api/people/staff/' + f.user.id + '/contracts', c.id ? 'PUT' : 'POST', body).then(function () { close(2); fileTab = 'contracts'; reopen(f, 'Saved. Read it, then Send to sign.'); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  // -------------------------------------------------------- to be signed --
+  // what: { contract_id } | { case_id } | { document_number }
+  function sendToSign(f, what) {
+    var u = f.user, p = f.profile || {};
+    var mail = /\.local$/i.test(u.email || '') ? (p.personal_email || '') : u.email;
+    modal('<h2>Send to ' + esc(u.name || '') + ' to sign</h2>' +
+      (what.document_number !== undefined ? '<div class="grid">' + field('Document number in the Document centre', inp('sgDoc', what.document_number || '', 'text')) + field('Kind', '<select id="sgK">' + opts([['policy', 'Policy or handbook'], ['letter', 'Letter'], ['contract', 'Contract'], ['other', 'Other']], 'policy') + '</select>') + '</div>' : '') +
+      '<p class="sub">They get a notice to sign it in My HR file, and a private link by email (for staff who do not sign in). What they sign is fingerprinted now: if the file changes, it cannot be signed.</p>' +
+      '<div class="grid">' + field('Send the link to', inp('sgE', mail || '', 'email')) + field('Link works for (days)', inp('sgDays', 14, 'number')) + '</div>' +
+      '<label style="display:flex;gap:6px;align-items:center;margin:4px 0"><input type="checkbox" id="sgCode"> Ask for an access code before it opens (you give them the code by phone, not by email)</label>' +
+      '<label class="sub">Message (optional)</label><textarea id="sgM" rows="2"></textarea>' +
+      '<div class="controls" style="margin-top:8px"><button class="primary" id="sgGo">Send</button><button id="sgX">Cancel</button></div>', 2);
+    $('#sgX').onclick = function () { close(2); };
+    $('#sgGo').onclick = function () {
+      this.disabled = true;
+      var body = Object.assign({}, what, { email: $('#sgE').value, days: $('#sgDays').value, code: $('#sgCode').checked, message: $('#sgM').value });
+      if ($('#sgDoc')) { body.document_number = $('#sgDoc').value; body.kind = $('#sgK').value; }
+      api('/api/people/staff/' + u.id + '/signatures', 'POST', body).then(function (r) { close(2); fileTab = 'sign'; reopen(f); showLink(r); })
+        .catch(function (e) { $('#sgGo').disabled = false; toast(e.message); });
+    };
+  }
+  // The link and code are shown once: only their fingerprints are kept.
+  function showLink(r) {
+    modal('<h2>Sent</h2><p>' + (r.emailed ? 'The link was emailed to ' + esc(r.sent_to) + '.' : 'The link was <b>not</b> emailed (no email address, or email is not set up on this till). Copy it to them by WhatsApp, or they can sign in My HR file.') + '</p>' +
+      '<label class="sub">Their private link (works ' + r.expires_in_days + ' days; shown only now)</label><input readonly value="' + esc(r.link) + '" style="width:100%" onclick="this.select()">' +
+      (r.code ? '<div class="warn">Access code: <b style="font-size:20px;letter-spacing:3px">' + esc(r.code) + '</b><br>Give it to them by phone or in person, not with the link. Shown only now.</div>' : '') +
+      '<div class="controls" style="margin-top:8px"><button id="slX">Done</button></div>', 2);
+    $('#slX').onclick = function () { close(2); };
+  }
+  function signPane(el, f) {
+    var uid = f.user.id;
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    api('/api/people/staff/' + uid + '/signatures').then(function (d) {
+      el.innerHTML = '<p class="sub">Documents sent to them to sign: contracts (Contracts tab), letters (Probation &amp; conduct) or any file in the Document centre, such as the staff handbook. Signed copies carry a certificate (who, when, from where, a fingerprint and a seal) and are filed in their staff file.</p>' +
+        '<div class="controls"><button class="primary" id="sgDocB">✍ Send a Document centre file to sign</button></div>' +
+        (d.signatures.length ? d.signatures.map(function (s) {
+          return '<div class="item"><b>' + esc(s.title) + '</b> <span class="pill' + (s.status === 'signed' ? ' ok' : s.status === 'sent' ? ' warn' : ' bad') + '">' + esc(SIGNST[s.status]) + '</span>' + (s.code_locked ? ' <span class="pill bad">code locked</span>' : '') +
+            '<br><small>' + esc(['sent ' + day(s.sent_at) + (s.sent_by ? ' by ' + s.sent_by : ''), s.sent_to ? 'link to ' + s.sent_to : 'no email', s.needs_code ? 'access code' : '', s.viewed_at ? 'opened ' + when(s.viewed_at) : 'not opened yet',
+              s.signed_at ? 'signed ' + when(s.signed_at) + ' as “' + s.signer_name + '”' + (s.method === 'in_app' ? ' in My HR file' : ' from the link') : '', s.declined ? 'declined: ' + s.declined : '', s.signed_number ? 'filed ' + s.signed_number : '',
+              s.status === 'signed' ? (s.sealed ? 'seal checks out' : 'SEAL DOES NOT MATCH') : ''].filter(Boolean).join(' · ')) + '</small>' +
+            '<div style="margin-top:4px">' + (s.status === 'signed' ? '<a href="/api/people/signatures/' + s.id + '/copy" target="_blank" rel="noopener"><button class="sm">Signed copy</button></a>' : '') +
+            (s.status === 'sent' ? '<button class="sm" data-sgre="' + s.id + '">New link</button> <button class="sm" data-sgcan="' + s.id + '">Withdraw</button>' : '') + '</div></div>';
+        }).join('') : '<p class="sub">Nothing sent yet.</p>');
+      $('#sgDocB').onclick = function () { sendToSign(f, { document_number: '' }); };
+      all('[data-sgre]', el).forEach(function (b) { b.onclick = function () {
+        if (!confirm('Make a new link? The old link stops working.')) return;
+        api('/api/people/signatures/' + b.getAttribute('data-sgre') + '/resend', 'POST', {}).then(function (r) { reopen(f); r.expires_in_days = 14; r.sent_to = 'them'; showLink(r); }).catch(function (e) { toast(e.message); });
+      }; });
+      all('[data-sgcan]', el).forEach(function (b) { b.onclick = function () { if (confirm('Withdraw it? The link stops working.')) api('/api/people/signatures/' + b.getAttribute('data-sgcan') + '/cancel', 'POST').then(function () { reopen(f, 'Withdrawn'); }).catch(function (e) { toast(e.message); }); }; });
+    }).catch(function (e) { el.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+  // My HR file: what I have to sign, and my signed copies.
+  function mySignatures(el, after) {
+    api('/api/people/me/signatures').then(function (d) {
+      var open = d.signatures.filter(function (s) { return s.status === 'sent'; }), done = d.signatures.filter(function (s) { return s.status !== 'sent'; });
+      el.innerHTML = (open.length ? '<div class="warn">' + open.length + ' document(s) waiting for your signature.</div>' + open.map(function (s) {
+        return '<div class="item"><b>' + esc(s.title) + '</b><br><small>from ' + esc(s.sent_by || 'HR') + ' · ' + esc(day(s.sent_at)) + '</small>' + (s.message ? '<br>' + esc(s.message) : '') + '<div style="margin-top:4px"><button class="sm primary" data-msg="' + s.id + '">Read and sign</button></div></div>';
+      }).join('') : '<p class="sub">Nothing waiting for you.</p>') +
+        (done.length ? '<h4>Signed and other</h4>' + done.map(function (s) { return '<div class="item">' + esc(s.title) + ' <span class="pill' + (s.status === 'signed' ? ' ok' : '') + '">' + esc(SIGNST[s.status]) + '</span>' + (s.signed_at ? ' <small>' + esc(day(s.signed_at)) + '</small>' : '') + (s.status === 'signed' ? ' <a href="/api/people/me/signatures/' + s.id + '/copy" target="_blank" rel="noopener">My signed copy</a>' : '') + '</div>'; }).join('') : '');
+      all('[data-msg]', el).forEach(function (b) { b.onclick = function () { signBox(open.filter(function (s) { return String(s.id) === b.getAttribute('data-msg'); })[0], after); }; });
+    }).catch(function (e) { el.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+  function signBox(s, after) {
+    var src = '/api/people/me/signatures/' + s.id + '/content';
+    var mo = modal('<h2>' + esc(s.title) + '</h2><p class="sub">Read it all before you sign. ' + (s.is_file ? '<a href="' + src + '" target="_blank" rel="noopener">Open it in a new tab</a> if it does not show here.' : '') + '</p>' +
+      '<iframe src="' + src + '" sandbox style="width:100%;height:55vh;border:1px solid var(--line);border-radius:8px;background:#fff" title="The document"></iframe>' +
+      '<label class="sub">Type your full name</label><input id="sbN" autocomplete="name" style="width:100%"><label class="sub">Sign in the box</label><div id="sbPad"></div>' +
+      '<label style="display:flex;gap:6px;align-items:flex-start;margin:8px 0"><input type="checkbox" id="sbA"> I have read “' + esc(s.title) + '” and agree to it.</label>' +
+      '<div class="controls"><button class="primary" id="sbGo">Sign</button><button id="sbClr">Clear</button><button id="sbNo">I will not sign</button><button id="sbX">Close</button></div>');
+    var pad = window.VAScan && window.VAScan.pad ? window.VAScan.pad($('#sbPad', mo)) : null;
+    $('#sbX').onclick = function () { close(); };
+    $('#sbClr').onclick = function () { if (pad) pad.clear(); };
+    $('#sbGo').onclick = function () {
+      if (!pad || pad.empty()) return toast('Sign in the box first');
+      api('/api/people/me/signatures/' + s.id + '/sign', 'POST', { name: $('#sbN').value, image: pad.png(), agree: $('#sbA').checked }).then(function () { close(); toast('Signed. Your copy is under Signed and other.'); after(); }).catch(function (e) { toast(e.message); });
+    };
+    $('#sbNo').onclick = function () {
+      var why = prompt('Why are you not signing? HR will follow up.', '');
+      if (why) api('/api/people/me/signatures/' + s.id + '/decline', 'POST', { reason: why }).then(function () { close(); toast('HR has been told'); after(); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  // ------------------------------------------------- QuickBooks import --
+  function importView(v) {
+    v.innerHTML = '<div class="card"><h2>Employees from QuickBooks</h2><p class="sub">In QuickBooks Desktop: Reports › List › Employee Contact List, then Excel › Create New Worksheet › save as CSV; or File › Utilities › Export › Lists to IIF Files › Employee List. In QuickBooks Online: Payroll › Employees › Export. ' +
+      'You see each employee first: new, changed (with each change) or the same. Only what you tick is added or changed. New people get an HR file and a staff record with the login switched off; anyone with a release date in the past is put straight into the archive. TRN, NIS and pay go to Payroll (switched off) only if you may change pay.</p>' +
+      '<div class="controls"><input type="file" id="qeF" accept=".csv,.iif,.txt"><button id="qeP">Preview</button></div><div id="qeOut"></div></div>' +
+      '<div class="card"><h2>Payroll items from QuickBooks</h2><p class="sub">Lists › Payroll Item List › Reports › Payroll Item Listing, saved as CSV. Earnings, deductions and company contributions that are not here yet are added; PAYE, NIS, NHT, Education Tax and HEART are not imported, because Payroll works them out by the TAJ rules. Check the tax ticks on each new item in Payroll settings. Needs the pay permission.</p>' +
+      '<div class="controls"><input type="file" id="qiF" accept=".csv,.txt"><button id="qiP">Preview</button></div><div id="qiOut"></div></div>';
+    function read(input) { return new Promise(function (ok, bad) { var f = input.files[0]; if (!f) return bad(new Error('Choose the file first')); if (f.size > 5 * 1024 * 1024) return bad(new Error('The file is over 5 MB')); var r = new FileReader(); r.onload = function () { ok(String(r.result)); }; r.onerror = function () { bad(new Error('Could not read the file')); }; r.readAsText(f); }); }
+    var ST = { new: ['New', ' ok'], changed: ['Changed', ' warn'], same: ['Same', ''], duplicate: ['Twice in file', ' bad'], skip: ['Not imported', ''] };
+    function preview(url, input, out, cols) {
+      read(input).then(function (file) {
+        return api(url, 'POST', { file: file, preview: true }).then(function (d) {
+          var can = d.rows.filter(function (r) { return r.status === 'new' || r.status === 'changed'; });
+          out.innerHTML = '<p class="sub">' + d.rows.length + ' in the file: ' + can.length + ' to add or change.' + (d.payroll === false ? ' Pay details are left out: you may not change pay.' : '') + '</p>' +
+            '<div class="scroll"><table><thead><tr><th><input type="checkbox" id="' + out.id + 'All" checked></th>' + cols.map(function (c) { return '<th>' + c[0] + '</th>'; }).join('') + '<th>Status</th><th>What changes</th></tr></thead><tbody>' + d.rows.map(function (r) {
+              var on = r.status === 'new' || r.status === 'changed';
+              return '<tr><td>' + (on ? '<input type="checkbox" data-qi="' + r.i + '" checked>' : '') + '</td>' + cols.map(function (c) { return '<td>' + esc(c[1](r) || '') + '</td>'; }).join('') +
+                '<td><span class="pill' + ST[r.status][1] + '">' + ST[r.status][0] + '</span></td><td><small>' + esc(r.reason || (r.changes || []).map(function (x) { return x.label + ': ' + (x.from || '–') + ' → ' + x.to; }).join('; ') || (r.existing ? 'matches ' + r.existing : '')) + '</small></td></tr>';
+            }).join('') + '</tbody></table></div>' + (can.length ? '<div class="controls" style="margin-top:8px"><button class="primary" id="' + out.id + 'Go">Import the ticked ones</button></div>' : '');
+          if (!can.length) return;
+          $('#' + out.id + 'All').onchange = function () { var c = this.checked; all('[data-qi]', out).forEach(function (x) { x.checked = c; }); };
+          $('#' + out.id + 'Go').onclick = function () {
+            this.disabled = true;
+            api(url, 'POST', { file: file, include: all('[data-qi]', out).filter(function (x) { return x.checked; }).map(function (x) { return +x.getAttribute('data-qi'); }) })
+              .then(function (r) { out.innerHTML = '<div class="warn">Done: ' + [r.added != null ? r.added + ' added' : '', r.updated != null ? r.updated + ' updated' : '', r.left ? r.left + ' archived as released' : ''].filter(Boolean).join(', ') + '.</div>'; })
+              .catch(function (e) { toast(e.message); });
+          };
+        });
+      }).catch(function (e) { toast(e.message); });
+    }
+    $('#qeP').onclick = function () { preview('/api/people/import/employees', $('#qeF'), $('#qeOut'), [['Name', function (r) { return r.name; }], ['Email', function (r) { return r.email; }], ['Phone', function (r) { return r.phone; }], ['Hired', function (r) { return r.hired; }], ['Released', function (r) { return r.released; }]]); };
+    $('#qiP').onclick = function () { preview('/api/people/import/payroll-items', $('#qiF'), $('#qiOut'), [['Item', function (r) { return r.label; }], ['QuickBooks type', function (r) { return r.type; }], ['Becomes', function (r) { return r.kind || ''; }]]); };
   }
 
   // ----------------------------------------------------------- org chart --
@@ -469,8 +661,9 @@
         '<div class="kpis"><div class="kpi"><b>' + (l.vacation_left != null ? l.vacation_left : '–') + '</b><span>vacation days left this year</span></div><div class="kpi"><b>' + (l.sick_left != null ? l.sick_left : '–') + '</b><span>sick days left</span></div>' +
         '<div class="kpi"><b>' + (STATUS[p.status] || 'Active') + '</b><span>' + (p.status === 'probation' && p.probation_end ? 'until ' + esc(day(p.probation_end)) : 'status') + '</span></div></div>' +
         '<p class="sub">To book time off, ask your manager or use the leave form in the <a href="/documents.html">Document centre</a>. Your payslips are in <a href="/my-time.html">My time</a> and Payroll.</p></div>' +
-        '<div class="card"><h2>My contact details</h2><div class="grid">' + field('Personal phone', inp('mPh', p.personal_phone, 'tel')) + field('Personal email', inp('mEm', p.personal_email, 'email')) + field('Parish', inp('mPa', p.parish)) + '</div>' +
+        '<div class="card"><h2>My contact details</h2><div class="grid">' + field('Personal phone', inp('mPh', p.personal_phone, 'tel')) + field('Personal email', inp('mEm', p.personal_email, 'email')) + field('Mobile', inp('mMo', p.mobile, 'tel')) + field('Parish', inp('mPa', p.parish)) + '</div>' +
         '<label class="sub">Home address</label><textarea id="mA" rows="2">' + esc(p.address || '') + '</textarea><div class="controls" style="margin-top:8px"><button class="primary" id="mSave">Save</button></div></div>' +
+        '<div class="card" id="mSignCard"><h2>Documents to sign</h2><div id="mSign"><div class="empty">Loading…</div></div></div>' +
         '<div class="card"><h2>My emergency contacts</h2><div id="mC"></div></div>' +
         (f.my_tasks.length ? '<div class="card"><h2>HR tasks for me</h2>' + f.my_tasks.map(function (k) { return '<div class="task"><input type="checkbox" data-mt="' + k.id + '"><span>' + esc(k.title) + (k.link ? ' <a href="' + esc(k.link) + '">open ›</a>' : '') + (k.due_on ? '<br><small class="sub">by ' + esc(day(k.due_on)) + '</small>' : '') + '</span></div>'; }).join('') + '</div>' : '') +
         '<div class="card"><h2>My reviews and goals</h2>' + (f.reviews.length ? f.reviews.map(function (r) {
@@ -485,8 +678,9 @@
             (c.acknowledged_at ? '<br><small>Received ' + esc(day(c.acknowledged_at)) + (c.employee_response ? '. Your reply: “' + esc(c.employee_response) + '”' : '') + '</small>' :
               '<textarea id="mcr' + c.id + '" rows="2" placeholder="Your reply (optional)" style="margin-top:6px"></textarea><button class="sm primary" data-mc="' + c.id + '">I have received this letter</button>') + '</div>';
         }).join('') : '<p class="sub">None.</p>') + '</div>';
-      $('#mSave').onclick = function () { api('/api/people/me/details', 'PUT', { personal_phone: $('#mPh').value, personal_email: $('#mEm').value, parish: $('#mPa').value, address: $('#mA').value }).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); }); };
+      $('#mSave').onclick = function () { api('/api/people/me/details', 'PUT', { personal_phone: $('#mPh').value, personal_email: $('#mEm').value, mobile: $('#mMo').value, parish: $('#mPa').value, address: $('#mA').value }).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); }); };
       contactsPane($('#mC'), f.contacts, '/api/people/me/contacts', function (m) { toast(m); myFile(v); });
+      mySignatures($('#mSign'), function () { myFile(v); });
       all('[data-mr]', v).forEach(function (b) { b.onclick = function () { var id = b.getAttribute('data-mr'); api('/api/people/me/reviews/' + id + '/ack', 'POST', { comments: $('#mrc' + id).value }).then(function () { toast('Thank you'); myFile(v); }).catch(function (e) { toast(e.message); }); }; });
       all('[data-mc]', v).forEach(function (b) { b.onclick = function () { var id = b.getAttribute('data-mc'); api('/api/people/me/cases/' + id + '/ack', 'POST', { response: $('#mcr' + id).value }).then(function () { toast('Recorded'); myFile(v); }).catch(function (e) { toast(e.message); }); }; });
       all('[data-mt]', v).forEach(function (c) { c.onchange = function () { api('/api/people/me/tasks/' + c.getAttribute('data-mt'), 'PATCH', { done: c.checked }).then(function () { toast('Done'); myFile(v); }).catch(function (e) { toast(e.message); }); }; });
@@ -506,6 +700,7 @@
   api('/api/people/meta').then(function (m) { META = m; CAN = true; }, function () { CAN = false; }).then(route);
 })();
 </script>
+<script src="/assets/invoice-scan.js?v=20261028"></script>
 <script src="/assets/staff-assist.js?v=20261020" defer></script>
 </body>
 </html>

@@ -55,6 +55,7 @@
 <header><h1>Hiring</h1><nav><button class="sm" id="logBtn" data-hr>📜 Decisions</button><button class="sm" id="setBtn" data-hr>⚙ Emails &amp; settings</button><a href="/people.html">People &amp; HR</a><a href="/careers.html" target="_blank" rel="noopener" data-hr>Public careers page ↗</a><a href="/admin.html">Admin</a></nav></header>
 <main>
   <div class="card" id="myIvCard" hidden><h2>My interviews</h2><p class="sub">Interviews you are on the panel for. After each one, fill in your scorecard: the hiring team sees everyone’s scores side by side.</p><div id="myIv"></div></div>
+  <div class="card" id="myJobsCard" hidden><h2>My jobs</h2><p class="sub">Jobs you are the hiring manager or an interviewer for. As hiring manager you can read each applicant, their CV and the panel’s scores, add your notes and compare them; hiring staff move them on.</p><div id="myJobs"></div></div>
   <div class="card" id="reqCard" hidden><h2>Requisitions <button class="sm primary" id="newReq" data-hr>+ Requisition</button></h2><p class="sub">The case for a new job, approved before it is posted. Once approved, “Post it” makes the job posting.</p><div id="reqs"></div></div>
   <div class="card" data-hr><h2>Job postings <button class="sm primary" id="newJob">+ Job</button></h2><div id="jobs"></div></div>
   <div class="card" data-hr><h2>Applicants</h2>
@@ -178,6 +179,7 @@
       '<div class="lines" id="jqs">' + (j.questions || []).map(function (x) { return lineHtml('q', x); }).join('') + '</div><button class="sm" id="addQ">+ Question</button>' +
       '<h4>Interview scorecard</h4><p class="sub">What the panel scores, 1 to 5, after each interview. Leave empty for the standard list (experience, parts knowledge, customer service, communication, reliability, teamwork).</p>' +
       '<div class="lines" id="jsc">' + (j.scorecard || []).map(function (x) { return lineHtml('sc', x); }).join('') + '</div><button class="sm" id="addSc">+ Area to score</button>' +
+      '<h4>Interviewers</h4><p class="sub">Ticked for every interview for this job (you can change the panel each time). They see the interviews they sit on; the hiring manager also sees the applicants.</p>' + pickPeople('jiv', j.interviewer_ids) +
       '<div class="controls" style="margin-top:12px"><div><label>Hiring manager</label><select id="jhm">' + opts(META.people, j.hiring_manager_id, '–') + '</select></div>' +
         '<div><label>Requisition</label><select id="jreq">' + opts(reqs.filter(function (r) { return r.status === 'approved' || r.status === 'filled' || r.id === j.requisition_id; }).map(function (r) { return { id: r.id, name: '#' + r.id + ' ' + r.title + ' (' + REQ_ST[r.status] + ')' }; }), j.requisition_id, 'None') + '</select></div></div>' +
       '<label style="display:flex;gap:6px;align-items:center;margin:14px 0 8px"><input type="checkbox" id="jo"' + (j.is_open !== false ? ' checked' : '') + '> Open (shown on the careers page)</label>' +
@@ -201,7 +203,7 @@
     $('#jsave').onclick = function () {
       var body = { title: $('#jt').value, kind: $('#jk').value, openings: $('#jn').value, department: $('#jd').value, location: $('#jl').value, pay: $('#jp').value, closes_on: $('#jc').value, summary: $('#js').value, description: $('#jdesc').value, requirements: $('#jr').value, is_open: $('#jo').checked,
         documents: lines($('#jdocs'), 'doc'), questions: lines($('#jqs'), 'q'), cv_required: $('#jcv').checked,
-        scorecard: lines($('#jsc'), 'doc'), hiring_manager_id: $('#jhm').value || null, requisition_id: $('#jreq').value || null };
+        scorecard: lines($('#jsc'), 'doc'), hiring_manager_id: $('#jhm').value || null, requisition_id: $('#jreq').value || null, interviewer_ids: picked('jiv') };
       api('/api/hr/jobs' + (j.id ? '/' + j.id : ''), j.id ? 'PUT' : 'POST', body).then(function () { close(); toast('Saved'); loadJobs(); }).catch(function (e) { toast(e.message); });
     };
   }
@@ -273,6 +275,7 @@
         '<div class="controls" style="margin-top:8px"><button class="primary" id="asave">Save</button>' + (a.stage !== 'hired' ? '<button id="ahire">Hire</button>' : '') + '<button id="adel">Delete applicant</button><button id="ax">Close</button></div>' +
         '<h4>History</h4>' + (d.notes.length ? d.notes.map(function (n) { return '<p class="sub"><b>' + esc(when(n.at)) + '</b> ' + esc(n.by_name || (n.kind === 'email' ? 'automatic' : '')) + ': ' + esc(n.note || n.kind) + '</p>'; }).join('') : '<p class="sub">Nothing yet.</p>'));
       $('#ax').onclick = function () { close(); };
+      if (d.role === 'manager') return managerView(mo, a);
       wirePipeline(mo, a, d);
       $('#amail').onclick = function () { compose(a, 'blank'); };
       if ($('#askDocs')) $('#askDocs').onclick = function () { compose(a, 'docs'); };
@@ -416,7 +419,9 @@
     all('[data-ofwd]', mo).forEach(function (b) { b.onclick = function () { var n = prompt('Why is the offer withdrawn?', ''); if (!n) return; api('/api/hr/offers/' + b.getAttribute('data-ofwd') + '/withdraw', 'POST', { reason: n }).then(function () { re('Offer withdrawn'); }).catch(fail); }; });
   }
   function interviewForm(a, iv, round) {
-    var cur = iv || { round: round || 1, minutes: 45, mode: 'in_person', location: 'Vision Auto Solutions, 112C Waltham Park Road', panel: [] };
+    var job = jobs.filter(function (x) { return x.id === a.job_id; })[0] || {};
+    var dflt = (job.interviewer_ids || []).concat(job.hiring_manager_id ? [job.hiring_manager_id] : []).map(function (u) { return { id: u }; });
+    var cur = iv || { round: round || 1, minutes: 45, mode: 'in_person', location: 'Vision Auto Solutions, 112C Waltham Park Road', panel: dflt };
     var on = (cur.panel || []).map(function (p) { return String(p.id); });
     modal('<h2>' + (iv ? 'Change the interview' : 'Book an interview') + ': ' + esc(a.name) + '</h2>' +
       '<div class="controls"><div><label>When</label><input id="ivAt" type="datetime-local" value="' + (cur.starts_at ? localInput(cur.starts_at) : '') + '"></div>' +
@@ -545,7 +550,7 @@
               d.criteria.map(function (k) { return '<td>' + ((c.by_area || {})[k.key] != null ? c.by_area[k.key] : '') + '</td>'; }).join('') +
               '<td><small>' + Object.keys(RECO).filter(function (k) { return rec[k]; }).map(function (k) { return RECO[k] + ' ' + rec[k]; }).join('<br>') + '</small></td>' +
               '<td><small>' + c.refs_done + ' of ' + c.refs + ' done' + (c.refs_poor ? ' <span class="pill bad">' + c.refs_poor + ' poor</span>' : '') + '</small></td>' +
-              '<td>' + (['shortlist', 'interview', 'references'].indexOf(c.stage) >= 0 ? '<button class="sm" data-choose="' + c.id + '">Choose</button>' : '') + '</td></tr>';
+              '<td>' + (META.can_manage && ['shortlist', 'interview', 'references'].indexOf(c.stage) >= 0 ? '<button class="sm" data-choose="' + c.id + '">Choose</button>' : '') + '</td></tr>';
           }).join('') + '</tbody></table></div>' : '<div class="empty">Nobody shortlisted for this job yet.</div>') +
         '<div class="controls" style="margin-top:8px"><button id="cmX">Close</button></div>');
       $('#cmX').onclick = function () { close(); };
@@ -595,11 +600,12 @@
         '<div><label>Why</label><select id="rqR"><option value="new"' + (r.reason === 'new' ? ' selected' : '') + '>A new job</option><option value="replacement"' + (r.reason === 'replacement' ? ' selected' : '') + '>Replacing someone</option><option value="temporary"' + (r.reason === 'temporary' ? ' selected' : '') + '>Temporary cover</option></select></div>' +
         '<div><label>Replacing</label><select id="rqRp">' + opts(META.people, r.replaces_user_id, '–') + '</select></div><div><label>Hiring manager</label><select id="rqHm">' + opts(META.people, r.hiring_manager_id, '–') + '</select></div></div>' +
       '<div class="controls"><div><label>Lowest pay (J$ a year)</label><input id="rqMin" inputmode="decimal" value="' + esc(r.salary_min || '') + '"></div><div><label>Highest pay (J$ a year)</label><input id="rqMax" inputmode="decimal" value="' + esc(r.salary_max || '') + '"></div><div><label>Needed by</label><input id="rqSb" type="date" value="' + esc(r.start_by || '') + '"></div></div>' +
+      '<h4>Interviewers</h4>' + pickPeople('rqIv', r.interviewer_ids) +
       '<label class="sub">Why the shop needs this person (the approver reads this)</label><textarea id="rqJ" rows="4">' + esc(r.justification || '') + '</textarea>' +
       '<div class="controls" style="margin-top:8px"><button class="primary" id="rqSub">Save and send for approval</button><button id="rqSave">Save draft</button><button id="rqX">Cancel</button></div>');
     $('#rqX').onclick = function () { close(); };
     function save(submit) {
-      var body = { title: $('#rqT').value, kind: $('#rqK').value, openings: $('#rqN').value, department: $('#rqD').value, reason: $('#rqR').value, replaces_user_id: $('#rqRp').value, hiring_manager_id: $('#rqHm').value,
+      var body = { title: $('#rqT').value, kind: $('#rqK').value, openings: $('#rqN').value, department: $('#rqD').value, reason: $('#rqR').value, replaces_user_id: $('#rqRp').value, hiring_manager_id: $('#rqHm').value, interviewer_ids: picked('rqIv'),
         salary_min: $('#rqMin').value, salary_max: $('#rqMax').value, start_by: $('#rqSb').value, justification: $('#rqJ').value, submit: submit };
       api('/api/hr/requisitions' + (r.id ? '/' + r.id : ''), r.id ? 'PUT' : 'POST', body).then(function () { close(); toast(submit ? 'Sent for approval' : 'Saved'); loadReqs(); }).catch(function (e) { toast(e.message); });
     }
@@ -608,6 +614,33 @@
   }
 
   // -------------------------------------------- my interviews, decisions --
+  // Staff to tick (interviewers), and what was ticked.
+  function pickPeople(k, on) { on = (on || []).map(String); return '<div class="chips">' + META.people.map(function (p) { return '<label style="display:flex;gap:4px;align-items:center;font-size:13px"><input type="checkbox" data-pick="' + k + '" value="' + p.id + '"' + (on.indexOf(String(p.id)) >= 0 ? ' checked' : '') + '> ' + esc(p.name) + '</label>'; }).join(' ') + '</div>'; }
+  function picked(k) { return all('[data-pick="' + k + '"]').filter(function (c) { return c.checked; }).map(function (c) { return +c.value; }); }
+  // A hiring manager without hiring rights: the application to read, with a note box; no stage, email or file controls.
+  function managerView(mo, a) {
+    all('button, select, input, textarea', mo).forEach(function (el) { if (el.id !== 'ax' && !el.hasAttribute('data-ivscore')) el.remove(); });
+    all('.controls', mo).forEach(function (c) { if (!c.querySelector('button')) c.remove(); });
+    $('#ax', mo).insertAdjacentHTML('beforebegin', '<textarea id="mgNote" rows="2" placeholder="Your view on this applicant (added to the history)"></textarea><button class="primary" id="mgGo">Add note</button> ');
+    $('#ax').onclick = function () { close(); };
+    all('[data-ivscore]', mo).forEach(function (b) { b.onclick = function () { scoreForm(b.getAttribute('data-ivscore'), function () { openApp(a.id); }); }; });
+    $('#mgGo').onclick = function () { api('/api/hr/applications/' + a.id + '/notes', 'POST', { note: $('#mgNote').value }).then(function () { toast('Note added'); openApp(a.id); }).catch(function (e) { toast(e.message); }); };
+  }
+  function loadMyJobs() {
+    return api('/api/hr/my-jobs').then(function (d) {
+      $('#myJobsCard').hidden = !d.jobs.length;
+      $('#myJobs').innerHTML = d.jobs.map(function (j) {
+        var list = d.applications.filter(function (x) { return x.job_id === j.id; });
+        return '<h4>' + esc(j.title) + ' <span class="pill' + (j.is_open ? ' ok' : '') + '">' + (j.is_open ? 'open' : 'closed') + '</span> <span class="pill">' + (j.is_manager ? 'hiring manager' : 'interviewer') + '</span>' +
+          (j.is_manager ? ' <button class="sm" data-mjc="' + j.id + '">Compare candidates</button>' : '') + '</h4>' +
+          (j.is_manager ? (list.length ? '<div class="scroll"><table><thead><tr><th>Applicant</th><th>Stage</th><th>Screen</th><th>Interview score</th><th>Applied</th></tr></thead><tbody>' + list.map(function (x) {
+            return '<tr class="row" data-a="' + x.id + '"><td><b>' + esc(x.name || '') + '</b> <small>' + esc(x.ref || '') + '</small></td><td>' + esc(STAGE[x.stage]) + (x.interview_at ? '<br><small>' + esc(when(x.interview_at)) + '</small>' : '') + '</td><td>' + esc(SCREEN[x.screen_result] || '') + '</td><td>' + (x.avg_overall != null ? x.avg_overall + '/5' : '') + '</td><td>' + esc(day(x.created_at)) + '</td></tr>';
+          }).join('') + '</tbody></table></div>' : '<p class="sub">No applicants yet.</p>') : '<p class="sub">Your interviews for this job are under My interviews.</p>');
+      }).join('');
+      all('#myJobs [data-a]').forEach(function (el) { el.onclick = function () { openApp(el.getAttribute('data-a')); }; });
+      all('[data-mjc]').forEach(function (b) { b.onclick = function () { var j = d.jobs.filter(function (x) { return String(x.id) === b.getAttribute('data-mjc'); })[0]; compare(j); }; });
+    }).catch(function () {});
+  }
   function loadMine() {
     return api('/api/hr/my-interviews').then(function (d) {
       $('#myIvCard').hidden = !d.interviews.length && d.hr;
@@ -681,6 +714,7 @@
   // Panel members without hiring rights see only their interviews; approvers
   // without hiring rights see the requisitions too.
   loadMine().then(function (d) {
+    if (!d.hr) loadMyJobs();
     if (!d.hr) all('[data-hr]').forEach(function (el) { el.hidden = true; });
     var reqP = loadReqs().catch(function () {});
     if (!d.hr) return reqP.then(fromHash);

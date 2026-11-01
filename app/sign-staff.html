@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<meta name="referrer" content="no-referrer" />
+<title>Sign a document · Vision Auto Solutions</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+  :root {
+    --red:#d62828; --navy:#0b1b2b; --ink:#1f2937; --muted:#6b7280;
+    --line:#e5e7eb; --ok:#16a34a; --bg:#f6f7f9;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:15px}
+  header.top{background:var(--navy);color:#fff;padding:14px 16px}
+  header.top h1{margin:0;font-size:18px;font-weight:800}
+  header.top small{color:#cbd5e1}
+  main{max-width:760px;margin:0 auto;padding:16px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+  label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+  input[type=text]{width:100%;font:inherit;padding:10px;border:1px solid var(--line);border-radius:8px}
+  textarea{width:100%;font:inherit;padding:10px;border:1px solid var(--line);border-radius:8px}
+  iframe{width:100%;height:60vh;border:1px solid var(--line);border-radius:8px;background:#fff}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+  button{font:inherit;padding:11px 18px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer}
+  button.go{background:var(--red);border-color:var(--red);color:#fff;font-weight:700;flex:1}
+  button:disabled{opacity:.5}
+  .msg{padding:12px;border-radius:8px;background:#fee2e2;color:#991b1b}
+  .ok{padding:14px;border-radius:8px;background:#dcfce7;color:#14532d;font-weight:600}
+  .muted{color:var(--muted);font-size:13px}
+  a{color:var(--red)}
+</style>
+</head>
+<body>
+<header class="top"><h1 id="shop">Vision Auto Solutions</h1><small>A document for you to sign</small></header>
+<main id="out"><div class="card muted">Loading…</div></main>
+<script src="/assets/invoice-scan.js?v=20261028"></script>
+<script>
+(function () {
+  'use strict';
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var token = new URLSearchParams(location.search).get('t') || '';
+  var out = document.getElementById('out');
+  var base = '/api/public/staff-sign/' + encodeURIComponent(token);
+  var code = '';
+  // The token is in the address; keep it out of the history and of any Referer.
+  try { history.replaceState(null, '', location.pathname + '?t=' + encodeURIComponent(token)); } catch (_) {}
+  var stop = function (m) { out.innerHTML = '<div class="card"><div class="msg">' + esc(m) + '</div></div>'; };
+  function call(path, method, body) {
+    return fetch(base + path, { method: method || 'GET', credentials: 'omit', referrerPolicy: 'no-referrer', headers: Object.assign({ 'X-Access-Code': code }, body ? { 'Content-Type': 'application/json' } : {}), body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) { var e = new Error(j.error || 'This link is not valid'); e.needs_code = j.needs_code; throw e; } return j; }); });
+  }
+  var withCode = function (p) { return base + p + (code ? '?code=' + encodeURIComponent(code) : ''); };
+  call('').then(function (d) {
+    if (d.shop && d.shop.name) document.getElementById('shop').textContent = d.shop.name;
+    if (d.needs_code && d.status !== 'cancelled') askCode(d); else show(d);
+  }).catch(function (e) { stop(e.message); });
+
+  function askCode(d) {
+    out.innerHTML = '<div class="card"><h2 style="margin:0 0 6px">' + esc(d.title) + '</h2><p>This document is protected. Type the access code HR gave you (by phone or in person).</p>' +
+      '<label for="cd">Access code</label><input type="text" id="cd" inputmode="numeric" autocomplete="one-time-code" maxlength="6"><div class="row"><button class="go" id="cdGo">Open</button></div><div id="m" style="margin-top:10px"></div></div>';
+    document.getElementById('cdGo').onclick = function () {
+      code = document.getElementById('cd').value.replace(/\D/g, '');
+      call('/check', 'POST', {}).then(show).catch(function (e) { document.getElementById('m').innerHTML = '<div class="msg">' + esc(e.message) + '</div>'; });
+    };
+  }
+  function show(d) {
+    if (d.status === 'signed') {
+      out.innerHTML = '<div class="card"><div class="ok">“' + esc(d.title) + '” was signed by ' + esc(d.signer_name || 'you') + '.</div><p><a href="' + esc(withCode('/copy')) + '" target="_blank" rel="noopener noreferrer">Download your signed copy</a> (available from this link for 30 days; it is also in My HR file).</p></div>';
+      return;
+    }
+    if (d.status !== 'sent') return stop(d.status === 'declined' ? 'You declined to sign this. Please speak to HR if that was a mistake.' : 'This is no longer waiting for your signature.');
+    var src = withCode('/content');
+    out.innerHTML = '<div class="card"><h2 style="margin:0 0 4px">' + esc(d.title) + '</h2><div class="muted">For ' + esc(d.staff_name || '') + ' · sent by ' + esc(d.sent_by || 'HR') + '</div>' + (d.message ? '<p>' + esc(d.message) + '</p>' : '') +
+      '<p class="muted">Read it all before you sign.' + (d.is_file ? ' <a href="' + esc(src) + '" target="_blank" rel="noopener noreferrer">Open it in a new tab</a> if it does not show below.' : '') + '</p>' +
+      '<iframe sandbox src="' + esc(src) + '" title="The document"></iframe></div>' +
+      '<div class="card"><label for="nm">Your full name</label><input type="text" id="nm" autocomplete="name"><label>Sign below with your finger or mouse</label><div id="pad"></div>' +
+      '<label style="display:flex;gap:8px;align-items:flex-start;color:var(--ink);font-size:14px;margin-top:12px"><input type="checkbox" id="ag" style="margin-top:3px"> I have read “' + esc(d.title) + '” and agree to it.</label>' +
+      '<div class="row"><button id="clr">Clear</button><button class="go" id="go">Sign</button></div><div id="m" style="margin-top:10px"></div>' +
+      '<p class="muted">Your signature, the time and your internet address are kept with a fingerprint of the document, sealed so neither can be changed later. You get a signed copy. ' +
+      '<a href="#" id="no">I will not sign this</a></p></div>';
+    var pad = window.VAScan.pad(document.getElementById('pad'));
+    var m = document.getElementById('m');
+    document.getElementById('clr').onclick = pad.clear;
+    document.getElementById('go').onclick = function () {
+      var name = document.getElementById('nm').value.trim();
+      if (name.length < 2) { m.innerHTML = '<div class="msg">Type your name.</div>'; return; }
+      if (pad.empty()) { m.innerHTML = '<div class="msg">Sign in the box.</div>'; return; }
+      if (!document.getElementById('ag').checked) { m.innerHTML = '<div class="msg">Tick the box to confirm.</div>'; return; }
+      this.disabled = true;
+      call('/sign', 'POST', { name: name, image: pad.png(), agree: true })
+        .then(function () { show(Object.assign({}, d, { status: 'signed', signer_name: name })); })
+        .catch(function (e) { document.getElementById('go').disabled = false; m.innerHTML = '<div class="msg">' + esc(e.message) + '</div>'; });
+    };
+    document.getElementById('no').onclick = function (ev) {
+      ev.preventDefault();
+      var why = prompt('Why are you not signing? HR will follow up.', '');
+      if (why) call('/decline', 'POST', { reason: why }).then(function () { stop('You declined to sign. HR has been told.'); }).catch(function (e) { m.innerHTML = '<div class="msg">' + esc(e.message) + '</div>'; });
+    };
+  }
+})();
+</script>
+</body>
+</html>

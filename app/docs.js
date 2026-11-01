@@ -1016,5 +1016,19 @@ exports.register = function register(app, deps) {
     return doc;
   }
 
-  return { logComm, createDoc, fileHtml, CATEGORIES, ENTITIES };
+  // A document's current file, for a page that shows it without the Document
+  // centre's own permission check (a staff member signing it from a link).
+  // The caller has already decided who may see it; the opening is still logged.
+  async function fileOf(id, req, action, note) {
+    const { rows } = await query(`SELECT id, number, title, file_name, mime, size, sha256, storage FROM documents WHERE id = $1 AND deleted_at IS NULL`, [id]);
+    if (!rows.length) throw httpError(404, 'The document is no longer in the Document centre');
+    const d = rows[0];
+    d.abs = d.storage ? resolveStorage(d.storage) : null;
+    if (!d.abs || !fs.existsSync(d.abs)) throw httpError(404, 'The document has no file');
+    if (!d.sha256) d.sha256 = await sha256File(d.abs);
+    if (req && action) await access(d.id, req, action, note || null).catch(() => {});
+    return d;
+  }
+
+  return { logComm, createDoc, fileHtml, fileOf, CATEGORIES, ENTITIES };
 };
