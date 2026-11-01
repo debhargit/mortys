@@ -6560,3 +6560,315 @@ CREATE TABLE IF NOT EXISTS team_emergency_replies (  -- the roll call
   at            TIMESTAMPTZ DEFAULT NOW(),
   PRIMARY KEY (emergency_id, user_id)
 );
+
+-- =============================================================================
+--  People & HR (hr.js, people.html): the staff file beside the login.
+--  Personal details, emergency contacts, the job (title, department, manager,
+--  start date, contract), probation and confirmation, every promotion,
+--  transfer and pay change, warnings and discipline, leave allowance changes,
+--  reviews and goals, onboarding and exit checklists, and an audit of every
+--  HR change. Pay itself stays in Payroll (payroll_employees), leave days
+--  taken in Attendance (staff_leave), training in Training, papers in the
+--  Document centre (linked to the staff member).
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS hr_employees (
+  user_id          INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  job_title        TEXT,
+  department_id    INTEGER REFERENCES departments(id) ON DELETE SET NULL,
+  manager_user_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  start_date       DATE,
+  contract_type    TEXT NOT NULL DEFAULT 'permanent',  -- permanent | fixed_term | part_time | casual | contractor | intern
+  contract_end     DATE,                               -- fixed term: when it ends
+  work_location    TEXT,
+  status           TEXT NOT NULL DEFAULT 'active',     -- probation | active | notice | left
+  probation_months INTEGER NOT NULL DEFAULT 3,
+  probation_end    DATE,
+  confirmed_on     DATE,
+  confirmed_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  date_of_birth    DATE,
+  personal_email   TEXT,
+  personal_phone   TEXT,
+  address          TEXT,
+  parish           TEXT,
+  notes            TEXT,
+  from_application INTEGER REFERENCES job_applications(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  updated_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_employees_manager ON hr_employees (manager_user_id);
+
+CREATE TABLE IF NOT EXISTS hr_contacts (             -- emergency contacts / next of kin
+  id            SERIAL PRIMARY KEY,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  relationship  TEXT,
+  phone         TEXT,
+  alt_phone     TEXT,
+  email         TEXT,
+  address       TEXT,
+  is_primary    BOOLEAN NOT NULL DEFAULT false,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_contacts_user ON hr_contacts (user_id);
+
+-- One line per change to the job or pay: start, promotion, transfer, pay rise...
+CREATE TABLE IF NOT EXISTS hr_job_history (
+  id                 SERIAL PRIMARY KEY,
+  user_id            INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind               TEXT NOT NULL,                  -- start | promotion | transfer | pay_change | title_change | confirmation | demotion | other
+  effective_date     DATE NOT NULL,
+  job_title          TEXT,
+  department_id      INTEGER REFERENCES departments(id) ON DELETE SET NULL,
+  manager_user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  salary_annual      NUMERIC(14,2),                  -- J$ a year
+  hourly_rate        NUMERIC(10,2),                  -- J$ an hour
+  reason             TEXT,
+  applied_to_payroll BOOLEAN NOT NULL DEFAULT false,
+  by_user            INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at         TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_job_history_user ON hr_job_history (user_id, effective_date);
+
+-- Warnings, discipline and commendations.
+CREATE TABLE IF NOT EXISTS hr_cases (
+  id                 SERIAL PRIMARY KEY,
+  user_id            INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind               TEXT NOT NULL,                  -- counselling | verbal_warning | written_warning | final_warning | suspension | dismissal | commendation
+  incident_date      DATE,
+  summary            TEXT NOT NULL,
+  details            TEXT,
+  action             TEXT,                           -- what was decided / improvement expected
+  expires_on         DATE,                           -- a warning stops counting after this
+  status             TEXT NOT NULL DEFAULT 'open',   -- open | closed | appealed | withdrawn
+  employee_response  TEXT,
+  acknowledged_at    TIMESTAMPTZ,
+  document_id        INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  issued_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at         TIMESTAMPTZ DEFAULT NOW(),
+  closed_at          TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_hr_cases_user ON hr_cases (user_id);
+
+CREATE TABLE IF NOT EXISTS hr_reviews (
+  id                 SERIAL PRIMARY KEY,
+  user_id            INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind               TEXT NOT NULL DEFAULT 'annual', -- probation | annual | midyear | other
+  period_from        DATE,
+  period_to          DATE,
+  due_on             DATE,
+  reviewer_id        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  status             TEXT NOT NULL DEFAULT 'draft',  -- draft | done | acknowledged
+  ratings            JSONB NOT NULL DEFAULT '[]'::jsonb,  -- [{key, label, score 1-5, comment}]
+  overall            SMALLINT,
+  strengths          TEXT,
+  improve            TEXT,
+  comments           TEXT,
+  employee_comments  TEXT,
+  outcome            TEXT,                           -- probation: confirm | extend | end
+  completed_at       TIMESTAMPTZ,
+  acknowledged_at    TIMESTAMPTZ,
+  created_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at         TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_reviews_user ON hr_reviews (user_id);
+CREATE TABLE IF NOT EXISTS hr_goals (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  review_id   INTEGER REFERENCES hr_reviews(id) ON DELETE SET NULL,
+  title       TEXT NOT NULL,
+  measure     TEXT,                                  -- how we know it is done
+  due_on      DATE,
+  status      TEXT NOT NULL DEFAULT 'open',          -- open | done | dropped
+  progress    SMALLINT NOT NULL DEFAULT 0,           -- 0-100
+  note        TEXT,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_goals_user ON hr_goals (user_id);
+
+-- Days added to or taken off the yearly allowance (carried over, long service...).
+-- The allowance itself is set in Payroll (per person or the shop setting); days
+-- taken come from Attendance > Leave.
+CREATE TABLE IF NOT EXISTS hr_leave_adjustments (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  year        INTEGER NOT NULL,
+  kind        TEXT NOT NULL DEFAULT 'vacation',      -- vacation | sick
+  days        NUMERIC(5,2) NOT NULL,
+  reason      TEXT,
+  by_user     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_leave_adj_user ON hr_leave_adjustments (user_id, year);
+
+CREATE TABLE IF NOT EXISTS hr_exits (
+  id              SERIAL PRIMARY KEY,
+  user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL DEFAULT 'resignation',  -- resignation | termination | redundancy | end_of_contract | retirement | other
+  notice_date     DATE,
+  last_day        DATE NOT NULL,
+  reason          TEXT,
+  rehire          BOOLEAN,                              -- would we take them back
+  exit_interview  TEXT,
+  status          TEXT NOT NULL DEFAULT 'open',         -- open | done | cancelled
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  completed_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  completed_at    TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_hr_exits_user ON hr_exits (user_id);
+
+-- Checklists: onboarding a new starter, offboarding a leaver.
+CREATE TABLE IF NOT EXISTS hr_tasks (
+  id           SERIAL PRIMARY KEY,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind         TEXT NOT NULL DEFAULT 'onboarding',    -- onboarding | offboarding | other
+  exit_id      INTEGER REFERENCES hr_exits(id) ON DELETE CASCADE,
+  title        TEXT NOT NULL,
+  link         TEXT,                                  -- the screen where it is done
+  due_on       DATE,
+  assignee_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  sort         INTEGER NOT NULL DEFAULT 0,
+  done_at      TIMESTAMPTZ,
+  done_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  note         TEXT,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_tasks_user ON hr_tasks (user_id, kind);
+
+-- Every HR and hiring decision: who, when, what, and why.
+CREATE TABLE IF NOT EXISTS hr_audit (
+  id              BIGSERIAL PRIMARY KEY,
+  user_id         INTEGER REFERENCES users(id) ON DELETE SET NULL,           -- the employee, if any
+  application_id  INTEGER REFERENCES job_applications(id) ON DELETE SET NULL,
+  entity          TEXT NOT NULL,                     -- profile | contact | job | case | review | goal | leave | exit | task | requisition | job_post | application | interview | score | reference | offer | hire
+  entity_id       INTEGER,
+  action          TEXT NOT NULL,
+  detail          TEXT,
+  by_user         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  at              TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_audit_user ON hr_audit (user_id, at);
+CREATE INDEX IF NOT EXISTS idx_hr_audit_app ON hr_audit (application_id, at);
+
+-- =============================================================================
+--  Hiring, end to end (careers.js): requisition and approval, posting,
+--  applications, screening, shortlist, interviews with panels and
+--  scorecards, comparison, references, offer and acceptance, hire.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS job_requisitions (
+  id                SERIAL PRIMARY KEY,
+  title             TEXT NOT NULL,
+  department        TEXT,
+  kind              TEXT NOT NULL DEFAULT 'full_time',
+  openings          INTEGER NOT NULL DEFAULT 1,
+  reason            TEXT NOT NULL DEFAULT 'new',        -- new | replacement | temporary
+  replaces_user_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  salary_min        NUMERIC(14,2),                      -- J$ a year
+  salary_max        NUMERIC(14,2),
+  start_by          DATE,
+  justification     TEXT,
+  hiring_manager_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  status            TEXT NOT NULL DEFAULT 'draft',      -- draft | submitted | approved | rejected | cancelled | filled
+  requested_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  submitted_at      TIMESTAMPTZ,
+  decided_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  decided_at        TIMESTAMPTZ,
+  decision_note     TEXT,
+  created_at        TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS requisition_id INTEGER REFERENCES job_requisitions(id) ON DELETE SET NULL;
+ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS hiring_manager_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS scorecard JSONB NOT NULL DEFAULT '[]'::jsonb;   -- [{key, label}] interview criteria
+
+ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS screen_result TEXT;       -- pass | maybe | fail
+ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS screen_notes TEXT;
+ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS screened_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS screened_at TIMESTAMPTZ;
+ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS reject_reason TEXT;
+
+CREATE TABLE IF NOT EXISTS hr_interviews (
+  id              SERIAL PRIMARY KEY,
+  application_id  INTEGER NOT NULL REFERENCES job_applications(id) ON DELETE CASCADE,
+  round           INTEGER NOT NULL DEFAULT 1,
+  mode            TEXT NOT NULL DEFAULT 'in_person',   -- in_person | phone | video
+  starts_at       TIMESTAMPTZ NOT NULL,
+  minutes         INTEGER NOT NULL DEFAULT 45,
+  location        TEXT,
+  status          TEXT NOT NULL DEFAULT 'scheduled',   -- scheduled | done | cancelled | no_show
+  event_id        INTEGER REFERENCES team_events(id) ON DELETE SET NULL,
+  notes           TEXT,
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_interviews_app ON hr_interviews (application_id);
+CREATE TABLE IF NOT EXISTS hr_interview_panel (
+  interview_id  INTEGER NOT NULL REFERENCES hr_interviews(id) ON DELETE CASCADE,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY (interview_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS hr_interview_scores (
+  id            SERIAL PRIMARY KEY,
+  interview_id  INTEGER NOT NULL REFERENCES hr_interviews(id) ON DELETE CASCADE,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  scores        JSONB NOT NULL DEFAULT '[]'::jsonb,    -- [{key, label, score 1-5, comment}]
+  overall       SMALLINT,
+  recommend     TEXT,                                  -- strong_yes | yes | no | strong_no
+  strengths     TEXT,
+  concerns      TEXT,
+  submitted_at  TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (interview_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS hr_references (
+  id              SERIAL PRIMARY KEY,
+  application_id  INTEGER NOT NULL REFERENCES job_applications(id) ON DELETE CASCADE,
+  referee_name    TEXT NOT NULL,
+  relationship    TEXT,
+  company         TEXT,
+  phone           TEXT,
+  email           TEXT,
+  status          TEXT NOT NULL DEFAULT 'pending',     -- pending | asked | done | unreachable
+  asked_at        TIMESTAMPTZ,
+  done_at         TIMESTAMPTZ,
+  summary         TEXT,                                -- what they said
+  rating          TEXT,                                -- good | mixed | poor
+  would_rehire    BOOLEAN,
+  by_user         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_references_app ON hr_references (application_id);
+CREATE TABLE IF NOT EXISTS hr_offers (
+  id               SERIAL PRIMARY KEY,
+  application_id   INTEGER NOT NULL REFERENCES job_applications(id) ON DELETE CASCADE,
+  job_title        TEXT NOT NULL,
+  department_id    INTEGER REFERENCES departments(id) ON DELETE SET NULL,
+  manager_user_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  start_date       DATE,
+  contract_type    TEXT NOT NULL DEFAULT 'permanent',
+  contract_end     DATE,
+  pay_type         TEXT NOT NULL DEFAULT 'salary',     -- salary | hourly
+  salary_annual    NUMERIC(14,2),
+  hourly_rate      NUMERIC(10,2),
+  frequency        TEXT NOT NULL DEFAULT 'monthly',    -- weekly | fortnightly | monthly
+  probation_months INTEGER NOT NULL DEFAULT 3,
+  hours            TEXT,
+  benefits         TEXT,
+  conditions       TEXT,
+  respond_by       DATE,
+  status           TEXT NOT NULL DEFAULT 'draft',      -- draft | pending_approval | approved | sent | accepted | declined | withdrawn
+  approved_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  approved_at      TIMESTAMPTZ,
+  sent_at          TIMESTAMPTZ,
+  token            TEXT UNIQUE,                        -- the candidate's private link
+  responded_at     TIMESTAMPTZ,
+  response_name    TEXT,                               -- the name they typed to accept
+  response_note    TEXT,
+  response_ip      TEXT,
+  document_id      INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  created_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_offers_app ON hr_offers (application_id);

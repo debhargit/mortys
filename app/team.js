@@ -878,7 +878,9 @@ function register(app, deps) {
       if (sh.length) extra.push({ source: 'shifts', pattern: sh });
       if (cp.hr) {
         const { rows: iv } = await query(`SELECT a.id, a.name, j.title, a.interview_at FROM job_applications a LEFT JOIN job_posts j ON j.id = a.job_id
-          WHERE a.interview_at BETWEEN $1 AND $2 AND a.stage = 'interview'`, [from, to]).catch(() => ({ rows: [] }));
+          WHERE a.interview_at BETWEEN $1 AND $2 AND a.stage = 'interview'
+            AND NOT EXISTS (SELECT 1 FROM hr_interviews x JOIN team_event_attendees v ON v.event_id = x.event_id AND v.user_id = $3
+              WHERE x.application_id = a.id AND x.status = 'scheduled')`, [from, to, me(req)]).catch(() => ({ rows: [] }));   // already on my calendar as the interview's event
         for (const i of iv) extra.push({ source: 'interview', id: 'iv-' + i.id, title: 'Interview: ' + (i.name || 'applicant') + (i.title ? ' (' + i.title + ')' : ''), start: iso(i.interview_at), end: iso(new Date(new Date(i.interview_at).getTime() + 45 * 60000)), kind: 'meeting', link: '/hiring.html' });
       }
       res.json({ events, extra });

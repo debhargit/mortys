@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>People &amp; HR · Vision Auto Solutions</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0} header nav{margin-left:auto;display:flex;gap:14px;font-size:13px;align-items:center;flex-wrap:wrap} header a{color:#fff;opacity:.85}
+  main{max-width:1250px;margin:0 auto;padding:14px 16px 60px}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px} .tabs button{border-radius:999px} .tabs button.on{background:var(--red);border-color:var(--red);color:#fff}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  input,select,button,textarea{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  textarea{width:100%} button{cursor:pointer;background:var(--card)} button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600} button.sm{padding:3px 9px;font-size:12.5px}
+  button.link{border:0;background:none;color:var(--red);padding:0;font-weight:600}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px} .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px 12px;margin-bottom:10px} .grid label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px} .grid input,.grid select{width:100%}
+  .scroll{overflow-x:auto}
+  table{width:100%;border-collapse:collapse} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600}
+  tr.row{cursor:pointer} tr.row:hover td{background:var(--chip)}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip)} .pill.ok{background:#16a34a22;color:var(--ok)} .pill.warn{background:#f59e0b22;color:var(--warn)} .pill.bad{background:#d6282822;color:var(--red)}
+  .modal{position:fixed;inset:0;background:rgba(10,15,25,.55);display:flex;align-items:flex-start;justify-content:center;padding:4vh 12px;overflow:auto;z-index:9990} .modal .card{max-width:900px;width:100%}
+  .modal.top{z-index:9995} .modal.top .card{max-width:640px}
+  .empty{color:var(--muted);text-align:center;padding:20px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:9999}
+  .ftabs{display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:8px 0 12px} .ftabs button{border:0;border-bottom:2px solid transparent;border-radius:0;background:none;padding:6px 10px} .ftabs button.on{border-bottom-color:var(--red);font-weight:600}
+  .item{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:6px} .item small{color:var(--muted)}
+  .warn{background:#f59e0b18;border-left:3px solid var(--warn);padding:8px 10px;border-radius:8px;margin:8px 0}
+  h4{margin:14px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:12px} .kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px} .kpi b{display:block;font-size:22px} .kpi span{color:var(--muted);font-size:12px}
+  .bar{height:8px;background:var(--chip);border-radius:4px;overflow:hidden;min-width:60px} .bar i{display:block;height:100%;background:var(--red)}
+  .org ul{list-style:none;margin:0;padding-left:22px;border-left:1px dashed var(--line)} .org > ul{border-left:0;padding-left:0}
+  .org li{margin:6px 0} .org .node{display:inline-block;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer} .org .node:hover{border-color:var(--red)} .org .node small{color:var(--muted);display:block}
+  .task{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid var(--line)} .task span{flex:1} .task.done span{color:var(--muted);text-decoration:line-through}
+  .stars{display:flex;gap:4px} .stars button{padding:2px 9px;font-size:13px} .stars button.on{background:var(--red);border-color:var(--red);color:#fff}
+  @media print{ header,.tabs,.controls,button{display:none!important} .card{border:0} }
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>People &amp; HR</h1><nav><a href="/attendance.html">Attendance</a><a href="/payroll.html">Payroll</a><a href="/training.html">Training</a><a href="/documents.html">Documents</a><a href="/hiring.html">Hiring</a><a href="/admin.html#tab=staff">Users &amp; Staff</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"></div>
+  <div id="view"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div><div id="modal2"></div>
+<div class="toast" id="toast"></div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var day = function (t) { return t ? new Date(String(t).length === 10 ? t + 'T12:00:00' : t).toLocaleDateString('en-JM') : ''; };
+  var when = function (t) { return t ? new Date(t).toLocaleString('en-JM', { dateStyle: 'short', timeStyle: 'short' }) : ''; };
+  var jmd = function (v) { return v == null ? '' : 'J$' + Number(v).toLocaleString('en-JM', { maximumFractionDigits: 2 }); };
+  var today = function () { var d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+  var CONTRACT = { permanent: 'Permanent', fixed_term: 'Fixed term', part_time: 'Part time', casual: 'Casual', contractor: 'Contractor', intern: 'Internship' };
+  var STATUS = { probation: 'On probation', active: 'Active', notice: 'Working notice', left: 'Left' };
+  var JOBK = { start: 'Started', promotion: 'Promotion', transfer: 'Transfer', pay_change: 'Pay change', title_change: 'New job title', confirmation: 'Confirmed in post', demotion: 'Demotion', other: 'Other' };
+  var CASEK = { counselling: 'Counselling', verbal_warning: 'Verbal warning', written_warning: 'Written warning', final_warning: 'Final written warning', suspension: 'Suspension', dismissal: 'Dismissal', commendation: 'Commendation' };
+  var EXITK = { resignation: 'Resignation', termination: 'Termination', redundancy: 'Redundancy', end_of_contract: 'End of contract', retirement: 'Retirement', other: 'Other' };
+  var REVK = { probation: 'End of probation', annual: 'Yearly', midyear: 'Mid-year', other: 'Other' };
+  var META = { departments: [], people: [], criteria: [] };
+  var tab = 'staff', CAN = false, staff = [];
+
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 3500); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); }
+        return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; });
+      });
+  }
+  function modal(h, layer) {
+    var host = $(layer === 2 ? '#modal2' : '#modal');
+    host.innerHTML = '<div class="modal' + (layer === 2 ? ' top' : '') + '"><div class="card">' + h + '</div></div>';
+    host.firstChild.addEventListener('mousedown', function (e) { if (e.target.classList.contains('modal')) close(layer); });
+    return host.firstChild;
+  }
+  function close(layer) { $(layer === 2 ? '#modal2' : '#modal').innerHTML = ''; if (layer !== 2 && /^#staff=/.test(location.hash)) history.replaceState(null, '', '#' + tab); }
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { if ($('#modal2').innerHTML) close(2); else close(); } });
+  var opts = function (list, cur, blank) { return (blank != null ? '<option value="">' + esc(blank) + '</option>' : '') + list.map(function (p) { var id = p.id != null ? p.id : p[0], nm = p.name != null ? p.name : p[1]; return '<option value="' + esc(id) + '"' + (String(cur) === String(id) ? ' selected' : '') + '>' + esc(nm) + '</option>'; }).join(''); };
+  var pairs = function (o) { return Object.keys(o).map(function (k) { return [k, o[k]]; }); };
+  var field = function (label, html) { return '<div><label>' + esc(label) + '</label>' + html + '</div>'; };
+  var inp = function (id, v, type) { return '<input id="' + id + '" type="' + (type || 'text') + '" value="' + esc(v == null ? '' : v) + '">'; };
+  function statusPill(s) { return '<span class="pill' + (s === 'probation' || s === 'notice' ? ' warn' : s === 'left' ? ' bad' : ' ok') + '">' + esc(STATUS[s] || s) + '</span>'; }
+  function csv(name, rows) {
+    var text = rows.map(function (r) { return r.map(function (v) { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(','); }).join('\r\n');
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + text], { type: 'text/csv' })); a.download = name + '-' + today() + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  // ---------------------------------------------------------------- tabs --
+  var TABS = [['staff', '🗂 Staff files'], ['org', '🌳 Org chart'], ['leave', '🏖 Leave'], ['tasks', '✅ Checklists'], ['reports', '📊 Reports'], ['audit', '📜 HR log'], ['me', '🙂 My HR file']];
+  function drawTabs() {
+    $('#tabs').innerHTML = TABS.filter(function (t) { return CAN || t[0] === 'me'; }).map(function (t) { return '<button data-t="' + t[0] + '"' + (t[0] === tab ? ' class="on"' : '') + '>' + t[1] + '</button>'; }).join('');
+    all('[data-t]').forEach(function (b) { b.onclick = function () { location.hash = b.getAttribute('data-t'); }; });
+  }
+  function show() {
+    drawTabs();
+    var v = $('#view'); v.innerHTML = '<div class="empty">Loading…</div>';
+    var f = { staff: staffList, org: orgChart, leave: leaveView, tasks: tasksView, reports: reportsView, audit: auditView, me: myFile }[tab];
+    Promise.resolve(f(v)).catch(function (e) { v.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+
+  // ---------------------------------------------------------- staff list --
+  function staffList(v) {
+    return api('/api/people/staff' + ($('#showLeft') && $('#showLeft').checked ? '?all=1' : '')).then(function (d) {
+      var leftOn = $('#showLeft') && $('#showLeft').checked;
+      staff = d.staff;
+      v.innerHTML = '<div class="card"><h2>Staff files</h2><p class="sub">One file per person: details, emergency contacts, job and pay history, probation, warnings, reviews and goals, leave, documents and checklists. Logins, roles and PINs are on <a href="/admin.html#tab=staff">Users &amp; Staff</a>; pay on <a href="/payroll.html">Payroll</a>; leave days on <a href="/attendance.html#leave">Attendance › Leave</a>.</p>' +
+        '<div class="controls"><div style="flex:1;min-width:200px"><label>Find</label><input id="q" type="search" placeholder="Name, job, department or manager" style="width:100%"></div>' +
+        '<div><label>Department</label><select id="dF">' + opts(META.departments, '', 'All') + '</select></div><div><label>Status</label><select id="sF">' + opts(pairs(STATUS), '', 'All') + '</select></div>' +
+        '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="showLeft"' + (leftOn ? ' checked' : '') + '> Include people who left</label><button id="csvB">Export CSV</button></div><div id="list"></div></div>';
+      function draw() {
+        var q = $('#q').value.trim().toLowerCase(), df = $('#dF').value, sf = $('#sF').value;
+        var rows = staff.filter(function (s) { return (!q || [s.name, s.job_title, s.department, s.manager, s.employee_no].join(' ').toLowerCase().indexOf(q) >= 0) && (!df || String(s.department_id) === df) && (!sf || s.status === sf); });
+        $('#list').innerHTML = rows.length ? '<div class="scroll"><table><thead><tr><th>Name</th><th>Job</th><th>Department</th><th>Manager</th><th>Started</th><th>Contract</th><th>Status</th><th>Needs attention</th></tr></thead><tbody>' + rows.map(function (s) {
+          var flags = [];
+          if (s.status === 'probation' && s.probation_end && s.probation_end <= new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)) flags.push('<span class="pill warn">probation ends ' + esc(day(s.probation_end)) + '</span>');
+          if (s.open_cases) flags.push('<span class="pill bad">' + s.open_cases + ' warning' + (s.open_cases > 1 ? 's' : '') + '</span>');
+          if (s.review_due) flags.push('<span class="pill' + (s.review_due < today() ? ' bad' : '') + '">review ' + esc(day(s.review_due)) + '</span>');
+          if (s.open_tasks) flags.push('<span class="pill">' + s.open_tasks + ' to do</span>');
+          if (!s.contacts && s.status !== 'left') flags.push('<span class="pill warn">no emergency contact</span>');
+          if (!s.has_file) flags.push('<span class="pill">file not started</span>');
+          return '<tr class="row" data-u="' + s.id + '"><td><b>' + esc(s.name) + '</b>' + (s.employee_no ? ' <small class="sub">' + esc(s.employee_no) + '</small>' : '') + '</td><td>' + esc(s.job_title || '') + '</td><td>' + esc(s.department || '') + '</td><td>' + esc(s.manager || '') + '</td>' +
+            '<td>' + esc(day(s.start_date)) + '</td><td>' + esc(CONTRACT[s.contract_type] || '') + (s.contract_end ? '<br><small>to ' + esc(day(s.contract_end)) + '</small>' : '') + '</td><td>' + statusPill(s.status) + '</td><td>' + flags.join(' ') + '</td></tr>';
+        }).join('') + '</tbody></table></div>' : '<div class="empty">Nobody matches.</div>';
+        all('[data-u]').forEach(function (r) { r.onclick = function () { openFile(r.getAttribute('data-u')); }; });
+      }
+      $('#q').oninput = draw; $('#dF').onchange = draw; $('#sF').onchange = draw;
+      $('#showLeft').onchange = function () { staffList(v); };
+      $('#csvB').onclick = function () { csv('staff', [['Name', 'Employee no', 'Job', 'Department', 'Manager', 'Started', 'Contract', 'Contract ends', 'Status', 'Probation ends', 'Open warnings', 'Emergency contacts']].concat(staff.map(function (s) { return [s.name, s.employee_no, s.job_title, s.department, s.manager, s.start_date, CONTRACT[s.contract_type], s.contract_end, STATUS[s.status], s.probation_end, s.open_cases, s.contacts]; }))); };
+      draw();
+    });
+  }
+
+  // ------------------------------------------------------------ the file --
+  var FT = [['profile', 'Profile'], ['contacts', 'Emergency contacts'], ['job', 'Job & pay'], ['conduct', 'Probation & conduct'], ['leave', 'Leave'], ['reviews', 'Reviews & goals'], ['docs', 'Documents'], ['tasks', 'Checklists'], ['exit', 'Leaving'], ['log', 'History']];
+  var fileTab = 'profile';
+  function openFile(uid, keepTab) {
+    if (!keepTab) fileTab = 'profile';
+    history.replaceState(null, '', '#staff=' + uid);
+    return api('/api/people/staff/' + uid).then(function (f) {
+      var u = f.user, p = f.profile || {};
+      var mo = modal('<h2>' + esc(u.name || u.email) + ' ' + statusPill(u.is_archived ? 'left' : (p.status || 'active')) + '</h2>' +
+        '<p class="sub">' + esc([p.job_title, p.department, p.manager ? 'reports to ' + p.manager : '', u.email, u.phone].filter(Boolean).join(' · ')) + '</p>' +
+        (!f.profile ? '<div class="warn">This file has not been started. Fill in the profile and save to start it.</div>' : '') +
+        '<div class="ftabs">' + FT.map(function (t) { return '<button data-ft="' + t[0] + '"' + (t[0] === fileTab ? ' class="on"' : '') + '>' + t[1] + '</button>'; }).join('') + '</div><div id="fp"></div>' +
+        '<div class="controls" style="margin-top:12px"><button id="fPrint">Print</button><button id="fX">Close</button></div>');
+      $('#fX').onclick = function () { close(); };
+      $('#fPrint').onclick = function () { window.print(); };
+      all('[data-ft]', mo).forEach(function (b) { b.onclick = function () { fileTab = b.getAttribute('data-ft'); all('[data-ft]', mo).forEach(function (x) { x.classList.toggle('on', x === b); }); pane(f); }; });
+      pane(f);
+    }).catch(function (e) { toast(e.message); });
+  }
+  function reopen(f, msg) { if (msg) toast(msg); openFile(f.user.id, true); if (tab === 'staff') staffList($('#view')); }
+  function pane(f) {
+    var el = $('#fp'), u = f.user, p = f.profile || {}, uid = u.id;
+    var fail = function (e) { toast(e.message); };
+    var H = {
+      profile: function () {
+        el.innerHTML = '<div class="grid">' +
+          field('Job title', inp('pT', p.job_title)) + field('Department', '<select id="pD">' + opts(META.departments, p.department_id, '–') + '</select>') + field('Manager (reports to)', '<select id="pM">' + opts(META.people.filter(function (x) { return x.id !== uid; }), p.manager_user_id, '–') + '</select>') +
+          field('Start date', inp('pS', p.start_date || (f.payroll && f.payroll.hire_date), 'date')) + field('Contract', '<select id="pC">' + opts(pairs(CONTRACT), p.contract_type || 'permanent') + '</select>') + field('Contract ends (fixed term)', inp('pCe', p.contract_end, 'date')) +
+          field('Status', '<select id="pSt">' + opts(pairs(STATUS), p.status || 'active') + '</select>') + field('Probation (months)', inp('pPm', p.probation_months != null ? p.probation_months : 3, 'number')) + field('Probation ends', inp('pPe', p.probation_end, 'date')) +
+          field('Works at', inp('pW', p.work_location)) + field('Date of birth', inp('pDob', p.date_of_birth, 'date')) + field('Personal phone', inp('pPh', p.personal_phone)) +
+          field('Personal email', inp('pEm', p.personal_email, 'email')) + field('Parish', inp('pPa', p.parish)) + '</div>' +
+          '<label class="sub">Home address</label><textarea id="pA" rows="2">' + esc(p.address || '') + '</textarea><label class="sub">HR notes (only HR sees these)</label><textarea id="pN" rows="3">' + esc(p.notes || '') + '</textarea>' +
+          (p.confirmed_on ? '<p class="sub">Confirmed in post on ' + esc(day(p.confirmed_on)) + '.</p>' : '') +
+          '<p class="sub">Pay, TRN, NIS and bank details are kept in <a href="/payroll.html">Payroll</a>' + (f.payroll ? ' (' + (f.payroll.is_active ? 'paid' : 'switched off') + ', ' + (f.payroll.pay_type === 'hourly' ? jmd(f.payroll.hourly_rate) + ' an hour' : jmd(f.payroll.salary_annual) + ' a year') + ')' : ': not added yet') + '. Training: <a href="/training.html#people">' + ((f.training && f.training.records) || 0) + ' records</a>' + (f.training && f.training.expiring ? ', ' + f.training.expiring + ' expiring soon' : '') + '.' +
+          (f.applications && f.applications.length ? ' Hired from application <a href="/hiring.html#app=' + f.applications[0].id + '">' + esc(f.applications[0].ref || '#' + f.applications[0].id) + '</a>.' : '') + '</p>' +
+          '<div class="controls"><button class="primary" id="pSave">Save profile</button></div>';
+        $('#pSave').onclick = function () {
+          var body = { job_title: $('#pT').value, department_id: $('#pD').value, manager_user_id: $('#pM').value, start_date: $('#pS').value, contract_type: $('#pC').value, contract_end: $('#pCe').value, status: $('#pSt').value,
+            probation_months: $('#pPm').value, work_location: $('#pW').value, date_of_birth: $('#pDob').value, personal_phone: $('#pPh').value, personal_email: $('#pEm').value, parish: $('#pPa').value, address: $('#pA').value, notes: $('#pN').value };
+          // A probation end typed in wins; left as it was, it follows the start date.
+          if ($('#pPe').value !== (p.probation_end || '')) body.probation_end = $('#pPe').value;
+          api('/api/people/staff/' + uid + '/profile', 'PUT', body).then(function (r) { reopen(f, r.changed.length ? 'Saved' : 'Nothing changed'); }).catch(fail);
+        };
+      },
+      contacts: function () { contactsPane(el, f.contacts, '/api/people/staff/' + uid + '/contacts', function (m) { reopen(f, m); }); },
+      job: function () {
+        el.innerHTML = '<p class="sub">Every change to the job or pay, newest first. A change dated today or earlier becomes the current job. Tick “pass on to Payroll” to change their pay there too' + (META.can_payroll ? '' : ' (only someone who may change pay can do that)') + '.</p>' +
+          '<div class="grid">' + field('What changed', '<select id="jK">' + opts(pairs(JOBK).filter(function (x) { return x[0] !== 'confirmation'; }), 'promotion') + '</select>') + field('From', inp('jE', today(), 'date')) + field('New job title', inp('jT', '')) +
+          field('New department', '<select id="jD">' + opts(META.departments, '', 'No change') + '</select>') + field('New manager', '<select id="jM">' + opts(META.people.filter(function (x) { return x.id !== uid; }), '', 'No change') + '</select>') +
+          field('New yearly salary (J$)', inp('jS', '')) + field('New hourly rate (J$)', inp('jH', '')) + '</div>' +
+          '<label class="sub">Reason</label><input id="jR" style="width:100%"><div class="controls" style="margin-top:8px"><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="jP"' + (META.can_payroll && f.payroll ? '' : ' disabled') + '> Pass the new pay on to Payroll</label><button class="primary" id="jGo">Record it</button></div>' +
+          (f.history.length ? '<div class="scroll"><table><thead><tr><th>From</th><th>What</th><th>Job</th><th>Department / manager</th><th>Pay</th><th>Reason</th><th></th></tr></thead><tbody>' + f.history.map(function (h) {
+            return '<tr><td>' + esc(day(h.effective_date)) + '</td><td>' + esc(JOBK[h.kind] || h.kind) + '</td><td>' + esc(h.job_title || '') + '</td><td>' + esc([h.department, h.manager].filter(Boolean).join(' / ')) + '</td>' +
+              '<td>' + (h.salary_annual != null ? jmd(h.salary_annual) + '/yr' : '') + (h.hourly_rate != null ? jmd(h.hourly_rate) + '/hr' : '') + (h.applied_to_payroll ? '<br><small>in Payroll</small>' : '') + '</td><td><small>' + esc(h.reason || '') + '<br>' + esc(h.by_name || '') + '</small></td>' +
+              '<td><button class="sm" data-jdel="' + h.id + '" title="Entered by mistake">✕</button></td></tr>';
+          }).join('') + '</tbody></table></div>' : '<div class="empty">No history yet. Record their start first.</div>');
+        $('#jGo').onclick = function () {
+          api('/api/people/staff/' + uid + '/job', 'POST', { kind: $('#jK').value, effective_date: $('#jE').value, job_title: $('#jT').value, department_id: $('#jD').value, manager_user_id: $('#jM').value, salary_annual: $('#jS').value, hourly_rate: $('#jH').value, reason: $('#jR').value, apply_payroll: $('#jP').checked })
+            .then(function (r) { reopen(f, r.payroll_updated ? 'Recorded, and Payroll updated' : 'Recorded'); }).catch(fail);
+        };
+        all('[data-jdel]', el).forEach(function (b) { b.onclick = function () { if (confirm('Remove this line? Use it only for a mistake. Pay already passed on to Payroll is not changed back.')) api('/api/people/staff/' + uid + '/job/' + b.getAttribute('data-jdel'), 'DELETE').then(function () { reopen(f, 'Removed'); }).catch(fail); }; });
+      },
+      conduct: function () {
+        el.innerHTML = (p.status === 'probation' ? '<div class="warn"><b>On probation</b>' + (p.probation_end ? ' until ' + esc(day(p.probation_end)) : '') + '. Best done with an end-of-probation review (Reviews &amp; goals), or here: ' +
+            '<button class="sm" id="prOk">Confirm in post</button> <button class="sm" id="prExt">Extend</button></div>' : '') +
+          '<h4>Warnings, discipline and commendations</h4><div class="grid">' + field('Kind', '<select id="cK">' + opts(pairs(CASEK), 'verbal_warning') + '</select>') + field('Date of what happened', inp('cD', today(), 'date')) + field('Stays on file until', inp('cE', '', 'date')) + '</div>' +
+          '<label class="sub">What happened, in a line</label><input id="cS" style="width:100%"><label class="sub">The details (facts, what was said, who was there)</label><textarea id="cDt" rows="3"></textarea>' +
+          '<label class="sub">What happens next (the improvement expected, the next step)</label><textarea id="cA" rows="2"></textarea>' +
+          '<div class="controls" style="margin-top:8px"><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="cL" checked> File the letter in their staff file (Document centre)</label><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="cT" checked> Tell them (a notice to read it in My HR file)</label><button class="primary" id="cGo">Record it</button></div>' +
+          (f.cases.length ? f.cases.map(function (c) {
+            var live = c.status === 'open' && (!c.expires_on || c.expires_on >= today());
+            return '<div class="item"><b>' + esc(CASEK[c.kind]) + '</b> · ' + esc(day(c.incident_date)) + ' <span class="pill' + (c.kind === 'commendation' ? ' ok' : live ? ' bad' : '') + '">' + esc(c.status) + (c.expires_on ? ', until ' + esc(day(c.expires_on)) : '') + '</span>' +
+              '<br>' + esc(c.summary) + (c.action ? '<br><small>Next: ' + esc(c.action) + '</small>' : '') +
+              '<br><small>' + esc(c.issued_by_name || '') + (c.document_number ? ' · letter ' + esc(c.document_number) : '') + (c.acknowledged_at ? ' · received by them ' + esc(day(c.acknowledged_at)) : ' · not yet acknowledged') + (c.employee_response ? ' · their reply: “' + esc(c.employee_response) + '”' : '') + '</small>' +
+              '<div style="margin-top:4px">' + (c.status === 'open' ? '<button class="sm" data-cst="' + c.id + ':closed">Close</button> <button class="sm" data-cst="' + c.id + ':appealed">Appealed</button> <button class="sm" data-cst="' + c.id + ':withdrawn">Withdraw</button>' : '<button class="sm" data-cst="' + c.id + ':open">Reopen</button>') + '</div></div>';
+          }).join('') : '<p class="sub">Nothing recorded.</p>');
+        if ($('#prOk')) $('#prOk').onclick = function () { var n = prompt('A note for the file (optional)', 'Probation passed'); if (n === null) return; api('/api/people/staff/' + uid + '/probation', 'POST', { outcome: 'confirm', note: n }).then(function () { reopen(f, 'Confirmed in post'); }).catch(fail); };
+        if ($('#prExt')) $('#prExt').onclick = function () { var u2 = prompt('Extend probation to (YYYY-MM-DD)', ''); if (!u2) return; api('/api/people/staff/' + uid + '/probation', 'POST', { outcome: 'extend', until: u2, note: prompt('Why?', '') || '' }).then(function () { reopen(f, 'Probation extended'); }).catch(fail); };
+        $('#cGo').onclick = function () {
+          api('/api/people/staff/' + uid + '/cases', 'POST', { kind: $('#cK').value, incident_date: $('#cD').value, expires_on: $('#cE').value, summary: $('#cS').value, details: $('#cDt').value, action: $('#cA').value, file_letter: $('#cL').checked, tell: $('#cT').checked })
+            .then(function (r) { reopen(f, r.document ? 'Recorded; letter filed as ' + r.document.number : 'Recorded'); }).catch(fail);
+        };
+        all('[data-cst]', el).forEach(function (b) { b.onclick = function () { var x = b.getAttribute('data-cst').split(':'); api('/api/people/staff/' + uid + '/cases/' + x[0], 'PATCH', { status: x[1], note: prompt('Note (optional)', '') || '' }).then(function () { reopen(f, 'Updated'); }).catch(fail); }; });
+      },
+      leave: function () {
+        var l = f.leave || {};
+        el.innerHTML = '<p class="sub">The yearly allowance is set in <a href="/payroll.html">Payroll</a> (per person, or the shop’s number of days). Days off are recorded in <a href="/attendance.html#leave">Attendance › Leave</a>. Here you add or take off days: carried over from last year, long service, or a correction.</p>' +
+          '<div class="kpis"><div class="kpi"><b>' + (l.vacation_left != null ? l.vacation_left : '–') + '</b><span>vacation days left of ' + (l.vacation_entitled != null ? l.vacation_entitled : '–') + ' (' + (l.vacation_taken || 0) + ' taken)</span></div>' +
+          '<div class="kpi"><b>' + (l.sick_left != null ? l.sick_left : '–') + '</b><span>sick days left of ' + (l.sick_entitled != null ? l.sick_entitled : '–') + ' (' + (l.sick_taken || 0) + ' taken)</span></div>' +
+          '<div class="kpi"><b>' + ((l.unpaid_taken || 0) + (l.other_taken || 0)) + '</b><span>unpaid or other days this year</span></div></div>' +
+          '<div class="controls"><div><label>Year</label><input id="lY" type="number" value="' + new Date().getFullYear() + '" style="width:90px"></div><div><label>Kind</label><select id="lK"><option value="vacation">Vacation</option><option value="sick">Sick</option></select></div>' +
+          '<div><label>Days (minus to take off)</label><input id="lD" type="number" step="0.5" style="width:110px"></div><div style="flex:1;min-width:200px"><label>Reason</label><input id="lR" style="width:100%" placeholder="e.g. 3 days carried over from 2025"></div><button class="primary" id="lGo">Add</button></div>' +
+          (f.leave_adjustments.length ? '<table><thead><tr><th>Year</th><th>Kind</th><th>Days</th><th>Reason</th><th>By</th><th></th></tr></thead><tbody>' + f.leave_adjustments.map(function (a) { return '<tr><td>' + a.year + '</td><td>' + esc(a.kind) + '</td><td>' + (a.days > 0 ? '+' : '') + a.days + '</td><td>' + esc(a.reason || '') + '</td><td>' + esc(a.by_name || '') + '</td><td><button class="sm" data-ldel="' + a.id + '">✕</button></td></tr>'; }).join('') + '</tbody></table>' : '');
+        $('#lGo').onclick = function () { api('/api/people/staff/' + uid + '/leave-adjustments', 'POST', { year: $('#lY').value, kind: $('#lK').value, days: $('#lD').value, reason: $('#lR').value }).then(function () { reopen(f, 'Allowance changed'); }).catch(fail); };
+        all('[data-ldel]', el).forEach(function (b) { b.onclick = function () { api('/api/people/staff/' + uid + '/leave-adjustments/' + b.getAttribute('data-ldel'), 'DELETE').then(function () { reopen(f, 'Removed'); }).catch(fail); }; });
+      },
+      reviews: function () {
+        el.innerHTML = '<h4>Reviews</h4><div class="controls"><div><label>Kind</label><select id="rK">' + opts(pairs(REVK), p.status === 'probation' ? 'probation' : 'annual') + '</select></div><div><label>Due</label><input id="rD" type="date" value="' + esc(p.status === 'probation' && p.probation_end ? p.probation_end : '') + '"></div>' +
+          '<div><label>Reviewer</label><select id="rR">' + opts(META.people.filter(function (x) { return x.id !== uid; }), p.manager_user_id || '', 'Me') + '</select></div><div><label>Period from</label><input id="rF" type="date"></div><div><label>to</label><input id="rT" type="date"></div><button class="primary" id="rGo">Set up a review</button></div>' +
+          (f.reviews.length ? f.reviews.map(function (r) {
+            return '<div class="item"><b>' + esc(REVK[r.kind]) + ' review</b>' + (r.due_on ? ' · due ' + esc(day(r.due_on)) : '') + ' · ' + esc(r.reviewer || '') + ' <span class="pill' + (r.status === 'draft' ? (r.due_on && r.due_on < today() ? ' bad' : ' warn') : ' ok') + '">' + (r.status === 'draft' ? 'to do' : r.status === 'done' ? 'done, waiting for them to sign' : 'signed by them') + '</span>' +
+              (r.overall ? ' <b>' + r.overall + '/5</b>' : '') + (r.outcome ? ' · outcome: ' + esc(r.outcome) : '') + (r.employee_comments ? '<br><small>Their comments: “' + esc(r.employee_comments) + '”</small>' : '') +
+              '<div style="margin-top:4px"><button class="sm" data-rev="' + r.id + '">' + (r.status === 'draft' ? 'Fill in' : 'Open') + '</button></div></div>';
+          }).join('') : '<p class="sub">No reviews yet.</p>') +
+          '<h4>Goals</h4><div class="controls"><div style="flex:1;min-width:200px"><label>Goal</label><input id="gT" style="width:100%" placeholder="e.g. Learn the Toyota parts catalogue"></div><div style="flex:1;min-width:160px"><label>How we know it is done</label><input id="gM" style="width:100%"></div><div><label>By</label><input id="gD" type="date"></div><button class="primary" id="gGo">Add</button></div>' +
+          (f.goals.length ? f.goals.map(function (g) {
+            return '<div class="item" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1;min-width:200px"><b>' + esc(g.title) + '</b>' + (g.due_on ? ' · by ' + esc(day(g.due_on)) : '') + (g.measure ? '<br><small>' + esc(g.measure) + '</small>' : '') + '</span>' +
+              '<div class="bar" style="width:120px"><i style="width:' + g.progress + '%"></i></div><small>' + g.progress + '%</small><span class="pill' + (g.status === 'done' ? ' ok' : g.status === 'dropped' ? '' : ' warn') + '">' + esc(g.status) + '</span>' +
+              '<select data-gp="' + g.id + '">' + [0, 25, 50, 75, 100].map(function (n) { return '<option value="' + n + '"' + (g.progress === n ? ' selected' : '') + '>' + n + '%</option>'; }).join('') + '</select>' +
+              '<button class="sm" data-gs="' + g.id + ':done">Done</button><button class="sm" data-gs="' + g.id + ':dropped">Drop</button><button class="sm" data-gdel="' + g.id + '">✕</button></div>';
+          }).join('') : '<p class="sub">No goals yet.</p>');
+        $('#rGo').onclick = function () { api('/api/people/staff/' + uid + '/reviews', 'POST', { kind: $('#rK').value, due_on: $('#rD').value, reviewer_id: $('#rR').value, period_from: $('#rF').value, period_to: $('#rT').value }).then(function () { reopen(f, 'Review set up; the reviewer is told'); }).catch(fail); };
+        all('[data-rev]', el).forEach(function (b) { b.onclick = function () { reviewForm(f, f.reviews.filter(function (r) { return String(r.id) === b.getAttribute('data-rev'); })[0]); }; });
+        $('#gGo').onclick = function () { api('/api/people/staff/' + uid + '/goals', 'POST', { title: $('#gT').value, measure: $('#gM').value, due_on: $('#gD').value }).then(function () { reopen(f, 'Goal added'); }).catch(fail); };
+        var goal = function (id) { return f.goals.filter(function (g) { return String(g.id) === String(id); })[0]; };
+        var putGoal = function (g, ch) { api('/api/people/staff/' + uid + '/goals/' + g.id, 'PUT', Object.assign({}, g, ch)).then(function () { reopen(f, 'Goal updated'); }).catch(fail); };
+        all('[data-gp]', el).forEach(function (s) { s.onchange = function () { putGoal(goal(s.getAttribute('data-gp')), { progress: +s.value, status: +s.value === 100 ? 'done' : 'open' }); }; });
+        all('[data-gs]', el).forEach(function (b) { b.onclick = function () { var x = b.getAttribute('data-gs').split(':'); putGoal(goal(x[0]), { status: x[1] }); }; });
+        all('[data-gdel]', el).forEach(function (b) { b.onclick = function () { if (confirm('Remove this goal?')) api('/api/people/staff/' + uid + '/goals/' + b.getAttribute('data-gdel'), 'DELETE').then(function () { reopen(f, 'Removed'); }).catch(fail); }; });
+      },
+      docs: function () {
+        el.innerHTML = '<div class="empty">Loading…</div>';
+        api('/api/docs/for/staff/' + uid).then(function (d) {
+          el.innerHTML = '<p class="sub">Their papers in the <a href="/documents.html">Document centre</a>: contract, offer letter, IDs, warnings, appraisals, certificates. To add one, file it there and link it to this staff member. Opening a document is logged there.</p>' +
+            (d.documents.length ? '<table><thead><tr><th>Number</th><th>Document</th><th>Kind</th><th>Expires</th><th>Filed</th></tr></thead><tbody>' + d.documents.map(function (x) {
+              return '<tr><td>' + esc(x.number) + '</td><td><a href="/api/docs/' + x.id + '/file" target="_blank" rel="noopener">' + esc(x.title) + '</a></td><td>' + esc(x.category) + ' <small class="sub">' + esc(x.confidentiality) + '</small></td><td>' + esc(day(x.expiry_date)) + '</td><td>' + esc(day(x.created_at)) + '</td></tr>';
+            }).join('') + '</tbody></table>' : '<div class="empty">Nothing filed for them yet.</div>') + '<div class="controls" style="margin-top:8px"><a href="/documents.html"><button>Open the Document centre</button></a></div>';
+        }).catch(function (e) { el.innerHTML = '<div class="empty">' + esc(e.message) + ' (seeing staff files in the Document centre needs the Documents permissions)</div>'; });
+      },
+      tasks: function () {
+        var groups = { onboarding: 'Starting', offboarding: 'Leaving', other: 'Other' };
+        el.innerHTML = '<div class="controls"><div style="flex:1;min-width:200px"><label>Something to do</label><input id="tT" style="width:100%"></div><div><label>By</label><input id="tD" type="date"></div><div><label>Who</label><select id="tA">' + opts(META.people, '', 'Me') + '</select></div><button class="primary" id="tGo">Add</button>' +
+          (f.tasks.some(function (k) { return k.kind === 'onboarding'; }) ? '' : '<button id="tOn">Add the new-starter checklist</button>') + '</div>' +
+          (f.tasks.length ? Object.keys(groups).filter(function (g) { return f.tasks.some(function (k) { return k.kind === g; }); }).map(function (g) {
+            var list = f.tasks.filter(function (k) { return k.kind === g; }), done = list.filter(function (k) { return k.done_at; }).length;
+            return '<h4>' + groups[g] + ' (' + done + ' of ' + list.length + ' done)</h4>' + list.map(function (k) {
+              return '<div class="task' + (k.done_at ? ' done' : '') + '"><input type="checkbox" data-tk="' + k.id + '"' + (k.done_at ? ' checked' : '') + '><span>' + esc(k.title) + (k.link ? ' <a href="' + esc(k.link) + '" target="_blank">open ›</a>' : '') +
+                '<br><small class="sub">' + esc([k.assignee ? 'for ' + k.assignee : '', k.due_on ? 'by ' + day(k.due_on) : '', k.done_at ? 'done ' + day(k.done_at) + ' by ' + (k.done_by_name || '') : ''].filter(Boolean).join(' · ')) + '</small></span><button class="sm" data-tdel="' + k.id + '">✕</button></div>';
+            }).join('');
+          }).join('') : '<p class="sub">No checklist. New hires get the starter checklist automatically.</p>');
+        $('#tGo').onclick = function () { api('/api/people/staff/' + uid + '/tasks', 'POST', { title: $('#tT').value, due_on: $('#tD').value, assignee_id: $('#tA').value }).then(function () { reopen(f, 'Added'); }).catch(fail); };
+        if ($('#tOn')) $('#tOn').onclick = function () { api('/api/people/staff/' + uid + '/tasks', 'POST', { template: 'onboarding', due_on: p.start_date }).then(function () { reopen(f, 'Checklist added'); }).catch(fail); };
+        all('[data-tk]', el).forEach(function (c) { c.onchange = function () { api('/api/people/tasks/' + c.getAttribute('data-tk'), 'PATCH', { done: c.checked }).then(function () { reopen(f); }).catch(fail); }; });
+        all('[data-tdel]', el).forEach(function (b) { b.onclick = function () { if (confirm('Remove this item?')) api('/api/people/tasks/' + b.getAttribute('data-tdel'), 'DELETE').then(function () { reopen(f, 'Removed'); }).catch(fail); }; });
+      },
+      exit: function () {
+        var x = f.exits.filter(function (e) { return e.status === 'open'; })[0];
+        if (!x) {
+          el.innerHTML = (f.exits.length ? f.exits.map(function (e) { return '<div class="item"><b>' + esc(EXITK[e.kind]) + '</b> · last day ' + esc(day(e.last_day)) + ' <span class="pill">' + esc(e.status) + '</span>' + (e.reason ? '<br><small>' + esc(e.reason) + '</small>' : '') + (e.exit_interview ? '<br><small>Exit interview: ' + esc(e.exit_interview) + '</small>' : '') + (e.rehire != null ? '<br><small>Would take back: ' + (e.rehire ? 'yes' : 'no') + '</small>' : '') + '</div>'; }).join('') : '') +
+            (u.is_archived ? '<p class="sub">Their login was archived' + (u.left_on ? ' (left ' + esc(day(u.left_on)) + ')' : '') + '.</p>' :
+            '<h4>Someone is leaving</h4><p class="sub">Records the notice, puts them on “working notice” and gives you the leaving checklist (keys, final pay, archiving the login).</p><div class="grid">' + field('Why', '<select id="xK">' + opts(pairs(EXITK), 'resignation') + '</select>') + field('Notice given on', inp('xN', today(), 'date')) + field('Last day', inp('xL', '', 'date')) + field('Checklist for', '<select id="xA">' + opts(META.people, '', 'Me') + '</select>') + '</div>' +
+            '<label class="sub">Reason / details</label><textarea id="xR" rows="2"></textarea><div class="controls" style="margin-top:8px"><button class="primary" id="xGo">Start the exit</button></div>');
+          if ($('#xGo')) $('#xGo').onclick = function () { api('/api/people/staff/' + uid + '/exits', 'POST', { kind: $('#xK').value, notice_date: $('#xN').value, last_day: $('#xL').value, assignee_id: $('#xA').value, reason: $('#xR').value }).then(function () { fileTab = 'tasks'; reopen(f, 'Exit started: see the leaving checklist'); }).catch(fail); };
+          return;
+        }
+        var left = f.tasks.filter(function (k) { return k.exit_id === x.id && !k.done_at; }).length;
+        el.innerHTML = '<div class="warn"><b>' + esc(EXITK[x.kind]) + '</b> · notice ' + esc(day(x.notice_date)) + ' · last day <b>' + esc(day(x.last_day)) + '</b>. ' + (left ? left + ' leaving checklist item(s) still to do (Checklists tab).' : 'Leaving checklist done.') + '</div>' +
+          '<div class="grid">' + field('Last day', inp('xL', x.last_day, 'date')) + field('Would we take them back?', '<select id="xRh"><option value="">–</option><option value="yes"' + (x.rehire === true ? ' selected' : '') + '>Yes</option><option value="no"' + (x.rehire === false ? ' selected' : '') + '>No</option></select>') + '</div>' +
+          '<label class="sub">Reason</label><textarea id="xR" rows="2">' + esc(x.reason || '') + '</textarea><label class="sub">Exit interview: why they are leaving, what we could do better</label><textarea id="xI" rows="4">' + esc(x.exit_interview || '') + '</textarea>' +
+          '<div class="controls" style="margin-top:8px"><button id="xSave">Save</button><button class="primary" id="xDone">Complete the exit</button><button id="xCancel">They are staying (cancel)</button></div>';
+        var body = function () { return { last_day: $('#xL').value, reason: $('#xR').value, exit_interview: $('#xI').value, rehire: $('#xRh').value ? $('#xRh').value === 'yes' : null }; };
+        $('#xSave').onclick = function () { api('/api/people/exits/' + x.id, 'PATCH', body()).then(function () { reopen(f, 'Saved'); }).catch(fail); };
+        $('#xCancel').onclick = function () { if (confirm('Cancel the exit? Unfinished leaving tasks are removed.')) api('/api/people/exits/' + x.id, 'PATCH', { cancel: true }).then(function () { reopen(f, 'Exit cancelled'); }).catch(fail); };
+        $('#xDone').onclick = function () {
+          if (left && !confirm(left + ' checklist item(s) are not ticked. Complete the exit anyway?')) return;
+          var arch = !u.is_archived && confirm('Also archive their login now? This signs them out, stops sign-in and removes their till PIN. Their history stays.\n\nOK = archive now, Cancel = leave the login for now');
+          api('/api/people/exits/' + x.id, 'PATCH', Object.assign(body(), { complete: true })).then(function () {
+            if (!arch) return reopen(f, 'Exit completed');
+            return api('/api/admin/staff/' + uid, 'PATCH', { archived: true, left_on: $('#xL').value, archive_reason: EXITK[x.kind] + ($('#xR').value ? ' — ' + $('#xR').value.slice(0, 150) : '') })
+              .then(function () { reopen(f, 'Exit completed and login archived'); }, function (e) { reopen(f, 'Exit completed, but the login was not archived: ' + e.message); });
+          }).catch(fail);
+        };
+      },
+      log: function () {
+        el.innerHTML = f.log.length ? '<table><thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead><tbody>' + f.log.map(function (x) { return '<tr><td><small>' + esc(when(x.at)) + '</small></td><td>' + esc(x.by_name || '') + '</td><td>' + esc(x.action) + (x.detail ? '<br><small class="sub">' + esc(x.detail) + '</small>' : '') + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="empty">No changes recorded yet.</div>';
+      },
+    };
+    H[fileTab]();
+  }
+  // Emergency contacts: used by HR on a file, and by each person on their own.
+  function contactsPane(el, list, base, done) {
+    var fail = function (e) { toast(e.message); };
+    el.innerHTML = '<p class="sub">Who to call if something happens at work. Keep at least one.</p>' + (list.length ? list.map(function (c) {
+      return '<div class="item"><b>' + esc(c.name) + '</b>' + (c.relationship ? ' (' + esc(c.relationship) + ')' : '') + (c.is_primary ? ' <span class="pill ok">call first</span>' : '') + '<br>' + esc([c.phone, c.alt_phone, c.email].filter(Boolean).join(' · ')) + (c.address ? '<br><small>' + esc(c.address) + '</small>' : '') +
+        '<div style="margin-top:4px"><button class="sm" data-ce="' + c.id + '">Edit</button> <button class="sm" data-cd="' + c.id + '">Remove</button></div></div>';
+    }).join('') : '<div class="warn">No emergency contact yet.</div>') + '<div class="controls" style="margin-top:8px"><button class="primary" id="ctNew">+ Contact</button></div>';
+    function form(c) {
+      c = c || {};
+      modal('<h2>' + (c.id ? 'Edit contact' : 'Emergency contact') + '</h2><div class="grid">' + field('Name', inp('ctN', c.name)) + field('Relationship', inp('ctR', c.relationship)) + field('Phone', inp('ctP', c.phone, 'tel')) + field('Other phone', inp('ctP2', c.alt_phone, 'tel')) + field('Email', inp('ctE', c.email, 'email')) + '</div>' +
+        '<label class="sub">Address</label><input id="ctA" value="' + esc(c.address || '') + '" style="width:100%"><label style="display:flex;gap:6px;align-items:center;margin:8px 0"><input type="checkbox" id="ctPr"' + (c.is_primary ? ' checked' : '') + '> Call this person first</label>' +
+        '<div class="controls"><button class="primary" id="ctGo">Save</button><button id="ctX">Cancel</button></div>', 2);
+      $('#ctX').onclick = function () { close(2); };
+      $('#ctGo').onclick = function () {
+        api(base + (c.id ? '/' + c.id : ''), c.id ? 'PUT' : 'POST', { name: $('#ctN').value, relationship: $('#ctR').value, phone: $('#ctP').value, alt_phone: $('#ctP2').value, email: $('#ctE').value, address: $('#ctA').value, is_primary: $('#ctPr').checked })
+          .then(function () { close(2); done('Saved'); }).catch(fail);
+      };
+    }
+    $('#ctNew').onclick = function () { form(null); };
+    all('[data-ce]', el).forEach(function (b) { b.onclick = function () { form(list.filter(function (c) { return String(c.id) === b.getAttribute('data-ce'); })[0]); }; });
+    all('[data-cd]', el).forEach(function (b) { b.onclick = function () { if (confirm('Remove this contact?')) api(base + '/' + b.getAttribute('data-cd'), 'DELETE').then(function () { done('Removed'); }).catch(fail); }; });
+  }
+  function reviewForm(f, r) {
+    var draft = r.status === 'draft', uid = f.user.id;
+    var mo = modal('<h2>' + esc(REVK[r.kind]) + ' review: ' + esc(f.user.name || '') + '</h2><p class="sub">Score each area 1 (poor) to 5 (excellent), with an example where you can. Finishing it sends it to them to read, comment on and sign off.</p>' +
+      (r.ratings || []).map(function (x) {
+        return '<div class="item" data-rk="' + esc(x.key) + '"><b>' + esc(x.label) + '</b><div class="stars">' + [1, 2, 3, 4, 5].map(function (n) { return '<button type="button" data-s="' + n + '"' + (x.score === n ? ' class="on"' : '') + (draft ? '' : ' disabled') + '>' + n + '</button>'; }).join('') + '</div>' +
+          '<input class="rc" value="' + esc(x.comment || '') + '" placeholder="Example or comment" style="width:100%;margin-top:4px"' + (draft ? '' : ' disabled') + '></div>';
+      }).join('') +
+      '<label class="sub">What they do well</label><textarea id="rvS" rows="2"' + (draft ? '' : ' disabled') + '>' + esc(r.strengths || '') + '</textarea>' +
+      '<label class="sub">What to improve</label><textarea id="rvI" rows="2"' + (draft ? '' : ' disabled') + '>' + esc(r.improve || '') + '</textarea>' +
+      '<label class="sub">Other comments</label><textarea id="rvC" rows="2"' + (draft ? '' : ' disabled') + '>' + esc(r.comments || '') + '</textarea>' +
+      (r.kind === 'probation' ? '<div class="controls"><div><label>Outcome of the probation</label><select id="rvO"' + (draft ? '' : ' disabled') + '><option value="">–</option><option value="confirm"' + (r.outcome === 'confirm' ? ' selected' : '') + '>Passed: confirm in post</option><option value="extend"' + (r.outcome === 'extend' ? ' selected' : '') + '>Extend the probation</option><option value="end"' + (r.outcome === 'end' ? ' selected' : '') + '>Not passed: end employment</option></select></div><div><label>Extend to</label><input id="rvX" type="date"' + (draft ? '' : ' disabled') + '></div></div>' : '') +
+      (r.employee_comments ? '<p><b>Their comments:</b> ' + esc(r.employee_comments) + '</p>' : '') +
+      '<div class="controls" style="margin-top:8px">' + (draft ? '<button class="primary" id="rvF">Finish and send to them</button><button id="rvSave">Save draft</button><button id="rvDel">Delete</button>' : '<button id="rvRe">Reopen to change</button>') + '<button id="rvClose">Close</button></div>', 2);
+    all('.stars button', mo).forEach(function (b) { b.onclick = function () { all('button', b.parentNode).forEach(function (x) { x.classList.toggle('on', x === b); }); }; });
+    $('#rvClose').onclick = function () { close(2); };
+    var body = function (finish) {
+      var b = { ratings: all('[data-rk]', mo).map(function (el) { var on = $('.stars .on', el); return { key: el.getAttribute('data-rk'), score: on ? +on.getAttribute('data-s') : null, comment: $('.rc', el).value }; }),
+        strengths: $('#rvS').value, improve: $('#rvI').value, comments: $('#rvC').value, finish: finish };
+      if ($('#rvO')) { b.outcome = $('#rvO').value; b.extend_until = $('#rvX').value; }
+      return b;
+    };
+    var put = function (b, msg) { api('/api/people/staff/' + uid + '/reviews/' + r.id, 'PUT', b).then(function () { close(2); reopen(f, msg); }).catch(function (e) { toast(e.message); }); };
+    if ($('#rvF')) $('#rvF').onclick = function () { if ($('#rvO') && $('#rvO').value === 'end' && !confirm('Not passed: after finishing, start their exit on the Leaving tab.')) return; put(body(true), 'Review finished; they are told'); };
+    if ($('#rvSave')) $('#rvSave').onclick = function () { put(body(false), 'Saved'); };
+    if ($('#rvRe')) $('#rvRe').onclick = function () { put({ reopen: true }, 'Reopened'); };
+    if ($('#rvDel')) $('#rvDel').onclick = function () { if (confirm('Delete this review?')) api('/api/people/staff/' + uid + '/reviews/' + r.id, 'DELETE').then(function () { close(2); reopen(f, 'Deleted'); }).catch(function (e) { toast(e.message); }); };
+  }
+
+  // ----------------------------------------------------------- org chart --
+  function orgChart(v) {
+    return api('/api/people/org').then(function (d) {
+      var kids = {}; d.people.forEach(function (p) { (kids[p.manager_id || 0] = kids[p.manager_id || 0] || []).push(p); });
+      function tree(id, depth) {
+        var list = kids[id] || [];
+        if (!list.length || depth > 20) return '';
+        return '<ul>' + list.map(function (p) { return '<li><span class="node" data-u="' + p.id + '"><b>' + esc(p.name) + '</b><small>' + esc([p.job_title, p.department].filter(Boolean).join(' · ') || 'job not set') + ((kids[p.id] || []).length ? ' · ' + kids[p.id].length + ' report' + (kids[p.id].length > 1 ? 's' : '') : '') + '</small></span>' + tree(p.id, depth + 1) + '</li>'; }).join('') + '</ul>';
+      }
+      var none = (kids[0] || []).filter(function (p) { return !(kids[p.id] || []).length; });
+      kids[0] = (kids[0] || []).filter(function (p) { return (kids[p.id] || []).length; });
+      v.innerHTML = '<div class="card"><h2>Org chart</h2><p class="sub">Who reports to whom, from the manager on each staff file. Click a person to open their file.</p><div class="org">' + (tree(0, 0) || '<div class="empty">No managers set yet. Set each person’s manager on their profile.</div>') + '</div>' +
+        (none.length ? '<h4>Manager not set (' + none.length + ')</h4><div class="org"><ul>' + none.map(function (p) { return '<li><span class="node" data-u="' + p.id + '"><b>' + esc(p.name) + '</b><small>' + esc(p.job_title || 'job not set') + '</small></span></li>'; }).join('') + '</ul></div>' : '') + '</div>';
+      all('[data-u]', v).forEach(function (n) { n.onclick = function () { openFile(n.getAttribute('data-u')); }; });
+    });
+  }
+
+  // --------------------------------------------------------------- leave --
+  function leaveView(v) {
+    var year = ($('#lvY') && $('#lvY').value) || new Date().getFullYear();
+    return api('/api/people/leave?year=' + year).then(function (d) {
+      v.innerHTML = '<div class="card"><h2>Leave balances</h2><p class="sub">Allowance from Payroll plus or minus changes on each file; days taken from <a href="/attendance.html#leave">Attendance › Leave</a> (Monday to Saturday). Record time off there.</p>' +
+        '<div class="controls"><div><label>Year</label><input id="lvY" type="number" value="' + d.year + '" style="width:90px"></div><button id="lvCsv">Export CSV</button><a href="/attendance.html#leave"><button>Record leave ›</button></a></div>' +
+        '<div class="scroll"><table><thead><tr><th>Name</th><th>Department</th><th>Vacation: allowed</th><th>taken</th><th>left</th><th>Sick: allowed</th><th>taken</th><th>left</th><th>Unpaid / other</th></tr></thead><tbody>' + d.staff.map(function (s) {
+          return '<tr class="row" data-u="' + s.id + '"><td><b>' + esc(s.name) + '</b></td><td>' + esc(s.department || '') + '</td><td>' + s.vacation_entitled + (s.adjusted_vacation ? ' <small>(' + (s.adjusted_vacation > 0 ? '+' : '') + s.adjusted_vacation + ')</small>' : '') + '</td><td>' + s.vacation_taken + '</td>' +
+            '<td><b' + (s.vacation_left < 0 ? ' style="color:var(--red)"' : '') + '>' + s.vacation_left + '</b></td><td>' + s.sick_entitled + '</td><td>' + s.sick_taken + '</td><td' + (s.sick_left < 0 ? ' style="color:var(--red)"' : '') + '>' + s.sick_left + '</td><td>' + (s.unpaid_taken + s.other_taken) + '</td></tr>';
+        }).join('') + '</tbody></table></div></div>';
+      $('#lvY').onchange = function () { leaveView(v); };
+      $('#lvCsv').onclick = function () { csv('leave-' + d.year, [['Name', 'Department', 'Vacation allowed', 'Vacation taken', 'Vacation left', 'Sick allowed', 'Sick taken', 'Sick left', 'Unpaid', 'Other']].concat(d.staff.map(function (s) { return [s.name, s.department, s.vacation_entitled, s.vacation_taken, s.vacation_left, s.sick_entitled, s.sick_taken, s.sick_left, s.unpaid_taken, s.other_taken]; }))); };
+      all('[data-u]', v).forEach(function (r) { r.onclick = function () { fileTab = 'leave'; openFile(r.getAttribute('data-u'), true); }; });
+    });
+  }
+
+  // ---------------------------------------------------------- checklists --
+  function tasksView(v) {
+    return api('/api/people/tasks').then(function (d) {
+      var kinds = { onboarding: 'Starting', offboarding: 'Leaving', other: 'Other' };
+      v.innerHTML = '<div class="card"><h2>Checklists still open</h2><p class="sub">Starter and leaver checklists, and other HR tasks, for everyone. Tick them on the person’s file.</p>' +
+        (d.tasks.length ? '<div class="scroll"><table><thead><tr><th>Person</th><th>Kind</th><th>To do</th><th>For</th><th>By</th></tr></thead><tbody>' + d.tasks.map(function (k) {
+          return '<tr class="row" data-u="' + k.user_id + '"><td><b>' + esc(k.person) + '</b></td><td>' + esc(kinds[k.kind] || k.kind) + '</td><td>' + esc(k.title) + '</td><td>' + esc(k.assignee || '') + '</td><td' + (k.due_on && k.due_on < today() ? ' style="color:var(--red)"' : '') + '>' + esc(day(k.due_on)) + '</td></tr>';
+        }).join('') + '</tbody></table></div>' : '<div class="empty">Nothing open.</div>') + '</div>';
+      all('[data-u]', v).forEach(function (r) { r.onclick = function () { fileTab = 'tasks'; openFile(r.getAttribute('data-u'), true); }; });
+    });
+  }
+
+  // ------------------------------------------------------------- reports --
+  function reportsView(v) {
+    return api('/api/people/reports').then(function (r) {
+      var mx = function (list) { return Math.max.apply(null, [1].concat(list.map(function (x) { return x.n; }))); };
+      var bars = function (title, list, labels) {
+        var m = mx(list);
+        return '<div class="card"><h2>' + title + '</h2>' + (list.length ? '<table>' + list.map(function (x) { return '<tr><td>' + esc((labels && labels[x.label]) || x.label) + '</td><td style="width:55%"><div class="bar"><i style="width:' + Math.round(100 * x.n / m) + '%"></i></div></td><td><b>' + x.n + '</b></td></tr>'; }).join('') + '</table>' : '<div class="empty">None</div>') + '</div>';
+      };
+      var people = function (title, list, cols, note) {
+        return '<div class="card"><h2>' + title + ' <span class="pill' + (list.length ? ' warn' : ' ok') + '">' + list.length + '</span></h2>' + (note ? '<p class="sub">' + note + '</p>' : '') + (list.length ? '<table>' + list.map(function (x) { return '<tr class="row" data-u="' + x.id + '"><td><b>' + esc(x.name) + '</b></td>' + cols.map(function (c) { return '<td>' + esc(c(x)) + '</td>'; }).join('') + '</tr>'; }).join('') + '</table>' : '<p class="sub">Nothing.</p>') + '</div>';
+      };
+      var mm = Math.max.apply(null, [1].concat(r.moves.map(function (m) { return Math.max(m.starters, m.leavers); })));
+      v.innerHTML = '<div class="kpis"><div class="kpi"><b>' + r.headcount + '</b><span>staff now</span></div><div class="kpi"><b>' + r.starters12 + '</b><span>started in the last 12 months</span></div>' +
+        '<div class="kpi"><b>' + r.leavers12 + '</b><span>left in the last 12 months</span></div><div class="kpi"><b>' + r.turnover_pct + '%</b><span>turnover (leavers ÷ average staff)</span></div>' +
+        '<div class="kpi"><b>' + (r.hiring.in_progress || 0) + '</b><span>applicants in progress · ' + (r.hiring.posts_open || 0) + ' jobs open</span></div><div class="kpi"><b>' + (r.hiring.days_to_hire != null ? r.hiring.days_to_hire : '–') + '</b><span>average days from applying to hired</span></div></div>' +
+        '<div class="controls"><button id="rpPrint">Print</button></div>' +
+        '<div class="card"><h2>Starters and leavers by month</h2><table>' + r.moves.map(function (m) { return '<tr><td style="width:90px">' + esc(m.ym) + '</td><td><div class="bar"><i style="width:' + Math.round(100 * m.starters / mm) + '%;background:var(--ok)"></i></div><div class="bar" style="margin-top:2px"><i style="width:' + Math.round(100 * m.leavers / mm) + '%"></i></div></td><td><small>+' + m.starters + ' / −' + m.leavers + '</small></td></tr>'; }).join('') + '</table><p class="sub">Green: started. Red: left.</p></div>' +
+        bars('Staff by department', r.by_department) + bars('Staff by contract', r.by_contract, CONTRACT) + bars('Staff by status', r.by_status, STATUS) + bars('Length of service', r.service) + bars('Why people left (last 12 months)', r.exits, EXITK) +
+        people('Probation ending within 30 days', r.probation_due, [function (x) { return day(x.due); }], 'Hold the end-of-probation review before this date.') +
+        people('Contracts ending within 60 days', r.contracts_ending, [function (x) { return CONTRACT[x.contract_type] || ''; }, function (x) { return day(x.due); }]) +
+        people('Warnings still on file', r.warnings, [function (x) { return CASEK[x.kind]; }, function (x) { return x.summary; }, function (x) { return x.expires_on ? 'until ' + day(x.expires_on) : ''; }]) +
+        people('Reviews overdue', r.reviews_overdue, [function (x) { return REVK[x.kind]; }, function (x) { return 'due ' + day(x.due); }]) +
+        people('No emergency contact', r.no_contact, []) +
+        people('Start date or job title missing', r.missing, [function (x) { return [x.no_start ? 'start date' : '', x.no_title ? 'job title' : ''].filter(Boolean).join(', '); }]) +
+        people('Birthdays this month', r.birthdays, [function (x) { return x.day; }]);
+      $('#rpPrint').onclick = function () { window.print(); };
+      all('[data-u]', v).forEach(function (n) { n.onclick = function () { openFile(n.getAttribute('data-u')); }; });
+    });
+  }
+  function auditView(v) {
+    return api('/api/people/audit').then(function (d) {
+      v.innerHTML = '<div class="card"><h2>HR log</h2><p class="sub">Every change to a staff file and every hiring decision: who, when and what. Nothing here can be edited.</p>' +
+        (d.log.length ? '<div class="scroll"><table><thead><tr><th>When</th><th>Who</th><th>About</th><th>What</th></tr></thead><tbody>' + d.log.map(function (x) {
+          return '<tr><td><small>' + esc(when(x.at)) + '</small></td><td>' + esc(x.by_name || '') + '</td><td>' + (x.user_id ? '<button class="link" data-u="' + x.user_id + '">' + esc(x.person || '#' + x.user_id) + '</button>' : x.application_id ? '<a href="/hiring.html#app=' + x.application_id + '">applicant #' + x.application_id + '</a>' : esc(x.entity)) + '</td><td>' + esc(x.action) + (x.detail ? '<br><small class="sub">' + esc(x.detail) + '</small>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div>' : '<div class="empty">Nothing yet.</div>') + '</div>';
+      all('[data-u]', v).forEach(function (n) { n.onclick = function () { fileTab = 'log'; openFile(n.getAttribute('data-u'), true); }; });
+    });
+  }
+
+  // --------------------------------------------------------- my HR file --
+  function myFile(v) {
+    return api('/api/people/me').then(function (f) {
+      var p = f.profile || {}, l = f.leave || {};
+      var waiting = f.reviews.filter(function (r) { return r.status === 'done'; }), letters = f.cases.filter(function (c) { return !c.acknowledged_at; });
+      v.innerHTML = '<div class="card"><h2>My HR file</h2><p class="sub">' + esc([p.job_title, p.department, p.manager ? 'reports to ' + p.manager : '', p.start_date ? 'started ' + day(p.start_date) : ''].filter(Boolean).join(' · ')) + '</p>' +
+        (waiting.length || letters.length ? '<div class="warn">Waiting for you: ' + [waiting.length ? waiting.length + ' review(s) to read and sign' : '', letters.length ? letters.length + ' letter(s) to read' : ''].filter(Boolean).join(', ') + '.</div>' : '') +
+        '<div class="kpis"><div class="kpi"><b>' + (l.vacation_left != null ? l.vacation_left : '–') + '</b><span>vacation days left this year</span></div><div class="kpi"><b>' + (l.sick_left != null ? l.sick_left : '–') + '</b><span>sick days left</span></div>' +
+        '<div class="kpi"><b>' + (STATUS[p.status] || 'Active') + '</b><span>' + (p.status === 'probation' && p.probation_end ? 'until ' + esc(day(p.probation_end)) : 'status') + '</span></div></div>' +
+        '<p class="sub">To book time off, ask your manager or use the leave form in the <a href="/documents.html">Document centre</a>. Your payslips are in <a href="/my-time.html">My time</a> and Payroll.</p></div>' +
+        '<div class="card"><h2>My contact details</h2><div class="grid">' + field('Personal phone', inp('mPh', p.personal_phone, 'tel')) + field('Personal email', inp('mEm', p.personal_email, 'email')) + field('Parish', inp('mPa', p.parish)) + '</div>' +
+        '<label class="sub">Home address</label><textarea id="mA" rows="2">' + esc(p.address || '') + '</textarea><div class="controls" style="margin-top:8px"><button class="primary" id="mSave">Save</button></div></div>' +
+        '<div class="card"><h2>My emergency contacts</h2><div id="mC"></div></div>' +
+        (f.my_tasks.length ? '<div class="card"><h2>HR tasks for me</h2>' + f.my_tasks.map(function (k) { return '<div class="task"><input type="checkbox" data-mt="' + k.id + '"><span>' + esc(k.title) + (k.link ? ' <a href="' + esc(k.link) + '">open ›</a>' : '') + (k.due_on ? '<br><small class="sub">by ' + esc(day(k.due_on)) + '</small>' : '') + '</span></div>'; }).join('') + '</div>' : '') +
+        '<div class="card"><h2>My reviews and goals</h2>' + (f.reviews.length ? f.reviews.map(function (r) {
+          return '<div class="item"><b>' + esc(REVK[r.kind]) + ' review</b> · ' + esc(r.reviewer || '') + ' · ' + esc(day(r.completed_at)) + (r.overall ? ' · <b>' + r.overall + '/5</b>' : '') + '<br>' +
+            (r.ratings || []).filter(function (x) { return x.score; }).map(function (x) { return esc(x.label) + ': ' + x.score + (x.comment ? ' (' + esc(x.comment) + ')' : ''); }).join('<br>') +
+            (r.strengths ? '<br><small>Well done: ' + esc(r.strengths) + '</small>' : '') + (r.improve ? '<br><small>To improve: ' + esc(r.improve) + '</small>' : '') + (r.comments ? '<br><small>' + esc(r.comments) + '</small>' : '') +
+            (r.status === 'done' ? '<textarea id="mrc' + r.id + '" rows="2" placeholder="Your comments (optional)" style="margin-top:6px"></textarea><button class="sm primary" data-mr="' + r.id + '">I have read this review</button>' : '<br><small>Signed by you ' + esc(day(r.acknowledged_at)) + (r.employee_comments ? ': “' + esc(r.employee_comments) + '”' : '') + '</small>') + '</div>';
+        }).join('') : '<p class="sub">No reviews yet.</p>') +
+        (f.goals.length ? '<h4>Goals</h4>' + f.goals.map(function (g) { return '<div class="item"><b>' + esc(g.title) + '</b>' + (g.due_on ? ' · by ' + esc(day(g.due_on)) : '') + ' <span class="pill">' + esc(g.status) + ' ' + g.progress + '%</span>' + (g.measure ? '<br><small>' + esc(g.measure) + '</small>' : '') + '</div>'; }).join('') : '') + '</div>' +
+        '<div class="card"><h2>Letters</h2>' + (f.cases.length ? f.cases.map(function (c) {
+          return '<div class="item"><b>' + esc(CASEK[c.kind]) + '</b> · ' + esc(day(c.incident_date || c.created_at)) + '<br>' + esc(c.summary) + (c.details ? '<br><small>' + esc(c.details) + '</small>' : '') + (c.action ? '<br><small>Next: ' + esc(c.action) + '</small>' : '') + (c.expires_on ? '<br><small>On file until ' + esc(day(c.expires_on)) + '</small>' : '') +
+            (c.acknowledged_at ? '<br><small>Received ' + esc(day(c.acknowledged_at)) + (c.employee_response ? '. Your reply: “' + esc(c.employee_response) + '”' : '') + '</small>' :
+              '<textarea id="mcr' + c.id + '" rows="2" placeholder="Your reply (optional)" style="margin-top:6px"></textarea><button class="sm primary" data-mc="' + c.id + '">I have received this letter</button>') + '</div>';
+        }).join('') : '<p class="sub">None.</p>') + '</div>';
+      $('#mSave').onclick = function () { api('/api/people/me/details', 'PUT', { personal_phone: $('#mPh').value, personal_email: $('#mEm').value, parish: $('#mPa').value, address: $('#mA').value }).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); }); };
+      contactsPane($('#mC'), f.contacts, '/api/people/me/contacts', function (m) { toast(m); myFile(v); });
+      all('[data-mr]', v).forEach(function (b) { b.onclick = function () { var id = b.getAttribute('data-mr'); api('/api/people/me/reviews/' + id + '/ack', 'POST', { comments: $('#mrc' + id).value }).then(function () { toast('Thank you'); myFile(v); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-mc]', v).forEach(function (b) { b.onclick = function () { var id = b.getAttribute('data-mc'); api('/api/people/me/cases/' + id + '/ack', 'POST', { response: $('#mcr' + id).value }).then(function () { toast('Recorded'); myFile(v); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-mt]', v).forEach(function (c) { c.onchange = function () { api('/api/people/me/tasks/' + c.getAttribute('data-mt'), 'PATCH', { done: c.checked }).then(function () { toast('Done'); myFile(v); }).catch(function (e) { toast(e.message); }); }; });
+    });
+  }
+
+  // ---------------------------------------------------------------- start --
+  // #staff=12 opens a file over the staff list; #org, #leave... pick a tab.
+  var drawn = false;
+  function route() {
+    var h = location.hash.slice(1), m = /^staff=(\d+)$/.exec(h);
+    var want = !CAN ? 'me' : m ? 'staff' : TABS.some(function (t) { return t[0] === h; }) ? h : 'staff';
+    if (want !== tab || !drawn) { tab = want; drawn = true; show(); }
+    if (m && CAN) openFile(m[1]);
+  }
+  window.addEventListener('hashchange', route);
+  api('/api/people/meta').then(function (m) { META = m; CAN = true; }, function () { CAN = false; }).then(route);
+})();
+</script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+</body>
+</html>

@@ -62,6 +62,7 @@
 
   // ---------------------------------------------------- the applicant's page --
   if (params.get('app')) return statusPage(params.get('app'));
+  if (params.get('offer')) return offerPage(params.get('offer'));
 
   function statusPage(token) {
     document.getElementById('h1').textContent = 'Your application';
@@ -198,6 +199,32 @@
         })
         .catch(function (er) { bad(er.message); btn.disabled = false; btn.textContent = 'Send application'; });
     });
+  }
+  // The job offer, reached by the private link in the offer email: read the
+  // letter, then accept by typing your name, or decline.
+  function offerPage(token) {
+    document.getElementById('h1').textContent = 'Your job offer';
+    var url = '/api/public/offers/' + encodeURIComponent(token);
+    getJson(url).then(function (o) {
+      var answered = o.status !== 'sent';
+      m.innerHTML = '<div class="job">' + o.letter + '</div>' +
+        (answered
+          ? '<div class="ok">' + (o.status === 'accepted' ? 'You accepted this offer on ' + esc(day(o.responded_at)) + '. We will contact you about your first day.' : 'You declined this offer on ' + esc(day(o.responded_at)) + '.') + '</div>'
+          : '<div class="job"><h2>Your answer</h2>' + (o.respond_by ? '<p class="meta">Please answer by ' + esc(day(o.respond_by)) + '.</p>' : '') +
+            '<label for="ofName">To accept, type your full name</label><input id="ofName" autocomplete="name" placeholder="' + esc(o.name || '') + '">' +
+            '<label for="ofNote">Anything you want to tell us (optional)</label><textarea id="ofNote" rows="3"></textarea>' +
+            '<p class="err" id="ofErr"></p><div style="display:flex;gap:10px;flex-wrap:wrap"><button id="ofYes">I accept this offer</button><button class="ghost" id="ofNo">Decline</button></div></div>');
+      if (answered) return;
+      function send(decision) {
+        if (decision === 'decline' && !confirm('Decline this job offer?')) return;
+        document.getElementById('ofYes').disabled = document.getElementById('ofNo').disabled = true;
+        getJson(url + '/respond', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision: decision, name: document.getElementById('ofName').value, note: document.getElementById('ofNote').value }) })
+          .then(function (r) { m.innerHTML = '<div class="ok">' + esc(r.message) + '</div>'; })
+          .catch(function (e) { document.getElementById('ofErr').textContent = e.message; document.getElementById('ofYes').disabled = document.getElementById('ofNo').disabled = false; });
+      }
+      document.getElementById('ofYes').onclick = function () { send('accept'); };
+      document.getElementById('ofNo').onclick = function () { send('decline'); };
+    }).catch(function (e) { m.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
   }
   // So the postings can show in Google's job search.
   function jsonLd(jobs) {

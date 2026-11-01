@@ -13598,6 +13598,8 @@ function qboTabs(on){
     [['staff', 'Users'], ['roles', 'Roles'], ['staffcategories', 'Staff categories']]
       .filter(function(t){ return t[0] === on || hide.indexOf(t[0]) < 0; })
       .map(function(t){ return '<button type="button" data-qbtab="' + t[0] + '"' + (t[0] === on ? ' class="on"' : '') + '>' + t[1] + '</button>'; }).join('') +
+    // The HR side of the same people (people.html): files, reviews, leave, exits.
+    '<button type="button" onclick="location.href=tillHref(\'/people.html\')">HR files ›</button>' +
   '</div>';
 }
 function qboWireTabs(root){
@@ -13956,7 +13958,8 @@ async function renderStaff(panel){
             '<option value="true"' + (s.is_staff ? ' selected' : '') + '>Active staff</option>' +
             '<option value="false"' + (!s.is_staff ? ' selected' : '') + '>No longer staff</option>' +
           '</select></div>' +
-        '</div>' },
+        '</div>' +
+        '<p class="qbo-note">Job, manager, emergency contacts, reviews, warnings and leave are on their <a href="' + esc(tillHref('/people.html#staff=' + s.id)) + '">HR file ›</a></p>' },
       { key: 'role', label: 'Role', html:
         (s.is_admin ? '' : '<p class="qbo-note">Signs in at the till with a PIN only. The role applies if they are given admin panel access.</p>') +
         '<div class="qbo-sec" style="margin-top:0">Role</div><select class="fld" id="euRole">' + roleOptions(s.admin_role) + '</select>' +
@@ -18510,7 +18513,7 @@ var TILL_ORIGIN = 'https://till.visionautosolutions.com';
 var ON_WEBSITE = location.hostname !== 'till.visionautosolutions.com' &&
   /(^|\.)visionautosolutions\.(com|pages\.dev)$/.test(location.hostname);
 var TILL_ONLY_PAGES = ['accounting', 'budget', 'documents', 'receivables', 'payables', 'banking', 'loans-rent', 'report-balancing', 'payroll',
-  'clock', 'attendance', 'commission', 'training', 'hiring', 'dispatch', 'fleet-wall', 'mobile',
+  'clock', 'attendance', 'commission', 'training', 'hiring', 'people', 'dispatch', 'fleet-wall', 'mobile',
   'driver', 'cashier', 'warehouse', 'stockcash', 'report-planning', 'terminal', 'ai', 'system', 'security'];
 function tillHref(href) {
   if (!ON_WEBSITE || !href || href.charAt(0) !== '/' || href.charAt(1) === '/') return href;
@@ -18554,12 +18557,13 @@ var MODULE_GROUPS = [
     { href: '/report-balancing.html', icon: '⚖', name: 'Balancing report', blurb: 'Stock ledger and cost at sale' },
   ]},
   { title: '👥 People', items: [
+    { href: '/people.html',      icon: '🗂', name: 'People & HR', blurb: 'Staff files, contacts, job and pay history, probation, warnings, reviews, leave, exits, org chart, HR reports' },
     { href: '/payroll.html',     icon: '🧾', name: 'Payroll', blurb: 'Jamaican payroll: NIS, NHT, Ed Tax, HEART, PAYE, contractors, loans, deductions', key: 'payroll' },
     { href: '/clock.html',       icon: '⏱️', name: 'Time clock', blurb: 'Clock in and out' },
     { href: '/attendance.html',  icon: '🕘', name: 'Attendance', blurb: 'Hours, lateness, shifts' },
     { href: '/commission.html',  icon: '💰', name: 'Commission', blurb: 'Sales commission and boosts' },
     { href: '/training.html',    icon: '🎓', name: 'Training', blurb: 'Lessons, quizzes, practice till' },
-    { href: '/hiring.html',      icon: '🧑‍💼', name: 'Hiring and careers', blurb: 'Job posts and applicants' },
+    { href: '/hiring.html',      icon: '🧑‍💼', name: 'Hiring and careers', blurb: 'Requisitions, job posts, applicants, interviews and scorecards, references, offers' },
   ]},
   { title: '🚚 Deliveries and mobile', items: [
     { href: '/dispatch.html', icon: '🗺️', name: 'Dispatch', blurb: 'Delivery and admin-run queue, assign drivers, routes, live map, alerts', key: 'fleet' },

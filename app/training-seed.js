@@ -585,7 +585,7 @@ Stock to cash: All modules > Stock to cash shows stock that is not selling (over
   },
   {
     key: 'people', title: 'Staff, roles, payroll and attendance', sort: 135, quiz: false, roles: ['owner', 'manager'],
-    summary: 'Adding staff, roles and permissions, staff categories, attendance, payroll, commission, hiring and training.',
+    summary: 'Adding staff, roles and permissions, staff categories, HR files, attendance, payroll, commission, hiring and training.',
     body: `Manage users: Settings > Users & Staff opens Manage users, laid out like QuickBooks. Tabs across the top switch between Users, Roles and Staff categories. The Users list can be searched by name, email, phone or employee number, and filtered by status (current staff, active, disabled, no longer staff, archived, everyone) and by role.
 
 Adding staff: press "Add user". A panel opens on the right in two steps. 1 Details: name, email (sign-in), phone, temporary password, employee number, national ID (TRN) and till PIN (4 to 8 digits). 2 Role & access: the role (Owner, Manager, Cashier, Freelance rep or one you added) and categories (sales rep, cashier, mechanic, service advisor, driver, parts clerk). Untick "Can sign in to the admin panel" for staff who only need a PIN at the till.
@@ -600,6 +600,21 @@ Roles and permissions: the Roles tab (also Settings > Roles & Permissions). A ro
 
 Staff categories: Settings > Staff Categories lists what people do (sales rep, cashier, driver...). Each category has a permission grid: unticked functions are denied to its members, and a person's own record can re-allow or deny on top.
 
+People & HR: All modules > People & HR (or "HR files ›" beside the Users, Roles and Staff categories tabs, or "HR file ›" on a person's Profile tab). It needs the "Staff HR files" permission. The login, role and PIN stay on Users & Staff; pay, TRN, NIS and bank details stay in Payroll; days off are recorded in Attendance > Leave; papers live in the Document centre. The HR file links to all of them instead of copying them.
+- Staff files: everyone, with job, department, manager, start date, contract and status (on probation, active, working notice, left), and what needs attention: probation ending, warnings on file, reviews due, checklist items open, no emergency contact. Search, filter by department or status, and Export CSV. Click a person to open their file.
+- Profile: job title, department, manager, start date, contract (permanent, fixed term, part time, casual, contractor, internship) and when a fixed term ends, probation months (the end date is worked out from the start date), date of birth, personal phone, email and address, and private HR notes. Saving keeps Payroll's job title, department and start date in step.
+- Emergency contacts: who to call, with relationship and phones; tick the one to call first.
+- Job & pay: record a promotion, transfer, pay change or new title with the date it takes effect and the reason. From that date it is their current job. Tick "Pass the new pay on to Payroll" to change their salary or hourly rate there too (only someone who may change pay can). The list is their full job and salary history in J$.
+- Probation & conduct: confirm someone in post or extend their probation. Record counselling, a verbal, written or final warning, suspension, dismissal or a commendation: what happened, the details, what happens next, and how long it stays on file. The letter is filed in their staff file in the Document centre, and they can be told to read it; they confirm they received it and may reply. Mark a record closed, appealed or withdrawn.
+- Leave: this year's vacation and sick days allowed, taken and left. The allowance comes from Payroll; add or take off days here with a reason (for example days carried over). The Leave tab shows everyone's balance.
+- Reviews & goals: set up a review (end of probation, yearly, mid-year) with a due date and reviewer, who is told. Score each area 1 to 5 with examples, write what they do well and what to improve, and Finish: they are told to read it, comment and sign it off in My HR file. Finishing an end-of-probation review with "Passed" confirms them in post; "Extend" moves the probation date. Goals have a due date, a measure and progress.
+- Documents: everything filed in the Document centre for this staff member (contract, offer letter, IDs, warnings, certificates).
+- Checklists: the new-starter checklist (added on hire) and the leaving checklist, each item with who does it and by when, and a link to the screen where it is done.
+- Leaving: record a resignation, termination, redundancy, end of contract or retirement with the notice date and last day. They go on "working notice" and get the leaving checklist (keys and uniform back, final pay and vacation owed, loans settled, archive the login). Write up the exit interview and whether you would take them back, then "Complete the exit"; it can archive their login at the same time. "They are staying" cancels it.
+- History: every change to the file, with who made it and when. The HR log tab shows the same for everyone, with hiring decisions.
+- Org chart: who reports to whom, from each person's manager. People with no manager set are listed underneath.
+- Reports: staff now, starters and leavers by month, turnover, staff by department, contract, status and length of service, why people left, probation and contracts ending soon, warnings on file, overdue reviews, missing emergency contacts or start dates, and birthdays this month. Print it for a management meeting.
+
 Sales reps: Company & Print Settings > Sales reps lists reps with their commission %. A staff member who is also a rep is better added under Staff with the Sales rep category ticked.
 
 Time clock and attendance: staff clock in at All modules > Time clock (PIN, badge, fingerprint / face or email). Attendance shows who is in, today, requests (overtime, extensions, corrections) to approve, timesheets, staff and shifts, leave and holidays, sales per hour and settings. Approving the week's timesheets freezes the figures for payroll.
@@ -608,14 +623,22 @@ Payroll: All modules > Payroll (switched on in its settings). Set the company TR
 
 Commission: All modules > Commission. Rules set the rate by part, supplier, category or rep (% of the line, % of the margin, or J$ per unit, with tiers). Commission can be earned when the sale is made or only once it is fully paid. Split a sale between reps, add adjustments, make statements, approve and pay them. Every rep sees their own under My commission. Freelance reps and tracked links are managed there.
 
-Hiring: All modules > Hiring and careers.
+Hiring: All modules > Hiring and careers. The steps are: requisition, posting, applications, screening, shortlist, interviews, comparison, references, offer, hire. Every decision is kept with who made it, when and why (📜 Decisions).
+- Requisitions: press + Requisition to make the case for a job: title, how many, new or replacing someone, the pay range in J$ a year, when they are needed, the hiring manager, and why the shop needs them. "Send for approval" tells the owners and managers (and anyone with "Approve job requisitions and job offers"). The approver presses Approve, or Turn down with the reason. An approved requisition has "Post it", which makes the job posting for you to finish and open. Under Emails & settings you can require an approved requisition before any job is posted.
 - Postings: press + Job. Give the title, type, number of openings, pay, closing date and the job description. Under "Documents to send" list what applicants must provide (one click adds Photo ID, TRN, NIS, Police record, Driver's licence, Certificates, References or Proof of address); tick "needed" for the ones you must have. Add screening questions (written or yes/no) and tick "A CV is required" if it is. Open postings show on the public careers page, where people can search them and share them. The arrow beside Edit has Duplicate, Close or Reopen, Copy link, and sharing to WhatsApp, Facebook and LinkedIn.
 - Applying: the applicant fills in their details, answers the questions and attaches a CV and documents (PDF, Word or a phone photo, up to 5 MB each). A needed document can follow later.
 - Automatic reply: every applicant is emailed straight away with a reference number (such as VA-26-0042), what is still needed, and a private link. On that page they can see where their application is, upload missing documents, or withdraw and delete it. Set an inbox under "Emails & settings" to be told about each new application.
 - Applicants: shown as a board by stage or as a list, with search and Export CSV. A yellow "docs missing" tag shows who still owes documents. Open one to see their answers, CV and documents (opening a file is recorded), add a paper document you scanned, rate them, set an interview time and add notes. "Ask for them" emails the list of missing documents with their upload link; ✉ Email writes any other message.
-- Moving someone to Interview, Offer or Rejected offers an email written from that stage's template, which you can edit before sending or skip. Every email is kept in the application's history.
-- Emails & settings: edit the wording of the automatic reply and each stage email, and how long applicants who are not hired are kept. If the till has no email set up, emails are recorded but not sent, and the screen says so.
-- Hire makes a staff login, switched off until a manager sets the role and password. Applicants not hired are deleted (details, CV and documents) after the retention period.
+- The stages are New, Screen, Shortlist, Interview, References, Offer, Hired and Rejected. Moving someone to Interview, Offer or Rejected offers an email written from that stage's template, which you can edit before sending or skip. Rejecting asks why (kept on file, not sent to them). Every email is kept in the application's history.
+- Screening: in the application, choose Pass, Maybe or Fail and write why. "Pass and shortlist" moves them to Shortlist.
+- Interviews: "+ Book an interview": when, how long, in person, by phone or video, where, the round, and the panel (tick the staff who will interview). It goes on the staff calendar for the panel with a reminder, and they get a notice; moving or cancelling it tells them too. You are offered an email to the candidate with the time.
+- Scorecards: after the interview each panel member opens Hiring > My interviews (staff without hiring rights see only this) and fills in the scorecard: each area 1 to 5, would you hire them (strong yes, yes, no, strong no), strengths and concerns. The areas come from the job's "Interview scorecard" (set on the job form) or the standard list. The panel sees the candidate's answers but not their contact details or CV.
+- Comparing: the arrow beside a job's Edit has "Compare candidates": everyone shortlisted or further, side by side, best average score first, with each area, the panel's hire votes, references and any offer. "Choose" asks why, then sends them to reference checks or straight to the offer.
+- References: "+ Referee" with their name, company and phone or email. "✉ Ask" emails them the reference request (wording under Emails & settings), or phone them. "Record answer": what they said, good, mixed or poor, and whether they would employ them again.
+- Offer: "+ Make an offer": job title, department, who they report to, start date, contract, probation months, salary (J$ a year) or hourly rate, pay day, hours, benefits, conditions and the date to answer by. It is saved as a draft and "Send for approval" goes to the approvers, who Approve or Send back with what to change. Once approved, "✉ Send to them" emails the offer with a private link where they read the letter and accept by typing their name, or decline; you are told. The letter is filed in the Document centre. If they answer in person or on paper, use "Record their answer". "Letter" opens it to print.
+- Hire: only once the offer is accepted (if one was made). It makes their staff login (switched off until a manager sets the role, password and PIN on Users & Staff), opens their HR file from the offer (job, department, manager, start date, probation), adds them to Payroll switched off with the offered pay, gives them the new-starter checklist, files the offer under their name and marks the requisition filled. Their manager is told.
+- Emails & settings: edit the wording of the automatic reply, each stage email, the offer email and the reference request, how long applicants who are not hired are kept, and whether postings need an approved requisition. If the till has no email set up, emails are recorded but not sent, and the screen says so.
+- Applicants not hired are deleted (details, CV, documents, referees and the offer link) after the retention period.
 
 Training: All modules > Training. Each person reads the lessons for their role and takes the quizzes (a pass lasts a year). The practice till lets new staff ring up practice sales safely. Managers see the Team view and edit lessons and questions.
 
@@ -640,6 +663,24 @@ SOS: the SOS button alerts the shop at once with your position. Use it in any em
 Alerts: dispatch is alerted to SOS, a phone that has gone quiet, a driver stopped too long away from any stop, and speeding.
 
 Security screen: the Security screen (fleet wall) is a full-screen live driver map for the security monitor; it is opened with a screen link and needs no sign-in.`,
+    questions: [],
+  },
+  {
+    key: 'my-hr-file', title: 'My HR file', sort: 136, quiz: false,
+    summary: 'Your own staff file: contact details, emergency contacts, leave left, reviews, goals and letters.',
+    body: `Open it: All modules > People & HR, or go to people.html. Everyone sees their own file under "My HR file"; only HR sees other people's.
+
+What it shows: your job, department, manager and start date, whether you are on probation and until when, and the vacation and sick days you have left this year.
+
+Keep your details up to date: your personal phone, email, parish and home address, and your emergency contacts (who the shop calls if something happens to you at work). Add at least one, and tick the one to call first.
+
+Reviews: when your manager finishes a review you get a notice. Read the scores and comments, add your own comments if you want, and press "I have read this review". That signs it off; it does not mean you agree with every word.
+
+Letters: a warning or a commendation shows under Letters. Press "I have received this letter"; you may write a reply, which is kept with it.
+
+HR tasks: if HR gives you something to do for a new starter or someone leaving (hand over keys, set up a till), it shows under "HR tasks for me". Tick it when done.
+
+Time off: ask your manager, or fill in the leave form in the Document centre. Days taken are recorded in Attendance and come off what you have left.`,
     questions: [],
   },
   {

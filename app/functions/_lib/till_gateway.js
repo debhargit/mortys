@@ -43,7 +43,7 @@ export async function gatewaySignature(secret, ts, method, pathAndQuery, email) 
 // of them loads, then each of its API calls answers 501 "not ported". Must
 // match TILL_ONLY_PAGES in admin.html, which points the admin's own links at
 // the till; this catches the rest (bookmarks, typed addresses, history).
-const TILL_ONLY_PAGE = /^\/(accounting|budget|documents|receivables|payables|banking|loans-rent|report-balancing|payroll|clock|attendance|commission|training|hiring|dispatch|fleet-wall|mobile|driver|cashier|warehouse|stockcash|report-planning|terminal|ai|system|security)(\.html)?\/?$/;
+const TILL_ONLY_PAGE = /^\/(accounting|budget|documents|receivables|payables|banking|loans-rent|report-balancing|payroll|clock|attendance|commission|training|hiring|people|dispatch|fleet-wall|mobile|driver|cashier|warehouse|stockcash|report-planning|terminal|ai|system|security)(\.html)?\/?$/;
 
 // Returns a redirect to the same page on the till, or null.
 export function tillPageRedirect(request, env, pathname) {
