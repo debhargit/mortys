@@ -16,6 +16,19 @@
   .note{white-space:pre-wrap}
   .mono{font-family:ui-monospace,Consolas,monospace;font-size:12px}
   details summary{cursor:pointer}
+  /* network map */
+  #nmSvg{width:100%;height:auto;display:block;background:radial-gradient(circle at 50% 52%,rgba(37,99,235,.07),transparent 60%);border-radius:12px}
+  .nml{fill:none;stroke-width:2.2} .nml.up{stroke:#16a34a;opacity:.55} .nml.down{stroke:#dc2626;stroke-dasharray:7 6} .nml.unknown{stroke:#f59e0b;opacity:.7} .nml.idle{stroke:#94a3b8;stroke-dasharray:3 6;opacity:.7}
+  .nmp{fill:#16a34a}
+  .nmn{cursor:pointer;outline:none} .nmn .nmc{stroke-width:3;fill:var(--card)} .nmn.up .nmc{stroke:#16a34a} .nmn.down .nmc{stroke:#dc2626;fill:#fee2e2} .nmn.unknown .nmc{stroke:#f59e0b;fill:#fef3c7} .nmn.idle .nmc{stroke:#94a3b8;stroke-dasharray:4 3}
+  .nmn:hover .nmc,.nmn:focus .nmc{stroke-width:5} .nmn.sel .nmc{stroke-width:6;filter:drop-shadow(0 0 6px rgba(37,99,235,.6))}
+  .nmpulse{fill:none;stroke:#dc2626;stroke-width:3}
+  .nmi{text-anchor:middle;pointer-events:none} .nmt{text-anchor:middle;font-size:12.5px;font-weight:600;fill:var(--ink)} .nms{text-anchor:middle;font-size:11px;fill:var(--muted);font-family:ui-monospace,Consolas,monospace}
+  .nmt,.nms{paint-order:stroke;stroke:var(--card);stroke-width:4px;stroke-linejoin:round}
+  .nmwrap{overflow-x:auto} @media (max-width:760px){ #nmSvg{min-width:720px} }
+  .nmfoot{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12.5px;color:var(--muted);margin-top:6px} .nmd{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+  .nmd.up{background:#16a34a} .nmd.down{background:#dc2626} .nmd.unknown{background:#f59e0b} .nmd.idle{background:#94a3b8}
+  @media (prefers-color-scheme: dark){ .nmn.down .nmc{fill:#450a0a} .nmn.unknown .nmc{fill:#422006} }
 </style>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
@@ -383,6 +396,8 @@
       var down = d.targets.filter(function (t) { return t.enabled && t.last_ok === false; }).length, risky = d.ports.filter(function (p) { return p.risk; });
       var fwOk = d.firewall ? Object.keys(d.firewall).every(function (k) { return d.firewall[k]; }) : null;
       $('#out').innerHTML = '<div class="tiles"><div class="tile' + (down ? ' bad' : '') + '"><span class="k">Monitored: down</span><b>' + down + ' / ' + d.targets.length + '</b></div><div class="tile' + (fwOk === false ? ' bad' : '') + '"><span class="k">Windows Firewall</span><b>' + (fwOk == null ? '—' : fwOk ? 'On' : 'OFF') + '</b></div><div class="tile' + (risky.length ? ' bad' : '') + '"><span class="k">Risky open ports</span><b>' + risky.length + '</b></div><div class="tile click" id="lanTile"><span class="k">Devices on the network</span><b id="lanCount">scan</b></div></div>' +
+        '<div class="card" id="nmCard"><h2>Network map <span class="pill ok" id="nmLive">live</span></h2><p class="sub">The internet, the router, this server and every device on the shop network: green is answering, red has stopped, amber is a device nobody has registered, grey has not been heard from lately. Click a device for its details. It refreshes every 15 seconds.</p>' +
+          '<div id="nmap"><div class="empty">Drawing the map…</div></div></div>' +
         '<div class="card"><h2>Monitoring</h2><p class="sub">The router, internet, website, tills and printers, checked every minute' + (d.monitoring ? '' : ' (<b>not running on the test copy</b>: use Check now)') + '. When one stops answering it becomes a threat; when it comes back the threat closes itself.</p>' +
           '<div class="scroll"><table><thead><tr><th>Watching</th><th>How</th><th>Now</th><th class="n">Response</th><th class="n">Up 24 h</th><th class="n">Up 7 days</th><th></th></tr></thead><tbody>' +
           (d.targets.length ? d.targets.map(function (t) { return '<tr style="' + (t.enabled ? '' : 'opacity:.5') + '"><td><b>' + esc(t.name) + '</b>' + (t.critical ? ' <span class="pill bad">critical</span>' : '') + (t.asset_tag ? ' <small>' + esc(t.asset_tag) + '</small>' : '') + '</td><td class="mono">' + esc(t.kind === 'http' ? t.url : t.kind === 'tcp' ? t.host + ':' + t.port : 'ping ' + t.host) + '</td><td>' + (t.last_ok == null ? '<span class="pill">not checked</span>' : t.last_ok ? '<span class="pill ok">up</span>' : '<span class="pill bad">DOWN</span> <small>' + esc(t.last_error || '') + (t.down_since ? ' since ' + dt(t.down_since) : '') + '</small>') + '</td><td class="n">' + (t.last_ms != null ? t.last_ms + ' ms' : '') + '</td><td class="n">' + (t.uptime_24h != null ? t.uptime_24h + '%' : '') + '</td><td class="n">' + (t.uptime_7d != null ? t.uptime_7d + '%' : '') + '</td><td style="white-space:nowrap"><button class="sm" data-chk="' + t.id + '">Check now</button> <button class="sm" data-tog="' + t.id + '" data-on="' + (t.enabled ? '0' : '1') + '">' + (t.enabled ? 'Pause' : 'Resume') + '</button> <button class="sm" data-del="' + t.id + '">Remove</button></td></tr>'; }).join('') : '<tr><td colspan="7" class="empty">Nothing watched yet. Start with the router and the internet.</td></tr>') + '</tbody></table></div>' +
@@ -416,7 +431,91 @@
       };
       $('#nwadd').onclick = function () { nwForm(null); };
       all('[data-nwe]').forEach(function (b) { b.onclick = function () { nwForm(d.networks.find(function (w) { return String(w.id) === b.getAttribute('data-nwe'); })); }; });
+      netMap();
     }).catch(fail);
+  }
+
+  // ------------------------------------------------------------ network map --
+  // Hub and spoke: the internet at the top, the router in the middle, every
+  // device on an oval around it. Redrawn every 15 s while the map is on screen.
+  var mapTimer = null, mapPaused = false, mapSel = null, mapData = null;
+  var NM_ICON = { router: '📶', server: '🖥️', pc: '💻', till: '🧾', printer: '🖨️', receipt_printer: '🖨️', label_printer: '🏷️', scanner: '📠', phone: '📱', tablet: '📱', switch: '🔀', ups: '🔋', camera: '📷', website: '🌐', internet: '☁️', other: '🔌' };
+  var NM_LABEL = { up: 'answering', down: 'NOT ANSWERING', unknown: 'unregistered device', idle: 'not heard from lately' };
+  function netMap() {
+    clearInterval(mapTimer);
+    var load = function () {
+      if (!$('#nmap')) { clearInterval(mapTimer); return; }
+      if (mapPaused || document.hidden) return;
+      api('/api/sys/network/map').then(function (d) { mapData = d; drawMap(); }).catch(function (e) { if ($('#nmap')) $('#nmap').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+    };
+    load(); mapTimer = setInterval(load, 15000);
+  }
+  function drawMap() {
+    var d = mapData, host = $('#nmap'); if (!host || !d) return;
+    var W = 1000, cx = 500, cy = 300, devs = d.devices.filter(function (n) { return !n.router; });
+    var router = d.devices.filter(function (n) { return n.router; })[0] || { id: 'router', kind: 'router', name: 'Router', ip: '', status: 'idle' };
+    var srv = { id: 'server', kind: 'server', name: d.server.name + ' (this server)', ip: d.server.ips.join(', '), status: 'up' };
+    var ring = [srv].concat(devs), n = ring.length, pos = {};
+    // Up to 18 on one oval; more go on a second, inner one, alternately.
+    var two = n > 18;
+    ring.forEach(function (x, i) {
+      var k = two ? Math.floor(i / 2) : i, m = two ? Math.ceil(n / 2) : n, inner = two && i % 2;
+      var a = (-15 + 210 * (m > 1 ? k / (m - 1) : 0.5)) * Math.PI / 180, rx = inner ? 250 : 410, ry = inner ? 130 : 215;
+      pos[x.id] = [cx - rx * Math.cos(a), cy + ry * Math.sin(a)];
+    });
+    pos[router.id] = [cx, cy]; pos.internet = [cx, 64];
+    d.cloud.forEach(function (c, i) { pos[c.id] = [cx + 190 + i * 150, 64]; });
+    var H = 600, still = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var link = function (a, b, st, key) {
+      var p = pos[a], q = pos[b], cls = 'nml ' + st, path = 'M' + p[0].toFixed(1) + ' ' + p[1].toFixed(1) + ' L' + q[0].toFixed(1) + ' ' + q[1].toFixed(1);
+      return '<path class="' + cls + '" d="' + path + '"/>' + (st === 'up' && !still ? '<circle r="3.2" class="nmp"><animateMotion dur="' + (2 + (key % 7) * 0.35).toFixed(2) + 's" repeatCount="indefinite" path="' + path + '"/></circle>' : '');
+    };
+    var nodeSvg = function (x, big) {
+      var p = pos[x.id], r = big ? 30 : 23, st = x.status;
+      return '<g class="nmn ' + st + (mapSel === x.id ? ' sel' : '') + '" data-nm="' + esc(x.id) + '" transform="translate(' + p[0].toFixed(1) + ' ' + p[1].toFixed(1) + ')" tabindex="0">' +
+        '<title>' + esc((x.name || x.ip) + ' · ' + (NM_LABEL[st] || st)) + '</title>' +
+        (st === 'down' && !still ? '<circle class="nmpulse" r="' + r + '"><animate attributeName="r" values="' + r + ';' + (r + 16) + '" dur="1.6s" repeatCount="indefinite"/><animate attributeName="opacity" values=".55;0" dur="1.6s" repeatCount="indefinite"/></circle>' : '') +
+        '<circle class="nmc" r="' + r + '"/><text class="nmi" y="' + (big ? 9 : 7) + '" font-size="' + (big ? 26 : 19) + '">' + (NM_ICON[x.kind] || NM_ICON.other) + '</text>' +
+        '<text class="nmt" y="' + (r + 15) + '">' + esc(String(x.name || (st === 'unknown' ? 'Unknown device' : x.ip)).slice(0, 26)) + '</text>' +
+        (x.ip && x.kind !== 'internet' ? '<text class="nms" y="' + (r + 28) + '">' + esc(String(x.ip).slice(0, 30)) + (x.target && x.target.ms != null && st === 'up' ? ' · ' + x.target.ms + ' ms' : '') + '</text>' : '') + '</g>';
+    };
+    var inet = { id: 'internet', kind: 'internet', name: 'Internet', ip: '', status: d.internet.status, target: d.internet.target };
+    var h = '<div class="nmwrap"><svg id="nmSvg" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Network map">' +
+      link('internet', router.id, d.internet.status === 'down' || router.status === 'down' ? 'down' : router.status === 'idle' && d.internet.status === 'idle' ? 'idle' : 'up', 1) +
+      d.cloud.map(function (c, i) { return link(c.id, 'internet', c.status, i + 2); }).join('') +
+      ring.map(function (x, i) { return link(x.id, router.id, x.status, i + 9); }).join('') +
+      nodeSvg(inet, true) + d.cloud.map(function (c) { return nodeSvg(c); }).join('') + nodeSvg(router, true) + ring.map(function (x) { return nodeSvg(x, x.id === 'server'); }).join('') + '</svg></div>';
+    var count = function (s) { return ring.filter(function (x) { return x.status === s; }).length; };
+    h += '<div class="nmfoot"><span><i class="nmd up"></i>Answering ' + count('up') + '</span><span><i class="nmd down"></i>Not answering ' + count('down') + '</span><span><i class="nmd unknown"></i>Unregistered ' + count('unknown') + '</span><span><i class="nmd idle"></i>Not heard lately ' + count('idle') + '</span>' +
+      '<span style="margin-left:auto">Updated ' + esc(new Date(d.at).toLocaleTimeString('en-JM', { timeZone: 'America/Jamaica' })) + (d.monitoring ? '' : ' · test copy: monitoring checks only run with Check now') + '</span><button class="sm" id="nmPause">' + (mapPaused ? '▶ Resume' : '⏸ Pause') + '</button><button class="sm" id="nmNow">↻ Refresh</button></div><div id="nmDet"></div>';
+    host.innerHTML = h;
+    $('#nmLive').textContent = mapPaused ? 'paused' : 'live'; $('#nmLive').className = 'pill ' + (mapPaused ? '' : 'ok');
+    $('#nmPause').onclick = function () { mapPaused = !mapPaused; if (mapPaused) drawMap(); else netMap(); };
+    $('#nmNow').onclick = function () { mapPaused = false; netMap(); };
+    var everything = [inet, router].concat(d.cloud, ring);
+    all('[data-nm]', host).forEach(function (g) {
+      var pick = function () { mapSel = mapSel === g.getAttribute('data-nm') ? null : g.getAttribute('data-nm'); drawMap(); };
+      g.onclick = pick; g.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } };
+    });
+    var x = everything.filter(function (y) { return y.id === mapSel; })[0];
+    if (x) mapDetails(x);
+  }
+  function mapDetails(x) {
+    var t = x.target, row = function (k, v) { return v == null || v === '' ? '' : '<tr><th style="width:170px">' + k + '</th><td>' + v + '</td></tr>'; };
+    $('#nmDet').innerHTML = '<div class="card" style="margin:10px 0 0"><h2>' + (NM_ICON[x.kind] || NM_ICON.other) + ' ' + esc(x.name || x.ip || 'Device') + ' <span class="pill ' + ({ up: 'ok', down: 'bad', unknown: 'warn' }[x.status] || '') + '">' + esc(NM_LABEL[x.status] || x.status) + '</span></h2><table>' +
+      row('Kind', esc(String(x.kind).replace(/_/g, ' '))) + row('Address', x.ip ? '<span class="mono">' + esc(x.ip) + '</span>' : '') + row('Hardware (MAC)', x.mac ? '<span class="mono">' + esc(x.mac) + '</span>' : '') +
+      row('Equipment register', x.asset ? '<span class="pill ok">' + esc(x.asset.tag) + '</span> ' + esc(x.asset.name) + (x.asset.location ? ' · ' + esc(x.asset.location) : '') : (x.mac ? '<span class="pill warn">not registered</span>' : '')) +
+      row('Till', x.till ? esc(x.till.name || '') + ' · ' + (x.till.online ? 'checked in within 3 minutes' : 'last checked in ' + esc(dt(x.till.last_seen))) : '') +
+      row('Seen on the network', x.seen ? 'yes, in this computer\'s address table' : (x.kind === 'internet' || x.kind === 'website' || x.id === 'server' ? '' : 'not lately')) +
+      (t ? row('Monitoring', esc(t.how) + (t.critical ? ' <span class="pill bad">critical</span>' : '') + (t.enabled ? '' : ' (paused)')) + row('Last check', t.checked ? esc(dt(t.checked)) + (t.ok ? ' · ' + t.ms + ' ms' : t.ok === false ? ' · <b style="color:var(--red)">' + esc(t.error || 'no answer') + '</b>' : '') : 'not checked yet') +
+        row('Down since', t.down_since ? esc(dt(t.down_since)) : '') + row('Up in the last 24 h', t.uptime_24h != null ? t.uptime_24h + '%' : '') : '') + '</table>' +
+      '<div class="controls" style="margin-top:8px">' + (t ? '<button class="sm" id="nmChk">Check now</button>' : '') + (x.mac && !x.asset ? '<button class="sm primary" id="nmReg">Register this device</button>' : '') + (!t && x.ip && x.id !== 'server' && x.kind !== 'internet' ? '<button class="sm" id="nmWatch">Watch it (ping every minute)</button>' : '') + '</div></div>';
+    if ($('#nmChk')) $('#nmChk').onclick = function () { this.disabled = true; api('/api/sys/net-targets/' + t.id + '/check', 'POST', {}).then(function (r) { toast(r.result.ok ? 'Up · ' + r.result.ms + ' ms' : 'DOWN · ' + (r.result.error || '')); netMap(); }).catch(fail); };
+    if ($('#nmWatch')) $('#nmWatch').onclick = function () { api('/api/sys/net-targets', 'POST', { name: x.name || x.ip, kind: 'ping', host: x.ip, critical: x.kind === 'router' }).then(function () { toast('Watching ' + (x.name || x.ip)); network(); }).catch(fail); };
+    if ($('#nmReg')) $('#nmReg').onclick = function () {
+      modal('<h2>Register ' + esc(x.ip) + '</h2><div class="grid">' + field('rg_n', 'What is it?', '') + sel('rg_k', 'Kind', ['pc', 'till', 'printer', 'receipt_printer', 'label_printer', 'scanner', 'phone', 'tablet', 'router', 'switch', 'camera', 'other'], 'other') + field('rg_l', 'Where', '') + '</div><div class="controls" style="margin-top:8px"><button class="primary" id="y">Register</button><button id="x">Cancel</button></div>');
+      $('#x').onclick = close; $('#y').onclick = function () { api('/api/sys/lan-devices/register', 'POST', { name: val('rg_n'), kind: val('rg_k'), location: val('rg_l'), ip: x.ip, mac: x.mac }).then(function (r2) { close(); toast('Registered as ' + r2.tag); netMap(); }).catch(fail); };
+    };
   }
 
   start();

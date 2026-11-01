@@ -589,6 +589,78 @@ function register(app, deps) {
       res.json({ devices, unknown: devices.filter((x) => !x.asset).length });
     } catch (e) { fail(res, e); }
   });
+  // The network map: the internet, the router, this server and every device
+  // known from the ARP table, the equipment register, the monitoring checks and
+  // the tills' own check-ins, each with whether it is answering now. Reading it
+  // changes nothing (the device scan above is what raises unknown devices).
+  const isIp = (s) => /^\d+\.\d+\.\d+\.\d+$/.test(String(s || ''));
+  async function gateway() {
+    const raw = isWin ? await run('route', ['print', '-4']) : await run('ip', ['route']);
+    const m = isWin ? /^\s*0\.0\.0\.0\s+0\.0\.0\.0\s+(\d+\.\d+\.\d+\.\d+)/m.exec(raw) : /^default via (\d+\.\d+\.\d+\.\d+)/m.exec(raw);
+    return m ? m[1] : null;
+  }
+  app.get('/api/sys/network/map', ...NET, async (req, res) => {
+    try {
+      const [arp, gw] = await Promise.all([lanDevices(), gateway()]);
+      const ifs = interfaces();
+      const { rows: assets } = await query(`SELECT id, tag, name, kind, ip, lower(mac) AS mac, location FROM sys_assets WHERE status <> 'retired' AND (COALESCE(ip, '') <> '' OR COALESCE(mac, '') <> '')`);
+      const { rows: targets } = await query(
+        `SELECT t.id, t.name, t.kind, t.host, t.port, t.url, t.critical, t.enabled, t.last_ok, t.last_ms, t.last_error, t.last_checked, t.down_since, t.asset_id,
+                (SELECT ROUND(100.0 * AVG(CASE WHEN c.ok THEN 1 ELSE 0 END), 1) FROM sys_net_checks c WHERE c.target_id = t.id AND c.at > NOW() - INTERVAL '24 hours')::float AS uptime_24h
+           FROM sys_net_targets t ORDER BY t.id`);
+      const { rows: tills } = await query(`SELECT id, name, hostname, address, status, last_seen, (last_seen > NOW() - INTERVAL '3 minutes') AS online FROM terminals WHERE status <> 'blocked' AND last_seen > NOW() - INTERVAL '30 days'`);
+      const mine = new Set(ifs.map((i) => i.address));
+      const tOut = (t) => t && { id: t.id, name: t.name, how: t.kind === 'http' ? t.url : t.kind === 'tcp' ? t.host + ':' + t.port : 'ping ' + t.host, ok: t.enabled ? t.last_ok : null,
+        ms: t.last_ms, error: t.last_error, checked: t.last_checked, down_since: t.down_since, uptime_24h: t.uptime_24h, critical: t.critical, enabled: t.enabled };
+      const byIp = new Map();
+      const node = (ip) => { if (!byIp.has(ip)) byIp.set(ip, { id: 'ip:' + ip, ip, kind: 'other', name: null, mac: null, seen: false, asset: null, target: null, till: null }); return byIp.get(ip); };
+      for (const d of arp) { if (mine.has(d.ip)) continue; const n = node(d.ip); n.mac = d.mac; n.seen = true; }
+      for (const a of assets) {
+        const m = a.mac ? a.mac.replace(/[^0-9a-f]/g, '') : '';
+        let n = [...byIp.values()].find((x) => m && x.mac && x.mac.replace(/:/g, '') === m) || (a.ip && isIp(a.ip) && !mine.has(a.ip) ? node(a.ip) : null);
+        if (!n) continue;
+        n.asset = { id: a.id, tag: a.tag, name: a.name, kind: a.kind, location: a.location }; n.kind = a.kind; n.name = a.name;
+      }
+      for (const t of tills) {
+        if (!t.address || !isIp(t.address) || mine.has(t.address)) continue;
+        const n = node(t.address); n.till = { id: t.id, name: t.name || t.hostname, online: !!t.online, last_seen: t.last_seen };
+        if (!n.asset) { n.kind = 'till'; n.name = n.name || t.name || t.hostname; }
+      }
+      const cloud = [];   // things out on the internet: the website and other checks of public addresses
+      let internet = null;
+      for (const t of targets) {
+        const host = t.kind === 'http' ? (() => { try { return new URL(t.url).hostname; } catch (_) { return ''; } })() : t.host;
+        if (host && (isPrivate(host) || /\.local$|^localhost$/i.test(host) || !host.includes('.'))) {
+          if (mine.has(host) || /^(localhost|127\.)/.test(host)) continue;
+          const n = isIp(host) ? node(host) : (byIp.get(host) || node(host));
+          n.target = tOut(t); if (!n.name) n.name = t.name;
+          // Not in the equipment register: guess the kind from the name it is watched under.
+          if (n.kind === 'other') n.kind = [[/router|gateway/i, 'router'], [/label/i, 'label_printer'], [/printer/i, 'printer'], [/till|pos|register/i, 'till'], [/camera|cctv|dvr|nvr/i, 'camera'], [/switch/i, 'switch'], [/phone/i, 'phone'], [/tablet/i, 'tablet'], [/scanner/i, 'scanner'], [/ups|battery/i, 'ups'], [/pc|computer|laptop|desktop/i, 'pc']].reduce((k, [re, v]) => (k === 'other' && re.test(t.name) ? v : k), 'other');
+        } else if (t.kind === 'http') cloud.push({ id: 'web:' + t.id, kind: 'website', name: t.name, ip: host, target: tOut(t) });
+        else if (!internet || (t.enabled && t.last_ok === false)) internet = tOut(t);   // a ping of 1.1.1.1 and the like says whether the internet is there
+      }
+      // Status: a monitoring check decides; then a till's check-in; then whether the ARP table saw it lately.
+      const status = (n) => {
+        if (n.target && n.target.ok === false) return 'down';
+        if (n.target && n.target.ok) return 'up';
+        if (n.till) return n.till.online ? 'up' : (n.seen ? 'up' : 'idle');
+        if (n.seen) return n.asset ? 'up' : 'unknown';
+        return 'idle';
+      };
+      const devices = [...byIp.values()].map((n) => Object.assign(n, { status: status(n), router: n.ip === gw }));
+      const router = devices.find((n) => n.router) || (gw ? Object.assign(node(gw), { status: 'idle', router: true }) : null);
+      if (router) { router.kind = 'router'; router.name = router.name || 'Router'; if (router.seen && router.status !== 'down') router.status = 'up'; }   // the gateway is known for what it is, registered or not
+      res.json({
+        at: new Date().toISOString(),
+        server: { name: os.hostname(), ips: ifs.map((i) => i.address), status: 'up' },
+        internet: { status: internet ? (internet.ok === false ? 'down' : internet.ok ? 'up' : 'idle') : (cloud.some((c) => c.target.ok) ? 'up' : 'idle'), target: internet },
+        cloud: cloud.map((c) => Object.assign(c, { status: c.target.ok === false ? 'down' : c.target.ok ? 'up' : 'idle' })),
+        router: router ? router.id : null,
+        devices: devices.sort((a, b) => (a.router ? -1 : b.router ? 1 : 0) || String(a.kind).localeCompare(b.kind) || a.ip.localeCompare(b.ip, undefined, { numeric: true })),
+        monitoring: !devMode,
+      });
+    } catch (e) { fail(res, e); }
+  });
   app.post('/api/sys/lan-devices/register', ...NET, async (req, res) => {
     try {
       const b = req.body || {};
