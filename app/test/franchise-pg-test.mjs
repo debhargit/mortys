@@ -42,8 +42,15 @@ const admin = client(), anon = client();
 const stamp = Date.now().toString(36);
 const tokenOf = (link) => new URL(link).searchParams.get('s') || new URL(link).searchParams.get('p');
 
+// The server must be on the database this test reads with psql (a till's db-config.json can point a copied
+// app at the live database). A marker written only through psql has to come back through the API.
+const marker = String(10 + Math.floor(Math.random() * 40));
+sql(`INSERT INTO fr_settings (key, value) VALUES ('link_days', '${marker}') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`);
 let r = await admin('POST', '/api/auth/signin', { email: 'admin@visionautosolutions.com', password: 'password123' });
 ok(r._status === 200, 'admin signs in');
+r = await admin('GET', '/api/franchise/meta');
+if (!r.settings || String(r.settings.link_days) !== marker) { console.log('FAIL the server is not on the FR_TEST_PSQL database; stopping before anything is written'); process.exit(1); }
+sql(`DELETE FROM fr_settings WHERE key = 'link_days'`);
 
 // --------------------------------------------------------- permissions --
 const clerk = await admin('POST', '/api/admin/staff', { email: 'fr.clerk.' + stamp + '@example.test', password: 'Passw0rd!' + stamp, name: 'Fran Clerk', admin_role: 'cashier' });
@@ -59,7 +66,7 @@ ok((caps.capabilities || []).some((c) => c.key === 'franchise.manage'), 'franchi
 // ------------------------------------------------------------ templates --
 await admin('GET', '/api/docs/meta');            // the Document centre adds its own starters first
 let meta = await admin('GET', '/api/franchise/meta');
-ok(meta._status === 200 && meta.templates.length === 12, 'meta loads with 12 franchise templates');
+ok(meta._status === 200 && meta.templates.length === 21, 'meta loads with 21 franchise templates (' + meta.templates.length + ')');
 ok(meta.templates_in_docs && meta.templates.every((t) => t.document_id), 'every template is in the Document centre');
 const docTpls = await admin('GET', '/api/docs/templates');
 ok((docTpls.templates || []).some((t) => t.title === 'Franchise operations manual') && (docTpls.templates || []).some((t) => t.title === 'Leave application form'), 'Document centre has both its own and the franchise templates');
@@ -80,8 +87,12 @@ r = await admin('POST', '/api/franchise/territories', { code: 'MAN-' + stamp, na
 ok(r._status === 409, 'duplicate territory code refused');
 
 // --------------------------------------------------------- enquiries --
+sql(`INSERT INTO users (email, name, admin_role, is_admin, is_staff) VALUES ('cust.mgr.${stamp}@example.test', 'Customer With A Role', 'manager', false, false)`);
+const custMgr = sql(`SELECT id FROM users WHERE email = 'cust.mgr.${stamp}@example.test'`);
 r = await anon('POST', '/api/public/franchise-enquiry', { name: 'Web Person ' + stamp, phone: '876-555-0101', area_wanted: 'Ocho Rios', consent: true });
 ok(r._status === 200, 'public enquiry accepted');
+ok(sql(`SELECT COUNT(*) FROM team_notices WHERE user_id = ${custMgr} AND title LIKE '%Web Person ${stamp}%'`) === '0', 'the enquiry alert skips a customer account that has admin_role manager');
+ok(+sql(`SELECT COUNT(*) FROM team_notices n JOIN users u ON u.id = n.user_id WHERE n.title LIKE '%Web Person ${stamp}%' AND NOT (COALESCE(u.is_admin, false) OR COALESCE(u.is_staff, false))`) === 0, 'the enquiry alert reaches staff only');
 r = await anon('POST', '/api/public/franchise-enquiry', { name: 'Robot ' + stamp, phone: '876-555-0102', consent: true, website: 'http://spam' });
 r = await anon('POST', '/api/public/franchise-enquiry', { name: 'No Consent ' + stamp, phone: '876-555-0103' });
 ok(r._status === 400, 'enquiry without consent refused');
@@ -158,7 +169,7 @@ ok(r._status === 200 && r.franchisee_id, 'franchisee record made');
 const frId = r.franchisee_id;
 let F = await admin('GET', `/api/franchise/franchisees/${frId}`);
 ok(F.franchisee.number === 'FR-' + String(frId).padStart(3, '0') && F.franchisee.customer_id && F.franchisee.status === 'onboarding', 'numbered, onboarding, with a Receivables account');
-ok(F.tasks.length === 22, 'opening checklist made (' + F.tasks.length + ' items)');
+ok(F.tasks.length === 26, 'opening checklist made (' + F.tasks.length + ' items)');
 ok(F.documents.length === 2, 'the lead\'s NDA and disclosure document belong to the franchisee too');
 ok(sql(`SELECT status FROM fr_territories WHERE id = ${terrId}`) === 'reserved', 'territory reserved');
 

@@ -767,6 +767,69 @@ The templates are a starting point, not legal advice. Every copy carries a notic
     ],
   },
   {
+    key: 'franchise-network', title: 'The store network: stores, DCs, hubs, parts lookup and supply', sort: 153, quiz: true, roles: ['owner', 'manager'],
+    summary: 'Franchised, affiliate and company stores; distribution centres, hub and spoke stores; the parts catalogue and availability; stock levels, replenishment and supply orders.',
+    body: `Open it: All modules > Franchise, then the "Store network" row of tabs. It runs the way a parts-store chain runs: many stores sharing one system, one catalogue and one supply chain.
+
+Three kinds of store:
+1. Franchised stores: the owner pays the initial fee, a royalty, the brand fund and the technology fee, and trades under our name.
+2. Affiliate stores: an independent parts shop that joins the network as a dealer-member. It keeps its own name and ownership, shows the network banner, pays a monthly membership fee instead of a royalty, and buys through our distribution centre. It signs the affiliate store agreement (choose "join as an affiliate" on the enquiry, or set the kind of store on the record).
+3. Company-owned stores: ours. No fees are invoiced and no agreement is signed, but they report monthly, order from the DC and are on the scorecard.
+
+Distribution centres (DCs): Stores & DCs > New DC. Give each one an order cut-off time and its delivery days. Every store is placed with a DC (Place). Orders in before the cut-off leave on that day's run.
+
+Hubs and spokes: a hub store carries deeper stock (about three times a standard store) and sends parts to the spoke stores near it the same day, a "hot shot". Make a store a hub first, then set each spoke's hub. A hub that fills a spoke's order is paid back the parts at dealer cost (Rebates, co-op & loyalty > Money owed to stores).
+
+Formats: hub, standard, express and commercial counter, each with its size, parts carried, staff and investment range. Territory planning shows each territory's market (vehicles and garages times the yearly parts spend in Settings), its DC and the next store planned.
+
+The catalogue: one list of parts for every store, with the maker's part number, interchange numbers (other makers' numbers for the same part), what it fits (make, model, years, engine), the dealer cost a store pays the DC, the list price and any core charge. "Import the till's products" brings our own products across; check the fitment after.
+
+Can we get it? Open a part and choose the store: the till looks in the store, then its hub (hot shot, about 2 hours), then its DC (today if before the cut-off, otherwise the next delivery day), then the rest of the network. Never turn a customer away before checking.
+
+Stock levels: each DC and store keeps on-hand counts with a minimum and maximum. Paste "SKU, on hand, min, max" lines to load or count. The replenishment list orders everything below its minimum back up to the maximum, less what is already on order.
+
+Supply orders: a store orders from its DC (stock or special order) or from its hub (hot shot), from this screen or its own franchisee link. Shipping takes the stock out at the DC or hub and invoices the store in Receivables (account 4610). The store marks it received, which adds the stock to the store and records any shortage. Fill rate is the share of the quantity ordered that was shipped.`,
+    questions: [
+      ['An independent parts shop wants to keep its own name but buy through our DC. What is it?', ['A franchised store', 'An affiliate (dealer-member) store', 'A company-owned store', 'A hub'], 1, 'Affiliates keep their name and pay a membership fee instead of a royalty.'],
+      ['A spoke store needs a part today and does not have it. Where does the till look next?', ['Another DC', 'Its hub store, as a hot shot', 'The supplier', 'Nowhere'], 1, 'Store, then hub, then DC, then the rest of the network.'],
+      ['When is a supply order invoiced to the store?', ['When it is placed', 'When it is shipped', 'At the month end', 'Never'], 1, 'Shipping invoices the store for what left, at dealer cost.'],
+      ['What does the replenishment list order?', ['Everything in the catalogue', 'Parts below their minimum, back up to the maximum', 'Only special orders', 'Whatever sold yesterday'], 1, 'Less what is already on order.'],
+      ['Which stores are not invoiced fees?', ['Affiliate stores', 'Hub stores', 'Company-owned stores', 'Spoke stores'], 2, 'Company-owned stores report and order but pay no fees.'],
+    ],
+  },
+  {
+    key: 'franchise-commercial', title: 'Commercial accounts, pricing, loyalty, rebates, certification and the scorecard', sort: 154, quiz: true, roles: ['owner', 'manager'],
+    summary: 'Garage and fleet accounts and delivery routes, pro price tiers, the loyalty fund, the purchasing commitment and rebates, co-op advertising, required systems, staff certificates and the store scorecard.',
+    body: `Commercial (do-it-for-me) customers: garages, fleets, body shops and government buy on account and have parts delivered. Commercial accounts > New account: the store, the kind of business, the price tier, credit limit, payment terms (30 days normally), the delivery route and stop, and a monthly target. Print the "Commercial account application and credit terms" from the store's documents for them to sign.
+
+Delivery routes: each store's routes, with the driver, vehicle, run times and the delivery promise (45 minutes by default). Stores report deliveries and the average order-to-door time each month.
+
+Price tiers: Retail (list), Loyalty member, Pro 1 (garage), Pro 2 (fleet), Pro 3 (key account). Price = list less the tier discount, but never below dealer cost plus the margin floor. Choose a tier in the catalogue to see its prices.
+
+Loyalty: customers earn points (1 per J$100 by default) at any store and redeem them at any store. Each month a store pays into the network loyalty fund (account 2175) for the points it gave, on the same invoice as its fees, and is paid back for the points redeemed with it. That pay-back shows under Money owed to stores.
+
+Purchasing commitment: franchised and affiliate stores buy at least 80% of their stock (by value) through the DC. The till compares DC purchases with "all stock bought" in the monthly report.
+
+Rebates: after each quarter, "Work out and credit the rebates" (for example 2026-Q3) pays each store a share of its DC purchases on the rebate scale. A store under its commitment is held back unless you allow it.
+
+Co-op advertising: a store earns 1% of its DC purchases as a co-op allowance and claims 50% of approved local advertising against it, with proof. Approve or decline under Rebates, co-op & loyalty.
+
+Money owed to stores: rebates, approved co-op claims, loyalty pay-backs and hot-shot parts. Pay by cheque or transfer (Banking / Payables) or set it against their invoices in Receivables, then press Paid and record how.
+
+Required systems: each store's Store & systems tab lists the till, stock and replenishment, the parts catalogue, the DC ordering link, delivery tracking, loyalty, card terminal, CCTV and backup internet. Mark each one installed, verified or not needed.
+
+Certification: certificates such as Parts specialist level 1 and 2, Commercial sales, Battery and electrical, Delivery driver safety, Hazardous materials and Store manager. Each store needs the number set for each certificate. Record a certificate when someone passes; it lasts the months shown and must be renewed.
+
+The scorecard: net sales, sales a month and per square foot, commercial share, average sale, gross margin, inventory turns, shrink, DC fill rate, share bought through the DC, delivery time, certification, systems and the last audit, each green, amber or red against the targets in Settings, with a score out of 100. The figures come from the monthly reports, so ask stores to fill in the scorecard part of the report.`,
+    questions: [
+      ['A garage buys on account with parts delivered. What kind of sale is that?', ['DIY retail', 'Commercial (do-it-for-me)', 'Wholesale to a store', 'A transfer'], 1, 'Commercial share is on the scorecard.'],
+      ['Can a pro tier price go below the dealer cost?', ['Yes, if the discount is big enough', 'No: never below dealer cost plus the margin floor', 'Only for Pro 3', 'Only for loyalty members'], 1, 'The floor protects the store\'s margin.'],
+      ['A customer earns points at one store and redeems them at another. Who pays?', ['The store where they redeemed', 'The store that gave the points pays the fund; the redeeming store is paid back', 'Nobody', 'The DC'], 1, 'One network loyalty fund.'],
+      ['A store bought 60% of its stock through the DC; its commitment is 80%. What happens to the quarterly rebate?', ['It is doubled', 'It is held back unless a manager allows it', 'It is paid as usual', 'The store is closed'], 1, 'The supply agreement ties the rebate to the commitment.'],
+      ['Where does money the network owes a store get recorded as paid?', ['Rebates, co-op & loyalty > Money owed to stores > Paid', 'At the till', 'It is never recorded', 'In the audit'], 0, 'Pay it through Banking or Receivables, then record it here.'],
+    ],
+  },
+  {
     key: 'stores-suppliers', title: 'Branches, departments and the supplier portal', sort: 150, quiz: false, roles: ['owner', 'manager'],
     summary: 'Store locations, departments, stock transfers and giving suppliers a portal login.',
     body: `Stores and branches: All modules > Department store. Each store holds its own stock and contains departments. One store is the default - existing stock and tills live there. New stores start empty; move stock in with a transfer.

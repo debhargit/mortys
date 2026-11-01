@@ -29,14 +29,16 @@
 // =============================================================================
 'use strict';
 const crypto = require('crypto');
-const { TEMPLATES, ONBOARDING, PHASES, AUDIT_ITEMS } = require('./franchise-templates');
+const { TEMPLATES, ONBOARDING, PHASES, AUDIT_ITEMS, SYSTEMS, STORE_TYPES } = require('./franchise-templates');
 
 const STAGES = ['enquiry', 'qualified', 'nda', 'disclosed', 'application', 'approved', 'agreement', 'signed'];
 const STAGE_LABEL = { enquiry: 'Enquiry', qualified: 'Qualified', nda: 'NDA signed', disclosed: 'Disclosure received', application: 'Applied', approved: 'Approved',
   agreement: 'Agreement stage', signed: 'Agreement signed', declined: 'Declined', withdrawn: 'Withdrawn' };
 const FR_STATUSES = ['onboarding', 'open', 'suspended', 'terminated', 'expired', 'transferred'];
 // Documents both sides sign; the rest are signed by the franchisee alone.
-const COUNTER = new Set(['nda', 'agreement', 'renewal', 'transfer']);
+const COUNTER = new Set(['nda', 'agreement', 'renewal', 'transfer', 'affiliate', 'supply', 'hub_service']);
+// A month counts as invoiced once any of its monthly fees is (affiliates pay a membership fee, not a royalty).
+const MONTHLY = "('royalty', 'member', 'marketing', 'tech')";
 const ONE_OFF = ['initial', 'renewal', 'transfer', 'training', 'audit', 'late', 'other'];
 const CHARGE_LABEL = { initial: 'Initial franchise fee', royalty: 'Royalty', marketing: 'Brand marketing fund', tech: 'Technology fee', renewal: 'Renewal fee',
   transfer: 'Transfer fee', training: 'Extra training', audit: 'Re-audit fee', late: 'Late payment fee', other: 'Other charge' };
@@ -56,6 +58,10 @@ const DEFAULTS = {
   initial_fee: 2500000, royalty_pct: 6, marketing_pct: 2, tech_fee: 25000, min_royalty: 50000, renewal_fee: 500000, transfer_fee: 750000,
   term_years: 10, gct_rate: 15, wait_days: 14, report_day: 5, royalty_due_day: 10, local_marketing_pct: 1, opening_months: 9,
   min_capital: 8000000, min_net_worth: 20000000, renewal_notice_months: 12, pass_pct: 85, conditional_pct: 70, qualify_score: 60, link_days: 14,
+  // The store network (franchise-network.js).
+  member_fee: 40000, affiliate_marketing_pct: 1, commit_pct: 80, coop_pct: 1, coop_claim_pct: 50, loyalty_points_per_100: 1, loyalty_point_value: 1,
+  hot_shot_minutes: 120, delivery_promise_minutes: 45, spend_per_vehicle: 60000, spend_per_garage: 2400000,
+  target_commercial_pct: 40, target_fill_rate: 95, target_turns: 4, max_shrink_pct: 1, target_margin_pct: 38, target_cert_pct: 100,
 };
 
 function register(app, deps) {
@@ -146,8 +152,9 @@ function register(app, deps) {
   async function frRow(id) {
     const { rows } = await query(`SELECT f.*, ${DATE('f.signed_on')} AS signed_on, ${DATE('f.opened_on')} AS opened_on, ${DATE('f.term_start')} AS term_start,
         ${DATE('f.term_end')} AS term_end, ${DATE('f.ended_on')} AS ended_on, t.name AS territory_name, t.code AS territory_code, t.description AS territory_desc,
-        COALESCE(NULLIF(u.name, ''), u.email) AS customer_name, u.account_number
-      FROM fr_franchisees f LEFT JOIN fr_territories t ON t.id = f.territory_id LEFT JOIN users u ON u.id = f.customer_id WHERE f.id = $1`, [n(id)]);
+        COALESCE(NULLIF(u.name, ''), u.email) AS customer_name, u.account_number, dc.name AS dc_name, dc.code AS dc_code, COALESCE(h.trading_name, h.legal_name) AS hub_name, fm.name AS format_name
+      FROM fr_franchisees f LEFT JOIN fr_territories t ON t.id = f.territory_id LEFT JOIN users u ON u.id = f.customer_id
+        LEFT JOIN fr_dcs dc ON dc.id = f.dc_id LEFT JOIN fr_franchisees h ON h.id = f.hub_id LEFT JOIN fr_formats fm ON fm.key = f.format_key WHERE f.id = $1`, [n(id)]);
     if (!rows.length) throw httpError(404, 'Franchisee not found');
     const f = rows[0];
     delete f.portal_token_sha256;
@@ -157,7 +164,8 @@ function register(app, deps) {
   function terms(f, s) {
     const pick = (k) => (f && f[k] != null ? Number(f[k]) : s[k]);
     return { initial_fee: pick('initial_fee'), royalty_pct: pick('royalty_pct'), marketing_pct: pick('marketing_pct'), tech_fee: pick('tech_fee'),
-      min_royalty: pick('min_royalty'), renewal_fee: pick('renewal_fee'), transfer_fee: pick('transfer_fee'), term_years: f && f.term_years ? Number(f.term_years) : s.term_years };
+      min_royalty: pick('min_royalty'), renewal_fee: pick('renewal_fee'), transfer_fee: pick('transfer_fee'), term_years: f && f.term_years ? Number(f.term_years) : s.term_years,
+      member_fee: pick('member_fee'), commit_pct: pick('commit_pct'), coop_pct: pick('coop_pct'), store_type: (f && f.store_type) || 'franchise' };
   }
   function advance(stage, to) {
     if (stage === 'declined' || stage === 'withdrawn') return stage;
@@ -199,9 +207,22 @@ function register(app, deps) {
     const txt = { legal_name: 200, trading_name: 200, principal: 200, email: 200, phone: 60, address: 500, trn: 30, notes: 4000 };
     for (const k of Object.keys(txt)) if (!partial || k in b) out[k] = t(b[k], txt[k]);
     if (!partial || 'territory_id' in b) out.territory_id = n(b.territory_id);
+    if (!partial || 'store_type' in b) out.store_type = STORE_TYPES[b.store_type] ? b.store_type : 'franchise';
+    if (!partial || 'network_role' in b) out.network_role = ['hub', 'spoke', 'standalone'].includes(b.network_role) ? b.network_role : 'standalone';
+    if (!partial || 'format_key' in b) out.format_key = t(b.format_key, 40);
+    for (const k of ['dc_id', 'hub_id', 'sq_ft']) if (!partial || k in b) out[k] = n(b[k]);
+    if (!partial || 'member_fee' in b) out.member_fee = b.member_fee == null || b.member_fee === '' ? null : amt(b.member_fee);
+    for (const k of ['commit_pct', 'coop_pct']) if (!partial || k in b) {
+      const v = b[k] == null || b[k] === '' ? null : Number(b[k]);
+      if (v != null && !(v >= 0 && v <= 100)) throw httpError(400, 'Percentages must be 0 to 100');
+      out[k] = v;
+    }
+    if (out.network_role && out.network_role !== 'spoke') out.hub_id = null;
     for (const k of ['initial_fee', 'tech_fee', 'min_royalty', 'renewal_fee', 'transfer_fee']) if (!partial || k in b) out[k] = b[k] == null || b[k] === '' ? (partial ? null : s[k]) : amt(b[k]);
     for (const k of ['royalty_pct', 'marketing_pct']) if (!partial || k in b) {
-      const v = b[k] == null || b[k] === '' ? (partial ? null : s[k]) : Number(b[k]);
+      // A new affiliate pays the network marketing rate, not the franchise brand fund.
+      const def = k === 'marketing_pct' && out.store_type === 'affiliate' ? s.affiliate_marketing_pct : s[k];
+      const v = b[k] == null || b[k] === '' ? (partial ? null : def) : Number(b[k]);
       if (v != null && !(v >= 0 && v <= 30)) throw httpError(400, 'Percentages must be 0 to 30');
       out[k] = v;
     }
@@ -209,6 +230,14 @@ function register(app, deps) {
     if ('email' in out && out.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(out.email)) throw httpError(400, 'That email address does not look right');
     if (!partial && !out.legal_name) throw httpError(400, 'The franchisee\'s legal name (the company or person signing)');
     return out;
+  }
+  // Affiliates already trade (no site, fit-out or opening); only franchisees pay an initial fee.
+  function onboardingFor(type, role) {
+    return ONBOARDING.filter((o) => {
+      if (type !== 'franchise' && /Initial franchise fee/.test(o[1])) return false;
+      if (type === 'affiliate' && (['site'].includes(o[0]) || /layout|permits|Fit-out finished|Opening stock|Grand-opening|Soft opening|Opening day|Company registered/.test(o[1]))) return false;
+      return true;
+    }).map((o) => (role !== 'spoke' && /hub store assigned/.test(o[1]) ? [o[0], o[1].replace('; hub store assigned (spoke stores)', ''), o[2]] : o));
   }
   async function createFranchisee(req, b, leadId) {
     const s = await settings();
@@ -221,8 +250,8 @@ function register(app, deps) {
         cols.map((k) => f[k]).concat([leadId || null, me(req)]));
       const id = rows[0].id;
       await c.query(`UPDATE fr_franchisees SET number = 'FR-' || lpad(id::text, 3, '0') WHERE id = $1`, [id]);
-      await ensureCustomer(Object.assign({ id }, f), (sql, a) => c.query(sql, a));
-      await addTasks(id, ONBOARDING, today(), (sql, a) => c.query(sql, a));
+      if (f.store_type !== 'company') await ensureCustomer(Object.assign({ id }, f), (sql, a) => c.query(sql, a));
+      await addTasks(id, onboardingFor(f.store_type, f.network_role), today(), (sql, a) => c.query(sql, a));
       if (f.territory_id) await c.query(`UPDATE fr_territories SET status = 'reserved' WHERE id = $1 AND status = 'open'`, [f.territory_id]);
       if (leadId) await c.query(`UPDATE fr_leads SET franchisee_id = $2, updated_at = NOW() WHERE id = $1`, [leadId, id]);
       await c.query('COMMIT');
@@ -239,6 +268,11 @@ function register(app, deps) {
     const territory = f ? f.territory_name : lead && lead.territory_name;
     const tdesc = f ? f.territory_desc : lead && lead.territory_desc;
     const start = (f && (f.term_start || f.signed_on)) || today();
+    const tid = (f && f.territory_id) || (lead && lead.territory_id);
+    const [{ rows: rebates }, { rows: tr2 }] = await Promise.all([query(`SELECT min_quarter::float AS min_quarter, rebate_pct FROM fr_rebate_tiers ORDER BY min_quarter`).catch(() => ({ rows: [] })),
+      tid ? query(`SELECT t.population, t.vehicles, t.garages, t.dc_minutes, d.name AS dc_name FROM fr_territories t LEFT JOIN fr_dcs d ON d.id = t.dc_id WHERE t.id = $1`, [tid]).catch(() => ({ rows: [] })) : { rows: [] }]);
+    const terr = tr2[0] || null;
+    const num = (v) => Number(v).toLocaleString('en-JM');
     return Object.assign(ci, {
       today: longDate(),
       recipient: (f && (f.principal || f.legal_name)) || (lead && (lead.company ? lead.name + ' (' + lead.company + ')' : lead.name)) || '',
@@ -252,6 +286,14 @@ function register(app, deps) {
       min_royalty: money(tr.min_royalty), renewal_fee: money(tr.renewal_fee), transfer_fee: money(tr.transfer_fee),
       report_day: String(s.report_day), royalty_due_day: String(s.royalty_due_day), local_marketing_pct: String(s.local_marketing_pct),
       gct_rate: String(s.gct_rate), wait_days: String(s.wait_days), opening_months: String(s.opening_months),
+      store_type_label: STORE_TYPES[(f && f.store_type) || (lead && lead.programme) || 'franchise'] || STORE_TYPES.franchise,
+      member_fee: money(tr.member_fee), commit_pct: String(tr.commit_pct), coop_pct: String(tr.coop_pct), coop_claim_pct: String(s.coop_claim_pct),
+      loyalty_points_per_100: String(s.loyalty_points_per_100), loyalty_point_value: money(s.loyalty_point_value), hot_shot_minutes: String(s.hot_shot_minutes),
+      target_fill_rate: String(s.target_fill_rate), dc_name: (f && f.dc_name) || 'the distribution centre', hub_name: (f && f.hub_name) || 'the hub store for your area',
+      rebate_scale: rebates.length ? rebates.map((r) => 'DC purchases of ' + money(r.min_quarter) + ' or more in the quarter: ' + Number(r.rebate_pct) + '%').join('\n') : 'No rebate scale is set yet.',
+      territory_market: terr ? [terr.population && num(terr.population) + ' people', terr.vehicles && num(terr.vehicles) + ' vehicles', terr.garages && num(terr.garages) + ' garages and fleets',
+        terr.vehicles || terr.garages ? 'about ' + money((terr.vehicles || 0) * s.spend_per_vehicle + (terr.garages || 0) * s.spend_per_garage) + ' a year of parts spending' : null].filter(Boolean).join(', ') : '',
+      territory_supply: terr && terr.dc_name ? terr.dc_name + (terr.dc_minutes ? ', ' + terr.dc_minutes + ' minutes away' : '') : '',
     });
   }
   function page(title, number, body, auto) {
@@ -302,7 +344,7 @@ function register(app, deps) {
     if (!f && lead && lead.franchisee_id) f = await frRow(lead.franchisee_id);
     const tpl = await templateOf(kind);
     if (kind === 'fdd' && !(await signedNda(lead, f))) throw httpError(409, 'The confidentiality agreement (NDA) must be signed before the disclosure document is given');
-    if (['agreement', 'manual', 'renewal', 'transfer', 'default_notice', 'termination'].includes(kind) && !f) throw httpError(409, 'Make the franchisee record first (approve the lead and convert it)');
+    if (['agreement', 'manual', 'renewal', 'transfer', 'default_notice', 'termination', 'affiliate', 'supply', 'hub_service', 'systems', 'loyalty', 'certification', 'commercial_app', 'coop'].includes(kind) && !f) throw httpError(409, 'Make the franchisee record first (approve the lead and convert it)');
     const auto = await autoValues(lead, f);
     const given = {};
     for (const fl of tpl.fields || []) {
@@ -346,7 +388,7 @@ function register(app, deps) {
     if (png.length < 200 || png.slice(0, 8).toString('hex') !== '89504e470d0a1a0a') throw httpError(400, 'Sign in the box first');
     return s;
   }
-  const CAT = (kind) => (['training', 'opening', 'audit'].includes(kind) ? 'form' : ['default_notice', 'termination'].includes(kind) ? 'correspondence' : 'contract');
+  const CAT = (kind) => (['training', 'opening', 'audit', 'certification', 'commercial_app', 'coop', 'site_report'].includes(kind) ? 'form' : ['default_notice', 'termination'].includes(kind) ? 'correspondence' : 'contract');
   async function fileCopy(req, doc, note) {
     if (!docs || !docs.fileHtml) return null;
     try {
@@ -371,7 +413,7 @@ function register(app, deps) {
       if (doc.kind === 'fdd') { await query(`UPDATE fr_leads SET fdd_received_at = COALESCE(fdd_received_at, $2) WHERE id = $1`, [doc.lead_id, at]); await setStage(doc.lead_id, 'disclosed', null, req); }
       if (doc.kind === 'application') { await query(`UPDATE fr_leads SET applied_at = COALESCE(applied_at, $2) WHERE id = $1`, [doc.lead_id, at]); await setStage(doc.lead_id, 'application', null, req); }
     }
-    if (doc.franchisee_id && doc.kind === 'agreement') {
+    if (doc.franchisee_id && (doc.kind === 'agreement' || doc.kind === 'affiliate')) {
       const f = await frRow(doc.franchisee_id);
       const day = new Date(new Date(at).getTime() - 5 * 3600000).toISOString().slice(0, 10);
       const start = f.term_start || day;
@@ -386,7 +428,7 @@ function register(app, deps) {
     if (!['draft', 'sent'].includes(doc.status)) throw httpError(409, doc.status === 'cancelled' ? 'This document was cancelled' : 'This document has already been signed');
     if (!SECRET) throw httpError(503, 'Signing is not set up on this till (SESSION_SECRET is missing)');
     if (sha(doc.html) !== doc.content_sha256) throw httpError(409, 'This document was changed after it was made. Make a new one.');
-    if (doc.kind === 'agreement') await agreementReady(doc);
+    if (doc.kind === 'agreement' || doc.kind === 'affiliate') await agreementReady(doc);
     const name = String(s.name || '').trim().slice(0, 100);
     if (name.length < 2) throw httpError(400, 'Type the name of the person signing');
     const image = pngOf(s.image);
@@ -424,7 +466,7 @@ function register(app, deps) {
         statuses: FR_STATUSES, phases: PHASES, audit_items: AUDIT_ITEMS, audit_kinds: AUDIT_KINDS, charge_kinds: ONE_OFF.map((k) => ({ key: k, label: CHARGE_LABEL[k] })),
         templates: TEMPLATES.map((x) => Object.assign({ key: x.key, title: x.title, sign: !!x.sign, countersign: COUNTER.has(x.key), fields: x.fields },
           tmap[x.key] ? { document_id: tmap[x.key].deleted_at ? null : tmap[x.key].document_id, doc_number: tmap[x.key].number, reviewed_at: tmap[x.key].reviewed_at, reviewer: tmap[x.key].reviewer, reviewed_by_name: tmap[x.key].reviewed_by_name } : {})),
-        templates_in_docs: tplReady });
+        templates_in_docs: tplReady, store_types: STORE_TYPES, systems: SYSTEMS });
     } catch (e) { fail(res, e); }
   });
   app.put('/api/franchise/settings', ...M, async (req, res) => {
@@ -479,7 +521,7 @@ function register(app, deps) {
         query(`SELECT f.id, f.number, COALESCE(f.trading_name, f.legal_name) AS name FROM fr_franchisees f WHERE f.status = 'open' AND COALESCE(f.opened_on, CURRENT_DATE) < $1::date + interval '1 month'
           AND NOT EXISTS (SELECT 1 FROM fr_reports r WHERE r.franchisee_id = f.id AND r.period = $1) ORDER BY 2`, [last]),
         query(`SELECT r.id, r.franchisee_id, ${DATE('r.period')} AS period, COALESCE(f.trading_name, f.legal_name) AS name, r.net_sales::float AS net_sales FROM fr_reports r JOIN fr_franchisees f ON f.id = r.franchisee_id
-          WHERE NOT EXISTS (SELECT 1 FROM fr_charges c WHERE c.franchisee_id = r.franchisee_id AND c.kind = 'royalty' AND c.period = r.period) ORDER BY r.period, 4`),
+          WHERE NOT EXISTS (SELECT 1 FROM fr_charges c WHERE c.franchisee_id = r.franchisee_id AND c.kind IN ${MONTHLY} AND c.period = r.period) ORDER BY r.period, 4`),
         query(`SELECT COALESCE(SUM(i.total - ${PAID('i.id')}), 0)::float AS owed,
                  COALESCE(SUM(i.total - ${PAID('i.id')}) FILTER (WHERE i.due_date < CURRENT_DATE), 0)::float AS overdue
             FROM ar_invoices i WHERE i.voided_at IS NULL AND i.id IN (SELECT ar_invoice_id FROM fr_charges WHERE ar_invoice_id IS NOT NULL)`),
@@ -497,6 +539,11 @@ function register(app, deps) {
         open_actions: actions.rows, audits_due: audits.rows, signatures: waiting.rows[0], recent: recent.rows });
     } catch (e) { fail(res, e); }
   });
+  // The scorecard figures on a report row.
+  function REPORT_EXTRA(a) {
+    return ['diy_sales', 'commercial_sales', 'cogs', 'inventory_value', 'shrink', 'purchases_total', 'delivery_minutes'].map((k) => a + '.' + k + '::float AS ' + k)
+      .concat(['loyalty_issued', 'loyalty_redeemed', 'loyalty_members', 'deliveries'].map((k) => a + '.' + k)).join(', ');
+  }
   // Payments applied to an invoice (voided payments do not count: the view leaves them out).
   function PAID(col) { return `(SELECT COALESCE(SUM(x.amount), 0) FROM ar_applications x JOIN account_payments ap ON ap.id = x.payment_id WHERE x.invoice_id = ${col})`; }
 
@@ -527,8 +574,9 @@ function register(app, deps) {
   // ================================================================ leads ==
   function leadInput(b, partial) {
     const out = {};
-    const txt = { name: 200, company: 200, email: 200, phone: 60, address: 500, parish: 60, area_wanted: 200, source: 60, experience: 4000, timeline: 200, message: 4000, notes: 4000 };
+    const txt = { name: 200, company: 200, email: 200, phone: 60, address: 500, parish: 60, area_wanted: 200, source: 60, experience: 4000, timeline: 200, message: 4000, notes: 4000, current_store: 300 };
     for (const k of Object.keys(txt)) if (!partial || k in b) out[k] = t(b[k], txt[k]);
+    if (!partial || 'programme' in b) out.programme = b.programme === 'affiliate' ? 'affiliate' : 'franchise';
     for (const k of ['capital', 'net_worth']) if (!partial || k in b) out[k] = amt(b[k]);
     if (!partial || 'territory_id' in b) out.territory_id = n(b.territory_id);
     if (!partial || 'owner_id' in b) out.owner_id = n(b.owner_id);
@@ -543,7 +591,7 @@ function register(app, deps) {
       if (req.query.stage === 'active') where.push(`l.stage NOT IN ('declined', 'withdrawn', 'signed')`);
       else if (req.query.stage) { args.push(String(req.query.stage)); where.push(`l.stage = $${args.length}`); }
       if (req.query.q) { args.push('%' + String(req.query.q).trim() + '%'); where.push(`(l.name ILIKE $${args.length} OR l.company ILIKE $${args.length} OR l.email ILIKE $${args.length} OR l.phone ILIKE $${args.length} OR l.area_wanted ILIKE $${args.length})`); }
-      const { rows } = await query(`SELECT l.id, l.name, l.company, l.email, l.phone, l.parish, l.area_wanted, l.source, l.stage, l.score, l.capital::float AS capital, l.franchisee_id,
+      const { rows } = await query(`SELECT l.id, l.name, l.company, l.email, l.phone, l.parish, l.area_wanted, l.source, l.stage, l.score, l.capital::float AS capital, l.franchisee_id, l.programme,
           ${DATE('l.created_at')} AS created_day, l.nda_signed_at, l.fdd_received_at, l.applied_at, t.name AS territory_name, COALESCE(NULLIF(o.name, ''), o.email) AS owner_name
         FROM fr_leads l LEFT JOIN fr_territories t ON t.id = l.territory_id LEFT JOIN users o ON o.id = l.owner_id ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY l.created_at DESC LIMIT 500`, args);
       res.json({ leads: rows });
@@ -647,7 +695,7 @@ function register(app, deps) {
       const l = await leadRow(req.params.id);
       if (l.franchisee_id) throw httpError(409, 'This lead already has a franchisee record');
       if (l.stage !== 'approved') throw httpError(409, 'Approve the lead first');
-      const b = Object.assign({ legal_name: l.company || l.name, principal: l.name, email: l.email, phone: l.phone, address: l.address, territory_id: l.territory_id }, req.body || {});
+      const b = Object.assign({ legal_name: l.company || l.name, principal: l.name, email: l.email, phone: l.phone, address: l.address, territory_id: l.territory_id, store_type: l.programme }, req.body || {});
       const id = await createFranchisee(req, b, l.id);
       await setStage(l.id, 'agreement', null, req);
       // The documents made for the lead belong to the franchisee too.
@@ -660,7 +708,7 @@ function register(app, deps) {
   app.get('/api/franchise/franchisees', ...M, async (req, res) => {
     try {
       const { rows } = await query(`SELECT f.id, f.number, f.legal_name, f.trading_name, f.principal, f.phone, f.email, f.status, ${DATE('f.signed_on')} AS signed_on, ${DATE('f.opened_on')} AS opened_on,
-          ${DATE('f.term_end')} AS term_end, t.name AS territory_name, f.customer_id,
+          ${DATE('f.term_end')} AS term_end, t.name AS territory_name, f.customer_id, f.store_type, f.network_role, f.format_key, f.dc_id, f.hub_id, f.sq_ft,
           (SELECT COUNT(*)::int FROM fr_tasks k WHERE k.franchisee_id = f.id AND k.done_at IS NULL) AS tasks_open,
           (SELECT COUNT(*)::int FROM fr_tasks k WHERE k.franchisee_id = f.id) AS tasks_all,
           (SELECT score_pct::float FROM fr_audits a WHERE a.franchisee_id = f.id ORDER BY audit_date DESC, id DESC LIMIT 1) AS last_audit
@@ -679,8 +727,8 @@ function register(app, deps) {
         query(`SELECT k.id, k.phase, k.title, ${DATE('k.due_on')} AS due_on, k.done_at, k.note, COALESCE(NULLIF(u.name, ''), u.email) AS done_by_name FROM fr_tasks k LEFT JOIN users u ON u.id = k.done_by WHERE k.franchisee_id = $1 ORDER BY k.sort, k.id`, [f.id]),
         query(`SELECT * FROM fr_documents WHERE franchisee_id = $1 ORDER BY id DESC`, [f.id]),
         query(`SELECT r.id, ${DATE('r.period')} AS period, r.gross_sales::float AS gross_sales, r.refunds::float AS refunds, r.gct_collected::float AS gct_collected, r.net_sales::float AS net_sales,
-            r.transactions, r.local_marketing::float AS local_marketing, r.notes, r.source, r.submitted_at,
-            EXISTS (SELECT 1 FROM fr_charges c WHERE c.franchisee_id = r.franchisee_id AND c.kind = 'royalty' AND c.period = r.period) AS billed
+            r.transactions, r.local_marketing::float AS local_marketing, r.notes, r.source, r.submitted_at, ${REPORT_EXTRA('r')},
+            EXISTS (SELECT 1 FROM fr_charges c WHERE c.franchisee_id = r.franchisee_id AND c.kind IN ${MONTHLY} AND c.period = r.period) AS billed
           FROM fr_reports r WHERE r.franchisee_id = $1 ORDER BY r.period DESC`, [f.id]),
         query(`SELECT c.id, c.kind, ${DATE('c.period')} AS period, c.description, c.base::float AS base, c.rate::float AS rate, c.amount::float AS amount, c.gct::float AS gct, c.ar_invoice_id, i.number AS invoice_number, c.created_at
           FROM fr_charges c LEFT JOIN ar_invoices i ON i.id = c.ar_invoice_id WHERE c.franchisee_id = $1 ORDER BY c.id DESC`, [f.id]),
@@ -714,7 +762,7 @@ function register(app, deps) {
       const b = req.body || {};
       if (b.status === 'open') {
         if (!['onboarding', 'expired'].includes(f.status)) throw httpError(409, 'Only a franchise being set up can be opened');
-        if (f.status === 'onboarding' && !f.signed_on) throw httpError(409, 'The franchise agreement must be signed before the shop opens');
+        if (f.status === 'onboarding' && !f.signed_on && f.store_type !== 'company') throw httpError(409, (f.store_type === 'affiliate' ? 'The affiliate store agreement' : 'The franchise agreement') + ' must be signed before the shop opens');
         const day = d(b.opened_on) || today();
         await query(`UPDATE fr_franchisees SET status = 'open', opened_on = COALESCE(opened_on, $2), updated_at = NOW() WHERE id = $1`, [f.id, day]);
         await log({ franchisee_id: f.id, action: 'opened', detail: day }, req);
@@ -860,13 +908,21 @@ function register(app, deps) {
     if (gross == null) throw httpError(400, 'Gross sales for the month (J$, including GCT)');
     const net = r2(gross - refunds - gct);
     if (net < 0) throw httpError(400, 'Refunds and GCT are more than the gross sales');
-    const { rows: billed } = await query(`SELECT 1 FROM fr_charges WHERE franchisee_id = $1 AND kind = 'royalty' AND period = $2`, [f.id, period]);
+    const { rows: billed } = await query(`SELECT 1 FROM fr_charges WHERE franchisee_id = $1 AND kind IN ${MONTHLY} AND period = $2`, [f.id, period]);
     if (billed.length) throw httpError(409, monthName(period) + ' has already been invoiced. Ask the franchisor to correct it with a credit.');
-    const { rows } = await query(`INSERT INTO fr_reports (franchisee_id, period, gross_sales, refunds, gct_collected, net_sales, transactions, local_marketing, notes, source, submitted_by, submitted_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
+    // The figures the store scorecard needs (all optional).
+    const x = {};
+    for (const k of ['diy_sales', 'commercial_sales', 'cogs', 'inventory_value', 'shrink', 'purchases_total']) x[k] = amt(b[k]);
+    for (const k of ['loyalty_issued', 'loyalty_redeemed', 'loyalty_members', 'deliveries']) { const v = parseInt(b[k], 10); x[k] = Number.isFinite(v) && v >= 0 ? v : null; }
+    { const v = Number(b.delivery_minutes); x.delivery_minutes = b.delivery_minutes != null && b.delivery_minutes !== '' && Number.isFinite(v) && v >= 0 ? r2(v) : null; }
+    if (x.diy_sales != null && x.commercial_sales != null && Math.abs(x.diy_sales + x.commercial_sales - net) > Math.max(1, net * 0.02)) throw httpError(400, 'DIY and commercial sales should add up to the net sales (' + money(net) + ')');
+    const xk = Object.keys(x);
+    const { rows } = await query(`INSERT INTO fr_reports (franchisee_id, period, gross_sales, refunds, gct_collected, net_sales, transactions, local_marketing, notes, source, submitted_by, ${xk.join(', ')}, submitted_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,${xk.map((_, i) => '$' + (i + 12)).join(',')},NOW())
       ON CONFLICT (franchisee_id, period) DO UPDATE SET gross_sales = EXCLUDED.gross_sales, refunds = EXCLUDED.refunds, gct_collected = EXCLUDED.gct_collected, net_sales = EXCLUDED.net_sales,
-        transactions = EXCLUDED.transactions, local_marketing = EXCLUDED.local_marketing, notes = EXCLUDED.notes, source = EXCLUDED.source, submitted_by = EXCLUDED.submitted_by, submitted_at = NOW() RETURNING id`,
-      [f.id, period, gross, refunds, gct, net, n(b.transactions), amt(b.local_marketing), t(b.notes, 2000), source, userId || null]);
+        transactions = EXCLUDED.transactions, local_marketing = EXCLUDED.local_marketing, notes = EXCLUDED.notes, source = EXCLUDED.source, submitted_by = EXCLUDED.submitted_by,
+        ${xk.map((k) => k + ' = EXCLUDED.' + k).join(', ')}, submitted_at = NOW() RETURNING id`,
+      [f.id, period, gross, refunds, gct, net, n(b.transactions), amt(b.local_marketing), t(b.notes, 2000), source, userId || null].concat(xk.map((k) => x[k])));
     return { id: rows[0].id, period, net_sales: net };
   }
   app.post('/api/franchise/franchisees/:id(\\d+)/reports', ...M, async (req, res) => {
@@ -901,9 +957,10 @@ function register(app, deps) {
     try {
       const f = await frRow(req.params.id);
       if (!['open', 'suspended'].includes(f.status)) throw httpError(409, 'Only an open franchise is billed monthly');
+      if (f.store_type === 'company') throw httpError(409, 'Company-owned stores are not billed fees');
       const period = monthOf((req.body || {}).period);
       if (!period) throw httpError(400, 'Which month (YYYY-MM)?');
-      const { rows: rep } = await query(`SELECT id, net_sales::float AS net FROM fr_reports WHERE franchisee_id = $1 AND period = $2`, [f.id, period]);
+      const { rows: rep } = await query(`SELECT id, net_sales::float AS net, loyalty_issued, loyalty_redeemed FROM fr_reports WHERE franchisee_id = $1 AND period = $2`, [f.id, period]);
       if (!rep.length) throw httpError(409, 'There is no sales report for ' + monthName(period) + ' yet');
       const s = await settings(), tr = terms(f, s), net = rep[0].net;
       if (!f.customer_id) f.customer_id = await ensureCustomer(f);
@@ -911,13 +968,20 @@ function register(app, deps) {
       const minFrom = f.opened_on ? addMonths(f.opened_on.slice(0, 8) + '01', 3) : null;
       let royalty = r2(net * tr.royalty_pct / 100), minNote = '';
       if (minFrom && period >= minFrom && royalty < tr.min_royalty) { royalty = r2(tr.min_royalty); minNote = ' (monthly minimum)'; }
-      const mkt = r2(net * tr.marketing_pct / 100), tech = r2(tr.tech_fee);
+      // Affiliates pay a membership fee instead of the royalty, and the network marketing rate.
+      const affiliate = f.store_type === 'affiliate';
+      const mktPct = affiliate && f.marketing_pct == null ? s.affiliate_marketing_pct : tr.marketing_pct;
+      const mkt = r2(net * mktPct / 100), tech = r2(tr.tech_fee);
       const [inc, fund] = [await accountFor('franchise_income'), await accountFor('franchise_fund')];
       const parts = [
-        { kind: 'royalty', amount: royalty, base: net, rate: tr.royalty_pct, account_id: inc, description: 'Royalty ' + tr.royalty_pct + '% of net sales ' + money(net) + ', ' + monthName(period) + minNote },
-        { kind: 'marketing', amount: mkt, base: net, rate: tr.marketing_pct, account_id: fund, description: 'Brand marketing fund ' + tr.marketing_pct + '% of net sales, ' + monthName(period) },
+        affiliate ? { kind: 'member', amount: r2(tr.member_fee), base: null, rate: null, account_id: inc, description: 'Affiliate membership fee, ' + monthName(period) }
+          : { kind: 'royalty', amount: royalty, base: net, rate: tr.royalty_pct, account_id: inc, description: 'Royalty ' + tr.royalty_pct + '% of net sales ' + money(net) + ', ' + monthName(period) + minNote },
+        { kind: 'marketing', amount: mkt, base: net, rate: mktPct, account_id: fund, description: (affiliate ? 'Network marketing ' : 'Brand marketing fund ') + mktPct + '% of net sales, ' + monthName(period) },
         { kind: 'tech', amount: tech, base: null, rate: null, account_id: inc, description: 'Technology and system fee, ' + monthName(period) },
       ].filter((p) => p.amount > 0);
+      // Loyalty: the store pays into the network fund for the points it gave, and is paid back for the points redeemed with it.
+      const pv = s.loyalty_point_value, issued = Number(rep[0].loyalty_issued || 0), redeemed = Number(rep[0].loyalty_redeemed || 0);
+      if (issued > 0 && pv > 0) parts.push({ kind: 'loyalty', amount: r2(issued * pv), base: issued, rate: pv, account_id: await accountFor('franchise_loyalty'), description: 'Loyalty points given: ' + issued.toLocaleString('en-JM') + ' at ' + money(pv) + ', ' + monthName(period) });
       if (!parts.length) throw httpError(409, 'Nothing to bill for ' + monthName(period));
       const next = addMonths(period, 1);
       const due = next.slice(0, 8) + String(Math.min(28, s.royalty_due_day)).padStart(2, '0');
@@ -926,9 +990,15 @@ function register(app, deps) {
       const inv = await invoice(c, f, parts, { due, memo: 'Franchise fees for ' + monthName(period) + ' - ' + (f.trading_name || f.legal_name) + ' (' + f.number + ')', userId: me(req) });
       for (const p of parts) await c.query(`INSERT INTO fr_charges (franchisee_id, kind, period, description, base, rate, amount, gct, ar_invoice_id, report_id, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
         [f.id, p.kind, period, p.description, p.base, p.rate, p.amount, inv.share(p.amount), inv.id, rep[0].id, me(req)]);
+      let credit = null;
+      if (redeemed > 0 && pv > 0) {
+        const { rows: cr } = await c.query(`INSERT INTO fr_credits (franchisee_id, kind, period, description, amount, created_by) VALUES ($1,'loyalty',$2,$3,$4,$5) RETURNING id, amount::float AS amount`,
+          [f.id, period.slice(0, 7), 'Loyalty points redeemed at the store: ' + redeemed.toLocaleString('en-JM') + ' at ' + money(pv) + ', ' + monthName(period), r2(redeemed * pv), me(req)]);
+        credit = cr[0];
+      }
       await c.query('COMMIT');
       await log({ franchisee_id: f.id, action: 'invoiced', detail: monthName(period) + ': ' + inv.number + ' ' + money(inv.total) }, req);
-      res.json({ ok: true, invoice: { id: inv.id, number: inv.number, total: inv.total, gct: inv.gct, due }, lines: parts.map((p) => ({ kind: p.kind, amount: p.amount, description: p.description })) });
+      res.json({ ok: true, invoice: { id: inv.id, number: inv.number, total: inv.total, gct: inv.gct, due }, lines: parts.map((p) => ({ kind: p.kind, amount: p.amount, description: p.description })), loyalty_credit: credit });
     } catch (e) {
       if (c) await c.query('ROLLBACK').catch(() => {});
       if (e.code === '23505') e = httpError(409, 'That month has already been invoiced');
@@ -1170,7 +1240,7 @@ function register(app, deps) {
       const x = await byToken(req);
       if (!x.viewed_at) await query(`UPDATE fr_documents SET viewed_at = NOW() WHERE id = $1`, [x.id]);
       let notYet = null;
-      if (x.kind === 'agreement') { try { await agreementReady(x); } catch (e) { notYet = e.message; } }
+      if (x.kind === 'agreement' || x.kind === 'affiliate') { try { await agreementReady(x); } catch (e) { notYet = e.message; } }
       res.json({ title: x.title, number: numberOf(x), html: x.html, company: await companyInfo(), not_yet: notYet });
     } catch (e) { fail(res, e); }
   });
@@ -1198,13 +1268,14 @@ function register(app, deps) {
       if (b.website) return res.json({ ok: true });   // a robot filled the hidden box
       if (b.consent !== true) throw httpError(400, 'Tick the box to let us contact you about your enquiry');
       const l = leadInput({ name: b.name, company: b.company, email: b.email, phone: b.phone, parish: b.parish, area_wanted: b.area_wanted, capital: b.capital, net_worth: b.net_worth,
-        experience: b.experience, timeline: b.timeline, message: b.message, source: 'website' }, false);
+        experience: b.experience, timeline: b.timeline, message: b.message, source: 'website', programme: b.programme, current_store: b.current_store }, false);
       const cols = Object.keys(l);
       const { rows } = await query(`INSERT INTO fr_leads (${cols.join(', ')}) VALUES (${cols.map((_, i) => '$' + (i + 1)).join(', ')}) RETURNING id`, cols.map((k) => l[k]));
       await log({ lead_id: rows[0].id, action: 'enquiry from the website', detail: l.name + (l.area_wanted ? ' - ' + l.area_wanted : '') }, req);
+      // Staff owners and managers only: customer accounts can carry admin_role too.
       if (deps.notice) {
-        const { rows: mgr } = await query(`SELECT id FROM users WHERE admin_role IN ('owner', 'manager') AND NOT COALESCE(disabled, false)`).catch(() => ({ rows: [] }));
-        if (mgr.length) deps.notice(mgr.map((m) => m.id), { kind: 'memo', title: '🏪 New franchise enquiry: ' + l.name, body: (l.area_wanted || '') + (l.phone ? ' · ' + l.phone : ''), link: '/franchise.html#lead=' + rows[0].id }).catch(() => {});
+        const { rows: mgr } = await query(`SELECT id FROM users WHERE (COALESCE(is_admin, false) OR COALESCE(is_staff, false)) AND admin_role IN ('owner', 'manager') AND NOT COALESCE(disabled, false) LIMIT 50`).catch(() => ({ rows: [] }));
+        if (mgr.length) deps.notice(mgr.map((m) => m.id), { kind: 'memo', title: (l.programme === 'affiliate' ? '🏪 New affiliate store enquiry: ' : '🏪 New franchise enquiry: ') + l.name, body: (l.area_wanted || '') + (l.phone ? ' · ' + l.phone : ''), link: '/franchise.html#lead=' + rows[0].id }).catch(() => {});
       }
       res.json({ ok: true });
     } catch (e) { fail(res, e); }
@@ -1224,8 +1295,8 @@ function register(app, deps) {
       const f = await byPortal(req);
       const s = await settings();
       const [reps, audits, man, tasks] = await Promise.all([
-        query(`SELECT ${DATE('period')} AS period, gross_sales::float AS gross_sales, refunds::float AS refunds, gct_collected::float AS gct_collected, net_sales::float AS net_sales, transactions, submitted_at,
-            EXISTS (SELECT 1 FROM fr_charges c WHERE c.franchisee_id = r.franchisee_id AND c.kind = 'royalty' AND c.period = r.period) AS billed FROM fr_reports r WHERE franchisee_id = $1 ORDER BY period DESC LIMIT 24`, [f.id]),
+        query(`SELECT ${DATE('period')} AS period, gross_sales::float AS gross_sales, refunds::float AS refunds, gct_collected::float AS gct_collected, net_sales::float AS net_sales, transactions, submitted_at, ${REPORT_EXTRA('r')},
+            EXISTS (SELECT 1 FROM fr_charges c WHERE c.franchisee_id = r.franchisee_id AND c.kind IN ${MONTHLY} AND c.period = r.period) AS billed FROM fr_reports r WHERE franchisee_id = $1 ORDER BY period DESC LIMIT 24`, [f.id]),
         query(`SELECT ${DATE('audit_date')} AS audit_date, kind, score_pct::float AS score_pct, result, findings, actions, ${DATE('follow_up_on')} AS follow_up_on FROM fr_audits WHERE franchisee_id = $1 ORDER BY audit_date DESC LIMIT 10`, [f.id]),
         query(`SELECT id FROM fr_documents WHERE franchisee_id = $1 AND kind = 'manual' AND status IN ('signed', 'countersigned', 'sent', 'draft') ORDER BY id DESC LIMIT 1`, [f.id]),
         query(`SELECT phase, title, ${DATE('due_on')} AS due_on, done_at FROM fr_tasks WHERE franchisee_id = $1 ORDER BY sort, id`, [f.id])]);
@@ -1233,7 +1304,9 @@ function register(app, deps) {
       res.json({ franchisee: { number: f.number, legal_name: f.legal_name, trading_name: f.trading_name, status: f.status, territory: f.territory_name, opened_on: f.opened_on, term_end: f.term_end },
         terms: Object.assign(terms(f, s), { report_day: s.report_day, royalty_due_day: s.royalty_due_day, gct_rate: s.gct_rate }), company: await companyInfo(),
         reports: reps.rows, audits: audits.rows, statement: { billed: st.billed, paid: st.paid, balance: st.balance, overdue: st.overdue, invoices: st.invoices.filter((i) => !i.voided_at).slice(0, 36).map((i) => ({ number: i.number, invoice_date: i.invoice_date, due_date: i.due_date, memo: i.memo, total: i.total, paid: i.paid, balance: i.balance })) },
-        manual: man.rows.length ? (await docRow(man.rows[0].id)).html : null, tasks: f.status === 'onboarding' ? tasks.rows : [], phases: PHASES });
+        manual: man.rows.length ? (await docRow(man.rows[0].id)).html : null, tasks: f.status === 'onboarding' ? tasks.rows : [], phases: PHASES,
+        store: { store_type: f.store_type, store_type_label: STORE_TYPES[f.store_type], format: f.format_name, role: f.network_role, dc: f.dc_name, hub: f.hub_name },
+        network: await net.portal(f) });
     } catch (e) { fail(res, e); }
   });
   app.post('/api/public/franchisee/:token/report', async (req, res) => {
@@ -1246,7 +1319,10 @@ function register(app, deps) {
     } catch (e) { fail(res, e); }
   });
 
+  const net = require('./franchise-network').register(app, deps, { M, me, fail, httpError, t, d, n, r2, amt, money, today, addDays, addMonths, monthOf, monthName, DATE, PAID,
+    settings, frRow, terms, log, invoice, accountFor, ensureCustomer, byPortal, noStore, limited, STORE_TYPES, SYSTEMS });
+
   return { ensureTemplates };
 }
 
-module.exports = { register, STAGES, DEFAULTS };
+module.exports = { register, STAGES, DEFAULTS, MONTHLY };

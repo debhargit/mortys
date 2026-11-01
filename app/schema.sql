@@ -7215,3 +7215,322 @@ CREATE TABLE IF NOT EXISTS user_module_menus (
   updated_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
   updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- =============================================================================
+--  FRANCHISE STORE NETWORK (franchise-network.js; franchise.html "Store network")
+--  The parts-retail model: franchised, affiliate (independent dealer-member)
+--  and company-owned stores, supplied by distribution centres, with hub stores
+--  that serve nearby spoke stores the same day; commercial (garage and fleet)
+--  accounts on delivery routes, pro price tiers, loyalty, purchasing
+--  commitments and rebates, the co-op advertising fund, required systems,
+--  staff certification and the store scorecard. Safe to re-run.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS fr_dcs (
+  id             SERIAL PRIMARY KEY,
+  code           TEXT NOT NULL UNIQUE,
+  name           TEXT NOT NULL,
+  address        TEXT,
+  parish         TEXT,
+  manager        TEXT,
+  phone          TEXT,
+  cutoff_time    TEXT NOT NULL DEFAULT '14:00',   -- orders in by this time leave on today's run
+  delivery_days  TEXT NOT NULL DEFAULT 'Mon-Sat',
+  runs_per_day   INTEGER NOT NULL DEFAULT 1,
+  active         BOOLEAN NOT NULL DEFAULT true,
+  notes          TEXT,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS fr_formats (
+  key              TEXT PRIMARY KEY,
+  name             TEXT NOT NULL,
+  description      TEXT,
+  sq_ft_min        INTEGER,
+  sq_ft_max        INTEGER,
+  sku_target       INTEGER,
+  staff            INTEGER,
+  investment_low   NUMERIC(16,2),
+  investment_high  NUMERIC(16,2),
+  sort             INTEGER NOT NULL DEFAULT 100
+);
+INSERT INTO fr_formats (key, name, description, sq_ft_min, sq_ft_max, sku_target, staff, investment_low, investment_high, sort) VALUES
+  ('hub',      'Hub store',          'A large store carrying deep stock (about three times a standard store) that sends parts to the spoke stores around it the same day.', 6000, 10000, 30000, 12, 60000000, 95000000, 10),
+  ('standard', 'Standard store',     'The usual neighbourhood parts store: walk-in DIY customers and a commercial counter with one or two delivery vehicles.', 3500, 6000, 15000, 7, 30000000, 55000000, 20),
+  ('express',  'Express store',      'A small store in a town centre or plaza: fast-moving lines only, everything else from the hub or the distribution centre the same day.', 1500, 3500, 6000, 4, 15000000, 28000000, 30),
+  ('counter',  'Commercial counter', 'A trade counter serving garages and fleets only, mostly by delivery. No retail floor.', 1500, 4000, 8000, 5, 18000000, 32000000, 40)
+ON CONFLICT (key) DO NOTHING;
+
+ALTER TABLE fr_franchisees ADD COLUMN IF NOT EXISTS store_type   TEXT NOT NULL DEFAULT 'franchise' CHECK (store_type IN ('franchise', 'affiliate', 'company'));
+ALTER TABLE fr_franchisees ADD COLUMN IF NOT EXISTS format_key   TEXT REFERENCES fr_formats(key) ON DELETE SET NULL;
+ALTER TABLE fr_franchisees ADD COLUMN IF NOT EXISTS network_role TEXT NOT NULL DEFAULT 'standalone' CHECK (network_role IN ('hub', 'spoke', 'standalone'));
+ALTER TABLE fr_franchisees ADD COLUMN IF NOT EXISTS dc_id        INTEGER REFERENCES fr_dcs(id) ON DELETE SET NULL;
+ALTER TABLE fr_franchisees ADD COLUMN IF NOT EXISTS hub_id       INTEGER REFERENCES fr_franchisees(id) ON DELETE SET NULL;
+ALTER TABLE fr_franchisees ADD COLUMN IF NOT EXISTS sq_ft        INTEGER;
+ALTER TABLE fr_franchisees ADD COLUMN IF NOT EXISTS member_fee   NUMERIC(14,2);   -- affiliate: monthly membership fee
+ALTER TABLE fr_franchisees ADD COLUMN IF NOT EXISTS commit_pct   NUMERIC(6,3);    -- share of purchases to come through the DC
+ALTER TABLE fr_franchisees ADD COLUMN IF NOT EXISTS coop_pct     NUMERIC(6,3);    -- co-op advertising accrual on DC purchases
+ALTER TABLE fr_leads       ADD COLUMN IF NOT EXISTS programme    TEXT NOT NULL DEFAULT 'franchise' CHECK (programme IN ('franchise', 'affiliate'));
+ALTER TABLE fr_leads       ADD COLUMN IF NOT EXISTS current_store TEXT;           -- affiliate: the shop they run today
+
+ALTER TABLE fr_territories ADD COLUMN IF NOT EXISTS vehicles       INTEGER;       -- registered vehicles in the area
+ALTER TABLE fr_territories ADD COLUMN IF NOT EXISTS garages        INTEGER;       -- garages and fleets that could buy on account
+ALTER TABLE fr_territories ADD COLUMN IF NOT EXISTS dc_id          INTEGER REFERENCES fr_dcs(id) ON DELETE SET NULL;
+ALTER TABLE fr_territories ADD COLUMN IF NOT EXISTS dc_minutes     INTEGER;       -- drive time from the DC
+ALTER TABLE fr_territories ADD COLUMN IF NOT EXISTS planned_format TEXT REFERENCES fr_formats(key) ON DELETE SET NULL;
+ALTER TABLE fr_territories ADD COLUMN IF NOT EXISTS planned_type   TEXT CHECK (planned_type IN ('franchise', 'affiliate', 'company'));
+ALTER TABLE fr_territories ADD COLUMN IF NOT EXISTS priority       INTEGER;       -- 1 = open next
+
+-- The monthly report, with the figures the scorecard needs.
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS diy_sales          NUMERIC(16,2);   -- walk-in retail, net
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS commercial_sales   NUMERIC(16,2);   -- garages, fleets, trade accounts, net
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS cogs               NUMERIC(16,2);   -- cost of the goods sold
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS inventory_value    NUMERIC(16,2);   -- stock at cost at month end
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS shrink             NUMERIC(16,2);   -- stock lost (count differences, damage, theft) at cost
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS purchases_total    NUMERIC(16,2);   -- all stock bought in the month, from anyone
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS loyalty_issued     INTEGER;         -- loyalty points given
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS loyalty_redeemed   INTEGER;         -- loyalty points taken off bills
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS loyalty_members    INTEGER;         -- members signed up in the month
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS deliveries         INTEGER;         -- commercial deliveries made
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS delivery_minutes   NUMERIC(8,1);    -- average order-to-door time
+
+ALTER TABLE fr_charges DROP CONSTRAINT IF EXISTS fr_charges_kind_check;
+ALTER TABLE fr_charges ADD CONSTRAINT fr_charges_kind_check CHECK (kind IN ('initial', 'royalty', 'marketing', 'tech', 'renewal', 'transfer', 'training', 'audit', 'late', 'other', 'member', 'loyalty', 'supply'));
+DROP INDEX IF EXISTS uq_fr_charges_period;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fr_charges_month ON fr_charges (franchisee_id, kind, period) WHERE kind IN ('royalty', 'marketing', 'tech', 'member', 'loyalty');
+
+-- The network parts catalogue, with what each part fits.
+CREATE TABLE IF NOT EXISTS fr_catalogue (
+  id              SERIAL PRIMARY KEY,
+  sku             TEXT NOT NULL UNIQUE,
+  part_number     TEXT,
+  brand           TEXT,
+  description     TEXT NOT NULL,
+  category        TEXT,
+  interchange     TEXT,                          -- other makers' numbers for the same part
+  dealer_cost     NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (dealer_cost >= 0),  -- what a store pays the DC
+  list_price      NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (list_price >= 0),   -- suggested retail
+  core_charge     NUMERIC(14,2) NOT NULL DEFAULT 0,
+  warranty_months INTEGER,
+  stocking        TEXT NOT NULL DEFAULT 'store' CHECK (stocking IN ('store', 'hub', 'dc')),  -- every store / hubs / DC only
+  product_id      INTEGER,                       -- the till product it came from, if imported
+  active          BOOLEAN NOT NULL DEFAULT true,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fr_catalogue_text ON fr_catalogue (lower(description));
+CREATE INDEX IF NOT EXISTS idx_fr_catalogue_product ON fr_catalogue (product_id);
+CREATE TABLE IF NOT EXISTS fr_fitment (
+  id            SERIAL PRIMARY KEY,
+  catalogue_id  INTEGER NOT NULL REFERENCES fr_catalogue(id) ON DELETE CASCADE,
+  make          TEXT NOT NULL,
+  model         TEXT,
+  year_from     INTEGER,
+  year_to       INTEGER,
+  engine        TEXT,
+  note          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_fr_fitment_part ON fr_fitment (catalogue_id);
+CREATE INDEX IF NOT EXISTS idx_fr_fitment_make ON fr_fitment (lower(make), lower(model));
+-- Stock at each DC and store, for parts availability and replenishment.
+CREATE TABLE IF NOT EXISTS fr_stock (
+  id             SERIAL PRIMARY KEY,
+  catalogue_id   INTEGER NOT NULL REFERENCES fr_catalogue(id) ON DELETE CASCADE,
+  dc_id          INTEGER REFERENCES fr_dcs(id) ON DELETE CASCADE,
+  franchisee_id  INTEGER REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  on_hand        INTEGER NOT NULL DEFAULT 0,
+  min_qty        INTEGER,
+  max_qty        INTEGER,
+  updated_at     TIMESTAMPTZ DEFAULT NOW(),
+  CHECK ((dc_id IS NULL) <> (franchisee_id IS NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fr_stock_dc    ON fr_stock (dc_id, catalogue_id) WHERE dc_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fr_stock_store ON fr_stock (franchisee_id, catalogue_id) WHERE franchisee_id IS NOT NULL;
+
+-- Orders from a store to its DC (stock and special orders) or its hub (same-day "hot shot").
+CREATE TABLE IF NOT EXISTS fr_supply_orders (
+  id              SERIAL PRIMARY KEY,
+  number          TEXT UNIQUE,                  -- SO-00001
+  franchisee_id   INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL DEFAULT 'stock' CHECK (kind IN ('stock', 'special', 'hot')),
+  dc_id           INTEGER REFERENCES fr_dcs(id) ON DELETE SET NULL,
+  hub_id          INTEGER REFERENCES fr_franchisees(id) ON DELETE SET NULL,   -- set when a hub fills it
+  status          TEXT NOT NULL DEFAULT 'submitted' CHECK (status IN ('submitted', 'shipped', 'received', 'cancelled')),
+  needed_by       DATE,
+  notes           TEXT,
+  source          TEXT NOT NULL DEFAULT 'staff',  -- staff | portal | replenish
+  total_cost      NUMERIC(16,2) NOT NULL DEFAULT 0,
+  ar_invoice_id   INTEGER REFERENCES ar_invoices(id) ON DELETE SET NULL,
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  shipped_at      TIMESTAMPTZ,
+  shipped_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  received_at     TIMESTAMPTZ,
+  receive_note    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_fr_supply_fr ON fr_supply_orders (franchisee_id, created_at);
+CREATE TABLE IF NOT EXISTS fr_supply_lines (
+  id            SERIAL PRIMARY KEY,
+  order_id      INTEGER NOT NULL REFERENCES fr_supply_orders(id) ON DELETE CASCADE,
+  catalogue_id  INTEGER NOT NULL REFERENCES fr_catalogue(id),
+  qty           INTEGER NOT NULL CHECK (qty > 0),
+  qty_shipped   INTEGER,
+  qty_received  INTEGER,
+  unit_cost     NUMERIC(14,2) NOT NULL DEFAULT 0
+);
+
+-- Price tiers: retail, loyalty members and the pro (commercial) levels.
+CREATE TABLE IF NOT EXISTS fr_price_tiers (
+  id            SERIAL PRIMARY KEY,
+  code          TEXT NOT NULL UNIQUE,
+  name          TEXT NOT NULL,
+  kind          TEXT NOT NULL DEFAULT 'commercial' CHECK (kind IN ('retail', 'loyalty', 'commercial')),
+  discount_pct  NUMERIC(6,3) NOT NULL DEFAULT 0 CHECK (discount_pct >= 0 AND discount_pct < 100),
+  floor_pct     NUMERIC(6,3) NOT NULL DEFAULT 10,   -- never below dealer cost plus this margin
+  min_monthly   NUMERIC(14,2),                       -- spend a month to qualify
+  description   TEXT,
+  sort          INTEGER NOT NULL DEFAULT 100
+);
+INSERT INTO fr_price_tiers (code, name, kind, discount_pct, floor_pct, min_monthly, description, sort) VALUES
+  ('RETAIL', 'Retail (list price)',       'retail',     0,  10, NULL,    'Walk-in customers.', 10),
+  ('LOYAL',  'Loyalty member',            'loyalty',    5,  10, NULL,    'Signed-up loyalty members, on top of their points.', 20),
+  ('PRO1',   'Pro 1: garage',             'commercial', 12, 10, 150000,  'Independent garages and mechanics buying on account.', 30),
+  ('PRO2',   'Pro 2: fleet',              'commercial', 18, 8,  600000,  'Fleets, taxi and bus operators, larger garages.', 40),
+  ('PRO3',   'Pro 3: key account',        'commercial', 24, 6,  2000000, 'National fleets, government and dealer groups, by agreement.', 50)
+ON CONFLICT (code) DO NOTHING;
+
+-- Delivery routes run by a store's commercial team.
+CREATE TABLE IF NOT EXISTS fr_routes (
+  id             SERIAL PRIMARY KEY,
+  franchisee_id  INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  name           TEXT NOT NULL,
+  driver         TEXT,
+  vehicle        TEXT,
+  runs           TEXT,                          -- '8:30, 11:00, 14:00'
+  promise_minutes INTEGER,                      -- order-to-door promise
+  active         BOOLEAN NOT NULL DEFAULT true,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+-- Commercial (do-it-for-me) customers: garages, fleets and trade accounts.
+CREATE TABLE IF NOT EXISTS fr_commercial_accounts (
+  id             SERIAL PRIMARY KEY,
+  franchisee_id  INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  name           TEXT NOT NULL,
+  kind           TEXT NOT NULL DEFAULT 'garage' CHECK (kind IN ('garage', 'fleet', 'dealer', 'government', 'body_shop', 'other')),
+  contact        TEXT,
+  phone          TEXT,
+  email          TEXT,
+  address        TEXT,
+  trn            TEXT,
+  tier_id        INTEGER REFERENCES fr_price_tiers(id) ON DELETE SET NULL,
+  credit_limit   NUMERIC(14,2),
+  terms_days     INTEGER NOT NULL DEFAULT 30,
+  route_id       INTEGER REFERENCES fr_routes(id) ON DELETE SET NULL,
+  stop_order     INTEGER,
+  monthly_target NUMERIC(14,2),
+  bays           INTEGER,                        -- service bays (garages)
+  status         TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('prospect', 'active', 'on_hold', 'closed')),
+  opened_on      DATE,
+  notes          TEXT,
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fr_commercial_fr ON fr_commercial_accounts (franchisee_id, status);
+
+-- Purchasing rebates: the share of a quarter's DC purchases paid back to a store.
+CREATE TABLE IF NOT EXISTS fr_rebate_tiers (
+  id           SERIAL PRIMARY KEY,
+  min_quarter  NUMERIC(16,2) NOT NULL CHECK (min_quarter >= 0),   -- DC purchases in the quarter
+  rebate_pct   NUMERIC(6,3) NOT NULL CHECK (rebate_pct >= 0 AND rebate_pct <= 20)
+);
+INSERT INTO fr_rebate_tiers (min_quarter, rebate_pct)
+  SELECT * FROM (VALUES (3000000::numeric, 1::numeric), (7500000, 2), (15000000, 3), (30000000, 4)) v
+  WHERE NOT EXISTS (SELECT 1 FROM fr_rebate_tiers);
+-- Money the franchisor owes a store: rebates, approved co-op claims, loyalty points redeemed.
+CREATE TABLE IF NOT EXISTS fr_credits (
+  id             SERIAL PRIMARY KEY,
+  franchisee_id  INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL CHECK (kind IN ('rebate', 'coop', 'loyalty', 'other')),
+  period         TEXT,                          -- '2026-Q3', '2026-10'
+  description    TEXT,
+  amount         NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+  status         TEXT NOT NULL DEFAULT 'owed' CHECK (status IN ('owed', 'settled', 'cancelled')),
+  settled_how    TEXT,                          -- cheque, bank transfer, set against invoices
+  settled_ref    TEXT,
+  settled_at     TIMESTAMPTZ,
+  settled_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  source_id      INTEGER,                       -- the co-op claim
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fr_credits_period ON fr_credits (franchisee_id, kind, period) WHERE kind IN ('rebate', 'loyalty') AND status <> 'cancelled';
+-- Co-op advertising: a store spends on approved local advertising and claims part of it back.
+CREATE TABLE IF NOT EXISTS fr_coop_claims (
+  id             SERIAL PRIMARY KEY,
+  franchisee_id  INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  description    TEXT NOT NULL,
+  media          TEXT,                          -- radio, print, social, sponsorship, signage, event
+  spend_date     DATE NOT NULL,
+  spend          NUMERIC(14,2) NOT NULL CHECK (spend > 0),
+  claimed        NUMERIC(14,2) NOT NULL CHECK (claimed > 0),
+  proof          TEXT,                          -- invoice number, link, what was attached
+  status         TEXT NOT NULL DEFAULT 'submitted' CHECK (status IN ('submitted', 'approved', 'declined')),
+  approved       NUMERIC(14,2),
+  decided_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  decided_at     TIMESTAMPTZ,
+  decision_note  TEXT,
+  source         TEXT NOT NULL DEFAULT 'staff',
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Required systems at each store.
+CREATE TABLE IF NOT EXISTS fr_store_systems (
+  franchisee_id  INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  system_key     TEXT NOT NULL,
+  status         TEXT NOT NULL DEFAULT 'missing' CHECK (status IN ('missing', 'installed', 'verified', 'not_needed')),
+  detail         TEXT,                          -- version, serial, provider
+  checked_at     TIMESTAMPTZ,
+  checked_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  PRIMARY KEY (franchisee_id, system_key)
+);
+
+-- Training and certification (parts specialist levels, commercial sales, and so on).
+CREATE TABLE IF NOT EXISTS fr_cert_programs (
+  code            TEXT PRIMARY KEY,
+  name            TEXT NOT NULL,
+  description     TEXT,
+  for_role        TEXT,
+  valid_months    INTEGER NOT NULL DEFAULT 24,
+  required_per_store INTEGER NOT NULL DEFAULT 0,  -- certified people each store must have
+  lesson_key      TEXT,                           -- the till training lesson behind it
+  pass_pct        INTEGER NOT NULL DEFAULT 80,
+  sort            INTEGER NOT NULL DEFAULT 100,
+  active          BOOLEAN NOT NULL DEFAULT true
+);
+INSERT INTO fr_cert_programs (code, name, description, for_role, valid_months, required_per_store, lesson_key, pass_pct, sort) VALUES
+  ('PS1', 'Parts specialist level 1', 'Counter basics: the catalogue, fitment by make, model, year and engine, cores and warranty, the till.', 'Counter staff', 24, 2, 'franchise-network', 80, 10),
+  ('PS2', 'Parts specialist level 2', 'Advanced diagnosis help, brakes, steering and suspension, cooling, charging and starting systems.', 'Senior counter staff', 24, 1, NULL, 80, 20),
+  ('CSR', 'Commercial sales',          'Opening and growing garage and fleet accounts, pro pricing, delivery promises, credit control.', 'Commercial staff', 24, 1, 'franchise-commercial', 80, 30),
+  ('BAT', 'Battery and electrical',    'Testing, charging, fitting and recycling batteries safely; alternators and starters.', 'Counter staff', 24, 1, NULL, 80, 40),
+  ('DRV', 'Delivery driver safety',    'Defensive driving, loading, proof of delivery, cash and parts security on the road.', 'Drivers', 12, 0, NULL, 80, 50),
+  ('HAZ', 'Hazardous materials',       'Oils, fluids, batteries and chemicals: storage, spills, recycling and the safety sheets.', 'Everyone', 24, 1, NULL, 80, 60),
+  ('MGR', 'Store manager',             'Running the store to the manual: people, stock, cash, the scorecard and the audit.', 'Managers', 36, 1, 'franchise', 80, 70)
+ON CONFLICT (code) DO NOTHING;
+CREATE TABLE IF NOT EXISTS fr_staff_certs (
+  id              SERIAL PRIMARY KEY,
+  franchisee_id   INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  person          TEXT NOT NULL,
+  role            TEXT,
+  program_code    TEXT NOT NULL REFERENCES fr_cert_programs(code),
+  earned_on       DATE NOT NULL,
+  expires_on      DATE,
+  score           INTEGER,
+  certificate_no  TEXT,
+  revoked_at      TIMESTAMPTZ,
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fr_staff_certs_fr ON fr_staff_certs (franchisee_id, program_code);
+
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('4610', 'Franchise Supply Sales',  'income',    'Franchise Supply Sales',  'INC',    'franchise_supply'),
+  ('2175', 'Franchise Loyalty Fund',  'liability', 'Franchise Loyalty Fund',  'OCLIAB', 'franchise_loyalty')
+ON CONFLICT DO NOTHING;

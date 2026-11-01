@@ -77,7 +77,8 @@ const TEMPLATES = [
 <p><b>{{company}}</b> · {{company_address}} · {{company_phone}}<br>Issue date: {{issue_date}} · Given to: <b>{{recipient}}</b></p>
 <div class="box"><b>Read this whole document before you sign any agreement or pay any money.</b> It tells you about the franchisor, the costs, your duties, the territory and how the franchise can end. Take it to an attorney and an accountant. You must receive it at least {{wait_days}} days before you sign the franchise agreement or pay anything other than a refundable deposit.</div>
 <h2>Item 1. The franchisor</h2><p>{{franchisor_history}}</p>
-<p>The franchise is an auto-parts and auto-accessory shop operated under the Vision Auto Solutions name, using the Franchisor's till, stock and online ordering system, approved suppliers and operating methods.</p>
+<p>The franchise is an auto-parts and auto-accessory store operated under the Vision Auto Solutions name, using the Franchisor's till, stock and online ordering system, approved suppliers and operating methods. Stores sell to two kinds of customer: walk-in do-it-yourself drivers, and commercial (do-it-for-me) customers such as garages and fleets, who buy on account and have parts delivered.</p>
+<p>The network has three kinds of store: <b>franchised stores</b> (this document); <b>affiliate stores</b>, independently owned parts shops that join the network as dealer-members, trade under their own name with the network banner, and buy through the Franchisor's distribution centre; and <b>company-owned stores</b>. Stores are supplied from a distribution centre, and larger <b>hub stores</b> carry deeper stock and send parts to the smaller <b>spoke stores</b> near them the same day. You are offered: {{store_type_label}}.</p>
 <h2>Item 2. Business experience</h2><p>{{management}}</p>
 <h2>Item 3. Litigation</h2><p>{{litigation}}</p>
 <h2>Item 4. Bankruptcy and insolvency</h2><p>{{insolvency}}</p>
@@ -90,14 +91,19 @@ const TEMPLATES = [
 <tr><td>Local marketing (spent by you)</td><td>At least {{local_marketing_pct}}% of net sales</td><td>Each month</td></tr>
 <tr><td>Renewal fee</td><td>{{renewal_fee}}</td><td>When renewing</td></tr>
 <tr><td>Transfer fee</td><td>{{transfer_fee}}</td><td>Before a transfer is approved</td></tr>
+<tr><td>Affiliate membership fee (affiliate stores only, instead of the royalty)</td><td>{{member_fee}} a month</td><td>With the monthly invoice</td></tr>
+<tr><td>Loyalty programme</td><td>{{loyalty_point_value}} for each point your store gives; you are paid back the same for each point a customer redeems at your store</td><td>With the monthly invoice</td></tr>
+<tr><td>Stock bought from the distribution centre</td><td>The dealer cost in the network catalogue</td><td>Invoiced when shipped; due in 30 days</td></tr>
 <tr><td>Extra training, audits after a failed audit, late payment interest</td><td>As set out in the agreement</td><td>When charged</td></tr></table>
 <p>GCT at {{gct_rate}}% is added where it applies.</p>
 <h2>Item 7. Estimated initial investment</h2><p>Between <b>J\${{investment_low}}</b> and <b>J\${{investment_high}}</b>, covering the initial fee, rent deposit, fit-out and signs, shelving, the till hardware, opening stock, licences, insurance, training travel, grand-opening marketing and 3 months of working capital. The figures are estimates; your costs depend on the site.</p>
-<h2>Item 8. Where you must buy</h2><p>Parts, stock, signs, uniforms and the till system must come from the Franchisor or approved suppliers, so that quality and fitment are consistent. The Franchisor may earn a margin or rebate on some of these and will say so in writing.</p>
+<h2>Item 8. Where you must buy</h2><p>Parts, stock, signs, uniforms and the till system must come from the Franchisor or approved suppliers, so that quality and fitment are consistent. You agree to buy at least <b>{{commit_pct}}%</b> of your stock (by value) through the Franchisor's distribution centre, under the supply and distribution agreement. The Franchisor earns a margin on the stock it sells you (the difference between its own cost and the dealer cost) and may receive rebates and advertising money from suppliers.</p>
+<p>The Franchisor pays you back part of what you buy: a <b>quarterly purchasing rebate</b> on your distribution-centre purchases (the current scale is in the supply agreement), and a <b>co-op advertising allowance</b> of {{coop_pct}}% of those purchases, which you claim against approved local advertising (up to {{coop_claim_pct}}% of what you spend).</p>
 <h2>Item 9. Your duties</h2><p>A table of your duties under the agreement (site, opening, training, standards, reporting, insurance, marketing, renewal, transfer) with the agreement section for each.</p>
 <h2>Item 10. Financing</h2><p>The Franchisor does not offer financing unless set out here.</p>
-<h2>Item 11. The Franchisor's help</h2><p>Before opening: site criteria and approval, layout, opening stock list, initial training, the operations manual, till set-up and opening support. After opening: field visits, refresher training, the brand marketing fund, supplier terms, and the till and online ordering system. You must open within {{opening_months}} months of signing.</p>
-<h2>Item 12. Territory</h2><p>{{territory}}: {{territory_desc}}. The Franchisor will not open or license another Vision Auto Solutions shop inside it during the term while you are not in default. The Franchisor keeps the right to sell online and to serve national fleet accounts, sharing those sales as the agreement says.</p>
+<h2>Item 11. The Franchisor's help, and the systems you must use</h2><p>Before opening: site and territory assessment, the store format, layout, opening stock list, initial training and certification, the operations manual, till set-up and opening support. After opening: field visits, refresher training, the brand marketing fund, supplier terms, the distribution centre and hub deliveries, the network parts catalogue, the loyalty programme, and the till and online ordering system. You must open within {{opening_months}} months of signing.</p>
+<p>Required systems: the Vision till (point of sale), its stock and replenishment screens, the electronic parts catalogue and lookup, the ordering link to the distribution centre, commercial delivery tracking, an approved card terminal, CCTV and a backup internet line, as listed in the systems schedule. The technology fee ({{tech_fee}} a month) covers the till software, support and updates; hardware is bought by you.</p>
+<h2>Item 12. Territory</h2><p>{{territory}}: {{territory_desc}}. The Franchisor will not open or license another Vision Auto Solutions shop inside it during the term while you are not in default. The Franchisor keeps the right to sell online and to serve national fleet accounts, sharing those sales as the agreement says. Your commercial customers may be anywhere your delivery routes reach in time, but a commercial customer inside another store's territory is served by that store unless both agree. Company-owned and affiliate stores that were trading in an area before your territory was granted may keep trading there.</p>
 <h2>Item 13. Trade marks</h2><p>The Vision Auto Solutions name and logo, and any registration or application at the Jamaica Intellectual Property Office.</p>
 <h2>Item 14. Copyright and confidential information</h2><p>The operations manual, training material and the till system belong to the Franchisor and are confidential.</p>
 <h2>Item 15. Taking part in running the business</h2><p>The principal, or an approved trained manager, must run the shop day to day.</p>
@@ -107,7 +113,7 @@ const TEMPLATES = [
 <h2>Item 19. Financial performance</h2><p>{{performance}}</p>
 <h2>Item 20. Outlets</h2><p>{{outlets}}</p>
 <h2>Item 21. Financial statements</h2><p>{{financials}}</p>
-<h2>Item 22. Contracts</h2><p>Attached: the confidentiality agreement, the franchise agreement, the personal guarantee, the general release used on renewal and transfer.</p>
+<h2>Item 22. Contracts</h2><p>Attached: the confidentiality agreement, the franchise agreement (or, for affiliate stores, the affiliate store agreement), the supply and distribution agreement, the required systems schedule, the loyalty programme rules, the hub service agreement (hub stores only), the personal guarantee, and the general release used on renewal and transfer.</p>
 <h2>Item 23. Receipt</h2>
 <p>I, <b>{{recipient}}</b>, confirm that I received this franchise disclosure document and its attachments on the date I sign below. I understand I should not sign the franchise agreement until at least {{wait_days}} days after this date.</p>
 <p class="sig">Signature: ____________________ &nbsp; Date received: ____________________</p>` },
@@ -133,7 +139,7 @@ const TEMPLATES = [
 <li>The monthly sales report is due by day {{report_day}} and payment by day {{royalty_due_day}} of the following month. GCT is added where it applies. Late amounts carry interest at 1.5% a month and a late fee as the manual sets out.</li></ul>
 <h2>5. Site and opening</h2><p>The Franchisee finds a site meeting the Franchisor's criteria, gets the Franchisor's written approval before signing a lease, includes the Franchisor's lease rider, builds and fits out the shop to the approved layout, obtains all permits and licences, and opens by {{opening_deadline}} (in any case within {{opening_months}} months of signing).</p>
 <h2>6. Training and help</h2><p>The principal and the shop manager must complete initial training to the Franchisor's satisfaction before opening. The Franchisor gives opening support, field visits and refresher training as described in the manual.</p>
-<h2>7. Operations manual and standards</h2><p>The Franchisee runs the shop strictly in line with the operations manual, which the Franchisor may update from time to time. All sales go through the Vision Auto Solutions till system. Stock comes only from the Franchisor or approved suppliers.</p>
+<h2>7. Operations manual, supply and systems</h2><p>The Franchisee runs the store strictly in line with the operations manual, which the Franchisor may update from time to time. All sales go through the Vision Auto Solutions till system, and the store uses every system in the required systems schedule. Stock comes only from the Franchisor or approved suppliers, and at least {{commit_pct}}% of purchases by value come through the Franchisor's distribution centre under the supply and distribution agreement. The store keeps the number of certified staff the certification programme requires, takes part in the loyalty programme, and offers commercial (garage and fleet) accounts and deliveries at the store format's standard.</p>
 <h2>8. Marks</h2><p>The Franchisee uses the marks only as the Franchisor directs, only for the shop, and gains no ownership of them. The Franchisee tells the Franchisor at once of any misuse it sees.</p>
 <h2>9. Confidentiality and non-compete</h2><p>The Franchisee keeps the manual and all confidential information secret. During the term, and for 12 months after it ends, within the territory and 10 km around it, the Franchisee and its principals will not run or work for a competing auto-parts business. The parties accept these limits as reasonable to protect the System.</p>
 <h2>10. Records, reporting and audits</h2><p>The Franchisee keeps full books and records for at least 7 years, sends the monthly sales report, quarterly management accounts and annual financial statements within 90 days of the year end, and lets the Franchisor inspect the shop and audit the books at reasonable times. If an audit finds net sales under-reported by more than 2%, the Franchisee pays the shortfall, interest and the cost of the audit.</p>
@@ -209,8 +215,28 @@ const TEMPLATES = [
 <p>The franchisor visits each shop at least every quarter and may send mystery shoppers. The audit covers brand standards, customer service, the till and cash, stock, health and safety, and records. Each item scores 2 (meets the standard), 1 (partly) or 0 (does not); the result is the percentage of points available.</p>
 <ul><li>85% or more: pass.</li><li>70% to 84%: conditional pass; the action plan is checked at a follow-up visit within 30 days.</li><li>Under 70%: fail; a notice of default may be issued and a re-audit is charged. Two fails in 12 months may end the franchise.</li></ul>
 <h2>12. Marketing</h2>
-<p>The brand fund pays for national advertising, the website and campaigns. Local marketing of at least {{local_marketing_pct}}% of net sales is spent on approved local activity. Online orders delivered into your territory are credited as the franchisor's current policy states.</p>
-<h2>13. Changes to the manual</h2>
+<p>The brand fund pays for national advertising, the website and campaigns. Local marketing of at least {{local_marketing_pct}}% of net sales is spent on approved local activity. Online orders delivered into your territory are credited as the franchisor's current policy states. Approved local advertising can be claimed against your co-op allowance with the co-op claim form and proof of the spend.</p>
+<h2>13. The store network: DC, hubs and spokes</h2>
+<ul><li>Your store is supplied by its distribution centre (DC). Stock orders are placed through the till or your franchisee link before the DC's cut-off time to go on that day's run. Special orders for parts you do not stock go the same way.</li>
+<li>A hub store carries deeper stock and sends parts to its spoke stores the same day ("hot shot"). Before telling a customer a part is not available, check availability: your store, then your hub, then the DC. Offer the time the part can be in the customer's hands.</li>
+<li>Receive every DC and hub delivery against its order on the day it arrives and record any short, damaged or wrong part at once; the DC credits it.</li>
+<li>Keep minimum and maximum stock levels for every line in your format's range. The replenishment list orders back up to the maximum.</li>
+<li>Hub stores keep the extra range the hub service agreement sets and answer spoke orders within the promised time.</li></ul>
+<h2>14. Parts lookup and the catalogue</h2>
+<ul><li>Look up every part by make, model, year and engine in the network catalogue. Use the interchange numbers to find an equal part when the first choice is out.</li>
+<li>Explain cores (the old part handed back for a refund of the core charge) and the warranty on every sale where they apply.</li></ul>
+<h2>15. Commercial (do-it-for-me) customers</h2>
+<ul><li>Garages, fleets and trade customers are opened as commercial accounts with a credit limit, payment terms and a price tier (Pro 1, Pro 2 or Pro 3). Only the franchisee or manager sets the tier.</li>
+<li>Deliveries run on set routes and times. Keep the delivery promise for your format and record each delivery; the average order-to-door time is on your scorecard.</li>
+<li>Visit your top commercial accounts at least once a month. Aim for the network target share of commercial sales.</li></ul>
+<h2>16. Loyalty and pricing</h2>
+<ul><li>Sign up every willing retail customer to the loyalty programme. Points are given and redeemed only through the till, by the programme rules.</li>
+<li>Prices: list price for walk-in customers, the loyalty price for members, the account's tier price for commercial customers. Never sell below the price floor.</li></ul>
+<h2>17. Certification</h2>
+<ul><li>Every counter person earns Parts specialist level 1 within 90 days of starting. Each store keeps the certified people the certification programme requires, and renews certificates before they expire.</li></ul>
+<h2>18. The scorecard</h2>
+<p>Each month your store is measured on: net sales, sales per square foot, commercial share, average sale, gross margin, inventory turns, shrink, DC fill rate, purchases through the DC, delivery time, certified staff and the last audit. Your monthly report must include the figures the scorecard needs (DIY and commercial sales, cost of goods sold, month-end stock, shrink, total purchases, loyalty points and deliveries).</p>
+<h2>19. Changes to the manual</h2>
 <p>The franchisor may update the manual to keep the System current. Updates take effect on the date given in them, normally 30 days after they are sent.</p>
 <h2>Acknowledgement</h2><p>I received this copy of the operations manual, will keep it confidential, and will run the shop by it.</p>
 <p class="sig">Franchisee: ____________________ &nbsp; Date: ____________________</p>` },
@@ -316,6 +342,157 @@ const TEMPLATES = [
 <p>{{company}} consents to the transfer of the franchise for {{trading_name}} ({{territory}}) from <b>{{franchisee}}</b> to <b>{{buyer}}</b> on {{transfer_date}}, subject to: all money owed being paid; the buyer completing initial training and signing the current franchise agreement; the seller signing a general release; payment of the transfer fee of {{transfer_fee}} plus GCT; and {{conditions}}</p>
 <p>The seller remains bound by the confidentiality and non-compete sections after the transfer.</p>
 ` + sig('For the Franchisor: {{company}}', 'The seller: {{franchisee}}') },
+
+  // ======================================================= store network ==
+  // ------------------------------------------------------ affiliate store --
+  { key: 'affiliate', title: 'Affiliate store agreement (dealer-member)', sign: true, agreement: true, fields: [
+      { key: 'store_name', label: 'The store\'s own trading name', type: 'text', required: true },
+      { key: 'banner', label: 'Banner shown with it', type: 'text', required: true, default: 'Member of the Vision Auto Solutions parts network' },
+      { key: 'guarantor', label: 'Personal guarantor(s)', type: 'text' },
+      { key: 'special_terms', label: 'Special terms (or leave blank)', type: 'textarea' } ],
+    body: NOTE + `<h1>Affiliate store agreement</h1>
+<p>Made on {{today}} between <b>{{company}}</b> of {{company_address}} ("the Network") and <b>{{franchisee}}</b> (TRN {{franchisee_trn}}) of {{franchisee_address}}, whose principal is {{principal}} ("the Affiliate"), for the parts store known as <b>{{store_name}}</b>.</p>
+<h2>Background</h2><p>The Affiliate owns and runs an independent auto-parts store. The Network runs a distribution centre, a parts catalogue, a till and ordering system and a marketing programme for parts stores. The Affiliate wishes to join the Network as a dealer-member: to keep its own name and ownership, show the Network banner, and buy through the Network. Because the Affiliate pays fees and uses the Network's banner and methods, this arrangement may count as a franchise; the Affiliate received the Network's disclosure document at least {{wait_days}} days before signing.</p>
+<h2>1. Membership</h2><p>The Network admits the Affiliate's store at {{franchisee_address}} as a member store. The Affiliate trades as <b>{{store_name}}</b> with the words "{{banner}}" on its sign, bags and receipts, in the form the Network approves. The Affiliate gains no ownership of the Network's name or marks.</p>
+<h2>2. Term</h2><p>From {{effective_date}} for <b>{{term_years}} years</b>, to {{term_end}}, renewable for further terms on the Network's then-current affiliate terms if the Affiliate is not in default.</p>
+<h2>3. Fees</h2><ul><li><b>Membership fee:</b> {{member_fee}} a month, invoiced with the monthly statement. No royalty is charged.</li>
+<li><b>Network marketing:</b> {{marketing_pct}}% of net sales each month, for network advertising, the website and promotions that name member stores.</li>
+<li><b>Technology fee:</b> {{tech_fee}} a month for the till, catalogue and ordering system.</li>
+<li><b>Loyalty programme:</b> as the programme rules set out.</li>
+<li>GCT is added where it applies. The monthly sales report is due by day {{report_day}} and payment by day {{royalty_due_day}} of the following month.</li></ul>
+<h2>4. Supply</h2><p>The Affiliate buys at least <b>{{commit_pct}}%</b> of its stock by value through the Network's distribution centre ({{dc_name}}) under the supply and distribution agreement, and earns the purchasing rebate and co-op advertising allowance that agreement sets out. The Affiliate may buy the rest from any supplier, but sells no counterfeit or grey-market parts.</p>
+<h2>5. Systems and standards</h2><p>The Affiliate uses the Network's till and catalogue for every sale and order, keeps the member-store standards in the operations manual (sign, cleanliness, customer service, fitment checks, warranty and returns, safety), takes part in the loyalty programme and lets the Network visit and audit the store. Certified staff: at least the numbers the certification programme requires.</p>
+<h2>6. What stays the Affiliate's</h2><p>The store, its own name, its staff, its customers and its prices (within the Network's price floor for promoted lines) remain the Affiliate's. The Affiliate is responsible for its employees, taxes (GCT, PAYE, NIS, NHT, Education Tax, HEART/NSTA), licences and insurance.</p>
+<h2>7. Territory</h2><p>Membership gives no exclusive territory. The Network will not admit another member store within 3 km of the Affiliate's store without first offering the Affiliate the chance to object on reasonable grounds.</p>
+<h2>8. Confidentiality and data</h2><p>The catalogue, dealer costs, rebate scales, supplier terms and the manual are confidential. Customer data collected through the Network's systems is handled under the Data Protection Act, 2020.</p>
+<h2>9. Leaving the network</h2><p>Either side may end this agreement on 90 days' written notice after the first 12 months. The Network may end it sooner on notice if the Affiliate does not pay within 10 days of a reminder, breaks the standards and does not put it right within 30 days, or seriously harms the Network's name. On ending, the Affiliate removes the banner within 14 days, pays all money owed, returns the manual and stops using the Network's systems; the Network may buy back unopened stock it supplied at the dealer cost less 15%.</p>
+<h2>10. Disputes and general</h2><p>Talk, then mediation in Kingston, then arbitration in Kingston under the Arbitration Act, 2017. The laws of Jamaica apply. The parties are independent businesses. {{guarantor}} guarantees the Affiliate's obligations.</p>
+<h2>Special terms</h2><p>{{special_terms}}</p>
+` + sig('For the Network: {{company}}', 'For the Affiliate: {{franchisee}}') },
+
+  // ----------------------------------------------- supply and distribution --
+  { key: 'supply', title: 'Supply and distribution agreement', sign: true, fields: [
+      { key: 'payment_days', label: 'Days to pay DC invoices', type: 'number', required: true, default: '30' },
+      { key: 'credit_limit', label: 'Trade credit limit (J$)', type: 'text', required: true, default: '3,000,000' },
+      { key: 'special_terms', label: 'Special terms (or leave blank)', type: 'textarea' } ],
+    body: NOTE + `<h1>Supply and distribution agreement</h1>
+<p>Made on {{today}} between <b>{{company}}</b> ("the Supplier"), through its distribution centre <b>{{dc_name}}</b>, and <b>{{franchisee}}</b>, trading as {{trading_name}} ("the Store"), a {{store_type_label}}.</p>
+<h2>1. What is supplied</h2><p>The Supplier sells the Store the parts, accessories, fluids and supplies in the network catalogue at the dealer cost shown in the catalogue on the day of the order. The Supplier may change dealer costs on 14 days' notice, except for supplier price rises passed on at once.</p>
+<h2>2. Purchasing commitment</h2><p>The Store buys at least <b>{{commit_pct}}%</b> of its stock purchases by value through the Supplier, measured each quarter from the Store's monthly reports. If the Store falls short for two quarters in a row, the Supplier may withhold that quarter's rebate and co-op allowance.</p>
+<h2>3. Ordering and delivery</h2><ul><li>Stock and special orders go through the till or the franchisee link. Orders in by the DC cut-off time leave on that day's run; the delivery days and runs are set by the DC.</li>
+<li>Spoke stores may order urgent parts from their hub store ({{hub_name}}) as a same-day "hot shot", normally within {{hot_shot_minutes}} minutes.</li>
+<li>The Store checks each delivery on arrival and reports any short, damaged or wrong item within 24 hours. The Supplier credits proven shortages.</li>
+<li>Fill rate: the Supplier aims to ship at least {{target_fill_rate}}% of the lines ordered, and reports the Store's fill rate each month.</li></ul>
+<h2>4. Price and payment</h2><p>Each shipment is invoiced on the Store's account when it leaves, with GCT at {{gct_rate}}%. Payment is due within <b>{{payment_days}} days</b>. Trade credit limit: <b>J\${{credit_limit}}</b>. The Supplier may hold orders while the account is over its limit or overdue.</p>
+<h2>5. Purchasing rebate</h2><p>After each quarter the Supplier pays back a share of that quarter's DC purchases on this scale:</p><p>{{rebate_scale}}</p><p>Rebates are paid by cheque or bank transfer, or set against the Store's invoices, within 45 days of the quarter end.</p>
+<h2>6. Co-op advertising allowance</h2><p>The Store earns {{coop_pct}}% of its DC purchases as a co-op allowance. It claims against it with the co-op claim form for approved local advertising, up to {{coop_claim_pct}}% of each spend, with proof. Unused allowance lapses 12 months after it was earned.</p>
+<h2>7. Returns, cores and warranty</h2><p>Unsold stock in its original packaging may be returned within 90 days for credit less a 10% restocking charge (no charge for the Supplier's own errors). Cores and warranty returns follow the catalogue's terms and the manual, and are credited when the Supplier's vendor accepts them.</p>
+<h2>8. Title and risk</h2><p>Risk passes on delivery; ownership passes when the invoice is paid in full.</p>
+<h2>9. Term</h2><p>This agreement runs alongside the Store's franchise or affiliate agreement and ends with it.</p>
+<h2>Special terms</h2><p>{{special_terms}}</p>
+` + sig('For the Supplier: {{company}}', 'For the Store: {{franchisee}}') },
+
+  // --------------------------------------------------------- hub service --
+  { key: 'hub_service', title: 'Hub store service agreement', sign: true, fields: [
+      { key: 'spokes', label: 'Spoke stores served', type: 'textarea', required: true },
+      { key: 'extra_range', label: 'Extra range the hub carries', type: 'textarea', required: true, default: 'About three times the standard store range: slower-moving engine, transmission, steering and suspension parts, and the full battery and filter ranges.' },
+      { key: 'transfer_price', label: 'Transfer price to spokes', type: 'text', required: true, default: 'Dealer cost plus 5% handling' } ],
+    body: NOTE + `<h1>Hub store service agreement</h1>
+<p>Made on {{today}} between <b>{{company}}</b> and <b>{{franchisee}}</b>, trading as {{trading_name}} ("the Hub").</p>
+<h2>1. The hub's role</h2><p>The Hub keeps deeper stock than a standard store and supplies the spoke stores near it the same day, so that customers of every store can get a part quickly without each store stocking it. Spoke stores served: {{spokes}}</p>
+<h2>2. Range</h2><p>{{extra_range}} The range is reviewed each quarter from the parts the spokes asked for and could not get.</p>
+<h2>3. Service promise</h2><p>The Hub answers a spoke's hot-shot order at once and gets the part to the spoke within {{hot_shot_minutes}} minutes during opening hours, by its own driver or the network's courier.</p>
+<h2>4. Price</h2><p>Parts go to spokes at: {{transfer_price}}. The network may support the extra stock with longer payment terms or a stocking allowance, agreed in writing.</p>
+<h2>5. Measuring it</h2><p>The network reports the Hub's fill rate for spoke orders and its delivery times each month.</p>
+` + sig('For {{company}}', 'For the Hub: {{franchisee}}') },
+
+  // ------------------------------------------------------ systems schedule --
+  { key: 'systems', title: 'Required systems schedule', sign: true, fields: [
+      { key: 'install_by', label: 'Installed by', type: 'date' } ],
+    body: NOTE + `<h1>Required systems schedule</h1>
+<p>For <b>{{trading_name}}</b> ({{franchisee}}), a {{store_type_label}}. To be installed and working by {{install_by}}, and kept working throughout the term.</p>
+<table><tr><th>System</th><th>What it is for</th><th>Who provides it</th></tr>
+<tr><td>Vision till (point of sale)</td><td>Every sale, return, quote and account payment; the sales report</td><td>{{company}} (software); the store (hardware)</td></tr>
+<tr><td>Stock and replenishment</td><td>On-hand counts, min and max levels, the replenishment list</td><td>{{company}}</td></tr>
+<tr><td>Electronic parts catalogue</td><td>Lookup by make, model, year and engine; interchange numbers</td><td>{{company}}</td></tr>
+<tr><td>Ordering link to the DC</td><td>Stock, special and hot-shot orders, delivery tracking</td><td>{{company}}</td></tr>
+<tr><td>Commercial delivery tracking</td><td>Routes, stops, proof of delivery</td><td>{{company}}</td></tr>
+<tr><td>Loyalty sign-up and scanning</td><td>Points given and redeemed</td><td>{{company}}</td></tr>
+<tr><td>Card terminal</td><td>Card and contactless payments, from an approved provider</td><td>The store</td></tr>
+<tr><td>CCTV</td><td>Till, door and stock room, 30 days kept</td><td>The store</td></tr>
+<tr><td>Main and backup internet</td><td>The till keeps working if one line fails</td><td>The store</td></tr></table>
+<p>The technology fee ({{tech_fee}} a month) covers the {{company}} software, support and updates. Each person uses their own login. The store may not connect other software to the till without written approval.</p>
+<p class="sig">Store: ____________________ &nbsp; Date: ____________________</p>` },
+
+  // ------------------------------------------------------- loyalty rules --
+  { key: 'loyalty', title: 'Loyalty programme rules (store participation)', sign: true, fields: [
+      { key: 'programme_name', label: 'Programme name', type: 'text', required: true, default: 'Vision Rewards' } ],
+    body: NOTE + `<h1>{{programme_name}}: rules for member stores</h1>
+<p>For <b>{{trading_name}}</b> ({{franchisee}}).</p>
+<h2>1. How customers earn</h2><p>A signed-up retail customer earns <b>{{loyalty_points_per_100}} point(s) for each J$100</b> spent (before GCT) on qualifying goods at any store in the network. Commercial accounts on a pro tier do not earn points.</p>
+<h2>2. How customers redeem</h2><p>Each point is worth <b>{{loyalty_point_value}}</b> off a later purchase at any store. Points expire 12 months after they are earned.</p>
+<h2>3. Who pays</h2><p>The network runs one loyalty fund. Each month your store pays into it {{loyalty_point_value}} for every point it gave, and is paid back {{loyalty_point_value}} for every point redeemed at your store, from the figures in your monthly report and the till. So a customer can earn in one store and spend in another, and each store pays only for the points it gave.</p>
+<h2>4. The store's duties</h2><ul><li>Offer sign-up to every retail customer; record consent as the Data Protection Act, 2020 requires.</li><li>Give and redeem points only through the till.</li><li>Never give points for sales to yourself, staff or commercial accounts.</li></ul>
+<h2>5. Changes</h2><p>The network may change the earn rate, value or rules on 30 days' notice to stores and customers. Points already earned keep their value.</p>
+<p class="sig">Store: ____________________ &nbsp; Date: ____________________</p>` },
+
+  // ------------------------------------------------- certification programme --
+  { key: 'certification', title: 'Training and certification programme', sign: false, fields: [
+      { key: 'year', label: 'Programme year', type: 'text', required: true, default: '2027' } ],
+    body: NOTE + `<h1>Training and certification programme {{year}}</h1>
+<p>For <b>{{trading_name}}</b> ({{franchisee}}). Certificates show that a person has learned and passed a set standard, like the industry's technician and parts-specialist certifications. Each one is earned by completing the lessons on the till's Training screen and passing the quiz at the pass mark, and lasts the time shown; renew it before it runs out.</p>
+<table><tr><th>Certificate</th><th>For</th><th>Lasts</th><th>Each store needs</th></tr>
+<tr><td>Parts specialist level 1</td><td>Every counter person, within 90 days of starting</td><td>2 years</td><td>2</td></tr>
+<tr><td>Parts specialist level 2</td><td>Senior counter staff</td><td>2 years</td><td>1</td></tr>
+<tr><td>Commercial sales</td><td>Whoever looks after garage and fleet accounts</td><td>2 years</td><td>1</td></tr>
+<tr><td>Battery and electrical</td><td>Counter staff who test and fit batteries</td><td>2 years</td><td>1</td></tr>
+<tr><td>Delivery driver safety</td><td>Every delivery driver</td><td>1 year</td><td>Every driver</td></tr>
+<tr><td>Hazardous materials</td><td>At least one person on every shift</td><td>2 years</td><td>1</td></tr>
+<tr><td>Store manager</td><td>The manager and the franchisee's principal</td><td>3 years</td><td>1</td></tr></table>
+<p>The current requirements are those set in the franchise system's certification list, which may change on 30 days' notice. The share of required certificates a store holds is on its monthly scorecard and is checked at each audit.</p>` },
+
+  // ------------------------------------------------ commercial application --
+  { key: 'commercial_app', title: 'Commercial account application and credit terms', sign: false, fields: [
+      { key: 'business', label: 'Business name (garage, fleet...)', type: 'text', required: true },
+      { key: 'contact', label: 'Contact person', type: 'text', required: true },
+      { key: 'monthly', label: 'Expected monthly spend (J$)', type: 'text' } ],
+    body: NOTE + `<h1>Commercial account application</h1>
+<p>Store: <b>{{trading_name}}</b> · {{franchisee_address}}</p>
+<table><tr><th>Business</th><td>{{business}}</td></tr><tr><th>Contact</th><td>{{contact}}</td></tr><tr><th>Address</th><td>&nbsp;</td></tr><tr><th>TRN / GCT number</th><td>&nbsp;</td></tr>
+<tr><th>Kind</th><td>☐ Garage ☐ Fleet ☐ Body shop ☐ Dealer ☐ Government ☐ Other</td></tr><tr><th>Service bays / vehicles</th><td>&nbsp;</td></tr><tr><th>Expected monthly spend</th><td>J\${{monthly}}</td></tr>
+<tr><th>Trade references (2)</th><td>&nbsp;<br>&nbsp;</td></tr><tr><th>Bank</th><td>&nbsp;</td></tr><tr><th>People allowed to order</th><td>&nbsp;</td></tr></table>
+<h2>Terms</h2><ul><li>Prices at the price tier the store sets for the account (Pro 1, Pro 2 or Pro 3), reviewed each quarter on the account's spend.</li>
+<li>Invoices are due within the terms on the account (normally 30 days from the statement). Overdue accounts are put on hold and may be charged interest at 1.5% a month.</li>
+<li>Deliveries run on the store's routes; sign for each delivery. Report short or wrong parts on delivery.</li>
+<li>Cores must be returned within 30 days or the core charge stands. Warranty claims follow the manufacturer's terms.</li>
+<li>We may check the references and your credit, and keep your details to run the account, as the Data Protection Act, 2020 allows.</li></ul>
+<p class="sig">For the business: ____________________ &nbsp; Name and title: ____________________ &nbsp; Date: ________</p>
+<p class="sig">Approved for the store: ____________________ &nbsp; Tier: ______ &nbsp; Credit limit: J$__________ &nbsp; Terms: ____ days</p>` },
+
+  // --------------------------------------------------------- co-op claim --
+  { key: 'coop', title: 'Co-op advertising claim form', sign: false, fields: [
+      { key: 'activity', label: 'The advertising (what, where, when)', type: 'textarea', required: true },
+      { key: 'spend', label: 'Amount spent (J$, before GCT)', type: 'text', required: true } ],
+    body: NOTE + `<h1>Co-op advertising claim</h1>
+<p>Store: <b>{{trading_name}}</b> ({{franchisee}}) · Date: {{today}}</p>
+<table><tr><th>Advertising</th><td>{{activity}}</td></tr><tr><th>Amount spent</th><td>J\${{spend}}</td></tr><tr><th>Claimed ({{coop_claim_pct}}% of the spend, up to the allowance)</th><td>&nbsp;</td></tr></table>
+<p>Attach: the supplier's invoice and proof the advertising ran (a copy of the advert, a screenshot, the radio station's affidavit, photographs of the event or signage). The advertising must show the network name and logo as the brand guide sets out, and be approved before it runs.</p>
+<p class="sig">Store: ____________________ &nbsp; Approved: J$__________ by ____________________</p>` },
+
+  // ------------------------------------------- site and territory assessment --
+  { key: 'site_report', title: 'Site and territory assessment', sign: false, fields: [
+      { key: 'site_address', label: 'Site address', type: 'text', required: true },
+      { key: 'format', label: 'Store format proposed', type: 'text', required: true, default: 'Standard store' },
+      { key: 'traffic', label: 'Traffic, visibility, parking, access', type: 'textarea' },
+      { key: 'competition', label: 'Competing parts stores nearby', type: 'textarea' },
+      { key: 'commercial', label: 'Garages and fleets within delivery reach', type: 'textarea' },
+      { key: 'recommendation', label: 'Recommendation', type: 'textarea', required: true } ],
+    body: NOTE + `<h1>Site and territory assessment</h1>
+<p>For: <b>{{recipient}}</b> · Territory: {{territory}} ({{territory_desc}}) · Date: {{today}}</p>
+<table><tr><th>Site</th><td>{{site_address}}</td></tr><tr><th>Format</th><td>{{format}}</td></tr><tr><th>Market</th><td>{{territory_market}}</td></tr>
+<tr><th>Supply</th><td>{{territory_supply}}</td></tr><tr><th>Traffic and access</th><td>{{traffic}}</td></tr><tr><th>Competition</th><td>{{competition}}</td></tr><tr><th>Commercial customers</th><td>{{commercial}}</td></tr></table>
+<h2>Recommendation</h2><p>{{recommendation}}</p>
+<p class="sig">Assessed by: ____________________ &nbsp; Approved: ____________________</p>` },
 ];
 
 // The opening checklist the module creates for each new franchisee.
@@ -337,6 +514,10 @@ const ONBOARDING = [
   ['training', 'Principal and manager complete initial training (2 weeks) and pass the quizzes', 120],
   ['training', 'Operations manual issued and acknowledged', 120],
   ['training', 'Shop staff hired, contracts signed, staff training completed', 150],
+  ['fitout', 'Required systems installed and verified (till, catalogue, DC ordering, delivery tracking)', 140],
+  ['fitout', 'Distribution centre account set up; hub store assigned (spoke stores)', 120],
+  ['training', 'Counter staff certified Parts specialist level 1; manager certified', 150],
+  ['launch', 'Commercial accounts and first delivery route set up', 160],
   ['launch', 'Pre-opening audit passed', 155],
   ['launch', 'Grand-opening marketing plan approved', 150],
   ['launch', 'Soft opening / trial trading day', 160],
@@ -372,6 +553,29 @@ const AUDIT_ITEMS = [
   ['Records and reporting', 'Insurance, trade licence and registrations current'],
   ['Records and reporting', 'All staff trained for their role; logins not shared'],
   ['Records and reporting', 'CCTV working; recordings kept 30 days'],
+  ['Commercial and delivery', 'Commercial accounts have a tier, credit limit and terms on file'],
+  ['Commercial and delivery', 'Deliveries recorded; delivery promise kept'],
+  ['Commercial and delivery', 'Top accounts visited this month'],
+  ['Stock and supply', 'Availability checked (store, hub, DC) before turning a customer away'],
+  ['Stock and supply', 'DC and hub deliveries received the same day; shortages reported'],
+  ['Stock and supply', 'Min and max levels kept; replenishment order placed on schedule'],
+  ['People and systems', 'Required certified staff in post; certificates current'],
+  ['People and systems', 'Every required system working (till, catalogue, DC ordering, card terminal)'],
+  ['People and systems', 'Loyalty sign-ups offered at the till'],
 ];
 
-module.exports = { TEMPLATES, ONBOARDING, PHASES, AUDIT_ITEMS, NOTE };
+// The systems every store must have (franchise-network.js, the systems schedule).
+const SYSTEMS = [
+  ['pos', 'Vision till (point of sale)', 'Every sale, return, quote and account payment.'],
+  ['inventory', 'Stock and replenishment', 'On-hand counts, min and max levels, the replenishment list.'],
+  ['catalogue', 'Electronic parts catalogue and lookup', 'Make, model, year and engine lookup, interchange numbers.'],
+  ['dc_link', 'Ordering link to the distribution centre', 'Stock, special and hot-shot orders; delivery tracking.'],
+  ['delivery', 'Commercial delivery tracking', 'Routes, stops and proof of delivery.'],
+  ['loyalty', 'Loyalty sign-up and scanning', 'Points given and redeemed at the till.'],
+  ['card', 'Approved card terminal', 'Card and contactless payments.'],
+  ['cctv', 'CCTV', 'Till, door and stock room; 30 days kept.'],
+  ['internet', 'Main and backup internet', 'The till keeps working if one line fails.'],
+];
+const STORE_TYPES = { franchise: 'Franchised store', affiliate: 'Affiliate (dealer-member) store', company: 'Company-owned store' };
+
+module.exports = { TEMPLATES, ONBOARDING, PHASES, AUDIT_ITEMS, NOTE, SYSTEMS, STORE_TYPES };
