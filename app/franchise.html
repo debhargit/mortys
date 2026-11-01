@@ -1006,5 +1006,6 @@
   Promise.all([reloadMeta(), reloadNet()]).then(show).catch(function (e) { $('#view').innerHTML = '<div class="card empty">' + esc(/permission|403|not allowed/i.test(e.message) ? 'You need the Franchise permission (Users & Staff > Roles & Permissions).' : e.message) + '</div>'; });
 })();
 </script>
+<script src="/assets/module-look.js?v=20261101" defer></script>
 </body>
 </html>
