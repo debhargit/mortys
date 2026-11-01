@@ -2658,7 +2658,8 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM warehouse_settings WHERE key = 'pricing_rules_seeded') THEN
     INSERT INTO pricing_rules (category, markup_pct, round_to)
     SELECT NULL, ROUND(((percentile_cont(0.5) WITHIN GROUP (ORDER BY price_usd / cost_usd)) - 1)::numeric * 100, 1), 10
-      FROM products WHERE cost_usd > 0 AND price_usd > cost_usd;
+      FROM products WHERE cost_usd > 0 AND price_usd > cost_usd
+    HAVING COUNT(*) > 0;  -- no priced products (fresh install) = no default rule, not a NULL markup
     INSERT INTO pricing_rules (category, markup_pct, round_to)
     SELECT category, ROUND(((percentile_cont(0.5) WITHIN GROUP (ORDER BY price_usd / cost_usd)) - 1)::numeric * 100, 1), 10
       FROM products WHERE cost_usd > 0 AND price_usd > cost_usd AND COALESCE(category, '') <> ''
