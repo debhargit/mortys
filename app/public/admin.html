@@ -18614,45 +18614,429 @@ function modulesCss(){
     '.mod-tile .tag.on{background:#dcfce7;color:#166534}.mod-tile .tag.off{background:#f3f4f6;color:#6b7280}';
   document.head.appendChild(st);
 }
+// Per-person menus (menus.js on the server). A manager can lay out someone's
+// menu on a kanban board (Set up staff menus); each person stars favourites,
+// which sit in a row at the top. The server only sends the modules a person's
+// role and permissions allow, so neither layer can widen the menu. Where
+// /api/menu/me does not answer (the website port, an older till) the screen
+// falls back to the full menu with no stars, as before.
+var MENU_CSS_DONE = false;
+function menusCss(){
+  if (MENU_CSS_DONE) return; MENU_CSS_DONE = true;
+  var st = document.createElement('style');
+  st.textContent =
+    '.mod-tile{position:relative}' +
+    '.mod-star{position:absolute;top:6px;right:6px;cursor:pointer;font-size:16px;line-height:1;padding:2px 4px;color:var(--muted,#6b7280);opacity:.45}' +
+    '.mod-star:hover{opacity:.9}.mod-star.on{opacity:1;color:var(--warn,#f59e0b)}' +
+    '.mod-grp.favs .mod-tile{cursor:grab}.mod-tile.dragging,.kb-card.dragging{opacity:.4}' +
+    '.mod-grp.favs .mod-grid.over{outline:2px dashed #d61f2b;outline-offset:3px;border-radius:10px}' +
+    '.mod-mv{display:flex;gap:3px;margin-top:6px}' +
+    '.mod-mv span{border:1px solid var(--line,#e5e7eb);border-radius:5px;font-size:11px;padding:0 6px;cursor:pointer;color:var(--muted,#6b7280)}' +
+    '.mod-mv span:hover{color:var(--heading,#111);border-color:#d61f2b}' +
+    '.mod-head{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;justify-content:space-between}' +
+    '.mod-note{font-size:12px;color:var(--muted,#6b7280);margin:0 0 10px}' +
+    '.mod-empty{font-size:12.5px;color:var(--muted,#6b7280);padding:10px 12px;border:1px dashed var(--line,#e5e7eb);border-radius:10px}' +
+    '.kb-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 10px;font-size:13px}' +
+    '.kb-bar select{padding:7px 10px;border:1px solid var(--line,#e5e7eb);border-radius:7px;font:inherit;background:var(--card,#fff);color:inherit;max-width:100%}' +
+    '.kb-tag{font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px;background:#f3f4f6;color:#4b5563}.kb-tag.custom{background:#dbeafe;color:#1e40af}' +
+    '.kb-tag.dirty{background:#fef3c7;color:#92400e}' +
+    '.kb-board{display:flex;gap:12px;overflow-x:auto;align-items:flex-start;padding-bottom:10px}' +
+    '.kb-col{flex:0 0 240px;background:var(--hover,#f3f4f6);border:1px solid var(--line,#e5e7eb);border-radius:10px;padding:8px;display:flex;flex-direction:column;max-height:72vh}' +
+    '.kb-col.pool{background:transparent;border-style:dashed}' +
+    '.kb-col-h{display:flex;gap:2px;align-items:center;margin-bottom:6px}' +
+    '.kb-col-h input{flex:1;min-width:0;font:inherit;font-weight:700;font-size:13px;border:1px solid transparent;background:transparent;border-radius:6px;padding:4px 6px;color:inherit}' +
+    '.kb-col-h input:focus,.kb-col-h input:hover{border-color:var(--line,#e5e7eb);background:var(--card,#fff)}' +
+    '.kb-col-h b{flex:1;font-size:13px;padding:4px 6px}' +
+    '.kb-col-h button,.kb-card button{border:0;background:none;cursor:pointer;font-size:12px;color:var(--muted,#6b7280);padding:2px 4px;font-family:inherit;border-radius:4px}' +
+    '.kb-col-h button:hover,.kb-card button:hover{color:var(--heading,#111);background:var(--card,#fff)}' +
+    '.kb-cnt{font-size:11px;color:var(--muted,#6b7280);padding:0 4px}' +
+    '.kb-list{flex:1;overflow-y:auto;min-height:70px;display:flex;flex-direction:column;gap:6px;padding:3px;border-radius:8px}' +
+    '.kb-list.over{outline:2px dashed #d61f2b;outline-offset:-2px}' +
+    '.kb-card{display:flex;gap:6px;align-items:center;background:var(--card,#fff);border:1px solid var(--line,#e5e7eb);border-radius:8px;padding:6px 6px 6px 8px;cursor:grab;font-size:12.5px}' +
+    '.kb-card .ic{font-size:17px;flex:0 0 auto}.kb-card .nm{flex:1;min-width:0;line-height:1.25}' +
+    '.kb-card .acts{display:flex;flex:0 0 auto}' +
+    '.kb-empty{font-size:11.5px;color:var(--muted,#6b7280);text-align:center;padding:12px 4px}' +
+    '.kb-msg{font-size:12.5px;margin:0 0 10px;min-height:1em}';
+  document.head.appendChild(st);
+}
+function moduleTiles(){
+  var map = {};
+  MODULE_GROUPS.forEach(function(g){ g.items.forEach(function(it){ map[it.href] = it; }); });
+  return map;
+}
+// The groups a person sees: their manager's layout if there is one, else the
+// standard menu, cut down to what they are allowed either way.
+function menuGroupsFor(menu){
+  var tiles = moduleTiles();
+  var ok = menu && Array.isArray(menu.allowed) ? menu.allowed : null;
+  function allow(h){ return !ok || ok.indexOf(h) !== -1; }
+  if (menu && menu.layout) return menu.layout.map(function(g){
+    return { title: g.title, items: g.items.filter(function(h){ return tiles[h] && allow(h); }).map(function(h){ return tiles[h]; }) };
+  });
+  return MODULE_GROUPS.map(function(g){ return { title: g.title, items: g.items.filter(function(it){ return allow(it.href); }) }; });
+}
+function moduleNames(hrefs){
+  var tiles = moduleTiles();
+  return hrefs.map(function(h){ return tiles[h] ? tiles[h].name : h; }).join(', ');
+}
+
 async function renderModules(panel){
-  modulesCss();
+  modulesCss(); menusCss();
   // Ask the server which optional parts exist / are on; failure just means "unknown".
-  var hasSystem = false, payroll = null;
+  var hasSystem = false, payroll = null, menu = null;
   try { var r1 = await fetch('/api/sys/me', { credentials: 'same-origin' }); hasSystem = r1.ok; } catch (_) {}
   try { var r2 = await fetch('/api/payroll/module', { credentials: 'same-origin' }); if (r2.ok) payroll = await r2.json(); } catch (_) {}
+  try { var r3 = await fetch('/api/menu/me', { credentials: 'same-origin' }); if (r3.ok) menu = await r3.json(); } catch (_) {}
   // On the website those two checks hit the port, which has neither; the tiles
   // open on the till, which has System management, so show it.
   if (ON_WEBSITE) hasSystem = true;
-  var html = '<div class="mod-wrap"><h2>🧭 All modules</h2>' +
-    '<p class="mod-sub">Every business module in one place. Each opens in its own tab; what you can do there depends on your role.</p>' +
-    '<input class="mod-find" id="modFind" type="search" placeholder="Find a module… (e.g. payroll, bank, clearance)">';
-  MODULE_GROUPS.forEach(function(g){
-    var items = g.items.filter(function(it){ return it.key !== 'system' || hasSystem; });
-    if (!items.length) return;
-    html += '<div class="mod-grp"><h3>' + esc(g.title) + '</h3><div class="mod-grid">';
-    items.forEach(function(it){
-      var tag = '';
-      if (it.key === 'payroll' && payroll) tag = payroll.on ? '<span class="tag on">On</span>' : '<span class="tag off">Switched off</span>';
-      html += '<a class="mod-tile" href="' + tillHref(it.href) + '" target="_blank" rel="noopener" data-find="' + esc((it.name + ' ' + it.blurb + ' ' + g.title).toLowerCase()) + '">' +
-        '<span class="ic">' + it.icon + '</span><span><b>' + esc(it.name) + tag + '</b><small>' + esc(it.blurb) + '</small></span></a>';
-    });
-    html += '</div></div>';
+  var groups = menuGroupsFor(menu).map(function(g){
+    return { title: g.title, items: g.items.filter(function(it){ return it.key !== 'system' || hasSystem; }) };
   });
-  html += '</div>';
-  panel.innerHTML = html;
-  var find = document.getElementById('modFind');
-  if (find) find.addEventListener('input', function(){
-    var q = find.value.trim().toLowerCase();
+  var visible = {};
+  groups.forEach(function(g){ g.items.forEach(function(it){ visible[it.href] = g.title; }); });
+  var tiles = moduleTiles();
+  var favs = menu ? (menu.favourites || []).filter(function(h){ return visible[h]; }) : [];
+  var dragHref = null;
+
+  function tile(it, gTitle, inFavs){
+    var tag = '';
+    if (it.key === 'payroll' && payroll) tag = payroll.on ? '<span class="tag on">On</span>' : '<span class="tag off">Switched off</span>';
+    var on = favs.indexOf(it.href) !== -1;
+    var mv = inFavs && favs.length > 1
+      ? '<span class="mod-mv"><span data-mv="-1" data-href="' + esc(it.href) + '" title="Move left">◀</span><span data-mv="1" data-href="' + esc(it.href) + '" title="Move right">▶</span></span>' : '';
+    return '<a class="mod-tile" href="' + tillHref(it.href) + '" target="_blank" rel="noopener" data-href="' + esc(it.href) + '"' +
+      (inFavs ? ' draggable="true"' : '') + ' data-find="' + esc((it.name + ' ' + it.blurb + ' ' + gTitle).toLowerCase()) + '">' +
+      '<span class="ic">' + it.icon + '</span><span><b>' + esc(it.name) + tag + '</b><small>' + esc(it.blurb) + '</small>' + mv + '</span>' +
+      (menu ? '<span class="mod-star' + (on ? ' on' : '') + '" role="button" tabindex="0" data-star="' + esc(it.href) + '" title="' +
+        (on ? 'Take off Favourites' : 'Add to Favourites') + '">' + (on ? '★' : '☆') + '</span>' : '') +
+    '</a>';
+  }
+
+  function paint(){
+    var q = (document.getElementById('modFind') || {}).value || '';
+    var html = '<div class="mod-wrap"><div class="mod-head"><div><h2>🧭 All modules</h2>' +
+      '<p class="mod-sub">Every business module in one place. Each opens in its own tab; what you can do there depends on your role.' +
+      (menu ? ' Click ☆ on a module to pin it to Favourites.' : '') + '</p></div>' +
+      (menu && can('menu.manage') ? '<button type="button" class="btn ghost" id="modSetup">🗂 Set up staff menus</button>' : '') + '</div>' +
+      (menu && menu.layout ? '<p class="mod-note">This menu was set up for you' + (menu.updated_by ? ' by ' + esc(menu.updated_by) : '') + '. Ask a manager if you need something added.</p>' : '') +
+      '<input class="mod-find" id="modFind" type="search" placeholder="Find a module… (e.g. payroll, bank, clearance)" value="' + esc(q) + '">';
+    if (menu) {
+      html += '<div class="mod-grp favs"><h3>⭐ Favourites</h3>';
+      html += favs.length
+        ? '<div class="mod-grid" id="modFavGrid">' + favs.map(function(h){ return tile(tiles[h], 'favourites ' + visible[h], true); }).join('') + '</div>'
+        : '<div class="mod-empty">Nothing here yet. Click ☆ on any module below to pin it here, then drag to put them in your order.</div>';
+      html += '</div>';
+    }
+    groups.forEach(function(g){
+      if (!g.items.length) return;
+      html += '<div class="mod-grp"><h3>' + esc(g.title) + '</h3><div class="mod-grid">' +
+        g.items.map(function(it){ return tile(it, g.title, false); }).join('') + '</div></div>';
+    });
+    if (!Object.keys(visible).length) html += '<div class="mod-empty" style="margin-top:16px">No modules are set up for you yet. Ask a manager.</div>';
+    html += '</div>';
+    panel.innerHTML = html;
+    wire();
+    applyFind();
+  }
+
+  function applyFind(){
+    var find = document.getElementById('modFind');
+    var q = find ? find.value.trim().toLowerCase() : '';
     panel.querySelectorAll('.mod-tile').forEach(function(t){ t.style.display = !q || t.getAttribute('data-find').indexOf(q) !== -1 ? '' : 'none'; });
     panel.querySelectorAll('.mod-grp').forEach(function(gr){
+      if (gr.classList.contains('favs') && !q) { gr.style.display = ''; return; }
       var any = Array.prototype.some.call(gr.querySelectorAll('.mod-tile'), function(t){ return t.style.display !== 'none'; });
       gr.style.display = any ? '' : 'none';
     });
-  });
+  }
+
+  async function saveFavs(next){
+    var before = favs;
+    favs = next; paint();
+    try { var r = await api('/api/menu/me/favourites', { method: 'PUT', body: { items: favs } }); favs = r.favourites.filter(function(h){ return visible[h]; }); }
+    catch (e) { favs = before; if (typeof posToast === 'function') posToast('Favourites not saved: ' + e.message); }
+    paint();
+  }
+
+  function wire(){
+    var find = document.getElementById('modFind');
+    if (find) find.addEventListener('input', applyFind);
+    var setup = document.getElementById('modSetup');
+    if (setup) setup.addEventListener('click', function(){ show('menusetup'); });
+    panel.querySelectorAll('[data-star]').forEach(function(s){
+      function toggle(e){
+        e.preventDefault(); e.stopPropagation();
+        var h = s.getAttribute('data-star'), i = favs.indexOf(h), next = favs.slice();
+        if (i === -1) next.push(h); else next.splice(i, 1);
+        saveFavs(next);
+      }
+      s.addEventListener('click', toggle);
+      s.addEventListener('keydown', function(e){ if (e.key === 'Enter' || e.key === ' ') toggle(e); });
+    });
+    panel.querySelectorAll('[data-mv]').forEach(function(b){
+      b.addEventListener('click', function(e){
+        e.preventDefault(); e.stopPropagation();
+        var h = b.getAttribute('data-href'), i = favs.indexOf(h), j = i + Number(b.getAttribute('data-mv'));
+        if (i === -1 || j < 0 || j >= favs.length) return;
+        var next = favs.slice(); next.splice(i, 1); next.splice(j, 0, h);
+        saveFavs(next);
+      });
+    });
+    // Drag a favourite onto another to put it in that place.
+    var grid = document.getElementById('modFavGrid');
+    if (!grid) return;
+    grid.querySelectorAll('.mod-tile').forEach(function(t){
+      t.addEventListener('dragstart', function(e){ dragHref = t.getAttribute('data-href'); t.classList.add('dragging'); try { e.dataTransfer.setData('text/plain', dragHref); e.dataTransfer.effectAllowed = 'move'; } catch (_) {} });
+      t.addEventListener('dragend', function(){ t.classList.remove('dragging'); grid.classList.remove('over'); });
+    });
+    grid.addEventListener('dragover', function(e){ if (dragHref) { e.preventDefault(); grid.classList.add('over'); } });
+    grid.addEventListener('dragleave', function(e){ if (!grid.contains(e.relatedTarget)) grid.classList.remove('over'); });
+    grid.addEventListener('drop', function(e){
+      e.preventDefault(); grid.classList.remove('over');
+      if (!dragHref) return;
+      var target = e.target.closest && e.target.closest('.mod-tile');
+      var next = favs.filter(function(h){ return h !== dragHref; });
+      var at = target ? next.indexOf(target.getAttribute('data-href')) : -1;
+      if (target && at !== -1) {
+        var r = target.getBoundingClientRect();
+        if (e.clientX > r.left + r.width / 2) at++;
+        next.splice(at, 0, dragHref);
+      } else next.push(dragHref);
+      dragHref = null;
+      if (next.join('|') !== favs.join('|')) saveFavs(next);
+    });
+  }
+
+  paint();
+}
+
+// ------------------------------------------------- Set up staff menus --
+// A kanban board for one staff member's menu: each column is a group on their
+// All modules screen, each card a module. "Not on their menu" holds the
+// modules they are allowed but will not see. Modules their permissions do not
+// allow never appear here at all; the server drops them again on save.
+var MENU_SETUP_USER = null;
+async function renderMenuSetup(panel){
+  modulesCss(); menusCss();
+  var staff;
+  try { staff = (await api('/api/menu/staff')).staff || []; }
+  catch (e) { panel.innerHTML = '<div class="empty">' + esc(e.status === 403 ? 'Setting up staff menus needs the "Set up other staff members’ All modules menu" permission.' : e.message) + '</div>'; return; }
+  var tiles = moduleTiles();
+  var st = { user: null, menu: null, cols: [], dirty: false, msg: '', msgOk: true };
+  var drag = null;
+
+  function who(u){ return u ? (u.name || u.email) : ''; }
+  function standardCols(allowed){
+    return MODULE_GROUPS.map(function(g){
+      return { title: g.title, items: g.items.filter(function(it){ return allowed.indexOf(it.href) !== -1; }).map(function(it){ return it.href; }) };
+    }).filter(function(g){ return g.items.length; });
+  }
+  function pool(){
+    var placed = {};
+    st.cols.forEach(function(c){ c.items.forEach(function(h){ placed[h] = 1; }); });
+    return st.menu.allowed.filter(function(h){ return tiles[h] && !placed[h]; });
+  }
+  function say(msg, good){ st.msg = msg; st.msgOk = good !== false; }
+
+  async function load(id, keepMsg){
+    MENU_SETUP_USER = id || null;
+    st.user = null; st.menu = null; st.cols = []; st.dirty = false;
+    if (!keepMsg) say('');
+    if (id) {
+      try {
+        var r = await api('/api/menu/staff/' + id);
+        st.user = r.user; st.menu = r;
+        st.cols = r.layout ? r.layout.map(function(g){ return { title: g.title, items: g.items.slice() }; }) : standardCols(r.allowed);
+      } catch (e) { say(e.message, false); MENU_SETUP_USER = null; }
+    }
+    paint();
+  }
+
+  function card(h, ci){
+    var it = tiles[h];
+    var inPool = ci === -1;
+    return '<div class="kb-card" draggable="true" data-href="' + esc(h) + '" data-col="' + ci + '" title="' + esc(it.blurb) + '">' +
+      '<span class="ic">' + it.icon + '</span><span class="nm">' + esc(it.name) + '</span><span class="acts">' +
+      (inPool
+        ? '<button type="button" data-act="add" title="Put it on their menu (first group)">＋</button>'
+        : '<button type="button" data-act="up" title="Move up">▲</button><button type="button" data-act="down" title="Move down">▼</button>' +
+          '<button type="button" data-act="left" title="Move to the group on the left">◀</button><button type="button" data-act="right" title="Move to the group on the right">▶</button>' +
+          '<button type="button" data-act="hide" title="Take it off their menu">✕</button>') +
+    '</span></div>';
+  }
+
+  function paint(){
+    var html = '<div class="mod-wrap"><div class="mod-head"><div><h2>🗂 Set up staff menus</h2>' +
+      '<p class="mod-sub">Pick a staff member, then lay out their All modules menu. Each column is a group on their menu. Drag cards between groups or up and down to change the order; ' +
+      'cards in “Not on their menu” are hidden from them. They can still star their own favourites from what you give them. Nobody ever sees a module their role or permissions do not allow.</p></div>' +
+      '<button type="button" class="btn ghost" id="kbBack">← All modules</button></div>' +
+      '<div class="kb-bar"><label for="kbUser"><b>Staff member</b></label> <select id="kbUser"><option value="">Choose a staff member…</option>' +
+      staff.map(function(u){ return '<option value="' + u.id + '"' + (st.user && st.user.id === u.id ? ' selected' : '') + '>' + esc(who(u)) + (u.admin_role ? ' (' + esc(u.admin_role) + ')' : '') + (u.custom ? ' • own menu' : '') + '</option>'; }).join('') +
+      '</select>';
+    if (st.user) {
+      html += st.menu.layout
+        ? ' <span class="kb-tag custom">Own menu' + (st.menu.updated_by ? ', set up by ' + esc(st.menu.updated_by) : '') + (st.menu.updated_at ? ' on ' + esc(new Date(st.menu.updated_at).toLocaleDateString('en-JM', { day: 'numeric', month: 'short', year: 'numeric' })) : '') + '</span>'
+        : ' <span class="kb-tag">Standard menu for their role</span>';
+      if (st.dirty) html += ' <span class="kb-tag dirty">Not saved yet</span>';
+    }
+    html += '</div>';
+    if (st.user) {
+      html += '<div class="kb-bar">' +
+        '<button type="button" class="btn" id="kbSave">💾 Save menu</button>' +
+        '<button type="button" class="btn ghost" id="kbAddCol">＋ Add group</button>' +
+        '<button type="button" class="btn ghost" id="kbReset">↺ Reset to role default</button>' +
+        '<select id="kbCopyFrom"><option value="">Copy from another user…</option>' +
+          staff.filter(function(u){ return u.id !== st.user.id; }).map(function(u){ return '<option value="' + u.id + '">' + esc(who(u)) + (u.custom ? ' • own menu' : ' • standard') + '</option>'; }).join('') +
+        '</select><button type="button" class="btn ghost" id="kbCopy">Copy</button></div>';
+    }
+    html += '<div class="kb-msg" id="kbMsg" style="color:' + (st.msgOk ? 'var(--green,#15803d)' : 'var(--red,#b91c1c)') + '">' + esc(st.msg) + '</div>';
+    if (st.user) {
+      var p = pool();
+      html += '<div class="kb-board" id="kbBoard">' +
+        '<div class="kb-col pool"><div class="kb-col-h"><b>🚫 Not on their menu</b><span class="kb-cnt">' + p.length + '</span></div>' +
+        '<div class="kb-list" data-col="-1">' + (p.length ? p.map(function(h){ return card(h, -1); }).join('') : '<div class="kb-empty">Everything they are allowed is on their menu.</div>') + '</div></div>';
+      st.cols.forEach(function(c, ci){
+        html += '<div class="kb-col"><div class="kb-col-h">' +
+          '<button type="button" data-colact="left" data-ci="' + ci + '" title="Move this group left">◀</button>' +
+          '<input value="' + esc(c.title) + '" data-title="' + ci + '" maxlength="60" aria-label="Group name">' +
+          '<span class="kb-cnt">' + c.items.length + '</span>' +
+          '<button type="button" data-colact="right" data-ci="' + ci + '" title="Move this group right">▶</button>' +
+          '<button type="button" data-colact="del" data-ci="' + ci + '" title="Remove this group (its modules go to Not on their menu)">✕</button></div>' +
+          '<div class="kb-list" data-col="' + ci + '">' + (c.items.length ? c.items.map(function(h){ return card(h, ci); }).join('') : '<div class="kb-empty">Drag modules here. Empty groups do not show on their menu.</div>') + '</div></div>';
+      });
+      html += '</div>';
+      var hidden = Object.keys(tiles).length - st.menu.allowed.filter(function(h){ return tiles[h]; }).length;
+      if (hidden > 0) html += '<p class="mod-note">' + hidden + ' module' + (hidden === 1 ? ' is' : 's are') + ' not shown here because ' + esc(who(st.user)) +
+        '’s role and permissions do not allow ' + (hidden === 1 ? 'it' : 'them') + '. To change that, use Roles &amp; Permissions or Users &amp; Staff.</p>';
+    } else if (!staff.length) html += '<div class="empty">No staff accounts yet.</div>';
+    html += '</div>';
+    panel.innerHTML = html;
+    wire();
+  }
+
+  function changed(){ st.dirty = true; say(''); paint(); }
+  function take(h){
+    st.cols.forEach(function(c){ var i = c.items.indexOf(h); if (i !== -1) c.items.splice(i, 1); });
+  }
+  function place(h, ci, at){
+    take(h);
+    if (ci < 0) return;
+    if (!st.cols.length) { st.cols.push({ title: 'My menu', items: [] }); ci = 0; }
+    var items = st.cols[ci].items;
+    items.splice(at == null || at > items.length ? items.length : at, 0, h);
+  }
+  function locate(h){
+    for (var ci = 0; ci < st.cols.length; ci++) { var i = st.cols[ci].items.indexOf(h); if (i !== -1) return { ci: ci, i: i }; }
+    return null;
+  }
+
+  function wire(){
+    document.getElementById('kbBack').addEventListener('click', function(){ show('modules'); });
+    var sel = document.getElementById('kbUser');
+    sel.addEventListener('change', function(){
+      if (st.dirty && !confirm('You have changes to ' + who(st.user) + '’s menu that are not saved. Leave them?')) { sel.value = st.user ? st.user.id : ''; return; }
+      load(Number(sel.value) || null);
+    });
+    if (!st.user) return;
+
+    document.getElementById('kbSave').addEventListener('click', async function(){
+      try {
+        var r = await api('/api/menu/staff/' + st.user.id, { method: 'PUT', body: { groups: st.cols } });
+        var u = staff.find(function(x){ return x.id === st.user.id; }); if (u) u.custom = true;
+        say('Saved. ' + who(st.user) + ' will see this menu the next time they open All modules.' +
+          (r.dropped && r.dropped.length ? ' Left out, because their permissions do not allow it: ' + moduleNames(r.dropped) + '.' : ''));
+        await load(st.user.id, true);
+      } catch (e) { say(e.message, false); paint(); }
+    });
+    document.getElementById('kbAddCol').addEventListener('click', function(){
+      st.cols.push({ title: 'New group', items: [] }); changed();
+      var inputs = panel.querySelectorAll('[data-title]'); var last = inputs[inputs.length - 1];
+      if (last) { last.focus(); last.select(); }
+    });
+    document.getElementById('kbReset').addEventListener('click', async function(){
+      if (!confirm('Put ' + who(st.user) + ' back on the standard menu for their role? Their own favourites stay.')) return;
+      try {
+        await api('/api/menu/staff/' + st.user.id, { method: 'DELETE' });
+        var u = staff.find(function(x){ return x.id === st.user.id; }); if (u) u.custom = false;
+        say(who(st.user) + ' is back on the standard menu for their role.');
+        await load(st.user.id, true);
+      } catch (e) { say(e.message, false); paint(); }
+    });
+    document.getElementById('kbCopy').addEventListener('click', async function(){
+      var fromId = Number(document.getElementById('kbCopyFrom').value);
+      if (!fromId) { say('Choose who to copy from first.', false); paint(); return; }
+      var from = staff.find(function(x){ return x.id === fromId; });
+      if (!confirm('Replace ' + who(st.user) + '’s menu with a copy of ' + who(from) + '’s?')) return;
+      try {
+        var r = await api('/api/menu/staff/' + st.user.id + '/copy', { method: 'POST', body: { from_user_id: fromId } });
+        var u = staff.find(function(x){ return x.id === st.user.id; }); if (u) u.custom = !!r.layout;
+        say(r.note || ('Copied ' + who(from) + '’s menu.' + (r.dropped && r.dropped.length ? ' Left out, because ' + who(st.user) + '’s permissions do not allow it: ' + moduleNames(r.dropped) + '.' : '')));
+        await load(st.user.id, true);
+      } catch (e) { say(e.message, false); paint(); }
+    });
+
+    panel.querySelectorAll('[data-title]').forEach(function(inp){
+      inp.addEventListener('input', function(){
+        st.cols[Number(inp.getAttribute('data-title'))].title = inp.value;
+        if (!st.dirty) { st.dirty = true; var bar = panel.querySelector('.kb-bar'); if (bar && !bar.querySelector('.kb-tag.dirty')) bar.insertAdjacentHTML('beforeend', ' <span class="kb-tag dirty">Not saved yet</span>'); }
+      });
+    });
+    panel.querySelectorAll('[data-colact]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var ci = Number(b.getAttribute('data-ci')), act = b.getAttribute('data-colact');
+        if (act === 'del') {
+          if (st.cols[ci].items.length && !confirm('Remove the group “' + st.cols[ci].title + '”? Its modules go to Not on their menu.')) return;
+          st.cols.splice(ci, 1);
+        } else {
+          var j = ci + (act === 'left' ? -1 : 1);
+          if (j < 0 || j >= st.cols.length) return;
+          var c = st.cols.splice(ci, 1)[0]; st.cols.splice(j, 0, c);
+        }
+        changed();
+      });
+    });
+    panel.querySelectorAll('.kb-card [data-act]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var h = b.closest('.kb-card').getAttribute('data-href'), act = b.getAttribute('data-act'), at = locate(h);
+        if (act === 'add') place(h, 0);
+        else if (act === 'hide') take(h);
+        else if (at && act === 'up') { if (at.i === 0) return; place(h, at.ci, at.i - 1); }
+        else if (at && act === 'down') { if (at.i >= st.cols[at.ci].items.length - 1) return; place(h, at.ci, at.i + 1); }
+        else if (at && act === 'left') place(h, at.ci - 1);           // the first group's left is "Not on their menu"
+        else if (at && act === 'right') { if (at.ci >= st.cols.length - 1) return; place(h, at.ci + 1); }
+        changed();
+      });
+    });
+
+    // Drag and drop: the drop point among the cards sets the position.
+    panel.querySelectorAll('.kb-card').forEach(function(c){
+      c.addEventListener('dragstart', function(e){ drag = c.getAttribute('data-href'); c.classList.add('dragging'); try { e.dataTransfer.setData('text/plain', drag); e.dataTransfer.effectAllowed = 'move'; } catch (_) {} });
+      c.addEventListener('dragend', function(){ c.classList.remove('dragging'); drag = null; panel.querySelectorAll('.kb-list.over').forEach(function(l){ l.classList.remove('over'); }); });
+    });
+    panel.querySelectorAll('.kb-list').forEach(function(list){
+      list.addEventListener('dragover', function(e){ if (drag) { e.preventDefault(); list.classList.add('over'); } });
+      list.addEventListener('dragleave', function(e){ if (!list.contains(e.relatedTarget)) list.classList.remove('over'); });
+      list.addEventListener('drop', function(e){
+        e.preventDefault(); list.classList.remove('over');
+        if (!drag) return;
+        var ci = Number(list.getAttribute('data-col')), h = drag; drag = null;
+        if (ci < 0) { take(h); changed(); return; }
+        var cards = Array.prototype.filter.call(list.querySelectorAll('.kb-card'), function(c){ return c.getAttribute('data-href') !== h; });
+        var at = cards.length;
+        for (var i = 0; i < cards.length; i++) { var r = cards[i].getBoundingClientRect(); if (e.clientY < r.top + r.height / 2) { at = i; break; } }
+        place(h, ci, at);
+        changed();
+      });
+    });
+  }
+
+  await load(MENU_SETUP_USER);
 }
 
 renderers.marketing      = renderMarketing;
 renderers.modules        = renderModules;
+renderers.menusetup      = renderMenuSetup;
 // Re-bind the stub renderers (var X = stub(...) hoists the declaration but not the
 // assignment, so the original renderers map captured `undefined` for these. Re-bind
 // here, AFTER the stubs are actually assigned, so clicking the sidebar items works.)

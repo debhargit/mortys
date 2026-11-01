@@ -1254,6 +1254,7 @@ const CAPABILITIES = [
   { key: 'fleet.drive',         group: 'Deliveries & drivers', label: 'Driver app: take assigned jobs, share location while on shift' },
   { key: 'fleet.view',          group: 'Deliveries & drivers', label: 'See the dispatch board, live driver map and history' },
   { key: 'fleet.dispatch',      group: 'Deliveries & drivers', label: 'Create and assign driver jobs, set routes, clear alerts, make security-screen links' },
+  { key: 'menu.manage',         group: 'Staff menus',   label: 'Set up other staff members’ All modules menu (which modules they see, and in which groups)' },
 ];
 const CAPABILITY_KEYS = new Set(CAPABILITIES.map((c) => c.key));
 // Supervisory functions: off for staff by default (owners and managers have
@@ -1268,6 +1269,7 @@ const RESTRICTED_CAPS = new Set([
   'ar.manage', 'ap.manage', 'bank.manage', 'payroll.view', 'payroll.run', 'payroll.approve', 'sys.audit', 'sys.security', 'sys.support', 'sys.network',
   'docs.manage', 'docs.confidential', 'docs.restricted', 'docs.approve', 'comms.journal',
   'fleet.drive', 'fleet.view', 'fleet.dispatch', 'suppliers.manage', 'team.announce', 'team.oversee',
+  'menu.manage',
 ]);
 
 // Resolve a user's effective capability map across all three layers:
@@ -6622,6 +6624,8 @@ require('./franchise').register(app, { query, getPool: () => pool, requireAdmin,
 // Team chat, voice and video calls, notices and the staff calendar (team.js).
 // Team notices also carry the time clock's lateness letters and requests, and assigned training.
 const teamApi = require('./team').register(app, { query, requireAdmin, requireCap, userCan });
+// Per-person All modules menu: a manager's layout plus each person's own favourites.
+require('./menus').register(app, { query, requireAdmin, requireCap, permState: (id) => userPermState(id) });
 timeclock.useNotices(teamApi.notice);
 const reps = require('./reps').register(app, {
   query, getPool: () => pool, requireAdmin, requireCap, bcrypt, posSaleHandler, nextQuoteNumber, notify,

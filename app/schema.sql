@@ -7201,3 +7201,17 @@ INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
   ('4600', 'Franchise Fees and Royalties',        'income',    'Franchise Fees and Royalties',        'INC',    'franchise_income'),
   ('2170', 'Franchise Brand Fund',                'liability', 'Franchise Brand Fund',                'OCLIAB', 'franchise_fund')
 ON CONFLICT DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- Staff menus (menus.js): the "All modules" screen set up per person.
+-- layout: a manager's kanban board for this person, [{title, items:[link]}];
+-- NULL means the standard menu for their role. favourites: their own starred
+-- modules, in their order. Neither can show a module their permissions do
+-- not allow; the server filters both on every read.
+CREATE TABLE IF NOT EXISTS user_module_menus (
+  user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  layout      JSONB,
+  favourites  JSONB NOT NULL DEFAULT '[]',
+  updated_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
