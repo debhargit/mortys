@@ -12,11 +12,12 @@
 //  someone was already owed (the old report recalculates history).
 //
 //  Which rate, first that applies:
-//    a rule for this part;
-//    the part's own commission override (products.commission_type);
-//    the best-fitting other rule (supplier > category > every part; a rule
-//      for this rep beats one for every rep; higher priority first);
-//    the rep's default % (mechanics.commission_pct). No rate = nothing.
+//    the part's own commission setting on its inventory record
+//      (products.commission_type: a %, a flat J$ per unit, or none);
+//    the rep's own rate (mechanics.commission_pct);
+//    only for a rep with no rate of their own, the best-fitting rule
+//      (part > supplier > category > every part; a rule for this rep beats
+//      one for every rep; higher priority first). No rate = nothing.
 //  Basis: % of the line (ex GCT), % of the margin (line less cost at sale),
 //  or a flat J$ per unit. Tiers pick the rate from the rep's net sales so far
 //  this month. A split sale shares each line by the reps' percentages.
@@ -104,13 +105,14 @@ function register(app, deps) {
             AND s2.created_at >= date_trunc('month', $2::timestamptz AT TIME ZONE '${TZ}') AT TIME ZONE '${TZ}' AND s2.created_at < $2`, [rep.rep_id, sale.created_at]);
       const mtd = n(mt[0].v);
       for (const l of lines) {
-        const rule = pickRule(rules, l, rep.rep_id, sale.day);
+        // The item's own setting, else the rep's own rate; rules only for a rep with no rate.
+        const rule = n(m[0].commission_pct) > 0 ? null : pickRule(rules, l, rep.rep_id, sale.day);
         let basis, rate, ruleName;
-        if (rule && !(rule.scope !== 'product' && l.commission_type)) { basis = rule.basis; rate = tierRate(rule, mtd); ruleName = rule.name; }
-        else if (l.commission_type === 'none') continue;
+        if (l.commission_type === 'none') continue;
         else if (l.commission_type === 'amount') { basis = 'flat'; rate = n(l.commission_value); ruleName = 'part override'; }
         else if (l.commission_type === 'percent') { basis = 'sale'; rate = n(l.commission_value); ruleName = 'part override'; }
         else if (n(m[0].commission_pct) > 0) { basis = 'sale'; rate = n(m[0].commission_pct); ruleName = 'rep default'; }
+        else if (rule) { basis = rule.basis; rate = tierRate(rule, mtd); ruleName = rule.name; }
         else continue;
         const basisAmt = basis === 'margin' ? n(l.total) - n(l.qty) * n(l.cost) : basis === 'flat' ? n(l.qty) : n(l.total);
         const amount = r2((basis === 'flat' ? basisAmt * rate : basisAmt * rate / 100) * n(rep.share_pct) / 100);
@@ -254,6 +256,14 @@ function register(app, deps) {
         [req.params.id, r.name, r.scope, r.scope_value, r.rep_id, r.basis, r.rate, r.tiers, r.priority, r.starts_on, r.ends_on, r.is_active]);
       if (!rows.length) throw httpError(404, 'Rule not found');
       res.json({ rule: rows[0], note: 'Applies to sales from now on; commission already worked out is not changed.' });
+    } catch (e) { fail(res, e); }
+  });
+  // Commission already worked out keeps the rule's name (commission_entries.rule_name).
+  app.delete('/api/comm/rules/:id', ...can('comm.rules'), async (req, res) => {
+    try {
+      const { rows } = await query(`DELETE FROM commission_rules WHERE id = $1 RETURNING id, name`, [parseInt(req.params.id, 10) || 0]);
+      if (!rows.length) throw httpError(404, 'Rule not found');
+      res.json({ ok: true, deleted: rows[0], note: 'Commission already worked out with it is not changed.' });
     } catch (e) { fail(res, e); }
   });
 

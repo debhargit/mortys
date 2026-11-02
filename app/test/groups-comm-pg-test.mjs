@@ -208,6 +208,34 @@ r = await rita.c('GET', '/api/comm/me');
 ok(r.totals.paid === 200 && r.totals.unpaid === 0, 'after payment: J$200 paid, nothing owed');
 ok(r.statements.some((x) => x.status === 'paid') && r.payouts.length >= 1 && r.payouts[0].amount === 200, 'her history shows the paid statement and the payment');
 
+// ---------------------------- which rate: the part's own setting, else the rep's own
+// A rule for every rep (like "Standard Commission" 1%) no longer beats a rep's rate.
+const [img2, img3] = sql(`SELECT string_agg(img, ',' ORDER BY img) FROM (SELECT img FROM products WHERE is_active AND price_usd > 0 AND NOT COALESCE(serial_required, false) AND img <> '${img}' ORDER BY img LIMIT 2) x`).split(',');
+sql(`UPDATE products SET commission_type = 'percent', commission_value = 10 WHERE img = '${img2}'; UPDATE products SET commission_type = 'none', commission_value = NULL WHERE img = '${img3}';
+     UPDATE products SET commission_type = NULL, commission_value = NULL WHERE img = '${img}'`);
+r = await admin('POST', '/api/comm/rules', { name: 'Everyone 1% ' + stamp, scope: 'all', basis: 'sale', rate: 1 });
+const allRule = r.rule.id;
+const entriesOf = (saleId) => sql(`SELECT string_agg(i.product_img || '=' || e.rate::float || '/' || e.rule_name, ';' ORDER BY i.product_img) FROM commission_entries e JOIN pos_sale_items i ON i.id = e.sale_item_id WHERE e.sale_id = ${saleId} AND e.kind = 'earned'`);
+const runFor = async (s) => { sql(`UPDATE pos_sales SET created_at = NOW() - INTERVAL '1 minute' WHERE id = ${s.id}`); await admin('POST', '/api/comm/run'); return entriesOf(s.id); };
+const s3 = await sale(rita.c, [{ product_img: img, description: 'Plain part', qty: 1, unit_price_usd: 1000 }, { product_img: img2, description: 'Part with its own 10%', qty: 1, unit_price_usd: 2000 }, { product_img: img3, description: 'No-commission part', qty: 1, unit_price_usd: 500 }], 0, { sales_rep_id: repId, sales_rep_name: 'Rita' });
+const e3 = await runFor(s3);
+ok(e3.includes(img + '=5/rep default'), 'a plain part earns her own 5%, not the 1% rule for every rep');
+ok(e3.includes(img2 + '=10/part override'), 'a part with its own 10% earns 10%');
+ok(!e3.includes(img3 + '='), 'a part set to no commission earns nothing');
+await admin('PUT', '/api/comm/reps/' + repId + '/rate', { commission_pct: null });
+const s4 = await sale(rita.c, line(0), 0, { sales_rep_id: repId, sales_rep_name: 'Rita' });
+ok((await runFor(s4)).includes(img + '=1/Everyone 1% ' + stamp), 'a rep with no rate of her own falls back to the rule');
+await admin('PUT', '/api/comm/reps/' + repId + '/rate', { commission_pct: 5 });
+
+// Deleting a rule.
+ok((await rita.c('DELETE', '/api/comm/rules/' + allRule))._status === 403, 'a rep cannot delete a rule');
+r = await admin('DELETE', '/api/comm/rules/' + allRule);
+ok(r._status === 200 && r.deleted && r.deleted.id === allRule, 'a manager deletes the rule');
+ok(!(await admin('GET', '/api/comm/rules')).rules.some((x) => x.id === allRule), 'it is gone from the list');
+ok((await admin('DELETE', '/api/comm/rules/' + allRule))._status === 404, 'deleting it again: not found');
+ok(sql(`SELECT COUNT(*) FROM commission_entries WHERE sale_id = ${s4.id} AND rule_name = 'Everyone 1% ${stamp}'`) === '1', 'commission worked out with it stays');
+sql(`UPDATE products SET commission_type = NULL, commission_value = NULL WHERE img IN ('${img2}', '${img3}')`);
+
 r = await ann.c('GET', '/api/comm/me');
 ok(r._status === 200 && r.rep === null && r.can.view === true, 'Ann (not a rep) gets no rep page, and the page knows she may see everyone\'s');
 

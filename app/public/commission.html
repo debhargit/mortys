@@ -115,18 +115,26 @@
       var d = r[1];
       var scopeVal = function (x) { return x.scope === 'all' ? 'every part' : x.scope === 'supplier' ? 'supplier: ' + ((d.suppliers.find(function (s) { return String(s.id) === String(x.scope_value); }) || {}).name || x.scope_value) : x.scope + ': ' + x.scope_value; };
       var rate = function (x) { return x.basis === 'flat' ? J(x.rate) + ' per unit' : Number(x.rate) + '% of ' + (x.basis === 'margin' ? 'margin' : 'sale'); };
-      $('#out').innerHTML = '<div class="card"><h2>Rules <button class="sm primary" id="newR">+ Rule</button></h2><p class="sub">Most specific wins: a part rule, then the part\'s own override, then supplier, category, every part; a rule for one rep beats one for all; higher priority first. With no rule, the rep\'s default % applies. Changes affect sales from now on.</p>' +
-        '<div class="scroll"><table><thead><tr><th>Rule</th><th>Applies to</th><th>Rep</th><th>Rate</th><th>Tiers</th><th class="n">Priority</th><th>Dates</th><th></th></tr></thead><tbody>' +
-        (d.rules.length ? d.rules.map(function (x, i) {
-          return '<tr><td><b>' + esc(x.name) + '</b>' + (x.is_active ? '' : ' <span class="pill">off</span>') + '</td><td>' + esc(scopeVal(x)) + '</td><td>' + esc(x.rep_name || 'every rep') + '</td><td>' + rate(x) + '</td>' +
-            '<td><small>' + (Array.isArray(x.tiers) ? x.tiers.map(function (t) { return 'from ' + J(t.from) + ': ' + t.rate + (x.basis === 'flat' ? '' : '%'); }).join('<br>') : '') + '</small></td><td class="n">' + x.priority + '</td>' +
-            '<td><small>' + esc((x.starts_on || '').slice(0, 10)) + (x.ends_on ? ' to ' + esc(x.ends_on.slice(0, 10)) : '') + '</small></td><td><button class="sm" data-edit="' + i + '">Edit</button></td></tr>';
-        }).join('') : '<tr><td colspan="8" class="empty">No rules yet: reps earn their default % only.</td></tr>') + '</tbody></table></div></div>' +
-        '<div class="card"><h2>Each rep\'s own rate</h2><p class="sub">The % of each sale a rep earns when no rule above applies. A change counts from now on; commission already worked out stays. Someone becomes a rep when they are in the Sales rep group (Admin › Users › Groups).</p>' +
+      // Each rep's own rate comes first: it is what a sale earns unless the part has its own setting.
+      var repRates = '<div class="card"><h2>Each rep\'s own rate</h2><p class="sub">What each rep earns on their sales: this % of each line before GCT. Only a part\'s own commission setting (Inventory › edit the part › Commission) changes it: a different %, a flat J$ per unit, or no commission. A change counts from now on; commission already worked out stays. Someone becomes a rep when they are in the Sales rep group (Admin › Users › Groups); freelance reps\' rates are on the Freelance reps tab.</p>' +
         '<div class="scroll"><table><thead><tr><th>Rep</th><th>Rate (% of each sale)</th><th></th></tr></thead><tbody>' +
         ((st && st.reps.length) ? st.reps.map(function (m) {
           return '<tr><td>' + esc(m.name) + '</td><td><input type="number" min="0" max="100" step="0.1" data-rate="' + m.id + '" value="' + (m.commission_pct != null ? Number(m.commission_pct) : '') + '" placeholder="none" style="width:100px"> %</td><td><button class="sm" data-ratesave="' + m.id + '">Save</button></td></tr>';
         }).join('') : '<tr><td colspan="3" class="empty">No sales reps yet.</td></tr>') + '</tbody></table></div></div>';
+      $('#out').innerHTML = repRates + '<div class="card"><h2>Rules <button class="sm primary" id="newR">+ Rule</button></h2><p class="sub">Rules are only used for a rep with no rate of their own above (for example a rate for every such rep, or a higher rate once their sales this month pass an amount). A part\'s own commission setting still comes first. You do not need any rules: delete the ones you do not use. Changes affect sales from now on.</p>' +
+        '<div class="scroll"><table><thead><tr><th>Rule</th><th>Applies to</th><th>Rep</th><th>Rate</th><th>Tiers</th><th class="n">Priority</th><th>Dates</th><th></th></tr></thead><tbody>' +
+        (d.rules.length ? d.rules.map(function (x, i) {
+          return '<tr><td><b>' + esc(x.name) + '</b>' + (x.is_active ? '' : ' <span class="pill">off</span>') + '</td><td>' + esc(scopeVal(x)) + '</td><td>' + esc(x.rep_name || 'every rep') + '</td><td>' + rate(x) + '</td>' +
+            '<td><small>' + (Array.isArray(x.tiers) ? x.tiers.map(function (t) { return 'from ' + J(t.from) + ': ' + t.rate + (x.basis === 'flat' ? '' : '%'); }).join('<br>') : '') + '</small></td><td class="n">' + x.priority + '</td>' +
+            '<td><small>' + esc((x.starts_on || '').slice(0, 10)) + (x.ends_on ? ' to ' + esc(x.ends_on.slice(0, 10)) : '') + '</small></td><td style="white-space:nowrap"><button class="sm" data-edit="' + i + '">Edit</button> <button class="sm" data-del="' + i + '">Delete</button></td></tr>';
+        }).join('') : '<tr><td colspan="8" class="empty">No rules: each rep earns their own rate.</td></tr>') + '</tbody></table></div></div>';
+      all('[data-del]').forEach(function (b) {
+        b.onclick = function () {
+          var x = d.rules[+b.getAttribute('data-del')];
+          if (!confirm('Delete the rule "' + x.name + '"? Commission already worked out with it stays as it is.')) return;
+          api('/api/comm/rules/' + x.id, 'DELETE').then(function () { toast('Rule deleted'); rules(); }).catch(function (e) { toast(e.message); });
+        };
+      });
       all('[data-ratesave]').forEach(function (b) {
         b.onclick = function () {
           var id = b.getAttribute('data-ratesave'), v = $('[data-rate="' + id + '"]').value;
