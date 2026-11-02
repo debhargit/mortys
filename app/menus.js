@@ -59,6 +59,7 @@ const MODULES = {
   '/': null,
   '/system.html': ['sys.audit', 'sys.security', 'sys.support', 'sys.network', 'support.raise'],
   '/security.html': ['sec.manage', 'audit.view'],
+  '/legacy-import.html': ['import.legacy'],
 };
 const MAX_GROUPS = 30, MAX_TITLE = 60, MAX_FAVS = 40;
 
