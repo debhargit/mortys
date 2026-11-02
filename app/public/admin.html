@@ -586,6 +586,13 @@ async function api(path, opts){
   var data = null;
   try { data = await res.json(); } catch(e){}
   if (!res.ok) {
+    // Over the operator's own discount limit (staff-groups.js): a manager's PIN
+    // approves it on this till, then the same request goes again, once.
+    if (res.status === 403 && data && data.discount_limit && !opts.discountRetry && typeof posPinPrompt === 'function') {
+      var appr = await posPinPrompt({ purpose: 'override', title: 'Manager approval needed', detail: data.error,
+        endpoint: '/api/admin/pos/discount-override?pct=' + encodeURIComponent(data.asked_pct) });
+      if (appr) return api(path, Object.assign({}, opts, { discountRetry: true }));
+    }
     // Carry the status and the body on the error. Throwing only the message
     // discarded everything the server said about *why* -- db_down being the
     // one that matters, since it separates "the database is stopped" from
@@ -12627,7 +12634,7 @@ function posPinPrompt(opts){
       err.style.display = 'none';
       // Then who it is: the person picks their name (assets/pin-staff.js) and
       // the PIN is checked against that one account.
-      var approving = o.purpose === 'override' || /^\/api\/dept\/override/.test(o.endpoint || '');
+      var approving = o.purpose === 'override' || /^\/api\/(dept\/override|admin\/pos\/discount-override)/.test(o.endpoint || '');
       var who = window.pickPinStaff
         ? await window.pickPinStaff({ managersFirst: approving, title: approving ? 'Who is approving?' : 'Who are you?' })
         : { id: null };
@@ -13597,7 +13604,7 @@ var QBO_ROLE_FILTER = null, QBO_OPEN_ROLE = null;
 function qboTabs(on){
   var hide = (MY_ROLE && Array.isArray(MY_ROLE.hidden_tabs)) ? MY_ROLE.hidden_tabs : [];
   return '<div class="qbo-tabs">' +
-    [['staff', 'Users'], ['roles', 'Roles'], ['staffcategories', 'Staff categories']]
+    [['staff', 'Users'], ['roles', 'Roles'], ['staffcategories', 'Groups']]
       .filter(function(t){ return t[0] === on || hide.indexOf(t[0]) < 0; })
       .map(function(t){ return '<button type="button" data-qbtab="' + t[0] + '"' + (t[0] === on ? ' class="on"' : '') + '>' + t[1] + '</button>'; }).join('') +
     // The HR side of the same people (people.html): files, reviews, leave, exits.
@@ -13752,30 +13759,32 @@ async function renderStaff(panel){
   }
   var EXTRA_NOTE = '<p class="qbo-note" style="margin-top:0">For someone who does two jobs, such as a cashier who also receives stock. Each extra role adds the screens it opens. Manager rights come from the main role only.</p>';
   function todayLocal(){ var t = new Date(); return new Date(t.getTime() - t.getTimezoneOffset() * 60000).toISOString().slice(0, 10); }
-  // Categories carry their own function-permission denies; a staff member
-  // inherits the union of their categories' denies, then their own record
+  // Groups (categories) allow and block functions; a staff member can do what
+  // any of their groups allows, else not what one blocks. Their own record
   // can re-grant (Allow) or force-deny (Deny) on top.
   var CAT_BY_ID = {}; (cats.categories || []).forEach(function(c){ CAT_BY_ID[c.id] = c; });
-  function catDeniesFor(catIds){
-    var d = {};
+  function catEffect(catIds){
+    var deny = {}, grant = {};
     catIds.forEach(function(id){
       var full = CAT_BY_ID[id];
-      var p = (full && full.perms && typeof full.perms === 'object') ? full.perms : {};
-      Object.keys(p).forEach(function(k){ if (p[k] === false) d[k] = full.label; });
+      if (!full || full.is_active === false) return;
+      var p = (full.perms && typeof full.perms === 'object') ? full.perms : {};
+      Object.keys(p).forEach(function(k){ if (p[k] === false) deny[k] = full.label; else if (p[k] === true) grant[k] = full.label; });
     });
-    return d;
+    Object.keys(grant).forEach(function(k){ delete deny[k]; });
+    return { deny: deny, grant: grant };
   }
   // Function permissions for one person, grouped the way QuickBooks groups a
   // role's rights: a collapsible block per area with a count of what is on.
   function permBlocks(s){
     var full = roleIsFull(s.admin_role);
     var ov = (s.perms && typeof s.perms === 'object') ? s.perms : {};
-    var catD = catDeniesFor((s.categories || []).map(function(c){ return c.id; }));
+    var eff = catEffect((s.categories || []).map(function(c){ return c.id; })), catD = eff.deny, catG = eff.grant;
     var groups = {};
     CAPS.forEach(function(c){ (groups[c.group] = groups[c.group] || []).push(c); });
     return '<p class="qbo-note qbo-permnote">' + (full
         ? 'This person’s role counts as a manager, so they always have full access. Change the role to limit them.'
-        : '<b>Inherit</b> follows this person’s staff categories. <b>Allow</b> overrides a category block. <b>Deny</b> turns it off outright.') + '</p>' +
+        : '<b>Inherit</b> follows this person’s groups (set them up on the Groups tab). <b>Allow</b> gives it to just this person. <b>Deny</b> takes it away from just this person.') + '</p>' +
       Object.keys(groups).map(function(g){
         var on = groups[g].filter(function(c){ return ov[c.key] !== false && !(catD[c.key] && ov[c.key] !== true); }).length;
         return '<div class="qbo-cat">' +
@@ -13784,7 +13793,8 @@ async function renderStaff(panel){
           '<div class="qbo-cat-bd">' + groups[g].map(function(c){
             var cur = ov[c.key] === true ? 'allow' : ov[c.key] === false ? 'deny' : 'inherit';
             return '<div class="qbo-perm"><span style="flex:1">' + esc(c.label) +
-                (catD[c.key] ? ' <small style="color:#b45309">— “' + esc(catD[c.key]) + '” blocks this</small>' : '') + '</span>' +
+                (catD[c.key] ? ' <small style="color:#b45309">— “' + esc(catD[c.key]) + '” blocks this</small>' : '') +
+                (catG[c.key] ? ' <small style="color:#15803d">— “' + esc(catG[c.key]) + '” allows this</small>' : '') + '</span>' +
               '<select class="qbo-pv" data-cap="' + esc(c.key) + '"' + (full ? ' disabled' : '') + '>' +
                 '<option value="inherit"' + (cur === 'inherit' ? ' selected' : '') + '>Inherit</option>' +
                 '<option value="allow"' + (cur === 'allow' ? ' selected' : '') + '>Allow</option>' +
@@ -13800,7 +13810,7 @@ async function renderStaff(panel){
   }
   function catChecks(cls, selected){
     var sel = selected || [];
-    if (!STAFF_CATS.length) return '<small style="color:var(--muted)">No categories yet — add one under Staff categories.</small>';
+    if (!STAFF_CATS.length) return '<small style="color:var(--muted)">No groups yet — add one on the Groups tab.</small>';
     return '<div class="qbo-chips">' + STAFF_CATS.map(function(c){
       return '<label class="qbo-chip"><input type="checkbox" class="' + cls + '" value="' + c.id + '"' + (sel.indexOf(c.id) >= 0 ? ' checked' : '') + '/>' + esc(c.label) +
         (c.department ? '<small> · ' + esc(c.department) + '</small>' : '') + '</label>';
@@ -13925,7 +13935,7 @@ async function renderStaff(panel){
         '<div class="qbo-sec">Role</div><select id="sfRole" class="fld">' + roleOptions('cashier') + '</select>' +
         '<p class="qbo-note" id="sfRoleSum">' + esc(roleSummary('cashier')) + '</p>' +
         '<div class="qbo-sec">Extra roles</div>' + EXTRA_NOTE + '<div id="sfXWrap">' + extraChecks('sfXRole', 'cashier', []) + '</div>' +
-        '<div class="qbo-sec">Staff categories</div>' + catChecks('sfNewCat', []) },
+        '<div class="qbo-sec">Groups</div>' + catChecks('sfNewCat', []) },
     ], '<button class="qbo-btn ghost qbo-close">Cancel</button><span class="qbo-msg" id="sfMsg"></span><span class="sp"></span>' +
        '<button class="qbo-btn ghost" id="sfNext">Next</button><button class="qbo-btn" id="sfGo">Add user</button>');
     wireExtras(d, '#sfRole', '#sfXWrap', '#sfRoleSum', 'sfXRole');
@@ -13968,11 +13978,33 @@ async function renderStaff(panel){
         '<p class="qbo-note" id="euRoleSum">' + esc(comboSummary(s.admin_role, extrasOf(s))) + '</p>' +
         '<button type="button" class="qbo-link" id="euSeeRole">View this role’s screens →</button>' +
         '<div class="qbo-sec">Extra roles</div>' + EXTRA_NOTE + '<div id="euXWrap">' + extraChecks('euXRole', s.admin_role, extrasOf(s)) + '</div>' +
-        '<div class="qbo-sec">Staff categories</div>' + catChecks('euCat', catIds) },
+        '<div class="qbo-sec">Groups</div>' + catChecks('euCat', catIds) },
       { key: 'perms', label: 'Permissions', html: permBlocks(s) },
+      { key: 'selling', label: 'Selling', html: '<div class="euSell"><p class="qbo-note">Loading…</p></div>' },
       { key: 'pinned', label: 'Pinned screens', html: favChecks(Array.isArray(s.forced_favs) ? s.forced_favs : [], !!s.favs_locked) },
     ], '<button class="qbo-btn ghost qbo-close">Cancel</button><span class="qbo-msg" id="euMsg"></span><span class="sp"></span><button class="qbo-btn" id="euSave">Save</button>');
     d.querySelectorAll('.qbo-cat-hd').forEach(function(h){ h.addEventListener('click', function(){ h.parentNode.classList.toggle('open'); }); });
+    // Selling: discount limit and commission rate (staff-groups.js). An older
+    // server has no such route; the tab then says so and Save leaves it alone.
+    var sell = null, sellPane = d.querySelector('.euSell');
+    api('/api/admin/staff/' + id + '/selling').then(function(sv){
+      sell = sv;
+      var eff = sv.effective || {};
+      sellPane.innerHTML = '<div class="qbo-sec" style="margin-top:0">Discount limit</div>' +
+        (eff.manager ? '<p class="qbo-note" style="margin-top:0">Their role counts as a manager, so they have no discount limit.</p>' : '') +
+        '<div class="qbo-grid"><div><label class="lbl">Most they can take off a ticket</label><div style="display:flex;align-items:center;gap:6px">' +
+          '<input class="fld" id="euDisc" type="number" min="0" max="100" step="0.5" style="width:110px" value="' + (sv.discount_limit_pct != null ? sv.discount_limit_pct : '') + '" placeholder="From groups"/> %</div></div></div>' +
+        '<p class="qbo-note">Leave it empty to use their groups’ limit' + (eff.source === 'group' ? ' (now ' + eff.limit_pct + '% from “' + esc(eff.group) + '”)' : eff.source === 'own' || eff.manager ? '' : ' (none of their groups has one, so no limit)') +
+          '. Line and ticket discounts count together on sales, orders and quotes. Past the limit the till asks for a manager’s PIN.</p>' +
+        '<div class="qbo-sec">Commission</div>' +
+        (sv.rep
+          ? '<div class="qbo-grid"><div><label class="lbl">Their commission rate</label><div style="display:flex;align-items:center;gap:6px">' +
+              '<input class="fld" id="euComm" type="number" min="0" max="100" step="0.1" style="width:110px" value="' + (sv.rep.commission_pct != null ? sv.rep.commission_pct : '') + '" placeholder="None"/> % of each sale</div></div></div>' +
+            '<p class="qbo-note">Used on every sale credited to them unless a commission rule says otherwise. A change counts from now on; commission already worked out stays. They see what they have built up under Commission › My commission.</p>'
+          : '<p class="qbo-note" style="margin-top:0">Only sales reps earn commission. Tick Sales rep under Groups on the Role tab, save, then open this again to set their rate.</p>');
+    }).catch(function(e){
+      sellPane.innerHTML = '<p class="qbo-note" style="margin-top:0">' + (e.status === 404 ? 'Discount limits and commission rates are set here once the till’s server has been restarted.' : esc(e.message)) + '</p>';
+    });
     var extrasPicked = wireExtras(d, '#euRole', '#euXWrap', '#euRoleSum', 'euXRole');
     d.querySelector('#euRole').addEventListener('change', function(){
       var full = roleIsFull(this.value);
@@ -14010,6 +14042,11 @@ async function renderStaff(panel){
         await api('/api/admin/staff/' + id, { method: 'PATCH', body: body });
         // A manager role always has full access, so its overrides are not kept.
         if (!roleIsFull(body.admin_role)) await api('/api/admin/users/' + id + '/perms', { method: 'PATCH', body: { perms: perms } });
+        if (sell) {
+          var sb = { discount_limit_pct: d.querySelector('#euDisc').value.trim() };
+          if (sell.rep) sb.commission_pct = d.querySelector('#euComm').value.trim();
+          await api('/api/admin/staff/' + id + '/selling', { method: 'PUT', body: sb });
+        }
         renderStaff(panel);
       } catch (e) { btn.disabled = false; qboSay(msg, e.message, 'bad'); }
     });
@@ -14607,7 +14644,167 @@ async function submitStaff(){
 // =============================================================================
 //  STAFF CATEGORIES — the extensible list behind "what does this person do"
 // =============================================================================
-async function renderStaffCategories(panel){
+// Groups: people who do the same job (Cashiers, Sales reps, Accounts) get
+// the same functions by being put in a group. Someone in two groups can do
+// what either allows; owners and managers can always do everything. The
+// groups are the staff categories, so the till and the service module keep
+// finding sales reps and mechanics as before. Until the till's server is
+// restarted onto staff-groups.js there is no /api/admin/groups: the old
+// category screen is shown instead.
+async function renderStaffCategories(panel, openId, openTab){
+  panel.innerHTML = '<div class="empty">Loading…</div>';
+  var r;
+  try { r = await api('/api/admin/groups'); }
+  catch (e) {
+    if (e.status === 404) return renderStaffCategoriesOld(panel);
+    panel.innerHTML = '<div class="empty">Could not load: ' + esc(e.message) + '</div>'; return;
+  }
+  var CAPS = r.capabilities || [], AREAS = {};
+  CAPS.forEach(function(c){ (AREAS[c.group] = AREAS[c.group] || []).push(c); });
+  // What a group allows: what it says, else the standard (a group never saved says nothing).
+  function allows(g, c){
+    var p = (g.perms && typeof g.perms === 'object') ? g.perms : {};
+    return p[c.key] === true || (p[c.key] !== false && !c.restricted);
+  }
+  function onCount(g){ return CAPS.filter(function(c){ return allows(g, c); }).length; }
+
+  var rows = r.groups.map(function(g){
+    var names = g.members.map(function(m){ return m.name || m.email; });
+    return '<tr class="qbo-row" data-gid="' + g.id + '"' + (g.is_active ? '' : ' style="opacity:.55"') + '>' +
+      '<td><div class="qbo-rolename">' + esc(g.label) + (g.is_system ? '<span class="qbo-pill sys">Built in</span>' : '') + (g.is_active ? '' : '<span class="qbo-pill ltd" style="margin-left:8px">Switched off</span>') + '</div>' +
+        '<div class="qbo-code">' + (names.length ? esc(names.slice(0, 4).join(', ') + (names.length > 4 ? ' and ' + (names.length - 4) + ' more' : '')) : 'Nobody yet') + '</div></td>' +
+      '<td>' + onCount(g) + ' of ' + CAPS.length + '</td>' +
+      '<td>' + (g.max_discount_pct != null ? g.max_discount_pct + '%' : '<span style="color:var(--muted)">No limit</span>') + '</td>' +
+      '<td>' + g.members.length + '</td>' +
+      '<td class="qbo-act"><button class="qbo-link" data-gedit="' + g.id + '">Open</button></td></tr>';
+  }).join('');
+
+  panel.innerHTML = QBO_ROLES_CSS +
+    '<div class="qbo">' +
+      '<div class="qbo-hd"><div><h2>Manage users</h2>' +
+        '<p>Put people in groups, and choose once what each group can do. Someone in two groups can do what either group allows. Owners and managers can always do everything. A person’s own Permissions tab can still allow or stop one thing for just them.</p></div>' +
+        '<button class="qbo-btn" id="grNew">Add group</button></div>' +
+      qboTabs('staffcategories') +
+      '<div class="qbo-scroll"><table class="qbo-table"><thead><tr><th>Group</th><th>Functions on</th><th>Discount limit</th><th>People</th><th style="text-align:right">Action</th></tr></thead><tbody>' +
+        rows + '</tbody></table></div>' +
+    '</div>';
+  var root = panel.querySelector('.qbo');
+  qboWireTabs(root);
+
+  root.querySelector('#grNew').addEventListener('click', function(){
+    var d = qboDrawer(root, 'Add a group', 'For example Cashiers, Sales reps or Accounts.', [{ key: 'new', label: 'New group', html:
+      '<div class="qbo-grid"><div><label class="lbl">Name</label><input class="fld" id="grLabel" placeholder="e.g. Accounts"/></div>' +
+      '<div><label class="lbl">Start as a copy of</label><select class="fld" id="grCopy"><option value="">Nothing (the standard)</option>' +
+        r.groups.map(function(g){ return '<option value="' + g.id + '">' + esc(g.label) + '</option>'; }).join('') + '</select></div></div>' +
+      '<p class="qbo-note">Next you choose what the group can do and who is in it.</p>' }],
+      '<button class="qbo-btn ghost qbo-close">Cancel</button><span class="qbo-msg"></span><span class="sp"></span><button class="qbo-btn" id="grMake">Add group</button>');
+    d.querySelector('#grLabel').focus();
+    d.querySelector('#grMake').addEventListener('click', async function(){
+      try {
+        var made = await api('/api/admin/groups', { method: 'POST', body: { label: d.querySelector('#grLabel').value.trim(), copy_from: d.querySelector('#grCopy').value || null } });
+        renderStaffCategories(panel, made.id, 'perms');
+      } catch (e) { qboSay(d.querySelector('.qbo-msg'), e.message, 'bad'); }
+    });
+  });
+
+  function openGroup(id, tab){
+    var g = r.groups.find(function(x){ return String(x.id) === String(id); });
+    if (!g) return;
+    var permsHtml = '<p class="qbo-note" style="margin-top:0">Tick what people in this group can do. <b>Manager</b> marks the functions staff do not have unless a group or the person is given them.</p>' +
+      Object.keys(AREAS).map(function(a){
+        var on = AREAS[a].filter(function(c){ return allows(g, c); }).length;
+        return '<div class="qbo-cat"><div class="qbo-cat-hd"><span class="chev">▶</span><span class="qbo-cat-nm">' + esc(a) + '</span>' +
+            '<span class="qbo-cat-ct"><span class="qbo-cat-n">' + on + '</span> of ' + AREAS[a].length + '</span></div>' +
+          '<div class="qbo-cat-bd"><label class="qbo-perm all"><input type="checkbox" class="qbo-catall"/> All of ' + esc(a) + '</label>' +
+            AREAS[a].map(function(c){
+              return '<label class="qbo-perm"><input type="checkbox" class="grCap" data-cap="' + esc(c.key) + '"' + (allows(g, c) ? ' checked' : '') + '/> <span style="flex:1">' + esc(c.label) + '</span>' +
+                (c.restricted ? '<span class="qbo-pill ltd">Manager</span>' : '') + '</label>';
+            }).join('') + '</div></div>';
+      }).join('');
+    var inIt = {}; g.members.forEach(function(m){ inIt[m.id] = 1; });
+    var others = r.staff.filter(function(s){ return !inIt[s.id]; });
+    var peopleHtml = '<div class="qbo-sec" style="margin-top:0">Add someone</div>' +
+      (others.length
+        ? '<div style="display:flex;gap:8px;flex-wrap:wrap"><select class="fld" id="grAddWho" style="flex:1;min-width:200px">' +
+            others.map(function(s){ return '<option value="' + s.id + '">' + esc(s.name || s.email) + (s.full ? ' (manager: already has everything)' : '') + '</option>'; }).join('') +
+          '</select><button type="button" class="qbo-btn" id="grAdd">Add to group</button></div>'
+        : '<p class="qbo-note">Everyone is already in this group.</p>') +
+      '<div class="qbo-sec">In this group (' + g.members.length + ')</div>' +
+      (g.members.length
+        ? g.members.map(function(m){
+            return '<div class="qbo-perm"><span class="qbo-av">' + esc(qboInitials(m.name || m.email)) + '</span><span style="flex:1">' + esc(m.name || m.email) +
+              (m.full ? ' <span class="qbo-pill mgr">Manager</span>' : '') + '</span><button type="button" class="qbo-link" data-grout="' + m.id + '">Take out</button></div>';
+          }).join('')
+        : '<p class="qbo-note">Nobody yet.</p>');
+    var discHtml = '<div class="qbo-grid"><div><label class="lbl">Most a member can take off a ticket</label>' +
+        '<div style="display:flex;align-items:center;gap:6px"><input class="fld" id="grDisc" type="number" min="0" max="100" step="0.5" style="width:110px" value="' + (g.max_discount_pct != null ? g.max_discount_pct : '') + '" placeholder="No limit"/> %</div></div></div>' +
+      '<p class="qbo-note">Line discounts and the whole-ticket discount count together, on sales, orders and quotes. Past the limit the till asks for a manager’s PIN. Someone in two groups gets the higher limit; a limit set on the person themself (Users › Edit › Selling) comes first. Leave it empty for no limit.</p>';
+    var d = qboDrawer(root, g.label, g.members.length + ' ' + (g.members.length === 1 ? 'person' : 'people') + (g.is_system ? ' · built in' : ''), [
+      { key: 'perms', label: 'What they can do', html: (g.is_system ? '' : '<div class="qbo-grid" style="margin-bottom:12px"><div><label class="lbl">Group name</label><input class="fld" id="grName" value="' + esc(g.label) + '"/></div></div>') + permsHtml },
+      { key: 'people', label: 'People', html: peopleHtml },
+      { key: 'disc', label: 'Discount limit', html: discHtml },
+    ], '<button class="qbo-btn ghost qbo-close">Close</button><span class="qbo-msg"></span><span class="sp"></span>' +
+       '<button class="qbo-btn ghost" id="grOnOff">' + (g.is_active ? 'Switch off' : 'Switch on') + '</button>' +
+       (g.is_system ? '' : '<button class="qbo-btn danger" id="grDel">Delete</button>') +
+       '<button class="qbo-btn" id="grSave">Save</button>');
+    if (tab) qboDrawerTab(d, tab);
+    var msg = d.querySelector('.qbo-msg');
+    function syncCat(cat){
+      var boxes = cat.querySelectorAll('.grCap'), on = 0;
+      boxes.forEach(function(b){ if (b.checked) on++; });
+      cat.querySelector('.qbo-cat-n').textContent = on;
+      var all = cat.querySelector('.qbo-catall');
+      all.checked = on === boxes.length; all.indeterminate = on > 0 && on < boxes.length;
+    }
+    d.querySelectorAll('.qbo-cat').forEach(function(cat){
+      syncCat(cat);
+      cat.querySelector('.qbo-cat-hd').addEventListener('click', function(){ cat.classList.toggle('open'); });
+      cat.querySelector('.qbo-catall').addEventListener('change', function(){
+        var want = this.checked;
+        cat.querySelectorAll('.grCap').forEach(function(b){ b.checked = want; });
+        syncCat(cat);
+      });
+      cat.querySelectorAll('.grCap').forEach(function(b){ b.addEventListener('change', function(){ syncCat(cat); }); });
+    });
+    // People go in and out at once; the screen reloads on the People tab.
+    var addBtn = d.querySelector('#grAdd');
+    if (addBtn) addBtn.addEventListener('click', async function(){
+      try { await api('/api/admin/groups/' + id + '/members', { method: 'POST', body: { user_ids: [parseInt(d.querySelector('#grAddWho').value, 10)] } }); renderStaffCategories(panel, id, 'people'); }
+      catch (e) { qboSay(msg, e.message, 'bad'); }
+    });
+    d.querySelectorAll('[data-grout]').forEach(function(b){
+      b.addEventListener('click', async function(){
+        try { await api('/api/admin/groups/' + id + '/members/' + this.getAttribute('data-grout'), { method: 'DELETE' }); renderStaffCategories(panel, id, 'people'); }
+        catch (e) { qboSay(msg, e.message, 'bad'); }
+      });
+    });
+    d.querySelector('#grSave').addEventListener('click', async function(){
+      var allowed = {};
+      d.querySelectorAll('.grCap').forEach(function(b){ allowed[b.getAttribute('data-cap')] = b.checked; });
+      var body = { allowed: allowed, max_discount_pct: d.querySelector('#grDisc').value.trim() };
+      var nm = d.querySelector('#grName'); if (nm) body.label = nm.value.trim();
+      var btn = this; btn.disabled = true; qboSay(msg, 'Saving…');
+      try { await api('/api/admin/groups/' + id, { method: 'PUT', body: body }); renderStaffCategories(panel); }
+      catch (e) { btn.disabled = false; qboSay(msg, e.message, 'bad'); }
+    });
+    d.querySelector('#grOnOff').addEventListener('click', async function(){
+      try { await api('/api/admin/groups/' + id, { method: 'PUT', body: { is_active: !g.is_active } }); renderStaffCategories(panel); }
+      catch (e) { qboSay(msg, e.message, 'bad'); }
+    });
+    var del = d.querySelector('#grDel');
+    if (del) del.addEventListener('click', async function(){
+      if (!confirm('Delete the group “' + g.label + '”? The people in it lose what it gives them.')) return;
+      try { await api('/api/admin/user-categories/' + id, { method: 'DELETE' }); renderStaffCategories(panel); }
+      catch (e) { qboSay(msg, e.message, 'bad'); }
+    });
+  }
+  root.querySelectorAll('.qbo-row').forEach(function(tr){
+    tr.addEventListener('click', function(){ openGroup(tr.getAttribute('data-gid')); });
+  });
+  if (openId) openGroup(openId, openTab);
+}
+
+async function renderStaffCategoriesOld(panel){
   panel.innerHTML = '<div class="empty">Loading…</div>';
   var r, capsRes;
   try {

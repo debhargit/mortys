@@ -7618,3 +7618,18 @@ INSERT INTO payroll_items (code, label, kind, paye, nis, nht, ed, heart, is_syst
   ('tips_cash',      'Cash tips kept (already received)',    'earning',   true,  true,  true,  true,  true,  false, 43)
 ON CONFLICT (code) DO NOTHING;
 UPDATE payroll_items SET paid_outside = true WHERE code = 'tips_cash' AND NOT paid_outside;
+
+-- =============================================================================
+--  Staff groups and selling limits (staff-groups.js)
+--
+--  Groups are the staff categories. user_categories.perms now holds true
+--  (allowed) as well as false (blocked) for each function; a person can do
+--  what any of their groups allows, else not what one blocks.
+--  max_discount_pct: the most a member may take off a ticket without a
+--  manager's PIN (the highest of their groups counts).
+--  users.staff_discount_limit_pct: one person's own limit, which beats their
+--  groups'. (users.discount_limit_pct is a customer's ceiling and stays as it
+--  was.) A rep's commission rate stays mechanics.commission_pct.
+-- =============================================================================
+ALTER TABLE user_categories ADD COLUMN IF NOT EXISTS max_discount_pct NUMERIC(5,2);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_discount_limit_pct NUMERIC(5,2);

@@ -4,7 +4,8 @@
 //  Mounted by server.js:  require('./commission').register(app, deps)
 //  Routes under /api/comm. Capabilities: comm.view (everyone's commission),
 //  comm.rules (rules), comm.approve (splits, adjustments, statements, payout).
-//  Every rep can see their own earnings at /api/comm/me.
+//  Every rep can see their own earnings at /api/comm/me; comm.rules also
+//  sets each rep's own rate (PUT /api/comm/reps/:id/rate).
 //
 //  From the moment it is switched on, each sale line is worked out ONCE and
 //  stored in commission_entries, so a later rate change never rewrites what
@@ -33,7 +34,7 @@ const TZ = 'America/Jamaica';
 const SPEC = { product: 4, supplier: 3, category: 2, all: 1 };
 
 function register(app, deps) {
-  const { query, getPool, requireAdmin, requireCap } = deps;
+  const { query, getPool, requireAdmin, requireCap, userCan } = deps;
   const can = (k) => [requireAdmin, requireCap(k)];
   const n = (v) => (v == null ? 0 : Number(v));
   const r2 = (v) => Math.round(n(v) * 100) / 100;
@@ -302,15 +303,58 @@ function register(app, deps) {
     } catch (e) { fail(res, e); }
   });
 
-  // A rep's own commission (any staff member linked to a rep record).
+  // A rep's own commission (any staff member linked to a rep record): what
+  // they built up in the chosen dates and this month, what is still owed to
+  // them, what was paid, and the rates that apply to them. `can` tells the
+  // page which manager tabs to show.
   app.get('/api/comm/me', requireAdmin, async (req, res) => {
     try {
-      const { rows: m } = await query(`SELECT id, name FROM mechanics WHERE user_id = $1 AND is_active LIMIT 1`, [req.session.userId]);
-      if (!m.length) return res.json({ rep: null });
-      const from = dateArg(req.query.from) || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
-      const to = dateArg(req.query.to) || new Date().toISOString().slice(0, 10);
-      const { rows: st } = await query(`SELECT number, period_to, total, status, approved_at, paid_at FROM commission_statements WHERE rep_id = $1 ORDER BY id DESC LIMIT 24`, [m[0].id]);
-      res.json({ rep: m[0], summary: (await summary(from, to, m[0].id))[0] || null, entries: await entries(from, to, m[0].id, null), statements: st });
+      const can = {};
+      for (const k of ['view', 'rules', 'approve']) can[k] = userCan ? await userCan(req, 'comm.' + k) : true;
+      const { rows: m } = await query(`SELECT id, name, commission_pct::float AS commission_pct FROM mechanics WHERE user_id = $1 AND is_active LIMIT 1`, [req.session.userId]);
+      if (!m.length) return res.json({ rep: null, can });
+      const rep = m[0];
+      const { rows: d } = await query(`SELECT to_char(NOW() AT TIME ZONE '${TZ}', 'YYYY-MM-DD') AS today, to_char(date_trunc('month', NOW() AT TIME ZONE '${TZ}'), 'YYYY-MM-DD') AS month`);
+      const today = d[0].today, month = d[0].month;
+      const from = dateArg(req.query.from) || month, to = dateArg(req.query.to) || today;
+      const started = await setting('comm_start_at', null);
+      const { rows: st } = await query(`SELECT number, period_to, total, status, approved_at, paid_at FROM commission_statements WHERE rep_id = $1 ORDER BY id DESC LIMIT 24`, [rep.id]);
+      const { rows: tot } = await query(
+        `SELECT COALESCE(SUM(amount) FILTER (WHERE status IN ('earned', 'on_statement', 'approved')), 0) AS unpaid,
+                COALESCE(SUM(amount) FILTER (WHERE status = 'pending'), 0) AS waiting,
+                COALESCE(SUM(amount) FILTER (WHERE status = 'paid'), 0) AS paid
+           FROM commission_entries WHERE rep_id = $1`, [rep.id]);
+      const { rows: paid } = await query(`SELECT created_at, amount_usd::float AS amount, notes FROM commission_payouts WHERE mechanic_id = $1 ORDER BY id DESC LIMIT 24`, [rep.id]);
+      const { rows: rules } = await query(
+        `SELECT name, scope, scope_value, basis, rate::float AS rate, tiers, rep_id IS NOT NULL AS just_you FROM commission_rules
+          WHERE is_active AND (rep_id IS NULL OR rep_id = $1) AND (ends_on IS NULL OR ends_on >= CURRENT_DATE) ORDER BY rep_id IS NOT NULL DESC, priority DESC, id`, [rep.id]);
+      // Own sales in the dates, from the receipts: shown before tracking is
+      // switched on too, with what the rep's own rate would come to.
+      const { rows: sales } = await query(
+        `SELECT COUNT(DISTINCT s.id)::int AS receipts, COALESCE(SUM(i.total_usd), 0) AS total
+           FROM pos_sales s JOIN pos_sale_items i ON i.sale_id = s.id
+          WHERE s.sales_rep_id = $3 AND NOT COALESCE(s.voided, false) AND COALESCE(s.receipt_number, '') NOT LIKE 'CN%' AND ${RANGE('s.created_at')}`, [from, to, rep.id]).catch((e) => { console.warn('[comm] own sales', e.message); return { rows: [{ receipts: 0, total: 0 }] }; });
+      res.json({
+        rep, can, started: !!started, from, to, month,
+        summary: (await summary(from, to, rep.id))[0] || null,
+        this_month: (await summary(month, today, rep.id))[0] || null,
+        totals: { unpaid: r2(tot[0].unpaid), waiting: r2(tot[0].waiting), paid: r2(tot[0].paid) },
+        sales: { receipts: sales[0].receipts, total: r2(sales[0].total), estimate: started ? null : r2(n(sales[0].total) * n(rep.commission_pct) / 100) },
+        rules, payouts: paid.map((p) => ({ ...p, amount: r2(p.amount) })),
+        entries: await entries(from, to, rep.id, null), statements: st,
+      });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Each rep's own rate: used on a sale line when no rule applies.
+  app.put('/api/comm/reps/:id/rate', ...can('comm.rules'), async (req, res) => {
+    try {
+      const v = (req.body || {}).commission_pct;
+      const rate = v === '' || v == null ? null : Number(v);
+      if (rate != null && !(rate >= 0 && rate <= 100)) throw httpError(400, 'The rate must be from 0 to 100%');
+      const { rows } = await query(`UPDATE mechanics SET commission_pct = $2 WHERE id = $1 RETURNING id, name, commission_pct::float AS commission_pct`, [parseInt(req.params.id, 10), rate]);
+      if (!rows.length) throw httpError(404, 'Rep not found');
+      res.json({ rep: rows[0], note: 'Applies to sales from now on; commission already worked out is not changed.' });
     } catch (e) { fail(res, e); }
   });
 

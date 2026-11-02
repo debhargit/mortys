@@ -1274,16 +1274,19 @@ const RESTRICTED_CAPS = new Set([
 
 // Resolve a user's effective capability map across all three layers:
 //   role.can_manage -> full access (nothing below applies)
-//   else per cap:    allowed, minus any active category deny, then the
-//                    user's own {true = re-grant / false = deny} override.
+//   else per cap:    the standard (allowed unless restricted), then the
+//                    staff member's groups (active categories): a group that
+//                    turns it on gives it, else one that turns it off takes it
+//                    away -- so several groups add up -- then the user's own
+//                    {true = re-grant / false = deny} override.
 async function userPermState(userId) {
   const { rows } = await query('SELECT admin_role, perms FROM users WHERE id = $1', [userId]);
   if (!rows.length) return { full: false, perms: {} };
   const full = await roleCanManage(rows[0].admin_role);
   const userOv = (rows[0].perms && typeof rows[0].perms === 'object') ? rows[0].perms : {};
 
-  // Denies inherited from the staff member's active categories.
-  const catDeny = {};
+  // What the staff member's active categories (groups) turn on and off.
+  const catDeny = {}, catGrant = {};
   if (!full) {
     const { rows: cr } = await query(
       `SELECT c.perms FROM user_category_members m
@@ -1291,19 +1294,19 @@ async function userPermState(userId) {
         WHERE m.user_id = $1`, [userId]);
     for (const row of cr) {
       const p = (row.perms && typeof row.perms === 'object') ? row.perms : {};
-      for (const [k, v] of Object.entries(p)) if (v === false) catDeny[k] = true;
+      for (const [k, v] of Object.entries(p)) { if (v === false) catDeny[k] = true; else if (v === true) catGrant[k] = true; }
     }
   }
 
   const perms = {};
   for (const c of CAPABILITIES) {
     if (full) { perms[c.key] = true; continue; }
-    let allowed = !catDeny[c.key] && !RESTRICTED_CAPS.has(c.key);
+    let allowed = catGrant[c.key] ? true : !catDeny[c.key] && !RESTRICTED_CAPS.has(c.key);
     if (userOv[c.key] === true) allowed = true;
     if (userOv[c.key] === false) allowed = false;
     perms[c.key] = allowed;
   }
-  return { full, perms, cat_denies: Object.keys(catDeny) };
+  return { full, perms, cat_denies: Object.keys(catDeny).filter((k) => !catGrant[k]), cat_grants: Object.keys(catGrant) };
 }
 
 // Enforcement helper. `req` must carry an authenticated session.
@@ -4062,6 +4065,10 @@ app.patch('/api/admin/user-categories/:id/perms', requireManager, async (req, re
   for (const [k, v] of Object.entries(incoming)) {
     if (CAPABILITY_KEYS.has(k) && v === false) clean[k] = false;
   }
+  // What the group turns on (set on the Groups screen, staff-groups.js) stays
+  // unless this list turns it off.
+  const { rows: had } = await query('SELECT perms FROM user_categories WHERE id = $1', [id]);
+  for (const [k, v] of Object.entries((had[0] && had[0].perms) || {})) if (v === true && clean[k] === undefined) clean[k] = true;
   const { rowCount } = await query('UPDATE user_categories SET perms = $1::jsonb WHERE id = $2', [JSON.stringify(clean), id]);
   if (!rowCount) return res.status(404).json({ error: 'No such category' });
   res.json({ ok: true, perms: clean });
@@ -6611,7 +6618,7 @@ posAddons.register(app, { query, getPool: () => pool, requireAdmin, requireManag
 require('./payroll').register(app, { query, getPool: () => pool, requireAdmin, requireCap, userCan, mailer, glPost: () => gl.postAll(null),
   getShop: async () => shopSettingsToShop(await getShopSettings()), weekFor: timeclock.weekFor });
 // Commission v2: stored per sale line, rules, splits, clawbacks, statements (commission.js).
-require('./commission').register(app, { query, getPool: () => pool, requireAdmin, requireCap });
+require('./commission').register(app, { query, getPool: () => pool, requireAdmin, requireCap, userCan });
 // Freelance reps (portal, invites, quotes, orders), tracked links, referrals (reps.js).
 // People & HR: the staff file (hr.js), and the careers page and applicant
 // tracking (careers.js), which opens the staff file on hire. Team notices are
@@ -6626,6 +6633,9 @@ require('./franchise').register(app, { query, getPool: () => pool, requireAdmin,
 const teamApi = require('./team').register(app, { query, requireAdmin, requireCap, userCan });
 // Per-person All modules menu: a manager's layout plus each person's own favourites.
 require('./menus').register(app, { query, requireAdmin, requireCap, permState: (id) => userPermState(id) });
+// Staff groups (what each group may do, who is in it) and each person's discount limit (staff-groups.js).
+const staffGroups = require('./staff-groups').register(app, { query, requireAdmin, requireManager, permState: (id) => userPermState(id),
+  getCapabilities: () => CAPABILITIES, getRestricted: () => RESTRICTED_CAPS, roleCanManage, pins, syncStaffProfile });
 timeclock.useNotices(teamApi.notice);
 const reps = require('./reps').register(app, {
   query, getPool: () => pool, requireAdmin, requireCap, bcrypt, posSaleHandler, nextQuoteNumber, notify,
@@ -7961,6 +7971,9 @@ app.post('/api/admin/pos/quote', requireAdmin, async (req, res) => {
   const items = Array.isArray(b.items) ? b.items : [];
   if (!items.length) return res.status(400).json({ error: 'At least one item required' });
   try {
+    // A quote is a price promised to the customer: the same discount limit as a sale.
+    const overLimit = await staffGroups.checkDiscount(req, items, b.discount_usd, true);
+    if (overLimit) return res.status(overLimit.status).json(overLimit.body);
     let subtotal = 0;
     for (const it of items) subtotal += (Number(it.unit_price_usd) * Number(it.qty)) + Number(it.core_charge_usd || 0) + Number(it.env_fee_usd || 0);
     subtotal = Math.round(subtotal * 100) / 100;
@@ -8092,6 +8105,9 @@ async function posSaleHandler(req, res) {
     // (functions/_lib/price_breaks.js) ported over first.
     if (items.some((it) => it.price_manual) && !(await userCan(req, 'pos.price_override')))
       return res.status(403).json({ error: 'Your account is not allowed to change a line’s unit price.' });
+    // The operator's own discount limit (staff-groups.js); past it, a manager's PIN.
+    const overLimit = await staffGroups.checkDiscount(req, items, b.discount_usd, b.dry_run !== true);
+    if (overLimit) return res.status(overLimit.status).json(overLimit.body);
   }
 
   const client = await pool.connect();

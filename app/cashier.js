@@ -193,6 +193,8 @@ function register(app, deps) {
       if (!Array.isArray(b.items) || !b.items.length) throw httpError(400, 'At least one item required');
       // Dry run under the person saving it: their discount permissions, the exact total.
       const dry = await runSale(req, Object.assign({}, b, { dry_run: true, payments: [{ method: 'cash', amount_usd: null }] }), null);
+      // Over the person's discount limit: the till asks for a manager's PIN and sends it again.
+      if (dry.body && dry.body.discount_limit) return res.status(403).json(dry.body);
       if (dry.status !== 200 || !dry.body || !dry.body.ok) throw httpError(dry.status || 400, (dry.body && dry.body.error) || 'Could not price this order');
       const st = await stationOf(req);
       // Route to the order station's cashier; if that drawer is closed, to its backup.
