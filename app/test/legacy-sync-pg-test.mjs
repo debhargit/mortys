@@ -25,7 +25,7 @@ const csv = (rows) => rows.map((r) => r.map((v) => (/[",\n]/.test(String(v)) ? '
 function write(dir, name, rows) { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, name), csv(rows)); }
 function sync(dir, apply) {
   const r = spawnSync(process.execPath, [path.join(APP, 'tools', 'legacy-sync.mjs'), '--dir=' + dir].concat(apply ? ['--apply'] : []),
-    { env: Object.assign({}, process.env, { DATABASE_URL: DB }), encoding: 'utf8', maxBuffer: 1 << 26 });
+    { env: Object.assign({}, process.env, { VISION_DB_URL: DB }), encoding: 'utf8', maxBuffer: 1 << 26 });
   const lines = (r.stdout || '').split('\n');
   const tagged = (t) => lines.filter((l) => l.startsWith('@@' + t + ' ')).map((l) => JSON.parse(l.slice(t.length + 3)));
   return { code: r.status, out: r.stdout + r.stderr, check: tagged('check')[0], results: tagged('result'), done: tagged('done')[0], warn: tagged('warn') };

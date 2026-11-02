@@ -29,10 +29,19 @@ export function dbConfig() {
 }
 
 // The import page (legacy-import.js) runs these tools as child processes and
-// passes the server's own DATABASE_URL, so they always write to the database
-// the till is running on. Run by hand, they use db-config.json as before.
+// passes VISION_DB_URL, built from the connection the server itself is using,
+// so they always write to the database the till is running on. Run by hand,
+// they use db-config.json like the server does, and DATABASE_URL only when
+// there is no db-config.json (a .env can hold an old password the server
+// never uses).
+function dbUrl() {
+  if (process.env.VISION_DB_URL) return process.env.VISION_DB_URL;
+  if (fs.existsSync(path.join(APP, 'db-config.json'))) return null;
+  return process.env.DATABASE_URL || null;
+}
 export function pool(max = 4) {
-  if (process.env.DATABASE_URL) return new pg.Pool({ connectionString: process.env.DATABASE_URL, max });
+  const url = dbUrl();
+  if (url) return new pg.Pool({ connectionString: url, max });
   const c = dbConfig();
   return new pg.Pool({ host: c.host, port: c.port, database: c.database, user: c.user, password: c.password, max });
 }
@@ -65,7 +74,7 @@ function tsvCell(v) {
 // `rows` may be any sync/async iterable, so callers can pipe straight from a
 // CSV reader without materialising a million objects.
 export async function copyInto(table, cols, rows, { onProgress, progressEvery = 100000 } = {}) {
-  const url = process.env.DATABASE_URL;
+  const url = dbUrl();
   const c = url ? null : dbConfig();
   const args = [...(url ? ['-d', url] : ['-h', c.host, '-p', String(c.port), '-U', c.user, '-d', c.database]),
     '-q', '-v', 'ON_ERROR_STOP=1',

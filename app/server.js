@@ -6621,7 +6621,7 @@ require('./payroll').register(app, { query, getPool: () => pool, requireAdmin, r
 // Commission v2: stored per sale line, rules, splits, clawbacks, statements (commission.js).
 require('./commission').register(app, { query, getPool: () => pool, requireAdmin, requireCap, userCan });
 // Import from the legacy program: check and bring across its CSV exports again and again (legacy-import.js).
-require('./legacy-import').register(app, { query, requireAdmin, requireCap });
+require('./legacy-import').register(app, { query, getPool: () => pool, requireAdmin, requireCap });
 // Freelance reps (portal, invites, quotes, orders), tracked links, referrals (reps.js).
 // People & HR: the staff file (hr.js), and the careers page and applicant
 // tracking (careers.js), which opens the staff file on hire. Team notices are

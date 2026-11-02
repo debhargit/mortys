@@ -48,6 +48,15 @@ function register(app, deps) {
     return rows.length ? rows[0].value : dflt;
   }
 
+  // The connection the server's pool is using, as a URL for the tools.
+  function dbUrl() {
+    const o = (deps.getPool && deps.getPool() && deps.getPool().options) || {};
+    if (o.connectionString) return o.connectionString;
+    if (!o.host) return null;
+    const auth = encodeURIComponent(o.user || 'postgres') + (o.password ? ':' + encodeURIComponent(o.password) : '');
+    return 'postgresql://' + auth + '@' + o.host + ':' + (o.port || 5432) + '/' + encodeURIComponent(o.database || 'postgres');
+  }
+
   // A run left 'running' by a restart cannot finish now.
   query(`UPDATE legacy_import_runs SET status = 'interrupted', finished_at = NOW() WHERE status = 'running'`).catch(() => {});
 
@@ -74,7 +83,12 @@ function register(app, deps) {
   function startRun(runId, dir, apply, only, checked) {
     const args = [path.join(TOOLS, 'legacy-sync.mjs'), '--dir=' + dir].concat(apply ? ['--apply'] : []).concat(only && only.length ? ['--only=' + only.join(',')] : [])
       .concat(checked ? ['--reuse-stage'] : []);
-    const child = spawn(process.execPath, args, { cwd: __dirname, env: process.env, windowsHide: true });
+    // The tools connect exactly as this server does (db-config.json first, then
+    // .env): VISION_DB_URL carries the pool's own settings to them.
+    const env = Object.assign({}, process.env);
+    const url = dbUrl();
+    if (url) env.VISION_DB_URL = url;
+    const child = spawn(process.execPath, args, { cwd: __dirname, env, windowsHide: true });
     job = { id: runId, child, step: 'starting', log: [], check: checked || null, results: [], warnings: [], failed: null };
     let buf = '';
     const onData = (d) => {
