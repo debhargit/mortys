@@ -102,8 +102,9 @@ export const onRequest = async (context) => {
     }
     return app.fetch(context.request, context.env, context);
   }
-  // Payables, banking and the other till-only screens open on the till.
-  const toTill = tillPageRedirect(context.request, context.env, pathname);
+  // Payables, banking and the other till-only screens open on the till (or a
+  // "till offline" page when it does not answer).
+  const toTill = await tillPageRedirect(context.request, context.env, pathname);
   if (toTill) return toTill;
   return context.next();
 };

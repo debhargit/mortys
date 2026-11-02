@@ -41,16 +41,81 @@ export async function gatewaySignature(secret, ts, method, pathAndQuery, email) 
 
 // Pages built on the till after the Cloudflare port: on the website every one
 // of them loads, then each of its API calls answers 501 "not ported". Must
-// match TILL_ONLY_PAGES in admin.html, which points the admin's own links at
-// the till; this catches the rest (bookmarks, typed addresses, history).
+// match TILL_ONLY_PAGES in admin.html. The admin's links, bookmarks, typed
+// addresses and history all come through here.
 const TILL_ONLY_PAGE = /^\/(accounting|budget|documents|receivables|payables|banking|loans-rent|report-balancing|payroll|clock|attendance|commission|training|hiring|people|franchise|franchisee|dispatch|fleet-wall|mobile|driver|cashier|warehouse|stockcash|report-planning|terminal|ai|system|security)(\.html)?\/?$/;
 
-// Returns a redirect to the same page on the till, or null.
-export function tillPageRedirect(request, env, pathname) {
+// Whether the till answers. When its tunnel is down, sending staff there shows
+// Cloudflare's bare "Error 1033" page, so every till page is checked first and,
+// if the till is unreachable, the website answers with tillOfflinePage instead.
+// An "up" answer is kept for 30 s (one check per burst of clicks); "down" is
+// never kept, so the first click after the tunnel is back goes straight through.
+const UP_FOR_MS = 30000;
+const PROBE_MS = 5000;
+const tillUpAt = {};   // origin -> when it last answered
+
+async function tillAnswers(origin) {
+  if (Date.now() - (tillUpAt[origin] || 0) < UP_FOR_MS) return true;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), PROBE_MS);
+  try {
+    const r = await fetch(new URL('/api/health', origin).href, { headers: { accept: 'application/json' }, redirect: 'manual', signal: ctl.signal });
+    if (!r.ok) return false;
+    tillUpAt[origin] = Date.now();
+    return true;
+  } catch (e) {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const PAGE_NAMES = {
+  accounting: 'Accounting', budget: 'Budget', documents: 'Document centre', receivables: 'Receivables', payables: 'Payables',
+  banking: 'Banking', 'loans-rent': 'Loans & rent', 'report-balancing': 'Balancing report', payroll: 'Payroll', clock: 'Time clock',
+  attendance: 'Attendance', commission: 'Commission', training: 'Training', hiring: 'Hiring', people: 'People & HR',
+  franchise: 'Franchise', franchisee: 'Franchisee portal', dispatch: 'Dispatch', 'fleet-wall': 'Fleet wall', mobile: 'Mobile',
+  driver: 'Driver', cashier: 'Cashier', warehouse: 'Warehouse', stockcash: 'Stock & cash', 'report-planning': 'Planning report',
+  terminal: 'Terminal', ai: 'AI assistant', system: 'System', security: 'Security',
+};
+
+// The website's own page for a till page it cannot reach. It reloads itself
+// every 20 s; the reload checks the till again and opens the page once it answers.
+export function tillOfflinePage(page) {
+  const name = page === 'admin' ? 'Purchasing' : (PAGE_NAMES[page] || page);
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>${name} · till offline</title>
+<style>
+body{margin:0;font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:#f4f6f9;color:#1f2937}
+main{max-width:560px;margin:8vh auto;padding:28px 24px;background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.08)}
+h1{font-size:22px;margin:0 0 12px}p{margin:0 0 12px}.muted{color:#6b7280;font-size:14px}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0}
+a.btn,button{font:inherit;padding:10px 16px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#1f2937;text-decoration:none;cursor:pointer}
+button.go{background:#b91c1c;border-color:#b91c1c;color:#fff}code{background:#f3f4f6;padding:1px 5px;border-radius:4px}
+</style></head><body><main>
+<h1>${name} can't be reached right now</h1>
+<p>${name} runs on the shop's till computer, and the website can't reach the till at the moment. Nothing is lost: everything is kept on the till.</p>
+<p>This page checks again by itself and opens ${name} as soon as the till answers. <span class="muted" id="t"></span></p>
+<div class="row"><button class="go" onclick="location.reload()">Try again now</button><a class="btn" href="/admin.html">Back to admin</a></div>
+<p class="muted"><b>At the shop?</b> On the till computer itself, open <code>http://localhost:3056/${page}.html</code>.</p>
+<p class="muted"><b>To bring it back:</b> the till computer must be switched on and signed in, with the <b>Vision network</b> window open. If that window was closed, ask whoever looks after the till to start it again.</p>
+</main><script>
+var s = 20, t = document.getElementById('t');
+setInterval(function () { s--; if (s <= 0) location.reload(); else t.textContent = '(next check in ' + s + ' s)'; }, 1000);
+</script></body></html>`;
+  return new Response(html, { status: 503, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'retry-after': '20' } });
+}
+
+// Returns a redirect to the same page on the till, the offline page when the
+// till does not answer, or null for anything that is not a till page.
+export async function tillPageRedirect(request, env, pathname) {
   const origin = env && env.TILL_ORIGIN;
   if (!origin || (request.method !== 'GET' && request.method !== 'HEAD')) return null;
-  const m = TILL_ONLY_PAGE.exec(pathname);
+  // /till-admin is the till's own admin.html (purchasing must be done there);
+  // the browser keeps the #tab=... part across the redirect.
+  const m = /^\/till-admin\/?$/.test(pathname) ? [pathname, 'admin'] : TILL_ONLY_PAGE.exec(pathname);
   if (!m) return null;
+  if (!(await tillAnswers(origin))) return tillOfflinePage(m[1]);
   const src = new URL(request.url);
   return Response.redirect(new URL('/' + m[1] + '.html' + src.search, origin).href, 302);
 }

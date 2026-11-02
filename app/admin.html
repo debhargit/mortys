@@ -11309,7 +11309,9 @@ var PO_VIEW_ID = null; // set when drilled into a single PO's detail
 // bills have to land in the till's database (the books), not the website's copy.
 function purchasingOnTill(panel, tab){
   if (!ON_WEBSITE) return false;
-  var href = TILL_ORIGIN + '/admin.html#tab=' + tab;
+  // Through the website's /till-admin, which shows a "till offline" page instead
+  // of Cloudflare's error when the till cannot be reached.
+  var href = '/till-admin#tab=' + tab;
   panel.innerHTML = '<div class="empty">Purchasing is done on the till, so stock and supplier bills go into the shop\'s books.<br/><br/><a class="btn ok" href="' + href + '">Open it on the till ›</a></div>';
   location.href = href;
   return true;
@@ -18501,8 +18503,12 @@ function stub(label){ return async function(panel){ panel.innerHTML = '<div clas
 // website every one of them answered "This endpoint is not ported to
 // Cloudflare yet" (payables, receivables, banking, payroll, clock, fleet,
 // warehouse...). The till has them all and is where the books are kept, so on
-// the website their links point at till.visionautosolutions.com instead --
-// staff sign in there once, with its own 30-day session. Pages the port DID
+// the website they open on till.visionautosolutions.com instead -- staff sign
+// in there once, with its own 30-day session. The links stay on the website
+// (/payables.html...): the website checks the till answers and sends the browser
+// on, or shows its own "till offline" page that retries, rather than
+// Cloudflare's bare Error 1033 when the till's tunnel is down
+// (functions/_lib/till_gateway.js). Pages the port DID
 // cover (department store, supplier management, messages, the shop) stay on
 // the website, and so do print pages (receipt, invoice, quote, pick slip),
 // which work there and need the website's own sign-in. Accounting moved to
@@ -18515,21 +18521,10 @@ var ON_WEBSITE = location.hostname !== 'till.visionautosolutions.com' &&
 var TILL_ONLY_PAGES = ['accounting', 'budget', 'documents', 'receivables', 'payables', 'banking', 'loans-rent', 'report-balancing', 'payroll',
   'clock', 'attendance', 'commission', 'training', 'hiring', 'people', 'franchise', 'franchisee', 'dispatch', 'fleet-wall', 'mobile',
   'driver', 'cashier', 'warehouse', 'stockcash', 'report-planning', 'terminal', 'ai', 'system', 'security'];
+// Left as the website's own path, so the website's check and fallback apply.
 function tillHref(href) {
-  if (!ON_WEBSITE || !href || href.charAt(0) !== '/' || href.charAt(1) === '/') return href;
-  var page = href.split(/[?#]/)[0].replace(/^\//, '').replace(/\.html$/, '');
-  return TILL_ONLY_PAGES.indexOf(page) >= 0 ? TILL_ORIGIN + href : href;
+  return href;
 }
-// Catches every other link to these pages (the Reports screen lists them too),
-// including middle-click / ctrl-click, by fixing the href just before it is used.
-if (ON_WEBSITE) ['click', 'auxclick'].forEach(function (ev) {
-  document.addEventListener(ev, function (e) {
-    var a = e.target && e.target.closest && e.target.closest('a[href]');
-    if (!a) return;
-    var h = a.getAttribute('href'), t = tillHref(h);
-    if (t !== h) a.setAttribute('href', t);
-  }, true);
-});
 
 var MODULE_GROUPS = [
   { title: '🏭 Suppliers', items: [
