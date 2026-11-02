@@ -18712,7 +18712,10 @@ async function renderModules(panel){
     var q = (document.getElementById('modFind') || {}).value || '';
     var html = '<div class="mod-wrap"><div class="mod-head"><div><h2>🧭 All modules</h2>' +
       '<p class="mod-sub">Every business module in one place. Each opens in its own tab; what you can do there depends on your role.' +
-      (menu ? ' Click ☆ on a module to pin it to Favourites.' : '') + '</p></div>' +
+      (menu ? ' Click ☆ on a module to pin it to Favourites.' : '') +
+      // The till's modules on made-up data (functions/_lib/till_gateway.js): to
+      // learn or show them, and while the till is offline. Website only.
+      (ON_WEBSITE ? ' <a href="/demo/" target="_blank" rel="noopener">▶ Demo with sample data</a>' : '') + '</p></div>' +
       (menu && can('menu.manage') ? '<button type="button" class="btn ghost" id="modSetup">🗂 Set up staff menus</button>' : '') + '</div>' +
       (menu && menu.layout ? '<p class="mod-note">This menu was set up for you' + (menu.updated_by ? ' by ' + esc(menu.updated_by) : '') + '. Ask a manager if you need something added.</p>' : '') +
       '<input class="mod-find" id="modFind" type="search" placeholder="Find a module… (e.g. payroll, bank, clearance)" value="' + esc(q) + '">';

@@ -96,7 +96,7 @@ button.go{background:#b91c1c;border-color:#b91c1c;color:#fff}code{background:#f3
 <h1>${name} can't be reached right now</h1>
 <p>${name} runs on the shop's till computer, and the website can't reach the till at the moment. Nothing is lost: everything is kept on the till.</p>
 <p>This page checks again by itself and opens ${name} as soon as the till answers. <span class="muted" id="t"></span></p>
-<div class="row"><button class="go" onclick="location.reload()">Try again now</button><a class="btn" href="/admin.html">Back to admin</a></div>
+<div class="row"><button class="go" onclick="location.reload()">Try again now</button>${page === 'admin' || NO_DEMO.has(page) ? '' : `<a class="btn" href="/demo/${page}">Look around with sample data</a>`}<a class="btn" href="/admin.html">Back to admin</a></div>
 <p class="muted"><b>At the shop?</b> On the till computer itself, open <code>http://localhost:3056/${page}.html</code>.</p>
 <p class="muted"><b>To bring it back:</b> the till computer must be switched on and signed in, with the <b>Vision network</b> window open. If that window was closed, ask whoever looks after the till to start it again.</p>
 </main><script>
@@ -106,8 +106,62 @@ setInterval(function () { s--; if (s <= 0) location.reload(); else t.textContent
   return new Response(html, { status: 503, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'retry-after': '20' } });
 }
 
+// ---------------------------------------------------------------- demo --
+// The till's pages on sample data, for when the till is offline or to show
+// someone around. /demo/<page> sets a cookie for this browser session and opens
+// the page; while it is set, the website serves the till pages itself with
+// assets/demo-mode.js first in <head>, which answers every /api/ call in the
+// browser from assets/demo-data.json (made-up data) and saves nothing.
+// /demo/leave clears it. Nothing in demo mode ever reaches the till.
+const DEMO_COOKIE = 'vision_demo';
+const inDemo = (request) => /(?:^|;\s*)vision_demo=1(?:;|$)/.test(request.headers.get('cookie') || '');
+
+function demoIndex() {
+  const links = Object.entries(PAGE_NAMES).filter(([p]) => !NO_DEMO.has(p))
+    .map(([p, n]) => `<a href="/demo/${p}">${n}</a>`).join('');
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Demo · sample data</title>
+<style>
+body{margin:0;font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:#f4f6f9;color:#1f2937}
+.bar{background:#b45309;color:#fff;font-weight:600;padding:8px 14px}
+main{max-width:760px;margin:4vh auto;padding:24px;background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.08)}
+h1{font-size:22px;margin:0 0 10px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin:18px 0}
+.grid a{display:block;padding:12px 14px;border:1px solid #e5e7eb;border-radius:8px;color:#1f2937;text-decoration:none;font-weight:600}
+.grid a:hover{border-color:#b45309;background:#fffbeb}.muted{color:#6b7280;font-size:14px}
+</style></head><body><div class="bar">DEMO · sample data. Nothing you do here is saved.</div><main>
+<h1>Look around the till's modules</h1>
+<p>These open the till's own screens on made-up sample data: a few staff, suppliers, customers, bills, invoices and a payroll run. Use them to learn your way around or to show someone, even when the till is offline.</p>
+<p class="muted">Nothing you enter is saved, and none of it is the shop's real figures. "Leave demo" on the bar goes back to the admin.</p>
+<div class="grid">${links}</div><p><a href="/demo/leave">Leave demo and go back to the admin</a></p></main></body></html>`;
+  return new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
+}
+// Till pages with no demo: sign-in-by-PIN screens and public portals.
+const NO_DEMO = new Set(['clock', 'driver', 'franchisee', 'mobile', 'fleet-wall']);
+
+// /demo, /demo/<page>, /demo/leave. Returns a Response or null.
+export function demoRoute(request, pathname) {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return null;
+  if (/^\/demo\/?$/.test(pathname)) return demoIndex();
+  if (/^\/demo\/leave\/?$/.test(pathname)) {
+    return new Response(null, { status: 302, headers: { location: '/admin.html', 'set-cookie': DEMO_COOKIE + '=; Path=/; Max-Age=0; SameSite=Lax; Secure', 'cache-control': 'no-store' } });
+  }
+  const m = /^\/demo\/([a-z-]+?)(?:\.html)?\/?$/.exec(pathname);
+  if (!m || !(m[1] in PAGE_NAMES) || NO_DEMO.has(m[1])) return null;
+  return new Response(null, { status: 302, headers: { location: '/' + m[1] + '.html', 'set-cookie': DEMO_COOKIE + '=1; Path=/; SameSite=Lax; Secure', 'cache-control': 'no-store' } });
+}
+
+// The website's own copy of a till page, with the demo script put first.
+async function demoPage(env, request, page) {
+  if (!env || !env.ASSETS) return null;
+  const r = await env.ASSETS.fetch(new Request(new URL('/' + page, request.url).href));
+  if (!r.ok) return null;
+  const html = (await r.text()).replace(/<head[^>]*>/i, (h) => h + '<script src="/assets/demo-mode.js?v=20261101"></script>');
+  return new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
+}
+
 // Returns a redirect to the same page on the till, the offline page when the
-// till does not answer, or null for anything that is not a till page.
+// till does not answer, the demo page in demo mode, or null for anything that
+// is not a till page.
 export async function tillPageRedirect(request, env, pathname) {
   const origin = env && env.TILL_ORIGIN;
   if (!origin || (request.method !== 'GET' && request.method !== 'HEAD')) return null;
@@ -115,6 +169,10 @@ export async function tillPageRedirect(request, env, pathname) {
   // the browser keeps the #tab=... part across the redirect.
   const m = /^\/till-admin\/?$/.test(pathname) ? [pathname, 'admin'] : TILL_ONLY_PAGE.exec(pathname);
   if (!m) return null;
+  if (m[1] !== 'admin' && !NO_DEMO.has(m[1]) && inDemo(request)) {
+    const demo = await demoPage(env, request, m[1]);
+    if (demo) return demo;
+  }
   if (!(await tillAnswers(origin))) return tillOfflinePage(m[1]);
   const src = new URL(request.url);
   return Response.redirect(new URL('/' + m[1] + '.html' + src.search, origin).href, 302);
