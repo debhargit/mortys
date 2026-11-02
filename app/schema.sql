@@ -7598,3 +7598,23 @@ CREATE TABLE IF NOT EXISTS hr_notes (
 );
 CREATE INDEX IF NOT EXISTS idx_hr_notes_user ON hr_notes (user_id, kind);
 CREATE INDEX IF NOT EXISTS idx_hr_notes_remind ON hr_notes (remind_at) WHERE kind = 'todo' AND done_at IS NULL AND reminded_at IS NULL;
+
+-- =============================================================================
+--  Payroll: tips, service charge, cash tips already received, and commission
+--  entered by hand (the 'commission' item only comes from commission statements)
+--
+--  payroll_items.paid_outside: money the person already has (cash tips handed
+--  to them by customers). It counts in gross pay and in each contribution it
+--  is ticked for, but is not paid again: net pay leaves it out, and the
+--  ledger posts no wages for it (only the tax on it). How each earning is
+--  taxed stays the PAYE / NIS / NHT / Ed / HEART ticks; the Payroll page sets
+--  them in one go ("like pay", "income tax only", "not taxed").
+-- =============================================================================
+ALTER TABLE payroll_items ADD COLUMN IF NOT EXISTS paid_outside BOOLEAN NOT NULL DEFAULT false;
+INSERT INTO payroll_items (code, label, kind, paye, nis, nht, ed, heart, is_system, sort) VALUES
+  ('commission_manual', 'Commission (entered by hand)',     'earning',   true,  true,  true,  true,  true,  false, 41),
+  ('tips',           'Tips (paid through the business)',     'earning',   true,  true,  true,  true,  true,  false, 41),
+  ('service_charge', 'Service charge share',                 'earning',   true,  true,  true,  true,  true,  false, 42),
+  ('tips_cash',      'Cash tips kept (already received)',    'earning',   true,  true,  true,  true,  true,  false, 43)
+ON CONFLICT (code) DO NOTHING;
+UPDATE payroll_items SET paid_outside = true WHERE code = 'tips_cash' AND NOT paid_outside;

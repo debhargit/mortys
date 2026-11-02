@@ -452,6 +452,9 @@ function register(app, deps) {
             lines.push({ a: pension ? ch.acct('pension_payable') : ch.acct('payroll_deductions_payable'), amt: -n(l.amount), party: (l.payee || who).slice(0, 41), memo: l.label });
             continue;
           }
+          // Already in the person's hand (cash tips kept): not the business's money, so no
+          // wages for it; net pay already leaves it out, and the tax on it is posted below.
+          if (l.kind === 'earning' && l.received) continue;
           if (l.kind === 'earning') lines.push({ a: acctOf[l.code] || (l.code === 'commission' ? ch.acct('commissions_payable') : contractor ? ch.acct('contract_labour') : ch.acct('wages')), amt: n(l.amount), party: who, memo: l.label });
           else lines.push({ a: acctOf[l.code] || ch.acct('payroll_deductions_payable'), amt: -n(l.amount), party: who, memo: l.label });
         }

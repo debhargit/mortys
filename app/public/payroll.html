@@ -401,11 +401,14 @@
     var ctr = sn.worker_type === 'contractor';
     var stat = ctr ? [['Contractor levy', s.levy, y.levy], ['Withholding tax', s.wht, y.wht]] : [['NIS', s.nis_ee, y.nis_ee], ['NHT', s.nht_ee, y.nht_ee], ['Education Tax', s.ed_ee, y.ed_ee], ['Income tax (PAYE)', s.paye, y.paye]];
     if (num(s.pension_ee) || num(y.pension_ee)) stat.push(['Pension', s.pension_ee, y.pension_ee]);
+    // Cash tips and the like the person already has: in gross pay, taken back out of net.
+    var got = earn.filter(function (l) { return l.received; }).reduce(function (t, l) { return t + num(l.amount); }, 0);
     return '<div class="page"><div style="display:flex;justify-content:space-between"><div><h2>' + esc(e.name) + '</h2><small>' + esc(e.address || '') + (e.trn ? ' · TRN ' + esc(e.trn) : '') + (e.nis ? ' · NIS ' + esc(e.nis) : '') + '</small></div><div style="text-align:right"><b>' + (sn.worker_type === 'contractor' ? 'PAYMENT ADVICE' : 'PAYSLIP') + '</b><br>' + esc(s.number) + (s.status === 'draft' ? ' (DRAFT)' : '') + '</div></div>' +
       '<div class="box"><b>' + esc(sn.name) + '</b>' + (sn.employee_no ? ' · #' + esc(sn.employee_no) : '') + (sn.job_title ? ' · ' + esc(sn.job_title) : '') + '<br><small>TRN ' + esc(sn.trn || '—') + ' · NIS ' + esc(sn.nis_no || '—') + ' · Period ' + esc(s.period_start) + ' to ' + esc(s.period_end) + ' · Paid ' + esc(s.pay_date) + ' by ' + esc(sn.pay_method || '') + (sn.bank_masked ? ' ' + esc(sn.bank_name || '') + ' ' + esc(sn.bank_masked) : '') + (s.cheque_number ? ' chq ' + esc(s.cheque_number) : '') + '</small></div>' +
-      '<table><thead><tr><th>Earnings</th><th class="n">Hours / qty</th><th class="n">Rate</th><th class="n">Amount</th></tr></thead><tbody>' + earn.map(function (l) { return '<tr><td>' + esc(l.label) + '</td><td class="n">' + (l.qty != null && l.code !== 'commission' && l.qty !== 1 ? l.qty : '') + '</td><td class="n">' + (l.qty !== 1 && l.rate ? J(l.rate) : '') + '</td><td class="n">' + J(l.amount) + '</td></tr>'; }).join('') + '<tr><td colspan="3"><b>Gross pay</b></td><td class="n"><b>' + J(s.gross) + '</b></td></tr></tbody></table>' +
+      '<table><thead><tr><th>Earnings</th><th class="n">Hours / qty</th><th class="n">Rate</th><th class="n">Amount</th></tr></thead><tbody>' + earn.map(function (l) { return '<tr><td>' + esc(l.label) + (l.received ? ' <small>(already received)</small>' : '') + '</td><td class="n">' + (l.qty != null && l.code !== 'commission' && l.qty !== 1 ? l.qty : '') + '</td><td class="n">' + (l.qty !== 1 && l.rate ? J(l.rate) : '') + '</td><td class="n">' + J(l.amount) + '</td></tr>'; }).join('') + '<tr><td colspan="3"><b>Gross pay</b></td><td class="n"><b>' + J(s.gross) + '</b></td></tr></tbody></table>' +
       '<table style="margin-top:8px"><thead><tr><th>Deductions</th><th class="n">This pay</th><th class="n">Year to date</th></tr></thead><tbody>' + stat.map(function (x) { return '<tr><td>' + x[0] + '</td><td class="n">' + J(x[1]) + '</td><td class="n">' + J(x[2]) + '</td></tr>'; }).join('') +
-      ded.map(function (l) { return '<tr><td>' + esc(l.label) + '</td><td class="n">' + J(l.amount) + '</td><td></td></tr>'; }).join('') + '</tbody></table>' +
+      ded.map(function (l) { return '<tr><td>' + esc(l.label) + '</td><td class="n">' + J(l.amount) + '</td><td></td></tr>'; }).join('') +
+      (got ? '<tr><td>Already received (not paid again)</td><td class="n">' + J(got) + '</td><td></td></tr>' : '') + '</tbody></table>' +
       '<div class="box" style="display:flex;justify-content:space-between;font-size:16px"><b>NET PAY</b><b>' + J(s.net) + '</b></div>' +
       '<small>Year to date: gross ' + J(y.gross) + ' · net ' + J(y.net) + ' · statutory income ' + J(y.statutory) + '.</small>' + (function () {
         var erl = s.lines.filter(function (l) { return l.kind === 'employer'; });
@@ -494,6 +497,18 @@
     ['nis_ee', 'NIS employee'], ['nis_er', 'NIS employer'], ['nis_ceiling', 'NIS wage ceiling a year (J$)'], ['nht_ee', 'NHT employee'], ['nht_er', 'NHT employer'], ['ed_ee', 'Education Tax employee'], ['ed_er', 'Education Tax employer'],
     ['heart_er', 'HEART/NSTA employer'], ['pension_cap', 'Pension tax relief cap (0.2 = 20%)'], ['min_wage_week', 'Minimum wage a 40-hour week (J$)'], ['min_wage_hours', 'Hours in the minimum-wage week'],
     ['levy_rate', 'Contractor levy (0.02 = 2%)'], ['wht_rate', 'Withholding tax (0.03 = 3%)'], ['wht_threshold', 'WHT on an invoice from (J$)'], ['wht_aggregate', 'WHT on smaller invoices adding to (J$ in 30 days)']];
+  // How an earning is taxed: the PAYE / NIS / NHT / Ed / HEART ticks, in one choice.
+  var TAX_KEYS = ['paye', 'nis', 'nht', 'ed', 'heart'];
+  var TAXED_FLAGS = { all: [true, true, true, true, true], paye: [true, false, false, false, false], none: [false, false, false, false, false] };
+  function taxedOf(i) {
+    var f = TAX_KEYS.map(function (k) { return !!i[k]; });
+    for (var t in TAXED_FLAGS) if (TAXED_FLAGS[t].join() === f.join()) return t;
+    return 'custom';
+  }
+  function taxedSelect(v, off, id) {
+    return '<select ' + (id ? 'id="' + id + '"' : 'data-taxed') + (off ? ' disabled' : '') + '>' + [['all', 'Like pay (all five)'], ['paye', 'Income tax (PAYE) only'], ['none', 'Not taxed'], ['custom', 'Pick each tax']]
+      .map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === v ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>';
+  }
   function rates() {
     Promise.all([api('/api/payroll/rates'), loadItems(), B.loadAccounts()]).then(function (r) {
       var d = r[0], c = d.current || d.rates[0] || {};
@@ -502,19 +517,35 @@
         d.rates.map(function (x) { var p = function (v) { return (num(v) * 100).toFixed(2).replace(/\.?0+$/, '') + '%'; }; return '<tr' + (x === d.current ? ' style="font-weight:600"' : '') + '><td>' + esc(x.effective_from) + (x === d.current ? ' <span class="pill ok">now</span>' : '') + '</td><td class="n">' + J(x.paye_threshold) + '</td><td class="n">' + p(x.paye_rate1) + ' / ' + p(x.paye_rate2) + ' over ' + J(x.paye_band2_from) + '</td><td class="n">' + p(x.nis_ee) + ' / ' + p(x.nis_er) + ' (' + J(x.nis_ceiling) + ')</td><td class="n">' + p(x.nht_ee) + ' / ' + p(x.nht_er) + '</td><td class="n">' + p(x.ed_ee) + ' / ' + p(x.ed_er) + '</td><td class="n">' + p(x.heart_er) + '</td><td class="n">' + (x.min_wage_week ? J(x.min_wage_week) : '') + '</td><td><small>' + esc(x.note || '') + '</small></td></tr>'; }).join('') + '</tbody></table></div>' +
         (me.can_run ? '<h2 style="margin-top:12px">Add or change rates from a date</h2><div class="grid">' + field('ef', 'Takes effect', '', 'date') + RATE_FIELDS.map(function (f) { return field('r_' + f[0], f[1], c[f[0]], 'number', ' step="any"'); }).join('') + field('rnote', 'Note (e.g. the TAJ notice)', '') + '</div><div class="controls" style="margin-top:8px"><button class="primary" id="rsv">Save rates</button></div>' : '') + '</div>' +
         '<div class="card"><h2>Earnings and deductions</h2><p class="sub">Ticks say which contributions an earning attracts, or, for something the business pays for the person, whether it is a taxable benefit. Change them only on advice (for example a tax-free allowance, or employer-paid life insurance your accountant says is taxable). "Pension relief": a deduction to an approved pension scheme that reduces income tax (with the pension %, up to the cap). The account is where it goes in the ledger: blank means Salaries and Wages for earnings, and Other Payroll Deductions Payable for deductions.</p>' +
-        '<div class="scroll"><table><thead><tr><th>Item</th><th>Type</th><th>PAYE</th><th>NIS</th><th>NHT</th><th>Ed</th><th>HEART</th><th>Pension relief</th><th>Ledger account</th><th>In use</th><th></th></tr></thead><tbody>' +
+        '<p class="sub"><b>Commission, tips, gratuity and your own kinds of pay:</b> add them below as an earning and choose how each is taxed. "Already received" is money the person already has, such as cash tips customers handed them: it is taxed as chosen and shows on the payslip, but is not paid again. Tax on tips and gratuities: check with your accountant or TAJ.</p>' +
+        '<div class="scroll"><table><thead><tr><th>Item</th><th>Type</th><th>How it is taxed</th><th>PAYE</th><th>NIS</th><th>NHT</th><th>Ed</th><th>HEART</th><th>Already received</th><th>Pension relief</th><th>Ledger account</th><th>In use</th><th></th></tr></thead><tbody>' +
         items.map(function (i) { var ck = function (k) { return '<input type="checkbox" data-k="' + k + '"' + (i[k] ? ' checked' : '') + (i.kind === 'deduction' || !me.can_run ? ' disabled' : '') + '>'; };
-          return '<tr data-it="' + esc(i.code) + '"><td><input data-k="label" value="' + esc(i.label) + '"' + (me.can_run ? '' : ' disabled') + '></td><td>' + (i.kind === 'employer' ? 'paid by the business' : i.kind) + (i.is_system ? ' <small>(worked out)</small>' : '') + '</td><td>' + ck('paye') + '</td><td>' + ck('nis') + '</td><td>' + ck('nht') + '</td><td>' + ck('ed') + '</td><td>' + ck('heart') + '</td><td>' + (i.kind === 'deduction' ? '<input type="checkbox" data-k="pension_relief"' + (i.pension_relief ? ' checked' : '') + (me.can_run ? '' : ' disabled') + '>' : '') + '</td>' +
+          return '<tr data-it="' + esc(i.code) + '"><td><input data-k="label" value="' + esc(i.label) + '"' + (me.can_run ? '' : ' disabled') + '></td><td>' + (i.kind === 'employer' ? 'paid by the business' : i.kind) + (i.is_system ? ' <small>(worked out)</small>' : '') + '</td>' +
+            '<td>' + (i.kind === 'earning' ? taxedSelect(taxedOf(i), !me.can_run) : '') + '</td><td>' + ck('paye') + '</td><td>' + ck('nis') + '</td><td>' + ck('nht') + '</td><td>' + ck('ed') + '</td><td>' + ck('heart') + '</td>' +
+            '<td>' + (i.kind === 'earning' ? '<input type="checkbox" data-k="paid_outside"' + (i.paid_outside ? ' checked' : '') + (i.is_system || !me.can_run ? ' disabled' : '') + ' title="Already in the person\'s hand (e.g. cash tips): taxed, not paid again">' : '') + '</td>' +
+            '<td>' + (i.kind === 'deduction' ? '<input type="checkbox" data-k="pension_relief"' + (i.pension_relief ? ' checked' : '') + (me.can_run ? '' : ' disabled') + '>' : '') + '</td>' +
             '<td><select data-k="gl_account_id"' + (me.can_run ? '' : ' disabled') + '><option value="">(default)</option>' + B.accounts().map(function (a) { return '<option value="' + a.id + '"' + (String(a.id) === String(i.gl_account_id) ? ' selected' : '') + '>' + esc(a.code + ' ' + a.name) + '</option>'; }).join('') + '</select></td>' +
             '<td><input type="checkbox" data-k="is_active"' + (i.is_active ? ' checked' : '') + (i.is_system || !me.can_run ? ' disabled' : '') + '></td><td>' + (me.can_run ? '<button class="sm" data-save="' + esc(i.code) + '">Save</button>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div>' +
-        (me.can_run ? '<div class="controls" style="margin-top:8px"><div><label>New item</label><input id="nl" placeholder="e.g. Uniform allowance"></div><div><label>Type</label><select id="nk"><option value="earning">Earning</option><option value="deduction">Deduction</option><option value="employer">Employer contribution</option></select></div><button id="nadd">Add</button></div>' : '') + '</div>';
+        (me.can_run ? '<div class="controls" style="margin-top:8px"><div><label>New item</label><input id="nl" placeholder="e.g. Tips from card sales, Uniform allowance"></div><div><label>Type</label><select id="nk"><option value="earning">Earning (pay)</option><option value="deduction">Deduction</option><option value="employer">Employer contribution</option></select></div>' +
+          '<div id="ntx"><label>How it is taxed</label>' + taxedSelect('all', false, 'ntaxed') + '</div><div id="nrc"><label><input type="checkbox" id="nrec"> Already received (e.g. cash tips kept)</label></div><button id="nadd">Add</button></div>' : '') + '</div>';
       if ($('#rsv')) $('#rsv').onclick = function () { var b = { effective_from: val('ef'), note: val('rnote') }; RATE_FIELDS.forEach(function (f) { b[f[0]] = val('r_' + f[0]); }); api('/api/payroll/rates', 'POST', b).then(function () { toast('Rates saved'); rates(); }).catch(fail); };
       all('[data-save]').forEach(function (b) { b.onclick = function () {
         var tr = b.closest('tr'), body = {};
         all('[data-k]', tr).forEach(function (el) { var k = el.getAttribute('data-k'); body[k] = el.type === 'checkbox' ? el.checked : el.value; });
         api('/api/payroll/items/' + encodeURIComponent(tr.getAttribute('data-it')), 'PUT', body).then(function () { toast('Saved'); }).catch(fail);
       }; });
-      if ($('#nadd')) $('#nadd').onclick = function () { api('/api/payroll/items', 'POST', { label: val('nl'), kind: val('nk') }).then(function () { rates(); }).catch(fail); };
+      // "How it is taxed" sets the five ticks; ticking one by hand shows "Pick each tax".
+      all('[data-taxed]').forEach(function (sel) {
+        var tr = sel.closest('tr');
+        sel.onchange = function () { if (sel.value === 'custom') return; var f = TAXED_FLAGS[sel.value]; TAX_KEYS.forEach(function (k, j) { $('[data-k="' + k + '"]', tr).checked = f[j]; }); };
+        TAX_KEYS.forEach(function (k) { $('[data-k="' + k + '"]', tr).addEventListener('change', function () { var o = {}; TAX_KEYS.forEach(function (x) { o[x] = $('[data-k="' + x + '"]', tr).checked; }); sel.value = taxedOf(o); }); });
+      });
+      if ($('#nk')) $('#nk').onchange = function () { var e = val('nk') === 'earning'; $('#ntx').style.display = e ? '' : 'none'; $('#nrc').style.display = e ? '' : 'none'; };
+      if ($('#nadd')) $('#nadd').onclick = function () {
+        var b = { label: val('nl'), kind: val('nk') };
+        if (b.kind === 'earning') { var f = TAXED_FLAGS[val('ntaxed')] || TAXED_FLAGS.all; TAX_KEYS.forEach(function (k, j) { b[k] = f[j]; }); b.paid_outside = $('#nrec').checked; }
+        api('/api/payroll/items', 'POST', b).then(function () { toast('Added. Set the ticks below if it is taxed some other way.'); rates(); }).catch(fail);
+      };
     }).catch(fail);
   }
 

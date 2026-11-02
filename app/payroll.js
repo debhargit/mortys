@@ -170,8 +170,10 @@ function register(app, deps) {
       const { rows: ex } = await query(`SELECT 1 FROM payroll_items WHERE code = $1`, [code]);
       if (ex.length) code = code + '_' + Date.now().toString(36).slice(-4);
       const f = (k) => (kind === 'deduction' ? false : b[k] !== false);
-      await query(`INSERT INTO payroll_items (code, label, kind, paye, nis, nht, ed, heart, gl_account_id, sort) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-        [code, label, kind, kind === 'employer' ? !!b.paye : f('paye'), kind === 'employer' ? !!b.nis : f('nis'), kind === 'employer' ? !!b.nht : f('nht'), kind === 'employer' ? !!b.ed : f('ed'), kind === 'employer' ? !!b.heart : f('heart'), parseInt(b.gl_account_id, 10) || null, kind === 'deduction' ? 140 : kind === 'employer' ? 210 : 70]);
+      // paid_outside: an earning the person already has (cash tips kept): taxed as ticked, not paid again.
+      await query(`INSERT INTO payroll_items (code, label, kind, paye, nis, nht, ed, heart, gl_account_id, sort, paid_outside) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [code, label, kind, kind === 'employer' ? !!b.paye : f('paye'), kind === 'employer' ? !!b.nis : f('nis'), kind === 'employer' ? !!b.nht : f('nht'), kind === 'employer' ? !!b.ed : f('ed'), kind === 'employer' ? !!b.heart : f('heart'), parseInt(b.gl_account_id, 10) || null, kind === 'deduction' ? 140 : kind === 'employer' ? 210 : 70,
+          kind === 'earning' && !!b.paid_outside]);
       res.json({ ok: true, code });
     } catch (e) { fail(res, e); }
   });
@@ -182,9 +184,11 @@ function register(app, deps) {
       if (!rows.length) throw httpError(404, 'Not found');
       const it = rows[0], ded = it.kind === 'deduction';
       const flag = (k) => (ded ? false : (k in b ? !!b[k] : it[k]));
-      await query(`UPDATE payroll_items SET label = $2, paye = $3, nis = $4, nht = $5, ed = $6, heart = $7, gl_account_id = $8, is_active = $9, pension_relief = $10 WHERE code = $1`,
+      // Worked-out items (basic pay, overtime...) are always paid through payroll.
+      const outside = it.kind === 'earning' && !it.is_system && 'paid_outside' in b ? !!b.paid_outside : it.paid_outside;
+      await query(`UPDATE payroll_items SET label = $2, paye = $3, nis = $4, nht = $5, ed = $6, heart = $7, gl_account_id = $8, is_active = $9, pension_relief = $10, paid_outside = $11 WHERE code = $1`,
         [it.code, String(b.label || it.label).trim().slice(0, 60), flag('paye'), flag('nis'), flag('nht'), flag('ed'), flag('heart'),
-          'gl_account_id' in b ? (parseInt(b.gl_account_id, 10) || null) : it.gl_account_id, it.is_system ? true : ('is_active' in b ? !!b.is_active : it.is_active), ded && 'pension_relief' in b ? !!b.pension_relief : it.pension_relief]);
+          'gl_account_id' in b ? (parseInt(b.gl_account_id, 10) || null) : it.gl_account_id, it.is_system ? true : ('is_active' in b ? !!b.is_active : it.is_active), ded && 'pension_relief' in b ? !!b.pension_relief : it.pension_relief, outside]);
       res.json({ ok: true });
     } catch (e) { fail(res, e); }
   });
@@ -502,6 +506,8 @@ function register(app, deps) {
     const gross = sum(earn), bPaye = base('paye'), bNis = base('nis'), bNht = base('nht'), bEd = base('ed'), bHeart = base('heart');
     const cashPaye = Math.max(0, sum(earn.filter((l) => flag(l, 'paye'))));   // pensionable pay
     const other_ded0 = sum(ded), er_benefits = sum(er), taxable_benefits = sum(er.filter((l) => flag(l, 'paye')));
+    // Already in the person's hand (cash tips kept): in gross and taxed as ticked, not paid again.
+    const received = sum(earn.filter((l) => items[l.code] && items[l.code].paid_outside));
     // A contractor is self-employed: no PAYE / NIS / NHT / Education Tax / HEART.
     // Contractor levy on construction, haulage and tillage work; withholding tax
     // on specified services when the business is a withholding agent.
@@ -516,7 +522,7 @@ function register(app, deps) {
       }
       wht = r2(wht);
       const z = { statutory: 0, nis_ee: 0, nis_er: 0, nht_ee: 0, nht_er: 0, ed_ee: 0, ed_er: 0, heart_er: 0, paye: 0, pension_ee: 0, pension_er: 0 };
-      return Object.assign(z, { gross, levy, wht, other_ded: other_ded0, net: r2(gross - levy - wht - other_ded0), er_benefits, taxable_benefits: 0 });
+      return Object.assign(z, { gross, levy, wht, other_ded: other_ded0, net: r2(gross - levy - wht - other_ded0 - received), er_benefits, taxable_benefits: 0 });
     }
     const pension_ee = r2(cashPaye * n(emp.pension_ee_pct) / 100);
     const pension_er = r2(cashPaye * n(emp.pension_er_pct) / 100);
@@ -537,7 +543,7 @@ function register(app, deps) {
     const thr = (n(rt.paye_threshold) + n(emp.extra_threshold)) / P, band = n(rt.paye_band2_from) / P;
     const paye = emp.paye_exempt ? 0 : r2(n(rt.paye_rate1) * Math.max(0, Math.min(statutory, band) - thr) + n(rt.paye_rate2) * Math.max(0, statutory - Math.max(band, thr)));
     const other_ded = other_ded0;
-    const net = r2(gross - nis_ee - nht_ee - ed_ee - paye - pension_ee - other_ded);
+    const net = r2(gross - nis_ee - nht_ee - ed_ee - paye - pension_ee - other_ded - received);
     return { gross, statutory, nis_ee, nis_er, nht_ee, nht_er, ed_ee, ed_er, heart_er, paye, pension_ee, pension_er, levy: 0, wht: 0, other_ded, net, er_benefits, taxable_benefits };
   }
 
@@ -745,6 +751,8 @@ function register(app, deps) {
       lines = b.lines; warnings = b.warnings; cids = b.commissionIds; snapshot = b.snapshot;
     }
     const v = compute(lines, emp, rt, PERIODS[run.frequency], s, items);
+    // The payslip and the ledger read this from the line, so a later change to the item leaves this slip as worked out.
+    for (const l of lines) { if (l.kind === 'earning' && items[l.code] && items[l.code].paid_outside) l.received = true; else delete l.received; }
     warnings = warnings.filter((w) => !/^Net pay is below/.test(w));
     if (v.net < 0) warnings.push('Net pay is below zero: reduce the deductions');
     await query(`UPDATE payroll_slips SET lines = $2, warnings = $3, commission_ids = $4, snapshot = $5, edited = $6, ${STAT.map((k, i) => k + ' = $' + (i + 7)).join(', ')} WHERE id = $1`,
@@ -1102,7 +1110,8 @@ function register(app, deps) {
         const text = [emp.name + ' - payslip ' + run.number, 'Period ' + sl.period_start + ' to ' + sl.period_end + ', paid ' + sl.pay_date, '',
           ...sl.lines.map((l) => (l.kind === 'deduction' ? '  less ' : '  ') + l.label + ': ' + J(l.amount)),
           '', 'Gross pay: ' + J(sl.gross), 'NIS: ' + J(sl.nis_ee), 'NHT: ' + J(sl.nht_ee), 'Education Tax: ' + J(sl.ed_ee), 'Income tax (PAYE): ' + J(sl.paye),
-          ...(n(sl.pension_ee) ? ['Pension: ' + J(sl.pension_ee)] : []), ...(n(sl.levy) ? ['Contractor levy: ' + J(sl.levy)] : []), ...(n(sl.wht) ? ['Withholding tax: ' + J(sl.wht)] : []), 'NET PAY: ' + J(sl.net), '', 'Year to date: gross ' + J(v.ytd.gross) + ', PAYE ' + J(v.ytd.paye) + ', net ' + J(v.ytd.net)].join('\n');
+          ...(n(sl.pension_ee) ? ['Pension: ' + J(sl.pension_ee)] : []), ...(n(sl.levy) ? ['Contractor levy: ' + J(sl.levy)] : []), ...(n(sl.wht) ? ['Withholding tax: ' + J(sl.wht)] : []),
+          ...((sl.lines || []).some((l) => l.received) ? ['Already received, not paid again (e.g. cash tips): ' + J((sl.lines || []).filter((l) => l.received).reduce((t, l) => t + n(l.amount), 0))] : []), 'NET PAY: ' + J(sl.net), '', 'Year to date: gross ' + J(v.ytd.gross) + ', PAYE ' + J(v.ytd.paye) + ', net ' + J(v.ytd.net)].join('\n');
         try { await mailer.sendEmail({ to, subject: 'Your payslip ' + sl.pay_date, text }); sent++; } catch (_) { skipped++; }
       }
       res.json({ ok: true, sent, skipped });
