@@ -1002,6 +1002,15 @@ var CURRENT_ADMIN_NAME = null; // display name (or email) of the signed-in admin
 var MY_PERMS = {};
 var MY_PERMS_FULL = true;
 function can(cap){ return MY_PERMS_FULL || MY_PERMS[cap] !== false; }
+// Whether each POS rep may take payment (rep id -> false when not), from
+// /api/admin/pos/reps. A ticket credited to a rep who may not is saved as an
+// order for a cashier, whoever is signed in.
+var POS_REP_PAYS = {};
+function posTakesPaymentHere(){
+  if (!can('pos.finalise_invoice')) return false;
+  var r = POS.rep;
+  return !(r && typeof r.id === 'number' && POS_REP_PAYS[r.id] === false);
+}
 // Sidebar items a cashier account doesn't see. Matches the endpoints gated
 // by requireManager() in server.js: staff/supplier management, purchase
 // orders, coupons, and marketing are all manager-rate financial/roster
@@ -4493,6 +4502,8 @@ async function renderPOS(panel){
     var repsRes = await api('/api/admin/pos/reps');
     reps = repsRes.reps || [];
     myRepId = repsRes.me_rep_id || null;
+    POS_REP_PAYS = {};
+    reps.forEach(function(r){ if (r.takes_payment === false) POS_REP_PAYS[r.id] = false; });
   } catch (_) {}
   // The signed-in user has no staff/mechanic row, so the server can't match
   // them to a rep. Add them to the picker anyway with a sentinel id ('self')
@@ -5816,11 +5827,11 @@ async function renderPOS(panel){
       co.disabled = unpriced > 0 || !POS.cart.length;
       co.style.opacity = co.disabled ? '.45' : '1';
       co.style.cursor = co.disabled ? 'not-allowed' : 'pointer';
-      var asOrder = !can('pos.finalise_invoice');
+      var asOrder = !posTakesPaymentHere();
       co.innerHTML = (asOrder ? '➕ SAVE ORDER' : 'CHECKOUT') + ' <small style="opacity:.7;font-weight:600">F9</small>';
       co.title = unpriced > 0
         ? 'Enter a price on every line to ' + (asOrder ? 'save the order' : 'complete a sale')
-        : (asOrder ? 'Save this cart as an order for a cashier to take payment' : '');
+        : (asOrder ? (can('pos.finalise_invoice') && POS.rep ? POS.rep.name + ' does not take payment: this saves the ticket as an order for a cashier' : 'Save this cart as an order for a cashier to take payment') : '');
     }
     var qb = document.getElementById('posSaveQuote');
     if (qb){
@@ -6195,6 +6206,7 @@ async function renderPOS(panel){
     var m = reps.find(function(x){ return String(x.id) === String(raw); });
     POS.rep = m ? { id: m.id, name: m.name } : null;
     posSaveState();
+    refreshBar();   // CHECKOUT or SAVE ORDER depends on who is selling
   });
   // PIN sign-in: identifies whoever is standing at the till and credits the
   // ticket to them. rep_id comes back from the server already resolved to the
@@ -6714,7 +6726,9 @@ async function renderPOS(panel){
     // Operators without pos.finalise_invoice don't ring the sale -- they save
     // an order and a cashier takes payment / mints the invoice.
     if (POS_DEPT && POS_DEPT.general && POS.collectAt) return posSaveCartAsOrder(refreshBar);
-    if (!can('pos.finalise_invoice')) return posSaveCartAsOrder(refreshBar);
+    // So do tickets credited to a sales rep who does not take payment, even
+    // when the person signed in could.
+    if (!posTakesPaymentHere()) return posSaveCartAsOrder(refreshBar);
     openTenderModal(refreshBar);
   });
   document.getElementById('posSaveQuote').addEventListener('click', function(){ if (!posRequireCustomer()) return; posSaveCartAsQuote(refreshBar); });

@@ -7633,3 +7633,18 @@ UPDATE payroll_items SET paid_outside = true WHERE code = 'tips_cash' AND NOT pa
 -- =============================================================================
 ALTER TABLE user_categories ADD COLUMN IF NOT EXISTS max_discount_pct NUMERIC(5,2);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_discount_limit_pct NUMERIC(5,2);
+
+-- =============================================================================
+--  POS: the Cashier group takes payment
+--
+--  A ticket whose seller may not take payment at the POS (pos.finalise_invoice)
+--  is saved as an order for a cashier (admin.html posTakesPaymentHere; the
+--  rep list says who may, /api/admin/pos/reps takes_payment). The Cashier
+--  group turns both payment permissions on, so someone in Sales rep and
+--  Cashier still takes payment if Sales rep turns them off. Only when the
+--  group has not set them itself.
+-- =============================================================================
+UPDATE user_categories SET perms = COALESCE(perms, '{}'::jsonb) || '{"pos.finalise_invoice": true}'::jsonb
+ WHERE code = 'cashier' AND NOT (COALESCE(perms, '{}'::jsonb) ? 'pos.finalise_invoice');
+UPDATE user_categories SET perms = COALESCE(perms, '{}'::jsonb) || '{"cashier.access": true}'::jsonb
+ WHERE code = 'cashier' AND NOT (COALESCE(perms, '{}'::jsonb) ? 'cashier.access');

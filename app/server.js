@@ -8787,7 +8787,7 @@ app.get('/api/admin/pos/reps', requireAdmin, async (req, res) => {
   // user. Staff carrying no category at all are still offered, so a shop that
   // has not sorted its roster yet is not left with an empty picker.
   const { rows } = await query(
-    `SELECT m.id, m.user_id, m.name, m.role, m.email
+    `SELECT m.id, m.user_id, m.name, m.role, m.email, COALESCE(m.is_freelance, false) AS is_freelance
        FROM mechanics m
       WHERE m.is_active = true
         AND (
@@ -8823,10 +8823,20 @@ app.get('/api/admin/pos/reps', requireAdmin, async (req, res) => {
     meRepId = hit ? hit.id : null;
   }
 
+  // takes_payment: whether the person may take payment at the POS
+  // (pos.finalise_invoice). When the rep picked as the seller may not, the till
+  // saves the ticket as an order for a cashier, even if whoever is signed in
+  // could ring it. A rep with no staff login (or a freelance rep) never can.
+  const pays = {};
+  for (const r of rows) {
+    if (!r.user_id || r.is_freelance) { pays[r.id] = false; continue; }
+    const st = await userPermState(r.user_id);
+    pays[r.id] = !!(st.full || st.perms['pos.finalise_invoice'] !== false);
+  }
   // email was only needed for the match above; it is not part of this
   // endpoint's contract and the picker has no use for it.
   res.json({
-    reps: rows.map((r) => ({ id: r.id, user_id: r.user_id, name: r.name, role: r.role })),
+    reps: rows.map((r) => ({ id: r.id, user_id: r.user_id, name: r.name, role: r.role, takes_payment: pays[r.id] })),
     me_rep_id: meRepId,
   });
 });

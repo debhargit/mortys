@@ -147,6 +147,12 @@ function register(app, deps) {
   app.use('/api/admin/pos/sale', async (req, res, next) => {
     if (req.method !== 'POST' || (req.body && req.body.dry_run === true)) return next();
     try {
+      // Someone who does not take payment saves an order instead (the till does
+      // this itself; this stops a sale posted straight at the API). Taking
+      // payment on a saved order replays the sale without passing through here.
+      if (!(await userCan(req, 'pos.finalise_invoice'))) {
+        return res.status(403).json({ error: 'You do not take payment at the till: save the ticket as an order and a cashier takes payment.', save_as_order: true });
+      }
       const st = await stationOf(req);
       if (!st) {
         // Unbound device (the shared counter PC): its sales belong to the default
