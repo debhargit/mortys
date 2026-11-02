@@ -21,6 +21,11 @@ const flag = (name) => argv.find((a) => a.startsWith(`--${name}=`))?.split('=').
 const DIR = flag('dir') || ROOT;
 const ONLY = flag('only')?.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
 
+// The October 2026 exports had some columns renamed by hand (PART NAME, BRAND,
+// CUSTOMER...); a straight export from the legacy program keeps its own field
+// names (DESCR1, CATEGORY, CL_NAME...). Each field takes whichever is there.
+const either = (...v) => v.find((x) => x !== undefined);
+
 // source file -> { table, cols, pick(record) -> array in cols order }
 // `cols` deliberately omits src_line; it is appended by the runner.
 const SPECS = {
@@ -29,8 +34,8 @@ const SPECS = {
     cols: ['sku', 'location', 'part_name', 'descr2', 'quantity', 'min_lev', 'max_lev', 'cost', 'price',
       'wholeprice', 'margin', 'unit', 'brand', 'model', 'supplier', 'taxcode', 'txrate', 'active',
       'type', 'receiveqty', 'soldqty', 'ini_date', 'commish', 'discount'],
-    pick: (r) => [r.SKU, r.LOCATION, r['PART NAME'], r.DESCR2, r.QUANTITY, r.MIN_LEV, r.MAX_LEV, r.COST,
-      r.PRICE, r.WHOLEPRICE, r.MARGIN, r.UNIT, r.BRAND, r.MODEL, r.SUPPLIER, r.TAXCODE, r.TXRATE,
+    pick: (r) => [r.SKU, r.LOCATION, either(r['PART NAME'], r.DESCR1), r.DESCR2, r.QUANTITY, r.MIN_LEV, r.MAX_LEV, r.COST,
+      r.PRICE, r.WHOLEPRICE, r.MARGIN, r.UNIT, either(r.BRAND, r.CATEGORY), r.MODEL, r.SUPPLIER, r.TAXCODE, r.TXRATE,
       r.ACTIVE, r.TYPE, r.RECEIVEQTY, r.SOLDQTY, r.INI_DATE, r.COMMISH, r.DISCOUNT],
   },
   INVOICE: {
@@ -39,8 +44,8 @@ const SPECS = {
       'phone', 'reference', 'sub_total', 'tax', 'total', 'total_paid', 'status', 'taxable', 'pricing',
       'cred_terms', 'labour', 'tranno', 'cl_number', 'cr_number', 'credit', 'app_user', 'change_due',
       'reason', 'receipt', 'tend'],
-    pick: (r) => [r.INV_NUMBER, r.INV_DATE, r.INV_TIME, r.SALESPERSN, r.CUSTOMER, r.ADDRESS1, r.ADDRESS2,
-      r.PHONE, r.REFERENCE, r.SUB_TOTAL, r.TAX, r.TOTAL, r.TOTAL_PAID, r.STATUS, r.TAXABLE, r.PRICING,
+    pick: (r) => [r.INV_NUMBER, r.INV_DATE, r.INV_TIME, r.SALESPERSN, either(r.CUSTOMER, r.CL_NAME), either(r.ADDRESS1, r.CL_ADDR1), either(r.ADDRESS2, r.CL_ADDR2),
+      either(r.PHONE, r.CL_PHONE), r.REFERENCE, r.SUB_TOTAL, r.TAX, r.TOTAL, r.TOTAL_PAID, r.STATUS, r.TAXABLE, r.PRICING,
       r.CRED_TERMS, r.LABOUR, r.TRANNO, r.CL_NUMBER, r.CR_NUMBER, r.CREDIT, r.USER, r.CHANGE,
       r.REASON, r.RECEIPT, r.TEND],
   },
@@ -50,8 +55,8 @@ const SPECS = {
       'amount', 'ddate', 'salespersn', 'det_time', 'taxamt', 'status', 'cost', 'customer', 'txrate',
       'tranno', 'cr_number', 'sprice', 'app_user'],
     // NB: the column literally named UNIT holds the unit PRICE, not a UOM.
-    pick: (r) => [r.INV_NUMBER, r.LIN_NUMBER, r.SKU, r['PART NAME'], r.QUANTITY, r.UNIT, r.DISC, r.TAX,
-      r.AMOUNT, r.DDATE, r.SALESPERSN, r.DET_TIME, r.TAXAMT, r.STATUS, r.COST, r.CUSTOMER, r.TXRATE,
+    pick: (r) => [r.INV_NUMBER, r.LIN_NUMBER, r.SKU, either(r['PART NAME'], r.DESC), r.QUANTITY, r.UNIT, r.DISC, r.TAX,
+      r.AMOUNT, r.DDATE, r.SALESPERSN, r.DET_TIME, r.TAXAMT, r.STATUS, r.COST, either(r.CUSTOMER, r.CL_NAME), r.TXRATE,
       r.TRANNO, r.CR_NUMBER, r.SPRICE, r.USER],
   },
   INVPAY: {
@@ -66,7 +71,7 @@ const SPECS = {
     cols: ['sku', 'supplier', 'rec_date', 'qty', 'cost', 'lcost', 'price', 'reference', 'sub_total',
       'txrate', 'total', 'total_paid', 'pay_date', 'orderby', 'lin_number', 'descr', 'unit', 'disc',
       'tax', 'det_time', 'salespersn', 'app_user'],
-    pick: (r) => [r.SKU, r.SUPPLIER, r.REC_DATE, r.QTY, r.COST, r.LCOST, r.PRICE, r.REFERENCE,
+    pick: (r) => [r.SKU, r.SUPPLIER, r.REC_DATE, r.QTY, either(r.COST, r.PCOST), r.LCOST, either(r.PRICE, r.LPRICE), r.REFERENCE,
       r.SUB_TOTAL, r.TXRATE, r.TOTAL, r.TOTAL_PAID, r.PAY_DATE, r.ORDERBY, r.LIN_NUMBER, r.DESC,
       r.RATE, r.DISC, r.TAX, r.DET_TIME, r.SALESPERSN, r.USER],
   },
@@ -75,10 +80,16 @@ const SPECS = {
 // Positional file overrides, in SPECS order, for callers that pass paths.
 const NAMES = Object.keys(SPECS);
 const positional = argv.filter((a) => !a.startsWith('--'));
+// The file name in any case (the legacy program writes invpay.csv as well as INVPAY.csv).
 const pathFor = (name) => {
   const i = NAMES.indexOf(name);
-  return positional[i] || path.join(DIR, `${name}.csv`);
+  if (positional[i]) return positional[i];
+  const hit = fs.existsSync(DIR) && fs.readdirSync(DIR).find((f) => f.toUpperCase() === name + '.CSV');
+  return path.join(DIR, hit || `${name}.csv`);
 };
+// Excel stops a sheet at 1,048,576 rows (header + 1,048,575). A file saved
+// through Excel with exactly that many rows has almost certainly lost the rest.
+const EXCEL_ROWS = 1048575;
 
 const targets = (ONLY || NAMES).filter((n) => {
   if (!SPECS[n]) { console.error(`unknown source: ${n}`); process.exit(1); }
@@ -115,6 +126,12 @@ try {
     const n = await copyInto(spec.table, cols, rows());
     const secs = (Date.now() - t0) / 1000;
     console.log(`${fmt(n)} rows in ${secs.toFixed(1)}s`);
+    if (n >= EXCEL_ROWS - 10 && n <= EXCEL_ROWS) {
+      console.log(`  ! ${name} has ${fmt(n)} rows: Excel's limit. The file was probably cut short when saved through Excel;`
+        + ' export it straight from the legacy program (or with tools/dbf2csv.mjs) to get the rest.');
+      console.log('@@warn ' + JSON.stringify({ file: name, rows: n, reason: 'excel-limit' }));
+    }
+    console.log('@@staged ' + JSON.stringify({ file: name, rows: n, path: file }));
   }
 
   console.log('\nstaged row counts:');

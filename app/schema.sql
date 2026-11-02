@@ -7648,3 +7648,24 @@ UPDATE user_categories SET perms = COALESCE(perms, '{}'::jsonb) || '{"pos.finali
  WHERE code = 'cashier' AND NOT (COALESCE(perms, '{}'::jsonb) ? 'pos.finalise_invoice');
 UPDATE user_categories SET perms = COALESCE(perms, '{}'::jsonb) || '{"cashier.access": true}'::jsonb
  WHERE code = 'cashier' AND NOT (COALESCE(perms, '{}'::jsonb) ? 'cashier.access');
+-- =============================================================================
+--  Import from the legacy program (legacy-import.js, legacy-import.html)
+--
+--  One row per Check or Import of the legacy CSV exports: the folder and files,
+--  what the check found, what each step added, warnings (a file cut short by
+--  Excel) and the end of the log.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS legacy_import_runs (
+  id            SERIAL PRIMARY KEY,
+  mode          TEXT NOT NULL,                 -- 'check' | 'import'
+  folder        TEXT NOT NULL,
+  files         JSONB,
+  status        TEXT NOT NULL DEFAULT 'running',   -- running | done | failed | interrupted
+  check_result  JSONB,
+  results       JSONB,
+  warnings      JSONB,
+  log_tail      TEXT,
+  started_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  started_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  finished_at   TIMESTAMPTZ
+);

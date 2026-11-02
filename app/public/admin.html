@@ -18731,7 +18731,7 @@ var ON_WEBSITE = location.hostname !== 'till.visionautosolutions.com' &&
   /(^|\.)visionautosolutions\.(com|pages\.dev)$/.test(location.hostname);
 var TILL_ONLY_PAGES = ['accounting', 'budget', 'documents', 'receivables', 'payables', 'banking', 'loans-rent', 'report-balancing', 'payroll',
   'clock', 'attendance', 'commission', 'training', 'hiring', 'people', 'franchise', 'franchisee', 'dispatch', 'fleet-wall', 'mobile',
-  'driver', 'cashier', 'warehouse', 'stockcash', 'report-planning', 'terminal', 'ai', 'system', 'security'];
+  'driver', 'cashier', 'warehouse', 'stockcash', 'report-planning', 'terminal', 'ai', 'system', 'security', 'legacy-import'];
 // Left as the website's own path, so the website's check and fallback apply.
 function tillHref(href) {
   return href;
@@ -18797,6 +18797,7 @@ var MODULE_GROUPS = [
   { title: '🛡 Security and system', items: [
     { href: '/system.html',      icon: '🛡', name: 'System management', blurb: 'Audit, security, threats, network, help desk, equipment', key: 'system' },
     { href: '/security.html',    icon: '🔒', name: 'Security and audit log', blurb: 'Lockouts, 2-step sign-in, audit trail' },
+    { href: '/legacy-import.html', icon: '📥', name: 'Import from the old system', blurb: 'Bring across the old program’s exports: stock, invoices, payments, stock received' },
   ]},
 ];
 var MODULES_CSS_DONE = false;

@@ -37,6 +37,7 @@
     '/ai.html': ['🤖', 'Customers', 'AI parts assistant', 'Counter and phone assistant: conversations, hand-overs and settings.', '#6d28d9', 'ai-assistant'],
     '/system.html': ['🛡', 'Security and system', 'System management', 'Audit, security, threats, the network map, help desk and equipment.', '#1e293b', 'settings-security'],
     '/security.html': ['🔒', 'Security and system', 'Security and audit log', 'Lockouts, 2-step sign-in and the audit trail.', '#1e293b', 'settings-security'],
+    '/legacy-import.html': ['📥', 'Security and system', 'Import from the old system', 'Check and bring across the old program’s exports: stock, invoices, payments and stock received.', '#1e293b', 'settings-security'],
   };
   var path = location.pathname.replace(/\/+$/, '') || '/';
   if (!M[path]) return;

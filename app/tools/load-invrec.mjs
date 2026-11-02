@@ -35,6 +35,10 @@
 import { pool, fmt, ensureLegacySchema } from './lib/db.mjs';
 
 const REPLACE = process.argv.includes('--replace');
+// --new-only (the import page): only receipts (supplier, date, reference) the
+// system does not have yet, numbered after that day's existing LEG- orders.
+// Orders already loaded, and their lines, are left exactly as they are.
+const NEW_ONLY = process.argv.includes('--new-only');
 const QTY_LIMIT = 100000;
 
 const db = pool(2);
@@ -87,8 +91,8 @@ try {
   console.log(`  skipped: price/cost revisions (qty=0) ${fmt(k.revisions)}, corrupt qty ${fmt(k.corrupt)}`);
   console.log(`  unusable REC_DATE: ${fmt(k.no_date)}  |  no SUPPLIER: ${fmt(k.no_supplier)}`);
 
-  await c.query(`DELETE FROM legacy_import_rejects WHERE source = 'INVREC'`);
-  await c.query(`
+  if (!NEW_ONLY) await c.query(`DELETE FROM legacy_import_rejects WHERE source = 'INVREC'`);
+  if (!NEW_ONLY) await c.query(`
     INSERT INTO legacy_import_rejects (source, reason, key1, key2, payload)
     SELECT 'INVREC',
            CASE WHEN row_kind = 'price-revision'
@@ -121,6 +125,18 @@ try {
                                          ORDER BY g.supplier_name, g.reference))::text, 4, '0') AS po_number,
            s.id AS supplier_id
       FROM g LEFT JOIN suppliers s ON lower(btrim(s.name)) = lower(g.supplier_name)`);
+
+  if (NEW_ONLY) {
+    const known = await c.query(`DELETE FROM _po g WHERE EXISTS (SELECT 1 FROM purchase_orders p WHERE p.legacy_key = g.legacy_key)`);
+    console.log(`receipts already in the system (left alone): ${fmt(known.rowCount)}`);
+    await c.query(`
+      WITH n AS (SELECT legacy_key, row_number() OVER (PARTITION BY rec_day ORDER BY supplier_name, reference) AS rn FROM _po),
+           day AS (SELECT legacy_key, 'LEG-' || coalesce(to_char(rec_day, 'YYYYMMDD'), 'UNDATED') || '-' AS prefix FROM _po)
+      UPDATE _po g
+         SET po_number = d.prefix || lpad(((SELECT count(*) FROM purchase_orders p WHERE p.po_number LIKE d.prefix || '%') + n.rn)::text, 4, '0')
+        FROM n JOIN day d USING (legacy_key)
+       WHERE n.legacy_key = g.legacy_key`);
+  }
 
   const { rows: [g] } = await c.query(`
     SELECT count(*)::int                                        AS orders,
@@ -189,6 +205,11 @@ try {
      WHERE r.row_kind = 'receipt'`);
 
   await c.query('COMMIT');
+  if (NEW_ONLY) {
+    console.log(`\nreceipts added: ${fmt(insPo.rowCount)}  |  received lines: ${fmt(insItems.rowCount)}`);
+    console.log('@@result ' + JSON.stringify({ step: 'invrec', added: insPo.rowCount, lines: insItems.rowCount }));
+    process.exit(0);
+  }
 
   const { rows: [t] } = await c.query(`
     SELECT (SELECT count(*) FROM purchase_orders)::int                            AS orders,

@@ -31,6 +31,11 @@
 import { pool, fmt, ensureLegacySchema } from './lib/db.mjs';
 
 const REPLACE = process.argv.includes('--replace');
+// --new-only (the import page): add only invoices the system does not have --
+// by INV_NUMBER and TRANNO, since the legacy program reused invoice numbers --
+// and on the ones it has, bring across only what has been paid since (account
+// invoices paid later). Nothing else on an existing sale is touched.
+const NEW_ONLY = process.argv.includes('--new-only');
 
 const db = pool(2);
 const c = await db.connect();
@@ -205,6 +210,50 @@ try {
            jsonb_build_object('src_line', src_line, 'tranno', legacy_tranno,
                               'created_at', created_at, 'total', total)
       FROM _sale WHERE dup_n > 1`);
+
+  if (NEW_ONLY) {
+    await c.query(`CREATE TEMP TABLE _known AS SELECT DISTINCT invoice_number, legacy_tranno FROM pos_sales WHERE invoice_number IS NOT NULL`);
+    await c.query('CREATE INDEX ON _known (invoice_number, legacy_tranno)');
+    // A new invoice whose number is already a receipt (the counter was reset)
+    // takes -L<line>, like the -2/-3 suffixes the first load gave collisions.
+    const added = await c.query(`
+      INSERT INTO pos_sales (
+        receipt_number, invoice_number, legacy_tranno, created_at,
+        cashier_id, cashier_name, customer_id, customer_name, customer_phone,
+        sales_rep_id, sales_rep_name,
+        subtotal_usd, tax_usd, total_usd, amount_paid_usd, balance_due_usd,
+        amount_tendered, change_due, payment_status, tax_exempt, reference,
+        due_date, notes, voided, fulfilment)
+      SELECT CASE WHEN EXISTS (SELECT 1 FROM pos_sales p WHERE p.receipt_number = s.receipt_number)
+                  THEN s.invoice_number || '-L' || s.src_line ELSE s.receipt_number END,
+             s.invoice_number, s.legacy_tranno, s.created_at,
+             s.cashier_id, s.cashier_name, s.customer_id, s.customer_name, s.customer_phone,
+             s.sales_rep_id, s.sales_rep_name,
+             s.subtotal, s.tax, s.total, s.paid, s.balance_due,
+             s.tend, s.change_due, s.payment_status, s.tax_exempt, s.reference,
+             s.due_date, s.notes, false, 'pickup'
+        FROM _sale s
+       WHERE s.invoice_number NOT LIKE 'LEGACY-%'
+         AND NOT EXISTS (SELECT 1 FROM _known k WHERE k.invoice_number = s.invoice_number
+                                                  AND k.legacy_tranno IS NOT DISTINCT FROM s.legacy_tranno)
+      ON CONFLICT (receipt_number) DO NOTHING`);
+    // Only where the (number, TRANNO) pair is on one row of the file: a few pairs
+    // repeat with different amounts, and matching those crosswise would flip
+    // the amounts paid back and forth on every import.
+    const paid = await c.query(`
+      UPDATE pos_sales p
+         SET amount_paid_usd = s.paid, balance_due_usd = s.balance_due, payment_status = s.payment_status
+        FROM _sale s
+       WHERE p.legacy_tranno IS NOT NULL AND p.invoice_number = s.invoice_number AND p.legacy_tranno = s.legacy_tranno
+         AND (s.invoice_number, s.legacy_tranno) IN (SELECT invoice_number, legacy_tranno FROM _sale GROUP BY 1, 2 HAVING count(*) = 1)
+         AND (p.invoice_number, p.legacy_tranno) IN (SELECT invoice_number, legacy_tranno FROM pos_sales WHERE legacy_tranno IS NOT NULL
+                                                      AND invoice_number IN (SELECT invoice_number FROM _sale) GROUP BY 1, 2 HAVING count(*) = 1)
+         AND (p.amount_paid_usd IS DISTINCT FROM s.paid OR p.balance_due_usd IS DISTINCT FROM s.balance_due)`);
+    await c.query('COMMIT');
+    console.log(`\nnew invoices added: ${fmt(added.rowCount)}  |  older invoices with a new amount paid: ${fmt(paid.rowCount)}`);
+    console.log('@@result ' + JSON.stringify({ step: 'invoices', added: added.rowCount, updated: paid.rowCount }));
+    process.exit(0);
+  }
 
   const ins = await c.query(`
     INSERT INTO pos_sales (

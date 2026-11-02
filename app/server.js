@@ -1241,6 +1241,7 @@ const CAPABILITIES = [
   { key: 'sys.support',         group: 'System management', label: 'IT help desk (all tickets), equipment register, change log, system health' },
   { key: 'support.raise',       group: 'System management', label: 'Ask IT for help (raise and follow own tickets)' },
   { key: 'sys.network',         group: 'System management', label: 'Network management: monitoring, devices on the network, open ports, firewall, Wi-Fi register' },
+  { key: 'import.legacy',       group: 'System management', label: 'Import the old system’s exports (stock, invoices, payments, stock received)' },
   { key: 'docs.view',           group: 'Documents',     label: 'Open the document centre: public and internal documents, templates' },
   { key: 'docs.upload',         group: 'Documents',     label: 'File documents, fill in forms (leave and others), log calls and letters' },
   { key: 'docs.manage',         group: 'Documents',     label: 'Manage the library: edit or delete any document, folders, templates, legal hold, recycle bin, access log' },
@@ -1269,7 +1270,7 @@ const RESTRICTED_CAPS = new Set([
   'ar.manage', 'ap.manage', 'bank.manage', 'payroll.view', 'payroll.run', 'payroll.approve', 'sys.audit', 'sys.security', 'sys.support', 'sys.network',
   'docs.manage', 'docs.confidential', 'docs.restricted', 'docs.approve', 'comms.journal',
   'fleet.drive', 'fleet.view', 'fleet.dispatch', 'suppliers.manage', 'team.announce', 'team.oversee',
-  'menu.manage',
+  'menu.manage', 'import.legacy',
 ]);
 
 // Resolve a user's effective capability map across all three layers:
@@ -6619,6 +6620,8 @@ require('./payroll').register(app, { query, getPool: () => pool, requireAdmin, r
   getShop: async () => shopSettingsToShop(await getShopSettings()), weekFor: timeclock.weekFor });
 // Commission v2: stored per sale line, rules, splits, clawbacks, statements (commission.js).
 require('./commission').register(app, { query, getPool: () => pool, requireAdmin, requireCap, userCan });
+// Import from the legacy program: check and bring across its CSV exports again and again (legacy-import.js).
+require('./legacy-import').register(app, { query, requireAdmin, requireCap });
 // Freelance reps (portal, invites, quotes, orders), tracked links, referrals (reps.js).
 // People & HR: the staff file (hr.js), and the careers page and applicant
 // tracking (careers.js), which opens the staff file on hire. Team notices are

@@ -30,6 +30,10 @@
 import { pool, fmt, ensureLegacySchema } from './lib/db.mjs';
 
 const REPLACE = process.argv.includes('--replace');
+// --new-only (the import page): lines only for sales that have none yet (the
+// invoices this import has just added), and only where the invoice is certain.
+// Every other sale's lines are left exactly as they are.
+const NEW_ONLY = process.argv.includes('--new-only');
 
 const db = pool(2);
 const c = await db.connect();
@@ -109,7 +113,11 @@ try {
              nullif(btrim(coalesce(tranno, '')), '')       AS tranno,
              upper(btrim(coalesce(tax, '')))               AS tax_flag,
              nullif(btrim(coalesce(lin_number, '')), '')   AS lin_no
-        FROM legacy_invdetai
+        FROM legacy_invdetai` + (NEW_ONLY ? `
+       -- Only invoice numbers with a sale that has no lines yet: the rest of a
+       -- million-row file is skipped here rather than resolved and dropped.
+       WHERE btrim(inv_number) IN (SELECT s.invoice_number FROM pos_sales s
+                                    WHERE NOT EXISTS (SELECT 1 FROM pos_sale_items i WHERE i.sale_id = s.id))` : '') + `
     )
     SELECT b.*,
            coalesce(u.id, bd.id, bt.id, pn.first_id)                   AS sale_id,
@@ -149,7 +157,16 @@ try {
     + ` ambiguous ${fmt(m.k_amb)}  |  orphan (no such invoice) ${fmt(m.k_orphan)}`);
   console.log(`fractional quantities rounded: ${fmt(m.fractional)}`);
 
+  if (NEW_ONLY) {
+    const dropped = await c.query(`
+      DELETE FROM _line l
+       WHERE l.sale_id IS NULL OR l.match_kind NOT IN ('unique', 'by-date', 'by-tranno')
+          OR EXISTS (SELECT 1 FROM pos_sale_items i WHERE i.sale_id = l.sale_id)`);
+    console.log(`lines for sales that already have their lines (left alone): ${fmt(dropped.rowCount)}`);
+  }
+
   // ---- record what could not be loaded cleanly -----------------------------
+  if (!NEW_ONLY) {
   await c.query(`DELETE FROM legacy_import_rejects WHERE source = 'INVDETAI'`);
   await c.query(`
     INSERT INTO legacy_import_rejects (source, reason, key1, key2, payload)
@@ -166,6 +183,7 @@ try {
            jsonb_build_object('src_line', src_line, 'sku', sku,
                               'qty_source', qty_raw, 'qty_loaded', qty, 'amount', amount)
       FROM _line WHERE qty_raw <> round(qty_raw)`);
+  }
 
   // ---- load ----------------------------------------------------------------
   // pos_sale_items has no natural key to upsert on (the legacy
@@ -203,6 +221,11 @@ try {
      WHERE l.sale_id IS NOT NULL`);
 
   await c.query('COMMIT');
+  if (NEW_ONLY) {
+    console.log(`\nline items added: ${fmt(ins.rowCount)}`);
+    console.log('@@result ' + JSON.stringify({ step: 'invdetai', added: ins.rowCount }));
+    process.exit(0);
+  }
 
   const { rows: [t] } = await c.query(`
     SELECT count(*)::int                                            AS items,

@@ -37,6 +37,11 @@
 import { pool, fmt, ensureLegacySchema } from './lib/db.mjs';
 
 const REPLACE = process.argv.includes('--replace');
+// --new-only (the import page): payments only for sales where the file has
+// more payments than the system -- new invoices, and older ones paid since --
+// and only where the invoice is certain. Every other sale's payments are left
+// exactly as they are.
+const NEW_ONLY = process.argv.includes('--new-only');
 
 const db = pool(2);
 const c = await db.connect();
@@ -134,6 +139,25 @@ try {
     + `  |  orphan ${fmt(m.k_orphan)}  |  refunds/credit notes stored negative: ${fmt(m.outflows)}`
     + `  |  unparseable PAY_DATE: ${fmt(m.no_date)}`);
 
+  if (NEW_ONLY) {
+    // Keep only the sales the file has more payments for, as one join (a
+    // DELETE ... IN (subquery) over 700k rows ran for hours on the full file).
+    await c.query(`
+      CREATE TEMP TABLE _keep AS
+      SELECT f.sale_id
+        FROM (SELECT sale_id, count(*)::int AS n FROM _pay
+               WHERE sale_id IS NOT NULL AND match_kind IN ('unique', 'by-tranno') GROUP BY sale_id) f
+        LEFT JOIN (SELECT sale_id, count(*)::int AS n FROM sale_payments GROUP BY sale_id) d ON d.sale_id = f.sale_id
+       WHERE f.n > coalesce(d.n, 0)`);
+    const { rows: [{ total }] } = await c.query('SELECT count(*)::int AS total FROM _pay');
+    await c.query(`CREATE TEMP TABLE _pay_new AS SELECT p.* FROM _pay p JOIN _keep k ON k.sale_id = p.sale_id WHERE p.match_kind IN ('unique', 'by-tranno')`);
+    await c.query('DROP TABLE _pay');
+    await c.query('ALTER TABLE _pay_new RENAME TO _pay');
+    await c.query('CREATE INDEX ON _pay (sale_id)');
+    await c.query('ANALYZE _pay');
+    const { rows: [{ kept }] } = await c.query('SELECT count(*)::int AS kept FROM _pay');
+    console.log(`payments already in the system (left alone): ${fmt(total - kept)}`);
+  } else {
   await c.query(`DELETE FROM legacy_import_rejects WHERE source = 'INVPAY'`);
   await c.query(`
     INSERT INTO legacy_import_rejects (source, reason, key1, key2, payload)
@@ -144,6 +168,7 @@ try {
            jsonb_build_object('src_line', src_line, 'pay_desc', desc_up,
                               'amount', amount, 'pay_date', pay_day)
       FROM _pay WHERE match_kind IN ('orphan', 'ambiguous-first')`);
+  }
 
   // sale_payments has no natural key either (INVPAY has no payment id -- its
   // PAY_NUMBER is blank on nearly every row), so a re-run replaces the payment
@@ -178,13 +203,18 @@ try {
       SELECT sale_id, method,
              row_number() OVER (PARTITION BY sale_id
                                 ORDER BY sum(amount_usd) DESC, count(*) DESC, method) AS rn
-        FROM sale_payments GROUP BY sale_id, method
+        FROM sale_payments` + (NEW_ONLY ? ' WHERE sale_id IN (SELECT DISTINCT sale_id FROM _pay)' : '') + ` GROUP BY sale_id, method
     )
     UPDATE pos_sales s SET payment_method = r.method
       FROM ranked r WHERE r.sale_id = s.id AND r.rn = 1
        AND (s.payment_method IS DISTINCT FROM r.method)`);
 
   await c.query('COMMIT');
+  if (NEW_ONLY) {
+    console.log(`\npayments added: ${fmt(ins.rowCount)} (replacing ${fmt(wiped.rowCount)} on invoices paid since)`);
+    console.log('@@result ' + JSON.stringify({ step: 'invpay', added: ins.rowCount, replaced: wiped.rowCount }));
+    process.exit(0);
+  }
 
   const { rows: byMethod } = await c.query(`
     SELECT method, count(*)::int AS n, round(sum(amount_usd), 2)::text AS total

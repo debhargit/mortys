@@ -28,7 +28,11 @@ export function dbConfig() {
   return cfg;
 }
 
+// The import page (legacy-import.js) runs these tools as child processes and
+// passes the server's own DATABASE_URL, so they always write to the database
+// the till is running on. Run by hand, they use db-config.json as before.
 export function pool(max = 4) {
+  if (process.env.DATABASE_URL) return new pg.Pool({ connectionString: process.env.DATABASE_URL, max });
   const c = dbConfig();
   return new pg.Pool({ host: c.host, port: c.port, database: c.database, user: c.user, password: c.password, max });
 }
@@ -61,12 +65,13 @@ function tsvCell(v) {
 // `rows` may be any sync/async iterable, so callers can pipe straight from a
 // CSV reader without materialising a million objects.
 export async function copyInto(table, cols, rows, { onProgress, progressEvery = 100000 } = {}) {
-  const c = dbConfig();
-  const args = ['-h', c.host, '-p', String(c.port), '-U', c.user, '-d', c.database,
+  const url = process.env.DATABASE_URL;
+  const c = url ? null : dbConfig();
+  const args = [...(url ? ['-d', url] : ['-h', c.host, '-p', String(c.port), '-U', c.user, '-d', c.database]),
     '-q', '-v', 'ON_ERROR_STOP=1',
     '-c', `\copy ${table} (${cols.join(',')}) FROM STDIN`];
   const child = spawn(psqlPath(), args, {
-    env: { ...process.env, PGPASSWORD: c.password },
+    env: url ? process.env : { ...process.env, PGPASSWORD: c.password },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 

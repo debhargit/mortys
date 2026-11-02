@@ -43,7 +43,7 @@ export async function gatewaySignature(secret, ts, method, pathAndQuery, email) 
 // of them loads, then each of its API calls answers 501 "not ported". Must
 // match TILL_ONLY_PAGES in admin.html. The admin's links, bookmarks, typed
 // addresses and history all come through here.
-const TILL_ONLY_PAGE = /^\/(accounting|budget|documents|receivables|payables|banking|loans-rent|report-balancing|payroll|clock|attendance|commission|training|hiring|people|franchise|franchisee|dispatch|fleet-wall|mobile|driver|cashier|warehouse|stockcash|report-planning|terminal|ai|system|security)(\.html)?\/?$/;
+const TILL_ONLY_PAGE = /^\/(accounting|budget|documents|receivables|payables|banking|loans-rent|report-balancing|payroll|clock|attendance|commission|training|hiring|people|franchise|franchisee|dispatch|fleet-wall|mobile|driver|cashier|warehouse|stockcash|report-planning|terminal|ai|system|security|legacy-import)(\.html)?\/?$/;
 
 // Whether the till answers. When its tunnel is down, sending staff there shows
 // Cloudflare's bare "Error 1033" page, so every till page is checked first and,
@@ -76,7 +76,7 @@ const PAGE_NAMES = {
   attendance: 'Attendance', commission: 'Commission', training: 'Training', hiring: 'Hiring', people: 'People & HR',
   franchise: 'Franchise', franchisee: 'Franchisee portal', dispatch: 'Dispatch', 'fleet-wall': 'Fleet wall', mobile: 'Mobile',
   driver: 'Driver', cashier: 'Cashier', warehouse: 'Warehouse', stockcash: 'Stock & cash', 'report-planning': 'Planning report',
-  terminal: 'Terminal', ai: 'AI assistant', system: 'System', security: 'Security',
+  terminal: 'Terminal', ai: 'AI assistant', system: 'System', security: 'Security', 'legacy-import': 'Import from the old system',
 };
 
 // The website's own page for a till page it cannot reach. It reloads itself
@@ -136,7 +136,7 @@ h1{font-size:22px;margin:0 0 10px}.grid{display:grid;grid-template-columns:repea
   return new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
 }
 // Till pages with no demo: sign-in-by-PIN screens and public portals.
-const NO_DEMO = new Set(['clock', 'driver', 'franchisee', 'mobile', 'fleet-wall']);
+const NO_DEMO = new Set(['clock', 'driver', 'franchisee', 'mobile', 'fleet-wall', 'legacy-import']);
 
 // /demo, /demo/<page>, /demo/leave. Returns a Response or null.
 export function demoRoute(request, pathname) {
