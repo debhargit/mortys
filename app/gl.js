@@ -41,6 +41,17 @@
 //    commission      commission paid out
 //    ar_invoice      invoices raised on the books (rent, late fees): Dr A/R;
 //                    Cr the lines' income accounts, GCT
+//    work_order      a work order billed: Dr A/R; Cr labour, parts, GCT; taken
+//                    back (work_order_unbill) it is reversed
+//    wo_payment      paid at the service desk: Dr safe (cash) / bank / card;
+//                    Cr A/R; a voided payment is reversed (wo_payment_void)
+//    fa_acquire      a fixed asset bought outside the ledger or owned before
+//                    it: Dr cost; Cr accumulated depreciation to date and the
+//                    account paid from / Opening Balance Equity
+//    fa_run          a month's depreciation: Dr expense; Cr accumulated
+//    fa_dispose      sold or scrapped: Dr accumulated, proceeds; Cr cost; the
+//                    rest to gain / loss on disposal (each with a _void)
+//  Coverage (/api/gl/coverage) checks that every document reaches the chart.
 //  Classes (QuickBooks class tracking, gl_classes): each line may carry one.
 //  Till documents take their store location's class; bills, invoices, bank
 //  and journal lines carry the class picked on the line; reversals keep theirs.
@@ -535,7 +546,94 @@ function register(app, deps) {
       if (value - credit) lines.push({ a: ch.acct('inv_adjust'), amt: r2(value - credit), memo: d.claim_status === 'credited' ? 'Credit short of cost' : 'Claim rejected' });
       return { book: 'stock', at: d.resolved_at, ref: 'Claim ' + d.id, memo: 'Supplier claim ' + d.claim_status + ': ' + d.product_img + (d.supplier ? ' (' + d.supplier + ')' : ''), lines };
     },
+
+    // Workshop invoice: a work order billed (work_order_billings). Dr A/R the
+    // total; Cr labour to Sales - Labour and Services, parts to Sales - Parts,
+    // GCT. Parts drawn from stock are costed by the stock ledger (requisition).
+    async work_order(c, ch, id) {
+      const { rows } = await c.query(`SELECT b.*, w.wo_number, w.customer_name, w.customer_user_id FROM work_order_billings b JOIN work_orders w ON w.id = b.work_order_id WHERE b.id = $1`, [id]);
+      if (!rows.length) return null;
+      const b = rows[0], party = custParty(b.customer_name, b.customer_user_id);
+      return { book: 'sales', at: b.created_at, ref: b.wo_number, memo: 'Work order ' + b.wo_number + (party !== 'Cash Sales' ? ' · ' + party : ''),
+        lines: [{ a: ch.acct('ar'), amt: n(b.total), party, memo: b.wo_number },
+                { a: ch.acct('sales_services'), amt: -n(b.labor), party, memo: 'Labour' },
+                { a: ch.acct('sales'), amt: -n(b.parts), party, memo: 'Parts' },
+                { a: ch.acct('gct'), amt: -n(b.tax), memo: 'GCT' }] };
+    },
+    // Billing taken back (status moved back or cancelled): reverse that billing's entry.
+    async work_order_unbill(c, ch, id) {
+      const { rows } = await c.query(`SELECT bill_id FROM work_order_billings WHERE id = $1 AND kind = 'unbill'`, [id]);
+      if (!rows.length || !rows[0].bill_id) return null;
+      return reversal(c, 'work_order', rows[0].bill_id, `SELECT created_at AS at, 'billing taken back' AS void_reason FROM work_order_billings WHERE bill_id = $1 AND kind = 'unbill'`);
+    },
+    // Paid at the service desk: cash to the safe (it is not in a till drawer), others per Posting rules; Cr A/R.
+    async wo_payment(c, ch, id) {
+      const { rows } = await c.query(`SELECT p.*, w.wo_number, w.customer_name, w.customer_user_id FROM work_order_payments_all p JOIN work_orders w ON w.id = p.work_order_id WHERE p.id = $1`, [id]);
+      if (!rows.length) return null;
+      const p = rows[0], party = custParty(p.customer_name, p.customer_user_id), m = String(p.method || '').toLowerCase();
+      return { book: 'sales', at: p.received_at, ref: p.reference || p.wo_number, memo: 'Workshop payment ' + m + ' on ' + p.wo_number,
+        lines: [{ a: m === 'cash' ? ch.acct('cash_safe') : ch.mapped('pay_method', m, 'suspense'), amt: n(p.amount_usd), memo: m },
+                { a: ch.acct('ar'), amt: -n(p.amount_usd), party, memo: p.wo_number }] };
+    },
+    async wo_payment_void(c, ch, id) { return reversal(c, 'wo_payment', id, `SELECT voided_at AS at, void_reason FROM work_order_payments_all WHERE id = $1`); },
+
+    // ---- Fixed assets (assets.js) ----
+    // Bought outside the ledger or owned before it: Dr cost; Cr accumulated
+    // depreciation to date (opening); Cr the account paid from, or Opening
+    // Balance Equity. Dated when acquired, never before the ledger start.
+    async fa_acquire(c, ch, id) {
+      const { rows } = await c.query(`SELECT a.*, to_char(a.acquired_on, 'YYYY-MM-DD') AS day, k.asset_account_id, k.accum_account_id FROM fa_assets a JOIN fa_classes k ON k.id = a.class_id WHERE a.id = $1`, [id]);
+      if (!rows.length || rows[0].funding === 'in_ledger') return null;
+      const a = rows[0], start = await ledgerStartDay(c);
+      const day = start && a.day < start ? start : a.day;
+      const accum = a.accum_account_id ? n(a.opening_accum) : 0;
+      const other = a.funding === 'opening' ? ch.acct('opening_equity') : a.funding_account_id;
+      if (!other) throw new Error('Asset ' + a.number + ': choose the account it was paid from');
+      return { book: 'assets', at: day + 'T12:00:00-05:00', ref: a.number, cls: a.gl_class_id, memo: 'Fixed asset ' + a.number + ' · ' + a.name + (a.funding === 'opening' ? ' (owned before the ledger)' : ''),
+        lines: [{ a: a.asset_account_id, amt: n(a.cost), memo: a.number + ' cost' },
+                { a: a.accum_account_id, amt: -accum, memo: a.number + ' depreciation to ' + (a.opening_through ? String(a.opening_through).slice(0, 7) : 'date') },
+                { a: other, amt: -(n(a.cost) - accum), memo: a.number }] };
+    },
+    async fa_acquire_void(c, ch, id) { return reversal(c, 'fa_acquire', id, `SELECT voided_at AS at, void_reason FROM fa_assets WHERE id = $1`); },
+    // A depreciation run: per asset, Dr its class's expense, Cr its accumulated depreciation; dated the last day of the run's month.
+    async fa_run(c, ch, id) {
+      const { rows: r } = await c.query(`SELECT *, to_char((month + INTERVAL '1 month' - INTERVAL '1 day')::date, 'YYYY-MM-DD') AS last_day, to_char(month, 'YYYY-MM') AS m FROM fa_runs WHERE id = $1`, [id]);
+      if (!r.length) return null;
+      const { rows: ds } = await c.query(
+        `SELECT a.number, a.name, a.gl_class_id, k.accum_account_id, k.expense_account_id, SUM(d.amount) AS amt, MIN(to_char(d.month, 'YYYY-MM')) AS m0, MAX(to_char(d.month, 'YYYY-MM')) AS m1
+           FROM fa_depreciation d JOIN fa_assets a ON a.id = d.asset_id JOIN fa_classes k ON k.id = a.class_id
+          WHERE d.run_id = $1 GROUP BY a.id, k.id ORDER BY a.number`, [id]);
+      const lines = [];
+      for (const d of ds) {
+        if (!d.accum_account_id || !d.expense_account_id) throw new Error('Asset ' + d.number + ': its class has no depreciation accounts');
+        const memo = d.number + ' ' + d.name.slice(0, 60) + ' ' + (d.m0 === d.m1 ? d.m0 : d.m0 + ' to ' + d.m1);
+        lines.push({ a: d.expense_account_id, amt: n(d.amt), memo, cls: d.gl_class_id }, { a: d.accum_account_id, amt: -n(d.amt), memo, cls: d.gl_class_id });
+      }
+      return { book: 'assets', at: r[0].last_day + 'T12:00:00-05:00', ref: 'Depreciation ' + r[0].m, memo: 'Depreciation for ' + r[0].m + ' (' + ds.length + ' assets)', lines };
+    },
+    async fa_run_void(c, ch, id) { return reversal(c, 'fa_run', id, `SELECT voided_at AS at, void_reason FROM fa_runs WHERE id = $1`); },
+    // Sold / scrapped: Dr accumulated depreciation, Dr what was received, Cr cost; the rest is a gain or a loss.
+    async fa_dispose(c, ch, id) {
+      const { rows } = await c.query(
+        `SELECT d.*, to_char(d.disposed_on, 'YYYY-MM-DD') AS day, a.number, a.name, a.cost, a.gl_class_id, k.asset_account_id, k.accum_account_id
+           FROM fa_disposals d JOIN fa_assets a ON a.id = d.asset_id JOIN fa_classes k ON k.id = a.class_id WHERE d.id = $1`, [id]);
+      if (!rows.length) return null;
+      const d = rows[0], accum = d.accum_account_id ? n(d.accum_at) : 0, proceeds = n(d.proceeds);
+      if (proceeds && !d.proceeds_account_id) throw new Error('Disposal of ' + d.number + ': choose the account the money went to');
+      const gain = r2(proceeds - (n(d.cost) - accum));
+      return { book: 'assets', at: d.day + 'T12:00:00-05:00', ref: d.number, cls: d.gl_class_id, memo: 'Fixed asset ' + d.kind.replace('_', ' ') + ': ' + d.number + ' · ' + d.name,
+        lines: [{ a: d.accum_account_id, amt: accum, memo: d.number + ' depreciation taken off' },
+                { a: d.proceeds_account_id, amt: proceeds, memo: d.number + ' proceeds' },
+                { a: d.asset_account_id, amt: -n(d.cost), memo: d.number + ' cost' },
+                { a: gain > 0 ? ch.acct('fa_gain') : ch.acct('fa_loss'), amt: -gain, memo: d.number + (gain > 0 ? ' gain' : ' loss') }] };
+    },
+    async fa_dispose_void(c, ch, id) { return reversal(c, 'fa_dispose', id, `SELECT voided_at AS at, void_reason FROM fa_disposals WHERE id = $1`); },
   };
+
+  async function ledgerStartDay(c) {
+    const { rows } = await c.query(`SELECT to_char((value::timestamptz AT TIME ZONE '${TZ}')::date, 'YYYY-MM-DD') AS d FROM warehouse_settings WHERE key = 'gl_start_at' AND value IS NOT NULL`);
+    return rows.length ? rows[0].d : null;
+  }
 
   async function reversal(c, kind, id, sql) {
     const { rows: e } = await c.query(`SELECT id, number, source_ref, memo FROM gl_entries WHERE source_kind = $1 AND source_id = $2`, [kind, id]);
@@ -602,12 +700,28 @@ function register(app, deps) {
       case 'payroll_loan_void': return `SELECT l.id FROM payroll_loans l WHERE l.voided_at IS NOT NULL AND l.voided_at >= $1 AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'payroll_loan' AND g.source_id = l.id) AND ${notPosted('payroll_loan_void', 'l.id')}`;
       case 'payroll_dedpay_void': return `SELECT p.id FROM payroll_ded_payments p WHERE p.voided_at IS NOT NULL AND p.voided_at >= $1 AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'payroll_dedpay' AND g.source_id = p.id) AND ${notPosted('payroll_dedpay_void', 'p.id')}`;
       case 'payroll_remit_void': return `SELECT r.id FROM payroll_remittances r WHERE r.voided_at IS NOT NULL AND r.voided_at >= $1 AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'payroll_remit' AND g.source_id = r.id) AND ${notPosted('payroll_remit_void', 'r.id')}`;
+      // Workshop: billings and payments from the ledger start.
+      case 'work_order': return `SELECT b.id FROM work_order_billings b WHERE b.kind = 'bill' AND b.created_at >= $1 AND b.total <> 0 AND ${notPosted('work_order', 'b.id')}`;
+      case 'work_order_unbill': return `SELECT u.id FROM work_order_billings u WHERE u.kind = 'unbill' AND u.created_at >= $1
+            AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'work_order' AND g.source_id = u.bill_id) AND ${notPosted('work_order_unbill', 'u.id')}`;
+      case 'wo_payment': return `SELECT p.id FROM work_order_payments_all p WHERE p.voided_at IS NULL AND p.received_at >= $1 AND p.amount_usd <> 0 AND ${notPosted('wo_payment', 'p.id')}`;
+      case 'wo_payment_void': return `SELECT p.id FROM work_order_payments_all p WHERE p.voided_at IS NOT NULL AND p.voided_at >= $1 AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'wo_payment' AND g.source_id = p.id) AND ${notPosted('wo_payment_void', 'p.id')}`;
+      // Fixed assets: whatever the register holds, once the ledger has started (an
+      // asset owned before the start posts on the start day).
+      case 'fa_acquire': return `SELECT a.id FROM fa_assets a WHERE a.funding IN ('account', 'opening') AND a.voided_at IS NULL AND $1::timestamptz IS NOT NULL AND ${notPosted('fa_acquire', 'a.id')}`;
+      case 'fa_acquire_void': return `SELECT a.id FROM fa_assets a WHERE a.voided_at IS NOT NULL AND $1::timestamptz IS NOT NULL AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'fa_acquire' AND g.source_id = a.id) AND ${notPosted('fa_acquire_void', 'a.id')}`;
+      case 'fa_run': return `SELECT r.id FROM fa_runs r WHERE r.voided_at IS NULL AND r.total > 0 AND $1::timestamptz IS NOT NULL AND ${notPosted('fa_run', 'r.id')}`;
+      case 'fa_run_void': return `SELECT r.id FROM fa_runs r WHERE r.voided_at IS NOT NULL AND $1::timestamptz IS NOT NULL AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'fa_run' AND g.source_id = r.id) AND ${notPosted('fa_run_void', 'r.id')}`;
+      case 'fa_dispose': return `SELECT d.id FROM fa_disposals d WHERE d.voided_at IS NULL AND $1::timestamptz IS NOT NULL AND ${notPosted('fa_dispose', 'd.id')}`;
+      case 'fa_dispose_void': return `SELECT d.id FROM fa_disposals d WHERE d.voided_at IS NOT NULL AND $1::timestamptz IS NOT NULL AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'fa_dispose' AND g.source_id = d.id) AND ${notPosted('fa_dispose_void', 'd.id')}`;
     }
     return null;
   }
   const ORDER = ['sale', 'sale_payment', 'sale_void', 'return', 'account_payment', 'receipt', 'bill', 'po_invoice', 'po_payment', 'till_open', 'till_movement', 'till_close', 'petty_payout', 'petty_advance_expensed', 'petty_movement', 'redemption_payout', 'gift_card', 'commission_accrual', 'commission', 'vendor_claim', 'ar_invoice', 'ap_bill', 'ap_payment', 'bank_txn',
-    'payroll_loan', 'payroll_run', 'payroll_payment', 'payroll_remit', 'payroll_dedpay', 'account_payment_void', 'ar_invoice_void', 'ap_bill_void', 'ap_payment_void', 'bank_txn_void',
-    'payroll_payment_void', 'payroll_run_void', 'payroll_remit_void', 'payroll_dedpay_void', 'payroll_loan_void', 'petty_payout_void'];
+    'payroll_loan', 'payroll_run', 'payroll_payment', 'payroll_remit', 'payroll_dedpay', 'work_order', 'wo_payment', 'fa_acquire', 'fa_run', 'fa_dispose',
+    'account_payment_void', 'ar_invoice_void', 'ap_bill_void', 'ap_payment_void', 'bank_txn_void',
+    'payroll_payment_void', 'payroll_run_void', 'payroll_remit_void', 'payroll_dedpay_void', 'payroll_loan_void', 'petty_payout_void',
+    'work_order_unbill', 'wo_payment_void', 'fa_dispose_void', 'fa_run_void', 'fa_acquire_void'];
 
   // Daily stock adjustments from the stock ledger (complete days only).
   async function postStockDays(startAt, ch, userId) {
@@ -677,6 +791,23 @@ function register(app, deps) {
     } finally { running = false; lastRun = { at: new Date().toISOString(), ...out }; }
     return out;
   }
+  // Post now, as soon as a transaction is saved (server.js calls this after
+  // every change made through the API). Calls close together share one run; a
+  // call while a run is going schedules one more, so nothing saved waits for
+  // the sweep below, which stays as the backstop.
+  let kickTimer = null, kickAgain = false;
+  function kick() {
+    if (kickTimer) return;
+    kickTimer = setTimeout(async () => {
+      try {
+        if ((await setting('gl_auto_post', 'on')) !== 'on') return;
+        if (running) { kickAgain = true; return; }
+        do { kickAgain = false; await postAll(null); } while (kickAgain);
+      } catch (e) { console.warn('[gl] post on save', e.message); }
+      finally { kickTimer = null; if (kickAgain) { kickAgain = false; kick(); } }
+    }, 250);
+    if (kickTimer.unref) kickTimer.unref();
+  }
   const timer = setInterval(async () => {
     try { if ((await setting('gl_auto_post', 'on')) === 'on') await postAll(null); } catch (e) { console.warn('[gl] auto post', e.message); }
   }, 60000);
@@ -728,10 +859,24 @@ function register(app, deps) {
         const { rows: pa } = await c.query(
           `SELECT u.name AS party, SUM(a.amount_usd) AS v FROM account_payments a JOIN users u ON u.id = a.customer_id WHERE a.created_at < $1 GROUP BY 1`, [st[0].at]);
         for (const r of pa) lines.push({ a: ch.acct('ar'), amt: -n(r.v), party: custParty(r.party, 1), memo: 'Paid on account' });
-        const { rows: ap } = await c.query(
-          `SELECT COALESCE(s.name, 'Supplier') AS party, SUM(po.balance_due_usd) AS v FROM purchase_orders po LEFT JOIN suppliers s ON s.id = po.supplier_id
-            WHERE COALESCE(po.balance_due_usd, 0) > 0 AND po.status <> 'cancelled' GROUP BY 1`);
-        for (const r of ap) lines.push({ a: ch.acct('ap'), amt: -n(r.v), party: r.party.slice(0, 41), memo: 'Owed to supplier' });
+        // Billed work orders less what was paid on them at the service desk.
+        const { rows: wo } = await c.query(
+          `SELECT w.customer_name AS party, w.customer_user_id, SUM(CASE WHEN w.status IN ('billed', 'paid') THEN w.total_usd ELSE 0 END
+                  - COALESCE((SELECT SUM(p.amount_usd) FROM work_order_payments p WHERE p.work_order_id = w.id), 0)) AS v
+             FROM work_orders w GROUP BY 1, 2`);
+        for (const r of wo) if (r2(r.v)) lines.push({ a: ch.acct('ar'), amt: n(r.v), party: custParty(r.party, r.customer_user_id), memo: 'Owed on work orders' });
+        // Owed to suppliers: Payables' unpaid bills less credits, else purchase-order balances.
+        let ap;
+        if (books) {
+          const by = {};
+          for (const d of await books.apDocs(null, c.query.bind(c))) { const k = (d.supplier || 'Supplier').slice(0, 41); by[k] = (by[k] || 0) + (d.kind === 'credit' ? -1 : 1) * n(d.open); }
+          ap = Object.entries(by).map(([party, v]) => ({ party, v }));
+        } else {
+          ap = (await c.query(
+            `SELECT COALESCE(s.name, 'Supplier') AS party, SUM(po.balance_due_usd) AS v FROM purchase_orders po LEFT JOIN suppliers s ON s.id = po.supplier_id
+              WHERE COALESCE(po.balance_due_usd, 0) > 0 AND po.status <> 'cancelled' GROUP BY 1`)).rows;
+        }
+        for (const r of ap) if (r2(r.v)) lines.push({ a: ch.acct('ap'), amt: -n(r.v), party: r.party.slice(0, 41), memo: 'Owed to supplier' });
         const { rows: gr } = await c.query(
           `SELECT COALESCE(SUM((l.qty_received + l.qty_damaged) * COALESCE(l.unit_cost, 0) * COALESCE(r.fx_rate, 1)), 0) AS v
              FROM receipts r JOIN receipt_lines l ON l.receipt_id = r.id WHERE r.status = 'posted' AND r.bill_status <> 'confirmed'`);
@@ -1181,6 +1326,37 @@ function register(app, deps) {
     } catch (e) { fail(res, e); }
   });
 
+  // What customers owe on work orders: billed work orders less what was paid at the service desk.
+  const WO_OPEN_SQL = `SELECT COALESCE((SELECT SUM(total_usd) FROM work_orders WHERE status IN ('billed', 'paid')), 0)
+                            - COALESCE((SELECT SUM(amount_usd) FROM work_order_payments), 0)`;
+  // What is owed to suppliers, as Payables (books.js) works it out: every unpaid
+  // bill less unused supplier credits. Before books.js is wired in, the old
+  // purchase-order balances.
+  async function apOpen(q) {
+    if (books) return r2((await books.apDocs(null, q)).reduce((t, d) => t + (d.kind === 'credit' ? -1 : 1) * n(d.open), 0));
+    return r2((await q(`SELECT COALESCE(SUM(balance_due_usd), 0) AS v FROM purchase_orders WHERE status <> 'cancelled' AND COALESCE(balance_due_usd, 0) > 0`)).rows[0].v);
+  }
+  // The fixed asset register against the ledger: cost on the classes' asset
+  // accounts, and accumulated depreciation on their contra accounts.
+  async function fixedAssetChecks(q) {
+    const { rows } = await q(
+      `SELECT (SELECT COALESCE(SUM(l.amount), 0) FROM gl_lines l WHERE l.account_id IN (SELECT asset_account_id FROM fa_classes)) AS gl_cost,
+              (SELECT COALESCE(-SUM(l.amount), 0) FROM gl_lines l WHERE l.account_id IN (SELECT accum_account_id FROM fa_classes WHERE accum_account_id IS NOT NULL)) AS gl_accum,
+              (SELECT COALESCE(SUM(cost), 0) FROM fa_assets WHERE status = 'active') AS cost,
+              (SELECT COALESCE(SUM(a.opening_accum), 0) + COALESCE((SELECT SUM(d.amount) FROM fa_depreciation d JOIN fa_assets x ON x.id = d.asset_id WHERE x.status = 'active'), 0)
+                 FROM fa_assets a WHERE a.status = 'active') AS accum,
+              (SELECT COUNT(*)::int FROM fa_assets) AS assets`);
+    const x = rows[0];
+    if (!x.assets && !n(x.gl_cost) && !n(x.gl_accum)) return [];
+    return [
+      { key: 'fa_cost', label: 'Fixed assets at cost', gl: x.gl_cost, system: r2(x.cost),
+        note: 'Assets in the register (not disposed) at cost. A difference is usually a bill or cheque coded to an asset account for something not in the register, or an asset entered as already in the ledger that was not.' },
+      { key: 'fa_accum', label: 'Accumulated depreciation', gl: x.gl_accum, system: r2(x.accum),
+        note: 'Depreciation to date on the register\'s assets: brought-forward depreciation plus every run.' },
+    ];
+  }
+  let books = null;
+
   // Tie-out: each control account against the system's own record.
   app.get('/api/gl/tieout', ...can('acct.view'), async (req, res) => {
     try {
@@ -1192,10 +1368,11 @@ function register(app, deps) {
           note: 'Stock on hand at average cost. Differences come from cost changes on stock already held, sales of stock not on hand, and receiving outside the Receive screen.' },
         { key: 'ar', label: 'Accounts receivable', gl: gl.ar, system: await one(`SELECT (SELECT COALESCE(SUM(balance_due_usd), 0) FROM pos_sales WHERE NOT COALESCE(voided, false))
                                    + (SELECT COALESCE(SUM(total), 0) FROM ar_invoices WHERE voided_at IS NULL)
-                                   - (SELECT COALESCE(SUM(amount_usd), 0) FROM account_payments) AS v`),
-          note: 'Balances due on sales and invoices raised on the books (rent, late fees), less payments received on account.' },
-        { key: 'ap', label: 'Accounts payable', gl: -gl.ap, system: await one(`SELECT COALESCE(SUM(balance_due_usd), 0) AS v FROM purchase_orders WHERE status <> 'cancelled' AND COALESCE(balance_due_usd, 0) > 0`),
-          note: 'Balances due on purchase orders.' },
+                                   - (SELECT COALESCE(SUM(amount_usd), 0) FROM account_payments)
+                                   + (${WO_OPEN_SQL}) AS v`),
+          note: 'Balances due on sales, invoices raised on the books (rent, late fees) and billed work orders, less payments received on account and at the service desk.' },
+        { key: 'ap', label: 'Accounts payable', gl: -gl.ap, system: await apOpen(query),
+          note: books ? 'Unpaid supplier bills of every kind (confirmed goods receipts, purchase invoices, expense bills) less unused supplier credits, as Payables shows them.' : 'Balances due on purchase orders.' },
         { key: 'grni', label: 'Goods received, not billed', gl: -gl.grni, system: await one(
             `SELECT COALESCE(SUM((l.qty_received + l.qty_damaged) * COALESCE(l.unit_cost, 0) * COALESCE(r.fx_rate, 1)), 0) AS v
                FROM receipts r JOIN receipt_lines l ON l.receipt_id = r.id WHERE r.status = 'posted' AND r.bill_status <> 'confirmed'`),
@@ -1205,8 +1382,110 @@ function register(app, deps) {
         { key: 'cash_drawers', label: 'Cash in drawers', gl: gl.cash_drawers, system: null,
           note: 'Should be the floats and takings of drawers open now; zero when every drawer is closed through the cashier module.' },
         { key: 'suspense', label: 'Suspense', gl: gl.suspense, system: 0, note: 'Postings that did not add up. Should be zero: open the account to see what landed here.' },
+        ...(await fixedAssetChecks(query)),
       ].map((x) => ({ ...x, gl: r2(x.gl), difference: x.system == null ? null : r2(n(x.gl) - n(x.system)) }));
       res.json({ checks });
+    } catch (e) { fail(res, e); }
+  });
+
+  // ------------------------------------------------------- coverage --
+  // Does every transaction reach the chart of accounts? For each kind of
+  // document: how many are in the ledger, waiting, or failing; entries whose
+  // document has since been deleted; documents changed after they were posted;
+  // posting rules that point at accounts that are missing or switched off; and
+  // money the system records that no posting rule covers.
+  const SOURCE_TABLE = { sale: 'pos_sales', sale_payment: 'sale_payments', return: 'pos_sale_returns', account_payment: 'account_payments_all', receipt: 'receipts', bill: 'receipts',
+    po_invoice: 'purchase_orders', po_payment: 'purchase_order_payments', till_open: 'till_sessions', till_close: 'till_sessions', till_movement: 'till_movements',
+    petty_payout: 'cash_payouts', petty_movement: 'petty_cash_movements', redemption_payout: 'redemption_instruments', gift_card: 'gift_card_transactions',
+    commission: 'commission_payouts', commission_accrual: 'commission_statements', vendor_claim: 'stock_dispositions', ar_invoice: 'ar_invoices', ap_bill: 'ap_bills',
+    ap_payment: 'ap_payments', bank_txn: 'bank_txns', payroll_run: 'payroll_runs', payroll_payment: 'payroll_payments', payroll_remit: 'payroll_remittances',
+    payroll_loan: 'payroll_loans', payroll_dedpay: 'payroll_ded_payments', work_order: 'work_order_billings', wo_payment: 'work_order_payments_all',
+    fa_acquire: 'fa_assets', fa_run: 'fa_runs', fa_dispose: 'fa_disposals' };
+  // Every system account a posting rule asks for, read from the rules themselves so the list cannot fall behind.
+  const RULE_KEYS = [...new Set([...require('fs').readFileSync(__filename, 'utf8').matchAll(/ch\.acct\('([a-z_]+)'\)|ch\.mapped\('[a-z_]+', [^,]+, '([a-z_]+)'\)/g)].map((m) => m[1] || m[2]))].sort();
+  app.get('/api/gl/coverage', ...can('acct.view'), async (req, res) => {
+    try {
+      const start = await setting('gl_start_at', null);
+      if (!start) return res.json({ started: false });
+      const { rows: done } = await query(`SELECT source_kind, COUNT(*)::int AS n FROM gl_entries GROUP BY 1`);
+      const postedBy = Object.fromEntries(done.map((r) => [r.source_kind, r.n]));
+      const sources = [];
+      for (const k of ORDER) {
+        const { rows } = await query(`SELECT COUNT(*)::int AS n FROM (${pendingSql(k)}) x`, [start]);
+        const failing = [...errors.entries()].filter(([key]) => key.startsWith(k + ':')).map(([key, m]) => ({ source: key, error: m }));
+        sources.push({ kind: k, posted: postedBy[k] || 0, waiting: rows[0].n, failing });
+      }
+      if (postedBy.stock_day) sources.push({ kind: 'stock_day', posted: postedBy.stock_day, waiting: 0, failing: [] });
+
+      // In the ledger, but the document behind it has gone (deleted after posting).
+      const orphans = [];
+      for (const [kind, table] of Object.entries(SOURCE_TABLE)) {
+        const { rows } = await query(`SELECT e.id, e.number, e.source_id, e.source_ref, to_char(e.entry_date, 'YYYY-MM-DD') AS entry_date FROM gl_entries e
+            WHERE e.source_kind = $1 AND e.reversed_by IS NULL AND NOT EXISTS (SELECT 1 FROM ${table} t WHERE t.id = e.source_id) ORDER BY e.id LIMIT 25`, [kind]);
+        for (const r of rows) orphans.push({ kind, ...r });
+      }
+
+      // Posted, then changed: the document's amount now against what the ledger has.
+      const ch = await chart(query);
+      const drift = (await query(
+        `SELECT 'sale' AS kind, e.id, e.number, s.receipt_number AS ref, s.total_usd AS document, SUM(l.amount) AS ledger
+           FROM gl_entries e JOIN pos_sales s ON s.id = e.source_id JOIN gl_lines l ON l.entry_id = e.id AND l.account_id = $1
+          WHERE e.source_kind = 'sale' AND e.reversed_by IS NULL AND NOT COALESCE(s.voided, false) GROUP BY e.id, s.id HAVING abs(SUM(l.amount) - s.total_usd) >= 0.01
+         UNION ALL
+         SELECT 'ar_invoice', e.id, e.number, i.number, i.total, SUM(l.amount)
+           FROM gl_entries e JOIN ar_invoices i ON i.id = e.source_id JOIN gl_lines l ON l.entry_id = e.id AND l.account_id = $1
+          WHERE e.source_kind = 'ar_invoice' AND e.reversed_by IS NULL AND i.voided_at IS NULL GROUP BY e.id, i.id HAVING abs(SUM(l.amount) - i.total) >= 0.01
+         UNION ALL
+         SELECT 'ap_bill', e.id, e.number, b.number, b.total, -SUM(l.amount) * CASE WHEN b.kind = 'credit' THEN -1 ELSE 1 END
+           FROM gl_entries e JOIN ap_bills b ON b.id = e.source_id JOIN gl_lines l ON l.entry_id = e.id AND l.account_id = $2
+          WHERE e.source_kind = 'ap_bill' AND e.reversed_by IS NULL AND b.voided_at IS NULL GROUP BY e.id, b.id HAVING abs(abs(SUM(l.amount)) - b.total) >= 0.01
+         UNION ALL
+         SELECT 'work_order', e.id, e.number, w.wo_number, w.total_usd, SUM(l.amount)
+           FROM gl_entries e JOIN work_order_billings b ON b.id = e.source_id JOIN work_orders w ON w.id = b.work_order_id JOIN gl_lines l ON l.entry_id = e.id AND l.account_id = $1
+          WHERE e.source_kind = 'work_order' AND e.reversed_by IS NULL AND w.status IN ('billed', 'paid') GROUP BY e.id, w.id HAVING abs(SUM(l.amount) - w.total_usd) >= 0.01
+         ORDER BY 2 DESC LIMIT 100`, [ch.acct('ar'), ch.acct('ap')])).rows
+        .map((r) => ({ ...r, document: r2(r.document), ledger: r2(r.ledger), difference: r2(n(r.ledger) - n(r.document)) }));
+
+      // The chart: the accounts the posting rules use must exist and be active.
+      const problems = [];
+      const { rows: acc } = await query(`SELECT id, code, name, system_key, is_active FROM gl_accounts`);
+      const byKey = Object.fromEntries(acc.filter((a) => a.system_key).map((a) => [a.system_key, a]));
+      for (const k of RULE_KEYS) {
+        if (!byKey[k]) problems.push({ where: 'Posting rules', what: 'No account is set up for "' + k + '": documents that need it cannot post' });
+        else if (!byKey[k].is_active) problems.push({ where: 'Posting rules', what: byKey[k].code + ' ' + byKey[k].name + ' is switched off but the rules post to it' });
+      }
+      const inactive = (sql, where, label) => query(sql).then(({ rows }) => rows.forEach((r) => problems.push({ where, what: label(r) })));
+      await inactive(`SELECT m.kind, m.key, a.code, a.name FROM gl_map m JOIN gl_accounts a ON a.id = m.account_id WHERE NOT a.is_active`, 'Posting rules',
+        (r) => r.kind + ' "' + r.key + '" posts to ' + r.code + ' ' + r.name + ', which is switched off');
+      await inactive(`SELECT p.name, p.img, a.code, a.name AS acct FROM products p JOIN gl_accounts a ON a.id IN (p.income_account_id, p.cogs_account_id) WHERE NOT a.is_active LIMIT 50`, 'Products',
+        (r) => (r.name || r.img) + ' posts to ' + r.code + ' ' + r.acct + ', which is switched off');
+      await inactive(`SELECT k.name, a.code, a.name AS acct FROM fa_classes k JOIN gl_accounts a ON a.id IN (k.asset_account_id, k.accum_account_id, k.expense_account_id) WHERE k.is_active AND NOT a.is_active`, 'Fixed asset classes',
+        (r) => r.name + ' uses ' + r.code + ' ' + r.acct + ', which is switched off');
+      await inactive(`SELECT k.name FROM fa_classes k WHERE k.is_active AND k.method <> 'none' AND (k.accum_account_id IS NULL OR k.expense_account_id IS NULL)`, 'Fixed asset classes',
+        (r) => r.name + ' is depreciated but has no accumulated depreciation or expense account');
+      await inactive(`SELECT i.label, a.code, a.name AS acct FROM payroll_items i JOIN gl_accounts a ON a.id = i.gl_account_id WHERE NOT a.is_active`, 'Payroll items',
+        (r) => r.label + ' posts to ' + r.code + ' ' + r.acct + ', which is switched off');
+      const { rows: idle } = await query(`SELECT a.code, a.name, SUM(l.amount) AS bal FROM gl_lines l JOIN gl_accounts a ON a.id = l.account_id WHERE NOT a.is_active GROUP BY a.id HAVING SUM(l.amount) <> 0`);
+      for (const r of idle) problems.push({ where: 'Balances', what: r.code + ' ' + r.name + ' is switched off but still holds ' + r2(r.bal).toFixed(2) });
+      const { rows: unb } = await query(`SELECT e.number FROM gl_entries e JOIN gl_lines l ON l.entry_id = e.id GROUP BY e.id HAVING SUM(l.amount) <> 0 LIMIT 20`);
+      for (const r of unb) problems.push({ where: 'Journal', what: r.number + ' does not balance' });
+
+      // Money the system records that no posting rule takes to the ledger.
+      const outside = [];
+      const { rows: web } = await query(`SELECT COUNT(*)::int AS n, COALESCE(SUM(total_usd), 0) AS v FROM orders WHERE payment_status = 'paid' AND created_at >= $1`, [start]);
+      if (web[0].n) outside.push({ what: 'Website orders paid online', count: web[0].n, amount: r2(web[0].v),
+        note: 'Card money taken on the website (Stripe) goes nowhere in the ledger. If the order is rung up at the till when collected, record the online payment there as card; otherwise post a journal: Dr Card Settlements Clearing, Cr Sales.' });
+      // Work orders billed before the ledger started are not in an opening entry made before the workshop posted.
+      const { rows: op } = await query(`SELECT EXISTS (SELECT 1 FROM gl_lines l JOIN gl_entries e ON e.id = l.entry_id WHERE e.source_kind = 'opening' AND l.memo = 'Owed on work orders') AS has`);
+      if (!op[0].has) {
+        const { rows: wo } = await query(
+          `SELECT COALESCE((SELECT SUM(total) FILTER (WHERE kind = 'bill') - COALESCE(SUM(total) FILTER (WHERE kind = 'unbill'), 0) FROM work_order_billings WHERE created_at < $1), 0)
+                - COALESCE((SELECT SUM(amount_usd) FROM work_order_payments_all WHERE received_at < $1 AND (voided_at IS NULL OR voided_at >= $1)), 0) AS v`, [start]);
+        if (r2(wo[0].v)) outside.push({ what: 'Work orders owed at the ledger start', count: null, amount: r2(wo[0].v),
+          note: 'Billed work orders less workshop payments before the ledger started: not in the opening entry, so A/R in the ledger is short by this much. Post a journal: Dr Accounts Receivable, Cr Opening Balance Equity, dated the ledger start.' });
+      }
+
+      res.json({ started: true, start_at: start, sources, orphans, drift, problems, outside, rule_accounts: RULE_KEYS.length });
     } catch (e) { fail(res, e); }
   });
 
@@ -1330,7 +1609,8 @@ function register(app, deps) {
     } catch (e) { fail(res, e); }
   });
 
-  return { postAll };
+  // books.js registers after this module: it hands over Payables' bill list for the A/P tie-out and opening entry.
+  return { postAll, kick, useBooks: (b) => { books = b; } };
 }
 
 module.exports = { register };

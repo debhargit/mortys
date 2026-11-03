@@ -16527,6 +16527,7 @@ async function renderReports(panel){
           '<a href="/report-balancing.html" target="_blank" rel="noopener">⚖ Balancing report ↗</a>' +
           '<a href="/messages.html" target="_blank" rel="noopener">✉ Customer messages ↗</a>' +
           '<a href="/accounting.html" target="_blank" rel="noopener">📒 Accounting ↗</a>' +
+          '<a href="/assets.html" target="_blank" rel="noopener">🏗 Fixed assets and depreciation ↗</a>' +
           '<a href="/security.html" target="_blank" rel="noopener">🔒 Security and audit log ↗</a>' +
           '<a href="/terminal.html" target="_blank" rel="noopener">🧾 Terminal journal and departments ↗</a>' +
           '<a href="/commission.html" target="_blank" rel="noopener">💰 Commission ↗</a>' +
@@ -18729,7 +18730,7 @@ function stub(label){ return async function(panel){ panel.innerHTML = '<div clas
 var TILL_ORIGIN = 'https://till.visionautosolutions.com';
 var ON_WEBSITE = location.hostname !== 'till.visionautosolutions.com' &&
   /(^|\.)visionautosolutions\.(com|pages\.dev)$/.test(location.hostname);
-var TILL_ONLY_PAGES = ['accounting', 'budget', 'documents', 'receivables', 'payables', 'banking', 'loans-rent', 'report-balancing', 'payroll',
+var TILL_ONLY_PAGES = ['accounting', 'assets', 'budget', 'documents', 'receivables', 'payables', 'banking', 'loans-rent', 'report-balancing', 'payroll',
   'clock', 'attendance', 'commission', 'training', 'hiring', 'people', 'franchise', 'franchisee', 'dispatch', 'fleet-wall', 'mobile',
   'driver', 'cashier', 'warehouse', 'stockcash', 'report-planning', 'terminal', 'ai', 'system', 'security', 'legacy-import'];
 // Left as the website's own path, so the website's check and fallback apply.
@@ -18755,6 +18756,8 @@ var MODULE_GROUPS = [
   ]},
   { title: '💰 Money', items: [
     { href: '/accounting.html',  icon: '📒', name: 'Accounting', blurb: 'General ledger, journals, trial balance, QuickBooks export' },
+    { href: '/assets.html',      icon: '🏗', name: 'Fixed assets', blurb: 'Asset register, monthly depreciation, disposals, asset schedule' },
+    { href: '/budget.html#value', icon: '🏦', name: 'Business value', blurb: 'Balance sheet, owners\' equity, what the business is worth, recommendations' },
     { href: '/budget.html',      icon: '💰', name: 'Budget & forecast', blurb: 'Budgets and versions, 12-month and 13-week forecasts, break-even, ROI, health report' },
     { href: '/receivables.html', icon: '📥', name: 'Receivables', blurb: 'Customer accounts, payments, statements, collections' },
     { href: '/payables.html',    icon: '📤', name: 'Payables', blurb: 'Supplier bills and paying them' },

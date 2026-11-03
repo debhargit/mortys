@@ -30,6 +30,8 @@ const MODULES = {
   '/documents.html#forms': ['docs.upload'],
   '/accounting.html': ['acct.view'],
   '/budget.html': ['acct.budget', 'acct.view'],
+  '/assets.html': ['acct.view'],
+  '/budget.html#value': ['acct.view'],
   '/receivables.html': ['ar.manage'],
   '/payables.html': ['ap.manage'],
   '/banking.html': ['bank.manage'],

@@ -393,8 +393,15 @@ CREATE TABLE IF NOT EXISTS work_order_payments (
   notes           TEXT,
   received_at     TIMESTAMPTZ DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_wo_payments_order ON work_order_payments (work_order_id);
-CREATE INDEX IF NOT EXISTS idx_wo_payments_received_at ON work_order_payments (received_at);
+-- The table becomes work_order_payments_all later (payments are voided, not
+-- deleted, once the ledger has them); its indexes keep their names.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_class WHERE relname = 'work_order_payments' AND relkind = 'r') THEN
+    CREATE INDEX IF NOT EXISTS idx_wo_payments_order ON work_order_payments (work_order_id);
+    CREATE INDEX IF NOT EXISTS idx_wo_payments_received_at ON work_order_payments (received_at);
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS cash_drawer_sessions (
   id              SERIAL PRIMARY KEY,
@@ -7669,3 +7676,222 @@ CREATE TABLE IF NOT EXISTS legacy_import_runs (
   started_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   finished_at   TIMESTAMPTZ
 );
+-- =============================================================================
+--  Ledger coverage: the workshop's work orders (gl.js)
+--
+--  Work orders were billed and paid outside the ledger: labour, parts and GCT
+--  never reached income, and workshop payments never reached cash or A/R.
+--  Now an invoice posts when a work order is billed (Dr A/R; Cr labour, parts,
+--  GCT) and each payment posts (Dr cash / bank; Cr A/R).
+--
+--  work_order_billings  one row each time a work order is billed, with the
+--                       amounts billed, and one 'unbill' row when it is taken
+--                       back (status moved back, or cancelled): the ledger
+--                       posts the first and reverses it for the second, so a
+--                       work order can be corrected and billed again.
+--  work_order_payments  payments are voided, not deleted, once the ledger has
+--                       them: every payment lives in work_order_payments_all
+--                       and work_order_payments is a view of the ones not
+--                       voided, so every report leaves voided ones out.
+--                       NOTE: the view is SELECT *; re-created on every boot.
+-- =============================================================================
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'work_order_payments' AND c.relkind = 'r' AND n.nspname = current_schema()) THEN
+    ALTER TABLE work_order_payments RENAME TO work_order_payments_all;
+  END IF;
+END $$;
+ALTER TABLE work_order_payments_all ADD COLUMN IF NOT EXISTS voided_at   TIMESTAMPTZ;
+ALTER TABLE work_order_payments_all ADD COLUMN IF NOT EXISTS voided_by   INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE work_order_payments_all ADD COLUMN IF NOT EXISTS void_reason TEXT;
+CREATE OR REPLACE VIEW work_order_payments AS SELECT * FROM work_order_payments_all WHERE voided_at IS NULL;
+
+ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS billed_at TIMESTAMPTZ;
+CREATE TABLE IF NOT EXISTS work_order_billings (
+  id             SERIAL PRIMARY KEY,
+  work_order_id  INTEGER NOT NULL REFERENCES work_orders(id) ON DELETE RESTRICT,
+  kind           TEXT NOT NULL CHECK (kind IN ('bill', 'unbill')),
+  bill_id        INTEGER REFERENCES work_order_billings(id),   -- unbill: the billing it takes back
+  labor          NUMERIC(14,2) NOT NULL DEFAULT 0,
+  parts          NUMERIC(14,2) NOT NULL DEFAULT 0,
+  tax            NUMERIC(14,2) NOT NULL DEFAULT 0,
+  total          NUMERIC(14,2) NOT NULL DEFAULT 0,
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_wo_billings_wo ON work_order_billings (work_order_id, id);
+
+-- Work orders already billed or paid: record the billing they had, dated when
+-- they were billed. The ledger posts the ones billed after it started (they
+-- were missed); earlier ones are history from before the ledger.
+UPDATE work_orders SET billed_at = COALESCE(paid_at, completed_at, created_at) WHERE billed_at IS NULL AND status IN ('billed', 'paid');
+INSERT INTO work_order_billings (work_order_id, kind, labor, parts, tax, total, created_at)
+SELECT w.id, 'bill', w.labor_total_usd, w.parts_total_usd, w.tax_usd, w.total_usd, w.billed_at
+  FROM work_orders w
+ WHERE w.status IN ('billed', 'paid') AND COALESCE(w.total_usd, 0) <> 0
+   AND NOT EXISTS (SELECT 1 FROM work_order_billings b WHERE b.work_order_id = w.id);
+
+-- Workshop payment methods the posting rules did not know.
+INSERT INTO gl_map (kind, key, account_id)
+SELECT m.kind, m.key, a.id FROM (VALUES ('pay_method', 'bank_transfer', 'bank'), ('pay_method', 'mobile', 'bank')) m(kind, key, sk)
+  JOIN gl_accounts a ON a.system_key = m.sk
+ON CONFLICT (kind, key) DO NOTHING;
+
+-- =============================================================================
+--  Fixed assets and depreciation (assets.js, assets.html)
+--
+--  fa_classes       kinds of asset: the cost, accumulated depreciation and
+--                   depreciation expense accounts, and the usual method, life
+--                   and salvage. Land has no accumulated depreciation account.
+--  fa_assets        the register: what was bought, when it went into service,
+--                   cost, salvage, method and life. How its cost reached the
+--                   books (funding):
+--                     in_ledger  already debited to the asset account by a bill
+--                                or bank payment coded to it: nothing to post
+--                     account    post Dr asset / Cr the account it was paid from
+--                     opening    owned before the ledger: Dr asset, Cr
+--                                accumulated depreciation to date (opening_accum),
+--                                Cr Opening Balance Equity for the rest
+--  fa_runs          a month's depreciation (catching up any months missed),
+--                   posted as one entry: Dr expense, Cr accumulated, per asset
+--  fa_depreciation  each asset's charge per month; a voided run's rows go
+--  fa_disposals     sold, scrapped or written off: Dr accumulated, Dr what was
+--                   received, Cr cost, the difference a gain or loss
+--  Every posting is in gl.js (fa_acquire, fa_run, fa_dispose and a reversal
+--  for each void). Amounts are J$.
+-- =============================================================================
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('1500', 'Furniture and Fixtures',                               'asset', 'Furniture and Fixtures',                               'FIXASSET', 'fa_furniture'),
+  ('1505', 'Accumulated Depreciation - Furniture and Fixtures',    'asset', 'Accumulated Depreciation - Furniture and Fixtures',    'FIXASSET', 'fa_furniture_ad'),
+  ('1510', 'Machinery and Workshop Equipment',                     'asset', 'Machinery and Workshop Equipment',                     'FIXASSET', 'fa_equipment'),
+  ('1515', 'Accumulated Depreciation - Machinery and Equipment',   'asset', 'Accumulated Depreciation - Machinery and Equipment',   'FIXASSET', 'fa_equipment_ad'),
+  ('1520', 'Motor Vehicles',                                       'asset', 'Motor Vehicles',                                       'FIXASSET', 'fa_vehicles'),
+  ('1525', 'Accumulated Depreciation - Motor Vehicles',            'asset', 'Accumulated Depreciation - Motor Vehicles',            'FIXASSET', 'fa_vehicles_ad'),
+  ('1530', 'Computer Equipment',                                   'asset', 'Computer Equipment',                                   'FIXASSET', 'fa_computers'),
+  ('1535', 'Accumulated Depreciation - Computer Equipment',        'asset', 'Accumulated Depreciation - Computer Equipment',        'FIXASSET', 'fa_computers_ad'),
+  ('1540', 'Leasehold Improvements',                               'asset', 'Leasehold Improvements',                               'FIXASSET', 'fa_leasehold'),
+  ('1545', 'Accumulated Depreciation - Leasehold Improvements',    'asset', 'Accumulated Depreciation - Leasehold Improvements',    'FIXASSET', 'fa_leasehold_ad'),
+  ('1550', 'Buildings',                                            'asset', 'Buildings',                                            'FIXASSET', 'fa_buildings'),
+  ('1555', 'Accumulated Depreciation - Buildings',                 'asset', 'Accumulated Depreciation - Buildings',                 'FIXASSET', 'fa_buildings_ad'),
+  ('1560', 'Land',                                                 'asset', 'Land',                                                 'FIXASSET', 'fa_land'),
+  ('6650', 'Depreciation Expense',                                 'expense',       'Depreciation Expense',             'EXP',   'depreciation'),
+  ('7400', 'Gain on Disposal of Assets',                           'other_income',  'Gain on Disposal of Assets',       'EXINC', 'fa_gain'),
+  ('8200', 'Loss on Disposal of Assets',                           'other_expense', 'Loss on Disposal of Assets',       'EXEXP', 'fa_loss')
+ON CONFLICT (code) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS fa_classes (
+  id                  SERIAL PRIMARY KEY,
+  name                TEXT NOT NULL UNIQUE,
+  asset_account_id    INTEGER NOT NULL REFERENCES gl_accounts(id),
+  accum_account_id    INTEGER REFERENCES gl_accounts(id),          -- NULL: not depreciated (land)
+  expense_account_id  INTEGER REFERENCES gl_accounts(id),
+  method              TEXT NOT NULL DEFAULT 'straight_line' CHECK (method IN ('straight_line', 'declining_balance', 'none')),
+  life_months         INTEGER CHECK (life_months IS NULL OR life_months BETWEEN 1 AND 1200),
+  rate_pct            NUMERIC(6,2) CHECK (rate_pct IS NULL OR (rate_pct > 0 AND rate_pct <= 100)),   -- declining balance: % a year
+  salvage_pct         NUMERIC(6,2) NOT NULL DEFAULT 0 CHECK (salvage_pct >= 0 AND salvage_pct < 100),
+  is_active           BOOLEAN NOT NULL DEFAULT true,
+  created_at          TIMESTAMPTZ DEFAULT NOW()
+);
+INSERT INTO fa_classes (name, asset_account_id, accum_account_id, expense_account_id, method, life_months)
+SELECT c.name, a.id, ad.id, ex.id, c.method, c.life
+  FROM (VALUES
+    ('Furniture and fixtures',            'fa_furniture',  'fa_furniture_ad',  'straight_line', 120),
+    ('Machinery and workshop equipment',  'fa_equipment',  'fa_equipment_ad',  'straight_line', 120),
+    ('Motor vehicles',                    'fa_vehicles',   'fa_vehicles_ad',   'straight_line',  60),
+    ('Computer equipment',                'fa_computers',  'fa_computers_ad',  'straight_line',  36),
+    ('Leasehold improvements',            'fa_leasehold',  'fa_leasehold_ad',  'straight_line', 120),
+    ('Buildings',                         'fa_buildings',  'fa_buildings_ad',  'straight_line', 480)
+  ) c(name, ak, adk, method, life)
+  JOIN gl_accounts a ON a.system_key = c.ak JOIN gl_accounts ad ON ad.system_key = c.adk JOIN gl_accounts ex ON ex.system_key = 'depreciation'
+ON CONFLICT (name) DO NOTHING;
+INSERT INTO fa_classes (name, asset_account_id, method)
+SELECT 'Land', a.id, 'none' FROM gl_accounts a WHERE a.system_key = 'fa_land'
+ON CONFLICT (name) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS fa_assets (
+  id                  SERIAL PRIMARY KEY,
+  number              TEXT UNIQUE,                     -- FA-0001
+  name                TEXT NOT NULL,
+  class_id            INTEGER NOT NULL REFERENCES fa_classes(id),
+  description         TEXT,
+  serial_no           TEXT,
+  location            TEXT,
+  custodian           TEXT,                            -- who has it
+  supplier_id         INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+  reference           TEXT,                            -- supplier invoice / cheque that paid for it
+  gl_class_id         INTEGER REFERENCES gl_classes(id),
+  acquired_on         DATE NOT NULL,
+  in_service_on       DATE NOT NULL,
+  cost                NUMERIC(14,2) NOT NULL CHECK (cost > 0),
+  salvage             NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (salvage >= 0),
+  method              TEXT NOT NULL CHECK (method IN ('straight_line', 'declining_balance', 'none')),
+  life_months         INTEGER CHECK (life_months IS NULL OR life_months BETWEEN 1 AND 1200),
+  rate_pct            NUMERIC(6,2) CHECK (rate_pct IS NULL OR (rate_pct > 0 AND rate_pct <= 100)),
+  funding             TEXT NOT NULL CHECK (funding IN ('in_ledger', 'account', 'opening')),
+  funding_account_id  INTEGER REFERENCES gl_accounts(id),
+  opening_accum       NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (opening_accum >= 0),
+  opening_through     DATE,                            -- first day of the last month opening_accum covers
+  status              TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disposed', 'void')),
+  notes               TEXT,
+  created_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at          TIMESTAMPTZ DEFAULT NOW(),
+  voided_at           TIMESTAMPTZ,
+  voided_by           INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  void_reason         TEXT,
+  CHECK (salvage < cost),
+  CHECK (opening_accum <= cost)
+);
+CREATE INDEX IF NOT EXISTS idx_fa_assets_class ON fa_assets (class_id, status);
+
+CREATE TABLE IF NOT EXISTS fa_runs (
+  id           SERIAL PRIMARY KEY,
+  month        DATE NOT NULL,                  -- first day of the last month it charges
+  total        NUMERIC(14,2) NOT NULL DEFAULT 0,
+  assets       INTEGER NOT NULL DEFAULT 0,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  voided_at    TIMESTAMPTZ,
+  voided_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  void_reason  TEXT
+);
+CREATE TABLE IF NOT EXISTS fa_depreciation (
+  id        SERIAL PRIMARY KEY,
+  run_id    INTEGER NOT NULL REFERENCES fa_runs(id) ON DELETE CASCADE,
+  asset_id  INTEGER NOT NULL REFERENCES fa_assets(id),
+  month     DATE NOT NULL,                     -- first day of the month charged
+  amount    NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+  UNIQUE (asset_id, month)
+);
+CREATE INDEX IF NOT EXISTS idx_fa_depreciation_run ON fa_depreciation (run_id);
+
+CREATE TABLE IF NOT EXISTS fa_disposals (
+  id                   SERIAL PRIMARY KEY,
+  asset_id             INTEGER NOT NULL REFERENCES fa_assets(id),
+  disposed_on          DATE NOT NULL,
+  kind                 TEXT NOT NULL CHECK (kind IN ('sold', 'scrapped', 'written_off', 'traded_in', 'stolen')),
+  proceeds             NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (proceeds >= 0),
+  proceeds_account_id  INTEGER REFERENCES gl_accounts(id),
+  accum_at             NUMERIC(14,2) NOT NULL DEFAULT 0,   -- accumulated depreciation taken off
+  note                 TEXT,
+  created_by           INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at           TIMESTAMPTZ DEFAULT NOW(),
+  voided_at            TIMESTAMPTZ,
+  voided_by            INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  void_reason          TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fa_disposals_live ON fa_disposals (asset_id) WHERE voided_at IS NULL;
+
+-- =============================================================================
+--  OWNERS' EQUITY ACCOUNTS (Business value report, budget.js)
+--  Opening Balance Equity holds what the books brought in when the ledger
+--  started. These are where the owners' money in and out, and the profit kept
+--  in the business, belong, so the equity statement can tell them apart.
+-- =============================================================================
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key)
+SELECT v.code, v.name, 'equity', v.name, 'EQUITY', v.sk FROM (VALUES
+  ('3100', 'Owner''s Capital',   'owner_capital'),
+  ('3200', 'Owner''s Drawings',  'owner_drawings'),
+  ('3900', 'Retained Earnings', 'retained_earnings')
+) v(code, name, sk)
+WHERE NOT EXISTS (SELECT 1 FROM gl_accounts g WHERE g.system_key = v.sk)
+ON CONFLICT (code) DO NOTHING;

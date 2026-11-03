@@ -78,7 +78,7 @@
 <header><h1>Budget &amp; forecast</h1><nav><a href="/accounting.html">Accounting</a><a href="/banking.html">Banking</a><a href="/admin.html">Admin</a></nav></header>
 <main>
   <div class="tabs" id="tabs">
-    <button data-t="budget" class="on">Budget</button><button data-t="outlook">12-month forecast</button><button data-t="forecast">13-week cash</button><button data-t="breakeven">Break-even</button><button data-t="roi">Investments &amp; ROI</button><button data-t="health">Health report</button>
+    <button data-t="budget" class="on">Budget</button><button data-t="outlook">12-month forecast</button><button data-t="forecast">13-week cash</button><button data-t="breakeven">Break-even</button><button data-t="roi">Investments &amp; ROI</button><button data-t="health">Health report</button><button data-t="value">Business value</button>
     <label class="curpick">Show in <select id="cur" title="Currency the figures are shown in"><option value="JMD">J$</option></select></label>
   </div>
   <div id="curnote"></div>
@@ -114,6 +114,7 @@
   var INCOME = { income: 1, other_income: 1 };
   var tab = 'budget', meta = null;
   try { tab = localStorage.getItem('vision.budgetTab') || 'budget'; } catch (_) {}
+  if (/^#(budget|outlook|forecast|breakeven|roi|health|value)$/.test(location.hash)) tab = location.hash.slice(1);   // links such as /budget.html#value
 
   function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 3500); }
   function api(url, method, body) {
@@ -841,10 +842,96 @@
     };
   }
 
+  // ======================================================= BUSINESS VALUE ==
+  var vq = { as_of: '', multiple: '' }, vdata = null;
+  var VR = { good: ['ok', 'Good'], watch: ['warn', 'Watch'], poor: ['bad', 'Act now'] };
+  function valueTab() {
+    var qs = [];
+    if (vq.as_of) qs.push('as_of=' + encodeURIComponent(vq.as_of));
+    if (vq.multiple) qs.push('multiple=' + encodeURIComponent(vq.multiple));
+    return api('/api/budget/value' + (qs.length ? '?' + qs.join('&') : '')).then(function (d) { vdata = d; drawValue(); });
+  }
+  function drawValue() {
+    var d = vdata, h = '<div class="card"><h2>Business value and owners\' equity</h2>';
+    var ctl = '<div class="controls"><div><label>As of</label><input type="date" id="vas" value="' + esc(vq.as_of || d.as_of) + '"></div>' +
+      '<div><label>Earnings multiple</label><input id="vmul" style="width:90px" placeholder="3.5" value="' + esc(vq.multiple) + '" title="Times a year\'s EBITDA; the range is one either side"></div>' +
+      '<button id="vgo">Work it out</button><span style="margin-left:auto"></span>' + (d.ready ? '<button id="vcsv">CSV</button><button id="vpr">Print / PDF</button>' : '') + '</div>';
+    if (!d.ready) { $('#out').innerHTML = h + ctl + '<div class="note warn">' + esc(d.reason) + '</div></div>'; return wireValue(); }
+    var V = d.valuation, B = d.balance_sheet, E = d.equity, Pf = d.profit;
+    h += '<p class="sub">From the books on ' + esc(d.as_of) + '. Equity movement and profit cover ' + esc(d.period.from) + ' to ' + esc(d.period.to) + ' (' + d.period.days + (d.period.days === 1 ? ' day' : ' days') + ').</p>' + ctl +
+      '<div class="kpis">' + [
+        ['Indicated value', V.value.mid, V.value.low === V.value.high ? (V.basis === 'assets' ? 'on its assets' : '') : cs() + J0(V.value.low) + ' to ' + cs() + J0(V.value.high)],
+        ['Owners\' equity', B.equity, 'book value of the owners\' stake'],
+        ['Total assets', B.assets, ''], ['Total liabilities', B.liabilities, ''],
+        ['Profit, a year', Pf.net_year, Pf.net_year == null ? 'too few days in the books' : 'scaled from the period'], ['EBITDA, a year', Pf.ebitda_year, 'before interest and depreciation'],
+      ].map(function (k) { return '<div class="kpi"><span>' + k[0] + '</span><b style="color:' + (k[1] < 0 ? 'var(--red)' : 'inherit') + '">' + (k[1] == null ? '–' : cs() + J0(k[1])) + '</b><small>' + esc(k[2]) + '</small></div>'; }).join('') + '</div></div>';
+
+    // Recommendations first: they are what the owner acts on.
+    var recs = d.recommendations.filter(function (r) { return r.rating !== 'good'; }), good = d.recommendations.filter(function (r) { return r.rating === 'good'; });
+    h += '<div class="card"><h2>Recommendations</h2>' + (recs.length ? '<ol style="margin:6px 0 0;padding-left:20px">' + recs.map(function (r) { return '<li style="margin-bottom:8px"><span class="pill ' + VR[r.rating][0] + '">' + VR[r.rating][1] + '</span> <b>' + esc(r.label) + ':</b> ' + htext(r.text) + '</li>'; }).join('') + '</ol>' : '<p class="sub">Nothing pressing on value or equity.</p>') +
+      (good.length ? '<p style="margin:10px 0 4px"><b>Going well</b></p><ul style="margin:0;padding-left:18px">' + good.map(function (r) { return '<li style="margin-bottom:6px"><b>' + esc(r.label) + ':</b> ' + htext(r.text) + '</li>'; }).join('') + '</ul>' : '') +
+      (d.health_actions.length ? '<p style="margin:10px 0 4px"><b>From the health report</b></p><ul style="margin:0;padding-left:18px">' + d.health_actions.map(function (a) { return '<li style="margin-bottom:6px"><b>' + esc(a.label) + ':</b> ' + htext(a.text) + '</li>'; }).join('') + '</ul>' : '') + '</div>';
+
+    // What it is worth.
+    var row = function (l, v, cls) { return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + l + '</td><td class="n">' + J(v) + '</td></tr>'; };
+    h += '<div class="grid"><div class="card"><h2>What the business is worth</h2><table><tbody>' +
+      row('<b>Book value</b> (assets less liabilities)', V.book) +
+      V.adjustments.map(function (a) { return row(htext(a.label), a.amount); }).join('') +
+      row('<b>Adjusted net assets</b>', V.adjusted, 'total') + '</tbody></table>' +
+      (V.earnings ? '<table style="margin-top:12px"><thead><tr><th>Earnings value</th><th class="n">' + V.multiples.low + '×</th><th class="n">' + V.multiples.mid + '×</th><th class="n">' + V.multiples.high + '×</th></tr></thead><tbody>' +
+        '<tr><td>EBITDA, a year, times the multiple</td><td class="n">' + J(Pf.ebitda_year * V.multiples.low) + '</td><td class="n">' + J(Pf.ebitda_year * V.multiples.mid) + '</td><td class="n">' + J(Pf.ebitda_year * V.multiples.high) + '</td></tr>' +
+        '<tr><td>less long-term debt</td><td class="n">' + J(-V.debt) + '</td><td class="n">' + J(-V.debt) + '</td><td class="n">' + J(-V.debt) + '</td></tr>' +
+        '<tr><td>plus money on hand</td><td class="n">' + J(Math.max(0, V.cash)) + '</td><td class="n">' + J(Math.max(0, V.cash)) + '</td><td class="n">' + J(Math.max(0, V.cash)) + '</td></tr>' +
+        '<tr class="total"><td>Earnings value</td><td class="n">' + J(V.earnings.low) + '</td><td class="n">' + J(V.earnings.mid) + '</td><td class="n">' + J(V.earnings.high) + '</td></tr></tbody></table>'
+        : '<div class="note warn" style="margin-top:12px">No earnings value: ' + (Pf.ebitda_year == null ? 'the books cover too few days to judge a year\'s profit' : 'the books show no profit before interest and depreciation for the period') + ', so the business is valued on its assets.</div>') +
+      '<div class="note info" style="margin-top:12px"><b>Indicated value: ' + cs() + J0(V.value.low) + (V.value.high !== V.value.low ? ' to ' + cs() + J0(V.value.high) : '') + '</b>, ' +
+        (V.basis === 'earnings' ? 'on its earnings, including about ' + cs() + J0(V.goodwill) + ' of goodwill over its assets.' : 'on its assets: its earnings do not support more.') + '</div></div>';
+
+    // Owners' equity: opening to closing.
+    h += '<div class="card"><h2>Owners\' equity</h2><table><tbody>' + row('<b>At ' + esc(d.period.from) + '</b>', E.opening) +
+      E.movement.map(function (m) { return row(esc(m.label), m.amount); }).join('') + row('<b>At ' + esc(d.period.to) + '</b>', E.closing, 'total') + '</tbody></table>' +
+      (Math.abs(E.check) >= 0.01 ? '<div class="note bad">The movement does not reach the balance sheet\'s equity by ' + J(E.check) + '.</div>' : '') +
+      '<table style="margin-top:12px"><thead><tr><th>Measure</th><th class="n">Result</th><th>Guide</th></tr></thead><tbody>' +
+      d.measures.map(function (m) { return '<tr><td><b>' + esc(m.label) + '</b><br><small style="color:var(--muted)">' + esc(m.note) + '</small></td><td class="n">' + htext(m.shown) + '</td><td><small>' + esc(m.guide) + '</small></td></tr>'; }).join('') + '</tbody></table></div></div>';
+
+    // Balance sheet.
+    var bs = function (keys, title, total) {
+      return '<tr class="head"><td colspan="2">' + title + '</td></tr>' + keys.map(function (k) {
+        var g = B.groups.filter(function (x) { return x.key === k; })[0];
+        if (!g || !g.lines.length) return '';
+        return '<tr><td style="padding-left:14px"><b>' + esc(g.label) + '</b></td><td class="n"><b>' + J(g.total) + '</b></td></tr>' +
+          g.lines.map(function (l) { return '<tr><td style="padding-left:28px">' + (l.code ? '<a href="/accounting.html" title="Open in Accounting">' + esc(l.code) + '</a> ' : '') + esc(l.name) + '</td><td class="n">' + J(l.amount) + '</td></tr>'; }).join('');
+      }).join('') + '<tr class="total"><td>' + total[0] + '</td><td class="n">' + J(total[1]) + '</td></tr>';
+    };
+    h += '<div class="card"><h2>Balance sheet at ' + esc(d.as_of) + '</h2><div class="scroll"><table><tbody>' +
+      bs(['cash', 'ar', 'stock', 'other_ca', 'fixed', 'other_a'], 'Assets', ['Total assets', B.assets]) +
+      bs(['cl', 'ltl'], 'Liabilities', ['Total liabilities', B.liabilities]) +
+      '<tr class="total"><td>Net assets</td><td class="n">' + J(B.net_assets) + '</td></tr>' +
+      bs(['equity'], 'Owners\' equity', ['Total owners\' equity', B.equity]) + '</tbody></table></div></div>';
+    h += '<div class="card"><p class="sub" style="margin:0">' + d.notes.map(esc).join(' ') + '</p></div>';
+    $('#out').innerHTML = h;
+    wireValue();
+  }
+  function wireValue() {
+    $('#vgo').onclick = function () { vq.as_of = $('#vas').value; vq.multiple = $('#vmul').value.trim(); valueTab().catch(function (e) { toast(e.message); }); };
+    if ($('#vpr')) $('#vpr').onclick = function () { window.print(); };
+    if ($('#vcsv')) $('#vcsv').onclick = function () {
+      var d = vdata, rows = [['Section', 'Line', 'Amount (J$)']];
+      d.balance_sheet.groups.forEach(function (g) { g.lines.forEach(function (l) { rows.push(['Balance sheet: ' + g.label, (l.code ? l.code + ' ' : '') + l.name, l.amount]); }); });
+      rows.push(['Balance sheet', 'Total assets', d.balance_sheet.assets], ['Balance sheet', 'Total liabilities', d.balance_sheet.liabilities], ['Balance sheet', 'Owners\' equity', d.balance_sheet.equity]);
+      rows.push(['Equity', 'Opening', d.equity.opening]); d.equity.movement.forEach(function (m) { rows.push(['Equity', m.label, m.amount]); }); rows.push(['Equity', 'Closing', d.equity.closing]);
+      rows.push(['Value', 'Book value', d.valuation.book]); d.valuation.adjustments.forEach(function (a) { rows.push(['Value', a.label.replace(/\{J:(-?[\d.]+)\}/g, '$1'), a.amount]); });
+      rows.push(['Value', 'Adjusted net assets', d.valuation.adjusted]);
+      if (d.valuation.earnings) rows.push(['Value', 'Earnings value (low)', d.valuation.earnings.low], ['Value', 'Earnings value (mid)', d.valuation.earnings.mid], ['Value', 'Earnings value (high)', d.valuation.earnings.high]);
+      rows.push(['Value', 'Indicated value (low)', d.valuation.value.low], ['Value', 'Indicated value (high)', d.valuation.value.high]);
+      csvDownload('business-value-' + d.as_of + '.csv', rows);
+    };
+  }
+
   function show() {
     all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); });
     try { localStorage.setItem('vision.budgetTab', tab); } catch (_) {}
-    var f = { budget: budgetTab, outlook: outlookTab, forecast: forecastTab, breakeven: breakevenTab, roi: roiTab, health: healthTab }[tab] || budgetTab;
+    var f = { budget: budgetTab, outlook: outlookTab, forecast: forecastTab, breakeven: breakevenTab, roi: roiTab, health: healthTab, value: valueTab }[tab] || budgetTab;
     $('#out').innerHTML = '<div class="empty">Loading…</div>';
     f().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
   }

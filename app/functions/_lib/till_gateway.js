@@ -43,7 +43,7 @@ export async function gatewaySignature(secret, ts, method, pathAndQuery, email) 
 // of them loads, then each of its API calls answers 501 "not ported". Must
 // match TILL_ONLY_PAGES in admin.html. The admin's links, bookmarks, typed
 // addresses and history all come through here.
-const TILL_ONLY_PAGE = /^\/(accounting|budget|documents|receivables|payables|banking|loans-rent|report-balancing|payroll|clock|attendance|commission|training|hiring|people|franchise|franchisee|dispatch|fleet-wall|mobile|driver|cashier|warehouse|stockcash|report-planning|terminal|ai|system|security|legacy-import)(\.html)?\/?$/;
+const TILL_ONLY_PAGE = /^\/(accounting|assets|budget|documents|receivables|payables|banking|loans-rent|report-balancing|payroll|clock|attendance|commission|training|hiring|people|franchise|franchisee|dispatch|fleet-wall|mobile|driver|cashier|warehouse|stockcash|report-planning|terminal|ai|system|security|legacy-import)(\.html)?\/?$/;
 
 // Whether the till answers. When its tunnel is down, sending staff there shows
 // Cloudflare's bare "Error 1033" page, so every till page is checked first and,
@@ -71,7 +71,7 @@ async function tillAnswers(origin) {
 }
 
 const PAGE_NAMES = {
-  accounting: 'Accounting', budget: 'Budget', documents: 'Document centre', receivables: 'Receivables', payables: 'Payables',
+  accounting: 'Accounting', assets: 'Fixed assets', budget: 'Budget', documents: 'Document centre', receivables: 'Receivables', payables: 'Payables',
   banking: 'Banking', 'loans-rent': 'Loans & rent', 'report-balancing': 'Balancing report', payroll: 'Payroll', clock: 'Time clock',
   attendance: 'Attendance', commission: 'Commission', training: 'Training', hiring: 'Hiring', people: 'People & HR',
   franchise: 'Franchise', franchisee: 'Franchisee portal', dispatch: 'Dispatch', 'fleet-wall': 'Fleet wall', mobile: 'Mobile',

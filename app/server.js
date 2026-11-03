@@ -816,6 +816,16 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json({ limit: '1mb' }));
+// Accounting is updated the moment a transaction is saved: after any change
+// made through the API succeeds, the ledger posts whatever is waiting (gl.js
+// kick). Set once gl.js is registered below.
+let glKick = null;
+app.use((req, res, next) => {
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.path.startsWith('/api/')) {
+    res.on('finish', () => { if (res.statusCode < 400 && glKick) glKick(); });
+  }
+  next();
+});
 app.use(
   cookieSession({
     name: 'mh_session',
@@ -5811,6 +5821,37 @@ async function recalcWoTotals(workOrderId) {
   return { labor, parts, tax, total };
 }
 
+// Work orders and the ledger (gl.js posts work_order_billings). Billing a work
+// order (status billed or paid) records what was billed; moving it out of
+// those, or cancelling it, records the billing taken back, which the ledger
+// reverses. While billed its lines and GCT are fixed, so the invoice in the
+// ledger stays the invoice the customer has.
+const WO_BILLED = ['billed', 'paid'];
+const WO_LOCKED = 'This work order is billed and its invoice is in the ledger. Set it back to Completed to change it, then bill it again.';
+async function woBilled(workOrderId, q = query) {
+  const { rows } = await q(`SELECT kind FROM work_order_billings WHERE work_order_id = $1 ORDER BY id DESC LIMIT 1`, [workOrderId]);
+  return !!rows.length && rows[0].kind === 'bill';
+}
+async function syncWoBilling(workOrderId, userId, q = query) {
+  const { rows: w } = await q(`SELECT status, labor_total_usd, parts_total_usd, tax_usd, total_usd FROM work_orders WHERE id = $1`, [workOrderId]);
+  if (!w.length) return;
+  const { rows: last } = await q(`SELECT id, kind FROM work_order_billings WHERE work_order_id = $1 ORDER BY id DESC LIMIT 1`, [workOrderId]);
+  const billed = !!last.length && last[0].kind === 'bill';
+  if (WO_BILLED.includes(w[0].status) && !billed && Number(w[0].total_usd)) {
+    await q(`INSERT INTO work_order_billings (work_order_id, kind, labor, parts, tax, total, created_by) VALUES ($1, 'bill', $2, $3, $4, $5, $6)`,
+      [workOrderId, w[0].labor_total_usd, w[0].parts_total_usd, w[0].tax_usd, w[0].total_usd, userId || null]);
+    await q(`UPDATE work_orders SET billed_at = COALESCE(billed_at, NOW()) WHERE id = $1`, [workOrderId]);
+  } else if (!WO_BILLED.includes(w[0].status) && billed) {
+    await q(`INSERT INTO work_order_billings (work_order_id, kind, bill_id, labor, parts, tax, total, created_by)
+             SELECT work_order_id, 'unbill', id, labor, parts, tax, total, $2 FROM work_order_billings WHERE id = $1`, [last[0].id, userId || null]);
+  }
+}
+async function woLocked(res, workOrderId) {
+  if (!(await woBilled(workOrderId))) return false;
+  res.status(409).json({ error: WO_LOCKED });
+  return true;
+}
+
 app.get('/api/admin/work-orders', requireAdmin, async (req, res) => {
   const status = req.query.status || null;
   const sql = status
@@ -5895,6 +5936,8 @@ app.patch('/api/admin/work-orders/:id', requireAdmin, async (req, res) => {
     sets.push(`${f} = $${sets.length + 1}`); vals.push(req.body[f]);
   }
   if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
+  // GCT is part of the billed invoice: it changes only once the work order is taken back out of billed.
+  if (req.body.tax_usd !== undefined && (req.body.status === undefined || WO_BILLED.includes(req.body.status)) && await woLocked(res, req.params.id)) return;
   vals.push(req.params.id);
   await query(`UPDATE work_orders SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
   if (req.body && req.body.status === 'completed') {
@@ -5903,6 +5946,7 @@ app.patch('/api/admin/work-orders/:id', requireAdmin, async (req, res) => {
   if (req.body && req.body.status === 'paid') {
     await query(`UPDATE work_orders SET paid_at = COALESCE(paid_at, NOW()) WHERE id = $1`, [req.params.id]);
   }
+  if (req.body && req.body.status !== undefined) await syncWoBilling(req.params.id, req.session.userId);
   res.json({ ok: true });
   // Fire-and-forget SMS notification on status change (best-effort).
   if (req.body && req.body.status && req.body.status !== prevStatus) {
@@ -5930,6 +5974,9 @@ app.patch('/api/admin/work-orders/:id', requireAdmin, async (req, res) => {
 });
 
 app.delete('/api/admin/work-orders/:id', requireManager, async (req, res) => {
+  // Billed or paid at some point: the ledger has it, so it stays (cancel it instead).
+  const { rows: used } = await query(`SELECT EXISTS (SELECT 1 FROM work_order_billings WHERE work_order_id = $1) OR EXISTS (SELECT 1 FROM work_order_payments_all WHERE work_order_id = $1) AS used`, [req.params.id]);
+  if (used[0].used) return res.status(409).json({ error: 'This work order has been billed or paid, so it is in the books. Set its status to Cancelled instead of deleting it.' });
   await query('DELETE FROM work_orders WHERE id = $1', [req.params.id]);
   res.json({ ok: true });
 });
@@ -5938,6 +5985,7 @@ app.delete('/api/admin/work-orders/:id', requireManager, async (req, res) => {
 app.post('/api/admin/work-orders/:id/labor', requireAdmin, async (req, res) => {
   const b = req.body || {};
   if (!b.description || !b.hours || !b.rate_usd) return res.status(400).json({ error: 'description, hours, rate_usd required' });
+  if (await woLocked(res, req.params.id)) return;
   const hours = Number(b.hours); const rate = Number(b.rate_usd);
   const total = Math.round(hours * rate * 100) / 100;
   await query(
@@ -5950,6 +5998,7 @@ app.post('/api/admin/work-orders/:id/labor', requireAdmin, async (req, res) => {
 });
 
 app.delete('/api/admin/work-orders/:woId/labor/:id', requireAdmin, async (req, res) => {
+  if (await woLocked(res, req.params.woId)) return;
   await query('DELETE FROM work_order_labor WHERE id = $1 AND work_order_id = $2', [req.params.id, req.params.woId]);
   const totals = await recalcWoTotals(req.params.woId);
   res.json({ ok: true, totals });
@@ -5959,6 +6008,7 @@ app.delete('/api/admin/work-orders/:woId/labor/:id', requireAdmin, async (req, r
 app.post('/api/admin/work-orders/:id/parts', requireAdmin, async (req, res) => {
   const b = req.body || {};
   if (!b.description || !b.qty || b.unit_price_usd == null) return res.status(400).json({ error: 'description, qty, unit_price_usd required' });
+  if (await woLocked(res, req.params.id)) return;
   const qty = parseInt(b.qty, 10); const unit = Number(b.unit_price_usd);
   const total = Math.round(qty * unit * 100) / 100;
   await query(
@@ -5971,6 +6021,7 @@ app.post('/api/admin/work-orders/:id/parts', requireAdmin, async (req, res) => {
 });
 
 app.delete('/api/admin/work-orders/:woId/parts/:id', requireAdmin, async (req, res) => {
+  if (await woLocked(res, req.params.woId)) return;
   await query('DELETE FROM work_order_parts WHERE id = $1 AND work_order_id = $2', [req.params.id, req.params.woId]);
   const totals = await recalcWoTotals(req.params.woId);
   res.json({ ok: true, totals });
@@ -6604,6 +6655,10 @@ const gl = require('./gl').register(app, { query, getPool: () => pool, requireAd
 // Receivables, payables and banking (books.js): QuickBooks-style customer and supplier centres, bank registers.
 const books = require('./books').register(app, { query, getPool: () => pool, requireAdmin, requireCap, userCan, mailer, glPost: () => gl.postAll(null),
   getShop: async () => shopSettingsToShop(await getShopSettings()), arOpenSql: AR_OPEN_SQL });
+glKick = gl.kick;   // post on every save (see the middleware near express.json)
+gl.useBooks(books);   // the A/P tie-out and opening entry use Payables' own list of unpaid bills
+// Fixed assets: register, depreciation runs, disposals; posted by gl.js (assets.js).
+require('./assets').register(app, { query, getPool: () => pool, requireAdmin, requireCap, glPost: () => gl.postAll(null) });
 // Loans, invoices raised on the books, recurring invoices and bills, scheduled reminders and late fees (billing.js).
 require('./billing').register(app, { query, getPool: () => pool, requireAdmin, requireCap, userCan, mailer, books, notify,
   getShop: async () => shopSettingsToShop(await getShopSettings()) });
@@ -9611,6 +9666,7 @@ app.post('/api/admin/work-orders/:id/payments', requireAdmin, async (req, res) =
     const { rows: p } = await client.query('SELECT COALESCE(SUM(amount_usd),0)::float AS paid FROM work_order_payments WHERE work_order_id = $1', [req.params.id]);
     if (w[0] && p[0] && p[0].paid >= w[0].total && w[0].total > 0) {
       await client.query(`UPDATE work_orders SET status = 'paid', paid_at = COALESCE(paid_at, NOW()) WHERE id = $1`, [req.params.id]);
+      await syncWoBilling(req.params.id, req.session.userId, client.query.bind(client));   // paid in full: billed too
     }
     await client.query('COMMIT');
     res.json({ ok: true, total_paid: p[0].paid, fully_paid: p[0].paid >= w[0].total });
@@ -9620,13 +9676,17 @@ app.post('/api/admin/work-orders/:id/payments', requireAdmin, async (req, res) =
   } finally { client.release(); }
 });
 
+// Taking a payment off voids it (the ledger reverses it); it stays on file in work_order_payments_all.
 app.delete('/api/admin/work-orders/:woId/payments/:id', requireAdmin, async (req, res) => {
-  await query('DELETE FROM work_order_payments WHERE id = $1 AND work_order_id = $2', [req.params.id, req.params.woId]);
-  // Revert paid status if needed
+  const reason = String((req.body && req.body.reason) || req.query.reason || 'Taken off the work order').slice(0, 200);
+  const { rowCount } = await query(`UPDATE work_order_payments_all SET voided_at = NOW(), voided_by = $3, void_reason = $4 WHERE id = $1 AND work_order_id = $2 AND voided_at IS NULL`,
+    [req.params.id, req.params.woId, req.session.userId || null, reason]);
+  if (!rowCount) return res.status(404).json({ error: 'Payment not found' });
+  // No longer paid in full: back to billed (the invoice stands; only the payment went)
   const { rows: w } = await query('SELECT total_usd::float AS total FROM work_orders WHERE id = $1', [req.params.woId]);
   const { rows: p } = await query('SELECT COALESCE(SUM(amount_usd),0)::float AS paid FROM work_order_payments WHERE work_order_id = $1', [req.params.woId]);
   if (w[0] && p[0] && p[0].paid < w[0].total) {
-    await query(`UPDATE work_orders SET status = 'completed', paid_at = NULL WHERE id = $1 AND status = 'paid'`, [req.params.woId]);
+    await query(`UPDATE work_orders SET status = 'billed', paid_at = NULL WHERE id = $1 AND status = 'paid'`, [req.params.woId]);
   }
   res.json({ ok: true });
 });
@@ -9772,6 +9832,7 @@ app.post('/api/admin/parts-requisitions/:id/fulfill', requireAdmin, async (req, 
     const { rows: pr } = await client.query('SELECT * FROM parts_requisitions WHERE id = $1', [req.params.id]);
     if (!pr.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Requisition not found' }); }
     if (pr[0].status === 'fulfilled') { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Already fulfilled' }); }
+    if (pr[0].work_order_id && await woBilled(pr[0].work_order_id, client.query.bind(client))) { await client.query('ROLLBACK'); return res.status(409).json({ error: WO_LOCKED }); }
     const { rows: items } = await client.query('SELECT * FROM parts_requisition_items WHERE requisition_id = $1', [req.params.id]);
     let anyBack = false;
     for (const it of items) {
@@ -9803,10 +9864,13 @@ app.post('/api/admin/parts-requisitions/:id/fulfill', requireAdmin, async (req, 
     if (pr[0].work_order_id) {
       const lr = await client.query('SELECT COALESCE(SUM(total_usd),0)::float AS s FROM work_order_labor WHERE work_order_id = $1', [pr[0].work_order_id]);
       const ppr = await client.query('SELECT COALESCE(SUM(total_usd),0)::float AS s FROM work_order_parts WHERE work_order_id = $1', [pr[0].work_order_id]);
-      await client.query('UPDATE work_orders SET labor_total_usd = $1, parts_total_usd = $2, total_usd = $3 WHERE id = $4',
-        [lr.rows[0].s, ppr.rows[0].s, lr.rows[0].s + ppr.rows[0].s, pr[0].work_order_id]);
+      // GCT as recalcWoTotals works it out: the total used to leave it out.
+      const sub = lr.rows[0].s + ppr.rows[0].s, tax = Math.round(sub * TAX_RATE * 100) / 100;
+      await client.query('UPDATE work_orders SET labor_total_usd = $1, parts_total_usd = $2, tax_usd = $3, total_usd = $4 WHERE id = $5',
+        [lr.rows[0].s, ppr.rows[0].s, tax, Math.round((sub + tax) * 100) / 100, pr[0].work_order_id]);
     }
-    await client.query(`UPDATE parts_requisitions SET status = $1, fulfilled_by = $2, fulfilled_at = NOW() WHERE id = $3`,
+    // fulfilled_by is a mechanics id: the staff record of the signed-in user (a users id there broke the foreign key).
+    await client.query(`UPDATE parts_requisitions SET status = $1, fulfilled_by = (SELECT id FROM mechanics WHERE user_id = $2 ORDER BY id LIMIT 1), fulfilled_at = NOW() WHERE id = $3`,
       [anyBack ? 'partial' : 'fulfilled', req.session.userId, req.params.id]);
     await client.query('COMMIT');
     res.json({ ok: true, status: anyBack ? 'partial' : 'fulfilled' });

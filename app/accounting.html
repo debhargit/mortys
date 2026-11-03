@@ -55,7 +55,7 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 </head>
 <body>
-<header><h1>Accounting</h1><nav><a href="/report-balancing.html">Balancing report</a><a href="/report-planning.html">Planning</a><a href="/budget.html">Budget &amp; forecast</a><a href="/admin.html">Admin</a></nav></header>
+<header><h1>Accounting</h1><nav><a href="/report-balancing.html">Balancing report</a><a href="/report-planning.html">Planning</a><a href="/budget.html">Budget &amp; forecast</a><a href="/assets.html">Fixed assets</a><a href="/budget.html#value">Business value</a><a href="/admin.html">Admin</a></nav></header>
 <main>
   <div class="tabs" id="tabs">
     <button data-t="home" class="on">Overview</button><button data-t="journal">Journal</button><button data-t="tb">Trial balance</button>
@@ -77,7 +77,9 @@
   var SRC = { sale: 'Sale', sale_payment: 'Payment', sale_void: 'Void', return: 'Return', account_payment: 'Account payment', receipt: 'Goods received', bill: 'Supplier bill',
     po_invoice: 'Purchase invoice', po_payment: 'Supplier payment', till_open: 'Drawer opened', till_movement: 'Drawer movement', till_close: 'Drawer closed',
     stock_day: 'Stock adjustments', gift_card: 'Gift card', commission: 'Commission paid', commission_accrual: 'Commission approved', opening: 'Opening balances', manual: 'Manual', reversal: 'Reversal',
-    ar_invoice: 'Invoice', ar_invoice_void: 'Invoice voided', ap_bill: 'Bill', ap_bill_void: 'Bill voided', ap_payment: 'Bill payment', ap_payment_void: 'Bill payment voided', bank_txn: 'Banking', bank_txn_void: 'Banking voided' };
+    ar_invoice: 'Invoice', ar_invoice_void: 'Invoice voided', ap_bill: 'Bill', ap_bill_void: 'Bill voided', ap_payment: 'Bill payment', ap_payment_void: 'Bill payment voided', bank_txn: 'Banking', bank_txn_void: 'Banking voided',
+    work_order: 'Work order', work_order_unbill: 'Work order taken back', wo_payment: 'Workshop payment', wo_payment_void: 'Workshop payment voided',
+    fa_acquire: 'Fixed asset', fa_acquire_void: 'Fixed asset voided', fa_run: 'Depreciation', fa_run_void: 'Depreciation voided', fa_dispose: 'Asset disposal', fa_dispose_void: 'Asset disposal voided' };
   var tab = 'home', accounts = null, period = null;
   try { tab = localStorage.getItem('vision.glTab') || 'home'; } catch (_) {}
 
@@ -141,8 +143,29 @@
           t.checks.map(function (c) {
             var ok = c.difference == null ? null : Math.abs(c.difference) < 0.01;
             return '<tr><td><b>' + esc(c.label) + '</b><br><small style="color:var(--muted)">' + esc(c.note) + '</small></td><td class="n">' + J(c.gl) + '</td><td class="n">' + (c.system == null ? '–' : J(c.system)) + '</td><td class="n">' + (c.difference == null ? '–' : J(c.difference)) + '</td><td>' + (ok == null ? '' : ok ? '<span class="pill ok">ties</span>' : '<span class="pill bad">check</span>') + '</td></tr>';
-          }).join('') + '</tbody></table></div></div>';
+          }).join('') + '</tbody></table></div></div><div id="cov"><div class="card empty">Checking every transaction reaches the chart of accounts…</div></div>';
+        return coverage();
       });
+    });
+  }
+
+  // Coverage: every kind of document, whether it is in the ledger, and anything that does not tie back.
+  function coverage() {
+    return api('/api/gl/coverage').then(function (c) {
+      if (!c.started) { $('#cov').innerHTML = ''; return; }
+      var bad = c.orphans.length + c.drift.length + c.problems.length + c.outside.length + c.sources.reduce(function (t, s) { return t + s.failing.length; }, 0);
+      var list = function (title, rows, cls) { return rows.length ? '<div class="note ' + (cls || 'bad') + '"><b>' + title + '</b><br>' + rows.join('<br>') + '</div>' : ''; };
+      $('#cov').innerHTML = '<div class="card"><h2>Coverage ' + (bad ? '<span class="pill bad">' + bad + ' to look at</span>' : '<span class="pill ok">every transaction ties back</span>') + '</h2>' +
+        '<p class="sub">Each kind of transaction the system records, and whether it reached the chart of accounts. ' + c.rule_accounts + ' system accounts are used by the posting rules.</p>' +
+        list('Could not post', [].concat.apply([], c.sources.map(function (s) { return s.failing.map(function (f) { return esc(f.source) + ': ' + esc(f.error); }); }))) +
+        list('Posting rules and the chart', c.problems.map(function (p) { return esc(p.where) + ': ' + esc(p.what); })) +
+        list('In the ledger, but the document has been deleted', c.orphans.map(function (o) { return '<a href="#" data-ce="' + o.id + '">' + esc(o.number) + '</a> ' + esc(SRC[o.kind] || o.kind) + ' #' + o.source_id + (o.source_ref ? ' (' + esc(o.source_ref) + ')' : '') + ', ' + esc(o.entry_date); })) +
+        list('Changed after it was posted', c.drift.map(function (d) { return '<a href="#" data-ce="' + d.id + '">' + esc(d.number) + '</a> ' + esc(SRC[d.kind] || d.kind) + ' ' + esc(d.ref || '') + ': document ' + J(d.document) + ', ledger ' + J(d.ledger); })) +
+        list('Money outside the ledger', c.outside.map(function (o) { return '<b>' + esc(o.what) + '</b>' + (o.count != null ? ' (' + o.count + ')' : '') + ': ' + J(o.amount) + '. ' + esc(o.note); }), 'warn') +
+        '<div class="scroll"><table><thead><tr><th>Transaction</th><th class="n">In the ledger</th><th class="n">Waiting</th><th class="n">Failing</th></tr></thead><tbody>' +
+        c.sources.filter(function (s) { return s.posted || s.waiting || s.failing.length; }).map(function (s) { return '<tr><td>' + esc(SRC[s.kind] || s.kind) + '</td><td class="n">' + s.posted.toLocaleString() + '</td><td class="n">' + (s.waiting || '') + '</td><td class="n">' + (s.failing.length ? '<span class="pill bad">' + s.failing.length + '</span>' : '') + '</td></tr>'; }).join('') +
+        '</tbody></table></div></div>';
+      all('[data-ce]').forEach(function (a) { a.onclick = function (e) { e.preventDefault(); openEntry(a.getAttribute('data-ce')); }; });
     });
   }
 
@@ -493,6 +516,9 @@
   }
   all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
   show();
+  // /accounting.html#entry=123 (links from Fixed assets and other screens) opens that entry.
+  var deep = /^#entry=(\d+)$/.exec(location.hash);
+  if (deep) openEntry(deep[1]);
 })();
 </script>
 <script src="/assets/staff-assist.js?v=20261020" defer></script>
