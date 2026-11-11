@@ -1001,6 +1001,29 @@ function register(app, deps) {
       res.json({ receipt: rows[0], applied: apps, balance_after: r2(bal), shop: (await getShop()) || {} });
     } catch (e) { fail(res, e); }
   });
+  // Send a customer's statement (Receivables > customer > Statement). The server
+  // builds it (books.statement), so the email is laid out exactly as the printed
+  // statement; SMS and WhatsApp get a one-line summary. It goes to the address
+  // on the customer's record and is noted in the collections notes.
+  app.post('/api/ar/customers/:id/statement/send', ...AR, async (req, res) => {
+    try {
+      const b = req.body || {};
+      const channel = ['email', 'sms', 'whatsapp'].includes(b.channel) ? b.channel : null;
+      if (!channel) throw httpError(400, 'Email, SMS or WhatsApp?');
+      if (!deps.notify || !deps.notify.message) throw httpError(501, 'Messaging is not available on this server');
+      const d = await books.statement(req.params.id, b.from);
+      const c = d.customer, title = 'Statement ' + (c.account_number ? c.account_number + ' ' : '') + '- ' + d.shop.name;
+      const row = await deps.notify.message({ channel, to: channel === 'email' ? c.email : c.phone, subject: title,
+        text: channel === 'email' ? books.statementText(d) : books.statementSms(d), html: channel === 'email' ? books.statementHtml(d) : null,
+        related_kind: 'billing_statement', related_id: c.id, customer_id: c.id, by_user: req.session.userId });
+      const ok = ['sent', 'stubbed', 'link', 'queued'].includes(row.status);
+      if (ok) {
+        await query(`INSERT INTO ar_notes (customer_id, kind, note, created_by) VALUES ($1, $2, $3, $4)`,
+          [c.id, channel === 'email' ? 'email' : 'note', 'Statement (' + money(d.due) + ' due) ' + (channel === 'whatsapp' ? 'prepared for WhatsApp' : 'sent by ' + (channel === 'sms' ? 'SMS' : 'email')) + ' to ' + row.to_addr, req.session.userId]);
+      }
+      res.json({ ok, status: row.status, reason: row.reason, to: row.to_addr, wa_link: row.wa_link || null });
+    } catch (e) { fail(res, e); }
+  });
   // Send a document the page composed (statement, invoice, receipt, loan schedule)
   // by email, SMS or WhatsApp, to the address on the customer's or supplier's
   // record (never one typed in), through the notifications log.

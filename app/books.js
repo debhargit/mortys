@@ -159,12 +159,147 @@ function register(app, deps) {
           WHERE ap.customer_id = $1 ORDER BY COALESCE(ap.paid_on, ap.created_at::date) DESC, ap.id DESC LIMIT 100`, [id]);
       for (const p of pays) if (!p.voided_at) Object.assign(p, await paymentCredit(p.id));
       const { rows: notes } = await query(`SELECT n.*, to_char(n.promise_date, 'YYYY-MM-DD') AS promise_day, u.name AS by_name FROM ar_notes n LEFT JOIN users u ON u.id = n.created_by WHERE n.customer_id = $1 ORDER BY n.created_at DESC LIMIT 50`, [id]);
-      const aging = { current: 0, d30: 0, d60: 0, d90: 0, over90: 0 };
-      for (const i of invoices) { const d = i.days_overdue; aging[d <= 0 ? 'current' : d <= 30 ? 'd30' : d <= 60 ? 'd60' : d <= 90 ? 'd90' : 'over90'] += i.open; }
-      for (const k of Object.keys(aging)) aging[k] = r2(aging[k]);
+      const aging = agingOf(invoices);
       const credit = r2(pays.filter((p) => !p.voided_at).reduce((t, p) => t + (p.unapplied || 0), 0));
       const open = r2(invoices.reduce((t, i) => t + i.open, 0));
       res.json({ customer: cu[0], invoices, payments: pays, notes, aging, open, credit, balance: r2(open - credit) });
+    } catch (e) { fail(res, e); }
+  });
+
+  // ------------------------------------------------- customer statement --
+  // Laid out like a QuickBooks statement: the shop's name, address, phone and
+  // TRN; "Statement" with its date and the account number; the To: block; the
+  // Amount Due / Amount Enc. box; the activity (Date, Transaction, Amount,
+  // Balance) from the balance brought forward; and the aging at the foot.
+  // The aging is the A/R aging report's rule (each open invoice aged from its
+  // due date, or its own date when it has no terms), so the two always agree.
+  // The balance brought forward is worked back from today's amount due, so the
+  // last line's balance is always the amount due. statementHtml() is the one
+  // layout for the printed statement and the emailed one.
+  const AGE_KEYS = ['current', 'd30', 'd60', 'd90', 'over90'];
+  function agingOf(invoices) {
+    const a = { current: 0, d30: 0, d60: 0, d90: 0, over90: 0 };
+    for (const i of invoices) { const d = i.days_overdue; a[d <= 0 ? 'current' : d <= 30 ? 'd30' : d <= 60 ? 'd60' : d <= 90 ? 'd90' : 'over90'] += i.open; }
+    for (const k of AGE_KEYS) a[k] = r2(a[k]);
+    return a;
+  }
+  const monthsBack = (m) => { const d = new Date(today() + 'T12:00:00Z'); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - m); return d.toISOString().slice(0, 10); };
+  async function statement(customerId, fromIn) {
+    const id = parseInt(customerId, 10) || 0;
+    const { rows: cu } = await query(
+      `SELECT u.id, COALESCE(NULLIF(u.name, ''), u.email) AS name, u.company_name, u.email, u.phone, u.account_number, u.payment_terms_days,
+              (SELECT row_to_json(a) FROM (SELECT recipient, line1, line2, city, parish, postal_code, country FROM customer_addresses
+                 WHERE user_id = u.id ORDER BY (kind = 'billing') DESC, is_default DESC, id LIMIT 1) a) AS address
+         FROM users u WHERE u.id = $1 AND NOT u.is_staff`, [id]);
+    if (!cu.length) throw httpError(404, 'Customer not found');
+    const to = today(), from = isDate(fromIn) ? String(fromIn) : monthsBack(2);
+    if (from > to) throw httpError(400, 'The statement cannot start after today');
+    const invoices = await openInvoices(id);
+    const aging = agingOf(invoices);
+    const { rows: cr } = await query(`SELECT COALESCE(credit, 0)::float AS credit FROM (${CREDIT_SQL}) c WHERE customer_id = $1`, [id]);
+    const open = r2(invoices.reduce((t, i) => t + i.open, 0)), credit = r2(cr.length ? cr[0].credit : 0), due = r2(open - credit);
+    // Everything that moved the balance in the period: what was charged to the
+    // account (a till sale's part not paid at the till; invoices and late fees
+    // raised on the books), and payments, credit notes and write-offs.
+    const { rows: acts } = await query(
+      `SELECT to_char(day, 'YYYY-MM-DD') AS day, to_char(due, 'YYYY-MM-DD') AS due, kind, ref, how, amount::float AS amount FROM (
+         SELECT s.created_at AS at, s.created_at::date AS day, s.due_date AS due, 'invoice' AS kind, s.receipt_number AS ref, NULL::text AS how,
+                s.total_usd - COALESCE(s.amount_paid_usd, 0) AS amount
+           FROM pos_sales s
+          WHERE s.customer_id = $1 AND s.voided = false AND s.total_usd - COALESCE(s.amount_paid_usd, 0) > 0.005 AND s.created_at::date BETWEEN $2::date AND $3::date
+         UNION ALL
+         SELECT (i.invoice_date + TIME '12:00') AT TIME ZONE 'America/Jamaica', i.invoice_date, i.due_date, CASE WHEN i.kind = 'late_fee' THEN 'late_fee' ELSE 'invoice' END, i.number, NULL, i.total
+           FROM ar_invoices i WHERE i.customer_id = $1 AND i.voided_at IS NULL AND i.invoice_date BETWEEN $2::date AND $3::date
+         UNION ALL
+         SELECT ap.created_at, COALESCE(ap.paid_on, ap.created_at::date), NULL::date, CASE WHEN ap.method IN ('writeoff', 'credit_note') THEN ap.method ELSE 'payment' END, ap.reference, ap.method, -ap.amount_usd
+           FROM account_payments ap WHERE ap.customer_id = $1 AND COALESCE(ap.paid_on, ap.created_at::date) BETWEEN $2::date AND $3::date
+       ) t ORDER BY t.day, t.at, t.ref`, [id, from, to]);
+    const forward = r2(due - acts.reduce((t, a) => t + a.amount, 0));
+    let run = forward;
+    const lines = acts.map((a) => { a.amount = r2(a.amount); run = r2(run + a.amount); return Object.assign(a, { balance: run, text: txnText(a) }); });
+    const s = (await getShop()) || {};
+    const { rows: tr } = await query(`SELECT value FROM warehouse_settings WHERE key = 'payroll_employer_trn'`);
+    const shop = { name: s.name || 'Vision Auto Solutions', address: s.address || '', country: s.country || '', phone: s.phone || '', email: s.email || '', website: s.website || '',
+      trn: (tr.length && String(tr[0].value || '').trim()) || '', notice: s.statement_notice || '' };
+    return { customer: cu[0], shop, from, to, forward, lines, aging, open, credit, due };
+  }
+  const PAID_BY = { cash: 'Cash', cheque: 'Cheque', card: 'Card', bank: 'Bank transfer' };
+  function txnText(a) {
+    if (a.kind === 'invoice') return (/^INV/i.test(a.ref || '') ? a.ref : 'INV #' + (a.ref || '')) + (a.due ? '. Due ' + longDate(a.due) + '.' : '');
+    if (a.kind === 'late_fee') return 'Late fee #' + (a.ref || '');
+    if (a.kind === 'payment') return 'PMT' + (PAID_BY[a.how] ? ' - ' + PAID_BY[a.how] : '') + (a.ref ? ' #' + a.ref : '');
+    return (a.kind === 'writeoff' ? 'Bad debt written off' : 'Credit note (return)') + (a.ref ? ' #' + a.ref : '');
+  }
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const longDate = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || '')); return m ? +m[3] + ' ' + MON[+m[2] - 1] + ' ' + m[1] : ''; };
+  const H = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const AGE_HEAD = ['Current', '1-30 Days Past Due', '31-60 Days Past Due', '61-90 Days Past Due', 'Over 90 Days Past Due'];
+  function toLines(c) {
+    const a = c.address || {}, place = [a.city, a.parish, a.postal_code].filter(Boolean).join(', ');
+    const out = [c.name, c.company_name && c.company_name !== c.name ? c.company_name : null, a.recipient && a.recipient !== c.name ? 'Attn: ' + a.recipient : null,
+      a.line1, a.line2, place, a.country && !/^jamaica$/i.test(a.country) ? a.country : null].filter(Boolean);
+    if (!a.line1 && c.phone) out.push(c.phone);
+    return out;
+  }
+  function shopLines(sh) {
+    return [sh.address, sh.country, sh.phone ? 'Tel: ' + sh.phone : null, sh.email, sh.website, sh.trn ? 'TRN: ' + sh.trn : null].filter(Boolean);
+  }
+  // A whole HTML document with the styles inline (email programs drop <style>),
+  // narrow enough for letter and A4 paper.
+  function statementHtml(d) {
+    const c = d.customer, A = d.aging;
+    const B = 'border:1px solid #000;', TH = B + 'padding:4px 8px;background:#e6e6e6;color:#000;font-weight:bold;font-size:11px;text-align:center;text-transform:none;letter-spacing:normal;';
+    const TD = B + 'padding:4px 8px;font-size:12px;color:#000;vertical-align:top;', N = TD + 'text-align:right;white-space:nowrap;';
+    const TB = 'border-collapse:collapse;';
+    const rows = ['<tr><td style="' + TD + 'white-space:nowrap">' + H(longDate(d.from)) + '</td><td style="' + TD + '">Balance forward</td><td style="' + N + '"></td><td style="' + N + '">' + money(d.forward) + '</td></tr>']
+      .concat(d.lines.map((l) => '<tr><td style="' + TD + 'white-space:nowrap">' + H(longDate(l.day)) + '</td><td style="' + TD + '">' + H(l.text) + '</td><td style="' + N + '">' + money(l.amount) + '</td><td style="' + N + '">' + money(l.balance) + '</td></tr>'));
+    if (!d.lines.length) rows.push('<tr><td style="' + TD + '"></td><td style="' + TD + 'color:#555">No new charges or payments in this period.</td><td style="' + N + '"></td><td style="' + N + '"></td></tr>');
+    const ageHead = AGE_HEAD.concat(d.credit > 0.005 ? ['Unapplied Credit'] : [], ['Amount Due']);
+    const ageVals = AGE_KEYS.map((k) => A[k]).concat(d.credit > 0.005 ? [-d.credit] : [], [d.due]);
+    return '<!doctype html><html><head><meta charset="utf-8"><title>Statement ' + H(c.account_number || '') + ' ' + H(c.name) + '</title>' +
+      '<style>@page{size:auto;margin:12mm}@media print{body{padding:0!important}}</style></head>' +
+      '<body style="margin:0;padding:16px;background:#fff;color:#000;font-family:Arial,Helvetica,sans-serif;font-size:12px">' +
+      '<div style="max-width:720px;margin:0 auto">' +
+      '<table style="width:100%;' + TB + '"><tr><td style="vertical-align:top;padding:0;border:0">' +
+        '<div style="font-size:18px;font-weight:bold">' + H(d.shop.name) + '</div>' +
+        '<div style="font-size:12px;line-height:1.45">' + shopLines(d.shop).map(H).join('<br>') + '</div></td>' +
+      '<td style="vertical-align:top;text-align:right;padding:0;border:0">' +
+        '<div style="font-size:26px;font-weight:bold;margin-bottom:6px">Statement</div>' +
+        '<table style="' + TB + 'margin-left:auto"><tr><th style="' + TH + '">Date</th><th style="' + TH + '">Account No.</th></tr>' +
+        '<tr><td style="' + TD + 'text-align:center;white-space:nowrap">' + H(longDate(d.to)) + '</td><td style="' + TD + 'text-align:center">' + H(c.account_number || '') + '</td></tr></table></td></tr></table>' +
+      '<table style="width:100%;' + TB + 'margin-top:18px"><tr><td style="vertical-align:top;padding:0;border:0;width:55%">' +
+        '<table style="' + TB + 'width:90%"><tr><th style="' + TH + 'text-align:left">To:</th></tr>' +
+        '<tr><td style="' + TD + 'height:70px;line-height:1.45">' + toLines(c).map(H).join('<br>') + '</td></tr></table></td>' +
+      '<td style="vertical-align:bottom;padding:0;border:0;text-align:right">' +
+        '<table style="' + TB + 'margin-left:auto"><tr><th style="' + TH + '">Amount Due</th><th style="' + TH + '">Amount Enc.</th></tr>' +
+        '<tr><td style="' + N + 'font-size:14px;font-weight:bold;padding:6px 10px">' + money(d.due) + '</td><td style="' + TD + 'min-width:110px"></td></tr></table></td></tr></table>' +
+      '<div style="margin:14px 0 4px;font-size:11px;color:#333">Activity from ' + H(longDate(d.from)) + ' to ' + H(longDate(d.to)) +
+        ' · Terms: ' + (c.payment_terms_days ? 'Net ' + H(c.payment_terms_days) + ' days' : 'Due on receipt') + '</div>' +
+      '<table style="width:100%;' + TB + '"><tr><th style="' + TH + 'width:95px">Date</th><th style="' + TH + '">Transaction</th><th style="' + TH + 'width:120px">Amount</th><th style="' + TH + 'width:120px">Balance</th></tr>' + rows.join('') + '</table>' +
+      '<table style="width:100%;' + TB + 'margin-top:14px"><tr>' + ageHead.map((h) => '<th style="' + TH + '">' + h + '</th>').join('') + '</tr>' +
+        '<tr>' + ageVals.map((v, i) => '<td style="' + N + 'text-align:center;' + (i === ageVals.length - 1 ? 'font-weight:bold;' : '') + '">' + money(v) + '</td>').join('') + '</tr></table>' +
+      (d.shop.notice ? '<p style="margin-top:14px;font-size:11px;color:#333">' + H(d.shop.notice) + '</p>' : '') +
+      '</div></body></html>';
+  }
+  // The same statement as plain text: the email's text part, and an SMS / WhatsApp summary.
+  function statementText(d) {
+    const c = d.customer, pad = (s, w) => { s = String(s); return s.length >= w ? s + ' ' : s + ' '.repeat(w - s.length); };
+    const head = [d.shop.name].concat(shopLines(d.shop)).join('\n');
+    const act = [pad(longDate(d.from), 13) + pad('Balance forward', 42) + pad('', 16) + money(d.forward)]
+      .concat(d.lines.map((l) => pad(longDate(l.day), 13) + pad(l.text, 42) + pad(money(l.amount), 16) + money(l.balance)));
+    const ages = AGE_KEYS.map((k, i) => AGE_HEAD[i] + ': ' + money(d.aging[k])).concat(d.credit > 0.005 ? ['Unapplied credit: ' + money(-d.credit)] : []);
+    return head + '\n\nSTATEMENT  ' + longDate(d.to) + '  Account No. ' + (c.account_number || '') + '\n\nTo:\n' + toLines(c).join('\n') +
+      '\n\nAMOUNT DUE: ' + money(d.due) + '\n\nActivity from ' + longDate(d.from) + ' to ' + longDate(d.to) + '\n' + act.join('\n') +
+      '\n\n' + ages.join('\n') + '\nAmount Due: ' + money(d.due) + (d.shop.notice ? '\n\n' + d.shop.notice : '');
+  }
+  function statementSms(d) {
+    return d.shop.name + ': statement for ' + d.customer.name + (d.customer.account_number ? ' (' + d.customer.account_number + ')' : '') + ' as of ' + longDate(d.to) +
+      '. Amount due ' + money(d.due) + (d.aging.d30 + d.aging.d60 + d.aging.d90 + d.aging.over90 > 0.005 ? ', of which ' + money(d.aging.d30 + d.aging.d60 + d.aging.d90 + d.aging.over90) + ' is past due' : '') + '.';
+  }
+  app.get('/api/ar/customers/:id/statement', ...AR, async (req, res) => {
+    try {
+      const d = await statement(req.params.id, req.query.from);
+      res.json(Object.assign(d, { html: statementHtml(d), email: canEmail(d.customer.email) ? d.customer.email : null }));
     } catch (e) { fail(res, e); }
   });
 
@@ -1480,7 +1615,7 @@ function register(app, deps) {
   // For billing.js: the same open items, reminder email and supplier bills these screens use.
   // Every open customer item (sales on account and invoices), for the cash forecast (budget.js).
   const arOpenItems = async () => (await query(`SELECT o.doc, o.id, o.customer_id, o.open::float AS open, to_char(COALESCE(o.due_date, o.created_at::date), 'YYYY-MM-DD') AS due FROM (${OPEN_SQL}) o`)).rows;
-  return { openInvoices, reminderEmail, canEmail, apDocs, arOpenItems, makeTxn, lineAccount, bankAccount, classId, post };
+  return { openInvoices, statement, statementHtml, statementText, statementSms, reminderEmail, canEmail, apDocs, arOpenItems, makeTxn, lineAccount, bankAccount, classId, post };
 }
 
 module.exports = { register };

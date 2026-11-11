@@ -82,7 +82,7 @@
       $('#np').onclick = function () { BU.planEditor('ar', null, c, again); };
       BU.planList($('#cplans'), { side: 'ar', customer_id: id });
       all('[data-vi]').forEach(function (b) { b.onclick = function () { BU.voidInvoice(+b.getAttribute('data-vi'), b.getAttribute('data-fee') === '1', again); }; });
-      $('#st').onclick = function () { statement(c, d); };
+      $('#st').onclick = function () { statement(c); };
       $('#rm').onclick = function () { api('/api/ar/customers/' + id + '/reminder', 'POST').then(function (r) { toast('Reminder sent: ' + r.invoices + ' invoice(s), ' + J(r.total)); detail(id); }).catch(function (e) { toast(e.message); }); };
       $('#hd').onclick = function () { var reason = c.credit_hold ? (prompt('Why is the hold lifted? (optional)', '') || '') : prompt('Why put the account on hold?', 'Overdue over 45 days'); if (reason === null) return; api('/api/ar/customers/' + id + '/hold', 'POST', { hold: !c.credit_hold, reason: reason }).then(function () { detail(id); }).catch(function (e) { toast(e.message); }); };
       $('#dsv').onclick = function () { api('/api/ar/customers/' + id + '/defaults', 'PUT', { default_income_account_id: $('#dca').value, default_class_id: $('#dcl').value }).then(function () { toast('Defaults saved'); detail(id); }).catch(function (e) { toast(e.message); }); };
@@ -184,15 +184,43 @@
     $('#x').onclick = close;
     $('#go').onclick = function () { api('/api/ar/payments/' + pid + '/apply', 'POST', { applications: apps() }).then(function () { close(); toast('Applied'); detail(c.id); }).catch(function (e) { toast(e.message); }); };
   }
-  function statement(c, d) {
-    var w = window.open('', '_blank');
-    if (!w) return toast('Allow pop-ups to print the statement');
-    var rows = d.invoices.map(function (i) { return '<tr><td>' + esc(i.day) + '</td><td>' + esc(i.receipt_number) + '</td><td>' + esc(i.due || i.day) + '</td><td style="text-align:right">' + J(i.total) + '</td><td style="text-align:right">' + J(i.paid) + '</td><td style="text-align:right">' + J(i.open) + '</td></tr>'; }).join('');
-    w.document.write('<!doctype html><title>Statement</title><body style="font:14px system-ui;margin:30px"><h2>' + esc(B.shopName()) + '</h2><h3>Statement of account · ' + esc(c.name) + '</h3><p>' + esc(c.account_number || '') + ' · as of ' + B.today() + '</p>' +
-      '<table style="width:100%;border-collapse:collapse" border="1" cellpadding="6"><tr><th>Date</th><th>Invoice</th><th>Due</th><th>Amount</th><th>Paid</th><th>Open</th></tr>' + rows + '</table>' +
-      '<p><b>Current ' + J(d.aging.current) + ' · 1-30 ' + J(d.aging.d30) + ' · 31-60 ' + J(d.aging.d60) + ' · 61-90 ' + J(d.aging.d90) + ' · Over 90 ' + J(d.aging.over90) + '</b></p>' +
-      (d.credit ? '<p>Less unapplied credit: ' + J(d.credit) + '</p>' : '') + '<h3>Amount due: ' + J(d.balance) + '</h3><script>print()<\/script></body>');
-    w.document.close();
+  // The customer's statement, laid out like a QuickBooks statement and built by
+  // the server, so the printed copy and the emailed copy are the same page.
+  function statement(c) {
+    var from = statement.from || '', st = null;
+    modal('<h2>Statement · ' + esc(c.name) + '</h2>' +
+      '<div class="controls"><div><label>Activity from</label><input id="stmFrom" type="date"></div><span class="sub">The statement is dated today. Charges and payments before this date are carried in as the balance forward.</span></div>' +
+      '<div id="stmView" class="scroll" style="max-height:55vh;border:1px solid #ccc;background:#fff;color:#000"></div>' +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="stmPrint">Print / PDF</button><button id="stmEmail">Email</button><button id="stmSms">SMS</button><button id="stmWa">WhatsApp</button><button id="stmClose">Close</button></div>' +
+      '<p class="sub" id="stmTo"></p>');
+    var load = function () {
+      return api('/api/ar/customers/' + c.id + '/statement' + (from ? '?from=' + encodeURIComponent(from) : '')).then(function (d) {
+        st = d; from = d.from; $('#stmFrom').value = d.from;
+        // The statement's own page, shown as it prints (its styles are all inline).
+        $('#stmView').innerHTML = new DOMParser().parseFromString(d.html, 'text/html').body.innerHTML;
+        $('#stmTo').textContent = 'Amount due ' + J(d.due) + '. Email goes to ' + (d.email || 'nobody: there is no email on the customer record') + '; SMS and WhatsApp send a short summary to ' + (d.customer.phone || 'nobody: there is no phone on the record') + '. Each one is noted in the collections notes.';
+      }).catch(function (e) { toast(e.message); });
+    };
+    $('#stmFrom').onchange = function () { if (this.value) { from = this.value; statement.from = from; load(); } };
+    $('#stmClose').onclick = close;
+    $('#stmPrint').onclick = function () {
+      if (!st) return;
+      var w = window.open('', '_blank');
+      if (!w) return toast('Allow pop-ups to print the statement');
+      w.document.write(st.html); w.document.close();
+      setTimeout(function () { w.focus(); w.print(); }, 300);
+    };
+    var send = function (channel) {
+      if (!st) return;
+      api('/api/ar/customers/' + c.id + '/statement/send', 'POST', { channel: channel, from: from }).then(function (r) {
+        if (r.wa_link) { window.open(r.wa_link, '_blank'); toast('WhatsApp opened for ' + r.to + ': press send there'); }
+        else toast(r.ok ? (r.status === 'stubbed' ? 'Logged only (' + r.reason + ')' : r.status === 'queued' ? 'Queued for ' + r.to : 'Statement sent to ' + r.to) : 'Not sent: ' + (r.reason || r.status));
+      }).catch(function (e) { toast(e.message); });
+    };
+    $('#stmEmail').onclick = function () { send('email'); };
+    $('#stmSms').onclick = function () { send('sms'); };
+    $('#stmWa').onclick = function () { send('whatsapp'); };
+    load();
   }
 
   // ------------------------------------------------------------ collections --

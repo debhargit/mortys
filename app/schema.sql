@@ -7895,3 +7895,72 @@ SELECT v.code, v.name, 'equity', v.name, 'EQUITY', v.sk FROM (VALUES
 ) v(code, name, sk)
 WHERE NOT EXISTS (SELECT 1 FROM gl_accounts g WHERE g.system_key = v.sk)
 ON CONFLICT (code) DO NOTHING;
+
+-- A message can carry its own HTML for email (the customer statement is sent
+-- laid out exactly as it prints); without it the text is wrapped as before.
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS body_html TEXT;
+
+-- =============================================================================
+--  Chart of accounts for an auto parts and general merchandise shop
+--  (QuickBooks-style list, 2026-11-11)
+--
+--  Stock, sales and cost of sales by product line, landed costs (freight,
+--  customs duty, broker), cores, warranty returns, supplier credits, damaged
+--  stock, shop supplies, delivery vehicles and merchant card fees.
+--
+--  The existing accounts stay as they are and keep their jobs: 1200 Inventory
+--  Asset, 4000 Sales - Parts and 5000 Cost of Goods Sold are the auto parts
+--  line and the default for anything not mapped; 5060 Freight and Duty In is
+--  where landed costs post automatically; 1150, 1160, 2100 and 5100 already
+--  cover supplier claims, GCT and shrinkage. None of these accounts has a
+--  system_key: nothing posts to them until a product category or payment
+--  method is mapped to them (Ledger > Mapping), or an entry is coded to them.
+--  Safe to re-run: an account whose code is already used is left alone.
+-- =============================================================================
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, notes) VALUES
+  -- Current assets: stock by product line
+  ('1155', 'Warranty Returns Awaiting Supplier Credit', 'asset', 'Warranty Returns Awaiting Supplier Credit', 'OCASSET', 'Faulty parts sent back to the supplier under warranty, until the credit or replacement comes'),
+  ('1180', 'Core Deposits Paid to Suppliers', 'asset', 'Core Deposits Paid to Suppliers', 'OCASSET', 'Core charges paid on batteries, alternators, starters and the like, refunded when the old core goes back'),
+  ('1220', 'Inventory - Tyres and Wheels', 'asset', 'Inventory - Tyres and Wheels', 'OCASSET', 'Tyres, rims, tubes and valves in stock'),
+  ('1230', 'Inventory - Batteries', 'asset', 'Inventory - Batteries', 'OCASSET', 'Vehicle batteries in stock'),
+  ('1240', 'Inventory - Oils, Lubricants and Fluids', 'asset', 'Inventory - Oils, Lubricants and Fluids', 'OCASSET', 'Engine oil, grease, coolant, brake and transmission fluid'),
+  ('1250', 'Inventory - Accessories', 'asset', 'Inventory - Accessories', 'OCASSET', 'Car care, seat covers, mats, lights, audio and other accessories'),
+  ('1260', 'Inventory - General Merchandise', 'asset', 'Inventory - General Merchandise', 'OCASSET', 'Hardware, tools, household and other non-automotive goods for sale'),
+  ('1270', 'Inventory in Transit', 'asset', 'Inventory in Transit', 'OCASSET', 'Imported goods paid for or shipped but not yet received into the store'),
+  ('1280', 'Inventory - Damaged and Returned Goods', 'asset', 'Inventory - Damaged and Returned Goods', 'OCASSET', 'Stock pulled from sale: damaged, customer returns waiting to be checked'),
+  -- Current liabilities
+  ('2110', 'Customer Core Deposits Held', 'liability', 'Customer Core Deposits Held', 'OCLIAB', 'Core charges collected from customers, refunded when they bring back the old part'),
+  ('2120', 'Customer Deposits and Special Orders', 'liability', 'Customer Deposits and Special Orders', 'OCLIAB', 'Money taken in advance on special-order parts and layaways, until the goods are handed over'),
+  ('2130', 'Warranty Provision', 'liability', 'Warranty Provision', 'OCLIAB', 'Expected cost of warranty claims on goods and work already sold'),
+  -- Income by line
+  ('4010', 'Sales - Tyres and Wheels', 'income', 'Sales - Tyres and Wheels', 'INC', NULL),
+  ('4020', 'Sales - Batteries', 'income', 'Sales - Batteries', 'INC', NULL),
+  ('4030', 'Sales - Oils, Lubricants and Fluids', 'income', 'Sales - Oils, Lubricants and Fluids', 'INC', NULL),
+  ('4040', 'Sales - Accessories', 'income', 'Sales - Accessories', 'INC', NULL),
+  ('4045', 'Sales - General Merchandise', 'income', 'Sales - General Merchandise', 'INC', NULL),
+  ('4060', 'Installation and Fitting Income', 'income', 'Installation and Fitting Income', 'INC', 'Tyre fitting and balancing, battery and accessory installation'),
+  ('4080', 'Core Charges Kept', 'income', 'Core Charges Kept', 'INC', 'Core deposits the customer did not come back for'),
+  ('4210', 'Shop Supply and Disposal Fees', 'income', 'Shop Supply and Disposal Fees', 'INC', 'Shop supply, used oil, tyre and battery disposal fees charged to customers'),
+  -- Cost of goods sold by line, landed costs, cores, warranty, supplier credits, damaged stock
+  ('5020', 'Cost of Goods Sold - Tyres and Wheels', 'cogs', 'Cost of Goods Sold - Tyres and Wheels', 'COGS', NULL),
+  ('5030', 'Cost of Goods Sold - Batteries', 'cogs', 'Cost of Goods Sold - Batteries', 'COGS', NULL),
+  ('5040', 'Cost of Goods Sold - Oils, Lubricants and Fluids', 'cogs', 'Cost of Goods Sold - Oils, Lubricants and Fluids', 'COGS', NULL),
+  ('5045', 'Cost of Goods Sold - Accessories', 'cogs', 'Cost of Goods Sold - Accessories', 'COGS', NULL),
+  ('5048', 'Cost of Goods Sold - General Merchandise', 'cogs', 'Cost of Goods Sold - General Merchandise', 'COGS', NULL),
+  ('5062', 'Freight In - Shipping and Courier', 'cogs', 'Freight In - Shipping and Courier', 'COGS', 'Ocean, air freight and courier on goods bought for resale'),
+  ('5064', 'Customs Duty and Import Charges', 'cogs', 'Customs Duty and Import Charges', 'COGS', 'Import duty, SCT, CAF and other customs charges on stock (GCT paid at customs goes to 1160)'),
+  ('5066', 'Customs Broker and Clearing Fees', 'cogs', 'Customs Broker and Clearing Fees', 'COGS', 'Broker, wharfage, port and storage charges to clear stock'),
+  ('5070', 'Core Charges Not Recovered', 'cogs', 'Core Charges Not Recovered', 'COGS', 'Core deposits paid to suppliers that will not be refunded'),
+  ('5075', 'Warranty Replacements', 'cogs', 'Warranty Replacements', 'COGS', 'Cost of parts replaced under warranty that the supplier does not cover'),
+  ('5080', 'Supplier Rebates, Discounts and Credits', 'cogs', 'Supplier Rebates, Discounts and Credits', 'COGS', 'Volume rebates, early payment discounts and supplier credits (reduces cost of sales)'),
+  ('5110', 'Damaged, Expired and Obsolete Stock', 'cogs', 'Damaged, Expired and Obsolete Stock', 'COGS', 'Stock written off because it is damaged, past its date or no longer sells'),
+  -- Expenses
+  ('6110', 'Shop Supplies', 'expense', 'Shop Supplies', 'EXP', 'Rags, cleaners, gloves, bags, labels and other consumables used in the shop'),
+  ('6120', 'Tools and Small Equipment', 'expense', 'Tools and Small Equipment', 'EXP', 'Hand tools and small equipment not worth putting in the fixed asset register'),
+  ('6720', 'Waste and Environmental Disposal', 'expense', 'Waste and Environmental Disposal', 'EXP', 'Disposal of used oil, old tyres, batteries and other waste'),
+  ('6852', 'Delivery Vehicle - Fuel', 'expense', 'Delivery Vehicle - Fuel', 'EXP', NULL),
+  ('6854', 'Delivery Vehicle - Repairs and Maintenance', 'expense', 'Delivery Vehicle - Repairs and Maintenance', 'EXP', NULL),
+  ('6856', 'Delivery Vehicle - Insurance, Licence and Fitness', 'expense', 'Delivery Vehicle - Insurance, Licence and Fitness', 'EXP', NULL),
+  ('6858', 'Delivery and Courier Out', 'expense', 'Delivery and Courier Out', 'EXP', 'Couriers, taxis and bearers delivering goods to customers'),
+  ('6952', 'Merchant Card Fees', 'expense', 'Merchant Card Fees', 'EXP', 'Card machine rental and the bank''s fees on card and online payments taken from customers')
+ON CONFLICT (code) DO NOTHING;
