@@ -44,10 +44,11 @@
   .score button{padding:2px 9px;font-size:12.5px} .score button.on{background:var(--red);border-color:var(--red);color:#fff}
   @media print{ header,.tabs,.controls,button{display:none!important} .card{border:0} }
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
 <header><h1>Franchise</h1><nav><a href="/receivables.html">Receivables</a><a href="/documents.html">Documents</a><a href="/training.html">Training</a><a href="/franchisee.html" target="_blank" rel="noopener">Enquiry form</a><a href="/admin.html">Admin</a></nav></header>
@@ -306,7 +307,7 @@
     all('[data-sign]', root).forEach(function (b) { b.onclick = function () { signDoc(+b.getAttribute('data-sign'), false, refresh); }; });
     all('[data-counter]', root).forEach(function (b) { b.onclick = function () { signDoc(+b.getAttribute('data-counter'), true, refresh); }; });
     all('[data-file]', root).forEach(function (b) { b.onclick = function () { guard(b, api('/api/franchise/documents/' + b.getAttribute('data-file') + '/file', 'POST', {})).then(function (r) { toast('Filed' + (r.document ? ' as ' + r.document.number : '')); refresh(); }); }; });
-    all('[data-cancel]', root).forEach(function (b) { b.onclick = function () { if (!confirm('Cancel this document? Any link sent stops working.')) return; guard(b, api('/api/franchise/documents/' + b.getAttribute('data-cancel') + '/cancel', 'POST', {})).then(refresh); }; });
+    all('[data-cancel]', root).forEach(function (b) { b.onclick = async function () { if (!(await vasConfirm('Cancel this document? Any link sent stops working.'))) return; guard(b, api('/api/franchise/documents/' + b.getAttribute('data-cancel') + '/cancel', 'POST', {})).then(refresh); }; });
   }
   function makeDoc(key, owner, refresh) {
     var t = META.templates.find(function (x) { return x.key === key; });
@@ -387,10 +388,10 @@
           '<div class="controls">' + (f.status === 'onboarding' ? '<button class="primary" id="oOpen"' + (f.signed_on ? '' : ' disabled title="Sign the agreement first"') + '>Mark the shop open</button>' : '') +
           (f.status === 'open' || f.status === 'expired' && f.term_end && f.term_end <= today() ? '' : '') + (f.term_end && f.term_end < today() && f.status === 'open' ? '<button id="oExp">Mark expired</button>' : '') +
           '<button id="oLink">Franchisee link (reports, statement, manual)</button></div><div id="oOut"></div>' + (d.lead ? '<p class="sub">From lead <a href="#lead=' + d.lead.id + '">#' + d.lead.id + '</a>.</p>' : '');
-        if ($('#oOpen', body)) $('#oOpen', body).onclick = function () { var dt = prompt('Opening date (YYYY-MM-DD)', today()); if (!dt) return; guard(this, api('/api/franchise/franchisees/' + id + '/status', 'POST', { status: 'open', opened_on: dt })).then(again); };
-        if ($('#oExp', body)) $('#oExp', body).onclick = function () { if (!confirm('Mark this franchise expired? The territory opens again.')) return; guard(this, api('/api/franchise/franchisees/' + id + '/status', 'POST', { status: 'expired' })).then(again); };
-        $('#oLink', body).onclick = function () {
-          if (!confirm('Make a new link for the franchisee? Any earlier link stops working.')) return;
+        if ($('#oOpen', body)) $('#oOpen', body).onclick = async function () { var dt = await vasPrompt('Opening date (YYYY-MM-DD)', today()); if (!dt) return; guard(this, api('/api/franchise/franchisees/' + id + '/status', 'POST', { status: 'open', opened_on: dt })).then(again); };
+        if ($('#oExp', body)) $('#oExp', body).onclick = async function () { if (!(await vasConfirm('Mark this franchise expired? The territory opens again.'))) return; guard(this, api('/api/franchise/franchisees/' + id + '/status', 'POST', { status: 'expired' })).then(again); };
+        $('#oLink', body).onclick = async function () {
+          if (!(await vasConfirm('Make a new link for the franchisee? Any earlier link stops working.'))) return;
           guard(this, api('/api/franchise/franchisees/' + id + '/portal-link', 'POST', {})).then(function (r) { $('#oOut', body).innerHTML = '<div class="item"><input style="width:100%" readonly value="' + esc(r.link) + '"><small>Shown once. Send it to the franchisee; it lets them send sales reports and see their statement.</small></div>'; $('#oOut input', body).select(); });
         };
       } else if (sub === 'checklist') {
@@ -444,9 +445,9 @@
           }).join('') : '<div class="empty">No renewals, transfers or notices.</div>') +
           '<p class="sub">Make the matching letter under "Agreement & documents" (notice of default, notice of termination, renewal letter, transfer consent). Invoice renewal and transfer fees under "Sales & fees".</p>';
         all('[data-act]', body).forEach(function (b) { b.onclick = function () { actionForm(f, b.getAttribute('data-act'), again); }; });
-        all('[data-close]', body).forEach(function (b) { b.onclick = function () {
+        all('[data-close]', body).forEach(function (b) { b.onclick = async function () {
           var st = b.getAttribute('data-st');
-          var note = prompt(st === 'done' ? 'Note (optional). This changes the franchise record.' : 'Note (optional)', ''); if (note === null) return;
+          var note = await vasPrompt(st === 'done' ? 'Note (optional). This changes the franchise record.' : 'Note (optional)', ''); if (note === null) return;
           guard(b, api('/api/franchise/actions/' + b.getAttribute('data-close') + '/close', 'POST', { status: st, note: note })).then(function (r) { toast('Done'); if (r.new_franchisee_id) { reloadMeta(); location.hash = 'fr=' + r.new_franchisee_id; } else again(); });
         }; });
       } else if (sub === 'edit') {
@@ -557,7 +558,7 @@
         a.items.map(function (i) { return '<tr><td>' + esc(i.section) + '</td><td>' + esc(i.item) + (i.note ? '<br><small>' + esc(i.note) + '</small>' : '') + '</td><td class="n">' + (i.score == null ? 'N/A' : i.score + '/2') + '</td></tr>'; }).join('') + '</tbody></table>' +
         (a.findings ? '<h4>Findings</h4><p>' + esc(a.findings) + '</p>' : '') + (a.actions ? '<h4>Actions</h4><p>' + esc(a.actions) + '</p>' : ''), 2);
       $('#avX', m).onclick = function () { close(2); }; $('#avP', m).onclick = function () { window.print(); }; }).catch(function (e) { toast(e.message); }); }; });
-    all('[data-ac]', root).forEach(function (b) { b.onclick = function () { var note = prompt('How were the actions closed?', ''); if (note === null) return; guard(b, api('/api/franchise/audits/' + b.getAttribute('data-ac') + '/close', 'POST', { note: note })).then(again); }; });
+    all('[data-ac]', root).forEach(function (b) { b.onclick = async function () { var note = await vasPrompt('How were the actions closed?', ''); if (note === null) return; guard(b, api('/api/franchise/audits/' + b.getAttribute('data-ac') + '/close', 'POST', { note: note })).then(again); }; });
   }
   function auditForm(frId, done) {
     var sections = {};
@@ -598,7 +599,7 @@
           (t.reviewed_at ? '<button class="sm" data-un="' + t.key + '">Withdraw review</button>' : '<button class="sm" data-rv="' + t.key + '">Record review</button>') + '</td></tr>'; }).join('') + '</tbody></table>' +
       '<p class="sub">The operations manual is issued to each franchisee as a numbered copy they sign for (Franchisee > Agreement & documents > Franchise operations manual), and they can read it from their franchisee link.</p></div>';
     all('[data-pv]').forEach(function (b) { b.onclick = function () { window.open('/api/franchise/templates/' + b.getAttribute('data-pv') + '/preview', '_blank'); }; });
-    all('[data-rv]').forEach(function (b) { b.onclick = function () { var who = prompt('Which attorney or firm reviewed it?', ''); if (!who) return; guard(b, api('/api/franchise/templates/' + b.getAttribute('data-rv') + '/review', 'POST', { reviewer: who })).then(function () { reloadMeta().then(templates); }); }; });
+    all('[data-rv]').forEach(function (b) { b.onclick = async function () { var who = await vasPrompt('Which attorney or firm reviewed it?', ''); if (!who) return; guard(b, api('/api/franchise/templates/' + b.getAttribute('data-rv') + '/review', 'POST', { reviewer: who })).then(function () { reloadMeta().then(templates); }); }; });
     all('[data-un]').forEach(function (b) { b.onclick = function () { guard(b, api('/api/franchise/templates/' + b.getAttribute('data-un') + '/review', 'POST', { reviewed: false })).then(function () { reloadMeta().then(templates); }); }; });
   }
 
@@ -739,7 +740,7 @@
     };
     $('#cGo').onclick = load; $('#cQ').onkeydown = function (e) { if (e.key === 'Enter') load(); }; $('#cTier').onchange = load; $('#cCat').onchange = load;
     $('#cNew').onclick = function () { partForm(null, load); };
-    $('#cImp').onclick = function () { if (!confirm('Add every active till product not yet in the catalogue? Its SKU, name, cost, price, core charge and "make model years" come across; check them after.')) return; guard(this, api('/api/franchise/network/catalogue/import', 'POST', {})).then(function (r) { toast(r.added + ' part(s) added' + (r.skipped ? ', ' + r.skipped + ' SKU(s) already there' : '') + (r.remaining ? '. ' + r.remaining + ' more to go: press Import again.' : '')); load(); }); };
+    $('#cImp').onclick = async function () { if (!(await vasConfirm('Add every active till product not yet in the catalogue? Its SKU, name, cost, price, core charge and "make model years" come across; check them after.'))) return; guard(this, api('/api/franchise/network/catalogue/import', 'POST', {})).then(function (r) { toast(r.added + ' part(s) added' + (r.skipped ? ', ' + r.skipped + ' SKU(s) already there' : '') + (r.remaining ? '. ' + r.remaining + ' more to go: press Import again.' : '')); load(); }); };
     load();
   }
   function fitRow(x) { x = x || {}; return '<tr class="fit"><td><input data-f="make" value="' + esc(x.make || '') + '" style="width:100px"></td><td><input data-f="model" value="' + esc(x.model || '') + '" style="width:110px"></td><td><input data-f="year_from" value="' + esc(x.year_from || '') + '" style="width:70px"></td><td><input data-f="year_to" value="' + esc(x.year_to || '') + '" style="width:70px"></td><td><input data-f="engine" value="' + esc(x.engine || '') + '" style="width:90px"></td><td><input data-f="note" value="' + esc(x.note || '') + '"></td><td><button class="sm" data-rm>✕</button></td></tr>'; }
@@ -818,7 +819,7 @@
         '<div class="controls" style="margin-top:8px">' + (ship ? '<button class="primary" id="ovShip">Ship it' + (d.store.store_type === 'company' ? '' : ' and invoice the store') + '</button><button id="ovCan">Cancel the order</button>' : '') + (recv ? field('Note (damage, wrong part…)', inp('ovNote')) + '<button class="primary" id="ovRecv">Received at the store</button>' : '') + '</div>', 2);
       $('#ovX', m).onclick = function () { close(2); };
       if ($('#ovShip', m)) $('#ovShip', m).onclick = function () { guard(this, api('/api/franchise/network/orders/' + id + '/ship', 'POST', { lines: o.lines.map(function (l) { return { id: l.id, qty_shipped: $('[data-sh="' + l.id + '"]', m).value }; }) })).then(function (r) { close(2); toast('Shipped: fill ' + r.fill_pct + '%' + (r.invoice ? ', invoice ' + r.invoice.number + ' ' + jmd(r.invoice.total) : '')); if (done) done(); }); };
-      if ($('#ovCan', m)) $('#ovCan', m).onclick = function () { var why = prompt('Why is it cancelled?', ''); if (why === null) return; guard(this, api('/api/franchise/network/orders/' + id + '/cancel', 'POST', { reason: why })).then(function () { close(2); if (done) done(); }); };
+      if ($('#ovCan', m)) $('#ovCan', m).onclick = async function () { var why = await vasPrompt('Why is it cancelled?', ''); if (why === null) return; guard(this, api('/api/franchise/network/orders/' + id + '/cancel', 'POST', { reason: why })).then(function () { close(2); if (done) done(); }); };
       if ($('#ovRecv', m)) $('#ovRecv', m).onclick = function () { guard(this, api('/api/franchise/network/orders/' + id + '/receive', 'POST', { note: val('ovNote', m), lines: o.lines.map(function (l) { return { id: l.id, qty_received: $('[data-rc="' + l.id + '"]', m).value }; }) })).then(function (r) { close(2); toast('Received' + (r.short.length ? '. Short: ' + r.short.join(', ') : '')); if (done) done(); }); };
     }).catch(function (e) { toast(e.message); });
   }
@@ -897,10 +898,10 @@
       $('#rbRun').onclick = function () { guard(this, api('/api/franchise/network/rebates/run', 'POST', { quarter: val('rbQ').trim().toUpperCase() })).then(function (r) {
         $('#rbOut').innerHTML = '<table><tbody>' + r.stores.map(function (s) { return '<tr><td>' + esc(s.name) + '</td><td class="n">' + jmd(s.dc_purchases) + '</td><td class="n">' + (s.compliance_pct != null ? s.compliance_pct + '% via DC' : '') + '</td><td class="n">' + s.rebate_pct + '%</td><td class="n">' + jmd(s.amount) + '</td><td>' + esc(s.result) + '</td></tr>'; }).join('') + '</tbody></table><p>Credited ' + jmd(r.total) + '.</p>'; }); };
       $('#ccNew').onclick = function () { claimForm(programmes); };
-      all('[data-cok]').forEach(function (b) { b.onclick = function () { var a = prompt('Amount to approve (J$). The store\'s co-op allowance limits it.', b.getAttribute('data-amt')); if (a === null) return; guard(b, api('/api/franchise/network/coop-claims/' + b.getAttribute('data-cok') + '/decide', 'POST', { decision: 'approve', amount: a })).then(function (r) { toast('Approved ' + jmd(r.approved)); programmes(); }); }; });
-      all('[data-cno]').forEach(function (b) { b.onclick = function () { var why = prompt('Why is it declined?', ''); if (!why) return; guard(b, api('/api/franchise/network/coop-claims/' + b.getAttribute('data-cno') + '/decide', 'POST', { decision: 'decline', note: why })).then(programmes); }; });
+      all('[data-cok]').forEach(function (b) { b.onclick = async function () { var a = await vasPrompt('Amount to approve (J$). The store\'s co-op allowance limits it.', b.getAttribute('data-amt')); if (a === null) return; guard(b, api('/api/franchise/network/coop-claims/' + b.getAttribute('data-cok') + '/decide', 'POST', { decision: 'approve', amount: a })).then(function (r) { toast('Approved ' + jmd(r.approved)); programmes(); }); }; });
+      all('[data-cno]').forEach(function (b) { b.onclick = async function () { var why = await vasPrompt('Why is it declined?', ''); if (!why) return; guard(b, api('/api/franchise/network/coop-claims/' + b.getAttribute('data-cno') + '/decide', 'POST', { decision: 'decline', note: why })).then(programmes); }; });
       all('[data-cs]').forEach(function (b) { b.onclick = function () { settleForm(+b.getAttribute('data-cs')); }; });
-      all('[data-cx]').forEach(function (b) { b.onclick = function () { var why = prompt('Why is it cancelled?', ''); if (!why) return; guard(b, api('/api/franchise/network/credits/' + b.getAttribute('data-cx') + '/cancel', 'POST', { reason: why })).then(programmes); }; });
+      all('[data-cx]').forEach(function (b) { b.onclick = async function () { var why = await vasPrompt('Why is it cancelled?', ''); if (!why) return; guard(b, api('/api/franchise/network/credits/' + b.getAttribute('data-cx') + '/cancel', 'POST', { reason: why })).then(programmes); }; });
     }).catch(function (e) { $('#view').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
   }
   function claimForm(done) {
@@ -930,7 +931,7 @@
       var draw = function () { var f = val('ceF'); var rows = d.certs.filter(function (c) { return !f || c.state === f; });
         $('#ceOut').innerHTML = rows.length ? '<table><thead><tr><th>Person</th><th>Store</th><th>Certificate</th><th>Earned</th><th>Expires</th><th class="n">Score</th><th>Number</th><th></th></tr></thead><tbody>' + rows.map(function (c) {
           return '<tr' + (c.state === 'revoked' ? ' style="opacity:.5"' : '') + '><td><b>' + esc(c.person) + '</b>' + (c.role ? '<br><small>' + esc(c.role) + '</small>' : '') + '</td><td>' + esc(c.store_name) + '</td><td>' + esc(c.program_name) + '</td><td>' + esc(day(c.earned_on)) + '</td><td>' + esc(day(c.expires_on)) + ' <span class="pill' + (c.state === 'current' ? ' ok' : c.state === 'expiring' ? ' warn' : ' bad') + '">' + esc(c.state) + '</span></td><td class="n">' + (c.score != null ? c.score + '%' : '') + '</td><td>' + esc(c.certificate_no || '') + '</td><td>' + (c.state !== 'revoked' ? '<button class="sm" data-rv="' + c.id + '">Withdraw</button>' : '') + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="empty">None.</div>';
-        all('[data-rv]').forEach(function (b) { b.onclick = function () { var why = prompt('Why is it withdrawn?', ''); if (why === null) return; guard(b, api('/api/franchise/network/certs/' + b.getAttribute('data-rv') + '/revoke', 'POST', { reason: why })).then(certs); }; }); };
+        all('[data-rv]').forEach(function (b) { b.onclick = async function () { var why = await vasPrompt('Why is it withdrawn?', ''); if (why === null) return; guard(b, api('/api/franchise/network/certs/' + b.getAttribute('data-rv') + '/revoke', 'POST', { reason: why })).then(certs); }; }); };
       $('#ceF').onchange = draw; draw();
       $('#ceCsv').onclick = function () { csv('franchise-certificates', [['Person', 'Role', 'Store', 'Certificate', 'Earned', 'Expires', 'State', 'Score', 'Number']].concat(d.certs.map(function (c) { return [c.person, c.role, c.store_name, c.program_name, c.earned_on, c.expires_on, c.state, c.score, c.certificate_no]; }))); };
       $('#ceNew').onclick = function () { certForm(null, certs); };

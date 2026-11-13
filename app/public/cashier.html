@@ -43,10 +43,11 @@
   .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 16px;border-radius:10px;font-weight:600;display:none;z-index:9;max-width:92vw}
   .toast.err{background:var(--red)} .toast.on{display:block}
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
 <header><h1>Cashier</h1><span class="st" id="stName">…</span><span class="small" id="who"></span><a href="/admin.html">Admin</a></header>
@@ -147,7 +148,7 @@
     return '<div class="grid2"><div class="card"><h2>X report: shift so far</h2><p class="small muted">' + esc(d.session.cashier) + ' since ' + esc(new Date(d.session.opened_at).toLocaleTimeString()) + '</p>' +
       '<table><tbody><tr><td>Sales</td><td class="n">' + d.sales.n + '</td></tr><tr><td>Sales total</td><td class="n">' + J(d.sales.total) + '</td></tr><tr><td>GCT</td><td class="n">' + J(d.sales.tax) + '</td></tr>' +
       d.tenders.map(function (x) { return '<tr><td>' + esc(x.method) + ' (' + x.n + ')</td><td class="n">' + J(x.amount) + '</td></tr>'; }).join('') +
-      '<tr><td>Opening float</td><td class="n">' + J(c.opening_float) + '</td></tr><tr><td>Drops to safe</td><td class="n">' + J(c.drops) + '</td></tr><tr><td>Payouts</td><td class="n">' + J(c.payouts) + '</td></tr>' +
+      '<tr><td>Opening float</td><td class="n">' + J(c.opening_float) + '</td></tr><tr><td>Drops to safe</td><td class="n">' + J(c.drops) + '</td></tr><tr><td>Payouts</td><td class="n">' + J(c.payouts) + '</td></tr>' + (c.refunds ? '<tr><td>Cash refunds on returns</td><td class="n">' + J(c.refunds) + '</td></tr>' : '') +
       (c.expected != null ? '<tr><td><b>Cash expected</b> (manager view)</td><td class="n"><b>' + J(c.expected) + '</b></td></tr>' : '') + '</tbody></table>' +
       (d.movements.length ? '<h2 style="margin-top:12px">Drawer movements</h2><table><tbody>' + d.movements.map(function (m) { return '<tr><td>' + esc(m.kind.replace('_', ' ')) + '<div class="small muted">' + esc(m.reason || '') + (m.approved_by_name ? ' · approved ' + esc(m.approved_by_name) : '') + '</div></td><td class="n">' + (m.amount ? J(m.amount) : '') + '</td></tr>'; }).join('') + '</tbody></table>' : '') + '</div>' +
       '<div class="card"><h2>Drawer actions</h2><div class="row"><select id="mvKind"><option value="drop">Drop to safe</option><option value="payout">Payout</option><option value="float_in">Add float</option><option value="no_sale">Open drawer (no sale)</option></select>' +
@@ -211,21 +212,21 @@
   function refreshMe() { return api('/api/cash/me').then(function (d) { S.me = d; if (!d.can.manage) document.querySelectorAll('[data-mgr]').forEach(function (b) { b.style.display = 'none'; }); }); }
 
   $('#tabs').addEventListener('click', function (e) { var b = e.target.closest('[data-t]'); if (b) setTab(b.getAttribute('data-t')); });
-  document.addEventListener('click', function (e) {
+  document.addEventListener('click', async function (e) {
     var t = e.target.closest('[data-a],[data-open],[data-tx],[data-bind],[data-review],[data-force]'); if (!t) return;
     if (t.hasAttribute('data-open')) return openOrder(t.getAttribute('data-open'));
     if (t.hasAttribute('data-tx')) { S.tenders.splice(+t.getAttribute('data-tx'), 1); return render(); }
     if (t.hasAttribute('data-bind')) {
-      if (!confirm('Make THIS device that station? Any other device using it stops being it.')) return;
+      if (!(await vasConfirm('Make THIS device that station? Any other device using it stops being it.'))) return;
       return api('/api/cash/stations/' + t.getAttribute('data-bind') + '/bind', { method: 'POST', body: {} }).then(function (d) {
         try { localStorage.setItem(KEY, d.key); } catch (_) {}
         toast('This device is now that station'); refreshMe().then(function () { setTab('stations'); });
       }).catch(function (er) { toast(er.message, true); });
     }
-    if (t.hasAttribute('data-review')) return api('/api/cash/till/sessions/' + t.getAttribute('data-review') + '/review', { method: 'POST', body: { note: prompt('Note (optional)') || '' } }).then(function () { setTab('shifts'); }).catch(function (er) { toast(er.message, true); });
+    if (t.hasAttribute('data-review')) return api('/api/cash/till/sessions/' + t.getAttribute('data-review') + '/review', { method: 'POST', body: { note: (await vasPrompt('Note (optional)')) || '' } }).then(function () { setTab('shifts'); }).catch(function (er) { toast(er.message, true); });
     if (t.hasAttribute('data-force')) {
-      var amt = prompt('Cash counted in that drawer (J$)'); if (amt == null) return;
-      return api('/api/cash/till/sessions/' + t.getAttribute('data-force') + '/force-close', { method: 'POST', body: { count: { 1: Math.round(Number(amt) || 0) }, notes: prompt('Why is a manager closing it?') || '' } })
+      var amt = await vasPrompt('Cash counted in that drawer (J$)'); if (amt == null) return;
+      return api('/api/cash/till/sessions/' + t.getAttribute('data-force') + '/force-close', { method: 'POST', body: { count: { 1: Math.round(Number(amt) || 0) }, notes: (await vasPrompt('Why is a manager closing it?')) || '' } })
         .then(function (d) { toast('Closed: ' + (d.variance >= 0 ? 'over ' : 'short ') + J(Math.abs(d.variance))); setTab('shifts'); }).catch(function (er) { toast(er.message, true); });
     }
     var a = t.getAttribute('data-a');
@@ -233,7 +234,7 @@
     if (a === 'back') { S.order = null; loadQueue(); }
     if (a === 'addTender') { S.tenders.push({ method: 'card', amount: '', tendered: '', reference: '' }); render(); }
     if (a === 'cancelOrder') {
-      var why = prompt('Cancel order #' + S.order.order.id + '? Reason:'); if (!why) return;
+      var why = await vasPrompt('Cancel order #' + S.order.order.id + '? Reason:'); if (!why) return;
       api('/api/admin/pos/orders/' + S.order.order.id + '/cancel', { method: 'POST', body: { reason: why } }).then(function () { S.order = null; toast('Cancelled'); loadQueue(); }).catch(function (er) { toast(er.message, true); });
     }
     if (a === 'pay') {
@@ -257,7 +258,7 @@
     }
     if (a === 'closeDrawer') {
       var c = readDenoms('c');
-      if (!confirm('Close the drawer with ' + J(c.total) + ' counted?')) return;
+      if (!(await vasConfirm('Close the drawer with ' + J(c.total) + ' counted?'))) return;
       api('/api/cash/till/close', { method: 'POST', body: { count: c.count, notes: $('#closeNotes').value } }).then(function (d) {
         toast(d.variance != null ? 'Closed. ' + (d.variance === 0 ? 'Balanced.' : (d.variance > 0 ? 'Over ' : 'Short ') + J(Math.abs(d.variance))) : d.message);
         refreshMe().then(loadDrawer);
@@ -289,6 +290,6 @@
 </script>
 <script src="/assets/pin-staff.js"></script>
 <script src="/assets/clock-banner.js" defer></script>
-<script src="/assets/staff-assist.js" defer></script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
 </body>
 </html>

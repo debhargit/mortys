@@ -69,10 +69,11 @@
   svg text{fill:var(--muted);font-size:11px}
   @media print{ header,.tabs,.controls,button,.nrow{display:none!important} .card{border:0} .bnotes{break-before:page} }
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
 <header><h1>Budget &amp; forecast</h1><nav><a href="/accounting.html">Accounting</a><a href="/banking.html">Banking</a><a href="/admin.html">Admin</a></nav></header>
@@ -87,6 +88,7 @@
 <div id="modal"></div>
 <div class="toast" id="toast"></div>
 <script src="/assets/doc-attach.js"></script>
+<script src="/assets/acct-tree.js?v=20261103"></script>
 <script>
 (function () {
   'use strict';
@@ -198,9 +200,9 @@
     $('#bv').onchange = function () { bq.ver = this.value; budgetTab(); };
     $('#bm').onchange = function () { bq.mode = this.value; drawBudget(); };
     if ($('#bu')) $('#bu').onchange = function () { bq.upto = this.value; drawBudget(); };
-    $('#bfy').onchange = function () {
+    $('#bfy').onchange = async function () {
       var v = +this.value;
-      if (!confirm('Start the financial year in ' + MON[v - 1] + '? Budgets already entered stay on their own months.')) { this.value = meta.fy_start; return; }
+      if (!(await vasConfirm('Start the financial year in ' + MON[v - 1] + '? Budgets already entered stay on their own months.'))) { this.value = meta.fy_start; return; }
       api('/api/budget/settings', 'PUT', { fy_start: v }).then(function () { meta.fy_start = v; bq.year = fyYear(); budgetTab(); }).catch(function (e) { toast(e.message); });
     };
     $('#bpr').onclick = function () { window.print(); };
@@ -294,8 +296,8 @@
   }
   function wireNotes() {
     if ($('#bgen')) $('#bgen').onclick = genForm;
-    if ($('#bdel')) $('#bdel').onclick = function () {
-      if (!confirm('Delete the whole budget for this year? It is kept as a saved version first, so it can be put back. It will not be made again automatically.')) return;
+    if ($('#bdel')) $('#bdel').onclick = async function () {
+      if (!(await vasConfirm('Delete the whole budget for this year? It is kept as a saved version first, so it can be put back. It will not be made again automatically.'))) return;
       api('/api/budget?year=' + bq.year + (bq.cls ? '&class_id=' + bq.cls : ''), 'DELETE').then(function () { toast('Budget deleted; a copy is kept under saved versions'); return budgetTab(); }).catch(function (e) { toast(e.message); });
     };
     all('tr[data-acct] td.acc').forEach(function (td) {
@@ -351,12 +353,12 @@
     var v = bdata.version;
     if (v) {
       $('#vback').onclick = function () { bq.ver = ''; budgetTab(); };
-      $('#vrestore').onclick = function () {
-        if (!confirm('Put "' + v.name + '" back as the working budget? The working budget as it stands is kept as a version first, so nothing is lost.')) return;
+      $('#vrestore').onclick = async function () {
+        if (!(await vasConfirm('Put "' + v.name + '" back as the working budget? The working budget as it stands is kept as a version first, so nothing is lost.'))) return;
         api('/api/budget/versions/' + v.id + '/restore', 'POST').then(function () { bq.ver = ''; toast('"' + v.name + '" is the working budget again'); return budgetTab(); }).catch(function (e) { toast(e.message); });
       };
-      $('#vdel').onclick = function () {
-        if (!confirm('Delete the version "' + v.name + '"? The working budget is not changed.')) return;
+      $('#vdel').onclick = async function () {
+        if (!(await vasConfirm('Delete the version "' + v.name + '"? The working budget is not changed.'))) return;
         api('/api/budget/versions/' + v.id, 'DELETE').then(function () { bq.ver = ''; toast('Version deleted'); return budgetTab(); }).catch(function (e) { toast(e.message); });
       };
       return;
@@ -386,7 +388,7 @@
         ins.forEach(function (x, k) { x.value = y ? (k === 11 ? last : each) : ''; }); this.blur(); sumGrid();
       };
     });
-    $('#bzero').onclick = function () { if (confirm('Clear every amount on the screen? Nothing is saved until you press Save.')) { all('tr[data-acct] input').forEach(function (i) { i.value = ''; }); sumGrid(); } };
+    $('#bzero').onclick = async function () { if (await vasConfirm('Clear every amount on the screen? Nothing is saved until you press Save.')) { all('tr[data-acct] input').forEach(function (i) { i.value = ''; }); sumGrid(); } };
     $('#bsave').onclick = function () {
       var b = this; b.disabled = true;
       api('/api/budget', 'PUT', { year: bq.year, class_id: bq.cls || null, rows: gridValues() }).then(function () { toast('Budget saved'); return budgetTab(); }).catch(function (e) { toast(e.message); }).then(function () { b.disabled = false; });
@@ -678,8 +680,8 @@
       var body = { name: $('#i_n').value, start_date: $('#i_d').value, class_id: $('#i_c').value || null, amount: moneyOut($('#i_a').value, i && i.amount), monthly_profit: moneyOut($('#i_m').value, i && i.monthly_profit) || 0, notes: $('#i_x').value, status: $('#i_s') && $('#i_s').checked ? 'closed' : 'active' };
       api('/api/budget/investments' + (i ? '/' + i.id : ''), i ? 'PUT' : 'POST', body).then(function () { closeModal(); toast('Saved'); after(); }).catch(function (e) { toast(e.message); });
     };
-    if ($('#i_del')) $('#i_del').onclick = function () {
-      if (!confirm('Delete ' + i.name + '? Its documents stay in the document centre.')) return;
+    if ($('#i_del')) $('#i_del').onclick = async function () {
+      if (!(await vasConfirm('Delete ' + i.name + '? Its documents stay in the document centre.'))) return;
       api('/api/budget/investments/' + i.id, 'DELETE').then(function () { closeModal(); toast('Deleted'); after(); }).catch(function (e) { toast(e.message); });
     };
   }
@@ -836,8 +838,8 @@
       api('/api/budget/health/saved', 'POST').then(function () { toast('Report kept'); return healthTab(); }).catch(function (e) { b.disabled = false; toast(e.message); });
     };
     if ($('#hnow')) $('#hnow').onclick = function () { hview = ''; healthTab(); };
-    if ($('#hdel')) $('#hdel').onclick = function () {
-      if (!confirm('Delete the report kept ' + d.saved.at + '?')) return;
+    if ($('#hdel')) $('#hdel').onclick = async function () {
+      if (!(await vasConfirm('Delete the report kept ' + d.saved.at + '?'))) return;
       api('/api/budget/health/saved/' + hview, 'DELETE').then(function () { hview = ''; toast('Report deleted'); return healthTab(); }).catch(function (e) { toast(e.message); });
     };
   }
@@ -899,17 +901,21 @@
       return '<tr class="head"><td colspan="2">' + title + '</td></tr>' + keys.map(function (k) {
         var g = B.groups.filter(function (x) { return x.key === k; })[0];
         if (!g || !g.lines.length) return '';
+        var items = g.lines.map(function (l) { return { id: l.id || 'pl', parent_id: l.parent_id, code: l.code, name: l.name, vals: [l.amount] }; });
         return '<tr><td style="padding-left:14px"><b>' + esc(g.label) + '</b></td><td class="n"><b>' + J(g.total) + '</b></td></tr>' +
-          g.lines.map(function (l) { return '<tr><td style="padding-left:28px">' + (l.code ? '<a href="/accounting.html" title="Open in Accounting">' + esc(l.code) + '</a> ' : '') + esc(l.name) + '</td><td class="n">' + J(l.amount) + '</td></tr>'; }).join('');
+          AcctTree.rows(AcctTree.build(items, B.chart || []), { indent: 28,
+            label: function (l) { return (l.code ? '<a href="/accounting.html" title="Open in Accounting">' + esc(l.code) + '</a> ' : '') + esc(l.name); },
+            cell: function (l, v) { return J(v); } });
       }).join('') + '<tr class="total"><td>' + total[0] + '</td><td class="n">' + J(total[1]) + '</td></tr>';
     };
-    h += '<div class="card"><h2>Balance sheet at ' + esc(d.as_of) + '</h2><div class="scroll"><table><tbody>' +
+    h += '<div class="card"><h2>Balance sheet at ' + esc(d.as_of) + '</h2><p class="sub">▸ shows a main account\'s sub-accounts. ' + AcctTree.buttons('bst') + '</p><div class="scroll"><table id="bst"><tbody>' +
       bs(['cash', 'ar', 'stock', 'other_ca', 'fixed', 'other_a'], 'Assets', ['Total assets', B.assets]) +
       bs(['cl', 'ltl'], 'Liabilities', ['Total liabilities', B.liabilities]) +
       '<tr class="total"><td>Net assets</td><td class="n">' + J(B.net_assets) + '</td></tr>' +
       bs(['equity'], 'Owners\' equity', ['Total owners\' equity', B.equity]) + '</tbody></table></div></div>';
     h += '<div class="card"><p class="sub" style="margin:0">' + d.notes.map(esc).join(' ') + '</p></div>';
     $('#out').innerHTML = h;
+    AcctTree.wire($('#bst')); AcctTree.wireButtons($('#out'));
     wireValue();
   }
   function wireValue() {

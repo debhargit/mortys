@@ -107,7 +107,7 @@ function register(app, deps) {
   app.get('/api/sys/me', requireAdmin, async (req, res) => {
     try {
       const [a, s, p, r, nw] = await Promise.all(['sys.audit', 'sys.security', 'sys.support', 'support.raise', 'sys.network'].map((k) => userCan(req, k)));
-      res.json({ audit: a, security: s, support: p, raise: r, network: nw });
+      res.json({ audit: a, security: s, support: p, raise: r, network: nw, user_id: req.session.userId });
     } catch (e) { fail(res, e); }
   });
 

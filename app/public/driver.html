@@ -7,8 +7,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Driver · Vision Auto</title>
 <link rel="manifest" href="/mobile.webmanifest">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   :root{--red:#d61f2b;--ink:#111827;--muted:#6b7280;--line:#e5e7eb;--bg:#f3f4f6;--ok:#16a34a;--warn:#d97706}
@@ -40,6 +40,7 @@
   .numicon{background:#111827;color:#fff;border:2px solid #fff;border-radius:50%;display:grid;place-items:center;font:700 13px system-ui;box-shadow:0 1px 4px rgba(0,0,0,.4)}
   .numicon.p1{background:var(--red)} .meicon{background:#2563eb;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 6px rgba(37,99,235,.25)}
 </style>
+<script src="/assets/vas-ui.js?v=20261110b"></script>
 </head>
 <body>
 <header><div><b>🚚 Driver</b><div class="who" id="who"></div></div><span class="sp"></span><button class="sos hidden" id="sosBtn">SOS</button></header>
@@ -71,8 +72,8 @@
       '<label>PIN</label><input id="pin" type="password" inputmode="numeric" autocomplete="one-time-code"><button class="big primary" id="pinGo">Sign in with PIN</button>' +
       '<details style="margin-top:12px"><summary class="sub">Email and password instead</summary><label>Email</label><input id="em" type="email" autocomplete="username"><label>Password</label><input id="pw" type="password" autocomplete="current-password"><button class="big dark" id="pwGo">Sign in</button></details>' +
       '<div class="err" id="lerr">' + esc(msg || '') + '</div><a href="#" id="pwChange" style="display:block;text-align:center;margin-top:10px;font-size:13px;color:inherit;opacity:.8">Change password</a></div><a class="big light" href="/mobile.html">◀ App menu</a>';
-    var done = function (r) {
-      if (r && r.need_2fa) { var code = prompt('6-digit code from your authenticator app'); if (!code) return; return api('/api/auth/2fa', 'POST', { code: code.trim() }).then(done).catch(function (e) { $('#lerr').textContent = e.message; }); }
+    var done = async function (r) {
+      if (r && r.need_2fa) { var code = await vasPrompt('6-digit code from your authenticator app'); if (!code) return; return api('/api/auth/2fa', 'POST', { code: code.trim() }).then(done).catch(function (e) { $('#lerr').textContent = e.message; }); }
       start();
     };
     // PIN, then the person taps their name (assets/pin-staff.js).

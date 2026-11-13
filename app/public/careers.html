@@ -37,10 +37,11 @@
   .docs{list-style:none;padding:0;margin:6px 0} .docs li{padding:6px 0;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:10px;font-size:15px} .docs small{color:var(--muted)}
   h3{margin:18px 0 6px;font-size:16px}
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b"></script>
 </head>
 <body>
 <header><div class="in"><h1 id="h1">Work with us</h1><p>Vision Auto Solutions · Kingston, Jamaica · <a href="/">Back to the shop</a></p></div></header>
@@ -98,11 +99,11 @@
           .then(function (r) { draw(r.view, 'Thank you. We have it.'); })
           .catch(function (er) { err.textContent = er.message; btn.disabled = false; btn.textContent = 'Upload'; });
       });
-      document.getElementById('wd').addEventListener('click', function () {
-        if (!confirm('Withdraw your application and delete your details, CV and documents? This cannot be undone.')) return;
+      document.getElementById('wd').addEventListener('click', async function () {
+        if (!(await vasConfirm('Withdraw your application and delete your details, CV and documents? This cannot be undone.'))) return;
         getJson(base, { method: 'DELETE' })
           .then(function () { m.innerHTML = '<div class="job"><div class="ok">Your application has been withdrawn and your details deleted. Thank you for your interest.</div></div>'; })
-          .catch(function (er) { alert(er.message); });
+          .catch(async function (er) { await vasAlert(er.message); });
       });
     }
     getJson(base).then(function (v) { draw(v); })
@@ -215,15 +216,15 @@
             '<label for="ofNote">Anything you want to tell us (optional)</label><textarea id="ofNote" rows="3"></textarea>' +
             '<p class="err" id="ofErr"></p><div style="display:flex;gap:10px;flex-wrap:wrap"><button id="ofYes">I accept this offer</button><button class="ghost" id="ofNo">Decline</button></div></div>');
       if (answered) return;
-      function send(decision) {
-        if (decision === 'decline' && !confirm('Decline this job offer?')) return;
+      async function send(decision) {
+        if (decision === 'decline' && !(await vasConfirm('Decline this job offer?'))) return;
         document.getElementById('ofYes').disabled = document.getElementById('ofNo').disabled = true;
         getJson(url + '/respond', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision: decision, name: document.getElementById('ofName').value, note: document.getElementById('ofNote').value }) })
           .then(function (r) { m.innerHTML = '<div class="ok">' + esc(r.message) + '</div>'; })
           .catch(function (e) { document.getElementById('ofErr').textContent = e.message; document.getElementById('ofYes').disabled = document.getElementById('ofNo').disabled = false; });
       }
-      document.getElementById('ofYes').onclick = function () { send('accept'); };
-      document.getElementById('ofNo').onclick = function () { send('decline'); };
+      document.getElementById('ofYes').onclick = async function () { await send('accept'); };
+      document.getElementById('ofNo').onclick = async function () { await send('decline'); };
     }).catch(function (e) { m.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
   }
   // So the postings can show in Google's job search.

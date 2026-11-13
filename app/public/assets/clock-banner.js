@@ -1,3 +1,5 @@
+// The program's own message windows (assets/vas-ui.js), for a page that has not loaded them itself.
+(function(){ if (window.VasUI || document.querySelector('script[src^="/assets/vas-ui.js"]')) return; var s = document.createElement('script'); s.src = '/assets/vas-ui.js?v=20261110b'; (document.head || document.documentElement).appendChild(s); })();
 /* =============================================================================
    Vision Auto Solutions -- shift banner (Phase 8b)
    Loaded by the till screens (admin POS, warehouse, cashier). Every minute it
@@ -49,26 +51,26 @@
     b.style.display = 'flex';
   }
   function hide() { if (bar) bar.style.display = 'none'; }
-  function askMore() {
-    var mins = prompt('How many more minutes do you need? (15 to 240)', '30');
+  async function askMore() {
+    var mins = await vasPrompt('How many more minutes do you need? (15 to 240)', '30');
     if (mins === null) return;
-    var why = prompt('Why do you need more time? (the manager sees this)');
+    var why = await vasPrompt('Why do you need more time? (the manager sees this)');
     if (!why) return;
-    req('/api/clock/me/extension', { minutes: parseInt(mins, 10), reason: why }).then(function (r) {
-      alert('Sent to the manager. You can keep working for ' + r.grace_minutes + ' minutes while they answer.'); tick();
-    }).catch(function (e) { alert(e.message); });
+    req('/api/clock/me/extension', { minutes: parseInt(mins, 10), reason: why }).then(async function (r) {
+      await vasAlert('Sent to the manager. You can keep working for ' + r.grace_minutes + ' minutes while they answer.'); tick();
+    }).catch(async function (e) { await vasAlert(e.message); });
   }
   function clockIn() {
-    punch({ action: 'in' }).then(function (r) { alert(r.message); tick(); }).catch(function (e) {
+    punch({ action: 'in' }).then(async function (r) { await vasAlert(r.message); tick(); }).catch(async function (e) {
       if (/overtime/i.test(e.message)) {
-        var why = prompt(e.message + '\n\nReason:');
+        var why = await vasPrompt(e.message + '\n\nReason:');
         if (!why) return;
-        punch({ action: 'in', confirm_overtime: true, ot_reason: why }).then(function (r) { alert(r.message); tick(); }).catch(function (e2) { alert(e2.message); });
-      } else alert(e.message + (/photo|fingerprint/i.test(e.message) ? '\nUse the time clock page.' : ''));
+        punch({ action: 'in', confirm_overtime: true, ot_reason: why }).then(async function (r) { await vasAlert(r.message); tick(); }).catch(async function (e2) { await vasAlert(e2.message); });
+      } else await vasAlert(e.message + (/photo|fingerprint/i.test(e.message) ? '\nUse the time clock page.' : ''));
     });
   }
   function clockOut() {
-    punch({ action: 'out' }).then(function (r) { alert(r.message); tick(); }).catch(function (e) { alert(e.message); });
+    punch({ action: 'out' }).then(async function (r) { await vasAlert(r.message); tick(); }).catch(async function (e) { await vasAlert(e.message); });
   }
   var myTime = function (hash) { return function () { location.href = '/my-time.html' + (hash || ''); }; };
   function tick() {
@@ -87,7 +89,7 @@
       if (d.warn === 5) return show('#d62828', 'Your shift ends in ' + Math.max(0, d.minutes_left) + ' minutes. You will be clocked out and signed out at ' + hm(d.auto_out_at) + '.', [btn('Ask for more time', askMore)]);
       if (d.warn === 15) return show('#b45309', 'Your shift ends in ' + d.minutes_left + ' minutes.', [btn('Ask for more time', askMore)], 'w15');
       if (d.entry && d.entry.mode === 'remote') return show('#475569', 'Clocked in as Remote: quotes and orders only, no payments.', [], 'remote');
-      if (d.on_break) return show('#475569', 'You are on ' + d.on_break.kind + '.', [btn('Back', function () { punch({ action: 'break_end' }).then(tick).catch(function (e) { alert(e.message); }); })]);
+      if (d.on_break) return show('#475569', 'You are on ' + d.on_break.kind + '.', [btn('Back', function () { punch({ action: 'break_end' }).then(tick).catch(async function (e) { await vasAlert(e.message); }); })]);
       hide();
     }).catch(function (e) {
       if (e.status === 401 && last && last.clocked_in) location.reload();   // signed out at the end of the shift

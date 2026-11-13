@@ -5,10 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Receivables · Vision Auto Solutions</title>
 <link rel="stylesheet" href="/assets/books.css">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
 <header><h1>Customers &amp; receivables</h1><nav><a href="/payables.html">Payables</a><a href="/banking.html">Banking</a><a href="/accounting.html">Ledger</a><a href="/admin.html">Admin</a></nav></header>
@@ -18,8 +19,9 @@
 </main>
 <div id="modal"></div>
 <div class="toast" id="toast"></div>
-<script src="/assets/books-common.js?v=20261019"></script>
-<script src="/assets/billing-ui.js?v=20261019"></script>
+<script src="/assets/books-common.js?v=20261103"></script>
+<script src="/assets/list-tools.js?v=20261109"></script>
+<script src="/assets/billing-ui.js?v=20261104"></script>
 <script src="/assets/doc-attach.js"></script>
 <script src="/assets/invoice-scan.js?v=20261028"></script>
 <script>
@@ -30,20 +32,36 @@
 
   // ------------------------------------------------------------ customer centre --
   function cust() {
-    return api('/api/ar/customers?q=' + encodeURIComponent(state.q) + '&filter=' + state.filter).then(function (d) {
+    return api('/api/ar/customers?all=1&filter=' + state.filter).then(function (d) {
+      var status = function (c) { return c.credit_hold ? 'On hold' : c.credit_limit != null && c.balance > c.credit_limit ? 'Over limit' : c.overdue > 0.005 ? 'Overdue' : c.balance > 0.005 ? 'Owes' : c.balance < -0.005 ? 'Has credit' : 'Paid up'; };
       $('#out').innerHTML = '<div class="tiles"><div class="tile"><span class="k">Open invoices</span><b>' + J(d.totals.open) + '</b></div><div class="tile bad"><span class="k">Overdue</span><b>' + J(d.totals.overdue) + '</b></div><div class="tile"><span class="k">Unapplied credits</span><b>' + J(d.totals.credit) + '</b></div></div>' +
-        '<div class="card"><div class="controls"><div style="flex:1"><label>Find a customer (name, account no. or phone)</label><input id="q" value="' + esc(state.q) + '" style="width:100%"></div>' +
-        '<div><label>Show</label><select id="f"><option value="">Everyone who owes or has credit</option><option value="overdue">Overdue</option><option value="over_limit">Over credit limit</option><option value="hold">On credit hold</option><option value="credit">With unapplied credit</option></select></div></div>' +
-        '<div class="scroll"><table><thead><tr><th>Customer</th><th class="n">Open</th><th class="n">Overdue</th><th class="n">Oldest</th><th class="n">Credit</th><th class="n">Balance</th><th class="n">Limit</th><th></th></tr></thead><tbody>' +
-        (d.customers.length ? d.customers.map(function (c) {
-          return '<tr data-c="' + c.id + '" class="click"><td><b>' + esc(c.name) + '</b><br><small>' + esc(c.account_number || '') + (c.phone ? ' · ' + esc(c.phone) : '') + '</small></td><td class="n">' + J(c.open) + '</td><td class="n">' + (c.overdue ? '<span class="pill bad">' + J(c.overdue) + '</span>' : '') + '</td>' +
-            '<td class="n">' + (c.oldest_days ? c.oldest_days + ' d' : '') + '</td><td class="n">' + (c.credit ? J(c.credit) : '') + '</td><td class="n"><b>' + J(c.balance) + '</b></td><td class="n">' + (c.credit_limit != null ? J(c.credit_limit) : '') + '</td>' +
-            '<td>' + (c.credit_hold ? '<span class="pill bad">hold</span>' : '') + (c.credit_limit != null && c.balance > c.credit_limit ? ' <span class="pill warn">over limit</span>' : '') + '</td></tr>';
-        }).join('') : '<tr><td colspan="8" class="empty">Nobody here.</td></tr>') + '</tbody></table></div></div>';
+        '<div class="card"><div class="controls"><div><label>Show</label><select id="f"><option value="">Everyone who owes or has credit</option><option value="all">All customers</option><option value="overdue">Overdue</option><option value="over_limit">Over credit limit</option><option value="hold">On credit hold</option><option value="credit">With unapplied credit</option></select></div>' +
+        (d.capped ? '<div class="note warn" style="margin:0">Only the first ' + d.customers.length.toLocaleString() + ' customers are loaded. Pick a narrower "Show".</div>' : '') + '</div>' +
+        '<div id="clist"></div></div>';
       $('#f').value = state.filter;
       $('#f').onchange = function () { state.filter = this.value; cust(); };
-      $('#q').onkeydown = function (e) { if (e.key === 'Enter') { state.q = this.value.trim(); cust(); } };
-      all('[data-c]').forEach(function (r) { r.onclick = function () { detail(+r.getAttribute('data-c')); }; });
+      window.ListTools.mount($('#clist'), {
+        key: 'ar-customers', rows: d.customers, csv: 'customers', placeholder: 'Find a customer: name, account no., phone, email, amount…',
+        empty: 'Nobody here.', emptyFiltered: 'No customer matches.', totals: ['open', 'overdue', 'credit', 'balance'],
+        search: function (c) { return String(c.phone || '').replace(/\D/g, ''); },
+        rowAttr: function (c) { return 'data-c="' + c.id + '" class="click"'; },
+        cols: [
+          { k: 'name', label: 'Customer', cell: function (c) { return '<b>' + esc(c.name) + '</b>'; } },
+          { k: 'account_number', label: 'Account no.', nowrap: true },
+          { k: 'phone', label: 'Phone', nowrap: true },
+          { k: 'email', label: 'Email', val: function (c) { return c.email && !/\.local$/.test(c.email) ? c.email : ''; } },
+          { k: 'open', label: 'Open', type: 'money' },
+          { k: 'overdue', label: 'Overdue', type: 'money', cell: function (c) { return c.overdue ? '<span class="pill bad">' + J(c.overdue) + '</span>' : ''; } },
+          { k: 'oldest_days', label: 'Oldest (days)', type: 'num', cell: function (c) { return c.oldest_days ? c.oldest_days + ' d' : ''; } },
+          { k: 'credit', label: 'Credit', type: 'money', cell: function (c) { return c.credit ? J(c.credit) : ''; } },
+          { k: 'balance', label: 'Balance', type: 'money', cell: function (c) { return '<b>' + J(c.balance) + '</b>'; } },
+          { k: 'credit_limit', label: 'Limit', type: 'money' },
+          { k: 'payment_terms_days', label: 'Terms (days)', type: 'num' },
+          { k: 'status', label: 'Status', type: 'list', val: status, cell: function (c) { return (c.credit_hold ? '<span class="pill bad">hold</span>' : '') + (c.credit_limit != null && c.balance > c.credit_limit ? ' <span class="pill warn">over limit</span>' : ''); } },
+          { k: 'last_note', label: 'Last note', type: 'date', nowrap: true, val: function (c) { return c.last_note ? String(c.last_note).slice(0, 10) : ''; } }
+        ],
+        after: function (tb) { all('[data-c]', tb).forEach(function (r) { r.onclick = function () { detail(+r.getAttribute('data-c')); }; }); }
+      });
     });
   }
 
@@ -54,7 +72,7 @@
         '<div class="card"><h2>' + esc(c.name) + (c.credit_hold ? ' <span class="pill bad">on credit hold</span>' : '') + '</h2><p class="sub">' + esc([c.account_number, c.phone, c.email && !/\.local$/.test(c.email) ? c.email : null].filter(Boolean).join(' · ')) + '</p>' +
         (c.credit_hold ? '<div class="note bad">Hold: ' + esc(c.credit_hold_reason || '') + '. The till will not charge sales to this account.</div>' : '') +
         '<div class="tiles"><div class="tile"><span class="k">Balance</span><b>' + J(d.balance) + '</b></div><div class="tile"><span class="k">Current</span><b>' + J(a.current) + '</b></div><div class="tile"><span class="k">1-30</span><b>' + J(a.d30) + '</b></div><div class="tile"><span class="k">31-60</span><b>' + J(a.d60) + '</b></div><div class="tile"><span class="k">61-90</span><b>' + J(a.d90) + '</b></div><div class="tile bad"><span class="k">Over 90</span><b>' + J(a.over90) + '</b></div><div class="tile"><span class="k">Unapplied credit</span><b>' + J(d.credit) + '</b></div></div>' +
-        '<div class="controls"><button class="primary" id="rp">Receive payment</button><button id="ni">New invoice</button><button id="st">Statement</button><button id="rm">Email a reminder</button><button id="bs">Reminders &amp; late fees</button><button id="hd">' + (c.credit_hold ? 'Lift credit hold' : 'Put on credit hold') + '</button>' +
+        '<div class="controls"><button class="primary" id="rp">Receive payment</button><button id="ni">New invoice</button><button id="st">Statement</button><button id="rm">Email a reminder</button><button id="bs">Reminders &amp; late fees</button><button id="hd">' + (c.credit_hold ? 'Lift credit hold' : 'Put on credit hold') + '</button>' + (d.invoices.length ? '<button id="wo" title="The customer will never pay: write the balance off as a bad debt">Write off bad debt</button>' : '') +
         '<span style="margin-left:auto"></span><div><label>Terms (days)</label><input id="tm" type="number" value="' + (c.payment_terms_days == null ? '' : c.payment_terms_days) + '" style="width:80px"></div><div><label>Credit limit (J$)</label><input id="cl" type="number" value="' + (c.credit_limit == null ? '' : c.credit_limit) + '" style="width:120px"></div><button id="sv">Save terms</button></div>' +
         '<div class="controls"><span class="sub">Accounting defaults for new invoice lines:</span><div><label>Category</label><select id="dca"><option value="">Rental Income (standard)</option>' + accounts.filter(function (a) { return ['income', 'other_income'].indexOf(a.type) >= 0; }).map(function (a) { return '<option value="' + a.id + '"' + (String(c.default_income_account_id) === String(a.id) ? ' selected' : '') + '>' + esc(a.code + ' ' + a.name) + '</option>'; }).join('') + '</select></div>' +
         '<div><label>Class</label><select id="dcl">' + B.classOptions(c.default_class_id) + '</select></div><button id="dsv">Save defaults</button></div></div>' +
@@ -63,9 +81,9 @@
         '<div class="card"><h2>Recurring invoices <button class="sm" id="np">New recurring invoice</button></h2><div id="cplans"></div></div>' +
         '<div class="card"><h2>Payments received</h2><div class="scroll"><table><thead><tr><th>Date</th><th>Method</th><th>Ref</th><th class="n">Amount</th><th>Applied to</th><th class="n">Unapplied</th><th>Deposited to</th><th></th></tr></thead><tbody>' +
         (d.payments.length ? d.payments.map(function (p) {
-          return '<tr style="' + (p.voided_at ? 'opacity:.5' : '') + '"><td>' + esc(p.day) + '</td><td>' + esc(p.method) + '</td><td>' + esc(p.reference || '') + '</td><td class="n">' + J(p.amount) + '</td><td><small>' + (p.applied_to || []).map(function (x) { return esc(x.receipt) + ' ' + J(x.amount); }).join('<br>') + '</small></td>' +
+          return '<tr style="' + (p.voided_at ? 'opacity:.5' : '') + '"><td>' + esc(p.day) + '</td><td>' + (p.method === 'writeoff' ? '<span class="pill warn" title="' + esc(p.notes || '') + '">bad debt written off</span>' : p.method === 'credit_note' ? '<span class="pill" title="' + esc(p.notes || '') + '">credit note (return)</span>' : esc(p.method)) + '</td><td>' + esc(p.reference || '') + '</td><td class="n">' + J(p.amount) + '</td><td><small>' + (p.applied_to || []).map(function (x) { return esc(x.receipt) + ' ' + J(x.amount); }).join('<br>') + '</small></td>' +
             '<td class="n">' + (p.voided_at ? '<span class="pill bad">void</span>' : p.unapplied ? '<b>' + J(p.unapplied) + '</b>' : '') + '</td><td><small>' + esc(p.deposit_to || '') + '</small></td>' +
-            '<td style="white-space:nowrap">' + (!p.voided_at && p.unapplied > 0.005 && d.invoices.length ? '<button class="sm" data-ap="' + p.id + '" data-u="' + p.unapplied + '">Apply credit</button> ' : '') + (!p.voided_at ? '<button class="sm" data-vd="' + p.id + '">Void</button>' : '<small>' + esc(p.void_reason || '') + '</small>') + '</td></tr>';
+            '<td style="white-space:nowrap">' + (!p.voided_at && p.unapplied > 0.005 && d.invoices.length ? '<button class="sm" data-ap="' + p.id + '" data-u="' + p.unapplied + '">Apply credit</button> ' : '') + (p.voided_at ? '<small>' + esc(p.void_reason || '') + '</small>' : p.method === 'credit_note' ? (p.unapplied > 0.005 && p.return_id ? '<button class="sm" data-po="' + p.return_id + '" data-u="' + p.unapplied + '">Pay out</button>' : '') : '<button class="sm" data-vd="' + p.id + '" data-wo="' + (p.method === 'writeoff' ? 1 : '') + '">' + (p.method === 'writeoff' ? 'Undo write-off' : 'Void') + '</button>') + '</td></tr>';
         }).join('') : '<tr><td colspan="8" class="empty">No payments.</td></tr>') + '</tbody></table></div></div>' +
         '<div class="card"><h2>Invoices &amp; documents</h2><p class="sub">Signed invoices, signed delivery slips, statements and anything else for this customer, kept in the document centre.</p><div id="cdocs"></div></div>' +
         '<div class="card"><h2>Collections notes</h2><div class="controls"><div><label>Kind</label><select id="nk"><option value="call">Phone call</option><option value="note">Note</option><option value="email">Email</option><option value="promise">Promise to pay</option></select></div>' +
@@ -84,12 +102,19 @@
       all('[data-vi]').forEach(function (b) { b.onclick = function () { BU.voidInvoice(+b.getAttribute('data-vi'), b.getAttribute('data-fee') === '1', again); }; });
       $('#st').onclick = function () { statement(c); };
       $('#rm').onclick = function () { api('/api/ar/customers/' + id + '/reminder', 'POST').then(function (r) { toast('Reminder sent: ' + r.invoices + ' invoice(s), ' + J(r.total)); detail(id); }).catch(function (e) { toast(e.message); }); };
-      $('#hd').onclick = function () { var reason = c.credit_hold ? (prompt('Why is the hold lifted? (optional)', '') || '') : prompt('Why put the account on hold?', 'Overdue over 45 days'); if (reason === null) return; api('/api/ar/customers/' + id + '/hold', 'POST', { hold: !c.credit_hold, reason: reason }).then(function () { detail(id); }).catch(function (e) { toast(e.message); }); };
+      $('#hd').onclick = async function () { var reason = c.credit_hold ? ((await vasPrompt('Why is the hold lifted? (optional)', '')) || '') : (await vasPrompt('Why put the account on hold?', 'Overdue over 45 days')); if (reason === null) return; api('/api/ar/customers/' + id + '/hold', 'POST', { hold: !c.credit_hold, reason: reason }).then(function () { detail(id); }).catch(function (e) { toast(e.message); }); };
       $('#dsv').onclick = function () { api('/api/ar/customers/' + id + '/defaults', 'PUT', { default_income_account_id: $('#dca').value, default_class_id: $('#dcl').value }).then(function () { toast('Defaults saved'); detail(id); }).catch(function (e) { toast(e.message); }); };
       $('#sv').onclick = function () { api('/api/ar/customers/' + id + '/terms', 'PUT', { payment_terms_days: $('#tm').value, credit_limit: $('#cl').value }).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); }); };
       $('#nk').onchange = function () { $('#pp').style.display = this.value === 'promise' ? '' : 'none'; };
       $('#na').onclick = function () { api('/api/ar/customers/' + id + '/notes', 'POST', { kind: $('#nk').value, note: $('#nt').value, promise_date: $('#pd').value, promise_amount: $('#pa').value }).then(function () { detail(id); }).catch(function (e) { toast(e.message); }); };
-      all('[data-vd]').forEach(function (b) { b.onclick = function () { var r = prompt('Why is this payment voided? (e.g. cheque returned)'); if (!r) return; api('/api/ar/payments/' + b.getAttribute('data-vd') + '/void', 'POST', { reason: r }).then(function () { toast('Voided'); detail(id); }).catch(function (e) { toast(e.message); }); }; });
+      if ($('#wo')) $('#wo').onclick = function () { writeOff(c, d.invoices); };
+      all('[data-po]').forEach(function (b) { b.onclick = async function () {
+        var left = Number(b.getAttribute('data-u'));
+        var amt = await vasPrompt('Pay out unused credit from this credit note. How much? (up to ' + J(left) + ')', left.toFixed(2)); if (!amt) return;
+        var how = ((await vasPrompt('Paid out by: cash, cheque, card or bank?', 'cash')) || '').trim().toLowerCase(); if (!how) return;
+        api('/api/admin/pos/returns/' + b.getAttribute('data-po') + '/refund-credit', 'POST', { amount: amt, method: how }).then(function () { toast('Credit paid out'); detail(c.id); }).catch(function (e) { toast(e.message); });
+      }; });
+      all('[data-vd]').forEach(function (b) { b.onclick = async function () { var r = await vasPrompt(b.getAttribute('data-wo') ? 'Undo this write-off? The amount is owed again and the bad debt expense is reversed. Why? (e.g. customer is paying after all)' : 'Why is this payment voided? (e.g. cheque returned)'); if (!r) return; api('/api/ar/payments/' + b.getAttribute('data-vd') + '/void', 'POST', { reason: r }).then(function () { toast('Voided'); detail(id); }).catch(function (e) { toast(e.message); }); }; });
       all('[data-ap]').forEach(function (b) { b.onclick = function () { applyCredit(c, d.invoices, +b.getAttribute('data-ap'), +b.getAttribute('data-u')); }; });
     }).catch(function (e) { toast(e.message); });
   }
@@ -177,6 +202,27 @@
         .then(function (r) { close(); toast('Payment saved' + (r.credit > 0 ? '; ' + J(r.credit) + ' left as credit' : '')); detail(c.id); }).catch(function (e) { toast(e.message); });
     };
   }
+  // Bad debt: the customer will never pay. Pick what to write off; the ledger posts
+  // Dr Bad Debts, Cr Accounts Receivable and the balance leaves Receivables.
+  // If they pay after all: Undo write-off on the payment line, then Receive payment.
+  function writeOff(c, invoices) {
+    var owed = Math.round(invoices.reduce(function (t, i) { return t + i.open; }, 0) * 100) / 100;
+    modal('<h2>Write off bad debt · ' + esc(c.name) + '</h2><p class="sub">For money this customer will never pay. Tick the invoices and till charges to write off (or type part of one). The amount comes off what they owe and goes to the Bad Debts expense account; your sales stay as they were. If they pay later, use <b>Undo write-off</b> on the payment line, then Receive payment.</p>' +
+      '<div class="controls"><div><label>Date</label><input id="wd" type="date" value="' + B.today() + '"></div><div style="flex:1"><label>Why? (kept on the account)</label><input id="wr" style="width:100%" placeholder="e.g. business closed, cannot be traced, debt over 1 year"></div></div>' +
+      '<div class="controls"><button class="sm" id="auto">Tick everything</button><span class="sub">Writing off <b id="used"></b> · still owed <span><b id="left"></b></span></span></div>' +
+      '<div class="scroll" style="max-height:40vh">' + invoiceRows(invoices) + '</div>' +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="wgo">Write off</button><button id="wx">Cancel</button></div>');
+    var apps = wireApply(function () { return owed; });
+    $('#wx').onclick = close;
+    $('#wgo').onclick = async function () {
+      var list = apps(), tot = Math.round(list.reduce(function (t, a) { return t + a.amount; }, 0) * 100) / 100;
+      if (!tot) return toast('Tick what to write off');
+      if (!$('#wr').value.trim()) return toast('Say why it is being written off');
+      if (!(await vasConfirm('Write off ' + J(tot) + ' owed by ' + c.name + ' as a bad debt?'))) return;
+      api('/api/ar/writeoffs', 'POST', { customer_id: c.id, written_off_on: $('#wd').value, reason: $('#wr').value, applications: list })
+        .then(function (r) { close(); toast(J(r.amount) + ' written off'); detail(c.id); }).catch(function (e) { toast(e.message); });
+    };
+  }
   function applyCredit(c, invoices, pid, unapplied) {
     modal('<h2>Apply credit · ' + esc(c.name) + '</h2><p class="sub">' + J(unapplied) + ' of this payment is not used on any invoice yet.</p><div class="controls"><button class="sm" id="auto">Apply oldest first</button><span class="sub">Applied <b id="used"></b> · still credit <span><b id="left"></b></span></span></div>' +
       '<div class="scroll" style="max-height:45vh">' + invoiceRows(invoices) + '</div><div class="controls" style="margin-top:10px"><button class="primary" id="go">Apply</button><button id="x">Cancel</button></div>');
@@ -227,19 +273,52 @@
   function coll() {
     return api('/api/ar/collections').then(function (d) {
       var STEP = { remind: ['Email a reminder', ''], call: ['Phone them', 'warn'], hold: ['Put on credit hold', 'bad'], promised: ['Promised to pay', 'ok'] };
-      $('#out').innerHTML = '<div class="card"><h2>Collections worklist</h2><p class="sub">Following the credit procedure: a reminder from the first day overdue, a phone call from day 15, credit hold at day 45. A promise to pay (logged as a note) holds the account until its date.</p><div class="scroll"><table><thead><tr><th>Customer</th><th class="n">Overdue</th><th class="n">Oldest</th><th>Next step</th><th>Last note</th></tr></thead><tbody>' +
-        (d.rows.length ? d.rows.map(function (r) { var s = STEP[r.step]; return '<tr data-c="' + r.id + '" class="click"><td><b>' + esc(r.name) + '</b>' + (r.phone ? '<br><small>' + esc(r.phone) + '</small>' : '') + '</td><td class="n">' + J(r.overdue) + '</td><td class="n">' + r.oldest_days + ' d</td><td><span class="pill ' + s[1] + '">' + s[0] + '</span>' + (r.credit_hold ? ' <span class="pill bad">on hold</span>' : '') + '</td><td><small>' + (r.last ? esc(r.last.kind + ': ' + r.last.note).slice(0, 90) : '') + '</small></td></tr>'; }).join('') : '<tr><td colspan="5" class="empty">Nothing overdue.</td></tr>') + '</tbody></table></div></div>';
-      all('[data-c]').forEach(function (r) { r.onclick = function () { tab = 'cust'; mark(); detail(+r.getAttribute('data-c')); }; });
+      var KINDS = { call: 'Phone call', note: 'Note', email: 'Email', promise: 'Promise to pay' };
+      $('#out').innerHTML = '<div class="card"><h2>Collections worklist</h2><p class="sub">Following the credit procedure: a reminder from the first day overdue, a phone call from day 15, credit hold at day 45. A promise to pay (logged as a note) holds the account until its date.</p><div id="klist"></div></div>';
+      window.ListTools.mount($('#klist'), {
+        key: 'ar-collections', rows: d.rows, csv: 'collections', placeholder: 'Find a customer, phone, email or note…',
+        empty: 'Nothing overdue.', emptyFiltered: 'No customer matches.', totals: ['overdue'],
+        search: function (r) { return String(r.phone || '').replace(/\D/g, ''); },
+        rowAttr: function (r) { return 'data-c="' + r.id + '" class="click"'; },
+        cols: [
+          { k: 'name', label: 'Customer', cell: function (r) { return '<b>' + esc(r.name) + '</b>'; } },
+          { k: 'account_number', label: 'Account no.', nowrap: true },
+          { k: 'phone', label: 'Phone', nowrap: true },
+          { k: 'email', label: 'Email', val: function (r) { return r.email && !/\.local$/.test(r.email) ? r.email : ''; } },
+          { k: 'overdue', label: 'Overdue', type: 'money' },
+          { k: 'oldest_days', label: 'Oldest (days)', type: 'num', cell: function (r) { return r.oldest_days + ' d'; } },
+          { k: 'step', label: 'Next step', type: 'list', val: function (r) { return STEP[r.step][0]; }, cell: function (r) { var s = STEP[r.step]; return '<span class="pill ' + s[1] + '">' + s[0] + '</span>'; } },
+          { k: 'hold', label: 'On hold', type: 'list', val: function (r) { return r.credit_hold ? 'Yes' : 'No'; }, cell: function (r) { return r.credit_hold ? '<span class="pill bad">on hold</span>' : ''; } },
+          { k: 'last_kind', label: 'Last contact', type: 'list', val: function (r) { return r.last ? KINDS[r.last.kind] || r.last.kind : ''; } },
+          { k: 'last_day', label: 'Last date', type: 'date', nowrap: true, val: function (r) { return r.last && r.last.created_at ? String(r.last.created_at).slice(0, 10) : ''; } },
+          { k: 'last_note', label: 'Last note', val: function (r) { return r.last ? r.last.note || '' : ''; }, cell: function (r) { return r.last ? '<small>' + esc(String(r.last.note || '').slice(0, 90)) + (r.last.promise_day ? ' <b>(promised ' + esc(r.last.promise_day) + ')</b>' : '') + '</small>' : ''; } }
+        ],
+        after: function (tb) { all('[data-c]', tb).forEach(function (r) { r.onclick = function () { tab = 'cust'; mark(); detail(+r.getAttribute('data-c')); }; }); }
+      });
     });
   }
   function aging() {
     return api('/api/ar/aging').then(function (d) {
       var t = d.totals;
-      $('#out').innerHTML = '<div class="card"><h2>A/R aging summary · ' + esc(d.as_of) + ' <button class="sm" id="csv">Download CSV</button></h2><p class="sub">Aged from each invoice\'s due date (or its date when it has no terms).</p><div class="scroll"><table><thead><tr><th>Customer</th><th class="n">Current</th><th class="n">1-30</th><th class="n">31-60</th><th class="n">61-90</th><th class="n">Over 90</th><th class="n">Total</th></tr></thead><tbody>' +
-        d.rows.map(function (r) { return '<tr data-c="' + (r.customer_id || '') + '" class="click"><td>' + esc(r.name) + '</td><td class="n">' + J(r.current) + '</td><td class="n">' + J(r.d30) + '</td><td class="n">' + J(r.d60) + '</td><td class="n">' + J(r.d90) + '</td><td class="n">' + J(r.over90) + '</td><td class="n"><b>' + J(r.total) + '</b></td></tr>'; }).join('') +
-        '<tr><td><b>Total</b></td><td class="n"><b>' + J(t.current) + '</b></td><td class="n"><b>' + J(t.d30) + '</b></td><td class="n"><b>' + J(t.d60) + '</b></td><td class="n"><b>' + J(t.d90) + '</b></td><td class="n"><b>' + J(t.over90) + '</b></td><td class="n"><b>' + J(t.total) + '</b></td></tr></tbody></table></div></div>';
-      all('[data-c]').forEach(function (r) { if (r.getAttribute('data-c')) r.onclick = function () { tab = 'cust'; mark(); detail(+r.getAttribute('data-c')); }; });
-      $('#csv').onclick = function () { B.csv('ar-aging-' + d.as_of + '.csv', [['customer', 'current', '1-30', '31-60', '61-90', 'over 90', 'total']].concat(d.rows.map(function (r) { return [r.name, r.current, r.d30, r.d60, r.d90, r.over90, r.total]; }))); };
+      $('#out').innerHTML = '<div class="tiles"><div class="tile"><span class="k">Current</span><b>' + J(t.current) + '</b></div><div class="tile"><span class="k">1-30</span><b>' + J(t.d30) + '</b></div><div class="tile"><span class="k">31-60</span><b>' + J(t.d60) + '</b></div><div class="tile"><span class="k">61-90</span><b>' + J(t.d90) + '</b></div><div class="tile bad"><span class="k">Over 90</span><b>' + J(t.over90) + '</b></div><div class="tile"><span class="k">Total owed to us</span><b>' + J(t.total) + '</b></div></div>' +
+        '<div class="card"><h2>A/R aging summary · ' + esc(d.as_of) + '</h2><p class="sub">Aged from each invoice\'s due date (or its date when it has no terms). The total row adds up whatever the search and filters are showing; Download CSV saves the same.</p>' +
+        '<div class="controls"><div><label>Quick view</label><select id="aview"><option value="">Everyone who owes</option><option value="late">Anything overdue</option><option value="d30">Over 30 days</option><option value="d60">Over 60 days</option><option value="d90">Over 90 days</option><option value="walkin">Not on an account (name only)</option></select></div></div><div id="alist"></div></div>';
+      var VIEW = { late: function (r) { return r.d30 + r.d60 + r.d90 + r.over90 > 0.005; }, d30: function (r) { return r.d60 + r.d90 + r.over90 > 0.005; }, d60: function (r) { return r.d90 + r.over90 > 0.005; }, d90: function (r) { return r.over90 > 0.005; }, walkin: function (r) { return !r.customer_id; } };
+      var rowsNow = function () { var f = VIEW[aging.view]; return f ? d.rows.filter(f) : d.rows; };
+      var m = function (k, label) { return { k: k, label: label, type: 'money', cell: function (r) { return r[k] ? J(r[k]) : ''; } }; };
+      var lt = window.ListTools.mount($('#alist'), {
+        key: 'ar-aging', rows: rowsNow(), csv: 'ar-aging-' + d.as_of, placeholder: 'Find a customer, account no., phone or amount…',
+        empty: 'Nobody owes us.', emptyFiltered: 'No customer matches.', totals: ['current', 'd30', 'd60', 'd90', 'over90', 'total'],
+        search: function (r) { return String(r.phone || '').replace(/\D/g, ''); },
+        rowAttr: function (r) { return 'data-c="' + (r.customer_id || '') + '"' + (r.customer_id ? ' class="click"' : ''); },
+        cols: [{ k: 'name', label: 'Customer', cell: function (r) { return esc(r.name || '') + (r.customer_id ? '' : ' <small class="sub">(no account)</small>'); } },
+          { k: 'account_number', label: 'Account no.' }, { k: 'phone', label: 'Phone', nowrap: true },
+          m('current', 'Current'), m('d30', '1-30'), m('d60', '31-60'), m('d90', '61-90'), m('over90', 'Over 90'),
+          { k: 'total', label: 'Total', type: 'money', cell: function (r) { return '<b>' + J(r.total) + '</b>'; } }],
+        after: function (tb) { all('[data-c]', tb).forEach(function (r) { if (r.getAttribute('data-c')) r.onclick = function () { tab = 'cust'; mark(); detail(+r.getAttribute('data-c')); }; }); }
+      });
+      $('#aview').value = aging.view || '';
+      $('#aview').onchange = function () { aging.view = this.value; lt.refresh(rowsNow()); };
     });
   }
 
@@ -257,6 +336,7 @@
   B.loadAccounts().then(function (a) { accounts = a; show(); }).catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
 })();
 </script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
 <script src="/assets/module-look.js?v=20261101" defer></script>
 </body>
 </html>

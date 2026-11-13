@@ -1,3 +1,5 @@
+// The program's own message windows (assets/vas-ui.js), for a page that has not loaded them itself.
+(function(){ if (window.VasUI || document.querySelector('script[src^="/assets/vas-ui.js"]')) return; var s = document.createElement('script'); s.src = '/assets/vas-ui.js?v=20261110b'; (document.head || document.documentElement).appendChild(s); })();
 // Loans, invoices on the books, recurring invoices / bills, reminders and late
 // fees (billing.js) -- the screens shared by receivables.html and payables.html.
 // Needs books-common.js (window.Books) loaded first.
@@ -21,17 +23,18 @@
   // [{account_id, class_id, description, amount}]. New lines start from the customer's / supplier's defaults.
   function linesEditor(el, lines, defaultAccount, hint, defaultClass) {
     var dflt = { account_id: defaultAccount, class_id: defaultClass || '' };
-    var rows = (lines && lines.length ? lines.map(function (l) { return { account_id: l.account_id, class_id: l.class_id || '', description: l.description, amount: l.amount }; }) : [{ account_id: dflt.account_id, class_id: dflt.class_id, description: '', amount: '' }]);
+    var rows = (lines && lines.length ? lines.map(function (l) { return { account_id: l.account_id, class_id: l.class_id || '', asset_id: l.asset_id || '', description: l.description, amount: l.amount }; }) : [{ account_id: dflt.account_id, class_id: dflt.class_id, asset_id: '', description: '', amount: '' }]);
     function draw() {
-      el.innerHTML = '<table><thead><tr><th>Category (account)</th><th>Class</th><th>Description' + (hint ? ' <small>' + esc(hint) + '</small>' : '') + '</th><th class="n">Amount (J$)</th><th></th></tr></thead><tbody>' +
-        rows.map(function (l, i) { return '<tr><td><select data-la="' + i + '">' + B.accountOptions('line', l.account_id) + '</select></td><td><select data-lc="' + i + '">' + B.classOptions(l.class_id) + '</select></td><td><input data-ld="' + i + '" value="' + esc(l.description || '') + '" style="width:100%"></td><td class="n"><input type="number" step="0.01" data-lm="' + i + '" value="' + num(l.amount) + '" style="width:120px"></td><td>' + (rows.length > 1 ? '<button class="sm" data-lx="' + i + '">✕</button>' : '') + '</td></tr>'; }).join('') +
+      el.innerHTML = '<table><thead><tr><th>Category (account)</th><th>Class</th><th title="A fixed asset this line is for">Asset</th><th>Description' + (hint ? ' <small>' + esc(hint) + '</small>' : '') + '</th><th class="n">Amount (J$)</th><th></th></tr></thead><tbody>' +
+        rows.map(function (l, i) { return '<tr><td><select data-la="' + i + '">' + B.accountOptions('line', l.account_id) + '</select></td><td><select data-lc="' + i + '">' + B.classOptions(l.class_id) + '</select></td><td><select data-lfa="' + i + '">' + B.assetOptions(l.asset_id) + '</select></td><td><input data-ld="' + i + '" value="' + esc(l.description || '') + '" style="width:100%"></td><td class="n"><input type="number" step="0.01" data-lm="' + i + '" value="' + num(l.amount) + '" style="width:120px"></td><td>' + (rows.length > 1 ? '<button class="sm" data-lx="' + i + '">✕</button>' : '') + '</td></tr>'; }).join('') +
         '</tbody></table><button class="sm" data-ladd>+ Line</button>';
       all('[data-la]', el).forEach(function (x) { x.onchange = function () { rows[+x.getAttribute('data-la')].account_id = x.value; }; });
       all('[data-lc]', el).forEach(function (x) { x.onchange = function () { rows[+x.getAttribute('data-lc')].class_id = x.value; }; });
+      all('[data-lfa]', el).forEach(function (x) { x.onchange = function () { rows[+x.getAttribute('data-lfa')].asset_id = x.value; }; });
       all('[data-ld]', el).forEach(function (x) { x.oninput = function () { rows[+x.getAttribute('data-ld')].description = x.value; }; });
       all('[data-lm]', el).forEach(function (x) { x.oninput = function () { rows[+x.getAttribute('data-lm')].amount = x.value; }; });
       all('[data-lx]', el).forEach(function (x) { x.onclick = function () { rows.splice(+x.getAttribute('data-lx'), 1); draw(); }; });
-      $('[data-ladd]', el).onclick = function () { rows.push({ account_id: dflt.account_id, class_id: dflt.class_id, description: '', amount: '' }); draw(); };
+      $('[data-ladd]', el).onclick = function () { rows.push({ account_id: dflt.account_id, class_id: dflt.class_id, asset_id: '', description: '', amount: '' }); draw(); };
     }
     draw();
     return { get: function () { return rows; }, total: function () { return rows.reduce(function (t, l) { return t + (+l.amount || 0); }, 0); },
@@ -56,8 +59,8 @@
         .then(function (r) { close(); toast('Invoice ' + r.number + ' saved: ' + J(r.total) + ', due ' + r.due_date); if (done) done(); }).catch(function (e) { toast(e.message); });
     };
   }
-  function voidInvoice(id, isFee, done) {
-    var r = prompt(isFee ? 'Why is the late fee waived?' : 'Why is this invoice voided?');
+  async function voidInvoice(id, isFee, done) {
+    var r = await vasPrompt(isFee ? 'Why is the late fee waived?' : 'Why is this invoice voided?');
     if (!r) return;
     api('/api/ar/invoices/' + id + '/void', 'POST', { reason: r }).then(function () { toast(isFee ? 'Fee waived' : 'Invoice voided'); if (done) done(); }).catch(function (e) { toast(e.message); });
   }
@@ -163,12 +166,12 @@
       all('[data-pe]', el).forEach(function (b) { b.onclick = function () { var p = byId(b.getAttribute('data-pe')); planEditor(opts.side, p, { id: p.customer_id || p.supplier_id, name: p.party }, again); }; });
       all('[data-ph]', el).forEach(function (b) { b.onclick = function () { planHistory(b.getAttribute('data-ph')); }; });
       all('[data-pr]', el).forEach(function (b) { b.onclick = function () { api('/api/billing/plans/' + b.getAttribute('data-pr') + '/run', 'POST', {}).then(function (r) { toast(r.created ? r.created + ' raised' : 'Nothing is due yet'); again(); }).catch(function (e) { toast(e.message); }); }; });
-      all('[data-pp]', el).forEach(function (b) { b.onclick = function () { var r = prompt('Why pause it? (optional)', ''); if (r === null) return; api('/api/billing/plans/' + b.getAttribute('data-pp') + '/status', 'POST', { status: 'paused', reason: r }).then(again).catch(function (e) { toast(e.message); }); }; });
-      all('[data-pend]', el).forEach(function (b) { b.onclick = function () { if (!confirm('End this plan? Nothing more will be raised from it.')) return; api('/api/billing/plans/' + b.getAttribute('data-pend') + '/status', 'POST', { status: 'ended', reason: 'Ended by staff' }).then(again).catch(function (e) { toast(e.message); }); }; });
+      all('[data-pp]', el).forEach(function (b) { b.onclick = async function () { var r = await vasPrompt('Why pause it? (optional)', ''); if (r === null) return; api('/api/billing/plans/' + b.getAttribute('data-pp') + '/status', 'POST', { status: 'paused', reason: r }).then(again).catch(function (e) { toast(e.message); }); }; });
+      all('[data-pend]', el).forEach(function (b) { b.onclick = async function () { if (!(await vasConfirm('End this plan? Nothing more will be raised from it.'))) return; api('/api/billing/plans/' + b.getAttribute('data-pend') + '/status', 'POST', { status: 'ended', reason: 'Ended by staff' }).then(again).catch(function (e) { toast(e.message); }); }; });
       all('[data-pa]', el).forEach(function (b) {
-        b.onclick = function () {
+        b.onclick = async function () {
           var next = b.getAttribute('data-next'), behind = next && next < B.today();
-          var skip = behind ? confirm('Periods from ' + next + ' were not billed while it was paused.\n\nOK: skip those and start from the period running now.\nCancel: bill every missed period.') : false;
+          var skip = behind ? (await vasConfirm('Periods from ' + next + ' were not billed while it was paused.\n\nOK: skip those and start from the period running now.\nCancel: bill every missed period.')) : false;
           api('/api/billing/plans/' + b.getAttribute('data-pa') + '/status', 'POST', { status: 'active', skip_missed: skip }).then(function (r) { toast('Resumed; next ' + r.next_run); again(); }).catch(function (e) { toast(e.message); });
         };
       });
@@ -190,7 +193,7 @@
       el.innerHTML = '<div class="tiles"><div class="tile"><span class="k">Owed on loans</span><b>' + J(d.owed) + '</b></div><div class="tile"><span class="k">Loans Payable in the ledger</span><b>' + J(d.ledger_balance) + '</b></div></div>' +
         '<div class="card"><h2>Loans <button class="sm primary" id="lnew">Register a loan</button></h2><p class="sub">Money the business has borrowed. Each instalment becomes a bill from the lender on its due date (principal to Loans Payable, interest to Interest Expense); pay it with Pay bills.</p>' +
         '<div class="scroll"><table><thead><tr><th>Loan</th><th>Lender</th><th class="n">Borrowed</th><th class="n">Rate</th><th class="n">Balance</th><th>Next due</th><th class="n">Payment</th><th>Paid by</th><th>Status</th></tr></thead><tbody>' +
-        (d.loans.length ? d.loans.map(function (l) { return '<tr data-l="' + l.id + '" class="click"><td><b>' + esc(l.name) + '</b>' + (l.reference ? '<br><small>' + esc(l.reference) + '</small>' : '') + '</td><td>' + esc(l.lender) + '</td><td class="n">' + J(l.principal) + '</td><td class="n">' + l.annual_rate + '%</td><td class="n"><b>' + J(l.balance) + '</b></td><td>' + esc(l.next_due || '') + '</td><td class="n">' + (l.next_payment ? J(l.next_payment) : '') + '</td><td><small>' + (l.pay_mode === 'standing_order' ? 'standing order' : 'we pay it') + '</small></td><td><span class="pill ' + (l.status === 'active' ? 'ok' : '') + '">' + esc(l.status === 'paid' ? 'fully billed' : l.status) + '</span></td></tr>'; }).join('') : '<tr><td colspan="9" class="empty">No loans registered.</td></tr>') +
+        (d.loans.length ? d.loans.map(function (l) { return '<tr data-l="' + l.id + '" class="click"><td><b>' + esc(l.name) + '</b>' + (l.reference ? '<br><small>' + esc(l.reference) + '</small>' : '') + (l.asset_number ? '<br><small>for ' + esc(l.asset_number) + '</small>' : '') + '</td><td>' + esc(l.lender) + '</td><td class="n">' + J(l.principal) + '</td><td class="n">' + l.annual_rate + '%</td><td class="n"><b>' + J(l.balance) + '</b></td><td>' + esc(l.next_due || '') + '</td><td class="n">' + (l.next_payment ? J(l.next_payment) : '') + '</td><td><small>' + (l.pay_mode === 'standing_order' ? 'standing order' : 'we pay it') + '</small></td><td><span class="pill ' + (l.status === 'active' ? 'ok' : '') + '">' + esc(l.status === 'paid' ? 'fully billed' : l.status) + '</span></td></tr>'; }).join('') : '<tr><td colspan="9" class="empty">No loans registered.</td></tr>') +
         '</tbody></table></div></div><div class="card"><h2>Coming up (30 days)</h2><div id="lup"></div></div>';
       upcoming($('#lup'), ['loan']);
       $('#lnew').onclick = function () { newLoan(supplierByName, function () { loans(el, supplierByName); }); };
@@ -205,10 +208,11 @@
       '<div><label>Repayment</label><select id="lm">' + Object.keys(METHOD).map(function (k) { return '<option value="' + k + '">' + METHOD[k] + '</option>'; }).join('') + '</select></div></div>' +
       '<div class="controls"><div><label>Money received on</label><input id="lsd" type="date" value="' + B.today() + '"></div><div><label>First instalment due</label><input id="lfd" type="date"></div>' +
       '<div><label>Paid by</label><select id="lpm"><option value="manual">Paying it ourselves (email a reminder)</option><option value="standing_order">Standing order (the bank takes it)</option></select></div></div>' +
-      '<div class="controls"><div><label>The money</label><select id="lrc"><option value="deposit">Record it as a deposit into…</option><option value="existing">Already in the books (nothing to record)</option></select></div><div id="ldepw"><label>Bank account</label><select id="ldep">' + B.accountOptions('bankonly') + '</select></div></div>' +
+      '<div class="controls"><div><label>The money</label><select id="lrc"><option value="deposit">Record it as a deposit into…</option><option value="existing">Already in the books (nothing to record)</option></select></div><div id="ldepw"><label>Bank account</label><select id="ldep">' + B.accountOptions('bankonly') + '</select></div>' +
+        '<div><label>For an asset (bought with it / secured on it)</label><select id="lfa" style="max-width:240px" title="The interest then shows as a running cost of the asset, and the net worth report shows what the business has in it after the loan">' + B.assetOptions('') + '</select></div></div>' +
       '<div class="controls"><button id="lpv">Show the schedule</button><button class="primary" id="lgo">Register</button><button id="lx">Cancel</button></div><div id="lsched"></div>');
     $('#lrc').onchange = function () { $('#ldepw').style.display = this.value === 'deposit' ? '' : 'none'; };
-    var body = function () { var s = supplierByName($('#lsup').value); return { name: $('#ln').value, supplier_id: s && s.id, reference: $('#lref').value, principal: $('#lp').value, annual_rate: $('#lr').value, instalments: $('#lk').value, frequency: $('#lf').value, method: $('#lm').value, start_date: $('#lsd').value, first_due: $('#lfd').value, pay_mode: $('#lpm').value, received: $('#lrc').value, deposit_account_id: $('#ldep').value }; };
+    var body = function () { var s = supplierByName($('#lsup').value); return { name: $('#ln').value, supplier_id: s && s.id, reference: $('#lref').value, principal: $('#lp').value, annual_rate: $('#lr').value, instalments: $('#lk').value, frequency: $('#lf').value, method: $('#lm').value, start_date: $('#lsd').value, first_due: $('#lfd').value, pay_mode: $('#lpm').value, received: $('#lrc').value, deposit_account_id: $('#ldep').value, asset_id: $('#lfa').value }; };
     $('#lx').onclick = close;
     $('#lpv').onclick = function () {
       api('/api/loans/preview', 'POST', body()).then(function (d) {
@@ -225,7 +229,7 @@
     return api('/api/loans/' + id).then(function (d) {
       var l = d.loan, back = function () { loans(el, supplierByName); }, again = function () { loanDetail(el, id, supplierByName); };
       el.innerHTML = '<div class="controls"><button id="lbk">◀ All loans</button></div><div class="card"><h2>' + esc(l.name) + ' <span class="pill">' + esc(l.status === 'paid' ? 'fully billed' : l.status) + '</span></h2>' +
-        '<p class="sub">' + esc(l.lender) + (l.reference ? ' · ' + esc(l.reference) : '') + ' · ' + J(l.principal) + ' at ' + l.annual_rate + '% · ' + esc(METHOD[l.method]) + ' · ' + esc(FREQ[l.frequency]) + ' · ' + (l.pay_mode === 'standing_order' ? 'standing order' : 'we pay it') + ' · received ' + esc(l.start_date) + '</p>' +
+        '<p class="sub">' + esc(l.lender) + (l.reference ? ' · ' + esc(l.reference) : '') + ' · ' + J(l.principal) + ' at ' + l.annual_rate + '% · ' + esc(METHOD[l.method]) + ' · ' + esc(FREQ[l.frequency]) + ' · ' + (l.pay_mode === 'standing_order' ? 'standing order' : 'we pay it') + ' · received ' + esc(l.start_date) + (l.asset ? ' · for <a href="/assets.html" target="_blank" rel="noopener">' + esc(l.asset) + '</a>' : '') + '</p>' +
         '<div class="tiles"><div class="tile"><span class="k">Balance</span><b>' + J(l.balance) + '</b></div><div class="tile"><span class="k">Principal billed</span><b>' + J(l.principal_billed) + '</b></div><div class="tile"><span class="k">Interest billed</span><b>' + J(l.interest_billed) + '</b></div></div>' +
         (l.status === 'active' ? '<div class="controls"><button id="lex">Pay extra off the principal</button><button id="lrs">Change rate / instalments</button><button id="lcn">Cancel loan</button></div>' : '') + '</div>' +
         '<div class="card"><h2>Schedule</h2><div class="scroll"><table><thead><tr><th>#</th><th>Due</th><th class="n">Payment</th><th class="n">Principal</th><th class="n">Interest</th><th class="n">Balance after</th><th>Bill</th><th></th></tr></thead><tbody>' +
@@ -233,16 +237,16 @@
           '<td>' + esc(r.bill_number || '') + ' <span class="pill ' + (STATE[r.state] || '') + '">' + esc(r.state) + '</span></td><td>' + (r.state === 'upcoming' ? '<button class="sm" data-bn="' + r.id + '">Bill now</button>' : r.state === 'bill voided' ? '<button class="sm" data-rb="' + r.id + '">Bill again</button>' : '') + '</td></tr>'; }).join('') +
         '</tbody></table></div></div>';
       $('#lbk').onclick = back;
-      all('[data-bn]').forEach(function (b) { b.onclick = function () { if (!confirm('Raise the bill for this instalment now (before its due date)?')) return; api('/api/loans/' + id + '/instalments/' + b.getAttribute('data-bn') + '/bill', 'POST', {}).then(again).catch(function (e) { toast(e.message); }); }; });
+      all('[data-bn]').forEach(function (b) { b.onclick = async function () { if (!(await vasConfirm('Raise the bill for this instalment now (before its due date)?'))) return; api('/api/loans/' + id + '/instalments/' + b.getAttribute('data-bn') + '/bill', 'POST', {}).then(again).catch(function (e) { toast(e.message); }); }; });
       all('[data-rb]').forEach(function (b) { b.onclick = function () { api('/api/loans/' + id + '/instalments/' + b.getAttribute('data-rb') + '/rebill', 'POST', {}).then(again).catch(function (e) { toast(e.message); }); }; });
       if (l.status !== 'active') return;
-      $('#lex').onclick = function () { var a = prompt('How much extra is being paid off the principal? (J$)'); if (!a) return; api('/api/loans/' + id + '/extra', 'POST', { amount: a, date: B.today() }).then(function () { toast('Billed; the instalments left are re-worked'); again(); }).catch(function (e) { toast(e.message); }); };
-      $('#lrs').onclick = function () {
-        var r = prompt('New interest rate (% a year), blank to keep ' + l.annual_rate + '%', ''); if (r === null) return;
-        var k = prompt('Instalments left (blank to keep)', ''); if (k === null) return;
+      $('#lex').onclick = async function () { var a = await vasPrompt('How much extra is being paid off the principal? (J$)'); if (!a) return; api('/api/loans/' + id + '/extra', 'POST', { amount: a, date: B.today() }).then(function () { toast('Billed; the instalments left are re-worked'); again(); }).catch(function (e) { toast(e.message); }); };
+      $('#lrs').onclick = async function () {
+        var r = await vasPrompt('New interest rate (% a year), blank to keep ' + l.annual_rate + '%', ''); if (r === null) return;
+        var k = await vasPrompt('Instalments left (blank to keep)', ''); if (k === null) return;
         api('/api/loans/' + id + '/reschedule', 'POST', { annual_rate: r, instalments: k }).then(function (x) { toast(x.instalments + ' instalments re-worked'); again(); }).catch(function (e) { toast(e.message); });
       };
-      $('#lcn').onclick = function () { var r = prompt('Why is the loan cancelled?'); if (!r) return; api('/api/loans/' + id + '/cancel', 'POST', { reason: r }).then(function (x) { toast(x.note || 'Cancelled'); back(); }).catch(function (e) { toast(e.message); }); };
+      $('#lcn').onclick = async function () { var r = await vasPrompt('Why is the loan cancelled?'); if (!r) return; api('/api/loans/' + id + '/cancel', 'POST', { reason: r }).then(function (x) { toast(x.note || 'Cancelled'); back(); }).catch(function (e) { toast(e.message); }); };
     });
   }
 

@@ -1,3 +1,5 @@
+// The program's own message windows (assets/vas-ui.js), for a page that has not loaded them itself.
+(function(){ if (window.VasUI || document.querySelector('script[src^="/assets/vas-ui.js"]')) return; var s = document.createElement('script'); s.src = '/assets/vas-ui.js?v=20261110b'; (document.head || document.documentElement).appendChild(s); })();
 // =============================================================================
 //  warehouse.html add-on: Orders tab (Phase 3 outbound).
 //  Queue -> pick (route-sorted, scan to pick) -> pack (packages, labels) ->
@@ -283,7 +285,7 @@
   }
 
   // --------------------------------------------------------------- events --
-  document.addEventListener('click', function (e) {
+  document.addEventListener('click', async function (e) {
     var t = e.target.closest('[data-oa]');
     if (!t) return;
     var a = t.getAttribute('data-oa'), id = t.getAttribute('data-id'), o = O.order;
@@ -307,9 +309,9 @@
         break;
       case 'short':
         var max = ln.qty - ln.qty_picked;
-        var n = parseInt(prompt('How many of ' + ln.sku + ' are missing? (up to ' + max + ')', String(max)), 10);
+        var n = parseInt(await vasPrompt('How many of ' + ln.sku + ' are missing? (up to ' + max + ')', String(max)), 10);
         if (!(n >= 0 && n <= max)) return;
-        var why = prompt('Why? Type: not found, damaged, wrong part, other', 'not found') || 'not found';
+        var why = (await vasPrompt('Why? Type: not found, damaged, wrong part, other', 'not found')) || 'not found';
         why = why.toLowerCase().replace(/\s+/g, '_'); if (['not_found', 'damaged', 'wrong_part', 'other'].indexOf(why) < 0) why = 'other';
         api('/api/out/f/' + o.id + '/lines/' + ln.id, { method: 'PATCH', body: { qty_short: n, short_reason: why } }).then(function (d) { setOrder(d.order); WH.render(); }).catch(function (er) { toast(er.message, true); });
         break;
@@ -325,20 +327,20 @@
       case 'printPkg': printPackages(o); break;
       case 'ticket': api('/api/out/f/' + o.id + '/ticket').then(printTicket).catch(function (er) { toast(er.message, true); }); break;
       case 'hold':
-        var reason = prompt('Why is this order on hold?'); if (!reason) return;
+        var reason = await vasPrompt('Why is this order on hold?'); if (!reason) return;
         act('/api/out/f/' + o.id + '/hold', { reason: reason }, 'On hold').catch(function () {}); break;
       case 'release': act('/api/out/f/' + o.id + '/release', {}, 'Released').catch(function () {}); break;
       case 'cancel':
-        var why2 = prompt('Cancel ' + o.number + '? Give the reason. (This does not refund the sale; do that at the till.)'); if (!why2) return;
+        var why2 = await vasPrompt('Cancel ' + o.number + '? Give the reason. (This does not refund the sale; do that at the till.)'); if (!why2) return;
         act('/api/out/f/' + o.id + '/cancel', { reason: why2 }, 'Cancelled').catch(function () {}); break;
       case 'collect':
         act('/api/out/collect', collectBody('', o.id), 'Handed over').catch(function () {}); break;
       case 'collector':
-        var cn = prompt('Name of the person the customer says will collect (they still need the code and photo ID). Leave empty to remove.', o.authorised_collector || '');
+        var cn = await vasPrompt('Name of the person the customer says will collect (they still need the code and photo ID). Leave empty to remove.', o.authorised_collector || '');
         if (cn === null) return;
         act('/api/out/f/' + o.id + '/collector', { name: cn.trim() }, cn.trim() ? 'Collector noted' : 'Removed').catch(function () {}); break;
       case 'failedAttempt': case 'failedAttemptId':
-        var fr = prompt('Why was it not delivered?\n1 Nobody there\n2 Wrong or incomplete address\n3 Refused\n4 Payment not ready\n5 Other\n\nType the number, then a note if you like (e.g. "1 gate locked")');
+        var fr = await vasPrompt('Why was it not delivered?\n1 Nobody there\n2 Wrong or incomplete address\n3 Refused\n4 Payment not ready\n5 Other\n\nType the number, then a note if you like (e.g. "1 gate locked")');
         if (!fr) return;
         var fm = fr.trim().match(/^([1-5])\s*(.*)$/);
         var frs = { 1: 'not_home', 2: 'wrong_address', 3: 'refused', 4: 'no_payment', 5: 'other' };
@@ -346,7 +348,7 @@
           .then(function (d) { if (o) setOrder(d.order); toast('Back in "packed, waiting to go out" for the next run'); loadSub(); WH.render(); }).catch(function (er) { toast(er.message, true); });
         break;
       case 'resend':
-        if (!confirm('Send the customer a new pickup code? The old one stops working.')) return;
+        if (!(await vasConfirm('Send the customer a new pickup code? The old one stops working.'))) return;
         api('/api/out/f/' + o.id + '/resend-code', { method: 'POST', body: {} }).then(function (d) { toast(d.notified.length ? 'New code sent by ' + d.notified.join(' and ') : 'New code made; print a ticket for the customer'); }).catch(function (er) { toast(er.message, true); });
         break;
       case 'collect2':
@@ -354,7 +356,7 @@
           .then(function (d) { O.collect = d.order; toast('Handed over: ' + d.order.number); WH.render(); }).catch(function (er) { toast(er.message, true); });
         break;
       case 'delivered': case 'deliveredId':
-        var who = prompt('Who received it?'); if (!who) return;
+        var who = await vasPrompt('Who received it?'); if (!who) return;
         api('/api/out/f/' + (id || o.id) + '/delivered', { method: 'POST', body: { received_by_name: who } }).then(function (d) { if (o) setOrder(d.order); toast('Delivered'); loadSub(); WH.render(); }).catch(function (er) { toast(er.message, true); });
         break;
       case 'mkManifest':
@@ -363,7 +365,7 @@
         break;
       case 'printManifest': api('/api/out/manifests/' + id).then(function (d) { printManifest(d.manifest); }).catch(function (er) { toast(er.message, true); }); break;
       case 'dispatch':
-        if (!confirm('Dispatch this manifest? Every order on it is marked out for delivery.')) return;
+        if (!(await vasConfirm('Dispatch this manifest? Every order on it is marked out for delivery.'))) return;
         api('/api/out/manifests/' + id + '/dispatch', { method: 'POST', body: {} }).then(function () { toast('Dispatched'); loadSub(); }).catch(function (er) { toast(er.message, true); });
         break;
     }

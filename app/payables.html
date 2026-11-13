@@ -5,22 +5,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Payables · Vision Auto Solutions</title>
 <link rel="stylesheet" href="/assets/books.css">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<style>.sgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px 12px}.sgrid label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}.sgrid input,.sgrid select,.sgrid textarea{width:100%}</style>
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
 <header><h1>Suppliers &amp; payables</h1><nav><a href="/receivables.html">Receivables</a><a href="/banking.html">Banking</a><a href="/accounting.html">Ledger</a><a href="/admin.html">Admin</a></nav></header>
 <main>
-  <div class="tabs" id="tabs"><button data-t="sup" class="on">Supplier centre</button><button data-t="pay">Pay bills</button><button data-t="bill">Enter a bill</button><button data-t="credit">Enter a supplier credit</button><button data-t="aging">A/P aging</button><button data-t="loans">Loans</button><button data-t="rec">Recurring bills</button><button data-t="qb">Import from QuickBooks</button></div>
+  <div class="tabs" id="tabs"><button data-t="sup" class="on">Suppliers</button><button data-t="pay">Pay bills</button><button data-t="bill">Enter a bill</button><button data-t="credit">Enter a supplier credit</button><button data-t="aging">A/P aging</button><button data-t="loans">Loans</button><button data-t="rec">Recurring bills</button><button data-t="qb">Import from QuickBooks</button><button data-t="train">Portal training</button></div>
   <div id="out"><div class="empty">Loading…</div></div>
 </main>
 <div id="modal"></div>
 <div class="toast" id="toast"></div>
 <datalist id="suppliers"></datalist>
-<script src="/assets/books-common.js?v=20261019"></script>
-<script src="/assets/billing-ui.js?v=20261019"></script>
+<script src="/assets/books-common.js?v=20261109cc"></script>
+<script src="/assets/list-tools.js?v=20261109"></script>
+<script src="/assets/billing-ui.js?v=20261104"></script>
 <script src="/assets/doc-attach.js"></script>
 <script src="/assets/invoice-scan.js?v=20261028"></script>
 <script>
@@ -31,41 +34,270 @@
 
   function supplierByName(v) { v = String(v || '').trim().toLowerCase(); return suppliers.find(function (s) { return s.name.toLowerCase() === v; }); }
 
-  // ------------------------------------------------------------ supplier centre --
+  // ------------------------------------------------------------ suppliers --
+  // One place for suppliers: what we owe them (the old supplier centre), their
+  // record (company, addresses, terms, tax: the old Admin > Suppliers screen),
+  // portal logins and credit (the old Supplier management page), items bought
+  // and documents. supplier-hub.js serves the list, the record and merging.
+  var SUPTAB = 'acct';
   function sup() {
-    return api('/api/ap/suppliers?q=' + encodeURIComponent(sup.q || '')).then(function (d) {
-      $('#out').innerHTML = '<div class="tiles"><div class="tile"><span class="k">Unpaid bills</span><b>' + J(d.totals.open) + '</b></div><div class="tile bad"><span class="k">Overdue</span><b>' + J(d.totals.overdue) + '</b></div><div class="tile"><span class="k">Supplier credits</span><b>' + J(d.totals.credits) + '</b></div></div>' +
-        '<div class="card"><div class="controls"><div style="flex:1"><label>Find a supplier</label><input id="q" value="' + esc(sup.q || '') + '" style="width:100%"></div></div><div class="scroll"><table><thead><tr><th>Supplier</th><th class="n">Bills</th><th class="n">Unpaid</th><th class="n">Overdue</th><th class="n">Credits</th><th>Next due</th></tr></thead><tbody>' +
-        (d.suppliers.length ? d.suppliers.map(function (s) { return '<tr data-s="' + s.id + '" class="click"><td><b>' + esc(s.name) + '</b></td><td class="n">' + s.bills + '</td><td class="n">' + J(s.open) + '</td><td class="n">' + (s.overdue ? '<span class="pill bad">' + J(s.overdue) + '</span>' : '') + '</td><td class="n">' + (s.credits ? J(s.credits) : '') + '</td><td>' + esc(s.next_due || '') + '</td></tr>'; }).join('') : '<tr><td colspan="6" class="empty">No unpaid bills. Search to open any supplier.</td></tr>') + '</tbody></table></div></div>';
-      $('#q').onkeydown = function (e) { if (e.key === 'Enter') { sup.q = this.value.trim(); sup(); } };
-      all('[data-s]').forEach(function (r) { r.onclick = function () { detail(+r.getAttribute('data-s')); }; });
+    var inact = !!sup.inactive;
+    return api('/api/ap/supplier-centre' + (inact ? '?inactive=1' : '')).then(function (d) {
+      sup.list = d.suppliers;
+      $('#out').innerHTML = '<div class="tiles"><div class="tile"><span class="k">Unpaid bills</span><b>' + J(d.totals.open) + '</b></div><div class="tile bad"><span class="k">Overdue</span><b>' + J(d.totals.overdue) + '</b></div><div class="tile"><span class="k">Supplier credits</span><b>' + J(d.totals.credits) + '</b></div>' +
+        '<div class="tile click" id="tdup"' + (d.duplicates ? '' : ' style="opacity:.7"') + '><span class="k">Possible duplicates</span><b' + (d.duplicates ? ' class="bad"' : '') + '>' + d.duplicates + '</b></div></div>' +
+        '<div class="card"><div class="controls"><div><label>Quick view</label><select id="sview"><option value="">Every supplier</option><option value="owe">We owe them</option><option value="overdue">Overdue</option><option value="credits">They gave us credits</option><option value="portal">Portal on</option><option value="nobills">No bills yet</option></select></div>' +
+        '<label style="display:flex;gap:6px;align-items:center;margin:0 0 6px"><input type="checkbox" id="inact"' + (inact ? ' checked' : '') + '> Show inactive</label>' +
+        '<span style="flex:1"></span><button id="nsup" class="primary">+ New supplier</button><button id="bdup">Find duplicates</button></div>' +
+        '<div id="slist"></div></div>';
+      var VIEW = { owe: function (s) { return s.open > 0.005; }, overdue: function (s) { return s.overdue > 0.005; }, credits: function (s) { return s.credits > 0.005; }, portal: function (s) { return !!s.portal_enabled; }, nobills: function (s) { return !s.bills; } };
+      var status = function (s) { return s.merged_into_id ? 'Merged' : s.is_active ? 'Active' : 'Inactive'; };
+      var rowsNow = function () { var f = VIEW[sup.view]; return f ? sup.list.filter(f) : sup.list; };
+      var lt = window.ListTools.mount($('#slist'), {
+        key: 'ap-suppliers', rows: rowsNow(), csv: 'suppliers', placeholder: 'Find a supplier: name, code, contact, phone, email, amount…',
+        empty: 'No suppliers yet: add one.', emptyFiltered: 'No supplier matches.',
+        search: function (s) { return [s.merged_into, String(s.phone || '').replace(/\D/g, '')].join(' '); },
+        totals: ['open', 'overdue', 'credits'],
+        rowAttr: function (s) { return 'data-s="' + s.id + '" class="click"' + (s.is_active ? '' : ' style="opacity:.6"'); },
+        cols: [
+          { k: 'name', label: 'Supplier', cell: function (s) { return '<b>' + esc(s.name) + '</b>' + (s.merged_into_id ? '<div class="sub" style="margin:0">merged into ' + esc(s.merged_into || '#' + s.merged_into_id) + '</div>' : ''); } },
+          { k: 'code', label: 'Code' },
+          { k: 'contact_name', label: 'Contact' },
+          { k: 'phone', label: 'Phone', nowrap: true },
+          { k: 'email', label: 'Email' },
+          { k: 'terms', label: 'Terms', type: 'num', val: function (s) { return s.payment_terms_days; }, cell: function (s) { return s.payment_terms_days != null ? 'Net ' + s.payment_terms_days : esc(s.payment_terms || ''); } },
+          { k: 'portal', label: 'Portal', type: 'list', val: function (s) { return s.portal_enabled ? 'On' : 'Off'; }, cell: function (s) { return (s.portal_enabled ? '<span class="pill ok">on</span>' : '') + (s.web_retail_enabled ? ' <span class="pill">retail</span>' : ''); } },
+          { k: 'credit_limit', label: 'Their credit to us', type: 'money' },
+          { k: 'bills', label: 'Bills', type: 'num', cell: function (s) { return s.bills || ''; } },
+          { k: 'open', label: 'Unpaid', type: 'money', cell: function (s) { return s.open ? J(s.open) : ''; } },
+          { k: 'overdue', label: 'Overdue', type: 'money', cell: function (s) { return s.overdue ? '<span class="pill bad">' + J(s.overdue) + '</span>' : ''; } },
+          { k: 'credits', label: 'Credits', type: 'money', cell: function (s) { return s.credits ? J(s.credits) : ''; } },
+          { k: 'next_due', label: 'Next due', type: 'date', nowrap: true },
+          { k: 'status', label: 'Status', type: 'list', val: status, cell: function (s) { return s.merged_into_id ? '<span class="pill">merged</span>' : s.is_active ? '' : '<span class="pill">inactive</span>'; } }
+        ],
+        after: function (tb) { all('[data-s]', tb).forEach(function (r) { r.onclick = function () { detail(+r.getAttribute('data-s')); }; }); }
+      });
+      $('#sview').value = sup.view || '';
+      $('#sview').onchange = function () { sup.view = this.value; lt.refresh(rowsNow()); };
+      $('#inact').onchange = function () { sup.inactive = this.checked; sup(); };
+      $('#nsup').onclick = newSupplier;
+      $('#bdup').onclick = $('#tdup').onclick = function () { dupes(); };
     });
   }
   function docRows(list, withPay) {
     return list.map(function (b) { return '<tr><td>' + esc(KIND[b.kind]) + '</td><td>' + esc(b.number) + (b.kind === 'bill' || b.kind === 'credit' ? ' <a href="#" data-bv="' + b.id + '">view</a>' : '') + '</td><td>' + esc(b.day) + '</td><td>' + esc(b.due || '') + '</td><td class="n">' + J(b.amount) + '</td><td class="n">' + J(b.paid) + '</td><td class="n"><b>' + J(b.open) + '</b></td><td class="n">' + (b.days_overdue ? '<span class="pill bad">' + b.days_overdue + ' d</span>' : '') + '</td></tr>'; }).join('');
   }
-  function detail(id) {
-    return api('/api/ap/suppliers/' + id).then(function (d) {
-      var s = d.supplier;
-      $('#out').innerHTML = '<div class="controls"><button id="bk">◀ All suppliers</button><button id="er" title="Company, addresses, tax ID, bills and items purchased">Edit supplier record ›</button></div><div class="card"><h2>' + esc(s.name) + '</h2>' +
-        '<div class="controls"><button class="primary" id="pb">Pay bills</button><button id="eb">Enter a bill</button><button id="ec">Enter a credit</button><span style="margin-left:auto"></span>' +
-        '<div><label>Terms (days)</label><input id="tm" type="number" value="' + (s.payment_terms_days == null ? '' : s.payment_terms_days) + '" style="width:80px"></div><div><label>Usual expense account</label><select id="da">' + B.accountOptions('line', s.default_account_id) + '</select></div><div><label>Usual class</label><select id="dc">' + B.classOptions(s.default_class_id) + '</select></div><button id="sv">Save</button></div></div>' +
-        '<div class="card"><h2>Unpaid</h2><div class="scroll"><table><thead><tr><th>Type</th><th>Number</th><th>Date</th><th>Due</th><th class="n">Amount</th><th class="n">Paid</th><th class="n">Open</th><th class="n">Overdue</th></tr></thead><tbody>' + (d.open.length ? docRows(d.open) : '<tr><td colspan="8" class="empty">Nothing unpaid.</td></tr>') + '</tbody></table></div></div>' +
-        '<div class="card"><h2>Payments</h2><div class="scroll"><table><thead><tr><th>Date</th><th>Method</th><th>Cheque / ref</th><th>Paid from</th><th class="n">Amount</th><th></th></tr></thead><tbody>' +
-        (d.payments.length ? d.payments.map(function (p) { return '<tr style="' + (p.voided_at ? 'opacity:.5' : '') + '"><td>' + esc(p.day) + '</td><td>' + esc(p.method) + '</td><td>' + esc(p.cheque_number || p.reference || '') + '</td><td>' + esc(p.paid_from) + '</td><td class="n">' + J(p.amount) + '</td><td style="white-space:nowrap"><button class="sm" data-pp="' + p.id + '">Print</button> ' + (p.voided_at ? '<span class="pill bad">void</span> <small>' + esc(p.void_reason || '') + '</small>' : '<button class="sm" data-vp="' + p.id + '">Void</button>') + '</td></tr>'; }).join('') : '<tr><td colspan="6" class="empty">No payments.</td></tr>') + '</tbody></table></div></div>' +
-        (d.history.length ? '<div class="card"><h2>Paid bills</h2><div class="scroll"><table><tbody>' + docRows(d.history) + '</tbody></table></div></div>' : '') +
-        '<div class="card"><h2>Supplier invoices &amp; documents</h2><p class="sub">Invoices, statements and anything else from this supplier, kept in the document centre. A bill\'s own invoice is filed with the bill (Enter a bill → Scan the supplier\'s invoice).</p><div id="supdocs"></div></div>';
-      $('#bk').onclick = show;
-      if (window.VADocs) window.VADocs.mount($('#supdocs'), 'supplier', id, { category: 'payables' });
-      $('#er').onclick = function () { location.href = '/admin.html#tab=suppliers&id=' + id; };
-      $('#pb').onclick = function () { tab = 'pay'; mark(); pay(id); };
-      $('#eb').onclick = function () { tab = 'bill'; mark(); billForm('bill', s); };
-      $('#ec').onclick = function () { tab = 'credit'; mark(); billForm('credit', s); };
-      $('#sv').onclick = function () { api('/api/ap/suppliers/' + id, 'PUT', { payment_terms_days: $('#tm').value, default_account_id: $('#da').value, default_class_id: $('#dc').value }).then(function () { toast('Saved'); return loadSuppliers(); }).catch(function (e) { toast(e.message); }); };
-      all('[data-vp]').forEach(function (b) { b.onclick = function () { var r = prompt('Why is this payment voided? (e.g. cheque lost, wrong amount)'); if (!r) return; api('/api/ap/payments/' + b.getAttribute('data-vp') + '/void', 'POST', { reason: r }).then(function () { toast('Voided: the bills are unpaid again'); detail(id); }).catch(function (e) { toast(e.message); }); }; });
-      all('[data-pp]').forEach(function (b) { b.onclick = function () { printPayment(+b.getAttribute('data-pp')); }; });
-      all('[data-bv]').forEach(function (a) { a.onclick = function (e) { e.preventDefault(); viewBill(+a.getAttribute('data-bv'), function () { detail(id); }); }; });
+
+  // The record's editable fields (were Admin > Suppliers' tabs).
+  function recordForm(s) {
+    s = s || {};
+    var v = function (k) { return esc(s[k] == null ? '' : s[k]); };
+    var f = function (label, id, k, attrs, help) { return '<div><label>' + esc(label) + '</label><input id="' + id + '" value="' + v(k) + '"' + (attrs ? ' ' + attrs : '') + (help ? ' title="' + esc(help) + '"' : '') + '></div>'; };
+    return '<div class="sgrid">' +
+      '<div style="grid-column:1/-1"><label>Company name (as on their invoices)</label><input id="r_name" value="' + v('name') + '"></div>' +
+      f('Code', 'r_code', 'code', 'placeholder="e.g. NAPA"', 'A short code of your own. Must be unique.') + f('Contact name', 'r_contact', 'contact_name') + f('Phone', 'r_phone', 'phone') + f('Email', 'r_email', 'email', 'type="email"') +
+      f('Website', 'r_web', 'website', 'placeholder="https://"') + f('Lead time (days)', 'r_lead', 'lead_time_days', 'type="number" min="0"', 'Days from ordering to delivery. Reorder suggestions use it.') +
+      f('Payment terms (days)', 'r_tdays', 'payment_terms_days', 'type="number" min="0" max="365" placeholder="blank = due on receipt"', 'Bills fall due this many days after the bill date.') +
+      f('Terms as printed', 'r_terms', 'payment_terms', 'placeholder="e.g. Net 30, 2% 10"') + f('Our account # with them', 'r_acct', 'account_number') + f('Tax ID (TRN)', 'r_tax', 'tax_id', 'placeholder="123-456-789"') +
+      '<div><label>Usual expense account</label><select id="r_da">' + B.accountOptions('line', s.default_account_id) + '</select></div><div><label>Usual class</label><select id="r_dc">' + B.classOptions(s.default_class_id) + '</select></div>' +
+      '<div style="grid-column:span 2"><label>Address</label><textarea id="r_addr" rows="3">' + v('address') + '</textarea></div>' +
+      '<div style="grid-column:span 2"><label>Remit-to address (blank = the address)</label><textarea id="r_remit" rows="3">' + v('remit_address') + '</textarea></div>' +
+      '<div style="grid-column:1/-1"><label>Notes</label><textarea id="r_notes" rows="3">' + v('notes') + '</textarea></div></div>';
+  }
+  function recordBody() {
+    var g = function (id) { var e = $('#' + id); return e ? String(e.value).trim() : ''; };
+    return { name: g('r_name'), code: g('r_code') || null, contact_name: g('r_contact') || null, phone: g('r_phone') || null, email: g('r_email') || null, website: g('r_web') || null,
+      lead_time_days: g('r_lead') || 7, payment_terms_days: g('r_tdays'), payment_terms: g('r_terms') || null, account_number: g('r_acct') || null, tax_id: g('r_tax') || null,
+      address: g('r_addr') || null, remit_address: g('r_remit') || null, notes: g('r_notes') || null, default_account_id: g('r_da'), default_class_id: g('r_dc') };
+  }
+  // Saves through the two endpoints that already own these fields.
+  function saveRecord(id, body) {
+    var core = Object.assign({}, body); delete core.default_account_id; delete core.default_class_id;
+    return api('/api/admin/suppliers/' + id, 'PATCH', core).then(function () {
+      return api('/api/ap/suppliers/' + id, 'PUT', { payment_terms_days: body.payment_terms_days, default_account_id: body.default_account_id, default_class_id: body.default_class_id });
+    });
+  }
+  function newSupplier() {
+    modal('<h2>New supplier</h2>' + recordForm({ lead_time_days: 7 }) + '<div class="controls" style="margin-top:10px"><button class="primary" id="ns_go">Save supplier</button><button id="ns_x">Cancel</button></div>');
+    $('#ns_x').onclick = close;
+    $('#ns_go').onclick = async function () {
+      var b = recordBody(); if (!b.name) return toast('Enter the supplier\'s name');
+      var same = (sup.list || []).filter(function (s) { return normName(s.name) && normName(s.name) === normName(b.name); });
+      if (same.length && !(await vasConfirm('There is already a supplier called ' + same[0].name + '. Add another one anyway?'))) return;
+      var btn = this; btn.disabled = true;
+      api('/api/admin/suppliers', 'POST', b).then(function (r) {
+        return api('/api/ap/suppliers/' + r.id, 'PUT', { payment_terms_days: b.payment_terms_days, default_account_id: b.default_account_id, default_class_id: b.default_class_id }).then(function () { return r; });
+      }).then(function (r) { close(); toast('Supplier added'); return loadSuppliers().then(function () { detail(r.id, 'details'); }); })
+        .catch(function (e) { btn.disabled = false; toast(e.message); });
+    };
+  }
+  function normName(s) { return String(s || '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').replace(/\b(ltd|limited|co|company|inc|incorporated|llc|corp|corporation|the|ja|jamaica|plc)\b/g, ' ').replace(/\s+/g, ''); }
+
+  function detail(id, which) {
+    if (which) SUPTAB = which;
+    return Promise.all([api('/api/ap/suppliers/' + id), api('/api/ap/suppliers/' + id + '/record')]).then(function (r) {
+      var d = r[0], rec = r[1], s = rec.supplier;
+      var tabs = [['acct', 'Account & bills'], ['details', 'Details'], ['portal', 'Portal & credit'], ['items', 'Items purchased'], ['docs', 'Documents']].filter(function (t) { return t[0] !== 'portal' || rec.can.portal; });
+      if (!tabs.some(function (t) { return t[0] === SUPTAB; })) SUPTAB = 'acct';
+      var owed = d.open.filter(function (b) { return b.kind !== 'credit'; }).reduce(function (t, b) { return t + b.open; }, 0);
+      $('#out').innerHTML = '<div class="controls"><button id="bk">◀ All suppliers</button></div>' +
+        '<div class="card"><h2>' + esc(s.name) + (s.code ? ' <small class="sub" style="margin:0">' + esc(s.code) + '</small>' : '') + (s.is_active ? '' : ' <span class="pill">inactive</span>') + (s.portal_enabled ? ' <span class="pill ok">portal on</span>' : '') + '</h2>' +
+        (s.merged_into_id ? '<div class="note warn">This supplier was merged into <a href="#" id="mto">' + esc(s.merged_into || '#' + s.merged_into_id) + '</a>' + (s.merged_at ? ' on ' + esc(String(s.merged_at).slice(0, 10)) : '') + '. Its bills, orders and parts are there now.</div>' : '') +
+        (rec.merged_from.length ? '<p class="sub">Also includes ' + rec.merged_from.map(function (m) { return '<a href="#" data-mf="' + m.id + '">' + esc(m.name) + '</a>'; }).join(', ') + ' (merged in).</p>' : '') +
+        '<div class="sub" style="margin:0">' + esc([s.contact_name, s.phone, s.email].filter(Boolean).join(' · ')) + (s.payment_terms_days != null ? ' · Net ' + s.payment_terms_days : '') + ' · We owe them <b>' + J(owed) + '</b></div>' +
+        '<div class="tabs" style="margin:10px 0 0">' + tabs.map(function (t) { return '<button data-st="' + t[0] + '"' + (t[0] === SUPTAB ? ' class="on"' : '') + '>' + esc(t[1]) + '</button>'; }).join('') + '</div></div><div id="spane"></div>';
+      $('#bk').onclick = function () { history.replaceState(null, '', location.pathname); show(); };
+      if ($('#mto')) $('#mto').onclick = function (e) { e.preventDefault(); detail(s.merged_into_id); };
+      all('[data-mf]').forEach(function (a) { a.onclick = function (e) { e.preventDefault(); detail(+a.getAttribute('data-mf')); }; });
+      all('[data-st]').forEach(function (b) { b.onclick = function () { SUPTAB = b.getAttribute('data-st'); all('[data-st]').forEach(function (x) { x.classList.toggle('on', x === b); }); pane(); }; });
+      try { history.replaceState(null, '', '#s=' + id); } catch (_) {}
+      var pane = function () { ({ acct: paneAccount, details: paneDetails, portal: panePortal, items: paneItems, docs: paneDocs })[SUPTAB](id, d, rec); };
+      pane();
     }).catch(function (e) { toast(e.message); });
+  }
+  function paneAccount(id, d, rec) {
+    var s = rec.supplier;
+    $('#spane').innerHTML = '<div class="card"><div class="controls"><button class="primary" id="pb">Pay bills</button><button id="eb">Enter a bill</button><button id="ec">Enter a credit</button></div></div>' +
+      '<div class="card"><h2>Unpaid</h2><div class="scroll"><table><thead><tr><th>Type</th><th>Number</th><th>Date</th><th>Due</th><th class="n">Amount</th><th class="n">Paid</th><th class="n">Open</th><th class="n">Overdue</th></tr></thead><tbody>' + (d.open.length ? docRows(d.open) : '<tr><td colspan="8" class="empty">Nothing unpaid.</td></tr>') + '</tbody></table></div></div>' +
+      '<div class="card"><h2>Payments</h2><div class="scroll"><table><thead><tr><th>Date</th><th>Method</th><th>Cheque / ref</th><th>Paid from</th><th class="n">Amount</th><th></th></tr></thead><tbody>' +
+      (d.payments.length ? d.payments.map(function (p) { return '<tr style="' + (p.voided_at ? 'opacity:.5' : '') + '"><td>' + esc(p.day) + '</td><td>' + esc(p.method) + '</td><td>' + esc(p.cheque_number || p.reference || '') + '</td><td>' + esc(p.paid_from) + '</td><td class="n">' + J(p.amount) + '</td><td style="white-space:nowrap"><button class="sm" data-pp="' + p.id + '">Print</button> ' + (p.voided_at ? '<span class="pill bad">void</span> <small>' + esc(p.void_reason || '') + '</small>' : '<button class="sm" data-vp="' + p.id + '">Void</button>') + '</td></tr>'; }).join('') : '<tr><td colspan="6" class="empty">No payments.</td></tr>') + '</tbody></table></div></div>' +
+      (d.history.length ? '<div class="card"><h2>Paid bills</h2><div class="scroll"><table><tbody>' + docRows(d.history) + '</tbody></table></div></div>' : '');
+    $('#pb').onclick = function () { tab = 'pay'; mark(); pay(id); };
+    $('#eb').onclick = function () { tab = 'bill'; mark(); billForm('bill', s); };
+    $('#ec').onclick = function () { tab = 'credit'; mark(); billForm('credit', s); };
+    all('[data-vp]').forEach(function (b) { b.onclick = async function () { var r = await vasPrompt('Why is this payment voided? (e.g. cheque lost, wrong amount)'); if (!r) return; api('/api/ap/payments/' + b.getAttribute('data-vp') + '/void', 'POST', { reason: r }).then(function () { toast('Voided: the bills are unpaid again'); detail(id); }).catch(function (e) { toast(e.message); }); }; });
+    all('[data-pp]').forEach(function (b) { b.onclick = function () { printPayment(+b.getAttribute('data-pp')); }; });
+    all('[data-bv]').forEach(function (a) { a.onclick = function (e) { e.preventDefault(); viewBill(+a.getAttribute('data-bv'), function () { detail(id); }); }; });
+  }
+  function paneDetails(id, d, rec) {
+    var s = rec.supplier;
+    $('#spane').innerHTML = '<div class="card"><h2>Supplier record</h2>' + recordForm(s) +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="r_save">Save supplier</button>' +
+      (s.merged_into_id ? '' : '<button id="r_act">' + (s.is_active ? 'Make inactive' : 'Make active again') + '</button><button id="r_merge">Merge another supplier into this one…</button>') + '</div></div>';
+    $('#r_save').onclick = function () {
+      var b = recordBody(); if (!b.name) return toast('The supplier needs a name');
+      var btn = this; btn.disabled = true;
+      saveRecord(id, b).then(function () { toast('Saved'); return loadSuppliers(); }).then(function () { detail(id); }).catch(function (e) { btn.disabled = false; toast(e.message); });
+    };
+    if ($('#r_act')) $('#r_act').onclick = function () {
+      api('/api/admin/suppliers/' + id, 'PATCH', { is_active: !s.is_active }).then(function () { toast(s.is_active ? 'Now inactive' : 'Active again'); detail(id); }).catch(function (e) { toast(e.message); });
+    };
+    if ($('#r_merge')) $('#r_merge').onclick = function () { pickToMerge(s); };
+  }
+  function panePortal(id) {
+    $('#spane').innerHTML = '<div class="card empty">Loading…</div>';
+    api('/api/admin/suppliers/' + id + '/portal').then(function (d) {
+      var s = d.supplier, a = d.account;
+      $('#spane').innerHTML = '<div class="card"><h2>Supplier portal and credit</h2><p class="sub">A portal login lets them manage their items, consignment, orders and account. The credit limit is what they extend to us. <a href="/supplier.html" target="_blank">Open the supplier portal ↗</a></p>' +
+        '<div class="tiles"><div class="tile"><span class="k">We owe them</span><b>' + J(a.balance) + '</b></div><div class="tile' + (a.overdue ? ' bad' : '') + '"><span class="k">Overdue</span><b>' + J(a.overdue) + '</b></div><div class="tile"><span class="k">Their credit to us</span><b>' + (a.credit_limit != null ? J(a.credit_limit) : '—') + '</b></div><div class="tile"><span class="k">Items / orders</span><b>' + d.counts.items + ' / ' + d.counts.orders + '</b></div></div>' +
+        '<div class="controls"><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="m_portal"' + (s.portal_enabled ? ' checked' : '') + '> Portal enabled</label>' +
+        '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="m_retail"' + (s.web_retail_enabled ? ' checked' : '') + '> Allow retail through the portal</label>' +
+        '<div><label>Credit limit (J$)' + (s.credit_set_by ? ' · set by ' + esc(s.credit_set_by) : '') + '</label><input id="m_credit" type="number" step="0.01" value="' + (s.credit_limit != null ? s.credit_limit : '') + '"></div><button class="primary" id="m_save">Save</button></div></div>' +
+        '<div class="card"><h2>Portal logins</h2><table><tbody>' + (d.users.length ? d.users.map(function (u) { return '<tr><td>' + esc(u.name || '') + '<div class="sub" style="margin:0">' + esc(u.email) + '</div></td><td>' + esc(u.role) + '</td><td>' + (u.is_active ? '✓' : '✕') + '</td><td>' + (u.last_login_at ? B.dt(u.last_login_at) : 'never signed in') + '</td><td><button class="sm" data-reset="' + u.id + '">Reset password</button></td></tr>'; }).join('') : '<tr><td class="empty">No logins yet.</td></tr>') + '</tbody></table>' +
+        '<div class="controls" style="margin-top:8px"><input id="iv_email" placeholder="Email to invite"><input id="iv_name" placeholder="Name"><select id="iv_role"><option value="owner">Owner</option><option value="manager">Manager</option><option value="staff">Staff</option></select><button class="primary" id="iv_go">Invite login</button></div><div id="iv_out" class="sub"></div></div>';
+      $('#m_save').onclick = function () { api('/api/admin/suppliers/' + id + '/portal', 'PUT', { portal_enabled: $('#m_portal').checked, web_retail_enabled: $('#m_retail').checked, credit_limit: $('#m_credit').value }).then(function () { toast('Saved'); panePortal(id); }).catch(function (e) { toast(e.message); }); };
+      $('#iv_go').onclick = function () {
+        if (!$('#iv_email').value) return toast('Enter an email');
+        api('/api/admin/suppliers/' + id + '/users', 'POST', { email: $('#iv_email').value, name: $('#iv_name').value, role: $('#iv_role').value })
+          .then(function (r) { panePortal(id); setTimeout(function () { $('#iv_out').innerHTML = 'Invited. ' + (r.temp_password ? 'Temporary password: <b>' + esc(r.temp_password) + '</b> (shown once; they should change it).' : 'An email was sent.'); }, 300); }).catch(function (e) { toast(e.message); });
+      };
+      all('[data-reset]').forEach(function (b) { b.onclick = function () { api('/api/admin/suppliers/' + id + '/users/' + b.dataset.reset + '/reset', 'POST', {}).then(function (r) { $('#iv_out').innerHTML = 'New temporary password: <b>' + esc(r.temp_password) + '</b>'; }).catch(function (e) { toast(e.message); }); }; });
+    }).catch(function (e) { $('#spane').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  function paneItems(id) {
+    $('#spane').innerHTML = '<div class="card empty">Loading…</div>';
+    api('/api/admin/suppliers/' + id + '/items').then(function (r) {
+      var it = r.items || [];
+      $('#spane').innerHTML = '<div class="card"><h2>Items purchased</h2><p class="sub">Every line on a purchase order that was placed, and stock taken in without a PO.</p><div class="scroll"><table><thead><tr><th>Date</th><th>Item</th><th>PO / receipt</th><th class="n">Qty</th><th class="n">Received</th><th class="n">Unit cost</th><th class="n">Total</th></tr></thead><tbody>' +
+        (it.length ? it.map(function (x) { return '<tr><td>' + esc(x.day || '') + '</td><td><b>' + esc(x.item || '') + '</b>' + (x.sku ? '<div class="sub" style="margin:0">' + esc(x.sku) + '</div>' : '') + '</td><td>' + (x.po_id ? '<a href="' + '/admin.html#tab=purchaseorders' + '">' + esc(x.ref || '') + '</a>' : esc(x.ref || '')) + (x.status ? ' <small class="sub">' + esc(x.status) + '</small>' : '') + '</td><td class="n">' + (x.qty || 0) + '</td><td class="n">' + (x.qty_received || 0) + '</td><td class="n">' + J(x.unit_cost) + '</td><td class="n">' + J(x.total) + '</td></tr>'; }).join('') : '<tr><td colspan="7" class="empty">Nothing bought from this supplier yet.</td></tr>') + '</tbody></table></div></div>';
+    }).catch(function (e) { $('#spane').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  function paneDocs(id) {
+    $('#spane').innerHTML = '<div class="card"><h2>Supplier invoices &amp; documents</h2><p class="sub">Invoices, statements and anything else from this supplier, kept in the document centre. A bill\'s own invoice is filed with the bill (Enter a bill → Scan the supplier\'s invoice).</p><div id="supdocs"></div></div>';
+    if (window.VADocs) window.VADocs.mount($('#supdocs'), 'supplier', id, { category: 'payables' });
+  }
+
+  // ------------------------------------------------------------ duplicates and merging --
+  function dupes() {
+    tab = 'sup'; mark();
+    return Promise.all([api('/api/ap/supplier-duplicates'), api('/api/ap/supplier-merges')]).then(function (r) {
+      var groups = r[0].groups, merges = r[1].merges;
+      $('#out').innerHTML = '<div class="controls"><button id="bk">◀ All suppliers</button></div>' +
+        '<div class="card"><h2>Possible duplicate suppliers</h2><p class="sub">Suppliers with the same name (ignoring "Ltd", punctuation and spacing), the same TRN, email or phone. Pick the one to keep and merge the others into it: their bills, payments, purchase orders, receipts, parts, portal logins, documents and history move to the one you keep, and blanks on its record are filled from theirs. The others stay, inactive, marked "merged". You can undo a merge below.</p>' +
+        (groups.length ? groups.map(function (g, gi) {
+          return '<div class="card" style="background:var(--bg)"><div class="sub" style="margin:0 0 6px">' + esc(g.reasons.join(', ')) + '</div><table><thead><tr><th>Keep</th><th>Merge in</th><th>Supplier</th><th>Phone / email</th><th>TRN</th><th class="n">Bills, POs, receipts</th><th class="n">Parts</th><th>Added</th></tr></thead><tbody>' +
+            g.members.map(function (m) {
+              return '<tr><td><input type="radio" name="k' + gi + '" value="' + m.id + '"' + (m.id === g.keep ? ' checked' : '') + '></td><td><input type="checkbox" data-g="' + gi + '" value="' + m.id + '"' + (m.id === g.keep ? '' : ' checked') + '></td>' +
+                '<td><a href="#" data-open="' + m.id + '"><b>' + esc(m.name) + '</b></a>' + (m.code ? ' <small class="sub">' + esc(m.code) + '</small>' : '') + (m.is_active ? '' : ' <span class="pill">inactive</span>') + '</td><td>' + esc([m.phone, m.email].filter(Boolean).join(' · ')) + '</td><td>' + esc(m.tax_id || '') + '</td><td class="n">' + m.docs + '</td><td class="n">' + m.parts + '</td><td>' + esc(m.created || '') + '</td></tr>';
+            }).join('') + '</tbody></table><div class="controls" style="margin:8px 0 0"><button class="primary" data-merge="' + gi + '">Merge…</button><button data-skip="' + gi + '">Not duplicates</button></div></div>';
+        }).join('') : '<div class="empty">No duplicates found.</div>') + '</div>' +
+        '<div class="card"><h2>Merge history</h2><table><thead><tr><th>When</th><th>Kept</th><th>Merged in</th><th class="n">Rows moved</th><th>By</th><th></th></tr></thead><tbody>' +
+        (merges.length ? merges.map(function (m) { return '<tr style="' + (m.undone ? 'opacity:.55' : '') + '"><td>' + esc(m.at) + '</td><td><a href="#" data-open="' + m.kept_id + '">' + esc(m.kept_name) + '</a></td><td>' + esc(m.merged_name) + '</td><td class="n">' + m.rows + '</td><td>' + esc(m.by_name || '') + '</td><td>' + (m.undone ? '<span class="pill">undone ' + esc(m.undone) + '</span>' : '<button class="sm" data-undo="' + m.id + '">Undo</button>') + '</td></tr>'; }).join('') : '<tr><td colspan="6" class="empty">No merges yet.</td></tr>') + '</tbody></table></div>';
+      $('#bk').onclick = function () { show(); };
+      var hidden = skipped();
+      groups.forEach(function (g, gi) { var key = g.members.map(function (m) { return m.id; }).sort().join('-'); if (hidden.indexOf(key) >= 0) { var b = $('[data-merge="' + gi + '"]'); if (b) b.closest('.card').style.display = 'none'; } });
+      all('[data-open]').forEach(function (a) { a.onclick = function (e) { e.preventDefault(); detail(+a.getAttribute('data-open')); }; });
+      all('input[type=radio]').forEach(function (rd) { rd.onchange = function () { var gi = rd.name.slice(1); all('[data-g="' + gi + '"]').forEach(function (cb) { if (cb.value === rd.value) cb.checked = false; }); }; });
+      all('[data-merge]').forEach(function (b) { b.onclick = function () {
+        var gi = b.getAttribute('data-merge'), keep = +($('input[name="k' + gi + '"]:checked') || {}).value;
+        var from = all('[data-g="' + gi + '"]:checked').map(function (x) { return +x.value; }).filter(function (x) { return x !== keep; });
+        if (!keep) return toast('Pick the one to keep');
+        if (!from.length) return toast('Tick the ones to merge into it');
+        confirmMerge(keep, from);
+      }; });
+      all('[data-skip]').forEach(function (b) { b.onclick = function () { var g = groups[+b.getAttribute('data-skip')]; var key = g.members.map(function (m) { return m.id; }).sort().join('-'); var h = skipped(); h.push(key); try { localStorage.setItem('va-sup-notdup', JSON.stringify(h)); } catch (_) {} b.closest('.card').style.display = 'none'; }; });
+      all('[data-undo]').forEach(function (b) { b.onclick = async function () {
+        if (!(await vasConfirm('Undo this merge? The merged supplier comes back and what was moved goes back to it.'))) return;
+        api('/api/ap/supplier-merges/' + b.getAttribute('data-undo') + '/undo', 'POST', {}).then(function (r) { toast('Undone: ' + r.moved_back + ' row(s) moved back'); return loadSuppliers(); }).then(dupes).catch(function (e) { toast(e.message); });
+      }; });
+    });
+  }
+  function skipped() { try { return JSON.parse(localStorage.getItem('va-sup-notdup') || '[]'); } catch (_) { return []; } }
+  var TABLE_LABEL = { ap_bills: 'Bills and credits', ap_payments: 'Payments', purchase_orders: 'Purchase orders', receipts: 'Goods received', products: 'Parts (usual supplier)', supplier_users: 'Portal logins', supplier_items: 'Portal catalogue items', supplier_orders: 'Portal orders', supplier_catalog_uploads: 'Catalogue uploads', consignment_ledger: 'Consignment', supplier_training: 'Portal training notes', billing_plans: 'Recurring bills', loans: 'Loans', fa_assets: 'Fixed assets', bank_txns: 'Bank transactions', stock_dispositions: 'Supplier claims', document_links: 'Documents', comm_log: 'Messages', commission_rules: 'Commission rules' };
+  function confirmMerge(keep, from) {
+    api('/api/ap/suppliers/' + keep + '/merge-preview?from=' + from.join(',')).then(function (p) {
+      modal('<h2>Merge into ' + esc(p.keep.name) + '</h2><p class="sub">Everything below moves to ' + esc(p.keep.name) + '. The others stay as inactive records marked "merged into ' + esc(p.keep.name) + '".</p>' +
+        p.from.map(function (f) { return '<h3 style="margin:10px 0 4px">' + esc(f.name) + '</h3>' + (f.moves.length ? '<table><tbody>' + f.moves.map(function (m) { return '<tr><td>' + esc(TABLE_LABEL[m.table] || m.table.replace(/_/g, ' ')) + '</td><td class="n">' + m.rows + '</td></tr>'; }).join('') + '</tbody></table>' : '<p class="sub">Nothing attached to it.</p>'); }).join('') +
+        (p.fills.length ? '<h3 style="margin:10px 0 4px">Filled in on ' + esc(p.keep.name) + ' (it was blank)</h3><table><tbody>' + p.fills.map(function (x) { return '<tr><td>' + esc(x.field.replace(/_/g, ' ')) + '</td><td>' + esc(x.value) + '</td><td class="sub">from ' + esc(x.from) + '</td></tr>'; }).join('') + '</tbody></table>' : '') +
+        '<div class="controls" style="margin-top:12px"><button class="primary" id="mg_go">Merge now</button><button id="mg_x">Cancel</button></div>');
+      $('#mg_x').onclick = close;
+      $('#mg_go').onclick = function () {
+        var b = this; b.disabled = true;
+        api('/api/ap/suppliers/' + keep + '/merge', 'POST', { from: from }).then(function (r) {
+          close(); toast('Merged ' + r.merged.length + ' supplier(s) into ' + r.kept.name);
+          return loadSuppliers().then(function () { detail(keep); });
+        }).catch(function (e) { b.disabled = false; toast(e.message); });
+      };
+    }).catch(function (e) { toast(e.message); });
+  }
+  // From a record: pick any other supplier to merge into this one.
+  function pickToMerge(s) {
+    modal('<h2>Merge another supplier into ' + esc(s.name) + '</h2><p class="sub">Type the duplicate\'s name.</p><input id="pm_q" list="suppliers" style="width:100%"><div class="controls" style="margin-top:10px"><button class="primary" id="pm_go">Next ›</button><button id="pm_x">Cancel</button></div>');
+    $('#pm_x').onclick = close;
+    $('#pm_go').onclick = function () {
+      var o = supplierByName($('#pm_q').value);
+      if (!o) return toast('Pick a supplier from the list');
+      if (o.id === s.id) return toast('That is this supplier');
+      close(); confirmMerge(s.id, [o.id]);
+    };
+  }
+
+  // ------------------------------------------------------------ portal training --
+  // (was the Training tab of Supplier management)
+  function training() {
+    return api('/api/admin/supplier-training').then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>Supplier portal training</h2><p class="sub">Notes and links shown to suppliers in their portal.</p>' +
+        '<div class="sgrid"><div style="grid-column:1/-1"><label>Title</label><input id="t_title"></div><div style="grid-column:1/-1"><label>Body</label><textarea id="t_body" rows="3"></textarea></div><div><label>Link URL (optional)</label><input id="t_url"></div><div><label>Only for this supplier (blank = all)</label><input id="t_sup" list="suppliers"></div></div>' +
+        '<div class="controls" style="margin-top:8px"><button class="primary" id="t_add">Post</button></div>' +
+        '<table style="margin-top:10px"><tbody>' + (d.items.length ? d.items.map(function (t) { return '<tr><td><b>' + esc(t.title) + '</b><div class="sub" style="margin:0">' + esc(t.supplier_name || 'All suppliers') + (t.url ? ' · ' + esc(t.url) : '') + '</div></td><td><button class="sm" data-tdel="' + t.id + '">Delete</button></td></tr>'; }).join('') : '<tr><td class="empty">None yet.</td></tr>') + '</tbody></table></div>';
+      $('#t_add').onclick = function () {
+        if (!$('#t_title').value.trim()) return toast('Title needed');
+        var sname = $('#t_sup').value.trim(), so = sname ? supplierByName(sname) : null;
+        if (sname && !so) return toast('Pick the supplier from the list, or leave it blank');
+        api('/api/admin/supplier-training', 'POST', { title: $('#t_title').value, body: $('#t_body').value, url: $('#t_url').value, supplier_id: so ? so.id : null }).then(function () { toast('Posted'); training(); }).catch(function (e) { toast(e.message); });
+      };
+      all('[data-tdel]').forEach(function (b) { b.onclick = async function () { if (!(await vasConfirm('Delete this note?'))) return; api('/api/admin/supplier-training/' + b.getAttribute('data-tdel'), 'DELETE').then(training).catch(function (e) { toast(e.message); }); }; });
+    });
   }
   function viewBill(id, after) {
     api('/api/ap/bills/' + id).then(function (d) {
@@ -77,7 +309,7 @@
       $('#x').onclick = close;
       // The supplier's invoice and anything else filed for this bill (document centre).
       if (window.VADocs) window.VADocs.mount($('#billdocs'), 'bill', b.id, { category: 'payables' });
-      if ($('#vb')) $('#vb').onclick = function () { var r = prompt('Why is it voided?'); if (!r) return; api('/api/ap/bills/' + id + '/void', 'POST', { reason: r }).then(function () { close(); toast('Voided'); after && after(); }).catch(function (e) { toast(e.message); }); };
+      if ($('#vb')) $('#vb').onclick = async function () { var r = await vasPrompt('Why is it voided?'); if (!r) return; api('/api/ap/bills/' + id + '/void', 'POST', { reason: r }).then(function () { close(); toast('Voided'); after && after(); }).catch(function (e) { toast(e.message); }); };
     }).catch(function (e) { toast(e.message); });
   }
 
@@ -85,40 +317,74 @@
   function pay(supplierId) {
     var dueBy = pay.due || '';
     return api('/api/ap/bills?due_by=' + dueBy + (supplierId ? '&supplier=' + supplierId : '')).then(function (d) {
-      $('#out').innerHTML = '<div class="card"><h2>Pay bills</h2><p class="sub">Tick the bills to pay; change an amount to pay part of a bill. One payment (cheque or transfer) is made per supplier, using any credits you tick for that supplier.</p>' +
-        '<div class="controls"><div><label>Show bills due by</label><input type="date" id="db" value="' + esc(dueBy) + '"></div>' + (supplierId ? '<button id="allsup">All suppliers</button>' : '') + '</div>' +
-        '<div class="scroll"><table><thead><tr><th></th><th>Supplier</th><th>Type</th><th>Number</th><th>Due</th><th class="n">Open</th><th class="n">Pay</th></tr></thead><tbody>' +
-        (d.bills.length ? d.bills.map(function (b, i) { return '<tr><td><input type="checkbox" data-ck="' + i + '"></td><td>' + esc(b.supplier) + '</td><td>' + esc(KIND[b.kind]) + '</td><td>' + esc(b.number) + '</td><td>' + esc(b.due || b.day) + (b.days_overdue ? ' <span class="pill bad">' + b.days_overdue + ' d late</span>' : '') + '</td><td class="n">' + J(b.open) + '</td><td class="n"><input type="number" step="0.01" data-am="' + i + '" style="width:120px"></td></tr>'; }).join('') : '<tr><td colspan="7" class="empty">No unpaid bills.</td></tr>') +
-        '</tbody></table></div>' +
-        (d.credits.length ? '<h2 style="margin-top:12px">Supplier credits to use</h2><table><tbody>' + d.credits.map(function (c, i) { return '<tr><td><input type="checkbox" data-cc="' + i + '"></td><td>' + esc(c.supplier) + '</td><td>' + esc(c.number) + '</td><td class="n">' + J(c.open) + ' available</td><td class="n"><input type="number" step="0.01" data-ca="' + i + '" style="width:120px"></td></tr>'; }).join('') + '</tbody></table>' : '') +
-        '<div class="controls" style="margin-top:12px"><div><label>Pay from</label><select id="pf">' + B.accountOptions('bank') + '</select></div><div><label>Method</label><select id="pm"><option value="cheque">Cheque</option><option value="transfer">Bank transfer</option><option value="cash">Cash</option><option value="card">Card</option></select></div>' +
+      // What to pay is kept on each bill (b.pay), so ticks and amounts stay put
+      // while you page, search and filter.
+      d.bills.forEach(function (b, i) { b.i = i; b.pay = 0; });
+      d.credits.forEach(function (c, i) { c.i = i; c.pay = 0; });
+      $('#out').innerHTML = '<div class="card"><h2>Pay bills</h2><p class="sub">Tick the bills to pay; change an amount to pay part of a bill. One payment (cheque or transfer) is made per supplier, using any credits you tick for that supplier. Ticks stay when you change page or filter.</p>' +
+        '<div class="controls"><div><label>Show bills due by</label><input type="date" id="db" value="' + esc(dueBy) + '"></div>' + (supplierId ? '<button id="allsup">All suppliers</button>' : '') +
+        '<span style="flex:1"></span><button class="sm" id="tkall" title="Tick every bill the search and filters are showing, on every page">Tick all showing</button><button class="sm" id="tkpage" title="Tick the bills on this page">Tick this page</button><button class="sm" id="tknone">Untick all</button></div>' +
+        '<div id="blist"></div>' +
+        (d.credits.length ? '<h2 style="margin-top:12px">Supplier credits to use</h2><div id="clist"></div>' : '') +
+        '<div class="controls" style="margin-top:12px"><div><label>Pay from</label><select id="pf">' + B.accountOptions('paybill') + '</select></div><div><label>Method</label><select id="pm"><option value="cheque">Cheque</option><option value="transfer">Bank transfer</option><option value="cash">Cash</option><option value="card">Card</option></select></div>' +
         '<div><label>First cheque no.</label><input id="pc" style="width:110px"></div><div><label>Payment date</label><input type="date" id="pd" value="' + B.today() + '"></div><div><label>Memo</label><input id="pmemo"></div></div>' +
         '<p id="sum" class="sub"></p><button class="primary" id="go">Pay selected bills</button></div>';
       var bank = B.accounts().find(function (a) { return a.system_key === 'bank'; }); if (bank) $('#pf').value = bank.id;
+      // A credit card in "Pay from" pays by card (Credit cards module).
+      $('#pf').onchange = function () { var a = B.accounts().find(function (x) { return String(x.id) === $('#pf').value; }); if (a && a.card) $('#pm').value = 'card'; };
       $('#db').onchange = function () { pay.due = this.value; pay(supplierId); };
       if ($('#allsup')) $('#allsup').onclick = function () { pay(); };
       var summary = function () {
-        var by = {};
-        all('[data-am]').forEach(function (x) { var v = +x.value || 0; if (v > 0) { var b = d.bills[+x.getAttribute('data-am')]; by[b.supplier_id] = (by[b.supplier_id] || 0) + v; } });
-        all('[data-ca]').forEach(function (x) { var v = +x.value || 0; if (v > 0) { var c = d.credits[+x.getAttribute('data-ca')]; by[c.supplier_id] = (by[c.supplier_id] || 0) - v; } });
+        var by = {}, nb = 0;
+        d.bills.forEach(function (b) { if (b.pay > 0) { nb++; by[b.supplier_id] = (by[b.supplier_id] || 0) + b.pay; } });
+        d.credits.forEach(function (c) { if (c.pay > 0) by[c.supplier_id] = (by[c.supplier_id] || 0) - c.pay; });
         var ids = Object.keys(by), tot = ids.reduce(function (t, k) { return t + by[k]; }, 0);
-        $('#sum').textContent = ids.length ? ids.length + ' payment(s), total ' + J(tot) : 'Nothing selected';
+        $('#sum').textContent = ids.length ? nb + ' bill(s) ticked · ' + ids.length + ' payment(s), total ' + J(tot) : 'Nothing selected';
         return by;
       };
-      all('[data-ck]').forEach(function (cb) { cb.onchange = function () { var x = $('[data-am="' + cb.getAttribute('data-ck') + '"]'); x.value = cb.checked ? d.bills[+cb.getAttribute('data-ck')].open.toFixed(2) : ''; summary(); }; });
-      all('[data-am]').forEach(function (x) { x.oninput = function () { $('[data-ck="' + x.getAttribute('data-am') + '"]').checked = +x.value > 0; summary(); }; });
-      all('[data-cc]').forEach(function (cb) { cb.onchange = function () { var x = $('[data-ca="' + cb.getAttribute('data-cc') + '"]'); x.value = cb.checked ? d.credits[+cb.getAttribute('data-cc')].open.toFixed(2) : ''; summary(); }; });
-      all('[data-ca]').forEach(function (x) { x.oninput = summary; });
+      var r2 = function (v) { return Math.round(v * 100) / 100; };
+      // One list helper for bills and for credits: a tick box and an amount per row.
+      var wire = function (list, tb) {
+        all('[data-ck]', tb).forEach(function (cb) { cb.onchange = function () { var x = list[+cb.getAttribute('data-ck')], inp = $('[data-am="' + x.i + '"]', tb); x.pay = cb.checked ? x.open : 0; inp.value = x.pay ? x.pay.toFixed(2) : ''; summary(); }; });
+        all('[data-am]', tb).forEach(function (inp) { inp.oninput = function () { var x = list[+inp.getAttribute('data-am')]; x.pay = Math.max(0, r2(+inp.value || 0)); $('[data-ck="' + x.i + '"]', tb).checked = x.pay > 0; summary(); }; });
+      };
+      var tickCol = { k: 'tick', label: '', type: 'none', cell: function (b) { return '<input type="checkbox" data-ck="' + b.i + '"' + (b.pay > 0 ? ' checked' : '') + '>'; } };
+      var payCol = { k: 'pay', label: 'Pay', type: 'none', n: true, cell: function (b) { return '<input type="number" step="0.01" data-am="' + b.i + '" value="' + (b.pay ? b.pay.toFixed(2) : '') + '" style="width:120px">'; } };
+      var bl = window.ListTools.mount($('#blist'), {
+        key: 'ap-paybills', rows: d.bills, csv: 'bills-to-pay', placeholder: 'Search bills: supplier, number, memo, amount…',
+        empty: 'No unpaid bills.', emptyFiltered: 'No bill matches.', totals: ['amount', 'open'],
+        search: function (b) { return b.memo || ''; },
+        cols: [tickCol,
+          { k: 'supplier', label: 'Supplier' },
+          { k: 'kind', label: 'Type', type: 'list', val: function (b) { return KIND[b.kind] || b.kind; } },
+          { k: 'number', label: 'Number', nowrap: true },
+          { k: 'day', label: 'Bill date', type: 'date', nowrap: true },
+          { k: 'due', label: 'Due', type: 'date', nowrap: true, val: function (b) { return b.due || b.day; } },
+          { k: 'days_overdue', label: 'Days late', type: 'num', cell: function (b) { return b.days_overdue ? '<span class="pill bad">' + b.days_overdue + ' d late</span>' : ''; } },
+          { k: 'amount', label: 'Amount', type: 'money' },
+          { k: 'open', label: 'Open', type: 'money' },
+          payCol],
+        after: function (tb) { wire(d.bills, tb); }
+      });
+      if (d.credits.length) window.ListTools.mount($('#clist'), {
+        key: 'ap-paycredits', rows: d.credits, pageSize: 10, placeholder: 'Search credits…', totals: ['open'],
+        cols: [tickCol, { k: 'supplier', label: 'Supplier' }, { k: 'number', label: 'Number' }, { k: 'day', label: 'Date', type: 'date' }, { k: 'open', label: 'Available', type: 'money' }, payCol],
+        after: function (tb) { wire(d.credits, tb); }
+      });
+      var setAll = function (list, v) { list.forEach(function (b) { b.pay = v ? b.open : 0; }); bl.draw(); summary(); };
+      $('#tkall').onclick = function () { setAll(bl.rows(), true); };
+      $('#tkpage').onclick = function () { setAll(bl.pageRows(), true); };
+      $('#tknone').onclick = function () { setAll(d.bills, false); };
       summary();
-      $('#go').onclick = function () {
+      $('#go').onclick = async function () {
         var by = {};
-        all('[data-am]').forEach(function (x) { var v = +x.value || 0; if (v > 0) { var b = d.bills[+x.getAttribute('data-am')]; (by[b.supplier_id] = by[b.supplier_id] || { bills: [], credits: [] }).bills.push({ kind: b.kind, id: b.id, amount: v }); } });
-        all('[data-ca]').forEach(function (x) { var v = +x.value || 0; if (v > 0) { var c = d.credits[+x.getAttribute('data-ca')]; (by[c.supplier_id] = by[c.supplier_id] || { bills: [], credits: [] }).credits.push({ id: c.id, amount: v }); } });
+        d.bills.forEach(function (b) { if (b.pay > 0) (by[b.supplier_id] = by[b.supplier_id] || { bills: [], credits: [] }).bills.push({ kind: b.kind, id: b.id, amount: b.pay }); });
+        d.credits.forEach(function (c) { if (c.pay > 0) (by[c.supplier_id] = by[c.supplier_id] || { bills: [], credits: [] }).credits.push({ id: c.id, amount: c.pay }); });
         var sids = Object.keys(by).filter(function (k) { return by[k].bills.length; });
         if (!sids.length) return toast('Tick the bills to pay');
         var cheque = $('#pc').value.trim(), method = $('#pm').value, made = [];
         if (method === 'cheque' && !/\d+$/.test(cheque)) return toast('First cheque number');
-        if (!confirm('Make ' + sids.length + ' payment(s)?')) return;
+        if (!(await vasConfirm('Make ' + sids.length + ' payment(s)?'))) return;
         var nextCheque = function (i) { if (method !== 'cheque') return null; var m = /^(.*?)(\d+)$/.exec(cheque); return m[1] + String(+m[2] + i).padStart(m[2].length, '0'); };
         var run = function (i) {
           if (i >= sids.length) { toast(made.length + ' payment(s) made'); if (made.length) printPayment(made[0]); pay(supplierId); return; }
@@ -152,14 +418,14 @@
       '<div class="controls" id="scanbar"></div><div id="scaninfo"></div>' +
       '<div class="controls"><div style="flex:1;min-width:220px"><label>Supplier</label><input id="bs" list="suppliers" style="width:100%" value="' + esc(pre ? pre.name : '') + '"></div><div><label>' + (isCredit ? 'Credit note no.' : 'Supplier invoice no.') + '</label><input id="bn" style="width:150px"></div>' +
       '<div><label>Date</label><input type="date" id="bd" value="' + B.today() + '"></div>' + (isCredit ? '' : '<div><label>Due (blank = from terms)</label><input type="date" id="bdu"></div>') + '</div>' +
-      '<table class="lines"><thead><tr><th style="width:32%">Category (account)</th><th style="width:15%">Class</th><th>Description</th><th class="n" style="width:150px">Amount</th><th style="width:40px"></th></tr></thead><tbody id="bl"></tbody></table>' +
+      '<table class="lines"><thead><tr><th style="width:30%">Category (account)</th><th style="width:13%">Class</th><th style="width:15%" title="A fixed asset this cost is for: repairs, fuel, insurance">Asset</th><th>Description</th><th class="n" style="width:150px">Amount</th><th style="width:40px"></th></tr></thead><tbody id="bl"></tbody></table>' +
       '<div class="controls" style="margin-top:6px"><button class="sm" id="add">Add a line</button></div>' +
       '<div class="controls"><div><label>GCT on the bill (J$)</label><input id="bg" type="number" step="0.01" style="width:130px"></div><button class="sm" id="g15">Add 15% GCT</button><div style="flex:1"><label>Memo</label><input id="bm" style="width:100%"></div></div>' +
       '<h3 id="bt" style="text-align:right"></h3><div class="controls"><button class="primary" id="bsv">Save ' + (isCredit ? 'credit' : 'bill') + '</button></div></div>';
     var addLine = function (acct, cls) {
       var tr = document.createElement('tr');
       if (acct === undefined || cls === undefined) { var sd = supNow && supNow(); if (acct === undefined) acct = sd && sd.default_account_id; if (cls === undefined) cls = sd && sd.default_class_id; }
-      tr.innerHTML = '<td><select data-la>' + B.accountOptions('line', acct) + '</select></td><td><select data-lc>' + B.classOptions(cls) + '</select></td><td><input data-ld></td><td><input data-lm type="number" step="0.01" style="text-align:right"></td><td><button class="sm" data-lx>✕</button></td>';
+      tr.innerHTML = '<td><select data-la>' + B.accountOptions('line', acct) + '</select></td><td><select data-lc>' + B.classOptions(cls) + '</select></td><td><select data-lfa>' + B.assetOptions() + '</select></td><td><input data-ld></td><td><input data-lm type="number" step="0.01" style="text-align:right"></td><td><button class="sm" data-lx>✕</button></td>';
       $('#bl').appendChild(tr);
       tr.querySelector('[data-lx]').onclick = function () { tr.remove(); total(); };
       tr.querySelector('[data-lm]').oninput = total;
@@ -216,7 +482,7 @@
     $('#bsv').onclick = function () {
       var s = supNow();
       if (!s) return toast('Choose the supplier from the list');
-      var lines = all('#bl tr').map(function (tr) { return { account_id: tr.querySelector('[data-la]').value, class_id: tr.querySelector('[data-lc]').value, description: tr.querySelector('[data-ld]').value, amount: tr.querySelector('[data-lm]').value }; }).filter(function (l) { return +l.amount > 0; });
+      var lines = all('#bl tr').map(function (tr) { return { account_id: tr.querySelector('[data-la]').value, class_id: tr.querySelector('[data-lc]').value, asset_id: tr.querySelector('[data-lfa]').value, description: tr.querySelector('[data-ld]').value, amount: tr.querySelector('[data-lm]').value }; }).filter(function (l) { return +l.amount > 0; });
       api('/api/ap/bills', 'POST', { kind: kind, supplier_id: s.id, number: $('#bn').value, bill_date: $('#bd').value, due_date: $('#bdu') ? $('#bdu').value : '', gct_amount: $('#bg').value, memo: $('#bm').value, lines: lines })
         .then(function (r) {
           var said = (isCredit ? 'Credit' : 'Bill') + ' saved: ' + J(r.total) + (r.due_date ? ', due ' + r.due_date : '');
@@ -233,11 +499,22 @@
   function aging() {
     return api('/api/ap/aging').then(function (d) {
       var t = d.totals;
-      $('#out').innerHTML = '<div class="card"><h2>A/P aging summary · ' + esc(d.as_of) + ' <button class="sm" id="csv">Download CSV</button></h2><p class="sub">Aged from each bill\'s due date.</p><div class="scroll"><table><thead><tr><th>Supplier</th><th class="n">Current</th><th class="n">1-30</th><th class="n">31-60</th><th class="n">61-90</th><th class="n">Over 90</th><th class="n">Total</th></tr></thead><tbody>' +
-        d.rows.map(function (r) { return '<tr data-s="' + r.supplier_id + '" class="click"><td>' + esc(r.name) + '</td><td class="n">' + J(r.current) + '</td><td class="n">' + J(r.d30) + '</td><td class="n">' + J(r.d60) + '</td><td class="n">' + J(r.d90) + '</td><td class="n">' + J(r.over90) + '</td><td class="n"><b>' + J(r.total) + '</b></td></tr>'; }).join('') +
-        '<tr><td><b>Total</b></td><td class="n"><b>' + J(t.current) + '</b></td><td class="n"><b>' + J(t.d30) + '</b></td><td class="n"><b>' + J(t.d60) + '</b></td><td class="n"><b>' + J(t.d90) + '</b></td><td class="n"><b>' + J(t.over90) + '</b></td><td class="n"><b>' + J(t.total) + '</b></td></tr></tbody></table></div></div>';
-      all('[data-s]').forEach(function (r) { r.onclick = function () { tab = 'sup'; mark(); detail(+r.getAttribute('data-s')); }; });
-      $('#csv').onclick = function () { B.csv('ap-aging-' + d.as_of + '.csv', [['supplier', 'current', '1-30', '31-60', '61-90', 'over 90', 'total']].concat(d.rows.map(function (r) { return [r.name, r.current, r.d30, r.d60, r.d90, r.over90, r.total]; }))); };
+      $('#out').innerHTML = '<div class="tiles"><div class="tile"><span class="k">Current</span><b>' + J(t.current) + '</b></div><div class="tile"><span class="k">1-30</span><b>' + J(t.d30) + '</b></div><div class="tile"><span class="k">31-60</span><b>' + J(t.d60) + '</b></div><div class="tile"><span class="k">61-90</span><b>' + J(t.d90) + '</b></div><div class="tile bad"><span class="k">Over 90</span><b>' + J(t.over90) + '</b></div><div class="tile"><span class="k">Total owed</span><b>' + J(t.total) + '</b></div></div>' +
+        '<div class="card"><h2>A/P aging summary · ' + esc(d.as_of) + '</h2><p class="sub">Aged from each bill\'s due date. The total row adds up whatever the search and filters are showing; Download CSV saves the same.</p>' +
+        '<div class="controls"><div><label>Quick view</label><select id="aview"><option value="">Everyone we owe</option><option value="late">Anything overdue</option><option value="d30">Over 30 days</option><option value="d60">Over 60 days</option><option value="d90">Over 90 days</option></select></div></div><div id="alist"></div></div>';
+      var VIEW = { late: function (r) { return r.d30 + r.d60 + r.d90 + r.over90 > 0.005; }, d30: function (r) { return r.d60 + r.d90 + r.over90 > 0.005; }, d60: function (r) { return r.d90 + r.over90 > 0.005; }, d90: function (r) { return r.over90 > 0.005; } };
+      var rowsNow = function () { var f = VIEW[aging.view]; return f ? d.rows.filter(f) : d.rows; };
+      var m = function (k, label) { return { k: k, label: label, type: 'money', cell: function (r) { return r[k] ? J(r[k]) : ''; } }; };
+      var lt = window.ListTools.mount($('#alist'), {
+        key: 'ap-aging', rows: rowsNow(), csv: 'ap-aging-' + d.as_of, placeholder: 'Find a supplier or an amount…',
+        empty: 'We owe nobody.', emptyFiltered: 'No supplier matches.', totals: ['current', 'd30', 'd60', 'd90', 'over90', 'total'],
+        rowAttr: function (r) { return 'data-s="' + r.supplier_id + '" class="click"'; },
+        cols: [{ k: 'name', label: 'Supplier' }, m('current', 'Current'), m('d30', '1-30'), m('d60', '31-60'), m('d90', '61-90'), m('over90', 'Over 90'),
+          { k: 'total', label: 'Total', type: 'money', cell: function (r) { return '<b>' + J(r.total) + '</b>'; } }],
+        after: function (tb) { all('[data-s]', tb).forEach(function (r) { r.onclick = function () { tab = 'sup'; mark(); detail(+r.getAttribute('data-s')); }; }); }
+      });
+      $('#aview').value = aging.view || '';
+      $('#aview').onchange = function () { aging.view = this.value; lt.refresh(rowsNow()); };
     });
   }
 
@@ -317,10 +594,10 @@
     all('[data-q]').forEach(function (x) { x.onchange = tot; });
     $('#qall').onchange = function () { var v = this.checked; all('[data-q]').forEach(function (x) { x.checked = v; }); tot(); };
     tot();
-    $('#qgo').onclick = function () {
+    $('#qgo').onclick = async function () {
       var ticked = all('[data-q]:checked').map(function (x) { return +x.getAttribute('data-q'); });
       var voids = ticked.filter(function (i) { return d.rows[i].status === 'gone'; }).length;
-      if (voids && !confirm('Void ' + voids + ' bill(s) that are no longer unpaid in QuickBooks? The ledger reverses them.')) return;
+      if (voids && !(await vasConfirm('Void ' + voids + ' bill(s) that are no longer unpaid in QuickBooks? The ledger reverses them.'))) return;
       if (ticked.some(function (i) { return d.rows[i].status !== 'gone'; }) && !$('#qa').value) return toast('Choose the account to book them against');
       var b = this; b.disabled = true;
       api('/api/ap/import/bills', 'POST', { file: file, date_order: $('#qo').value, include: ticked, account_id: $('#qa').value, class_id: $('#qc').value, create_suppliers: $('#qn').checked })
@@ -351,11 +628,19 @@
   function mark() { all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); }); }
   function show() {
     mark();
-    var f = { sup: sup, pay: function () { return pay(); }, bill: function () { billForm('bill'); return Promise.resolve(); }, credit: function () { billForm('credit'); return Promise.resolve(); }, aging: aging, loans: loans, rec: rec, qb: qbImport }[tab];
+    var f = { sup: sup, pay: function () { return pay(); }, bill: function () { billForm('bill'); return Promise.resolve(); }, credit: function () { billForm('credit'); return Promise.resolve(); }, aging: aging, loans: loans, rec: rec, qb: qbImport, train: training }[tab];
     f().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
   }
   all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
-  Promise.all([B.loadAccounts(), loadSuppliers()]).then(show).catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  // #s=12 opens that supplier, #training the portal training, #dupes the duplicates (links from the old supplier screens).
+  function start() {
+    var h = location.hash || '', m = /s=(\d+)/.exec(h);
+    if (m) { mark(); return detail(+m[1]); }
+    if (/training/.test(h)) { tab = 'train'; return show(); }
+    if (/dupes/.test(h)) return dupes();
+    return show();
+  }
+  Promise.all([B.loadAccounts(), loadSuppliers()]).then(start).catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
 })();
 </script>
 <script src="/assets/staff-assist.js?v=20261020" defer></script>

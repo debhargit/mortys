@@ -5,20 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Banking · Vision Auto Solutions</title>
 <link rel="stylesheet" href="/assets/books.css">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
-<header><h1>Banking</h1><nav><a href="/receivables.html">Receivables</a><a href="/payables.html">Payables</a><a href="/accounting.html">Ledger</a><a href="/admin.html">Admin</a></nav></header>
+<header><h1>Banking</h1><nav><a href="/cards.html">Credit cards</a><a href="/receivables.html">Receivables</a><a href="/payables.html">Payables</a><a href="/accounting.html">Ledger</a><a href="/admin.html">Admin</a></nav></header>
 <main>
   <div class="tabs" id="tabs"><button data-t="home" class="on">Accounts</button><button data-t="reg">Register</button><button data-t="spend">Write cheque / spend</button><button data-t="recv">Receive money</button><button data-t="xfer">Transfer</button><button data-t="dep">Make deposits</button><button data-t="rec">Reconcile</button><button data-t="feed">Bank statement</button></div>
   <div id="out"><div class="empty">Loading…</div></div>
 </main>
 <div id="modal"></div>
 <div class="toast" id="toast"></div>
-<script src="/assets/books-common.js?v=20261019"></script>
+<script src="/assets/books-common.js?v=20261103"></script>
 <script>
 (function () {
   'use strict';
@@ -60,8 +61,8 @@
       $('#rcsv').onclick = function () { B.csv('register-' + d.account.code + '.csv', [['date', 'entry', 'ref', 'payee', 'memo', 'payment', 'deposit', 'cleared', 'balance']].concat(d.lines.map(function (l) { return [l.day, l.number, l.ref, l.party, l.memo, l.amount < 0 ? -l.amount : '', l.amount > 0 ? l.amount : '', l.cleared, l.balance]; }))); };
       all('[data-tv]').forEach(function (b) { b.onclick = function () { viewTxn(+b.getAttribute('data-tv')); }; });
       all('[data-void]').forEach(function (b) {
-        b.onclick = function () {
-          var k = b.getAttribute('data-void').split(':'), r = prompt('Why is it voided? (e.g. cheque lost, entered twice)'); if (!r) return;
+        b.onclick = async function () {
+          var k = b.getAttribute('data-void').split(':'), r = await vasPrompt('Why is it voided? (e.g. cheque lost, entered twice)'); if (!r) return;
           var url = k[0] === 'bank_txn' ? '/api/bank/txns/' + k[1] + '/void' : k[0] === 'ap_payment' ? '/api/ap/payments/' + k[1] + '/void' : '/api/ar/payments/' + k[1] + '/void';
           api(url, 'POST', { reason: r }).then(function () { toast('Voided: a reversing entry is posted'); setTimeout(reg, 600); }).catch(function (e) { toast(e.message); });
         };
@@ -99,14 +100,14 @@
     $('#out').innerHTML = '<div class="card"><h2>' + (spend ? 'Write a cheque / spend money' : 'Receive money (not from a customer invoice)') + '</h2><p class="sub">' + (spend ? 'Money out that is not a supplier bill: bank charges, a direct expense, a loan repayment. Supplier bills are paid in Payables, so the supplier balance stays right.' : 'Money in that is not a customer payment: a loan, interest, a refund, owner\'s money. Customer payments go in Receivables.') + '</p>' +
       '<div class="controls"><div><label>' + (spend ? 'Pay from' : 'Deposit to') + '</label>' + accountSelect('ta') + '</div><div style="flex:1;min-width:200px"><label>' + (spend ? 'Pay to' : 'Received from') + '</label><input id="tp" style="width:100%"></div>' +
       (spend ? '<div><label>Cheque no. (blank if not a cheque)</label><input id="tc" style="width:130px"></div>' : '') + '<div><label>Date</label><input type="date" id="td" value="' + B.today() + '"></div></div>' +
-      '<table class="lines"><thead><tr><th style="width:34%">Category (account)</th><th style="width:15%">Class</th><th>Memo</th><th class="n" style="width:150px">Amount</th><th style="width:40px"></th></tr></thead><tbody id="tl"></tbody></table>' +
+      '<table class="lines"><thead><tr><th style="width:30%">Category (account)</th><th style="width:13%">Class</th><th style="width:15%" title="A fixed asset this is for: repairs, fuel, insurance, rent received">Asset</th><th>Memo</th><th class="n" style="width:150px">Amount</th><th style="width:40px"></th></tr></thead><tbody id="tl"></tbody></table>' +
       '<div class="controls" style="margin-top:6px"><button class="sm" id="add">Add a line</button><div style="flex:1"><label>Memo</label><input id="tm" style="width:100%"></div></div>' +
       '<h3 id="tt" style="text-align:right"></h3><div class="controls"><button class="primary" id="tgo">Save</button></div></div>';
-    var add = function () { var tr = document.createElement('tr'); tr.innerHTML = '<td><select data-la>' + B.accountOptions('line') + '</select></td><td><select data-lc>' + B.classOptions() + '</select></td><td><input data-ld></td><td><input data-lm type="number" step="0.01" style="text-align:right"></td><td><button class="sm" data-lx>✕</button></td>'; $('#tl').appendChild(tr); tr.querySelector('[data-lx]').onclick = function () { tr.remove(); tot(); }; tr.querySelector('[data-lm]').oninput = tot; };
+    var add = function () { var tr = document.createElement('tr'); tr.innerHTML = '<td><select data-la>' + B.accountOptions('line') + '</select></td><td><select data-lc>' + B.classOptions() + '</select></td><td><select data-lfa>' + B.assetOptions() + '</select></td><td><input data-ld></td><td><input data-lm type="number" step="0.01" style="text-align:right"></td><td><button class="sm" data-lx>✕</button></td>'; $('#tl').appendChild(tr); tr.querySelector('[data-lx]').onclick = function () { tr.remove(); tot(); }; tr.querySelector('[data-lm]').oninput = tot; };
     var tot = function () { $('#tt').textContent = 'Total ' + J(all('[data-lm]').reduce(function (t, x) { return t + (+x.value || 0); }, 0)); };
     add(); tot(); $('#add').onclick = add;
     $('#tgo').onclick = function () {
-      var lines = all('#tl tr').map(function (tr) { return { account_id: tr.querySelector('[data-la]').value, class_id: tr.querySelector('[data-lc]').value, memo: tr.querySelector('[data-ld]').value, amount: tr.querySelector('[data-lm]').value }; }).filter(function (l) { return +l.amount > 0; });
+      var lines = all('#tl tr').map(function (tr) { return { account_id: tr.querySelector('[data-la]').value, class_id: tr.querySelector('[data-lc]').value, asset_id: tr.querySelector('[data-lfa]').value, memo: tr.querySelector('[data-ld]').value, amount: tr.querySelector('[data-lm]').value }; }).filter(function (l) { return +l.amount > 0; });
       api('/api/bank/txns', 'POST', { kind: kind, account_id: $('#ta').value, payee: $('#tp').value, cheque_number: $('#tc') ? $('#tc').value : '', txn_date: $('#td').value, memo: $('#tm').value, lines: lines })
         .then(function (r) { toast('Saved: ' + J(r.amount)); if (spend && $('#tc').value) viewTxn(r.id); txnForm(kind); }).catch(function (e) { toast(e.message); });
     };
@@ -143,7 +144,7 @@
           (d.history.length ? '<div class="card"><h2>Past reconciliations <button class="sm" id="undo">Undo the last one</button></h2><table><tbody>' + d.history.map(function (h) { return '<tr><td>' + esc(h.statement_date) + '</td><td class="n">' + J(h.statement_balance) + '</td><td><small>' + esc(h.by_name || '') + ' ' + esc(B.dt(h.finished_at)) + '</small></td></tr>'; }).join('') + '</tbody></table></div>' : '');
         $('#ra').onchange = function () { pick(+this.value); rec(); };
         $('#go').onclick = function () { api('/api/bank/reconcile/' + acct + '/start', 'POST', { statement_date: $('#sd').value, statement_balance: $('#sb').value }).then(rec).catch(function (e) { toast(e.message); }); };
-        if ($('#undo')) $('#undo').onclick = function () { if (!confirm('Undo the most recent reconciliation? Its items become unticked.')) return; api('/api/bank/reconcile/' + acct + '/undo-last', 'POST').then(function () { toast('Undone'); rec(); }).catch(function (e) { toast(e.message); }); };
+        if ($('#undo')) $('#undo').onclick = async function () { if (!(await vasConfirm('Undo the most recent reconciliation? Its items become unticked.'))) return; api('/api/bank/reconcile/' + acct + '/undo-last', 'POST').then(function () { toast('Undone'); rec(); }).catch(function (e) { toast(e.message); }); };
         return;
       }
       drawRec(d);
@@ -161,10 +162,10 @@
     $('#tm').onclick = function () { tick([], true, { matched: true }); };
     $('#ta').onclick = function () { tick(d.lines.map(function (l) { return l.id; }), true); };
     $('#tn').onclick = function () { tick(d.lines.filter(function (l) { return l.ticked; }).map(function (l) { return l.id; }), false); };
-    var adjust = function (kind) { var a = prompt(kind === 'difference' ? 'Adjustment amount (minus for money out). Use this only when you cannot find the difference.' : 'Amount from the statement: minus for bank charges, plus for interest', kind === 'difference' ? String(d.difference) : ''); if (!a) return; api('/api/bank/reconcile/r/' + r.id + '/adjust', 'POST', { amount: a, kind: kind }).then(function (x) { if (!x.posted) toast('Saved; it will appear once the ledger posts it'); drawRec(x); }).catch(function (e) { toast(e.message); }); };
-    $('#adj').onclick = function () { adjust('charges'); };
-    $('#dif').onclick = function () { adjust('difference'); };
-    $('#cx').onclick = function () { if (!confirm('Cancel this reconciliation? Ticks are lost.')) return; api('/api/bank/reconcile/r/' + r.id + '/cancel', 'POST').then(rec).catch(function (e) { toast(e.message); }); };
+    var adjust = async function (kind) { var a = await vasPrompt(kind === 'difference' ? 'Adjustment amount (minus for money out). Use this only when you cannot find the difference.' : 'Amount from the statement: minus for bank charges, plus for interest', kind === 'difference' ? String(d.difference) : ''); if (!a) return; api('/api/bank/reconcile/r/' + r.id + '/adjust', 'POST', { amount: a, kind: kind }).then(function (x) { if (!x.posted) toast('Saved; it will appear once the ledger posts it'); drawRec(x); }).catch(function (e) { toast(e.message); }); };
+    $('#adj').onclick = async function () { await adjust('charges'); };
+    $('#dif').onclick = async function () { await adjust('difference'); };
+    $('#cx').onclick = async function () { if (!(await vasConfirm('Cancel this reconciliation? Ticks are lost.'))) return; api('/api/bank/reconcile/r/' + r.id + '/cancel', 'POST').then(rec).catch(function (e) { toast(e.message); }); };
     $('#fin').onclick = function () { api('/api/bank/reconcile/r/' + r.id + '/finish', 'POST').then(function () { toast('Reconciled to ' + r.statement_date); rec(); }).catch(function (e) { toast(e.message); }); };
   }
 
@@ -214,8 +215,8 @@
                 '<td><span class="pill ' + QS[l.status][0] + '">' + QS[l.status][1] + '</span>' + ch(l) + (l.reason ? '<br><small>' + esc(l.reason) + '</small>' : '') + '</td><td>' + (l.account ? esc(l.account) : '<small>' + esc(l.note || '') + '</small>') + '</td></tr>';
             }).join('') +
             '</tbody></table></div><div class="controls" style="margin-top:10px"><button class="primary" id="qgo"' + (work ? '' : ' disabled') + '>' + (rep ? 'Replace' : 'Update') + ': add ' + s.new + ', correct ' + s.changed + (rep ? ', take off ' + s.gone : '') + '</button></div>';
-          $('#qgo').onclick = function () {
-            if (rep && s.gone && !confirm('Take ' + s.gone + ' line(s) that are no longer in QuickBooks off the review list?')) return;
+          $('#qgo').onclick = async function () {
+            if (rep && s.gone && !(await vasConfirm('Take ' + s.gone + ' line(s) that are no longer in QuickBooks off the review list?'))) return;
             this.disabled = true;
             api('/api/bank/import-qb/' + acct, 'POST', qbody(false)).then(function (x) { toast('Added ' + x.added + ', corrected ' + x.updated + (x.removed ? ', took off ' + x.removed : '')); feed.st = 'new'; feed(); }).catch(function (e) { toast(e.message); });
           };
@@ -234,9 +235,9 @@
       });
       rulesCard();
       all('[data-add]').forEach(function (b) {
-        b.onclick = function () {
+        b.onclick = async function () {
           var i = +b.getAttribute('data-add'), f = d.lines[i], rule = $('[data-rl="' + i + '"]').checked;
-          var text = rule ? prompt('Use this account whenever the description contains:', f.description.split(/\s+/).slice(0, 2).join(' ')) : '';
+          var text = rule ? (await vasPrompt('Use this account whenever the description contains:', f.description.split(/\s+/).slice(0, 2).join(' '))) : '';
           if (rule && !text) return;
           api('/api/bank/feed/' + f.id + '/add', 'POST', { account_id: $('[data-acc="' + i + '"]').value, class_id: $('[data-cls="' + i + '"]').value, payee: $('[data-py="' + i + '"]').value, make_rule: rule, rule_text: text }).then(function () { toast('Added'); feed(); }).catch(function (e) { toast(e.message); });
         };
@@ -256,7 +257,7 @@
         (d.rules.length ? d.rules.map(function (r) { return '<tr><td><b>' + esc(r.contains) + '</b></td><td>' + (r.mode === 'split' ? '<span class="pill">split</span> ' + r.splits.map(function (x) { return esc((x.kind === 'amount' ? J(x.value) : x.kind === 'percent' ? x.value + '%' : 'rest') + ' → ' + x.account + (x.class ? ' (' + x.class + ')' : '')); }).join('<br>') : esc(r.code + ' ' + r.account)) + '</td><td>' + esc(r.payee || '') + '</td><td><button class="sm" data-re="' + r.id + '">Change</button> <button class="sm" data-rd="' + r.id + '">Delete</button></td></tr>'; }).join('') : '<tr><td colspan="4" class="empty">No rules yet.</td></tr>') + '</tbody></table>';
       $('#rnew').onclick = function () { ruleEditor(null); };
       all('[data-re]', el).forEach(function (b) { b.onclick = function () { ruleEditor(d.rules.find(function (r) { return r.id === +b.getAttribute('data-re'); })); }; });
-      all('[data-rd]', el).forEach(function (b) { b.onclick = function () { if (!confirm('Delete this rule?')) return; api('/api/bank/rules/' + b.getAttribute('data-rd'), 'DELETE').then(feed).catch(function (e) { toast(e.message); }); }; });
+      all('[data-rd]', el).forEach(function (b) { b.onclick = async function () { if (!(await vasConfirm('Delete this rule?'))) return; api('/api/bank/rules/' + b.getAttribute('data-rd'), 'DELETE').then(feed).catch(function (e) { toast(e.message); }); }; });
     }).catch(function (e) { el.innerHTML = '<p class="sub">' + esc(e.message) + '</p>'; });
   }
   function ruleEditor(r) {

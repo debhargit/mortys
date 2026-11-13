@@ -24,6 +24,8 @@ const CHECK = process.argv.includes('--check');
 const COPY_EXT = new Set(['.html', '.css', '.svg', '.jpg', '.jpeg', '.png', '.webp', '.gif', '.ico', '.txt', '.woff', '.woff2', '.map']);
 // Page shells / assets that must not leak even though the extension matches.
 const NEVER = new Set(['.env', '.env.example']);
+// Backup copies (admin_backup-…, _backup-before-…, admin.html._backup-…) stay off the website.
+const isBackup = (name) => name.includes('_backup');
 
 function sha(p) {
   try { return crypto.createHash('sha1').update(fs.readFileSync(p)).digest('hex'); }
@@ -34,7 +36,7 @@ if (!fs.existsSync(PUB)) fs.mkdirSync(PUB, { recursive: true });
 
 let copied = 0, unchanged = 0, drift = 0;
 for (const name of fs.readdirSync(ROOT)) {
-  if (NEVER.has(name)) continue;
+  if (NEVER.has(name) || isBackup(name)) continue;
   const src = path.join(ROOT, name);
   if (!fs.statSync(src).isFile()) continue;
   if (!COPY_EXT.has(path.extname(name).toLowerCase())) continue;
@@ -58,6 +60,7 @@ const ASSET_DST = path.join(PUB, 'assets');
 function syncDir(srcDir, dstDir, rel = '') {
   if (!fs.existsSync(srcDir)) return;
   for (const name of fs.readdirSync(srcDir)) {
+    if (isBackup(name)) continue;
     const s = path.join(srcDir, name);
     const d = path.join(dstDir, name);
     const st = fs.statSync(s);

@@ -439,10 +439,11 @@ header.site .nav{gap:18px;padding:12px 0}
 section[id]{scroll-margin-top:104px}
 
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b"></script>
 </head>
 <body>
 
@@ -459,7 +460,7 @@ section[id]{scroll-margin-top:104px}
     <a class="tb-pill" href="mailto:info@visionautosolutions.com" title="Email us">
       <span class="ic">✉️</span><span class="lbl">info@visionautosolutions.com</span>
     </a>
-    <button class="tb-pill" title="Mon–Fri 8am–5:30pm · Sat 8:30am–5:30pm · Sun closed" onclick="alert('Mon–Fri 8am–5:30pm · Sat 8:30am–5:30pm · Closed Sundays')">
+    <button class="tb-pill" title="Mon–Fri 8am–5:30pm · Sat 8:30am–5:30pm · Sun closed" onclick="vasAlert('Mon–Fri 8am–5:30pm · Sat 8:30am–5:30pm · Closed Sundays')">
       <span class="ic">🕐</span><span class="lbl">Mon–Sat</span>
     </button>
     <a class="tb-pill" href="/account.html" title="Sign in / My Account">
@@ -1023,11 +1024,11 @@ async function leadSubmit(){
     const j=await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(j.error||('HTTP '+r.status));
     const ref=j.id?('#'+j.id):'';
-    alert("✅ Thanks "+(data.first||'')+"!\n\nYour inquiry "+ref+" was received. Our parts desk will contact you at "+data.phone+" within one business day.\n\nFor immediate assistance, call 876-728-4735.");
+    await vasAlert("✅ Thanks "+(data.first||'')+"!\n\nYour inquiry "+ref+" was received. Our parts desk will contact you at "+data.phone+" within one business day.\n\nFor immediate assistance, call 876-728-4735.");
     f.reset();
   }catch(e){
     console.warn('[inquiry] submit failed:',e.message);
-    alert("Sorry — we couldn't submit that just now.\n\nPlease call 876-728-4735 or WhatsApp 876-553-4458 and we'll sort it out.");
+    await vasAlert("Sorry — we couldn't submit that just now.\n\nPlease call 876-728-4735 or WhatsApp 876-553-4458 and we'll sort it out.");
   }finally{
     if(btn){btn.disabled=false;btn.textContent='Send Inquiry';}
   }

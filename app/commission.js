@@ -132,7 +132,7 @@ function register(app, deps) {
   async function sweep() {
     if (busy) return { busy: true };
     busy = true;
-    const out = { sales: 0, entries: 0, collected: 0, lapsed: 0, voided: 0, clawbacks: 0 };
+    const out = { sales: 0, entries: 0, collected: 0, lapsed: 0, voided: 0, clawbacks: 0, restored: 0 };
     try {
       const start = await setting('comm_start_at', null);
       if (!start) return { not_started: true };
@@ -175,6 +175,19 @@ function register(app, deps) {
            JOIN commission_entries e ON e.sale_item_id = i.id AND e.kind = 'earned' AND e.status <> 'void'
           WHERE r.created_at >= $1
          ON CONFLICT DO NOTHING`, [start])).rowCount;
+      // 5. A return that was voided gives the commission back: a clawback not
+      //    yet on a statement is cancelled; one already settled (on a statement,
+      //    approved or paid) is put right with an adjustment on the next one.
+      out.restored = (await query(
+        `UPDATE commission_entries e SET status = 'void', note = CONCAT_WS(' · ', e.note, 'return voided')
+           FROM pos_sale_returns_all r WHERE e.return_id = r.id AND r.voided_at IS NOT NULL AND e.kind = 'clawback_return' AND e.status IN ('pending', 'earned')`)).rowCount;
+      out.restored += (await query(
+        `INSERT INTO commission_entries (rep_id, sale_id, sale_item_id, return_id, kind, basis, basis_amount, rate, share_pct, amount, rule_name, status, earned_at, note)
+         SELECT e.rep_id, e.sale_id, e.sale_item_id, e.return_id, 'adjust', e.basis, -e.basis_amount, e.rate, e.share_pct, -e.amount, e.rule_name, 'earned', r.voided_at,
+                'return ' || r.return_number || ' voided after its clawback was settled'
+           FROM commission_entries e JOIN pos_sale_returns_all r ON r.id = e.return_id
+          WHERE r.voided_at IS NOT NULL AND e.kind = 'clawback_return' AND e.status IN ('on_statement', 'approved', 'paid')
+            AND NOT EXISTS (SELECT 1 FROM commission_entries a WHERE a.kind = 'adjust' AND a.return_id = e.return_id AND a.sale_item_id = e.sale_item_id AND a.rep_id = e.rep_id)`)).rowCount;
     } finally { busy = false; lastRun = { at: new Date().toISOString(), ...out }; }
     return out;
   }

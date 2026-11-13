@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1b2b">
+<title>Petty cash vouchers · Vision Auto Solutions</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#15803d; --bad:#b91c1c; --warn:#b45309; --chip:#eef2f7; --soft:#f8fafc; --blue:#1d4ed8; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --soft:#111a24; --ok:#22c55e; --bad:#f87171; --warn:#f59e0b; --blue:#60a5fa; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:max(10px,env(safe-area-inset-top)) 16px 10px;position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header a.back{color:#fff;text-decoration:none;font-size:20px;opacity:.85}
+  header h1{font-size:17px;margin:0;flex:1;min-width:180px}
+  header .who{font-size:12.5px;opacity:.8}
+  button,.btn{font:inherit;cursor:pointer;border:1px solid var(--line);border-radius:9px;padding:8px 14px;background:var(--card);color:var(--ink);font-weight:600}
+  button:disabled{opacity:.5;cursor:default}
+  .primary{background:var(--red)!important;border-color:var(--red)!important;color:#fff!important}
+  .go{background:var(--ok)!important;border-color:var(--ok)!important;color:#fff!important}
+  .amber{background:#b45309!important;border-color:#b45309!important;color:#fff!important}
+  .ghost{background:transparent}
+  .sm{padding:5px 10px;font-size:13px}
+  header button{border-color:rgba(255,255,255,.25)}
+  input,select,textarea{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);width:100%;min-width:0}
+  textarea{resize:vertical}
+  label.l{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;margin:0 0 3px}
+  .wrap{display:grid;grid-template-columns:minmax(300px,380px) 1fr;gap:14px;padding:14px;max-width:1500px;margin:0 auto}
+  @media (max-width:900px){ .wrap{grid-template-columns:1fr} .wrap.detail .listpane{display:none} .wrap:not(.detail) .mainpane{display:none} }
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px}
+  .listpane .card{overflow:hidden}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;padding:10px}
+  .chips button{padding:5px 10px;font-size:12.5px;border-radius:999px;background:var(--chip);border-color:transparent}
+  .chips button.on{background:var(--navy);color:#fff}
+  .chips b{font-size:11px;opacity:.75;margin-left:3px}
+  .search{padding:0 10px 10px}
+  .vrow{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:10px 12px;border-top:1px solid var(--line);cursor:pointer}
+  .vrow:hover{background:var(--soft)} .vrow.on{background:#fff7ed} @media (prefers-color-scheme: dark){ .vrow.on{background:#2a2116} }
+  .vrow .n{font-weight:700} .vrow .amt{font-weight:800;text-align:right}
+  .vrow .s{font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:999px;text-transform:uppercase;letter-spacing:.4px;background:var(--chip);color:var(--ink)}
+  .pill.draft{background:#e5e7eb;color:#374151} .pill.pending{background:#fef3c7;color:#92400e} .pill.approved{background:#dbeafe;color:#1e3a8a}
+  .pill.rejected{background:#fee2e2;color:#991b1b} .pill.sent{background:#ede9fe;color:#5b21b6} .pill.paid{background:#dcfce7;color:#166534} .pill.void{background:#f3f4f6;color:#6b7280;text-decoration:line-through}
+  .empty{padding:30px 14px;text-align:center;color:var(--muted)}
+  .mainpane{min-width:0}
+  .paper{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .ph{background:var(--navy);color:#fff;padding:14px 18px;display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
+  .ph .co{flex:1;min-width:200px} .ph .co b{font-size:17px} .ph .co div{font-size:12px;opacity:.85}
+  .ph .ti{text-align:right} .ph .ti b{font-size:15px;letter-spacing:1px} .ph .ti div{font-size:13px}
+  .ph img{height:44px;border-radius:6px;background:#fff;padding:3px}
+  .sec{padding:14px 18px;border-top:1px solid var(--line)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px 16px}
+  @media (max-width:640px){ .grid2,.grid3{grid-template-columns:1fr} }
+  .kv{display:grid;grid-template-columns:110px 1fr;gap:4px 10px;font-size:14px}
+  .kv span{color:var(--muted)}
+  table.lines{width:100%;border-collapse:collapse;font-size:14px}
+  table.lines th{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);text-align:left;padding:6px;border-bottom:2px solid var(--line)}
+  table.lines td{padding:6px;border-bottom:1px solid var(--line);vertical-align:top}
+  .r{text-align:right} .nowrap{white-space:nowrap}
+  table.lines tfoot td{font-weight:800;font-size:16px;border-bottom:0}
+  .words{font-style:italic;color:var(--muted);font-size:13px}
+  .edit table.lines td{padding:4px}
+  .edit table.lines input,.edit table.lines select{padding:7px 8px}
+  .edit .qty{width:80px} .edit .unit{width:120px}
+  .edit table.lines td.acc select{max-width:280px} .edit table.lines td.det{min-width:240px}
+  @media (max-width:760px){
+    .edit table.lines thead{display:none}
+    .edit table.lines tr{display:grid;grid-template-columns:70px 1fr 1fr;gap:6px;padding:8px 0;border-bottom:1px solid var(--line)}
+    .edit table.lines td{border:0;padding:0}
+    .edit table.lines td.det{grid-column:2/4} .edit table.lines td.acc{grid-column:1/4}
+    .edit .qty,.edit .unit{width:100%}
+  }
+  .sig{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  @media (max-width:760px){ .sig{grid-template-columns:1fr 1fr} }
+  .sig div{font-size:12px;color:var(--muted)} .sig b{display:block;color:var(--ink);font-size:14px;min-height:20px}
+  .sig .line{border-top:1px solid var(--muted);margin-top:26px;padding-top:3px}
+  .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .note{font-size:12.5px;color:var(--muted)}
+  .box{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .opt{display:flex;gap:10px;align-items:flex-start;padding:10px;border:1px solid var(--line);border-radius:10px;margin-top:8px;cursor:pointer}
+  .opt.on{border-color:var(--navy);box-shadow:0 0 0 1px var(--navy) inset}
+  .opt input[type=radio]{width:auto;margin-top:4px}
+  .cm{padding:8px 0;border-bottom:1px dashed var(--line)} .cm:last-child{border-bottom:0}
+  .cm .h{font-size:12px;color:var(--muted)}
+  .ev{font-size:12.5px;color:var(--muted);padding:3px 0}
+  .ev b{color:var(--ink);font-weight:600}
+  .banner{padding:10px 14px;border-radius:10px;font-size:13.5px;margin-bottom:10px}
+  .banner.warn{background:#fef3c7;color:#92400e} .banner.bad{background:#fee2e2;color:#991b1b} .banner.ok{background:#dcfce7;color:#166534} .banner.info{background:#dbeafe;color:#1e3a8a}
+  dialog{border:0;border-radius:14px;padding:0;max-width:560px;width:calc(100% - 24px);background:var(--card);color:var(--ink)}
+  dialog::backdrop{background:rgba(0,0,0,.45)}
+  dialog .dh{padding:14px 18px;border-bottom:1px solid var(--line);font-weight:800}
+  dialog .db{padding:14px 18px} dialog .df{padding:12px 18px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+  .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#111827;color:#fff;padding:10px 16px;border-radius:10px;z-index:50;display:none;max-width:90vw;font-size:14px}
+  .toast.bad{background:#b91c1c}
+  .linkbox{display:flex;gap:6px} .linkbox input{font-size:13px}
+  .print-only{display:none}
+  @media print{
+    @page{margin:12mm}
+    body{background:#fff;color:#000;font-size:12.5px}
+    header,.listpane,.actions,.noprint,.toast,dialog{display:none!important}
+    .wrap{display:block;padding:0}
+    .mainpane{display:block!important}
+    .paper{border:1px solid #999;border-radius:0}
+    .ph{background:#fff!important;color:#000!important;border-bottom:2px solid #000}
+    .pill{border:1px solid #999;background:#fff!important;color:#000!important}
+    .print-only{display:block}
+    .sec{padding:8px 12px}
+  }
+</style>
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
+</head>
+<body>
+<header>
+  <a class="back noprint" id="backLink" href="/admin.html" title="Back office">‹</a>
+  <h1>🧾 Petty cash vouchers</h1>
+  <span class="who" id="who"></span>
+  <button class="primary" id="newBtn">+ New voucher</button>
+  <button class="ghost" id="popBtn" style="color:#fff;display:none" title="Open in its own window">↗ Own window</button>
+</header>
+<div class="wrap" id="wrap">
+  <div class="listpane">
+    <div class="card">
+      <div class="chips" id="chips"></div>
+      <div class="search"><input id="q" placeholder="Search number, payee, reference, detail"></div>
+      <div id="list"><div class="empty">Loading…</div></div>
+    </div>
+  </div>
+  <div class="mainpane" id="main"><div class="card empty">Choose a voucher on the left, or make a new one.</div></div>
+</div>
+
+<dialog id="dlg"><form method="dialog" id="dlgForm"><div class="dh" id="dlgTitle"></div><div class="db" id="dlgBody"></div><div class="df" id="dlgFoot"></div></form></dialog>
+<div class="toast" id="toast"></div>
+<datalist id="dlPayees"></datalist>
+<datalist id="dlDetails"></datalist>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function api(url, opts){ opts = opts || {}; opts.credentials='same-origin';
+    if (opts.json) { opts.method = opts.method || 'POST'; opts.headers = { 'Content-Type': 'application/json' }; opts.body = JSON.stringify(opts.json); delete opts.json; }
+    return fetch(url, opts).then(function(r){
+      if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); }
+      return r.json().catch(function(){ return {}; }).then(function(j){ if(!r.ok) throw new Error(j.error||r.statusText); return j; }); }); }
+  var tt;
+  function toast(m, bad){ var t=$('toast'); t.textContent=m; t.className='toast'+(bad?' bad':''); t.style.display='block'; clearTimeout(tt); tt=setTimeout(function(){ t.style.display='none'; }, 4200); }
+  function r2(v){ return Math.round((Number(v)||0)*100)/100; }
+  function money(v){ return 'J$' + r2(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  function dt(ts){ if(!ts) return ''; var d=new Date(ts); return d.toLocaleDateString('en-JM',{day:'numeric',month:'short',year:'numeric'}) + ' ' + d.toLocaleTimeString('en-JM',{hour:'numeric',minute:'2-digit'}); }
+  function day(s){ if(!s) return ''; var d=new Date(s+'T12:00:00'); return d.toLocaleDateString('en-JM',{weekday:'short',day:'numeric',month:'short',year:'numeric'}); }
+  var STATUS = { draft:'Draft', pending:'Waiting for approval', approved:'Approved', rejected:'Turned down', sent:'At the till', paid:'Paid', void:'Void' };
+  var TYPE = { expense:'Expenses', cogs:'Cost of sales', other_expense:'Other expenses', asset:'Assets', liability:'Liabilities', equity:'Equity', income:'Income', other_income:'Other income' };
+  var embedded = window.top !== window;
+  if (embedded) { $('backLink').style.display = 'none'; $('popBtn').style.display = ''; }
+  $('popBtn').addEventListener('click', function(){ window.open('/petty-voucher.html' + location.hash, '_blank', 'noopener'); });
+
+  var M = null;           // meta
+  var st = { filter: 'open', q: '', id: null, list: [] };
+
+  function words(v){ // same as the server's
+    var ONES=['','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen'];
+    var TENS=['','','twenty','thirty','forty','fifty','sixty','seventy','eighty','ninety'];
+    function u(n){ var h=Math.floor(n/100), r=n%100, o=[]; if(h) o.push(ONES[h]+' hundred'); if(r) o.push(r<20?ONES[r]:TENS[Math.floor(r/10)]+(r%10?'-'+ONES[r%10]:'')); return o.join(' and '); }
+    var cents=Math.round(Math.abs(Number(v)||0)*100), d=Math.floor(cents/100), c=cents%100, p=[], dd=d;
+    if(!d) return 'Zero dollars and '+String(c).padStart(2,'0')+'/100';
+    [[1e9,'billion'],[1e6,'million'],[1e3,'thousand'],[1,'']].forEach(function(x){ var k=Math.floor(dd/x[0]); if(k){ p.push(u(k)+(x[1]?' '+x[1]:'')); dd-=k*x[0]; } });
+    var s=p.join(' ')+' dollar'+(d===1?'':'s')+' and '+String(c).padStart(2,'0')+'/100'; return s.charAt(0).toUpperCase()+s.slice(1);
+  }
+  function acctLabel(id){ var a = (M.accounts||[]).find(function(x){ return x.id === Number(id); }); return a ? a.code + ' · ' + a.name : ''; }
+  function acctOptions(sel){
+    var out = '', grp = null;
+    (M.accounts||[]).forEach(function(a){
+      if (a.type !== grp) { if (grp !== null) out += '</optgroup>'; grp = a.type; out += '<optgroup label="' + esc(TYPE[a.type] || a.type) + '">'; }
+      out += '<option value="' + a.id + '"' + (Number(sel) === a.id ? ' selected' : '') + '>' + esc(a.code + ' · ' + a.name) + '</option>';
+    });
+    return out + (grp !== null ? '</optgroup>' : '');
+  }
+
+  // ------------------------------------------------------------- list --
+  function chips(counts){
+    var c = {}; (counts||[]).forEach(function(x){ c[x.status] = x.n; });
+    var open = (c.draft||0)+(c.pending||0)+(c.approved||0)+(c.rejected||0)+(c.sent||0);
+    var defs = [['open','Open',open]];
+    if (M.can.approve) defs.unshift(['waiting','Waiting for me',null]);
+    defs = defs.concat([['pending','Waiting',c.pending],['approved','Approved',c.approved],['sent','At the till',c.sent],['paid','Paid',c.paid],['rejected','Turned down',c.rejected],['void','Void',c.void],['all','All',null]]);
+    $('chips').innerHTML = defs.map(function(d){ return '<button data-f="' + d[0] + '" class="' + (st.filter===d[0]?'on':'') + '">' + d[1] + (d[2] ? '<b>' + d[2] + '</b>' : '') + '</button>'; }).join('');
+  }
+  function loadList(){
+    var qs = '?';
+    if (st.filter === 'waiting') qs += 'waiting=1'; else if (st.filter !== 'all') qs += 'status=' + st.filter;
+    if (st.q) qs += '&q=' + encodeURIComponent(st.q);
+    return api('/api/pv/vouchers' + qs).then(function(r){
+      st.list = r.vouchers || []; chips(r.counts);
+      $('list').innerHTML = st.list.length ? st.list.map(function(v){
+        return '<div class="vrow' + (st.id===v.id?' on':'') + '" data-id="' + v.id + '"><div class="n">' + esc(v.number) + ' <span class="pill ' + v.status + '">' + esc(STATUS[v.status]||v.status) + '</span></div>' +
+          '<div class="amt">' + money(v.total) + '</div>' +
+          '<div class="s">' + esc(v.payee_name) + (v.reference ? ' · ref ' + esc(v.reference) : '') + '</div><div class="s r">' + esc(day(v.voucher_date)) + '</div>' +
+          '<div class="s" style="grid-column:1/3">By ' + esc(v.prepared_by_name||'') + (v.approved_by_name ? ' · approved by ' + esc(v.approved_by_name) : v.status==='pending' ? ' · to ' + esc(v.approver_name || 'any approver') : '') + (v.comment_count ? ' · 💬 ' + v.comment_count : '') + '</div></div>';
+      }).join('') : '<div class="empty">No vouchers here.</div>';
+    }).catch(function(e){ $('list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+  $('chips').addEventListener('click', function(e){ var b=e.target.closest('[data-f]'); if(!b) return; st.filter=b.getAttribute('data-f'); loadList(); });
+  var qt; $('q').addEventListener('input', function(){ clearTimeout(qt); qt=setTimeout(function(){ st.q=$('q').value.trim(); loadList(); }, 300); });
+  $('list').addEventListener('click', function(e){ var r=e.target.closest('[data-id]'); if(!r) return; location.hash = 'v=' + r.getAttribute('data-id'); });
+  $('newBtn').addEventListener('click', function(){ location.hash = 'new'; });
+
+  // ------------------------------------------------------------- paper header --
+  function paperHead(numberHtml){
+    var s = M.shop || {};
+    return '<div class="ph">' + (s.logo_url ? '<img src="' + esc(s.logo_url) + '" alt="">' : '') +
+      '<div class="co"><b>' + esc(s.company_name || 'Vision Auto Solutions') + '</b><div>' + esc(s.address || '') + (s.phone ? ' · ' + esc(s.phone) : '') + (s.email ? ' · ' + esc(s.email) : '') + '</div></div>' +
+      '<div class="ti"><b>PETTY CASH VOUCHER</b><div>' + numberHtml + '</div></div></div>';
+  }
+
+  // ------------------------------------------------------------- editor --
+  function blankLine(){ return { qty: 1, detail: '', unit_amount: '', account_id: M.default_account_id }; }
+  function editor(v){
+    var isNew = !v;
+    v = v || { payee_name:'', payee_address:'', payee_phone:'', payee_email:'', reference:'', purpose:'', voucher_date: new Date(Date.now() - 5*3600000).toISOString().slice(0,10), lines:[blankLine()] };
+    $('wrap').classList.add('detail');
+    $('main').innerHTML = '<div class="paper edit">' + paperHead(isNew ? 'New' : esc(v.number) + ' <span class="pill ' + v.status + '">' + esc(STATUS[v.status]) + '</span>') +
+      (v.status === 'rejected' ? '<div class="sec"><div class="banner bad"><b>Turned down</b> by ' + esc(v.rejected_by_name||'') + ': ' + esc(v.reject_reason||'') + '. Change it and send it again.</div></div>' : '') +
+      '<div class="sec"><div class="grid2">' +
+        '<div><label class="l">Pay to (name) *</label><input id="fName" list="dlPayees" value="' + esc(v.payee_name) + '" placeholder="Person or business being paid" autocomplete="off"></div>' +
+        '<div class="grid2"><div><label class="l">Date</label><input id="fDate" type="date" value="' + esc(v.voucher_date) + '"></div><div><label class="l">Reference</label><input id="fRef" value="' + esc(v.reference||'') + '" placeholder="Their receipt / invoice no."></div></div>' +
+        '<div><label class="l">Address</label><textarea id="fAddr" rows="2" placeholder="Street, town">' + esc(v.payee_address||'') + '</textarea></div>' +
+        '<div class="grid2"><div><label class="l">Phone</label><input id="fPhone" value="' + esc(v.payee_phone||'') + '" inputmode="tel"></div><div><label class="l">Email</label><input id="fEmail" type="email" value="' + esc(v.payee_email||'') + '"></div></div>' +
+      '</div><div style="margin-top:10px"><label class="l">Purpose / details</label><input id="fPurpose" value="' + esc(v.purpose||'') + '" placeholder="What the money is for, in a few words"></div></div>' +
+      '<div class="sec"><table class="lines"><thead><tr><th class="r">Qty</th><th>Detail</th><th>Account (where it goes in the books)</th><th class="r">Unit amount</th><th class="r">Total</th><th></th></tr></thead><tbody id="lines"></tbody>' +
+        '<tfoot><tr><td colspan="4" class="r">Total</td><td class="r nowrap" id="tot"></td><td></td></tr></tfoot></table>' +
+        '<div class="actions" style="margin-top:8px;justify-content:space-between"><button type="button" class="sm" id="addLine">+ Add line</button><span class="words" id="words"></span></div></div>' +
+      (isNew ? '<div class="sec"><label class="l">Comment (optional)</label><textarea id="fComment" rows="2" placeholder="Anything the approver or cashier should know"></textarea></div>' : '') +
+      '<div class="sec"><div class="sig"><div>Prepared by<b>' + esc(isNew ? (M.me && M.me.name) : v.prepared_by_name) + '</b></div><div>Approved by<b>' + esc(v.approved_by_name || '—') + '</b></div></div></div>' +
+      '<div class="sec actions">' +
+        '<button type="button" class="ghost" id="cancelEd">Cancel</button><span style="flex:1"></span>' +
+        '<button type="button" id="saveDraft">💾 Save draft</button>' +
+        '<button type="button" class="primary" id="saveSend">Save and send for approval ›</button>' +
+      '</div></div>';
+    var lines = (v.lines && v.lines.length ? v.lines : [blankLine()]).map(function(l){ return { qty: l.qty, detail: l.detail, unit_amount: l.unit_amount, account_id: l.account_id }; });
+    function drawLines(){
+      $('lines').innerHTML = lines.map(function(l, i){
+        var amt = r2((Number(l.qty)||0) * (Number(l.unit_amount)||0));
+        return '<tr data-i="' + i + '"><td><input class="qty r" data-k="qty" type="number" min="0" step="any" value="' + esc(l.qty) + '"></td>' +
+          '<td class="det"><input data-k="detail" list="dlDetails" value="' + esc(l.detail) + '" placeholder="What was bought / paid for" autocomplete="off"></td>' +
+          '<td class="acc"><select data-k="account_id">' + acctOptions(l.account_id) + '</select></td>' +
+          '<td><input class="unit r" data-k="unit_amount" type="number" min="0" step="0.01" value="' + esc(l.unit_amount) + '" placeholder="0.00"></td>' +
+          '<td class="r nowrap" data-amt>' + money(amt) + '</td>' +
+          '<td>' + (lines.length > 1 ? '<button type="button" class="sm ghost" data-del="' + i + '" title="Remove line">✕</button>' : '') + '</td></tr>';
+      }).join('');
+      totals();
+    }
+    function totals(){
+      var t = lines.reduce(function(a, l){ return a + r2((Number(l.qty)||0) * (Number(l.unit_amount)||0)); }, 0);
+      $('tot').textContent = money(t); $('words').textContent = t > 0 ? words(t) : '';
+    }
+    $('lines').addEventListener('input', function(e){
+      var tr = e.target.closest('tr'), k = e.target.getAttribute('data-k'); if (!tr || !k) return;
+      var l = lines[+tr.getAttribute('data-i')]; l[k] = e.target.value;
+      if (k === 'detail') { // a detail used before brings its account (and price, if none typed)
+        var hit = (M.recent||[]).find(function(x){ return x.detail.toLowerCase() === String(l.detail).trim().toLowerCase(); });
+        if (hit) { if (hit.account_id) { l.account_id = hit.account_id; tr.querySelector('select').value = hit.account_id; } if (!Number(l.unit_amount) && hit.unit_amount) { l.unit_amount = hit.unit_amount; tr.querySelector('[data-k=unit_amount]').value = hit.unit_amount; } }
+      }
+      tr.querySelector('[data-amt]').textContent = money(r2((Number(l.qty)||0) * (Number(l.unit_amount)||0)));
+      totals();
+    });
+    $('lines').addEventListener('change', function(e){ var tr=e.target.closest('tr'); if(tr && e.target.tagName==='SELECT') lines[+tr.getAttribute('data-i')].account_id = e.target.value; });
+    $('lines').addEventListener('click', function(e){ var b=e.target.closest('[data-del]'); if(!b) return; lines.splice(+b.getAttribute('data-del'),1); drawLines(); });
+    $('addLine').addEventListener('click', function(){ var last = lines[lines.length-1]; var nl = blankLine(); if (last && last.account_id) nl.account_id = last.account_id; lines.push(nl); drawLines(); var ins = $('lines').querySelectorAll('[data-k=detail]'); ins[ins.length-1].focus(); });
+    $('fName').addEventListener('change', function(){
+      var p = (M.payees||[]).find(function(x){ return x.payee_name.toLowerCase() === $('fName').value.trim().toLowerCase(); });
+      if (p) { if (!$('fAddr').value) $('fAddr').value = p.payee_address||''; if (!$('fPhone').value) $('fPhone').value = p.payee_phone||''; if (!$('fEmail').value) $('fEmail').value = p.payee_email||''; }
+    });
+    $('cancelEd').addEventListener('click', function(){ if (isNew) { location.hash = ''; show(null); } else showVoucher(v.id); });
+    function body(){
+      return { payee_name: $('fName').value, voucher_date: $('fDate').value, reference: $('fRef').value, payee_address: $('fAddr').value, payee_phone: $('fPhone').value,
+        payee_email: $('fEmail').value, purpose: $('fPurpose').value, comment: $('fComment') ? $('fComment').value : '', lines: lines };
+    }
+    function save(then){
+      var bs = [$('saveDraft'), $('saveSend')]; bs.forEach(function(b){ b.disabled = true; });
+      var p = isNew ? api('/api/pv/vouchers', { json: body() }) : api('/api/pv/vouchers/' + v.id, { method: 'PUT', json: body() });
+      return p.then(function(r){ refreshMeta(); return then(r.voucher); }).catch(function(e){ toast(e.message, true); bs.forEach(function(b){ b.disabled = false; }); });
+    }
+    $('saveDraft').addEventListener('click', function(){ save(function(nv){ toast('Saved ' + nv.number + ' as a draft.'); location.hash = 'v=' + nv.id; if (!isNew) showVoucher(nv.id); }); });
+    $('saveSend').addEventListener('click', function(){ save(function(nv){ location.hash = 'v=' + nv.id; render(nv); askApproval(nv); }); });
+    drawLines();
+    $('fName').focus();
+  }
+
+  // ------------------------------------------------------------- the voucher --
+  function showVoucher(id){
+    st.id = id;
+    $('wrap').classList.add('detail');
+    document.querySelectorAll('.vrow').forEach(function(r){ r.classList.toggle('on', +r.getAttribute('data-id') === id); });
+    return api('/api/pv/vouchers/' + id).then(function(r){ render(r.voucher); }).catch(function(e){ $('main').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  function render(v){
+    st.id = v.id; var c = v.can || {};
+    var banner = '';
+    if (v.status === 'pending') banner = '<div class="banner warn">⏳ Waiting for approval' + (v.approver_name ? ' from <b>' + esc(v.approver_name) + '</b>' : ' from anyone who can approve') + (v.submitted_at ? ', sent ' + esc(dt(v.submitted_at)) : '') + '.' + (c.own_approval_blocked ? ' You prepared it, so someone else has to approve it.' : '') + '</div>';
+    else if (v.status === 'rejected') banner = '<div class="banner bad">✕ Turned down by <b>' + esc(v.rejected_by_name||'') + '</b>: ' + esc(v.reject_reason||'') + '</div>';
+    else if (v.status === 'approved') banner = '<div class="banner info">✓ Approved by <b>' + esc(v.approved_by_name||'') + '</b> ' + esc(dt(v.approved_at)) + '. Ready to pay.</div>';
+    else if (v.status === 'sent') banner = '<div class="banner info">💸 Waiting at the till: ' + esc(v.task_target_kind === 'user' ? (v.task_target_user || 'a cashier') : v.task_target_kind === 'station' ? (v.task_target_station || 'a till') : 'any cashier') + ' will pay it from the drawer (Cashier tab › Due for payment).</div>';
+    else if (v.status === 'paid') banner = '<div class="banner ok">✓ Paid ' + esc(dt(v.paid_at)) + (v.paid_by_name ? ' by <b>' + esc(v.paid_by_name) + '</b>' : '') + (v.pay_via === 'fund' ? ' from petty cash' + (v.fund_name ? ' (' + esc(v.fund_name) + ')' : '') : ' from the drawer' + (v.session_id ? ', shift ' + v.session_id : '')) + '. Posted to the accounts below.</div>';
+    else if (v.status === 'void') banner = '<div class="banner bad">Void: ' + esc(v.void_reason||'') + ' (' + esc(v.voided_by_name||'') + ', ' + esc(dt(v.voided_at)) + ')</div>';
+
+    var act = [];
+    if (c.approve) act.push('<button class="go" data-a="approve">✓ Approve</button>');
+    if (c.reject) act.push('<button data-a="reject">✕ Turn down</button>');
+    if (c.edit) act.push('<button data-a="edit">✏ Edit</button>');
+    if (c.submit) act.push('<button data-a="submit">' + (v.status === 'pending' ? '🔗 Send approval link again' : '📨 Send for approval') + '</button>');
+    if (c.send || c.pay_here || c.pay_fund) act.push('<button class="amber" data-a="pay">💸 Pay / send to cashier</button>');
+    if (c.take_back) act.push('<button data-a="takeback">↩ Take back from the till</button>');
+    if (c.recall) act.push('<button class="ghost" data-a="recall">Recall to change</button>');
+    act.push('<span style="flex:1"></span><button data-a="print">🖨 Print</button><button data-a="email">✉ Email</button><button data-a="link" title="Copy the link to this voucher">🔗 Link</button>');
+    if (c.void) act.push('<button class="ghost" data-a="void" style="color:var(--bad)">Void</button>');
+
+    var paidHow = v.status === 'paid' ? (v.pay_via === 'fund' ? 'Petty cash' + (v.fund_name ? ' · ' + v.fund_name : '') : 'Drawer' + (v.session_id ? ' · shift ' + v.session_id : '')) : '';
+    $('main').innerHTML = '<div class="noprint">' + banner + '</div>' +
+      '<div class="paper">' + paperHead('No. <b>' + esc(v.number) + '</b> <span class="pill ' + v.status + '">' + esc(STATUS[v.status]) + '</span><br>' + esc(day(v.voucher_date))) +
+      '<div class="sec grid2"><div class="kv"><span>Pay to</span><b>' + esc(v.payee_name) + '</b>' +
+          (v.payee_address ? '<span>Address</span><div>' + esc(v.payee_address).replace(/\n/g, '<br>') + '</div>' : '') +
+          (v.payee_phone ? '<span>Phone</span><div>' + esc(v.payee_phone) + '</div>' : '') + (v.payee_email ? '<span>Email</span><div>' + esc(v.payee_email) + '</div>' : '') + '</div>' +
+        '<div class="kv">' + (v.reference ? '<span>Reference</span><b>' + esc(v.reference) + '</b>' : '') + (v.purpose ? '<span>Purpose</span><div>' + esc(v.purpose) + '</div>' : '') +
+          (paidHow ? '<span>Paid from</span><div>' + esc(paidHow) + '</div>' : '') + '</div></div>' +
+      '<div class="sec"><table class="lines"><thead><tr><th class="r">Qty</th><th>Detail</th><th>Account</th><th class="r">Unit amount</th><th class="r">Total</th></tr></thead><tbody>' +
+        v.lines.map(function(l){ return '<tr><td class="r">' + esc(l.qty) + '</td><td>' + esc(l.detail) + '</td><td style="color:var(--muted)">' + esc((l.account_code ? l.account_code + ' · ' : '') + (l.account_name || '')) + '</td><td class="r nowrap">' + money(l.unit_amount) + '</td><td class="r nowrap">' + money(l.amount) + '</td></tr>'; }).join('') +
+        '</tbody><tfoot><tr><td colspan="4" class="r">Total</td><td class="r nowrap">' + money(v.total) + '</td></tr></tfoot></table>' +
+        '<div class="words" style="margin-top:4px">' + esc(v.amount_words) + '</div></div>' +
+      '<div class="sec"><div class="sig">' +
+        '<div>Prepared by<b>' + esc(v.prepared_by_name||'') + '</b>' + esc(dt(v.created_at)) + '<div class="line print-only">Signature</div></div>' +
+        '<div>Approved by<b>' + esc(v.approved_by_name || (v.status === 'pending' ? 'Waiting…' : '—')) + '</b>' + esc(dt(v.approved_at)) + '<div class="line print-only">Signature</div></div>' +
+        '<div>Paid by<b>' + esc(v.paid_by_name || '—') + '</b>' + esc(dt(v.paid_at)) + '<div class="line print-only">Signature</div></div>' +
+        '<div>Received by<b>&nbsp;</b>&nbsp;<div class="line">Signature of ' + esc(v.payee_name) + '</div></div>' +
+      '</div></div>' +
+      (v.comments.length ? '<div class="sec print-only"><b>Comments</b>' + v.comments.map(function(cm){ return '<div style="font-size:12px">' + esc(cm.user_name||'') + ' (' + esc(dt(cm.created_at)) + '): ' + esc(cm.body) + '</div>'; }).join('') + '</div>' : '') +
+      '<div class="sec actions noprint">' + act.join('') + '</div></div>' +
+      '<div class="grid2 noprint" style="margin-top:14px;align-items:start">' +
+        '<div class="card" style="padding:14px 16px"><b>💬 Comments</b><div id="cms">' + (v.comments.length ? v.comments.map(function(cm){ return '<div class="cm"><div class="h"><b>' + esc(cm.user_name||'') + '</b> · ' + esc(dt(cm.created_at)) + '</div>' + esc(cm.body).replace(/\n/g,'<br>') + '</div>'; }).join('') : '<div class="note" style="padding:6px 0">No comments yet.</div>') + '</div>' +
+          '<div style="display:flex;gap:6px;margin-top:8px"><textarea id="cmText" rows="2" placeholder="Add a comment"></textarea><button id="cmGo">Post</button></div></div>' +
+        '<div class="card" style="padding:14px 16px"><b>🕘 History</b>' + v.events.map(function(e){ return '<div class="ev">' + esc(dt(e.created_at)) + ' · <b>' + esc(e.user_name||'') + '</b> ' + esc(e.action.replace('_',' ')) + (e.detail ? ': ' + esc(e.detail) : '') + '</div>'; }).join('') + '</div>' +
+      '</div>';
+    $('main').querySelector('.paper').addEventListener('click', function(e){ var b=e.target.closest('[data-a]'); if(b) action(b.getAttribute('data-a'), v); });
+    $('cmGo').addEventListener('click', function(){
+      var t = $('cmText').value.trim(); if (!t) return;
+      this.disabled = true;
+      api('/api/pv/vouchers/' + v.id + '/comments', { json: { body: t } }).then(function(r){ render(r.voucher); loadList(); }).catch(function(e){ toast(e.message, true); });
+    });
+    document.querySelectorAll('.vrow').forEach(function(r){ r.classList.toggle('on', +r.getAttribute('data-id') === v.id); });
+  }
+
+  // ------------------------------------------------------------- dialogs --
+  function dialog(title, bodyHtml, buttons, onOpen){
+    $('dlgTitle').textContent = title; $('dlgBody').innerHTML = bodyHtml;
+    $('dlgFoot').innerHTML = '<button value="cancel" formnovalidate class="ghost">Cancel</button>' + buttons.map(function(b, i){ return '<button type="button" data-b="' + i + '" class="' + (b.cls||'') + '">' + b.label + '</button>'; }).join('');
+    $('dlgFoot').querySelectorAll('[data-b]').forEach(function(btn){ btn.addEventListener('click', function(){
+      var b = buttons[+btn.getAttribute('data-b')]; btn.disabled = true;
+      Promise.resolve(b.go()).then(function(keep){ if (keep !== true) $('dlg').close(); else btn.disabled = false; }).catch(function(e){ btn.disabled = false; toast(e.message, true); });
+    }); });
+    $('dlg').showModal(); if (onOpen) onOpen();
+  }
+  function done(r, msg){ if (msg) toast(msg); render(r.voucher); loadList(); }
+  function linkOf(v){ return location.origin + '/petty-voucher.html#v=' + v.id; }
+  function copy(text){ if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text).then(function(){ toast('Link copied.'); }); var i=document.createElement('textarea'); i.value=text; document.body.appendChild(i); i.select(); try{ document.execCommand('copy'); toast('Link copied.'); }catch(_){ } i.remove(); return Promise.resolve(); }
+
+  function askApproval(v){
+    var opts = '<option value="">Everyone who can approve</option>' + (M.approvers||[]).filter(function(a){ return !M.me || a.id !== M.me.id || M.can.full; }).map(function(a){ return '<option value="' + a.id + '"' + (v.approver_id === a.id ? ' selected' : '') + '>' + esc(a.name) + (a.role ? ' (' + esc(a.role) + ')' : '') + '</option>'; }).join('');
+    dialog('📨 Send ' + v.number + ' for approval (' + money(v.total) + ')',
+      '<label class="l">Who should approve it?</label><select id="apWho">' + opts + '</select>' +
+      '<p class="note">Managers and anyone given <b>Approve petty cash vouchers</b> in their permissions. They get it under their bell with a link straight to this voucher.</p>' +
+      '<label style="display:flex;gap:8px;align-items:center;margin:8px 0"><input type="checkbox" id="apEmail" style="width:auto"> Also email them the link</label>' +
+      '<label class="l">Note (optional)</label><input id="apNote" placeholder="e.g. urgent, the courier is waiting">' +
+      '<div id="apDone"></div>',
+      [{ label: 'Send for approval', cls: 'primary', go: function(){
+        return api('/api/pv/vouchers/' + v.id + '/submit', { json: { approver_id: $('apWho').value, email: $('apEmail').checked, note: $('apNote').value } }).then(function(r){
+          render(r.voucher); loadList();
+          var wa = 'https://wa.me/?text=' + encodeURIComponent('Please approve petty cash voucher ' + v.number + ' (' + money(v.total) + ' to ' + v.payee_name + '): ' + r.link);
+          $('dlgFoot').innerHTML = '<button value="cancel" class="primary">Done</button>';
+          $('apDone').innerHTML = '<div class="banner ok" style="margin-top:12px">Sent to ' + r.told + ' approver' + (r.told === 1 ? '' : 's') + ' under their bell.' + (r.emailed && r.emailed.length ? '<br>Email: ' + esc(r.emailed.join(', ')) : '') + '</div>' +
+            '<label class="l">Approval link (to send another way)</label><div class="linkbox"><input id="apLink" readonly value="' + esc(r.link) + '"><button type="button" id="apCopy">Copy</button><a class="btn" target="_blank" rel="noopener" href="' + esc(wa) + '">WhatsApp</a></div>';
+          $('apCopy').addEventListener('click', function(){ copy(r.link); });
+          return true;
+        });
+      } }]);
+  }
+
+  function payDialog(v){
+    var c = v.can, M2 = M;
+    var cashierOpts = (M2.cashiers||[]).map(function(u){ return '<option value="' + u.id + '">' + esc(u.name) + '</option>'; }).join('');
+    var stationOpts = (M2.stations||[]).map(function(s){ return '<option value="' + s.id + '">' + esc(s.name) + '</option>'; }).join('');
+    var fundOpts = (M2.funds||[]).map(function(f){ return '<option value="' + f.id + '">' + esc(f.name) + ' · ' + money(f.balance) + ' on hand</option>'; }).join('');
+    var html = '<p class="note" style="margin-top:0">Approved by <b>' + esc(v.approved_by_name||'') + '</b>. Each line posts to its account; the cash comes out of the drawer or the petty cash fund.</p>';
+    if (c.send) html += '<label class="opt on" data-o="send"><input type="radio" name="po" value="send" checked><div style="flex:1"><b>Send to a cashier to pay</b><div class="note">It shows in their Due for payment; whoever pays it has it on their shift.</div>' +
+      '<div class="grid2" style="margin-top:8px"><select id="pTk"><option value="all">Any cashier</option>' + (cashierOpts ? '<option value="user">One cashier…</option>' : '') + (stationOpts ? '<option value="station">One till…</option>' : '') + '</select>' +
+      '<select id="pUser" style="display:none">' + cashierOpts + '</select><select id="pStation" style="display:none">' + stationOpts + '</select></div>' +
+      '<input id="pNote" placeholder="Note for the cashier (optional)" style="margin-top:6px"></div></label>';
+    if (c.pay_here) html += '<label class="opt' + (c.send ? '' : ' on') + '" data-o="here"><input type="radio" name="po" value="here"' + (c.send ? '' : ' checked') + '><div><b>I am the cashier: pay it from my drawer now</b><div class="note">Uses the shift open on this till. If this PC is not your till it waits in your Due for payment.</div></div></label>';
+    if (c.pay_fund) html += '<label class="opt' + (c.send || c.pay_here ? '' : ' on') + '" data-o="fund"><input type="radio" name="po" value="fund"' + (c.send || c.pay_here ? '' : ' checked') + '><div style="flex:1"><b>Pay from a petty cash fund</b>' +
+      (fundOpts ? '<select id="pFund" style="margin-top:6px">' + fundOpts + '</select>' : '<div class="note">No petty cash fund is set up (Sales &amp; POS › Petty Cash).</div>') + '</div></label>';
+    dialog('💸 Pay ' + v.number + ' · ' + money(v.total) + ' to ' + v.payee_name, html, [{ label: 'Go', cls: 'amber', go: function(){
+      var o = (document.querySelector('input[name=po]:checked') || {}).value;
+      if (o === 'send') {
+        var tk = $('pTk').value;
+        return api('/api/pv/vouchers/' + v.id + '/send', { json: { target_kind: tk, target_user_id: $('pUser').value, target_station_id: $('pStation').value, note: $('pNote').value } }).then(function(r){ done(r, 'Sent to the till. It is in Due for payment.'); });
+      }
+      if (o === 'here') {
+        return api('/api/pv/vouchers/' + v.id + '/send', { json: { target_kind: 'me' } }).then(function(r){
+          return api('/api/cash/tasks/' + r.task_id + '/pay', { json: { reference: v.number } }).then(function(){
+            return api('/api/pv/vouchers/' + v.id).then(function(x){ done(x, 'Paid ' + money(v.total) + ' from your drawer.'); });
+          }).catch(function(e){ done(r); toast('Not paid yet: ' + e.message + ' It is waiting in your Due for payment on the Cashier tab.', true); });
+        });
+      }
+      if (o === 'fund') {
+        if (!$('pFund')) throw new Error('Set up a petty cash fund first');
+        return api('/api/pv/vouchers/' + v.id + '/pay-fund', { json: { fund_id: $('pFund').value } }).then(function(r){ done(r, 'Paid from petty cash.'); });
+      }
+      throw new Error('Choose how it is paid');
+    } }], function(){
+      var b = $('dlgBody');
+      b.querySelectorAll('.opt').forEach(function(o){ o.addEventListener('click', function(){ b.querySelectorAll('.opt').forEach(function(x){ x.classList.toggle('on', x === o); }); o.querySelector('input[type=radio]').checked = true; }); });
+      if ($('pTk')) $('pTk').addEventListener('change', function(){ $('pUser').style.display = this.value === 'user' ? '' : 'none'; $('pStation').style.display = this.value === 'station' ? '' : 'none'; });
+    });
+  }
+
+  function action(a, v){
+    var base = '/api/pv/vouchers/' + v.id;
+    if (a === 'edit') return editor(v);
+    if (a === 'print') return window.print();
+    if (a === 'link') return copy(linkOf(v));
+    if (a === 'submit') return askApproval(v);
+    if (a === 'pay') return payDialog(v);
+    if (a === 'approve') return dialog('✓ Approve ' + v.number + ' · ' + money(v.total), '<p style="margin-top:0">Pay <b>' + money(v.total) + '</b> to <b>' + esc(v.payee_name) + '</b>, prepared by ' + esc(v.prepared_by_name||'') + '.</p><label class="l">Note (optional)</label><input id="xNote">',
+      [{ label: '✓ Approve', cls: 'go', go: function(){ return api(base + '/approve', { json: { note: $('xNote').value } }).then(function(r){ done(r, 'Approved.'); }); } }]);
+    if (a === 'reject') return dialog('✕ Turn down ' + v.number, '<label class="l">Why? *</label><textarea id="xWhy" rows="3"></textarea>',
+      [{ label: 'Turn down', cls: 'primary', go: function(){ return api(base + '/reject', { json: { reason: $('xWhy').value } }).then(function(r){ done(r, 'Turned down; ' + (v.prepared_by_name || 'the preparer') + ' has been told.'); }); } }]);
+    if (a === 'void') return dialog('Void ' + v.number, '<label class="l">Why? *</label><input id="xWhy">',
+      [{ label: 'Void it', cls: 'primary', go: function(){ return api(base + '/void', { json: { reason: $('xWhy').value } }).then(function(r){ done(r, 'Voided.'); }); } }]);
+    if (a === 'recall') return dialog('Recall ' + v.number, '<p style="margin-top:0">It goes back to draft so it can be changed, and the approval is cleared: it has to be approved again.</p>',
+      [{ label: 'Recall', cls: 'primary', go: function(){ return api(base + '/recall', { json: {} }).then(function(r){ done(r, 'Back to draft.'); }); } }]);
+    if (a === 'takeback') return dialog('Take ' + v.number + ' back from the till', '<label class="l">Reason (optional)</label><input id="xWhy">',
+      [{ label: 'Take back', cls: 'primary', go: function(){ return api(base + '/take-back', { json: { reason: $('xWhy').value } }).then(function(r){ done(r, 'Taken back. It is approved and not paid.'); }); } }]);
+    if (a === 'email') return dialog('✉ Email ' + v.number, '<label class="l">To (one or more, separated by commas)</label><input id="xTo" value="' + esc(v.payee_email||'') + '" placeholder="name@example.com">' +
+      '<div class="note" style="margin:4px 0 8px">' + (M.approvers||[]).filter(function(x){ return x.email; }).slice(0, 6).map(function(x){ return '<a href="#" data-mail="' + esc(x.email) + '">+ ' + esc(x.name) + '</a>'; }).join(' &nbsp; ') + '</div>' +
+      '<label class="l">Message (optional)</label><textarea id="xMsg" rows="3"></textarea>',
+      [{ label: 'Send email', cls: 'primary', go: function(){ return api(base + '/email', { json: { to: $('xTo').value, message: $('xMsg').value } }).then(function(r){ done(r, r.stubbed ? 'Not sent: email (SMTP) is not set up on this server yet.' : 'Emailed.'); }); } }],
+      function(){ $('dlgBody').querySelectorAll('[data-mail]').forEach(function(x){ x.addEventListener('click', function(e){ e.preventDefault(); var i=$('xTo'); i.value = (i.value ? i.value.replace(/[,\s]+$/,'') + ', ' : '') + x.getAttribute('data-mail'); }); }); });
+  }
+
+  // ------------------------------------------------------------- routing --
+  function show(){
+    var h = location.hash.replace(/^#/, '');
+    var m = /(?:^|&)v=(\d+)/.exec(h);
+    if (h === 'new') { if (!(M.can.prepare || M.can.approve || M.can.manage)) { toast('Your account cannot prepare vouchers.', true); return; } st.id = null; return editor(null); }
+    if (m) return showVoucher(+m[1]);
+    st.id = null; $('wrap').classList.remove('detail');
+    $('main').innerHTML = '<div class="card empty">Choose a voucher on the left, or make a new one.</div>';
+  }
+  window.addEventListener('hashchange', show);
+  function refreshMeta(){
+    return api('/api/pv/meta').then(function(m){
+      M = m;
+      $('dlPayees').innerHTML = (m.payees||[]).map(function(p){ return '<option value="' + esc(p.payee_name) + '">'; }).join('');
+      $('dlDetails').innerHTML = (m.recent||[]).map(function(p){ return '<option value="' + esc(p.detail) + '">'; }).join('');
+    });
+  }
+  refreshMeta().then(function(){
+    $('who').textContent = (M.me ? M.me.name : '') + (M.can.approve ? ' · can approve' : '');
+    if (!(M.can.prepare || M.can.approve || M.can.manage)) $('newBtn').style.display = 'none';
+    if (M.can.approve && !location.hash) st.filter = 'waiting';
+    loadList(); show();
+  }).catch(function(e){ $('list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; $('main').innerHTML = ''; });
+})();
+</script>
+</body>
+</html>

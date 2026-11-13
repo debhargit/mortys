@@ -440,7 +440,7 @@ function register(app, deps) {
       const fw = fundId ? ' AND cp.fund_id = $3' : '', mw = fundId ? ' AND fund_id = $3' : '';
       const p = fundId ? [from, to, fundId] : [from, to];
       const [byCat, byFund, repl, variance, openAdv, lines] = await Promise.all([
-        query(`SELECT COALESCE(cat.name, 'Uncategorised') AS category, COUNT(*)::int AS n, (COALESCE(SUM(cp.amount_cents),0) / 100.0)::float AS spend_usd
+        query(`SELECT COALESCE(cat.name, CASE WHEN cp.reason LIKE 'Voucher PV-%' THEN 'Petty cash vouchers' ELSE 'Uncategorised' END) AS category, COUNT(*)::int AS n, (COALESCE(SUM(cp.amount_cents),0) / 100.0)::float AS spend_usd
                  FROM cash_payouts cp LEFT JOIN petty_cash_categories cat ON cat.id = cp.category_id
                 WHERE cp.source_type = 'fund' AND NOT cp.voided AND (NOT cp.is_advance OR cp.advance_status = 'expensed')
                   AND cp.created_at::date BETWEEN $1::date AND $2::date${fw}
@@ -456,7 +456,7 @@ function register(app, deps) {
         query(`SELECT COALESCE(cp.advance_to, 'unnamed') AS advance_to, COUNT(*)::int AS count, (COALESCE(SUM(cp.amount_cents),0) / 100.0)::float AS amount_usd
                  FROM cash_payouts cp WHERE cp.is_advance AND cp.advance_status = 'open' AND NOT cp.voided${fundId ? ' AND cp.fund_id = $1' : ''}
                 GROUP BY 1 ORDER BY amount_usd DESC`, fundId ? [fundId] : []),
-        query(`SELECT cp.created_at, f.name AS fund, COALESCE(cat.name, CASE WHEN cp.is_advance THEN 'Staff advance' END) AS category,
+        query(`SELECT cp.created_at, f.name AS fund, COALESCE(cat.name, CASE WHEN cp.is_advance THEN 'Staff advance' WHEN cp.reason LIKE 'Voucher PV-%' THEN 'Petty cash voucher' END) AS category,
                       cp.paid_to, cp.reason, cp.receipt_ref, (cp.amount_cents / 100.0)::float AS amount_usd,
                       cp.is_advance, cp.advance_status, cp.voided, u.name AS authorized_by
                  FROM cash_payouts cp
@@ -476,100 +476,9 @@ function register(app, deps) {
   });
 
   // ============================================================== warranty --
-  // The register is every sold line with a warranty end date (the till keeps
-  // the unit's serial on the line itself), soonest expiry first.
-  app.get('/api/admin/warranty/register', requireAdmin, async (req, res) => {
-    try {
-      const filter = req.query.filter || 'active';
-      const { rows } = await query(
-        `SELECT 'line' AS kind, psi.id AS ref_id, psi.serial_number AS serial, psi.product_img, psi.description AS product_name,
-                to_char(psi.warranty_until, 'YYYY-MM-DD') AS warranty_until, NULL AS unit_status, psi.sale_id,
-                ps.receipt_number, ps.customer_name, ps.customer_phone, ps.created_at AS sold_at
-           FROM pos_sale_items psi
-           JOIN pos_sales ps ON ps.id = psi.sale_id AND NOT COALESCE(ps.voided, false)
-          WHERE psi.warranty_until IS NOT NULL
-          ORDER BY psi.warranty_until ASC LIMIT 1000`);
-      const { rows: claims } = await query(`SELECT sale_item_id FROM warranty_claims WHERE status NOT IN ('closed', 'denied') AND sale_item_id IS NOT NULL`);
-      const open = new Set(claims.map((x) => x.sale_item_id));
-      const t = today(), in30 = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
-      const out = [];
-      for (const r of rows) {
-        r.warranty_state = r.warranty_until < t ? 'expired' : r.warranty_until <= in30 ? 'expiring' : 'active';
-        r.has_open_claim = open.has(r.ref_id);
-        if (filter === 'claimed' ? !r.has_open_claim : ['active', 'expiring', 'expired'].includes(filter) && r.warranty_state !== filter) continue;
-        out.push(r);
-      }
-      res.json({ register: out, as_of: t });
-    } catch (e) { fail(res, e, 'warranty'); }
-  });
-
-  app.get('/api/admin/warranty/claims', requireAdmin, async (req, res) => {
-    try {
-      const status = CLAIM_STATUS.includes(req.query.status) ? req.query.status : null;
-      const { rows } = await query(
-        `SELECT wc.*, COALESCE(p.name, psi.description) AS product_name, ob.name AS opened_by_name, rb.name AS resolved_by_name, ps.receipt_number
-           FROM warranty_claims wc
-           LEFT JOIN products p ON p.img = wc.product_img
-           LEFT JOIN pos_sale_items psi ON psi.id = wc.sale_item_id
-           LEFT JOIN users ob ON ob.id = wc.opened_by
-           LEFT JOIN users rb ON rb.id = wc.resolved_by
-           LEFT JOIN pos_sales ps ON ps.id = wc.sale_id
-          ${status ? 'WHERE wc.status = $1' : ''}
-          ORDER BY wc.opened_at DESC LIMIT 500`, status ? [status] : []);
-      res.json({ claims: rows });
-    } catch (e) { fail(res, e, 'warranty'); }
-  });
-
-  app.post('/api/admin/warranty/claims', requireAdmin, async (req, res) => {
-    try {
-      const b = req.body || {};
-      let productImg = b.product_img ? String(b.product_img) : null;
-      let serial = b.serial ? String(b.serial).trim().slice(0, 120) : null;
-      let saleId = parseInt(b.sale_id, 10) || null, saleItemId = parseInt(b.sale_item_id, 10) || null;
-      let customerName = b.customer_name || null, customerPhone = b.customer_phone || null;
-      // A serial alone finds the line it was sold on (newest first).
-      if (serial && !saleItemId) {
-        const li = await one(`SELECT id, serial_number FROM pos_sale_items WHERE lower(serial_number) = lower($1) ORDER BY id DESC LIMIT 1`, [serial]);
-        if (li) { saleItemId = li.id; serial = li.serial_number; }
-      }
-      if (saleItemId) {
-        const li = await one(`SELECT psi.product_img, psi.sale_id, ps.customer_name, ps.customer_phone
-                                FROM pos_sale_items psi JOIN pos_sales ps ON ps.id = psi.sale_id WHERE psi.id = $1`, [saleItemId]);
-        if (!li) saleItemId = null;
-        else { productImg = productImg || li.product_img; saleId = saleId || li.sale_id; customerName = customerName || li.customer_name; customerPhone = customerPhone || li.customer_phone; }
-      }
-      if (!productImg && !serial && !saleItemId) throw httpError(400, 'Give a serial, a sale line, or a product to open a claim against');
-      const { rows } = await query(
-        `INSERT INTO warranty_claims (product_img, serial, sale_id, sale_item_id, customer_name, customer_phone, fault, opened_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-        [productImg, serial, saleId, saleItemId, customerName, customerPhone, b.fault ? String(b.fault).slice(0, 500) : null, req.session.userId]);
-      res.json({ ok: true, id: rows[0].id });
-    } catch (e) { fail(res, e, 'warranty'); }
-  });
-
-  app.patch('/api/admin/warranty/claims/:id', requireAdmin, async (req, res) => {
-    try {
-      if (!(await userCan(req, 'pos.refund'))) throw httpError(403, 'Not allowed to resolve a warranty claim.');
-      const b = req.body || {};
-      const claim = await one('SELECT id FROM warranty_claims WHERE id = $1', [parseInt(req.params.id, 10) || 0]);
-      if (!claim) throw httpError(404, 'Not found');
-      const sets = [], vals = [];
-      const set = (col, v) => { vals.push(v); sets.push(col + ' = $' + vals.length); };
-      if (b.status !== undefined) {
-        if (!CLAIM_STATUS.includes(b.status)) throw httpError(400, 'Bad status');
-        set('status', b.status);
-      }
-      if (b.resolution_note !== undefined) set('resolution_note', b.resolution_note ? String(b.resolution_note).slice(0, 500) : null);
-      if (b.return_id !== undefined) set('return_id', parseInt(b.return_id, 10) || null);
-      if (b.replacement_sale_id !== undefined) set('replacement_sale_id', parseInt(b.replacement_sale_id, 10) || null);
-      if (b.fault !== undefined) set('fault', b.fault ? String(b.fault).slice(0, 500) : null);
-      if (['repair', 'replace', 'refund', 'denied', 'closed'].includes(b.status)) { set('resolved_by', req.session.userId); sets.push('resolved_at = NOW()'); }
-      if (!sets.length) throw httpError(400, 'Nothing to update');
-      vals.push(claim.id);
-      await query(`UPDATE warranty_claims SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
-      res.json({ ok: true });
-    } catch (e) { fail(res, e, 'warranty'); }
-  });
+  // WARRANTY-RULES: the register, claims (with photos), and the warranty plans
+  // live in warranty.js now; the URLs are the same.
+  require('./warranty').register(app, deps);
 
   // =========================================================== redeemables --
   const RI_COLS = `ri.id, ri.code, ri.product_img, ri.sale_id, ri.sale_item_id, ri.status,

@@ -49,13 +49,14 @@
   .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60;max-width:90vw}
   input.amt{width:120px;text-align:right}
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
-<header><h1>Accounting</h1><nav><a href="/report-balancing.html">Balancing report</a><a href="/report-planning.html">Planning</a><a href="/budget.html">Budget &amp; forecast</a><a href="/admin.html">Admin</a></nav></header>
+<header><h1>Accounting</h1><nav><a href="/report-balancing.html">Balancing report</a><a href="/report-planning.html">Planning</a><a href="/budget.html">Budget &amp; forecast</a><a href="/assets.html">Fixed assets</a><a href="/budget.html#value">Business value</a><a href="/admin.html">Admin</a></nav></header>
 <main>
   <div class="tabs" id="tabs">
     <button data-t="home" class="on">Overview</button><button data-t="journal">Journal</button><button data-t="tb">Trial balance</button>
@@ -65,6 +66,7 @@
 </main>
 <div id="modal"></div>
 <div class="toast" id="toast"></div>
+<script src="/assets/acct-tree.js?v=20261103"></script>
 <script>
 (function () {
   'use strict';
@@ -77,7 +79,9 @@
   var SRC = { sale: 'Sale', sale_payment: 'Payment', sale_void: 'Void', return: 'Return', account_payment: 'Account payment', receipt: 'Goods received', bill: 'Supplier bill',
     po_invoice: 'Purchase invoice', po_payment: 'Supplier payment', till_open: 'Drawer opened', till_movement: 'Drawer movement', till_close: 'Drawer closed',
     stock_day: 'Stock adjustments', gift_card: 'Gift card', commission: 'Commission paid', commission_accrual: 'Commission approved', opening: 'Opening balances', manual: 'Manual', reversal: 'Reversal',
-    ar_invoice: 'Invoice', ar_invoice_void: 'Invoice voided', ap_bill: 'Bill', ap_bill_void: 'Bill voided', ap_payment: 'Bill payment', ap_payment_void: 'Bill payment voided', bank_txn: 'Banking', bank_txn_void: 'Banking voided' };
+    ar_invoice: 'Invoice', ar_invoice_void: 'Invoice voided', ap_bill: 'Bill', ap_bill_void: 'Bill voided', ap_payment: 'Bill payment', ap_payment_void: 'Bill payment voided', bank_txn: 'Banking', bank_txn_void: 'Banking voided',
+    work_order: 'Work order', work_order_unbill: 'Work order taken back', wo_payment: 'Workshop payment', wo_payment_void: 'Workshop payment voided',
+    fa_acquire: 'Fixed asset', fa_acquire_void: 'Fixed asset voided', fa_run: 'Depreciation', fa_run_void: 'Depreciation voided', fa_dispose: 'Asset disposal', fa_dispose_void: 'Asset disposal voided' };
   var tab = 'home', accounts = null, period = null;
   try { tab = localStorage.getItem('vision.glTab') || 'home'; } catch (_) {}
 
@@ -115,8 +119,8 @@
           '<div class="note info">Starting writes one <b>opening entry</b> from the system as it stands right now: stock at cost, what customers owe, what is owed to suppliers, goods received but not billed, and gift-card balances, balanced to Opening Balance Equity. Cash in the safe and the bank are not in the system: add them afterwards as a manual journal.</div>' +
           '<div class="note warn">Do this when the shop is closed (before opening or after the last sale), and check the account names on the Accounts tab match QuickBooks before the first export. It cannot be back-dated.</div>' +
           '<button class="primary" id="start">Start the ledger now</button></div>';
-        $('#start').onclick = function () {
-          if (!confirm('Start the ledger now? This writes the opening entry from today\'s balances.')) return;
+        $('#start').onclick = async function () {
+          if (!(await vasConfirm('Start the ledger now? This writes the opening entry from today\'s balances.'))) return;
           api('/api/gl/setup', 'POST', {}).then(function () { toast('Ledger started'); show(); }).catch(function (e) { toast(e.message); });
         };
         return;
@@ -141,8 +145,29 @@
           t.checks.map(function (c) {
             var ok = c.difference == null ? null : Math.abs(c.difference) < 0.01;
             return '<tr><td><b>' + esc(c.label) + '</b><br><small style="color:var(--muted)">' + esc(c.note) + '</small></td><td class="n">' + J(c.gl) + '</td><td class="n">' + (c.system == null ? '–' : J(c.system)) + '</td><td class="n">' + (c.difference == null ? '–' : J(c.difference)) + '</td><td>' + (ok == null ? '' : ok ? '<span class="pill ok">ties</span>' : '<span class="pill bad">check</span>') + '</td></tr>';
-          }).join('') + '</tbody></table></div></div>';
+          }).join('') + '</tbody></table></div></div><div id="cov"><div class="card empty">Checking every transaction reaches the chart of accounts…</div></div>';
+        return coverage();
       });
+    });
+  }
+
+  // Coverage: every kind of document, whether it is in the ledger, and anything that does not tie back.
+  function coverage() {
+    return api('/api/gl/coverage').then(function (c) {
+      if (!c.started) { $('#cov').innerHTML = ''; return; }
+      var bad = c.orphans.length + c.drift.length + c.problems.length + c.outside.length + c.sources.reduce(function (t, s) { return t + s.failing.length; }, 0);
+      var list = function (title, rows, cls) { return rows.length ? '<div class="note ' + (cls || 'bad') + '"><b>' + title + '</b><br>' + rows.join('<br>') + '</div>' : ''; };
+      $('#cov').innerHTML = '<div class="card"><h2>Coverage ' + (bad ? '<span class="pill bad">' + bad + ' to look at</span>' : '<span class="pill ok">every transaction ties back</span>') + '</h2>' +
+        '<p class="sub">Each kind of transaction the system records, and whether it reached the chart of accounts. ' + c.rule_accounts + ' system accounts are used by the posting rules.</p>' +
+        list('Could not post', [].concat.apply([], c.sources.map(function (s) { return s.failing.map(function (f) { return esc(f.source) + ': ' + esc(f.error); }); }))) +
+        list('Posting rules and the chart', c.problems.map(function (p) { return esc(p.where) + ': ' + esc(p.what); })) +
+        list('In the ledger, but the document has been deleted', c.orphans.map(function (o) { return '<a href="#" data-ce="' + o.id + '">' + esc(o.number) + '</a> ' + esc(SRC[o.kind] || o.kind) + ' #' + o.source_id + (o.source_ref ? ' (' + esc(o.source_ref) + ')' : '') + ', ' + esc(o.entry_date); })) +
+        list('Changed after it was posted', c.drift.map(function (d) { return '<a href="#" data-ce="' + d.id + '">' + esc(d.number) + '</a> ' + esc(SRC[d.kind] || d.kind) + ' ' + esc(d.ref || '') + ': document ' + J(d.document) + ', ledger ' + J(d.ledger); })) +
+        list('Money outside the ledger', c.outside.map(function (o) { return '<b>' + esc(o.what) + '</b>' + (o.count != null ? ' (' + o.count + ')' : '') + ': ' + J(o.amount) + '. ' + esc(o.note); }), 'warn') +
+        '<div class="scroll"><table><thead><tr><th>Transaction</th><th class="n">In the ledger</th><th class="n">Waiting</th><th class="n">Failing</th></tr></thead><tbody>' +
+        c.sources.filter(function (s) { return s.posted || s.waiting || s.failing.length; }).map(function (s) { return '<tr><td>' + esc(SRC[s.kind] || s.kind) + '</td><td class="n">' + s.posted.toLocaleString() + '</td><td class="n">' + (s.waiting || '') + '</td><td class="n">' + (s.failing.length ? '<span class="pill bad">' + s.failing.length + '</span>' : '') + '</td></tr>'; }).join('') +
+        '</tbody></table></div></div>';
+      all('[data-ce]').forEach(function (a) { a.onclick = function (e) { e.preventDefault(); openEntry(a.getAttribute('data-ce')); }; });
     });
   }
 
@@ -175,18 +200,23 @@
         '<tr class="total"><td colspan="3">Total</td><td class="n">' + J(dr) + '</td><td class="n">' + J(cr) + '</td></tr></tbody></table></div>' +
         '<div class="controls" style="margin-top:10px">' + (!e.reversed_by && !e.reverses_id ? '<button id="rev">Reverse this entry</button>' : '') + '<button id="cls">Close</button></div>');
       $('#cls').onclick = closeModal;
-      if ($('#rev')) $('#rev').onclick = function () {
-        var why = prompt('Why is it being reversed? (A mirror entry is posted today; the original stays.)'); if (!why) return;
+      if ($('#rev')) $('#rev').onclick = async function () {
+        var why = await vasPrompt('Why is it being reversed? (A mirror entry is posted today; the original stays.)'); if (!why) return;
         api('/api/gl/entries/' + e.id + '/reverse', 'POST', { memo: why }).then(function () { toast('Reversed'); closeModal(); journal(); }).catch(function (er) { toast(er.message); });
       };
     }).catch(function (er) { toast(er.message); });
   }
   function newJournal() {
-    var row = function () { return '<tr><td><select data-a><option value="">Account…</option>' + acctOptions() + '</select></td><td><input data-p placeholder="Customer / supplier"></td><td><input data-m placeholder="Line memo"></td><td><input class="amt" data-d type="number" step="0.01" min="0"></td><td><input class="amt" data-c type="number" step="0.01" min="0"></td></tr>'; };
+    fetch('/api/assets/pick', { credentials: 'same-origin', headers: { Accept: 'application/json' } }).then(function (r) { return r.ok ? r.json() : { assets: [] }; })
+      .catch(function () { return { assets: [] }; }).then(function (r) { journalForm(r.assets || []); });
+  }
+  function journalForm(fa) {
+    var faOpts = '<option value="">—</option>' + fa.map(function (a) { return '<option value="' + a.id + '">' + esc(a.number + ' ' + a.name) + (a.status === 'active' ? '' : ' (' + esc(a.status) + ')') + '</option>'; }).join('');
+    var row = function () { return '<tr><td><select data-a style="max-width:180px"><option value="">Account…</option>' + acctOptions() + '</select></td><td><input data-p style="width:120px" placeholder="Customer / supplier"></td><td><select data-fa style="width:110px" title="Fixed asset this cost or income belongs to">' + faOpts + '</select></td><td><input data-m style="width:150px" placeholder="Line memo"></td><td><input class="amt" data-d style="width:100px" type="number" step="0.01" min="0"></td><td><input class="amt" data-c style="width:100px" type="number" step="0.01" min="0"></td></tr>'; };
     modal('<h2>Manual journal entry</h2><p class="sub">For things the till does not know: bank charges, cash and bank opening balances, deposits, corrections. A/R and A/P lines need a customer or supplier name.</p>' +
       '<div class="controls"><div><label>Date</label><input type="date" id="jd" value="' + ymd(new Date()) + '"></div><div style="flex:1"><label>What is it for?</label><input id="jm" style="width:100%"></div><div><label>Reference</label><input id="jr"></div></div>' +
-      '<div class="scroll"><table><thead><tr><th>Account</th><th>Customer / supplier</th><th>Memo</th><th class="n">Debit</th><th class="n">Credit</th></tr></thead><tbody id="jl">' + row() + row() + '</tbody>' +
-      '<tfoot><tr class="total"><td colspan="3"><button class="sm" id="addRow">+ line</button></td><td class="n" id="tdr">0.00</td><td class="n" id="tcr">0.00</td></tr></tfoot></table></div>' +
+      '<div class="scroll"><table><thead><tr><th>Account</th><th>Customer / supplier</th><th>Asset</th><th>Memo</th><th class="n">Debit</th><th class="n">Credit</th></tr></thead><tbody id="jl">' + row() + row() + '</tbody>' +
+      '<tfoot><tr class="total"><td colspan="4"><button class="sm" id="addRow">+ line</button></td><td class="n" id="tdr">0.00</td><td class="n" id="tcr">0.00</td></tr></tfoot></table></div>' +
       '<div class="controls" style="margin-top:10px"><button class="primary" id="jsave">Post entry</button><button id="jcancel">Cancel</button><span id="jdiff" class="sub"></span></div>');
     var sum = function () {
       var d = 0, c = 0; all('#jl tr').forEach(function (tr) { d += Number($('[data-d]', tr).value) || 0; c += Number($('[data-c]', tr).value) || 0; });
@@ -198,7 +228,7 @@
     $('#jcancel').onclick = closeModal;
     $('#jsave').onclick = function () {
       if (sum()) { toast('Debits and credits must be equal'); return; }
-      var lines = all('#jl tr').map(function (tr) { return { account_id: $('[data-a]', tr).value, party: $('[data-p]', tr).value, memo: $('[data-m]', tr).value, debit: $('[data-d]', tr).value, credit: $('[data-c]', tr).value }; })
+      var lines = all('#jl tr').map(function (tr) { return { account_id: $('[data-a]', tr).value, party: $('[data-p]', tr).value, asset_id: $('[data-fa]', tr).value, memo: $('[data-m]', tr).value, debit: $('[data-d]', tr).value, credit: $('[data-c]', tr).value }; })
         .filter(function (l) { return l.account_id && (Number(l.debit) || Number(l.credit)); });
       api('/api/gl/journal', 'POST', { date: $('#jd').value, memo: $('#jm').value, ref: $('#jr').value, lines: lines }).then(function () { toast('Posted'); closeModal(); tab = 'journal'; show(); }).catch(function (e) { toast(e.message); });
     };
@@ -218,16 +248,24 @@
         '<div class="card"><h2>Balance sheet at ' + esc(d.to) + '</h2><table><tbody><tr><td>Assets</td><td class="n">' + J(bs.assets) + '</td></tr><tr><td>Liabilities</td><td class="n">' + J(bs.liabilities) + '</td></tr>' +
         '<tr><td>Equity</td><td class="n">' + J(bs.equity) + '</td></tr><tr><td>Profit since the ledger started</td><td class="n">' + J(bs.earnings_to_date) + '</td></tr>' +
         '<tr class="total"><td>Check (should be 0)</td><td class="n">' + J(bs.check) + ' ' + (Math.abs(bs.check) < 0.01 ? '<span class="pill ok">balances</span>' : '<span class="pill bad">does not balance</span>') + '</td></tr></tbody></table></div></div>';
-      h += '<div class="card"><h2>Trial balance ' + (d.totals.balanced ? '<span class="pill ok">debits = credits</span>' : '<span class="pill bad">out of balance</span>') + '</h2><p class="sub">Click an account for its ledger.</p><div class="scroll"><table><thead><tr><th>Account</th><th>QuickBooks</th><th class="n">Opening</th><th class="n">Debits</th><th class="n">Credits</th><th class="n">Closing</th></tr></thead><tbody>';
-      var last = null;
-      d.accounts.forEach(function (a) {
-        if (!a.opening && !a.debits && !a.credits && !a.closing) return;
-        if (a.type !== last) { h += '<tr><td colspan="6" style="font-weight:700;background:var(--chip)">' + esc(TYPE[a.type] || a.type) + '</td></tr>'; last = a.type; }
-        h += '<tr class="click" data-acc="' + a.id + '"><td>' + esc(a.code + ' ' + a.name) + '</td><td><small>' + esc(a.qb_name || '') + '</small></td><td class="n">' + DC(a.opening) + '</td><td class="n">' + J(a.debits) + '</td><td class="n">' + J(a.credits) + '</td><td class="n">' + DC(a.closing) + '</td></tr>';
+      h += '<div class="card"><h2>Trial balance ' + (d.totals.balanced ? '<span class="pill ok">debits = credits</span>' : '<span class="pill bad">out of balance</span>') + '</h2><p class="sub">Click an account for its ledger. ▸ shows a main account\'s sub-accounts. ' + AcctTree.buttons('tbt') + '</p><div class="scroll"><table id="tbt"><thead><tr><th>Account</th><th>QuickBooks</th><th class="n">Opening</th><th class="n">Debits</th><th class="n">Credits</th><th class="n">Closing</th></tr></thead><tbody>';
+      // Grouped by type; sub-accounts fold under their main account (acct-tree.js).
+      var used = d.accounts.filter(function (a) { return a.opening || a.debits || a.credits || a.closing; });
+      Object.keys(TYPE).forEach(function (t) {
+        var items = used.filter(function (a) { return a.type === t; }).map(function (a) { return Object.assign({}, a, { vals: [a.opening, a.debits, a.credits, a.closing] }); });
+        if (!items.length) return;
+        h += '<tr><td colspan="6" style="font-weight:700;background:var(--chip)">' + esc(TYPE[t]) + '</td></tr>';
+        h += AcctTree.rows(AcctTree.build(items, d.accounts), {
+          label: function (a) { return esc(a.code + ' ' + a.name); },
+          extra: function (a, total) { return '<td><small>' + (total ? '' : esc(a.qb_name || '')) + '</small></td>'; },
+          cell: function (a, v, i) { return i === 0 || i === 3 ? DC(v) : J(v); },
+          attrs: function (a) { return 'class="click" data-acc="' + a.id + '"'; },
+        });
       });
       h += '<tr class="total"><td colspan="3">Total</td><td class="n">' + J(d.totals.debits) + '</td><td class="n">' + J(d.totals.credits) + '</td><td></td></tr></tbody></table></div></div>';
       $('#out').innerHTML = h;
       wirePeriod(tb);
+      AcctTree.wire($('#tbt')); AcctTree.wireButtons($('#out'));
       all('[data-acc]').forEach(function (tr) { tr.onclick = function () { ledger(tr.getAttribute('data-acc')); }; });
       $('#tbcsv').onclick = function () {
         csvDownload('trial-balance-' + d.from + '-' + d.to + '.csv', [['code', 'account', 'type', 'quickbooks', 'opening', 'debits', 'credits', 'closing']]
@@ -256,11 +294,11 @@
       $('#out').innerHTML = '<div class="card"><h2>Chart of accounts</h2><p class="sub">The QuickBooks name must match the account in QuickBooks exactly (Parent:Child for sub-accounts). Accounts marked “rule” are used by the posting rules. ' +
         'A <b>sub-account</b> takes its parent’s code plus a number of up to 4 digits (6400-1, 6400-0012) and its parent’s type; a parent shows its total including its sub-accounts (Σ).</p>' +
         '<div class="controls"><label style="display:flex;gap:6px;align-items:center;margin:0;color:inherit;font-size:13px">Import your QuickBooks chart (Lists → Chart of Accounts → File → Export → Lists to IIF): <input type="file" id="iif" accept=".iif,.txt"></label></div>' +
-        '<div class="scroll"><table><thead><tr><th>Code</th><th>Name</th><th>QuickBooks name</th><th>QB type</th><th class="n">Balance</th><th>Active</th><th></th></tr></thead><tbody>' +
+        '<div class="controls">' + AcctTree.buttons('chartt') + '</div><div class="scroll"><table id="chartt"><thead><tr><th>Code</th><th>Name</th><th>QuickBooks name</th><th>QB type</th><th class="n">Balance</th><th>Active</th><th></th></tr></thead><tbody>' +
         d.accounts.map(function (a) {
           var sub = !!a.parent_id, ind = (a.depth || 0) * 18;
-          return '<tr data-id="' + a.id + '">' +
-            '<td style="white-space:nowrap;padding-left:' + (6 + ind) + 'px">' + (sub ? '<span style="color:var(--muted)">↳ </span>' : '') +
+          return '<tr data-id="' + a.id + '" data-tid="' + a.id + '"' + (sub ? ' data-tpar="' + a.parent_id + '"' : '') + (a.sub_count ? ' data-tparent' : '') + '>' +
+            '<td style="white-space:nowrap;padding-left:' + (6 + ind) + 'px">' + (a.sub_count ? '<button type="button" class="tt" data-tt="' + a.id + '" title="Show or hide its sub-accounts">▸</button>' : '') + (sub ? '<span style="color:var(--muted)">↳ </span>' : '') +
               '<input data-f="code" value="' + esc(a.code) + '" style="width:' + (sub ? 96 : 80) + 'px' + (sub ? ';opacity:.75' : '') + '"' + (sub ? ' readonly title="Built from the parent account’s code"' : (a.sub_count ? ' title="Has sub-accounts: their codes are built from this one"' : '')) + '></td>' +
             '<td><input data-f="name" value="' + esc(a.name) + '"></td><td><input data-f="qb_name" value="' + esc(a.qb_name || '') + '" style="min-width:200px"></td>' +
             '<td><select data-f="qb_type"' + (sub ? ' disabled title="Same as the parent account"' : '') + '>' + typeOpts(a.qb_type) + '</select></td>' +
@@ -282,6 +320,7 @@
         '</tbody></table></div></div>';
 
       var byId = {}; d.accounts.forEach(function (a) { byId[a.id] = a; });
+      AcctTree.wire($('#chartt')); AcctTree.wireButtons($('#out'));   // main accounts fold their sub-accounts away
       function paintAddRow() {
         var p = byId[$('#nParent').value];
         $('#nSub').style.display = p ? '' : 'none';
@@ -322,7 +361,7 @@
   // --------------------------------------------------------------- rules --
   var KIND = { pay_method: ['Payments received', 'Where money taken in goes'], pay_out_method: ['Payments made', 'Where money paid out comes from'],
     revenue_category: ['Sales by category', 'Income account per product category'], cogs_category: ['Cost of sales by category', 'Cost account per product category'],
-    stock_reason: ['Stock adjustments', 'Where each kind of stock change is charged'], till_payout: ['Drawer payouts', 'Expense account per payout reason'] };
+    stock_reason: ['Stock adjustments', 'Where each kind of stock change is charged'], till_payout: ['Payouts and petty cash', 'Expense account per drawer payout reason or petty cash category'] };
   function rules() {
     return Promise.all([loadAccounts(), api('/api/gl/map')]).then(function (r) {
       var d = r[1], cur = {};
@@ -372,7 +411,7 @@
         d.classes.map(function (c) { return '<tr><td><b>' + esc(c.name) + '</b></td><td>' + esc(c.location || 'custom') + '</td><td class="n">' + c.lines + '</td><td>' + (c.is_active ? 'active' : 'retired') + '</td><td><button class="sm" data-cr="' + c.id + '">Rename</button> <button class="sm" data-ca="' + c.id + '" data-on="' + (c.is_active ? 0 : 1) + '">' + (c.is_active ? 'Retire' : 'Use again') + '</button></td></tr>'; }).join('') +
         '</tbody></table></div>';
       $('#cadd').onclick = function () { api('/api/gl/classes', 'POST', { name: $('#cn').value }).then(function () { toast('Added'); classesTab(); }).catch(function (e) { toast(e.message); }); };
-      all('[data-cr]').forEach(function (b) { b.onclick = function () { var n = prompt('New name'); if (!n) return; api('/api/gl/classes/' + b.getAttribute('data-cr'), 'PUT', { name: n }).then(function () { classesTab(); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-cr]').forEach(function (b) { b.onclick = async function () { var n = await vasPrompt('New name'); if (!n) return; api('/api/gl/classes/' + b.getAttribute('data-cr'), 'PUT', { name: n }).then(function () { classesTab(); }).catch(function (e) { toast(e.message); }); }; });
       all('[data-ca]').forEach(function (b) { b.onclick = function () { api('/api/gl/classes/' + b.getAttribute('data-ca'), 'PUT', { is_active: b.getAttribute('data-on') === '1' }).then(function () { classesTab(); }).catch(function (e) { toast(e.message); }); }; });
     });
   }
@@ -382,7 +421,9 @@
   // supplier and category, sales by customer and income category; print and CSV.
   var rq = { kind: 'pl', cls: '', byClass: false }, TYPE_HEAD = { income: 'Income', cogs: 'Cost of sales', expense: 'Expenses', other_income: 'Other income', other_expense: 'Other expenses' };
   function reportsTab() {
-    return api('/api/gl/classes').then(function (cd) {
+    var chart = [];
+    return Promise.all([api('/api/gl/classes'), (accounts ? Promise.resolve(accounts) : loadAccounts())]).then(function (r) {
+      var cd = r[0]; chart = r[1].accounts;
       var classOpts = '<option value="">All classes</option>' + cd.classes.map(function (c) { return '<option value="' + c.id + '"' + (String(rq.cls) === String(c.id) ? ' selected' : '') + '>' + esc(c.name) + '</option>'; }).join('') + '<option value="none"' + (rq.cls === 'none' ? ' selected' : '') + '>Unclassified</option>';
       var ctl = periodControls('<div><label>Report</label><select id="rk"><option value="pl">Profit &amp; loss by category</option><option value="expenses">Expenses by supplier and category</option><option value="sales">Sales by customer and income category</option></select></div>' +
         '<div><label>Class</label><select id="rc">' + classOpts + '</select></div><label id="rbw"><input type="checkbox" id="rb"' + (rq.byClass ? ' checked' : '') + '> A column per class</label><span style="margin-left:auto"></span><button id="rpr">Print / PDF</button><button id="rcsv">Excel / CSV</button>');
@@ -399,17 +440,22 @@
           var body = '', last = '';
           var sub = function (k) { return cols ? cols.map(function (c) { return '<td class="n"><b>' + J(d.by_class[c.id || 'none'][k]) + '</b></td>'; }).join('') + '<td class="n"><b>' + J(d.totals[k]) + '</b></td>' : '<td class="n"><b>' + J(d.totals[k]) + '</b></td>'; };
           var totalRow = function (label, k) { rows.push([label].concat(cols ? cols.map(function (c) { return d.by_class[c.id || 'none'][k]; }) : []).concat([d.totals[k]])); return '<tr class="total"><td>' + label + '</td>' + sub(k) + '</tr>'; };
-          d.accounts.forEach(function (a, i) {
-            if (a.type !== last) {
-              if (last === 'cogs' || (last === 'income' && a.type !== 'cogs')) body += totalRow('Gross profit', 'gross_profit');
-              body += '<tr><td colspan="' + head.length + '"><b>' + esc(TYPE_HEAD[a.type]) + '</b></td></tr>'; last = a.type;
-            }
-            rows.push([a.code + ' ' + a.name].concat(cols ? cols.map(function (c) { return a.by[c.id || 'none'] || 0; }) : []).concat([a.total]));
-            body += '<tr><td style="padding-left:' + (a.parent_id ? 28 : 12) + 'px">' + esc(a.code + ' ' + a.name) + '</td>' + (cols ? cols.map(function (c) { return cell(a, c.id || 'none', a.by[c.id || 'none'] || 0); }).join('') : '') + cell(a, undefined, a.total) + '</tr>';
+          var keys = (cols ? cols.map(function (c) { return c.id || 'none'; }) : []).concat([undefined]);
+          d.accounts.forEach(function (a) { rows.push([a.code + ' ' + a.name].concat(cols ? cols.map(function (c) { return a.by[c.id || 'none'] || 0; }) : []).concat([a.total])); });
+          // A section per type; sub-accounts fold under their main account (acct-tree.js).
+          Object.keys(TYPE_HEAD).forEach(function (t) {
+            var items = d.accounts.filter(function (a) { return a.type === t; }).map(function (a) { return Object.assign({}, a, { vals: keys.map(function (k) { return k === undefined ? a.total : (a.by[k] || 0); }) }); });
+            if (!items.length) return;
+            if (last === 'cogs' || (last === 'income' && t !== 'cogs')) body += totalRow('Gross profit', 'gross_profit');
+            body += '<tr><td colspan="' + head.length + '"><b>' + esc(TYPE_HEAD[t]) + '</b></td></tr>'; last = t;
+            body += AcctTree.rows(AcctTree.build(items, chart), {
+              label: function (a) { return esc(a.code + ' ' + a.name); },
+              cell: function (a, v, i, mode) { return mode === 'own' ? cell(a, keys[i], v).replace(/^<td class="n">|<\/td>$/g, '') : J(v); },
+            });
           });
           if (last === 'income' || last === 'cogs') body += totalRow('Gross profit', 'gross_profit');
           body += totalRow('Net profit', 'net');
-          html = '<table><thead><tr>' + head.map(function (h, i) { return '<th' + (i ? ' class="n"' : '') + '>' + esc(h) + '</th>'; }).join('') + '</tr></thead><tbody>' + (d.accounts.length ? body : '<tr><td colspan="' + head.length + '" class="empty">Nothing posted in these dates.</td></tr>') + '</tbody></table>' +
+          html = '<table id="plt"><thead><tr>' + head.map(function (h, i) { return '<th' + (i ? ' class="n"' : '') + '>' + esc(h) + '</th>'; }).join('') + '</tr></thead><tbody>' + (d.accounts.length ? body : '<tr><td colspan="' + head.length + '" class="empty">Nothing posted in these dates.</td></tr>') + '</tbody></table>' +
             '<p class="sub">Income and costs shown as positive. Click an amount to see the lines behind it. Classes are on entries posted from 19 Oct 2026; earlier lines are Unclassified.</p>';
         } else {
           head = [rq.kind === 'sales' ? 'Customer' : 'Supplier'].concat(d.accounts.map(function (a) { return a.code + ' ' + a.name; })).concat(['Total']);
@@ -420,7 +466,8 @@
             rows.map(function (r, i) { return '<tr' + (i === rows.length - 1 ? ' class="total"' : '') + '><td>' + esc(r[0]) + '</td>' + r.slice(1).map(function (v) { return '<td class="n">' + (v ? J(v) : '') + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>' +
             '<p class="sub">From the ' + (rq.kind === 'sales' ? 'customer' : 'supplier') + ' name on each ledger line (bills, cheques, invoices and till sales carry it from 19 Oct 2026). "(no name)" is everything else, e.g. stock adjustments or older entries.</p>';
         }
-        $('#out').innerHTML = '<div class="card">' + ctl + '<h2>' + esc(title) + '</h2>' + html + '</div>';
+        $('#out').innerHTML = '<div class="card">' + ctl + '<h2>' + esc(title) + '</h2>' + (rq.kind === 'pl' ? '<p class="sub">▸ shows a main account\'s sub-accounts. ' + AcctTree.buttons('plt') + '</p>' : '') + html + '</div>';
+        if (rq.kind === 'pl') { AcctTree.wire($('#plt')); AcctTree.wireButtons($('#out')); }
         $('#rk').value = rq.kind; $('#rbw').style.display = rq.kind === 'pl' ? '' : 'none';
         wirePeriod(function () { rq.kind = $('#rk').value; rq.cls = $('#rc').value; rq.byClass = $('#rb').checked; reportsTab(); });
         $('#rk').onchange = $('#rc').onchange = $('#rb').onchange = function () { $('#pgo').click(); };
@@ -463,8 +510,8 @@
       var dl = function (kind, again) {
         var f = $('#pf').value, to = $('#pt').value;
         return fetch('/api/gl/export/' + kind + '?from=' + f + '&to=' + to + (again ? '&again=1' : ''), { credentials: 'same-origin' }).then(function (res) {
-          if (!res.ok) return res.json().then(function (j) {
-            if (res.status === 409 && /already exported/.test(j.error || '') && confirm(j.error + '\n\nExport again anyway?')) return dl(kind, true);
+          if (!res.ok) return res.json().then(async function (j) {
+            if (res.status === 409 && /already exported/.test(j.error || '') && (await vasConfirm(j.error + '\n\nExport again anyway?'))) return dl(kind, true);
             throw new Error(j.error || 'Export failed');
           });
           return res.blob().then(function (b) { var a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'vision-' + (kind === 'iif' ? 'quickbooks' : 'journal') + '-' + f + '-to-' + to + '.' + kind; a.click(); toast('Downloaded'); closeTab(); });
@@ -472,13 +519,13 @@
       };
       $('#xIif').onclick = function () { dl('iif'); };
       $('#xCsv').onclick = function () { dl('csv'); };
-      all('[data-close]').forEach(function (b) { b.onclick = function () { var m = b.getAttribute('data-close'); if (!confirm('Close ' + m + '? Nothing more can be posted into it.')) return; api('/api/gl/periods', 'POST', { month: m }).then(function () { toast(m + ' closed'); closeTab(); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-close]').forEach(function (b) { b.onclick = async function () { var m = b.getAttribute('data-close'); if (!(await vasConfirm('Close ' + m + '? Nothing more can be posted into it.'))) return; api('/api/gl/periods', 'POST', { month: m }).then(function () { toast(m + ' closed'); closeTab(); }).catch(function (e) { toast(e.message); }); }; });
       all('[data-reopen]').forEach(function (b) {
-        b.onclick = function () {
+        b.onclick = async function () {
           var m = b.getAttribute('data-reopen');
-          if (!confirm('Reopen ' + m + '? Only do this to fix something, and fix QuickBooks the same way.')) return;
+          if (!(await vasConfirm('Reopen ' + m + '? Only do this to fix something, and fix QuickBooks the same way.'))) return;
           var go = function (force) { return api('/api/gl/periods/' + m, 'DELETE', force ? { confirm_exported: true } : {}); };
-          go(false).catch(function (e) { if (/already sent/.test(e.message) && confirm(e.message + '\n\nReopen anyway?')) return go(true); throw e; })
+          go(false).catch(async function (e) { if (/already sent/.test(e.message) && (await vasConfirm(e.message + '\n\nReopen anyway?'))) return go(true); throw e; })
             .then(function () { toast(m + ' reopened'); closeTab(); }).catch(function (e) { toast(e.message); });
         };
       });
@@ -493,8 +540,12 @@
   }
   all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
   show();
+  // /accounting.html#entry=123 (links from Fixed assets and other screens) opens that entry.
+  var deep = /^#entry=(\d+)$/.exec(location.hash);
+  if (deep) openEntry(deep[1]);
 })();
 </script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
 <script src="/assets/module-look.js?v=20261101" defer></script>
 </body>
 </html>

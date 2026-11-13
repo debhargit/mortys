@@ -3,93 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Supplier management · Vision Auto Solutions</title>
+<title>Suppliers · Vision Auto Solutions</title>
 <link rel="stylesheet" href="/assets/books.css">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<style>
-  header{background:#0f172a}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px 12px}
-  .grid label{display:block;font-size:12px;color:var(--muted);margin-bottom:2px} .grid input,.grid select{width:100%}
-  .modal .card{max-width:720px}
-  .mono{font-family:ui-monospace,monospace}
-</style>
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script>
+  // Supplier management is now part of the one supplier centre in Payables
+  // (Suppliers tab: record, portal logins and credit; Portal training tab).
+  (function () {
+    var h = location.hash || '';
+    location.replace('/payables.html' + (/training/.test(h) ? '#training' : ''));
+  })();
+</script>
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
-<header><h1>🏭 Supplier management</h1><nav><a href="/supplier.html" target="_blank">Open the supplier portal ↗</a><a href="/admin.html">Admin</a></nav></header>
-<main>
-  <div class="tabs" id="tabs"><button data-t="suppliers" class="on">Suppliers</button><button data-t="training">Training</button></div>
-  <div id="out"><div class="empty">Loading…</div></div>
-</main>
-<div id="modal"></div>
-<div class="toast" id="toast"></div>
-<script src="/assets/books-common.js?v=20261019"></script>
-<script>
-(function () {
-  'use strict';
-  var B = window.Books, $ = B.$, all = B.all, esc = B.esc, api = B.api, toast = B.toast, modal = B.modal, close = B.close, dt = B.dt, J = B.J;
-  var val = function (id) { var el = $('#' + id); return el ? (el.type === 'checkbox' ? el.checked : el.value) : undefined; };
-  var fail = function (e) { toast(e.message || String(e)); };
-  var tab = 'suppliers';
-  all('[data-t]').forEach(function (b) { b.onclick = function () { tab = b.dataset.t; all('[data-t]').forEach(function (x) { x.classList.toggle('on', x === b); }); show(); }; });
-  function show() { (tab === 'training' ? training : suppliers)(); }
-
-  function suppliers() {
-    api('/api/admin/suppliers').then(function (d) {
-      var list = (d.suppliers || []);
-      $('#out').innerHTML = '<div class="card"><h2>Suppliers</h2><p class="sub">Give a supplier a portal login so they can manage their items, consignment, orders and account. The credit limit is what they extend to us.</p>' +
-        '<input id="sq" placeholder="Filter by name" style="max-width:320px;margin-bottom:8px">' +
-        '<div class="scroll"><table><thead><tr><th>Supplier</th><th>Portal</th><th>Retail</th><th>Credit limit</th><th></th></tr></thead><tbody id="srows"></tbody></table></div></div>';
-      var paint = function () {
-        var q = (val('sq') || '').toLowerCase();
-        $('#srows').innerHTML = list.filter(function (s) { return !q || s.name.toLowerCase().indexOf(q) >= 0; }).map(function (s) {
-          return '<tr><td><b>' + esc(s.name) + '</b></td><td>' + (s.portal_enabled ? '<span class="pill ok">on</span>' : '<span class="pill">off</span>') + '</td><td>' + (s.web_retail_enabled ? '✓' : '') + '</td><td>' + (s.credit_limit != null ? J(s.credit_limit) + (s.credit_set_by ? ' <span class="sub">(' + esc(s.credit_set_by) + ')</span>' : '') : '—') + '</td><td style="white-space:nowrap"><button data-manage="' + s.id + '">Manage</button> <button data-record="' + s.id + '" title="Company, addresses, tax ID, bills and items purchased">Record ›</button></td></tr>';
-        }).join('') || '<tr><td colspan="5" class="empty">No suppliers.</td></tr>';
-        all('[data-manage]').forEach(function (b) { b.onclick = function () { manage(Number(b.dataset.manage)); }; });
-        all('[data-record]').forEach(function (b) { b.onclick = function () { location.href = '/admin.html#tab=suppliers&id=' + b.dataset.record; }; });
-      };
-      $('#sq').oninput = paint; paint();
-    }).catch(fail);
-  }
-
-  function manage(id) {
-    api('/api/admin/suppliers/' + id + '/portal').then(function (d) {
-      var s = d.supplier, a = d.account;
-      modal('<h2>' + esc(s.name) + '</h2>' +
-        '<div class="tiles"><div class="tile"><span>We owe them</span><b>' + J(a.balance) + '</b></div><div class="tile' + (a.overdue ? ' bad' : '') + '"><span>Overdue</span><b>' + J(a.overdue) + '</b></div><div class="tile"><span>Their credit to us</span><b>' + (a.credit_limit != null ? J(a.credit_limit) : '—') + '</b></div><div class="tile"><span>Items / orders</span><b>' + d.counts.items + ' / ' + d.counts.orders + '</b></div></div>' +
-        '<div class="grid" style="margin-top:6px"><div><label><input type="checkbox" id="m_portal"' + (s.portal_enabled ? ' checked' : '') + '> Portal enabled</label></div>' +
-        '<div><label><input type="checkbox" id="m_retail"' + (s.web_retail_enabled ? ' checked' : '') + '> Allow retail-through-portal</label></div>' +
-        '<div><label>Credit limit (admin override, J$)</label><input id="m_credit" type="number" step="0.01" value="' + (s.credit_limit != null ? s.credit_limit : '') + '"></div></div>' +
-        '<div class="controls" style="margin-top:8px"><button class="primary" id="m_save">Save</button></div>' +
-        '<h3 style="margin-top:14px">Logins</h3><table><tbody>' + (d.users.length ? d.users.map(function (u) { return '<tr><td>' + esc(u.name || '') + '<div class="sub" style="margin:0">' + esc(u.email) + '</div></td><td>' + esc(u.role) + '</td><td>' + (u.is_active ? '✓' : '✕') + '</td><td>' + (u.last_login_at ? dt(u.last_login_at) : 'never') + '</td><td><button data-reset="' + u.id + '">Reset password</button></td></tr>'; }).join('') : '<tr><td class="empty">No logins yet.</td></tr>') + '</tbody></table>' +
-        '<div class="controls" style="margin-top:6px"><input id="iv_email" placeholder="Email to invite"><input id="iv_name" placeholder="Name"><select id="iv_role"><option value="owner">Owner</option><option value="manager">Manager</option><option value="staff">Staff</option></select><button class="primary" id="iv_go">Invite login</button></div><div id="iv_out" class="sub"></div>' +
-        '<div class="controls" style="margin-top:12px"><button id="m_x">Close</button></div>');
-      $('#m_x').onclick = close;
-      $('#m_save').onclick = function () { api('/api/admin/suppliers/' + id + '/portal', { method: 'PUT', body: { portal_enabled: val('m_portal'), web_retail_enabled: val('m_retail'), credit_limit: val('m_credit') } }).then(function () { toast('Saved'); manage(id); suppliers(); }).catch(fail); };
-      $('#iv_go').onclick = function () {
-        if (!val('iv_email')) return toast('Enter an email');
-        api('/api/admin/suppliers/' + id + '/users', { method: 'POST', body: { email: val('iv_email'), name: val('iv_name'), role: val('iv_role') } })
-          .then(function (r) { $('#iv_out').innerHTML = 'Invited. ' + (r.temp_password ? 'Temporary password: <b class="mono">' + esc(r.temp_password) + '</b> (shown once; they should change it).' : 'An email was sent.'); manage(id); }).catch(fail);
-      };
-      all('[data-reset]').forEach(function (b) { b.onclick = function () { api('/api/admin/suppliers/' + id + '/users/' + b.dataset.reset + '/reset', { method: 'POST', body: {} }).then(function (r) { $('#iv_out').innerHTML = 'New temporary password: <b class="mono">' + esc(r.temp_password) + '</b>'; }).catch(fail); }; });
-    }).catch(fail);
-  }
-
-  function training() {
-    api('/api/admin/supplier-training').then(function (d) {
-      $('#out').innerHTML = '<div class="card"><h2>Supplier training</h2><p class="sub">Notes and links shown to suppliers in their portal. Leave the supplier blank to show it to all.</p>' +
-        '<div class="grid"><div style="grid-column:1/-1"><label>Title</label><input id="t_title"></div><div style="grid-column:1/-1"><label>Body</label><textarea id="t_body" rows="3"></textarea></div><div><label>Link URL (optional)</label><input id="t_url"></div></div>' +
-        '<div class="controls" style="margin-top:8px"><button class="primary" id="t_add">Post</button></div>' +
-        '<table style="margin-top:10px"><tbody>' + (d.items.length ? d.items.map(function (t) { return '<tr><td><b>' + esc(t.title) + '</b><div class="sub" style="margin:0">' + esc(t.supplier_name || 'All suppliers') + (t.url ? ' · ' + esc(t.url) : '') + '</div></td><td><button data-del="' + t.id + '">Delete</button></td></tr>'; }).join('') : '<tr><td class="empty">None yet.</td></tr>') + '</tbody></table></div>';
-      $('#t_add').onclick = function () { if (!val('t_title')) return toast('Title needed'); api('/api/admin/supplier-training', { method: 'POST', body: { title: val('t_title'), body: val('t_body'), url: val('t_url') } }).then(function () { toast('Posted'); training(); }).catch(fail); };
-      all('[data-del]').forEach(function (b) { b.onclick = function () { api('/api/admin/supplier-training/' + b.dataset.del, { method: 'DELETE' }).then(training).catch(fail); }; });
-    }).catch(fail);
-  }
-
-  show();
-})();
-</script>
-<script src="/assets/staff-assist.js?v=20261020" defer></script>
-<script src="/assets/module-look.js?v=20261101" defer></script>
+<header><h1>🏭 Suppliers</h1><nav><a href="/admin.html">Admin</a></nav></header>
+<main><div class="card empty">Suppliers are all in one place now. <a href="/payables.html">Open Suppliers &amp; payables ›</a></div></main>
 </body>
 </html>

@@ -36,10 +36,11 @@
   .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60;max-width:90vw}
   s{color:var(--muted)}
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
 <header><h1>Stock to cash</h1><nav><a href="/clearance.html" target="_blank" rel="noopener">Clearance page ↗</a><a href="/admin.html">Admin</a></nav></header>
@@ -124,29 +125,29 @@
       all('[data-i]').forEach(function (c) { c.onchange = function () { var k = c.getAttribute('data-i'); if (c.checked) sel[k] = d.items.find(function (x) { return x.img === k; }); else delete sel[k]; upd(); }; });
       $('#sa').onchange = function () { var on = this.checked; all('[data-i]').forEach(function (c) { c.checked = on; c.onchange(); }); };
       all('[data-dmg]').forEach(function (b) { b.onclick = function () { disposeDialog(d.items.find(function (x) { return x.img === b.getAttribute('data-dmg'); })); }; });
-      all('.bar [data-a]').forEach(function (b) { b.onclick = function () { bulk(b.getAttribute('data-a')); }; });
+      all('.bar [data-a]').forEach(function (b) { b.onclick = async function () { await bulk(b.getAttribute('data-a')); }; });
     });
   }
-  function bulk(a) {
+  async function bulk(a) {
     var imgs = Object.keys(sel);
     if (a === 'clear') { sel = {}; return list(); }
     if (!imgs.length) return toast('Tick some parts first');
-    var done = function (r) {
+    var done = async function (r) {
       var msg = (r.done ? r.done.length + ' changed' : (r.changed != null ? r.changed + ' changed' : 'Done'));
       if (r.skipped && r.skipped.length) msg += '; ' + r.skipped.length + ' skipped (' + r.skipped.slice(0, 3).map(function (x) { return x.img + ': ' + x.why; }).join('; ') + ')';
       toast(msg); sel = {}; list();
-      if (r.skipped && r.skipped.some(function (x) { return x.below_cost; }) && confirm('Some parts would go below cost. Do it anyway (dead stock)?')) {
+      if (r.skipped && r.skipped.some(function (x) { return x.below_cost; }) && (await vasConfirm('Some parts would go below cost. Do it anyway (dead stock)?'))) {
         api('/api/stockcash/clearance', 'POST', { imgs: r.skipped.filter(function (x) { return x.below_cost; }).map(function (x) { return x.img; }), action: lastAction.action, pct: lastAction.pct, allow_below_cost: true }).then(function (r2) { toast(r2.done.length + ' set below cost'); list(); }).catch(function (e) { toast(e.message); });
       }
     };
     var err = function (e) { toast(e.message); };
     var lastAction = {};
     if (a === 'step' || a === 'end') { lastAction = { action: a }; return api('/api/stockcash/clearance', 'POST', { imgs: imgs, action: a }).then(done).catch(err); }
-    if (a === 'set') { var pct = prompt('Percent off the regular price', '25'); if (!pct) return; lastAction = { action: 'set', pct: pct }; return api('/api/stockcash/clearance', 'POST', { imgs: imgs, action: 'set', pct: pct }).then(done).catch(err); }
-    if (a === 'boost') { var bp = prompt('Commission on these parts, % of the sale (blank = the default)', ''); if (bp === null) return; return api('/api/stockcash/boost', 'POST', { imgs: imgs, pct: bp }).then(done).catch(err); }
+    if (a === 'set') { var pct = await vasPrompt('Percent off the regular price', '25'); if (!pct) return; lastAction = { action: 'set', pct: pct }; return api('/api/stockcash/clearance', 'POST', { imgs: imgs, action: 'set', pct: pct }).then(done).catch(err); }
+    if (a === 'boost') { var bp = await vasPrompt('Commission on these parts, % of the sale (blank = the default)', ''); if (bp === null) return; return api('/api/stockcash/boost', 'POST', { imgs: imgs, pct: bp }).then(done).catch(err); }
     if (a === 'unboost') return api('/api/stockcash/boost', 'POST', { imgs: imgs, remove: true }).then(done).catch(err);
     if (a === 'disc') {
-      var by = prompt('Discontinue these parts (never reordered). Replaced by which part number? (leave blank if none)', ''); if (by === null) return;
+      var by = await vasPrompt('Discontinue these parts (never reordered). Replaced by which part number? (leave blank if none)', ''); if (by === null) return;
       return api('/api/stockcash/flags', 'POST', by ? { imgs: imgs, discontinued: true, superseded_by: by.trim() } : { imgs: imgs, discontinued: true }).then(done).catch(err);
     }
     if (a === 'dead') return api('/api/stockcash/flags', 'POST', { imgs: imgs, override: 'dead' }).then(done).catch(err);
@@ -160,9 +161,9 @@
       '<div><label>% off (open box / damaged)</label><input id="dp" type="number" placeholder="default" style="width:90px"></div><div><label>Found at</label><select id="ds"><option value="manual">Shelf</option><option value="receiving">Receiving</option><option value="count">Stock count</option></select></div></div>' +
       '<input id="dn" placeholder="What is wrong with it" style="width:100%"><div class="controls" style="margin-top:10px"><button class="primary" id="dgo">Save</button><button id="dx">Cancel</button></div>');
     $('#dx').onclick = close;
-    $('#dgo').onclick = function () {
+    $('#dgo').onclick = async function () {
       var k = $('#dk').value;
-      if (k === 'writeoff' && !confirm('Write off ' + $('#dq').value + ' unit(s)? The cost goes to stock losses.')) return;
+      if (k === 'writeoff' && !(await vasConfirm('Write off ' + $('#dq').value + ' unit(s)? The cost goes to stock losses.'))) return;
       api('/api/stockcash/dispose', 'POST', { img: r.img, qty: $('#dq').value, kind: k, pct: $('#dp').value, source: $('#ds').value, note: $('#dn').value })
         .then(function (x) { close(); toast(x.disposition.to_img ? 'Moved to ' + x.disposition.to_img : 'Saved'); list(); }).catch(function (e) { toast(e.message); });
     };
@@ -181,9 +182,9 @@
         }).join('') : '<tr><td colspan="5" class="empty">Nothing to grade.</td></tr>') + '</tbody></table></div></div>';
       $('#ra').onchange = function () { ret.all = this.checked; ret(); };
       all('[data-g]').forEach(function (b) {
-        b.onclick = function () {
+        b.onclick = async function () {
           var g = b.getAttribute('data-g'), body = { grade: g };
-          if (g === 'C') { var claim = b.getAttribute('data-s') === '1' && confirm('Faulty from the supplier? OK = claim it from them; Cancel = write it off.'); body.outcome = claim ? 'vendor_claim' : 'writeoff'; body.note = prompt('What is wrong with it?', '') || ''; }
+          if (g === 'C') { var claim = b.getAttribute('data-s') === '1' && (await vasConfirm('Faulty from the supplier? OK = claim it from them; Cancel = write it off.')); body.outcome = claim ? 'vendor_claim' : 'writeoff'; body.note = (await vasPrompt('What is wrong with it?', '')) || ''; }
           api('/api/stockcash/returns/' + b.getAttribute('data-r') + '/grade', 'POST', body).then(function () { toast('Graded ' + g); ret(); }).catch(function (e) { toast(e.message); });
         };
       });
@@ -200,8 +201,8 @@
             '<td>' + (x.kind === 'vendor_claim' ? esc(x.supplier || 'no supplier') + '<br><span class="pill ' + (x.claim_status === 'credited' ? 'ok' : x.claim_status === 'open' ? 'warn' : 'bad') + '">' + esc(x.claim_status) + (x.claim_status === 'credited' ? ' ' + J(x.claim_amount) : '') + '</span>' : '') + '</td>' +
             '<td style="white-space:nowrap">' + (x.kind === 'vendor_claim' && x.claim_status === 'open' ? '<button class="sm primary" data-cr="' + x.id + '" data-v="' + (x.qty * x.unit_cost) + '">Credited</button> <button class="sm" data-rj="' + x.id + '">Rejected</button>' : '') + '</td></tr>';
         }).join('') : '<tr><td colspan="8" class="empty">None yet.</td></tr>') + '</tbody></table></div></div>';
-      all('[data-cr]').forEach(function (b) { b.onclick = function () { var a = prompt('Credit amount from the supplier (J$)', Math.round(+b.getAttribute('data-v'))); if (!a) return; api('/api/stockcash/claims/' + b.getAttribute('data-cr'), 'POST', { status: 'credited', amount: a }).then(function () { toast('Credited'); disp(); }).catch(function (e) { toast(e.message); }); }; });
-      all('[data-rj]').forEach(function (b) { b.onclick = function () { if (!confirm('The supplier refused? The cost becomes a stock loss.')) return; api('/api/stockcash/claims/' + b.getAttribute('data-rj'), 'POST', { status: 'rejected' }).then(function () { toast('Rejected'); disp(); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-cr]').forEach(function (b) { b.onclick = async function () { var a = await vasPrompt('Credit amount from the supplier (J$)', Math.round(+b.getAttribute('data-v'))); if (!a) return; api('/api/stockcash/claims/' + b.getAttribute('data-cr'), 'POST', { status: 'credited', amount: a }).then(function () { toast('Credited'); disp(); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-rj]').forEach(function (b) { b.onclick = async function () { if (!(await vasConfirm('The supplier refused? The cost becomes a stock loss.'))) return; api('/api/stockcash/claims/' + b.getAttribute('data-rj'), 'POST', { status: 'rejected' }).then(function () { toast('Rejected'); disp(); }).catch(function (e) { toast(e.message); }); }; });
     });
   }
 
@@ -229,7 +230,7 @@
             '<td style="white-space:nowrap"><a class="sm" href="/api/stockcash/lots/' + l.id + '/csv">CSV</a> ' + (l.status === 'open' ? '<button class="sm primary" data-till="' + l.id + '">Send to till</button> <button class="sm" data-cx="' + l.id + '">Cancel</button>' : '') + '</td></tr>';
         }).join('') : '<tr><td colspan="7" class="empty">No lots.</td></tr>') + '</tbody></table></div></div>';
       all('[data-till]').forEach(function (b) { b.onclick = function () { api('/api/stockcash/lots/' + b.getAttribute('data-till') + '/till', 'POST').then(function (r) { toast('Order ' + r.order_id + ' waiting at the cashier: ' + J(r.total)); lots(); }).catch(function (e) { toast(e.message); }); }; });
-      all('[data-cx]').forEach(function (b) { b.onclick = function () { if (!confirm('Cancel this lot?')) return; api('/api/stockcash/lots/' + b.getAttribute('data-cx') + '/cancel', 'POST').then(lots).catch(function (e) { toast(e.message); }); }; });
+      all('[data-cx]').forEach(function (b) { b.onclick = async function () { if (!(await vasConfirm('Cancel this lot?'))) return; api('/api/stockcash/lots/' + b.getAttribute('data-cx') + '/cancel', 'POST').then(lots).catch(function (e) { toast(e.message); }); }; });
     });
   }
 
@@ -266,8 +267,8 @@
           .then(function (r) { toast('Campaign saved' + (r.coupon_code ? ', coupon ' + r.coupon_code : '') + '. Press Send when ready.'); campItems = []; camp(); }).catch(function (e) { toast(e.message); });
       };
       all('[data-send]').forEach(function (b) {
-        b.onclick = function () {
-          if (!confirm('Send this campaign now?')) return;
+        b.onclick = async function () {
+          if (!(await vasConfirm('Send this campaign now?'))) return;
           b.disabled = true;
           api('/api/stockcash/campaigns/' + b.getAttribute('data-send') + '/send', 'POST').then(function (r) { toast('Sent ' + r.sent + ' of ' + r.recipients + (r.failed ? ', ' + r.failed + ' failed' : '')); if (r.share && r.share.length) shareList(r.share); camp(); }).catch(function (e) { toast(e.message); camp(); });
         };
@@ -327,6 +328,7 @@
   show();
 })();
 </script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
 <script src="/assets/module-look.js?v=20261101" defer></script>
 </body>
 </html>

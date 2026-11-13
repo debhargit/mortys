@@ -18,10 +18,11 @@
   .row{display:flex;gap:10px;margin-top:10px} .row button{flex:1;padding:13px;border:0;border-radius:10px;font:inherit;font-weight:700;color:#fff;cursor:pointer}
   .ok{background:var(--ok)} .no{background:var(--red)}
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b"></script>
 </head>
 <body>
 <header><h1>Staff request</h1></header>
@@ -43,7 +44,7 @@
       fetch('/api/clock/decide/' + encodeURIComponent(t), { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision: d, note: document.getElementById('note').value }) })
         .then(function (x) { return x.json().then(function (j) { if (!x.ok) throw new Error(j.error); return j; }); })
         .then(function (j) { m.innerHTML = '<div class="card"><h2 style="margin-top:0">' + (j.status === 'approved' ? 'Approved' : 'Rejected') + '</h2><p>' + esc(r.name) + ' has been told by email.</p></div>'; })
-        .catch(function (e) { alert(e.message); });
+        .catch(async function (e) { await vasAlert(e.message); });
     };
     if (document.getElementById('ap')) { document.getElementById('ap').onclick = function () { go('approve'); }; document.getElementById('rj').onclick = function () { go('reject'); }; }
   }).catch(function (e) { m.innerHTML = '<div class="card">' + esc(e.message) + '</div>'; });

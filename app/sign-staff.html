@@ -6,7 +6,7 @@
 <meta name="robots" content="noindex" />
 <meta name="referrer" content="no-referrer" />
 <title>Sign a document · Vision Auto Solutions</title>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
 <style>
   :root {
     --red:#d62828; --navy:#0b1b2b; --ink:#1f2937; --muted:#6b7280;
@@ -33,6 +33,7 @@
   .muted{color:var(--muted);font-size:13px}
   a{color:var(--red)}
 </style>
+<script src="/assets/vas-ui.js?v=20261110b"></script>
 </head>
 <body>
 <header class="top"><h1 id="shop">Vision Auto Solutions</h1><small>A document for you to sign</small></header>
@@ -95,9 +96,9 @@
         .then(function () { show(Object.assign({}, d, { status: 'signed', signer_name: name })); })
         .catch(function (e) { document.getElementById('go').disabled = false; m.innerHTML = '<div class="msg">' + esc(e.message) + '</div>'; });
     };
-    document.getElementById('no').onclick = function (ev) {
+    document.getElementById('no').onclick = async function (ev) {
       ev.preventDefault();
-      var why = prompt('Why are you not signing? HR will follow up.', '');
+      var why = await vasPrompt('Why are you not signing? HR will follow up.', '');
       if (why) call('/decline', 'POST', { reason: why }).then(function () { stop('You declined to sign. HR has been told.'); }).catch(function (e) { m.innerHTML = '<div class="msg">' + esc(e.message) + '</div>'; });
     };
   }

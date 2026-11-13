@@ -95,10 +95,11 @@
   .sheet .lbl.bin{flex-direction:row;align-items:center;gap:.08in}
   .sheet .lbl.bin .code{font-size:20pt;font-weight:800}
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
 <header>
@@ -206,12 +207,12 @@
   function doLogin(url, body) {
     $('#loginErr').textContent = '';
     // 2-step sign-in: after the password, the code from the authenticator app.
-    var step = function (r) {
+    var step = async function (r) {
       if (!r || !r.need_2fa) return location.reload();
-      var code = prompt('Enter the 6-digit code from your authenticator app (or a recovery code)');
+      var code = await vasPrompt('Enter the 6-digit code from your authenticator app (or a recovery code)');
       if (code === null) return;
       return api('/api/auth/2fa', { method: 'POST', body: { code: code.trim() } }).then(step)
-        .catch(function (e) { if (/Sign in again|Too many/.test(e.message)) throw e; alert(e.message); return step({ need_2fa: true }); });
+        .catch(async function (e) { if (/Sign in again|Too many/.test(e.message)) throw e; await vasAlert(e.message); return await step({ need_2fa: true }); });
     };
     api(url, { method: 'POST', body: body }).then(step)
       .catch(function (e) { $('#loginErr').textContent = e.message; });
@@ -561,7 +562,7 @@
   }
 
   // ------------------------------------------------------ click handling --
-  document.addEventListener('click', function (e) {
+  document.addEventListener('click', async function (e) {
     var t = e.target.closest('[data-act],[data-sku],[data-bin],[data-del]');
     if (!t) return;
     if (t.hasAttribute('data-sel')) return;
@@ -588,7 +589,7 @@
       case 'binRange': createBins({ prefix: $('#rgPrefix').value.trim().toUpperCase(), from: +$('#rgFrom').value, to: +$('#rgTo').value, pad: +$('#rgPad').value, kind: $('#newKind').value }); break;
       case 'binLabelsSel': Object.keys(state.bins.selected).forEach(addBinLabel); state.bins.selected = {}; toast('Bin labels added'); setTab('labels'); break;
       case 'print': printLabels(); break;
-      case 'clearQ': if (confirm('Clear the print list?')) { state.queue = []; saveQueue(); render(); } break;
+      case 'clearQ': if (await vasConfirm('Clear the print list?')) { state.queue = []; saveQueue(); render(); } break;
     }
   });
   document.addEventListener('change', function (e) {
@@ -653,6 +654,6 @@
 <script src="/assets/pin-staff.js"></script>
 <script src="/assets/pw-change.js"></script>
 <script src="/assets/clock-banner.js" defer></script>
-<script src="/assets/staff-assist.js" defer></script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
 </body>
 </html>

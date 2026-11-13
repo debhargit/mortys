@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My pay · Vision Auto Solutions</title>
+<link rel="stylesheet" href="/assets/books.css">
+<style>
+  .slips{background:#8881;border-radius:12px;padding:14px 8px}
+  @media print{ main{padding:0;max-width:none} .slips{background:none;padding:0} #top,.card.noprint{display:none!important} }
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<script src="/assets/vas-ui.js?v=20261110b"></script>
+</head>
+<body>
+<header><h1>My pay</h1><nav><a href="/clock.html">Time clock</a><a href="/my-time.html">My time</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<script src="/assets/books-common.js?v=20261019"></script>
+<script src="/assets/payslip.js?v=20261110"></script>
+<script>
+// My pay: a member of staff sees their own payslips (to read on screen and to
+// print), the year to date, loans, savings, regular deductions and leave.
+//   /payslip.html            my pay
+//   /payslip.html?id=12      one payslip        ?ids=12,13  several (Payroll's "view")
+(function () {
+  'use strict';
+  var B = window.Books, $ = B.$, all = B.all, esc = B.esc, J = B.J, api = B.api, toast = B.toast;
+  var num = function (v) { return Number(v || 0); };
+  var style = document.createElement('style'); style.textContent = window.Payslip.css; document.head.appendChild(style);
+  var q = new URLSearchParams(location.search);
+  var ids = (q.get('ids') || q.get('id') || '').split(',').map(function (x) { return parseInt(x, 10); }).filter(Boolean).slice(0, 200);
+
+  function fail(e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message || String(e)) + '</div>'; }
+
+  // ------------------------------------------------------------ payslips --
+  function showSlips(list) {
+    Promise.all(list.map(function (id) { return api('/api/payroll/slips/' + id); })).then(function (vs) {
+      document.title = (vs.length === 1 ? 'Payslip ' + vs[0].slip.pay_date + ' ' + ((vs[0].slip.snapshot || {}).name || '') : 'Payslips') + ' · Vision Auto Solutions';
+      $('#out').innerHTML = '<div class="controls" id="top"><button id="bk">◀ My pay</button><button class="primary" id="pr">Print</button><span class="sub" style="margin:0">To save it as a file, choose "Save as PDF" as the printer.</span></div>' +
+        '<div class="slips">' + vs.map(window.Payslip.html).join('') + '</div>';
+      $('#bk').onclick = function () { history.pushState(null, '', '/payslip.html'); mine(); };
+      $('#pr').onclick = function () { window.print(); };
+      if (q.get('print') === '1') setTimeout(function () { window.print(); }, 300);
+    }).catch(fail);
+  }
+
+  // --------------------------------------------------------------- my pay --
+  function mine() {
+    api('/api/payroll/me').then(function (d) {
+      if (!d.employee) { $('#out').innerHTML = '<div class="card empty">You are not on payroll yet. When you are, your payslips show here.</div>'; return; }
+      var e = d.employee, y = d.ytd || {}, l = d.leave, last = d.slips[0];
+      var loans = (d.loans || []).filter(function (x) { return x.status !== 'void'; }), owed = loans.reduce(function (t, x) { return t + num(x.balance); }, 0);
+      var saved = (d.savings || []).reduce(function (t, x) { return t + num(x.saved); }, 0);
+      var h = '<div class="tiles">' +
+        '<div class="tile"><span class="k">Last net pay</span><b>' + (last ? J(last.net) : '—') + '</b>' + (last ? '<small class="sub">' + esc(last.pay_date) + '</small>' : '') + '</div>' +
+        '<div class="tile"><span class="k">Gross pay ' + esc(d.year) + '</span><b>' + J(y.gross) + '</b></div>' +
+        '<div class="tile"><span class="k">Income tax ' + esc(d.year) + '</span><b>' + J(y.paye) + '</b></div>' +
+        (l ? '<div class="tile"><span class="k">Vacation left</span><b>' + l.vacation_left + ' d</b></div>' : '') +
+        (owed > 0.004 ? '<div class="tile"><span class="k">Loans owed</span><b>' + J(owed) + '</b></div>' : '') +
+        (saved > 0.004 ? '<div class="tile"><span class="k">Savings</span><b>' + J(saved) + '</b></div>' : '') + '</div>';
+      h += '<div class="card"><h2>' + esc(e.name) + (e.job_title ? ' <span class="pill">' + esc(e.job_title) + '</span>' : '') + '</h2><p class="sub">Paid ' + esc(e.frequency) + ' by ' + esc(e.pay_method) + (e.bank_masked ? ' to account ' + esc(e.bank_masked) : '') +
+        '. If anything here looks wrong, tell whoever does the payroll.</p>' +
+        '<h2>My payslips</h2><div class="scroll"><table><thead><tr><th>Paid</th><th>Period</th><th class="n">Gross</th><th class="n">Net pay</th><th></th></tr></thead><tbody>' +
+        (d.slips.length ? d.slips.map(function (s) { return '<tr class="click" data-v="' + s.id + '"><td>' + esc(s.pay_date) + '</td><td>' + esc(s.period_start) + ' – ' + esc(s.period_end) + '</td><td class="n">' + J(s.gross) + '</td><td class="n"><b>' + J(s.net) + '</b></td><td><button class="sm" data-v="' + s.id + '">View</button> <button class="sm" data-p="' + s.id + '">Print</button></td></tr>'; }).join('') : '<tr><td colspan="5" class="empty">None yet. A payslip shows here once the pay run is approved.</td></tr>') +
+        '</tbody></table></div></div>';
+      h += '<div class="card"><h2>This year so far (' + esc(d.year) + ')</h2><p class="sub">The figures start again from zero every 1 January.</p><table><tbody>' +
+        '<tr><td>Gross pay</td><td class="n">' + J(y.gross) + '</td><td>Income tax (PAYE)</td><td class="n">' + J(y.paye) + '</td></tr>' +
+        '<tr><td>NIS</td><td class="n">' + J(y.nis_ee) + '</td><td>NHT</td><td class="n">' + J(y.nht_ee) + '</td></tr>' +
+        '<tr><td>Education Tax</td><td class="n">' + J(y.ed_ee) + '</td><td>Pension</td><td class="n">' + J(y.pension_ee) + '</td></tr>' +
+        '<tr><td>Other deductions</td><td class="n">' + J(y.other_ded) + '</td><td><b>Net pay</b></td><td class="n"><b>' + J(y.net) + '</b></td></tr>' +
+        (d.prior ? '<tr><td colspan="4"><small>From your earlier job this year' + (d.prior.employer ? ' (' + esc(d.prior.employer) + ')' : '') + ': gross ' + J(d.prior.gross) + ', income tax ' + J(d.prior.paye) + '. ' +
+          (e.paye_method === 'cumulative' ? 'It is counted when your income tax is worked out here.' : '') + '</small></td></tr>' : '') + '</tbody></table>' +
+        (l ? '<p style="margin:10px 0 0">Leave ' + esc(l.year) + ': vacation ' + l.vacation_taken + ' of ' + l.vacation_entitled + ' days taken (<b>' + l.vacation_left + ' left</b>)' + (l.vacation_adjusted ? ', ' + l.vacation_adjusted + ' of them carried forward or adjusted' : '') +
+          ' · sick ' + l.sick_taken + ' of ' + l.sick_entitled + ' (<b>' + l.sick_left + ' left</b>)' + (l.unpaid_taken ? ' · unpaid ' + l.unpaid_taken : '') + '</p>' : '') + '</div>';
+      if (loans.length) h += '<div class="card"><h2>Loans and salary advances</h2><table><thead><tr><th>Date</th><th>Kind</th><th class="n">Amount</th><th class="n">Each pay</th><th class="n">Repaid</th><th class="n">Still owed</th><th>Status</th></tr></thead><tbody>' +
+        loans.map(function (x) { return '<tr><td>' + esc(x.issue_date) + '</td><td>' + (x.kind === 'loan' ? 'Loan' : 'Salary advance') + '</td><td class="n">' + J(x.amount) + '</td><td class="n">' + J(x.per_pay) + '</td><td class="n">' + J(x.repaid) + '</td><td class="n"><b>' + J(x.balance) + '</b></td><td>' + esc(x.status) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+      if ((d.savings || []).length) h += '<div class="card"><h2>Savings</h2><table><thead><tr><th>Savings</th><th class="n">Each pay</th><th class="n">Saved so far</th><th></th></tr></thead><tbody>' +
+        d.savings.map(function (x) { return '<tr><td>' + esc(x.label) + (x.payee ? ' <small>· ' + esc(x.payee) + '</small>' : '') + '</td><td class="n">' + (x.is_active ? (num(x.pct) ? num(x.pct) + '% of pay' : J(x.per_pay)) : 'stopped') + '</td><td class="n"><b>' + J(x.saved) + '</b></td><td>' +
+          (num(x.payout_pending) > 0 ? '<span class="pill warn">' + J(x.payout_pending) + ' on your next payslip</span>' : (x.held ? '<small>ask payroll to pay it out</small>' : '<small>held by them, not by us</small>')) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+      if ((d.items || []).length) h += '<div class="card"><h2>Every pay</h2><p class="sub">Allowances, deductions and what the business pays for you each pay, besides tax and your basic pay.</p><table><tbody>' +
+        d.items.map(function (x) { return '<tr><td>' + esc(x.label) + (x.payee ? ' <small>· ' + esc(x.payee) + '</small>' : '') + '</td><td>' + (x.kind === 'earning' ? 'paid to you' : x.kind === 'deduction' ? 'taken from your pay' : 'paid or provided by the business') + '</td><td class="n">' + (num(x.pct) ? num(x.pct) + '% of pay' : J(x.amount)) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+      $('#out').innerHTML = h;
+      all('[data-v]').forEach(function (b) { b.onclick = function (ev) { ev.stopPropagation(); var id = +b.getAttribute('data-v'); history.pushState(null, '', '/payslip.html?id=' + id); showSlips([id]); }; });
+      all('[data-p]').forEach(function (b) { b.onclick = function (ev) { ev.stopPropagation(); window.open('/payslip.html?id=' + b.getAttribute('data-p') + '&print=1', '_blank'); }; });
+    }).catch(fail);
+  }
+
+  window.onpopstate = function () { location.reload(); };
+  if (ids.length) showSlips(ids); else mine();
+})();
+</script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+<script src="/assets/module-look.js?v=20261101" defer></script>
+</body>
+</html>

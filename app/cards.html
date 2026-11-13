@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Credit cards · Vision Auto Solutions</title>
+<link rel="stylesheet" href="/assets/books.css">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<style>
+  .cc{position:relative;border-radius:14px;padding:14px 16px;color:#fff;background:linear-gradient(135deg,#0b1b2b,#24486b);min-height:150px;cursor:pointer;display:flex;flex-direction:column;gap:6px;border:2px solid transparent}
+  .cc.on{border-color:var(--red)} .cc.closed{filter:grayscale(1);opacity:.7}
+  .cc .top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;font-size:12.5px;opacity:.9}
+  .cc .nm{font-weight:600;font-size:15px} .cc .num{font-family:ui-monospace,Consolas,monospace;letter-spacing:2px;opacity:.85;font-size:13px}
+  .cc .owed{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums} .cc small{opacity:.85}
+  .bar{height:7px;border-radius:99px;background:rgba(255,255,255,.25);overflow:hidden} .bar > i{display:block;height:100%;background:#4ade80}
+  .bar > i.warn{background:#fbbf24} .bar > i.bad{background:#f87171}
+  .ccgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px;margin-bottom:12px}
+  .cc .pills{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto} .cc .pill{background:rgba(255,255,255,.18);color:#fff}
+  .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+  .hbar{display:flex;align-items:center;gap:8px} .hbar span.b{flex:1;height:9px;background:var(--chip);border-radius:99px;overflow:hidden} .hbar span.b i{display:block;height:100%;background:var(--navy)}
+  @media (prefers-color-scheme: dark){ .hbar span.b i{background:#60a5fa} }
+  .kind{font-size:11.5px;padding:1px 7px;border-radius:99px;background:var(--chip);white-space:nowrap}
+  .kind.payment,.kind.refund,.kind.reward{background:#16a34a22;color:var(--ok)} .kind.fee,.kind.interest{background:#d6282822;color:var(--red)}
+  .form2{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px} .form2 label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px} .form2 input,.form2 select{width:100%}
+  .chart{width:100%;height:auto;display:block}
+  @media (max-width:600px){ .tabs{overflow-x:auto;flex-wrap:nowrap} .tabs button{flex:0 0 auto} }
+</style>
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
+</head>
+<body>
+<header><h1>💳 Credit cards</h1><nav><a href="/banking.html">Banking</a><a href="/payables.html">Payables</a><a href="/accounting.html">Ledger</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"><button data-t="home" class="on">Cards</button><button data-t="reg">Register</button><button data-t="charge">Add charge</button><button data-t="pay">Pay card</button><button data-t="stmt">Statements</button><button data-t="feed">Statement lines</button><button data-t="rec">Reconcile</button><button data-t="rew">Rewards</button><button data-t="rep">Reports</button><button data-t="setup">Setup</button></div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<script src="/assets/books-common.js?v=20261109cc"></script>
+<script>
+(function () {
+  'use strict';
+  var B = window.Books, $ = B.$, all = B.all, esc = B.esc, J = B.J, api = B.api, toast = B.toast, modal = B.modal, close = B.close;
+  var tab = 'home', card = null, cards = [], over = null;
+  try { card = +localStorage.getItem('vision.ccAcct') || null; } catch (_) {}
+  var KIND = { purchase: 'Purchase', refund: 'Refund / credit', fee: 'Fee', interest: 'Interest', cash_advance: 'Cash advance', payment: 'Payment', reward: 'Reward credit', moved: 'Moved to card', journal: 'Journal', bill: 'Supplier bill paid', po: 'Purchase order paid', other: 'Other' };
+  var PAY = { paid: ['ok', 'Paid in full'], minimum_paid: ['warn', 'Minimum paid'], due: ['', 'Due'], overdue: ['bad', 'Overdue'] };
+  var MONTHS = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function pick(id) { card = id; try { localStorage.setItem('vision.ccAcct', id); } catch (_) {} }
+  function cur() { return cards.find(function (c) { return c.id === card; }) || {}; }
+  function label(c) { return (c.name || '') + (c.last4 ? ' ••' + c.last4 : ''); }
+  function cardSelect(id) { return '<select id="' + id + '">' + cards.map(function (c) { return '<option value="' + c.id + '"' + (c.id === card ? ' selected' : '') + '>' + esc(label(c)) + '</option>'; }).join('') + '</select>'; }
+  function wireCardSelect(id, then) { if ($('#' + id)) $('#' + id).onchange = function () { pick(+this.value); then(); }; }
+  function payPill(s) { var p = PAY[s]; return p ? '<span class="pill ' + p[0] + '">' + p[1] + '</span>' : ''; }
+  function bankOptions(sel) { return B.accounts().filter(function (a) { return a.bank && a.system_key !== 'cash_drawers'; }).map(function (a) { return '<option value="' + a.id + '"' + (String(sel) === String(a.id) ? ' selected' : '') + '>' + esc(a.code + ' ' + a.name) + '</option>'; }).join(''); }
+  function holderOptions(sel) { return '<option value="">—</option>' + (cur().holders || []).filter(function (h) { return h.is_active || String(h.id) === String(sel); }).map(function (h) { return '<option value="' + h.id + '"' + (String(sel) === String(h.id) ? ' selected' : '') + '>' + esc(h.name + (h.last4 ? ' ••' + h.last4 : '')) + '</option>'; }).join(''); }
+  function needCard() { if (cards.length) return false; $('#out').innerHTML = '<div class="card"><div class="empty">No credit cards yet. Add one on the <b>Setup</b> tab.</div></div>'; return true; }
+  function bars(rows, money) {
+    var max = rows.reduce(function (m, r) { return Math.max(m, Math.abs(r.amount)); }, 0) || 1;
+    return rows.length ? '<table><tbody>' + rows.map(function (r) { return '<tr><td>' + esc(r.label) + '<div class="hbar" style="margin-top:4px"><span class="b"><i style="width:' + Math.max(1, Math.round(Math.abs(r.amount) / max * 100)) + '%"></i></span></div></td><td class="n">' + (money === false ? r.amount : J(r.amount)) + '<br><small>' + r.count + ' item' + (r.count === 1 ? '' : 's') + '</small></td></tr>'; }).join('') + '</tbody></table>' : '<div class="empty">Nothing in this period.</div>';
+  }
+  function loadCards() { return api('/api/cards').then(function (d) { over = d; cards = d.cards; if (!card || !cards.some(function (c) { return c.id === card; })) pick((cards[0] || {}).id || null); return d; }); }
+
+  // ------------------------------------------------------------ cards (overview) --
+  function home() {
+    return loadCards().then(function (d) {
+      var t = d.totals;
+      $('#out').innerHTML = (d.ledger_started ? '' : '<div class="note warn">The general ledger has not been started (Accounting page). Card registers and reconciliation read the ledger, so start it first.</div>') +
+        '<div class="tiles"><div class="tile"><span class="k">Owed on all cards</span><b>' + J(t.owed) + '</b></div><div class="tile"><span class="k">Total limits</span><b>' + J(t.limit) + '</b></div><div class="tile"><span class="k">Available</span><b>' + J(t.available) + '</b></div>' +
+        '<div class="tile' + (t.utilization >= 80 ? ' bad' : '') + '"><span class="k">Used</span><b>' + (t.utilization == null ? '—' : t.utilization + '%') + '</b></div><div class="tile"><span class="k">Rewards value</span><b>' + J(t.rewards_value) + '</b></div></div>' +
+        (d.alerts.length ? '<div class="card"><h2>Needs attention</h2>' + d.alerts.map(function (a) { return '<div class="note ' + (a.level === 'bad' ? 'bad' : a.level === 'warn' ? 'warn' : 'info') + '"' + (a.card ? ' data-go="' + a.card + '" style="cursor:pointer"' : '') + '>' + esc(a.text) + '</div>'; }).join('') + '</div>' : '') +
+        '<div class="ccgrid">' + d.cards.map(function (c) {
+          var u = c.utilization, cls = u >= 100 ? 'bad' : u >= 80 ? 'warn' : '';
+          var ls = c.last_statement;
+          return '<div class="cc' + (c.id === card ? ' on' : '') + (c.status === 'closed' ? ' closed' : '') + '" data-c="' + c.id + '"><div class="top"><div><div class="nm">' + esc(c.name) + '</div>' + esc([c.issuer, c.network].filter(Boolean).join(' · ')) + '</div><div style="text-align:right">' + (c.status !== 'active' ? '<span class="pill">' + esc(c.status) + '</span>' : '') + '</div></div>' +
+            '<div class="num">•••• •••• •••• ' + esc(c.last4 || '····') + '</div>' +
+            '<div><small>Owed</small><div class="owed">' + J(c.owed) + '</div></div>' +
+            (c.credit_limit ? '<div class="bar"><i class="' + cls + '" style="width:' + Math.min(100, Math.max(0, u || 0)) + '%"></i></div><small>' + (u || 0) + '% of ' + J(c.credit_limit) + ' · ' + J(c.available) + ' available</small>' : '<small>No limit entered</small>') +
+            '<div class="pills">' + (ls ? '<span class="pill">Statement ' + esc(ls.closing_date) + ': ' + J(ls.new_balance) + '</span>' + (c.pay_status !== 'paid' && ls.due_date ? '<span class="pill">Due ' + esc(ls.due_date) + '</span>' : '') + '<span class="pill">' + PAY[c.pay_status][1] + '</span>' : '<span class="pill">No statement yet</span>') +
+            (c.rewards.kind !== 'none' ? '<span class="pill">' + esc(fmtPts(c.rewards.balance, c.rewards.kind)) + '</span>' : '') + (c.to_review ? '<span class="pill">' + c.to_review + ' to review</span>' : '') + '</div></div>';
+        }).join('') + '</div>' +
+        (d.cards.length ? '<div class="card"><h2>Card by card</h2><div class="scroll"><table><thead><tr><th>Card</th><th class="n">Owed</th><th class="n">Limit</th><th class="n">Used</th><th>Last statement</th><th class="n">Still to pay</th><th class="n">Minimum left</th><th>Due</th><th>Status</th><th>Next statement</th><th class="n">Rewards</th></tr></thead><tbody>' +
+          d.cards.map(function (c) { var ls = c.last_statement; return '<tr class="click" data-c="' + c.id + '"><td>' + esc(label(c)) + '</td><td class="n">' + J(c.owed) + '</td><td class="n">' + (c.credit_limit ? J(c.credit_limit) : '—') + '</td><td class="n">' + (c.utilization == null ? '—' : c.utilization + '%') + '</td><td>' + (ls ? esc(ls.closing_date) + ' · ' + J(ls.new_balance) : '—') + '</td><td class="n">' + (ls ? J(c.statement_left) : '') + '</td><td class="n">' + (ls ? J(c.minimum_left) : '') + '</td><td>' + esc(c.next_due || '') + '</td><td>' + (ls ? payPill(c.pay_status) : '') + '</td><td>' + esc(c.next_statement || '') + '</td><td class="n">' + (c.rewards.kind !== 'none' ? J(c.rewards.value) : '—') + '</td></tr>'; }).join('') + '</tbody></table></div></div>' : '<div class="card"><div class="empty">No credit cards yet. Add one on the <b>Setup</b> tab.</div></div>') +
+        (d.off_card ? '<div class="card" id="offbox"><h2>Paid by card elsewhere</h2><p class="sub">Loading…</p></div>' : '');
+      all('[data-c]').forEach(function (x) { x.onclick = function () { pick(+x.getAttribute('data-c')); tab = 'reg'; show(); }; });
+      all('[data-go]').forEach(function (x) { x.onclick = function () { pick(+x.getAttribute('data-go')); tab = 'reg'; show(); }; });
+      if (d.off_card) offCard();
+    });
+  }
+  function fmtPts(v, kind) { return kind === 'cashback' ? J(v) + ' cashback' : Math.round(v).toLocaleString() + ' ' + (kind === 'miles' ? 'miles' : 'points'); }
+  function offCard() {
+    api('/api/cards/off-card').then(function (d) {
+      $('#offbox').innerHTML = '<h2>Paid by card elsewhere</h2><p class="sub">Supplier bill payments (Payables) and purchase-order payments marked <b>card</b> that went to a bank or clearing account instead of a credit card. "Move to card" puts the money back on the account it went to and charges the card, so both are right.</p>' +
+        '<div class="scroll"><table><thead><tr><th>Date</th><th>From</th><th>Paid to</th><th>Booked to</th><th class="n">Amount</th><th>Card</th><th></th></tr></thead><tbody>' + d.items.map(function (i, k) {
+          return '<tr><td>' + esc(i.day) + '</td><td>' + (i.source_kind === 'ap_payment' ? 'Payables' : 'Purchase order') + '</td><td>' + esc(i.party || '') + '<br><small>' + esc(i.reference || '') + '</small></td><td>' + esc(i.booked_to || 'not posted yet') + '</td><td class="n">' + J(i.amount) + '</td><td>' + cardSelect('mv' + k) + '</td><td><button class="sm" data-mv="' + k + '"' + (i.gl_line_id ? '' : ' disabled') + '>Move to card</button></td></tr>';
+        }).join('') + '</tbody></table></div>';
+      all('[data-mv]').forEach(function (b) { b.onclick = function () { var i = d.items[+b.getAttribute('data-mv')]; api('/api/cards/' + $('#mv' + b.getAttribute('data-mv')).value + '/move-in', 'POST', { source_kind: i.source_kind, id: i.id }).then(function () { toast('Moved to the card'); home(); }).catch(function (e) { toast(e.message); }); }; });
+    }).catch(function (e) { $('#offbox').innerHTML = '<div class="note bad">' + esc(e.message) + '</div>'; });
+  }
+
+  // ------------------------------------------------------------ register --
+  function reg() {
+    if (needCard()) return;
+    var p = reg.p = reg.p || { from: '', to: '', q: '', kind: '', holder: '' };
+    return api('/api/cards/' + card + '/register?from=' + p.from + '&to=' + p.to + '&kind=' + p.kind + '&holder=' + p.holder + '&q=' + encodeURIComponent(p.q)).then(function (d) {
+      var c = cur();
+      $('#out').innerHTML = '<div class="card"><div class="controls"><div><label>Card</label>' + cardSelect('ra') + '</div><div><label>From</label><input type="date" id="rf" value="' + esc(p.from) + '"></div><div><label>To</label><input type="date" id="rt" value="' + esc(p.to) + '"></div>' +
+        '<div><label>Kind</label><select id="rk"><option value="">All</option>' + Object.keys(KIND).map(function (k) { return '<option value="' + k + '"' + (p.kind === k ? ' selected' : '') + '>' + KIND[k] + '</option>'; }).join('') + '</select></div>' +
+        '<div><label>Cardholder</label><select id="rh">' + holderOptions(p.holder).replace('>—<', '>All<') + '</select></div><div><label>Find</label><input id="rq" value="' + esc(p.q) + '" placeholder="payee, ref, amount"></div><button id="rgo">Show</button><button id="rcsv">CSV</button></div>' +
+        '<div class="tiles"><div class="tile"><span class="k">Owed now</span><b>' + J(c.owed) + '</b></div><div class="tile"><span class="k">Available</span><b>' + (c.available == null ? '—' : J(c.available)) + '</b></div><div class="tile"><span class="k">Reconciled</span><b>' + J(c.reconciled) + '</b></div><div class="tile"><span class="k">Not yet cleared</span><b>' + (c.uncleared || 0) + '</b></div></div>' +
+        (d.pending.length ? '<div class="note warn">' + d.pending.length + ' transaction(s) saved but not in the ledger yet (they post within a minute, or once the ledger is started): ' + d.pending.map(function (x) { return esc(x.day + ' ' + (KIND[x.kind] || x.kind) + ' ' + J(x.amount)); }).join(', ') + '</div>' : '') +
+        '<p class="sub">Every ledger line on this card, newest first, from whichever module made it. Owed goes up with charges, down with payments and credits. C = ticked in the open reconciliation, R = reconciled.' + (d.more ? ' Showing the latest 1,000.' : '') + '</p>' +
+        '<div class="scroll"><table><thead><tr><th>Date</th><th>Kind</th><th>Payee / memo</th><th>Category</th><th>Holder</th><th>From</th><th class="n">Charge</th><th class="n">Payment / credit</th><th>✓</th><th class="n">Owed</th><th></th></tr></thead><tbody>' +
+        (d.lines.length ? d.lines.map(function (l) {
+          var voidable = !l.voided && l.cleared !== 'R' && (l.source_kind === 'bank_txn' || l.source_kind === 'ap_payment');
+          return '<tr style="' + (l.voided ? 'opacity:.55' : '') + '"><td style="white-space:nowrap">' + esc(l.day) + '<br><small>' + esc(l.number) + '</small></td><td><span class="kind ' + esc(l.kind) + '">' + esc(l.kind_label) + '</span></td><td>' + esc(l.party || '') + '<br><small>' + esc([l.memo, l.ref].filter(Boolean).join(' · ')) + '</small></td><td><small>' + esc(l.category || '') + '</small></td><td><small>' + esc(l.holder || '') + '</small></td><td><small>' + esc(l.from) + '</small></td>' +
+            '<td class="n">' + (l.amount > 0 ? J(l.amount) : '') + '</td><td class="n">' + (l.amount < 0 ? J(-l.amount) : '') + '</td><td>' + esc(l.cleared) + '</td><td class="n">' + (l.balance != null ? J(l.balance) : '') + '</td>' +
+            '<td style="white-space:nowrap">' + (l.source_kind === 'bank_txn' ? '<button class="sm" data-tv="' + l.source_id + '">Open</button> ' : '') + (voidable ? '<button class="sm" data-void="' + l.source_kind + ':' + l.source_id + '">Void</button>' : '') + '</td></tr>';
+        }).join('') : '<tr><td colspan="11" class="empty">Nothing on this card' + (p.from || p.q || p.kind ? ' for these filters' : ' yet') + '.</td></tr>') + '</tbody></table></div></div>';
+      wireCardSelect('ra', reg);
+      $('#rgo').onclick = function () { p.from = $('#rf').value; p.to = $('#rt').value; p.q = $('#rq').value.trim(); p.kind = $('#rk').value; p.holder = $('#rh').value; reg(); };
+      $('#rcsv').onclick = function () { B.csv('card-' + d.account.code + '.csv', [['date', 'entry', 'kind', 'payee', 'memo', 'ref', 'category', 'holder', 'from', 'charge', 'payment_credit', 'cleared', 'owed']].concat(d.lines.map(function (l) { return [l.day, l.number, l.kind_label, l.party, l.memo, l.ref, l.category, l.holder, l.from, l.amount > 0 ? l.amount : '', l.amount < 0 ? -l.amount : '', l.cleared, l.balance]; }))); };
+      all('[data-tv]').forEach(function (b) { b.onclick = function () { viewTxn(+b.getAttribute('data-tv')); }; });
+      all('[data-void]').forEach(function (b) {
+        b.onclick = async function () {
+          var k = b.getAttribute('data-void').split(':'), r = await vasPrompt('Why is it voided? (e.g. entered twice, wrong card)'); if (!r) return;
+          api(k[0] === 'bank_txn' ? '/api/cards/txns/' + k[1] + '/void' : '/api/ap/payments/' + k[1] + '/void', 'POST', { reason: r }).then(function () { toast('Voided: a reversing entry is posted'); setTimeout(function () { loadCards().then(reg); }, 600); }).catch(function (e) { toast(e.message); });
+        };
+      });
+    });
+  }
+  function viewTxn(id) {
+    api('/api/cards/txns/' + id).then(function (d) {
+      var t = d.txn;
+      modal('<h2>' + esc(t.kind_label || '') + ' · ' + esc(t.card || t.account) + (t.voided_at ? ' <span class="pill bad">void</span>' : '') + '</h2><p class="sub">' + esc(t.day) + (t.payee ? ' · ' + esc(t.payee) : '') + (t.holder ? ' · ' + esc(t.holder) : '') + (t.reference ? ' · ref ' + esc(t.reference) : '') + (t.memo ? ' · ' + esc(t.memo) : '') + (t.void_reason ? ' · void: ' + esc(t.void_reason) : '') + '</p>' +
+        '<table><tbody>' + d.lines.map(function (l) { return '<tr><td>' + esc(l.code + ' ' + l.account) + '</td><td>' + esc(l.memo || '') + '</td><td class="n">' + J(l.amount) + '</td></tr>'; }).join('') + '<tr><td><b>Total</b></td><td></td><td class="n"><b>' + J(t.amount) + '</b></td></tr></tbody></table>' +
+        '<div class="controls" style="margin-top:10px">' + (t.receipt_name ? '<a href="/api/cards/txns/' + t.id + '/receipt" target="_blank" rel="noopener"><button>Receipt: ' + esc(t.receipt_name) + '</button></a>' : '') + '<button id="x">Close</button></div>');
+      $('#x').onclick = close;
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // ------------------------------------------------------------ add a charge --
+  function charge() {
+    if (needCard()) return;
+    var k = charge.k = charge.k || 'purchase';
+    var multi = k === 'purchase' || k === 'refund';
+    $('#out').innerHTML = '<div class="card"><h2>Add to a card</h2><div class="tabs" id="ck">' + [['purchase', 'Purchase'], ['refund', 'Refund / credit'], ['fee', 'Fee'], ['interest', 'Interest'], ['cash_advance', 'Cash advance']].map(function (x) { return '<button data-k="' + x[0] + '" class="' + (x[0] === k ? 'on' : '') + '">' + x[1] + '</button>'; }).join('') + '</div>' +
+      '<p class="sub">' + ({ purchase: 'Something bought on the card that is not a supplier bill. A supplier\'s bill is paid in Payables → Pay bills with this card as "Pay from", so the supplier balance stays right.', refund: 'Money put back on the card by a shop (a return or a credit): the expense goes back down.', fee: 'Annual fee, late fee, over-limit fee and the like: Credit Card Interest and Fees.', interest: 'Interest charged on the statement: Credit Card Interest and Fees.', cash_advance: 'Cash taken out with the card: it goes into the bank or cash account it was put in.' })[k] + '</p>' +
+      '<div class="controls"><div><label>Card</label>' + cardSelect('ta') + '</div>' + (multi ? '<div style="flex:1;min-width:180px"><label>' + (k === 'refund' ? 'From (shop)' : 'Paid to (shop)') + '</label><input id="tp" style="width:100%"></div>' : '') +
+      '<div><label>Cardholder</label><select id="th">' + holderOptions() + '</select></div><div><label>Date</label><input type="date" id="td" value="' + B.today() + '"></div><div><label>Reference</label><input id="tr" style="width:120px"></div></div>' +
+      (multi ? '<table class="lines"><thead><tr><th style="width:30%">Category (account)</th><th style="width:13%">Class</th><th style="width:15%">Asset</th><th>Memo</th><th class="n" style="width:150px">Amount</th><th style="width:40px"></th></tr></thead><tbody id="tl"></tbody></table><div class="controls" style="margin-top:6px"><button class="sm" id="add">Add a line</button></div>'
+        : '<div class="controls"><div><label>Amount (J$)</label><input id="ta1" type="number" step="0.01" style="width:150px"></div>' + (k === 'cash_advance' ? '<div><label>Cash went into</label><select id="tto">' + bankOptions() + '</select></div>' : '') + '</div>') +
+      '<div class="controls"><div style="flex:1"><label>Memo</label><input id="tm" style="width:100%"></div><div><label>Receipt (photo or PDF, optional)</label><input type="file" id="tf" accept="image/*,application/pdf"></div></div>' +
+      '<h3 id="tt" style="text-align:right"></h3><div class="controls"><button class="primary" id="tgo">Save</button></div></div>';
+    all('#ck [data-k]').forEach(function (b) { b.onclick = function () { charge.k = b.getAttribute('data-k'); charge(); }; });
+    wireCardSelect('ta', charge);
+    var tot = function () { $('#tt').textContent = 'Total ' + J(multi ? all('[data-lm]').reduce(function (t, x) { return t + (+x.value || 0); }, 0) : (+$('#ta1').value || 0)); };
+    if (multi) {
+      var add = function () { var tr = document.createElement('tr'); tr.innerHTML = '<td><select data-la>' + B.accountOptions('line') + '</select></td><td><select data-lc>' + B.classOptions() + '</select></td><td><select data-lfa>' + B.assetOptions() + '</select></td><td><input data-ld></td><td><input data-lm type="number" step="0.01" style="text-align:right"></td><td><button class="sm" data-lx>✕</button></td>'; $('#tl').appendChild(tr); tr.querySelector('[data-lx]').onclick = function () { tr.remove(); tot(); }; tr.querySelector('[data-lm]').oninput = tot; };
+      add(); $('#add').onclick = add;
+    } else $('#ta1').oninput = tot;
+    tot();
+    $('#tgo').onclick = function () {
+      var fd = new FormData();
+      fd.append('kind', k); fd.append('txn_date', $('#td').value); fd.append('memo', $('#tm').value); fd.append('reference', $('#tr').value); fd.append('holder_id', $('#th').value);
+      if (multi) {
+        fd.append('payee', $('#tp').value);
+        fd.append('lines', JSON.stringify(all('#tl tr').map(function (tr) { return { account_id: tr.querySelector('[data-la]').value, class_id: tr.querySelector('[data-lc]').value, asset_id: tr.querySelector('[data-lfa]').value, memo: tr.querySelector('[data-ld]').value, amount: tr.querySelector('[data-lm]').value }; }).filter(function (l) { return +l.amount > 0; })));
+      } else { fd.append('amount', $('#ta1').value); if ($('#tto')) fd.append('to_account_id', $('#tto').value); }
+      if ($('#tf').files[0]) fd.append('receipt', $('#tf').files[0]);
+      $('#tgo').disabled = true;
+      fetch('/api/cards/' + $('#ta').value + '/txns', { method: 'POST', credentials: 'same-origin', body: fd }).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'Error ' + r.status); return j; }); })
+        .then(function (r) { toast('Saved: ' + J(r.amount)); loadCards().then(charge); }).catch(function (e) { toast(e.message); $('#tgo').disabled = false; });
+    };
+  }
+
+  // ------------------------------------------------------------ pay the card --
+  function pay() {
+    if (needCard()) return;
+    return loadCards().then(function () {
+      var c = cur(), ls = c.last_statement;
+      var opts = [['statement', 'Statement balance still to pay', ls ? c.statement_left : null], ['minimum', 'Minimum still to pay', ls ? c.minimum_left : null], ['current', 'Everything owed now', c.owed], ['other', 'Another amount', null]];
+      $('#out').innerHTML = '<div class="card"><h2>Pay the card</h2><p class="sub">Money from a bank account to the card. It shows in both registers: Banking (money out) and here (owed goes down).</p>' +
+        '<div class="controls"><div><label>Card</label>' + cardSelect('pa') + '</div><div><label>Pay from</label><select id="pf">' + bankOptions(c.pay_from_account_id || (B.accounts().find(function (a) { return a.system_key === 'bank'; }) || {}).id) + '</select></div><div><label>Date</label><input type="date" id="pd" value="' + B.today() + '"></div></div>' +
+        (ls ? '<div class="note info">Statement ' + esc(ls.closing_date) + ': ' + J(ls.new_balance) + ', minimum ' + J(ls.minimum_due) + (ls.due_date ? ', due <b>' + esc(ls.due_date) + '</b>' : '') + '. Paid since: ' + J(c.paid_since_statement) + '. ' + payPill(c.pay_status) + '</div>' : '<div class="note warn">No statement entered for this card yet: enter it on the Statements tab to see the balance and minimum due.</div>') +
+        '<div class="card" style="padding:10px">' + opts.map(function (o, i) { return '<label style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="radio" name="amt" value="' + o[0] + '"' + (i === (ls && c.statement_left > 0 ? 0 : 2) ? ' checked' : '') + (o[2] == null && o[0] !== 'other' ? ' disabled' : '') + '> ' + o[1] + (o[2] != null ? ': <b>' + J(o[2]) + '</b>' : '') + (o[0] === 'other' ? ' <input id="po" type="number" step="0.01" style="width:140px">' : '') + '</label>'; }).join('') + '</div>' +
+        '<div class="controls"><div><label>Cheque no. (if a cheque)</label><input id="pc" style="width:120px"></div><div><label>Reference</label><input id="pr" style="width:140px"></div><div style="flex:1"><label>Memo</label><input id="pm" style="width:100%"></div></div><button class="primary" id="pgo">Record payment</button></div>';
+      wireCardSelect('pa', pay);
+      $('#po').oninput = function () { all('[name=amt]').forEach(function (r) { r.checked = r.value === 'other'; }); };
+      $('#pgo').onclick = function () {
+        var v = (all('[name=amt]').find(function (r) { return r.checked; }) || {}).value, o = opts.find(function (x) { return x[0] === v; });
+        var amount = v === 'other' ? +$('#po').value : o && o[2];
+        if (!(amount > 0)) return toast('Nothing to pay for that choice: enter an amount');
+        api('/api/cards/' + card + '/pay', 'POST', { from_account_id: $('#pf').value, amount: amount, pay_date: $('#pd').value, statement_id: ls ? ls.id : null, cheque_number: $('#pc').value, reference: $('#pr').value, memo: $('#pm').value })
+          .then(function (r) { toast('Payment recorded: ' + J(r.amount)); tab = 'home'; show(); }).catch(function (e) { toast(e.message); });
+      };
+    });
+  }
+
+  // ------------------------------------------------------------ statements --
+  var SF = [['period_start', 'Period from', 'date'], ['closing_date', 'Closing date *', 'date'], ['due_date', 'Payment due date', 'date'], ['previous_balance', 'Previous balance'], ['payments_credits', 'Payments and credits'], ['purchases', 'Purchases'], ['cash_advances', 'Cash advances'], ['fees', 'Fees'], ['interest', 'Interest'], ['new_balance', 'New balance *'], ['minimum_due', 'Minimum payment'], ['credit_limit', 'Credit limit'], ['points_earned', 'Points earned'], ['points_redeemed', 'Points redeemed'], ['points_balance', 'Points balance']];
+  function stmt() {
+    if (needCard()) return;
+    return api('/api/cards/' + card + '/statements').then(function (d) {
+      $('#out').innerHTML = '<div class="card"><div class="controls"><div><label>Card</label>' + cardSelect('sa') + '</div><button class="primary" id="snew">Enter a statement</button></div>' +
+        '<p class="sub">Each monthly statement: the figures from it, the statement file (PDF, photo or the CSV download), and whether it has been paid and reconciled.</p>' +
+        '<div class="scroll"><table><thead><tr><th>Closing</th><th>Due</th><th class="n">Previous</th><th class="n">Charges</th><th class="n">Interest + fees</th><th class="n">Payments</th><th class="n">New balance</th><th class="n">Minimum</th><th class="n">Paid since</th><th>Paid?</th><th>Reconciled</th><th>File</th><th></th></tr></thead><tbody>' +
+        (d.statements.length ? d.statements.map(function (s, i) {
+          return '<tr><td>' + esc(s.closing_date) + '</td><td>' + esc(s.due_date || '') + '</td><td class="n">' + (s.previous_balance != null ? J(s.previous_balance) : '') + '</td><td class="n">' + (s.purchases != null ? J(s.purchases + (s.cash_advances || 0)) : '') + '</td><td class="n">' + (s.fees != null || s.interest != null ? J((s.fees || 0) + (s.interest || 0)) : '') + '</td><td class="n">' + (s.payments_credits != null ? J(s.payments_credits) : '') + '</td><td class="n"><b>' + J(s.new_balance) + '</b></td><td class="n">' + (s.minimum_due != null ? J(s.minimum_due) : '') + '</td><td class="n">' + J(s.paid) + '</td><td>' + payPill(s.pay_status) + '</td><td>' + (s.status === 'reconciled' ? '<span class="pill ok">Yes</span>' : '<button class="sm" data-rc="' + s.id + '">Reconcile</button>') + '</td>' +
+            '<td>' + (s.has_file ? '<a href="/api/cards/statements/' + s.id + '/file" target="_blank" rel="noopener">' + esc(s.file_name) + '</a>' : '<small>none</small>') + '</td><td style="white-space:nowrap"><button class="sm" data-se="' + i + '">Edit</button> ' + (s.status !== 'reconciled' ? '<button class="sm" data-sd="' + s.id + '">Delete</button>' : '') + '</td></tr>';
+        }).join('') : '<tr><td colspan="13" class="empty">No statements yet.</td></tr>') + '</tbody></table></div></div>';
+      wireCardSelect('sa', stmt);
+      $('#snew').onclick = function () { stmtForm({}); };
+      all('[data-se]').forEach(function (b) { b.onclick = function () { stmtForm(d.statements[+b.getAttribute('data-se')]); }; });
+      all('[data-sd]').forEach(function (b) { b.onclick = async function () { if (!(await vasConfirm('Delete this statement? (The file goes too. Nothing in the ledger changes.)'))) return; api('/api/cards/statements/' + b.getAttribute('data-sd'), 'DELETE').then(function () { toast('Deleted'); stmt(); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-rc]').forEach(function (b) { b.onclick = function () { api('/api/cards/' + card + '/reconcile/start', 'POST', { statement_id: +b.getAttribute('data-rc') }).then(function () { tab = 'rec'; show(); }).catch(function (e) { toast(e.message); tab = 'rec'; show(); }); }; });
+    });
+  }
+  function stmtForm(s) {
+    var c = cur();
+    modal('<h2>' + (s.id ? 'Statement closing ' + esc(s.closing_date) : 'Enter a statement') + ' · ' + esc(label(c)) + '</h2><p class="sub">Type the figures from the statement. Only the closing date and new balance are needed; the others make the reports and checks better. Attach the statement itself (PDF or photo); a CSV file\'s lines are also read in for you to match on the "Statement lines" tab.</p>' +
+      '<div class="form2">' + SF.map(function (f) { return '<div><label>' + f[1] + '</label><input id="s_' + f[0] + '" type="' + (f[2] || 'number') + '"' + (f[2] ? '' : ' step="0.01"') + ' value="' + esc(s[f[0]] == null ? '' : s[f[0]]) + '"></div>'; }).join('') + '</div>' +
+      '<div class="controls" style="margin-top:10px"><div style="flex:1"><label>Statement file (PDF, picture or CSV; up to 15 MB)' + (s.has_file ? ' · now: ' + esc(s.file_name) : '') + '</label><input type="file" id="s_file" accept="application/pdf,image/*,.csv,text/csv"></div>' +
+      '<div><label>CSV dates</label><select id="s_do"><option value="dmy">day/month/year</option><option value="mdy">month/day/year</option></select></div><div><label>CSV charges are</label><select id="s_ch"><option value="positive">+ (usual)</option><option value="negative">− (minus)</option></select></div></div>' +
+      '<div><label>Notes</label><input id="s_notes" style="width:100%" value="' + esc(s.notes || '') + '"></div>' +
+      (c.rewards_kind !== 'none' && c.rewards_mode !== 'statement' ? '<p class="sub">This card works its points out from spending, so "points earned" here is for checking only. (Setup → "Take points from the statements" uses the statement\'s figure instead.)</p>' : '') +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="s_go">Save</button><button id="x">Cancel</button></div>');
+    $('#x').onclick = close;
+    if (!s.id && c.last_statement) { var nb = $('#s_previous_balance'); if (!nb.value) nb.value = c.last_statement.new_balance; }
+    $('#s_go').onclick = function () {
+      var fd = new FormData();
+      if (s.id) fd.append('id', s.id);
+      SF.forEach(function (f) { fd.append(f[0], $('#s_' + f[0]).value); });
+      fd.append('notes', $('#s_notes').value); fd.append('date_order', $('#s_do').value); fd.append('charges', $('#s_ch').value);
+      if ($('#s_file').files[0]) fd.append('file', $('#s_file').files[0]);
+      $('#s_go').disabled = true;
+      fetch('/api/cards/' + card + '/statements', { method: 'POST', credentials: 'same-origin', body: fd }).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'Error ' + r.status); return j; }); })
+        .then(function (r) { close(); toast('Statement saved' + (r.imported ? (r.imported.error ? ' (CSV not read: ' + r.imported.error + ')' : ': ' + r.imported.added + ' lines read in, ' + r.imported.duplicates + ' already there') : '')); loadCards().then(stmt); })
+        .catch(function (e) { toast(e.message); $('#s_go').disabled = false; });
+    };
+  }
+
+  // ------------------------------------------------------------ statement lines --
+  function feed() {
+    if (needCard()) return;
+    var st = feed.st = feed.st || 'new';
+    return api('/api/cards/' + card + '/feed?status=' + st).then(function (d) {
+      $('#out').innerHTML = '<div class="card"><div class="controls"><div><label>Card</label>' + cardSelect('fa') + '</div><div><label>Show</label><select id="fs">' + [['new', 'To review'], ['matched', 'Matched'], ['added', 'Added'], ['ignored', 'Ignored']].map(function (x) { return '<option value="' + x[0] + '"' + (x[0] === st ? ' selected' : '') + '>' + x[1] + '</option>'; }).join('') + '</select></div><button id="fimp">Import CSV lines</button></div>' +
+        '<p class="sub">Lines read from the card company\'s CSV. Match each to what is already in the books (a bill paid by card, a charge entered here, a payment from the bank), or add it. Then reconcile.</p>' +
+        '<div class="scroll"><table><thead><tr><th>Date</th><th>Description</th><th class="n">Charge</th><th class="n">Credit</th><th>' + (st === 'new' ? 'Match or add' : 'Status') + '</th></tr></thead><tbody>' +
+        (d.lines.length ? d.lines.map(function (f, i) {
+          var act = '';
+          if (st === 'new') {
+            act = (f.matches.length ? f.matches.map(function (m) { return '<button class="sm" data-m="' + f.id + ':' + m.id + '">Match ' + esc(m.day + ' ' + (m.what || m.number)) + '</button>'; }).join(' ') + '<br>' : '') +
+              '<div class="controls" style="margin:4px 0 0"><select data-fk="' + i + '">' + (f.amount > 0 ? [['purchase', 'Purchase'], ['fee', 'Fee'], ['interest', 'Interest'], ['cash_advance', 'Cash advance']] : [['refund', 'Refund / credit'], ['payment', 'Payment from bank'], ['reward', 'Reward credit']]).map(function (x) { return '<option value="' + x[0] + '">' + x[1] + '</option>'; }).join('') + '</select>' +
+              '<select data-fa="' + i + '" style="max-width:220px">' + (f.amount > 0 ? B.accountOptions('line', f.suggest && f.suggest.account_id) : B.accountOptions('line')) + '</select><select data-fh="' + i + '">' + holderOptions() + '</select><button class="sm" data-add="' + i + '">Add</button><button class="sm" data-ig="' + f.id + '">Ignore</button></div>' + (f.suggest ? '<small>Suggested (' + esc(f.suggest.why) + ')</small>' : '');
+          } else act = st === 'ignored' ? '<button class="sm" data-un="' + f.id + '">Back to review</button>' : '<span class="pill ok">' + esc(f.status) + '</span>';
+          return '<tr><td>' + esc(f.day) + '</td><td>' + esc(f.description) + '</td><td class="n">' + (f.amount > 0 ? J(f.amount) : '') + '</td><td class="n">' + (f.amount < 0 ? J(-f.amount) : '') + '</td><td>' + act + '</td></tr>';
+        }).join('') : '<tr><td colspan="5" class="empty">Nothing here.</td></tr>') + '</tbody></table></div></div>';
+      wireCardSelect('fa', feed);
+      $('#fs').onchange = function () { feed.st = this.value; feed(); };
+      $('#fimp').onclick = importForm;
+      var acctFor = function (i) {
+        var k = $('[data-fk="' + i + '"]').value, sel = $('[data-fa="' + i + '"]');
+        if (k === 'payment' || k === 'cash_advance') { sel.innerHTML = bankOptions(cur().pay_from_account_id); sel.disabled = false; }
+        else if (k === 'fee' || k === 'interest' || k === 'reward') { sel.innerHTML = '<option value="">(set for you)</option>'; sel.disabled = true; }
+        else { sel.innerHTML = B.accountOptions('line', d.lines[i].suggest && d.lines[i].suggest.account_id); sel.disabled = false; }
+      };
+      all('[data-fk]').forEach(function (s) { s.onchange = function () { acctFor(+s.getAttribute('data-fk')); }; });
+      all('[data-m]').forEach(function (b) { b.onclick = function () { var x = b.getAttribute('data-m').split(':'); api('/api/cards/feed/' + x[0] + '/match', 'POST', { gl_line_id: +x[1] }).then(function () { toast('Matched'); feed(); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-add]').forEach(function (b) { b.onclick = function () { var i = +b.getAttribute('data-add'), f = d.lines[i]; api('/api/cards/feed/' + f.id + '/add', 'POST', { kind: $('[data-fk="' + i + '"]').value, account_id: $('[data-fa="' + i + '"]').value, holder_id: $('[data-fh="' + i + '"]').value }).then(function () { toast('Added'); feed(); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-ig]').forEach(function (b) { b.onclick = function () { api('/api/cards/feed/' + b.getAttribute('data-ig') + '/ignore', 'POST', {}).then(feed).catch(function (e) { toast(e.message); }); }; });
+      all('[data-un]').forEach(function (b) { b.onclick = function () { api('/api/cards/feed/' + b.getAttribute('data-un') + '/ignore', 'POST', { undo: true }).then(feed).catch(function (e) { toast(e.message); }); }; });
+    });
+  }
+  function importForm() {
+    modal('<h2>Import statement lines (CSV)</h2><p class="sub">Download the transactions as CSV from the card company\'s website and choose the file (or paste it). It needs a heading row with Date, Description and Amount (or Debit and Credit). Lines already imported are skipped.</p>' +
+      '<div class="controls"><input type="file" id="if" accept=".csv,text/csv"><div><label>Dates</label><select id="io"><option value="dmy">day/month/year</option><option value="mdy">month/day/year</option></select></div><div><label>Charges are</label><select id="ic"><option value="positive">+ (usual)</option><option value="negative">− (minus)</option></select></div></div>' +
+      '<textarea id="it" rows="8" style="width:100%" placeholder="Date,Description,Amount"></textarea><div class="controls" style="margin-top:8px"><button class="primary" id="igo">Import</button><button id="x">Cancel</button></div>');
+    $('#x').onclick = close;
+    $('#if').onchange = function () { var f = this.files[0]; if (!f) return; var r = new FileReader(); r.onload = function () { $('#it').value = r.result; }; r.readAsText(f); };
+    $('#igo').onclick = function () { api('/api/cards/' + card + '/import', 'POST', { csv: $('#it').value, date_order: $('#io').value, charges: $('#ic').value }).then(function (r) { close(); toast(r.added + ' lines added, ' + r.duplicates + ' already there, ' + r.skipped + ' skipped'); feed(); }).catch(function (e) { toast(e.message); }); };
+  }
+
+  // ------------------------------------------------------------ reconcile --
+  function rec() {
+    if (needCard()) return;
+    return api('/api/cards/' + card + '/reconcile').then(function (d) {
+      if (!d.recon) {
+        $('#out').innerHTML = '<div class="card"><div class="controls"><div><label>Card</label>' + cardSelect('ca') + '</div></div><h2>Reconcile with a statement</h2><p class="sub">Tick every charge, payment and credit that is on the statement until the difference is nil. Anything on the statement that is missing (interest, a fee) can be entered as you go.</p>' +
+          (d.statements.length ? '<div class="controls"><div><label>Statement</label><select id="cs">' + d.statements.map(function (s) { return '<option value="' + s.id + '">' + esc(s.closing_date) + ' · ' + J(s.new_balance) + '</option>'; }).join('') + '</select></div><button class="primary" id="cgo">Start</button></div>' : '<div class="note info">Enter the statement on the Statements tab first, or start with a date and balance:</div>') +
+          '<div class="controls"><div><label>Closing date</label><input type="date" id="cd"></div><div><label>New balance (owed)</label><input id="cb" type="number" step="0.01" style="width:150px"></div><button id="cgo2">Start without a saved statement</button></div>' +
+          (d.history.length ? '<h3>Done</h3><table><thead><tr><th>Statement</th><th class="n">Balance</th><th>By</th><th></th></tr></thead><tbody>' + d.history.map(function (h, i) { return '<tr><td>' + esc(h.statement_date) + '</td><td class="n">' + J(h.statement_balance) + '</td><td>' + esc(h.by_name || '') + ' <small>' + esc(B.dt(h.finished_at)) + '</small></td><td>' + (i === 0 ? '<button class="sm" id="undo">Undo</button>' : '') + '</td></tr>'; }).join('') + '</tbody></table>' : '') + '</div>';
+        wireCardSelect('ca', rec);
+        if ($('#cgo')) $('#cgo').onclick = function () { api('/api/cards/' + card + '/reconcile/start', 'POST', { statement_id: $('#cs').value }).then(rec).catch(function (e) { toast(e.message); }); };
+        $('#cgo2').onclick = function () { api('/api/cards/' + card + '/reconcile/start', 'POST', { statement_date: $('#cd').value, statement_balance: $('#cb').value }).then(rec).catch(function (e) { toast(e.message); }); };
+        if ($('#undo')) $('#undo').onclick = async function () { if (!(await vasConfirm('Undo the last reconciliation? Its items become uncleared again.'))) return; api('/api/cards/' + card + '/reconcile/undo-last', 'POST', {}).then(rec).catch(function (e) { toast(e.message); }); };
+        return;
+      }
+      paintRec(d);
+    });
+  }
+  function paintRec(d) {
+    var r = d.recon;
+    $('#out').innerHTML = '<div class="card"><h2>Reconciling ' + esc(label(cur())) + ' to the statement of ' + esc(r.statement_date) + '</h2>' +
+      '<div class="tiles"><div class="tile"><span class="k">Opening (last reconciled)</span><b>' + J(r.opening_balance) + '</b></div><div class="tile"><span class="k">Charges ticked</span><b>' + J(d.ticked_charges) + '</b></div><div class="tile"><span class="k">Payments / credits ticked</span><b>' + J(d.ticked_credits) + '</b></div><div class="tile"><span class="k">Statement balance</span><b>' + J(r.statement_balance) + '</b></div><div class="tile"><span class="k">Cleared balance</span><b>' + J(d.cleared_balance) + '</b></div><div class="tile' + (Math.abs(d.difference) > 0.005 ? ' bad' : '') + '"><span class="k">Difference</span><b>' + J(d.difference) + '</b></div></div>' +
+      '<div class="controls"><button id="tm">Tick lines matched to the statement</button><button id="ta">Tick all</button><button id="tn">Untick all</button><span style="flex:1"></span><button id="adj">Add interest / fee / adjustment</button><button class="primary" id="fin"' + (Math.abs(d.difference) > 0.005 ? ' disabled' : '') + '>Finish</button><button id="can">Cancel</button></div>' +
+      '<div class="scroll" style="max-height:60vh"><table><thead><tr><th>✓</th><th>Date</th><th>Kind</th><th>Payee / memo</th><th class="n">Charge</th><th class="n">Payment / credit</th><th></th></tr></thead><tbody>' +
+      d.lines.map(function (l) { return '<tr><td><input type="checkbox" data-l="' + l.id + '"' + (l.ticked ? ' checked' : '') + '></td><td>' + esc(l.day) + '</td><td><span class="kind ' + esc(l.kind) + '">' + esc(l.kind_label) + '</span></td><td>' + esc(l.party || '') + '<br><small>' + esc(l.memo || '') + '</small></td><td class="n">' + (l.amount > 0 ? J(l.amount) : '') + '</td><td class="n">' + (l.amount < 0 ? J(-l.amount) : '') + '</td><td>' + (l.on_statement ? '<span class="pill ok">on statement</span>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div></div>';
+    var tick = function (body) { api('/api/cards/reconcile/' + r.id + '/tick', 'POST', body).then(paintRec).catch(function (e) { toast(e.message); }); };
+    all('[data-l]').forEach(function (x) { x.onchange = function () { tick({ lines: [+x.getAttribute('data-l')], clear: x.checked }); }; });
+    $('#tm').onclick = function () { tick({ matched: true }); };
+    $('#ta').onclick = function () { tick({ lines: d.lines.map(function (l) { return l.id; }) }); };
+    $('#tn').onclick = function () { tick({ lines: d.lines.map(function (l) { return l.id; }), clear: false }); };
+    $('#can').onclick = async function () { if (!(await vasConfirm('Cancel this reconciliation? Ticks are lost.'))) return; api('/api/cards/reconcile/' + r.id + '/cancel', 'POST', {}).then(rec).catch(function (e) { toast(e.message); }); };
+    $('#fin').onclick = function () { api('/api/cards/reconcile/' + r.id + '/finish', 'POST', {}).then(function () { toast('Reconciled'); loadCards().then(rec); }).catch(function (e) { toast(e.message); }); };
+    $('#adj').onclick = function () {
+      modal('<h2>Add to this reconciliation</h2><div class="controls"><div><label>What</label><select id="ak"><option value="interest">Interest</option><option value="fee">Fee</option><option value="difference">Unexplained difference</option></select></div><div><label>Amount (minus for a credit)</label><input id="aa" type="number" step="0.01" value="' + (d.difference ? d.difference.toFixed(2) : '') + '"></div><div style="flex:1"><label>Memo</label><input id="am" style="width:100%"></div></div><div class="controls"><button class="primary" id="ago">Add and tick</button><button id="x">Cancel</button></div>');
+      $('#x').onclick = close;
+      $('#ago').onclick = function () { api('/api/cards/reconcile/' + r.id + '/adjust', 'POST', { kind: $('#ak').value, amount: $('#aa').value, memo: $('#am').value }).then(function (v) { close(); paintRec(v); }).catch(function (e) { toast(e.message); }); };
+    };
+  }
+
+  // ------------------------------------------------------------ rewards --
+  function rew() {
+    if (needCard()) return;
+    return api('/api/cards/' + card + '/rewards').then(function (d) {
+      var w = d.rewards, c = d.card, unit = w.kind === 'cashback' ? 'J$' : w.kind === 'miles' ? 'miles' : 'points';
+      $('#out').innerHTML = '<div class="card"><div class="controls"><div><label>Card</label>' + cardSelect('wa') + '</div></div>' +
+        (w.kind === 'none' ? '<div class="note info">This card has no rewards programme set. Turn it on in <b>Setup</b> (points, cashback or miles; how many per J$100 spent; what a point is worth).</div></div>' :
+        '<h2>' + esc(w.name || ({ points: 'Points', cashback: 'Cashback', miles: 'Miles' })[w.kind]) + '</h2><p class="sub">' + (w.mode === 'statement' ? 'Points come from the statements you enter.' : 'Worked out from spending: ' + w.earn_rate + ' ' + unit + ' per J$100' + (w.kind !== 'cashback' ? ', each worth J$' + w.point_value : '') + '; categories can earn more (Setup).') + '</p>' +
+        '<div class="tiles"><div class="tile"><span class="k">Balance</span><b>' + esc(fmtPts(w.balance, w.kind)) + '</b></div><div class="tile"><span class="k">Worth</span><b>' + J(w.value) + '</b></div><div class="tile"><span class="k">Earned</span><b>' + esc(fmtPts(w.earned, w.kind)) + '</b></div><div class="tile"><span class="k">Redeemed</span><b>' + esc(fmtPts(w.redeemed, w.kind)) + '</b><small>' + J(w.redeemed_value) + '</small></div><div class="tile"><span class="k">Expired</span><b>' + esc(fmtPts(w.expired, w.kind)) + '</b></div><div class="tile"><span class="k">Spend counted</span><b>' + J(w.spend) + '</b></div></div>' +
+        '<div class="grid2"><div class="card"><h2>Record</h2><div class="controls"><div><label>What</label><select id="ek"><option value="redeemed">Redeemed</option><option value="bonus">Bonus</option><option value="expired">Expired</option><option value="adjust">Adjustment (±)</option>' + (w.mode === 'statement' ? '<option value="earned">Earned</option>' : '') + '</select></div><div><label>' + (w.kind === 'cashback' ? 'Amount (J$)' : 'Points') + '</label><input id="ep" type="number" step="0.01" style="width:120px"></div><div><label>Date</label><input type="date" id="ed" value="' + B.today() + '"></div></div>' +
+        '<div class="controls" id="redeemBox"><div><label>Taken as</label><select id="ea"><option value="statement_credit">Statement credit (posts to the card)</option><option value="cash">Cash to the bank (posts)</option><option value="gift">Gift card / voucher</option><option value="travel">Travel</option><option value="goods">Goods</option></select></div><div><label>Value J$</label><input id="ev" type="number" step="0.01" style="width:120px"></div><div id="eb" style="display:none"><label>Into</label><select id="eto">' + bankOptions(c.pay_from_account_id) + '</select></div></div>' +
+        '<div class="controls"><div style="flex:1"><label>Memo</label><input id="em" style="width:100%"></div><button class="primary" id="ego">Save</button></div><p class="sub">A statement credit or cash-out is income (Credit Card Rewards and Cashback) and shows on the card or bank register.</p></div>' +
+        '<div class="card"><h2>Month by month</h2>' + (d.months.length ? '<table><thead><tr><th>Month</th><th class="n">Spend</th><th class="n">Earned</th></tr></thead><tbody>' + d.months.map(function (m) { return '<tr><td>' + esc(m.month) + '</td><td class="n">' + J(m.spend) + '</td><td class="n">' + esc(fmtPts(m.points, w.kind)) + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="empty">Charges entered on this card earn here (supplier bills paid by card count in the total).</div>') + '</div></div>' +
+        '<h3>History</h3><div class="scroll"><table><thead><tr><th>Date</th><th>What</th><th class="n">' + (w.kind === 'cashback' ? 'J$' : 'Points') + '</th><th class="n">Value</th><th>Memo</th><th>By</th><th></th></tr></thead><tbody>' +
+        (d.events.length ? d.events.map(function (e) { return '<tr style="' + (e.voided_at ? 'opacity:.5' : '') + '"><td>' + esc(e.day) + '</td><td>' + esc(e.kind) + '</td><td class="n">' + e.points + '</td><td class="n">' + (e.value != null ? J(e.value) : '') + '</td><td>' + esc(e.memo || '') + '</td><td>' + esc(e.by_name || '') + '</td><td>' + (e.voided_at ? '<span class="pill bad">void</span>' : (!e.bank_txn_id && !(e.statement_id && e.kind === 'earned') ? '<button class="sm" data-ev="' + e.id + '">Void</button>' : '')) + '</td></tr>'; }).join('') : '<tr><td colspan="7" class="empty">Nothing recorded.</td></tr>') + '</tbody></table></div></div>');
+      wireCardSelect('wa', rew);
+      if (w.kind === 'none') return;
+      var sync = function () { var red = $('#ek').value === 'redeemed'; $('#redeemBox').style.display = red ? '' : 'none'; $('#eb').style.display = $('#ea').value === 'cash' ? '' : 'none'; if (red && !$('#ev').dataset.touched) $('#ev').value = ((+$('#ep').value || 0) * (w.kind === 'cashback' ? 1 : w.point_value)).toFixed(2); };
+      $('#ek').onchange = sync; $('#ea').onchange = sync; $('#ep').oninput = sync; $('#ev').oninput = function () { this.dataset.touched = 1; }; sync();
+      $('#ego').onclick = function () { api('/api/cards/' + card + '/rewards', 'POST', { kind: $('#ek').value, points: $('#ep').value, event_date: $('#ed').value, redeem_as: $('#ea').value, value: $('#ev').value, to_account_id: $('#eto').value, memo: $('#em').value }).then(function () { toast('Saved'); rew(); }).catch(function (e) { toast(e.message); }); };
+      all('[data-ev]').forEach(function (b) { b.onclick = function () { api('/api/cards/rewards/' + b.getAttribute('data-ev') + '/void', 'POST', {}).then(rew).catch(function (e) { toast(e.message); }); }; });
+    });
+  }
+
+  // ------------------------------------------------------------ reports --
+  function rep() {
+    var p = rep.p = rep.p || { from: B.today().slice(0, 4) + '-01-01', to: B.today(), card: '' };
+    return api('/api/cards/report?from=' + p.from + '&to=' + p.to + '&card=' + p.card).then(function (d) {
+      // No card set up yet (or an older server): every list is there, just empty.
+      ['cards', 'by_category', 'by_payee', 'by_holder', 'by_source', 'monthly', 'charges', 'fees', 'payments', 'statements'].forEach(function (k) { if (!Array.isArray(d[k])) d[k] = []; });
+      var tot = d.cards.reduce(function (t, c) { ['opening', 'charges', 'refunds', 'payments', 'fees', 'interest', 'cash_advances', 'rewards', 'closing', 'rewards_earned', 'rewards_value'].forEach(function (k) { t[k] = (t[k] || 0) + (c[k] || 0); }); return t; }, {});
+      $('#out').innerHTML = '<div class="card"><div class="controls"><div><label>From</label><input type="date" id="pf" value="' + esc(p.from) + '"></div><div><label>To</label><input type="date" id="pt" value="' + esc(p.to) + '"></div><div><label>Card</label><select id="pc"><option value="">All cards</option>' + cards.map(function (c) { return '<option value="' + c.id + '"' + (String(c.id) === String(p.card) ? ' selected' : '') + '>' + esc(label(c)) + '</option>'; }).join('') + '</select></div><button id="pgo">Show</button><button id="pp">Print</button></div>' +
+        '<div class="tiles"><div class="tile"><span class="k">Charges</span><b>' + J(tot.charges || 0) + '</b></div><div class="tile"><span class="k">Refunds</span><b>' + J(tot.refunds || 0) + '</b></div><div class="tile"><span class="k">Interest</span><b>' + J(tot.interest || 0) + '</b></div><div class="tile"><span class="k">Fees</span><b>' + J(tot.fees || 0) + '</b></div><div class="tile"><span class="k">Payments</span><b>' + J(tot.payments || 0) + '</b></div><div class="tile"><span class="k">Owed at end</span><b>' + J(tot.closing || 0) + '</b></div></div>' +
+        '<h2>Card summary <button class="sm noprint" data-csv="sum">CSV</button></h2><div class="scroll"><table><thead><tr><th>Card</th><th class="n">Owed at start</th><th class="n">Charges</th><th class="n">Cash adv.</th><th class="n">Interest</th><th class="n">Fees</th><th class="n">Refunds</th><th class="n">Rewards credits</th><th class="n">Payments</th><th class="n">Owed at end</th><th class="n">Points earned</th><th class="n">Rewards worth</th></tr></thead><tbody>' +
+        d.cards.map(function (c) { return '<tr><td>' + esc(c.name + (c.last4 ? ' ••' + c.last4 : '')) + '</td><td class="n">' + J(c.opening) + '</td><td class="n">' + J(c.charges) + '</td><td class="n">' + J(c.cash_advances) + '</td><td class="n">' + J(c.interest) + '</td><td class="n">' + J(c.fees) + '</td><td class="n">' + J(c.refunds) + '</td><td class="n">' + J(c.rewards) + '</td><td class="n">' + J(c.payments) + '</td><td class="n"><b>' + J(c.closing) + '</b></td><td class="n">' + Math.round(c.rewards_earned) + '</td><td class="n">' + J(c.rewards_value) + '</td></tr>'; }).join('') + '</tbody></table></div></div>' +
+        '<div class="card"><h2>Spending by month</h2>' + monthChart(d.monthly) + '</div>' +
+        '<div class="grid2"><div class="card"><h2>By category <button class="sm noprint" data-csv="cat">CSV</button></h2>' + bars(d.by_category) + '</div><div class="card"><h2>By payee <button class="sm noprint" data-csv="payee">CSV</button></h2>' + bars(d.by_payee.slice(0, 15)) + '</div>' +
+        '<div class="card"><h2>By cardholder</h2>' + bars(d.by_holder) + '</div><div class="card"><h2>Where it was entered</h2><p class="sub">The module each card charge came from.</p>' + bars(d.by_source) + '</div></div>' +
+        '<div class="grid2"><div class="card"><h2>Interest and fees <button class="sm noprint" data-csv="fees">CSV</button></h2>' + (d.fees.length ? '<table><tbody>' + d.fees.map(function (f) { return '<tr><td>' + esc(f.day) + '</td><td>' + esc(f.card) + '</td><td>' + esc(f.kind) + '<br><small>' + esc(f.memo || '') + '</small></td><td class="n">' + J(f.amount) + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="empty">None. 👍</div>') + '</div>' +
+        '<div class="card"><h2>Payments made <button class="sm noprint" data-csv="pay">CSV</button></h2>' + (d.payments.length ? '<table><tbody>' + d.payments.map(function (f) { return '<tr><td>' + esc(f.day) + '</td><td>' + esc(f.card) + '</td><td><small>' + esc(f.memo || '') + '</small></td><td class="n">' + J(f.amount) + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="empty">None in this period.</div>') + '</div></div>' +
+        '<div class="card"><h2>Statements</h2>' + (d.statements.length ? '<div class="scroll"><table><thead><tr><th>Card</th><th>Closing</th><th>Due</th><th class="n">New balance</th><th class="n">Minimum</th><th class="n">Interest</th><th class="n">Fees</th><th>Reconciled</th><th>File</th></tr></thead><tbody>' + d.statements.map(function (s) { return '<tr><td>' + esc(s.card) + '</td><td>' + esc(s.closing_date) + '</td><td>' + esc(s.due_date || '') + '</td><td class="n">' + J(s.new_balance) + '</td><td class="n">' + (s.minimum_due != null ? J(s.minimum_due) : '') + '</td><td class="n">' + (s.interest != null ? J(s.interest) : '') + '</td><td class="n">' + (s.fees != null ? J(s.fees) : '') + '</td><td>' + (s.status === 'reconciled' ? '<span class="pill ok">Yes</span>' : '<span class="pill">No</span>') + '</td><td>' + (s.has_file ? '<a href="/api/cards/statements/' + s.id + '/file" target="_blank" rel="noopener">open</a>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<div class="empty">No statements in this period.</div>') + '</div>' +
+        '<div class="card"><h2>Every charge <button class="sm noprint" data-csv="all">CSV</button></h2><div class="scroll" style="max-height:50vh"><table><thead><tr><th>Date</th><th>Card</th><th>Kind</th><th>Payee / memo</th><th>Holder</th><th class="n">Amount</th></tr></thead><tbody>' + (d.charges.length ? d.charges.map(function (x) { return '<tr><td>' + esc(x.day) + '</td><td>' + esc(x.card) + '</td><td>' + esc(x.kind) + '</td><td>' + esc(x.party || '') + '<br><small>' + esc(x.memo || '') + '</small></td><td>' + esc(x.holder || '') + '</td><td class="n">' + J(x.amount) + '</td></tr>'; }).join('') : '<tr><td colspan="6" class="empty">None.</td></tr>') + '</tbody></table></div></div>';
+      $('#pgo').onclick = function () { p.from = $('#pf').value; p.to = $('#pt').value; p.card = $('#pc').value; rep(); };
+      $('#pp').onclick = function () { window.print(); };
+      var sets = {
+        sum: [['card', 'owed_at_start', 'charges', 'cash_advances', 'interest', 'fees', 'refunds', 'reward_credits', 'payments', 'owed_at_end', 'points_earned', 'rewards_worth']].concat(d.cards.map(function (c) { return [c.name, c.opening, c.charges, c.cash_advances, c.interest, c.fees, c.refunds, c.rewards, c.payments, c.closing, c.rewards_earned, c.rewards_value]; })),
+        cat: [['category', 'amount', 'count']].concat(d.by_category.map(function (r) { return [r.label, r.amount, r.count]; })),
+        payee: [['payee', 'amount', 'count']].concat(d.by_payee.map(function (r) { return [r.label, r.amount, r.count]; })),
+        fees: [['date', 'card', 'kind', 'memo', 'amount']].concat(d.fees.map(function (r) { return [r.day, r.card, r.kind, r.memo, r.amount]; })),
+        pay: [['date', 'card', 'memo', 'ref', 'amount']].concat(d.payments.map(function (r) { return [r.day, r.card, r.memo, r.ref, r.amount]; })),
+        all: [['date', 'card', 'kind', 'payee', 'memo', 'holder', 'ref', 'amount']].concat(d.charges.map(function (r) { return [r.day, r.card, r.kind, r.party, r.memo, r.holder, r.ref, r.amount]; })),
+      };
+      all('[data-csv]').forEach(function (b) { b.onclick = function () { B.csv('cards-' + b.getAttribute('data-csv') + '-' + p.from + '-' + p.to + '.csv', sets[b.getAttribute('data-csv')]); }; });
+    });
+  }
+  function monthChart(rows) {
+    if (!rows.length) return '<div class="empty">Nothing in this period.</div>';
+    var W = 760, H = 220, pad = 46, max = rows.reduce(function (m, r) { return Math.max(m, r.charges + r.fees_interest, r.payments); }, 0) || 1;
+    var bw = (W - pad - 10) / rows.length, y = function (v) { return H - 24 - (v / max) * (H - 40); };
+    var g = '';
+    rows.forEach(function (r, i) {
+      var x = pad + i * bw + 4, w = Math.max(4, bw / 2 - 5);
+      g += '<rect x="' + x + '" y="' + y(r.charges) + '" width="' + w + '" height="' + (H - 24 - y(r.charges)) + '" fill="#d62828" opacity=".85"><title>' + r.month + ' charges ' + J(r.charges) + '</title></rect>';
+      if (r.fees_interest) g += '<rect x="' + x + '" y="' + y(r.charges + r.fees_interest) + '" width="' + w + '" height="' + (y(r.charges) - y(r.charges + r.fees_interest)) + '" fill="#f59e0b"><title>' + r.month + ' interest and fees ' + J(r.fees_interest) + '</title></rect>';
+      g += '<rect x="' + (x + w + 2) + '" y="' + y(r.payments) + '" width="' + w + '" height="' + (H - 24 - y(r.payments)) + '" fill="#16a34a" opacity=".85"><title>' + r.month + ' payments ' + J(r.payments) + '</title></rect>';
+      g += '<text x="' + (x + w) + '" y="' + (H - 8) + '" font-size="11" text-anchor="middle" fill="currentColor">' + MONTHS[+r.month.slice(5)] + '</text>';
+    });
+    g += '<text x="4" y="' + (y(max) + 4) + '" font-size="11" fill="currentColor">' + Math.round(max).toLocaleString() + '</text><line x1="' + pad + '" x2="' + W + '" y1="' + (H - 24) + '" y2="' + (H - 24) + '" stroke="currentColor" opacity=".2"/>';
+    return '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Charges and payments by month">' + g + '</svg><p class="sub"><span style="color:#d62828">■</span> charges <span style="color:#f59e0b">■</span> interest and fees <span style="color:#16a34a">■</span> payments</p>';
+  }
+
+  // ------------------------------------------------------------ setup --
+  function setup() {
+    var go = function (det) {
+      var c = det ? det.card : {};
+      $('#out').innerHTML = (cards.length ? '<div class="card"><div class="controls"><div><label>Card</label>' + cardSelect('ea') + '</div></div>' +
+        '<h2>Card details</h2><div class="form2">' +
+        fld('name', 'Name (ledger account)', c.name) + fld('issuer', 'Bank / issuer', c.issuer) + sel('network', 'Network', c.network, ['', 'Visa', 'Mastercard', 'American Express', 'Discover', 'Other']) + fld('last4', 'Last 4 digits', c.last4) + fld('holder_name', 'Name on the card', c.holder_name) + fld('expires', 'Expires (MM/YY)', c.expires) +
+        fld('credit_limit', 'Credit limit (J$)', c.credit_limit, 'number') + fld('cash_limit', 'Cash advance limit', c.cash_limit, 'number') + fld('apr', 'Interest rate % a year', c.apr, 'number') + fld('cash_apr', 'Cash advance rate %', c.cash_apr, 'number') +
+        fld('statement_day', 'Statement closes on day', c.statement_day, 'number') + fld('due_day', 'Payment due on day', c.due_day, 'number') + fld('min_pct', 'Minimum payment %', c.min_pct, 'number') + fld('min_floor', 'Minimum payment at least', c.min_floor, 'number') +
+        fld('annual_fee', 'Annual fee', c.annual_fee, 'number') + sel('fee_month', 'Fee charged in', c.fee_month, [''].concat([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]), function (m) { return MONTHS[m] || '—'; }) +
+        '<div><label>Usually paid from</label><select id="e_pay_from_account_id"><option value="">—</option>' + bankOptions(c.pay_from_account_id) + '</select></div>' + sel('autopay', 'Paid automatically by the bank', c.autopay, ['none', 'minimum', 'statement', 'full'], function (v) { return { none: 'No', minimum: 'Minimum', statement: 'Statement balance', full: 'Full balance' }[v]; }) +
+        sel('status', 'Status', c.status, ['active', 'frozen', 'closed']) + '</div>' +
+        '<h2 style="margin-top:14px">Rewards</h2><div class="form2">' + sel('rewards_kind', 'Programme', c.rewards_kind, ['none', 'points', 'cashback', 'miles'], function (v) { return { none: 'None', points: 'Points', cashback: 'Cashback', miles: 'Miles' }[v]; }) + fld('rewards_name', 'Programme name', c.rewards_name) +
+        fld('earn_rate', 'Earned per J$100 (points, or J$ cashback)', c.earn_rate, 'number') + fld('point_value', 'J$ value of one point', c.point_value, 'number') + sel('rewards_mode', 'Points come from', c.rewards_mode, ['calculate', 'statement'], function (v) { return v === 'calculate' ? 'Worked out from spending' : 'Take points from the statements'; }) + fld('rewards_start', 'Count spending from', c.rewards_start, 'date') + '</div>' +
+        '<div style="margin-top:8px"><label class="sub">Notes</label><input id="e_notes" style="width:100%" value="' + esc(c.notes || '') + '"></div><div class="controls" style="margin-top:10px"><button class="primary" id="esave">Save card</button></div></div>' +
+        '<div class="grid2"><div class="card"><h2>Cardholders</h2><p class="sub">People with a card on this account. A monthly limit warns on the Cards tab when it is passed.</p><table><thead><tr><th>Name</th><th>Last 4</th><th>Staff login</th><th class="n">Monthly limit</th><th>Active</th><th></th></tr></thead><tbody>' +
+          det.holders.map(function (h, i) { return '<tr><td><input data-hn="' + i + '" value="' + esc(h.name) + '"></td><td><input data-h4="' + i + '" value="' + esc(h.last4 || '') + '" style="width:70px"></td><td><select data-hu="' + i + '">' + staffOpts(h.user_id) + '</select></td><td><input data-hl="' + i + '" type="number" step="0.01" value="' + (h.monthly_limit == null ? '' : h.monthly_limit) + '" style="width:110px"></td><td><input type="checkbox" data-ha="' + i + '"' + (h.is_active ? ' checked' : '') + '></td><td><button class="sm" data-hs="' + i + '">Save</button></td></tr>'; }).join('') +
+          '<tr><td><input id="hn" placeholder="Name"></td><td><input id="h4" style="width:70px"></td><td><select id="hu">' + staffOpts() + '</select></td><td><input id="hl" type="number" step="0.01" style="width:110px"></td><td></td><td><button class="sm" id="hadd">Add</button></td></tr></tbody></table></div>' +
+        '<div class="card"><h2>Bonus categories</h2><p class="sub">Spending on these accounts earns more (e.g. 3 = triple points on fuel). Everything else earns 1×.</p><table><tbody id="rr">' + det.rules.map(function (r) { return ruleRow(r.gl_account_id, r.multiplier); }).join('') + '</tbody></table><div class="controls" style="margin-top:6px"><button class="sm" id="radd">Add a category</button><button class="sm primary" id="rsave">Save categories</button></div></div></div>' : '') +
+        '<div class="card"><h2>Add a credit card</h2><p class="sub">Each card account gets its own ledger account (a credit card liability), like a bank account in Banking. Several people\'s cards on one account share one; add them as cardholders.</p><div class="controls"><div><label>Account no. (ledger)</label><input id="nc" placeholder="2410" style="width:100px"></div><div style="flex:1"><label>Name</label><input id="nn" placeholder="NCB Visa Business" style="width:100%"></div><div><label>Issuer</label><input id="ni" placeholder="NCB"></div><div><label>Last 4</label><input id="n4" style="width:70px"></div><div><label>Limit</label><input id="nl" type="number" step="0.01" style="width:120px"></div><button id="na">Add</button></div></div>';
+      if (!cards.length) { wireAdd(); return; }
+      wireCardSelect('ea', setup);
+      $('#esave').onclick = function () {
+        var b = {}; ['name', 'issuer', 'network', 'last4', 'holder_name', 'expires', 'credit_limit', 'cash_limit', 'apr', 'cash_apr', 'statement_day', 'due_day', 'min_pct', 'min_floor', 'annual_fee', 'fee_month', 'pay_from_account_id', 'autopay', 'status', 'rewards_kind', 'rewards_name', 'earn_rate', 'point_value', 'rewards_mode', 'rewards_start', 'notes'].forEach(function (k) { b[k] = $('#e_' + k).value; });
+        api('/api/cards/' + card, 'PUT', b).then(function () { toast('Saved'); return loadCards(); }).then(setup).catch(function (e) { toast(e.message); });
+      };
+      all('[data-hs]').forEach(function (b) { b.onclick = function () { var i = b.getAttribute('data-hs'), h = det.holders[+i]; api('/api/cards/' + card + '/holders', 'POST', { id: h.id, name: $('[data-hn="' + i + '"]').value, last4: $('[data-h4="' + i + '"]').value, user_id: $('[data-hu="' + i + '"]').value, monthly_limit: $('[data-hl="' + i + '"]').value, is_active: $('[data-ha="' + i + '"]').checked }).then(function () { toast('Saved'); return loadCards(); }).then(setup).catch(function (e) { toast(e.message); }); }; });
+      $('#hadd').onclick = function () { api('/api/cards/' + card + '/holders', 'POST', { name: $('#hn').value, last4: $('#h4').value, user_id: $('#hu').value, monthly_limit: $('#hl').value }).then(function () { toast('Added'); return loadCards(); }).then(setup).catch(function (e) { toast(e.message); }); };
+      var wireRule = function () { all('[data-rx]').forEach(function (x) { x.onclick = function () { x.closest('tr').remove(); }; }); };
+      $('#radd').onclick = function () { var t = document.createElement('tbody'); t.innerHTML = ruleRow('', 2); $('#rr').appendChild(t.firstChild); wireRule(); };
+      wireRule();
+      $('#rsave').onclick = function () { api('/api/cards/' + card + '/reward-rules', 'PUT', { rules: all('#rr tr').map(function (tr) { return { gl_account_id: tr.querySelector('[data-ra]').value, multiplier: tr.querySelector('[data-rm]').value }; }) }).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); }); };
+      wireAdd();
+    };
+    function wireAdd() { $('#na').onclick = function () { api('/api/cards', 'POST', { code: $('#nc').value, name: $('#nn').value, issuer: $('#ni').value, last4: $('#n4').value, credit_limit: $('#nl').value }).then(function (r) { toast('Added'); pick(r.id); return B.loadAccounts(); }).then(loadCards).then(setup).catch(function (e) { toast(e.message); }); }; }
+    function fld(k, l, v, type) { return '<div><label>' + l + '</label><input id="e_' + k + '" type="' + (type || 'text') + '"' + (type === 'number' ? ' step="any"' : '') + ' value="' + esc(v == null ? '' : v) + '"></div>'; }
+    function sel(k, l, v, opts, lab) { return '<div><label>' + l + '</label><select id="e_' + k + '">' + opts.map(function (o) { return '<option value="' + o + '"' + (String(v == null ? '' : v) === String(o) ? ' selected' : '') + '>' + esc(lab ? lab(o) : (o || '—')) + '</option>'; }).join('') + '</select></div>'; }
+    function staffOpts(sel2) { return '<option value="">—</option>' + (setup.staff || []).map(function (s) { return '<option value="' + s.id + '"' + (String(sel2) === String(s.id) ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join(''); }
+    function ruleRow(acct, m) { return '<tr><td><select data-ra>' + B.accountOptions('line', acct) + '</select></td><td style="width:110px"><input data-rm type="number" step="0.5" value="' + m + '" style="width:80px">×</td><td style="width:40px"><button class="sm" data-rx>✕</button></td></tr>'; }
+    var staffP = setup.staff ? Promise.resolve() : api('/api/cards/staff').then(function (d) { setup.staff = d.staff; }).catch(function () { setup.staff = []; });
+    return staffP.then(function () { return cards.length ? api('/api/cards/' + card).then(go) : go(null); });
+  }
+
+  // ------------------------------------------------------------ tabs --
+  var VIEWS = { home: home, reg: reg, charge: charge, pay: pay, stmt: stmt, feed: feed, rec: rec, rew: rew, rep: rep, setup: setup };
+  function show() {
+    all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); });
+    try { history.replaceState(null, '', '#' + tab); } catch (_) {}
+    var p = VIEWS[tab]();
+    if (p && p.catch) p.catch(function (e) { $('#out').innerHTML = '<div class="card"><div class="note bad">' + esc(e.message) + '</div></div>'; });
+  }
+  all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
+  var h = (location.hash || '').slice(1); if (VIEWS[h]) tab = h;
+  B.loadAccounts().then(loadCards).then(show).catch(function (e) { $('#out').innerHTML = '<div class="card"><div class="note bad">' + esc(e.message) + '</div></div>'; });
+})();
+</script>
+</body>
+</html>

@@ -33,7 +33,7 @@
     box.querySelectorAll('header [data-v]').forEach(function (x) { x.classList.toggle('on', x.getAttribute('data-v') === view); });
     if (view === 'ask') {
       b.innerHTML = '<textarea rows="3" placeholder="How do I…? e.g. how do I take a return"></textarea><button class="go">Ask</button><div class="out"></div>' +
-        '<p class="muted">Answers come from the shop\'s training lessons. Lessons and quizzes: <a href="/training.html" target="_blank" rel="noopener">Training</a>.</p>';
+        '<p class="muted">Answers come from the shop\'s training lessons. Lessons and quizzes: <a href="/training.html" target="_blank" rel="noopener">Training</a> · <a href="/training.html#manual" target="_blank" rel="noopener">the full manual</a>.</p>';
       var ta = b.querySelector('textarea');
       var ask = function () {
         var q = ta.value.trim(); if (!q) return;

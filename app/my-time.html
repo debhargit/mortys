@@ -30,10 +30,11 @@
   @media (max-width:600px){ #letters tr{display:block;border-bottom:1px solid var(--line);padding:6px 0} #letters td{display:block;border:0;padding:2px 0} }
   .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60;max-width:90vw}
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
 <header><h1>My time</h1><nav><a href="/clock.html">Time clock</a><a href="/admin.html">Admin</a></nav></header>
@@ -83,9 +84,9 @@
       b.onclick = function () {
         var a = b.getAttribute('data-p');
         b.disabled = true;
-        punch({ action: a }).then(function (r) { toast(r.message); load(); }).catch(function (e) {
+        punch({ action: a }).then(function (r) { toast(r.message); load(); }).catch(async function (e) {
           b.disabled = false;
-          if (e.j && e.j.need_overtime) { var why = prompt(e.message + '\n\nReason:'); if (why) punch({ action: a, confirm_overtime: true, ot_reason: why }).then(function (r) { toast(r.message); load(); }).catch(function (e2) { toast(e2.message); }); return; }
+          if (e.j && e.j.need_overtime) { var why = await vasPrompt(e.message + '\n\nReason:'); if (why) punch({ action: a, confirm_overtime: true, ot_reason: why }).then(function (r) { toast(r.message); load(); }).catch(function (e2) { toast(e2.message); }); return; }
           if (e.j && e.j.drawer_open) return toast(e.message);
           toast(e.message);
         });

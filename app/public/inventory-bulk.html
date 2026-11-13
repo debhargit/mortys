@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bulk change inventory · Vision Auto Solutions</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0} header nav{margin-left:auto;display:flex;gap:14px;font-size:13px} header a{color:#fff;opacity:.85}
+  main{max-width:1200px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  input,select,button{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  button{cursor:pointer;background:var(--card)} button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600} button.sm{padding:3px 9px;font-size:12.5px}
+  button:disabled{opacity:.5;cursor:default}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px} .row label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  table{width:100%;border-collapse:collapse} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600} td.n{text-align:right;font-variant-numeric:tabular-nums}
+  .scroll{overflow-x:auto;max-height:520px;overflow-y:auto}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip)} .pill.ok{background:#16a34a22;color:var(--ok)} .pill.warn{background:#f59e0b22;color:var(--warn)}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;max-height:140px;overflow:auto} .chips label{display:flex;gap:5px;align-items:center;background:var(--chip);padding:3px 9px;border-radius:999px;font-size:12.5px;margin:0;color:inherit}
+  .old{color:var(--muted);text-decoration:line-through} .new{font-weight:600}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60;max-width:90vw}
+</style>
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
+</head>
+<body>
+<header><h1>Bulk change inventory</h1><nav><a href="/store-tax.html">GCT and freight</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="card"><h2>1. Find the items</h2><p class="sub">Leave a box empty to not filter on it. Words in Search must all match (name, SKU, barcode, make and model).</p>
+    <div class="row">
+      <div style="flex:2;min-width:220px"><label>Search</label><input id="q" placeholder="e.g. brake pad civic" style="width:100%"></div>
+      <div><label>Location starts with</label><input id="fLoc" list="locs" style="width:150px"></div>
+      <div><label>Bin starts with</label><input id="fBin" style="width:110px"></div>
+      <div><label>Supplier</label><select id="fSup"><option value="">Any</option></select></div>
+      <div><label>Condition</label><select id="fCond"><option value="">Any</option><option>NEW</option><option>USED</option></select></div>
+      <div><label>Tax rate</label><select id="fTax"><option value="">Any</option><option value="default">Default (not set on item)</option></select></div>
+    </div>
+    <div class="row">
+      <div><label>Price from (J$)</label><input id="pMin" type="number" style="width:110px"></div><div><label>to</label><input id="pMax" type="number" style="width:110px"></div>
+      <div><label>Stock from</label><input id="sMin" type="number" style="width:90px"></div><div><label>to</label><input id="sMax" type="number" style="width:90px"></div>
+      <div><label>Status</label><select id="fStat"><option value="active">Active</option><option value="inactive">Inactive</option><option value="all">All</option></select></div>
+    </div>
+    <label style="font-size:12px;color:var(--muted)">Categories (none ticked = all)</label><div class="chips" id="fCats"></div>
+  </div>
+
+  <div class="card"><h2>2. What to change</h2>
+    <div class="row">
+      <div><label>Change</label><select id="aKind">
+        <option value="price">Selling price</option><option value="cost">Cost</option><option value="category">Category</option><option value="qty">Quantity in stock</option>
+        <option value="tax">Tax rate</option><option value="location">Location</option><option value="bin">Bin</option><option value="status">Active / inactive</option><option value="supplier">Supplier</option></select></div>
+      <div id="aBox" class="row" style="margin:0"></div>
+    </div>
+    <div class="row"><button class="primary" id="prev">Preview</button><span class="sub" id="msg" style="margin:0"></span></div>
+  </div>
+
+  <div class="card" id="pv" style="display:none"><h2>3. Check and apply <span class="pill" id="pvCount"></span></h2>
+    <p class="sub" id="pvSum"></p>
+    <div class="scroll"><table><thead><tr><th>Item</th><th>SKU</th><th>Category</th><th class="n">Now</th><th class="n">After</th></tr></thead><tbody id="pvRows"></tbody></table></div>
+    <div class="row" style="margin-top:10px"><button class="primary" id="apply">Apply to all</button><span class="sub" style="margin:0">Logged below, and can be undone.</span></div>
+  </div>
+
+  <div class="card"><h2>History</h2><p class="sub">Undo puts back the old value on each item, unless that item has been changed again since.</p>
+    <div class="scroll"><table><thead><tr><th>When</th><th>Who</th><th>Change</th><th class="n">Items</th><th></th></tr></thead><tbody id="hist"></tbody></table></div></div>
+</main>
+<datalist id="locs"></datalist>
+<div class="toast" id="toast"></div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 4000); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); }
+        return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; });
+      });
+  }
+  var O = { categories: [], tax_classes: [], suppliers: [], locations: [] }, last = null;
+
+  function actionBox() {
+    var k = $('#aKind').value, h = '';
+    var num = function (id, ph, w) { return '<div><label>' + ph + '</label><input id="' + id + '" type="number" step="any" style="width:' + (w || 130) + 'px"></div>'; };
+    if (k === 'price' || k === 'cost') {
+      h = '<div><label>How</label><select id="aMode"><option value="pct">Raise / cut by %</option><option value="amount">Raise / cut by J$</option><option value="set">Set to J$</option>' + (k === 'price' ? '<option value="markup">Cost plus %</option>' : '') + '</select></div>' +
+        num('aVal', 'Amount (minus to cut)') +
+        (k === 'price' ? '<div><label>Round to</label><select id="aRound"><option value="none">Cents</option><option value="whole">Whole dollar</option><option value="10">Nearest $10</option><option value="100">Nearest $100</option><option value="99">.99</option></select></div>' +
+          '<label style="display:flex;gap:5px;align-items:center;font-size:13px"><input type="checkbox" id="aCost" checked> Never below cost</label>' : '');
+    } else if (k === 'qty') {
+      h = '<div><label>How</label><select id="aMode"><option value="add">Add / take away</option><option value="set">Set to</option></select></div>' + num('aVal', 'Quantity (minus to take away)');
+    } else if (k === 'category') {
+      h = '<div><label>New category</label><input id="aVal" list="catl" style="width:220px"><datalist id="catl">' + O.categories.map(function (c) { return '<option value="' + esc(c.category) + '">'; }).join('') + '</datalist></div>';
+    } else if (k === 'tax') {
+      h = '<div><label>New tax rate</label><select id="aVal"><option value="default">Default (follow category)</option>' + O.tax_classes.map(function (c) { return '<option value="' + esc(c.code) + '">' + esc(c.name) + ' (' + (c.kind === 'standard' ? c.rate + '%' : c.kind) + ')</option>'; }).join('') + '</select></div>';
+    } else if (k === 'location' || k === 'bin') {
+      h = '<div><label>New ' + k + ' (empty = clear)</label><input id="aVal"' + (k === 'location' ? ' list="locs"' : '') + ' style="width:200px"></div>';
+    } else if (k === 'status') {
+      h = '<div><label>Make</label><select id="aVal"><option value="inactive">Inactive (hidden from sale)</option><option value="active">Active</option></select></div>';
+    } else if (k === 'supplier') {
+      h = '<div><label>New supplier</label><select id="aVal"><option value="">None</option>' + O.suppliers.map(function (s) { return '<option value="' + s.id + '">' + esc(s.name) + '</option>'; }).join('') + '</select></div>';
+    }
+    $('#aBox').innerHTML = h;
+    $('#pv').style.display = 'none';
+  }
+  function body() {
+    var v = function (id) { var el = $('#' + id); return el ? el.value : ''; };
+    var f = { q: v('q'), location: v('fLoc'), bin: v('fBin'), supplier_id: v('fSup'), condition: v('fCond'), tax_class: v('fTax'), price_min: v('pMin'), price_max: v('pMax'), stock_min: v('sMin'), stock_max: v('sMax'), status: v('fStat'),
+      categories: all('#fCats input:checked').map(function (x) { return x.value; }) };
+    var a = { kind: v('aKind'), value: v('aVal') };
+    if ($('#aMode')) a.mode = v('aMode');
+    if ($('#aRound')) a.round = v('aRound');
+    if ($('#aCost')) a.not_below_cost = $('#aCost').checked;
+    if (['price', 'cost', 'qty'].indexOf(a.kind) >= 0) a.value = Number(a.value);
+    return { filter: f, action: a };
+  }
+  var fmt = function (field, v) {
+    if (v == null || v === '') return '—';
+    if (field === 'price_usd' || field === 'cost_usd') return 'J$' + Number(v).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (field === 'is_active') return v === true || v === 'true' ? 'Active' : 'Inactive';
+    if (field === 'supplier_id') { var s = O.suppliers.filter(function (x) { return String(x.id) === String(v); })[0]; return s ? s.name : v; }
+    if (field === 'tax_class') { var c = O.tax_classes.filter(function (x) { return x.code === v; })[0]; return c ? c.name : v; }
+    return v;
+  };
+  function preview() {
+    var b = body();
+    if ((b.action.kind === 'price' || b.action.kind === 'cost' || b.action.kind === 'qty') && !isFinite(b.action.value)) return toast('Enter a number');
+    $('#msg').textContent = 'Working…';
+    api('/api/inventory/bulk/preview', 'POST', b).then(function (r) {
+      last = { body: b, count: r.changing };
+      $('#msg').textContent = r.matched + ' items match; ' + r.changing + ' would change.';
+      $('#pv').style.display = '';
+      $('#pvCount').textContent = r.changing + ' to change';
+      $('#pvSum').textContent = r.summary + (r.changing > r.rows.length ? ' · showing the first ' + r.rows.length : '');
+      $('#pvRows').innerHTML = r.rows.length ? r.rows.map(function (x) {
+        return '<tr><td>' + esc(x.name) + '</td><td>' + esc(x.sku || '') + '</td><td>' + esc(x.category || '') + '</td><td class="n old">' + esc(fmt(x.field, x.before)) + '</td><td class="n new">' + esc(fmt(x.field, x.after)) + '</td></tr>';
+      }).join('') : '<tr><td colspan="5" class="sub">Nothing would change.</td></tr>';
+      $('#apply').disabled = !r.changing;
+    }).catch(function (e) { $('#msg').textContent = ''; toast(e.message); });
+  }
+  async function apply() {
+    if (!last || !last.count) return;
+    if (!(await vasConfirm('Apply "' + $('#pvSum').textContent.split(' · ')[0] + '" to ' + last.count + ' items?'))) return;
+    $('#apply').disabled = true;
+    api('/api/inventory/bulk/apply', 'POST', Object.assign({ expect: last.count }, last.body)).then(function (r) {
+      toast('Changed ' + r.changed + ' items. #' + (r.batch_id || '') + ' can be undone below.'); $('#pv').style.display = 'none'; $('#msg').textContent = ''; history();
+    }).catch(function (e) { $('#apply').disabled = false; toast(e.message); });
+  }
+  function history() {
+    return api('/api/inventory/bulk/history').then(function (r) {
+      $('#hist').innerHTML = r.batches.length ? r.batches.map(function (x) {
+        return '<tr><td>' + esc(new Date(x.created_at).toLocaleString('en-JM', { dateStyle: 'short', timeStyle: 'short' })) + '</td><td>' + esc(x.by_name || '') + '</td><td>' + esc(x.summary) + '</td><td class="n">' + x.items + '</td><td>' +
+          (x.undone_at ? '<span class="pill warn">Undone' + (x.undone_by ? ' by ' + esc(x.undone_by) : '') + '</span>' : '<button class="sm" data-undo="' + x.id + '">Undo</button>') + '</td></tr>';
+      }).join('') : '<tr><td colspan="5" class="sub">No bulk changes yet.</td></tr>';
+      all('[data-undo]').forEach(function (b) {
+        b.onclick = async function () {
+          if (!(await vasConfirm('Undo this change?'))) return;
+          api('/api/inventory/bulk/' + b.getAttribute('data-undo') + '/undo', 'POST', {}).then(function (r) { toast('Put back ' + r.undone + ' items' + (r.skipped ? '; ' + r.skipped + ' left alone (changed since)' : '')); history(); }).catch(function (e) { toast(e.message); });
+        };
+      });
+    });
+  }
+  api('/api/inventory/bulk/options').then(function (o) {
+    O = o;
+    $('#fCats').innerHTML = o.categories.map(function (c) { return '<label><input type="checkbox" value="' + esc(String(c.category).toLowerCase()) + '"> ' + esc(c.category) + ' <small>(' + c.n + ')</small></label>'; }).join('');
+    $('#fSup').innerHTML += o.suppliers.map(function (s) { return '<option value="' + s.id + '">' + esc(s.name) + '</option>'; }).join('');
+    $('#fTax').innerHTML += o.tax_classes.map(function (c) { return '<option value="' + esc(c.code) + '">' + esc(c.name) + '</option>'; }).join('');
+    $('#locs').innerHTML = o.locations.map(function (l) { return '<option value="' + esc(l.location) + '">'; }).join('');
+    actionBox();
+  }).catch(function (e) { toast(e.message); });
+  $('#aKind').onchange = actionBox;
+  $('#prev').onclick = preview;
+  $('#apply').onclick = apply;
+  all('main input, main select').forEach(function (el) { if (!el.closest('#pv')) el.addEventListener('change', function () { $('#pv').style.display = 'none'; }); });
+  history();
+})();
+</script>
+<script src="/assets/module-look.js?v=20261101" defer></script>
+</body>
+</html>

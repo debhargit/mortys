@@ -34,10 +34,11 @@
   .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60;max-width:90vw}
   @media print{ header,.tabs,.controls,.noprint{display:none!important} .modal{position:static;padding:0;background:none} body{background:#fff} }
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
 <header><h1>Commission</h1><nav><a href="/accounting.html">Accounting</a><a href="/admin.html">Admin</a></nav></header>
@@ -88,7 +89,7 @@
       if (!s.started) {
         $('#out').innerHTML = '<div class="card"><h2>Switch on commission tracking</h2><p class="sub">From the moment you switch it on, commission on every sale with a rep is worked out once and kept, so later rate changes never rewrite what someone was owed. Sales before then are not included (the old commission report still covers them).</p>' +
           '<div class="note info">Set up the rules first (Rules tab), or give each rep their own rate (Rules tab, under the rules). Reps are the people in the Sales rep group.</div><button class="primary" id="startC">Switch on now</button></div>';
-        $('#startC').onclick = function () { if (!confirm('Start tracking commission from now?')) return; api('/api/comm/start', 'POST').then(function () { toast('Started'); sum(); }).catch(function (e) { toast(e.message); }); };
+        $('#startC').onclick = async function () { if (!(await vasConfirm('Start tracking commission from now?'))) return; api('/api/comm/start', 'POST').then(function () { toast('Started'); sum(); }).catch(function (e) { toast(e.message); }); };
         return;
       }
       return api('/api/comm/summary?from=' + p.from + '&to=' + p.to).then(function (d) {
@@ -129,9 +130,9 @@
             '<td><small>' + esc((x.starts_on || '').slice(0, 10)) + (x.ends_on ? ' to ' + esc(x.ends_on.slice(0, 10)) : '') + '</small></td><td style="white-space:nowrap"><button class="sm" data-edit="' + i + '">Edit</button> <button class="sm" data-del="' + i + '">Delete</button></td></tr>';
         }).join('') : '<tr><td colspan="8" class="empty">No rules: each rep earns their own rate.</td></tr>') + '</tbody></table></div></div>';
       all('[data-del]').forEach(function (b) {
-        b.onclick = function () {
+        b.onclick = async function () {
           var x = d.rules[+b.getAttribute('data-del')];
-          if (!confirm('Delete the rule "' + x.name + '"? Commission already worked out with it stays as it is.')) return;
+          if (!(await vasConfirm('Delete the rule "' + x.name + '"? Commission already worked out with it stays as it is.'))) return;
           api('/api/comm/rules/' + x.id, 'DELETE').then(function () { toast('Rule deleted'); rules(); }).catch(function (e) { toast(e.message); });
         };
       });
@@ -220,7 +221,7 @@
             '<td style="white-space:nowrap"><button class="sm" data-view="' + x.id + '">Open</button> ' + (x.status === 'draft' ? '<button class="sm primary" data-appr="' + x.id + '">Approve</button> <button class="sm" data-canc="' + x.id + '">Cancel</button>' : '') + (x.status === 'approved' ? '<button class="sm primary" data-pay="' + x.id + '">Pay</button>' : '') + '</td></tr>';
         }).join('') : '<tr><td colspan="7" class="empty">No statements yet.</td></tr>') + '</tbody></table></div></div>';
       $('#sMake').onclick = function () { api('/api/comm/statements', 'POST', { rep_id: $('#sRep').value, period_to: $('#sTo').value }).then(function () { toast('Statement made'); stmt(); }).catch(function (e) { toast(e.message); }); };
-      var act = function (sel, path, q) { all(sel).forEach(function (b) { b.onclick = function () { if (q && !confirm(q)) return; api('/api/comm/statements/' + b.getAttribute(sel.slice(1, -1)) + path, 'POST', {}).then(function () { toast('Done'); stmt(); }).catch(function (e) { toast(e.message); }); }; }); };
+      var act = function (sel, path, q) { all(sel).forEach(function (b) { b.onclick = async function () { if (q && !(await vasConfirm(q))) return; api('/api/comm/statements/' + b.getAttribute(sel.slice(1, -1)) + path, 'POST', {}).then(function () { toast('Done'); stmt(); }).catch(function (e) { toast(e.message); }); }; }); };
       act('[data-appr]', '/approve', 'Approve this statement? It goes in the books as commission owed.');
       act('[data-canc]', '/cancel', 'Cancel this draft? Its lines go back to earned.');
       act('[data-pay]', '/pay', 'Record this statement as paid in cash from the safe?');
@@ -251,7 +252,7 @@
         }).join('') : '<tr><td colspan="8" class="empty">No freelance reps yet.</td></tr>') + '</tbody></table></div></div>';
       var showInvite = function (url) { $('#rinv').innerHTML = '<div class="note warn">Send this link to the rep (WhatsApp or email). It works once, for 7 days:<br><input readonly id="invUrl" style="width:100%;margin-top:6px"></div>'; $('#invUrl').value = url; $('#invUrl').onclick = function () { this.select(); }; window.scrollTo(0, 0); };
       $('#radd').onclick = function () { api('/api/reps', 'POST', { name: $('#rn').value, email: $('#re').value, phone: $('#rp').value, commission_pct: $('#rc').value }).then(function (r) { repsTab().then(function () { showInvite(r.invite_url); }); }).catch(function (e) { toast(e.message); }); };
-      all('[data-inv]').forEach(function (b) { b.onclick = function () { if (!confirm('Make a new invite link? Their current 2-step sign-in stops working until they use it.')) return; api('/api/reps/' + b.getAttribute('data-inv') + '/invite', 'POST').then(function (r) { showInvite(r.invite_url); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-inv]').forEach(function (b) { b.onclick = async function () { if (!(await vasConfirm('Make a new invite link? Their current 2-step sign-in stops working until they use it.'))) return; api('/api/reps/' + b.getAttribute('data-inv') + '/invite', 'POST').then(function (r) { showInvite(r.invite_url); }).catch(function (e) { toast(e.message); }); }; });
       all('[data-act]').forEach(function (b) { b.onclick = function () { api('/api/reps/' + b.getAttribute('data-act'), 'PATCH', { is_active: b.getAttribute('data-on') === '1' }).then(function () { toast('Saved'); repsTab(); }).catch(function (e) { toast(e.message); }); }; });
       all('[data-pct]').forEach(function (i) { i.onchange = function () { api('/api/reps/' + i.getAttribute('data-pct'), 'PATCH', { commission_pct: i.value }).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); }); }; });
     });
@@ -324,6 +325,7 @@
   }).catch(function () {}).then(show);
 })();
 </script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
 <script src="/assets/module-look.js?v=20261101" defer></script>
 </body>
 </html>

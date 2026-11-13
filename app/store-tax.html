@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GCT and freight · Vision Auto Solutions</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0} header nav{margin-left:auto;display:flex;gap:14px;font-size:13px} header a{color:#fff;opacity:.85}
+  main{max-width:1100px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  input,select,button{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  button{cursor:pointer;background:var(--card)} button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600} button.sm{padding:3px 9px;font-size:12.5px}
+  table{width:100%;border-collapse:collapse} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600}
+  .scroll{overflow-x:auto}
+  .sw{display:flex;gap:10px;align-items:flex-start;margin:0 0 12px;font-size:14px} .sw input{margin-top:3px} .sw small{display:block;color:var(--muted)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px} @media (max-width:860px){ .grid{grid-template-columns:1fr} }
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px} .row label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  .parishes{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:6px} .parishes label{font-size:12.5px;color:var(--muted)} .parishes input{width:100%}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60;max-width:90vw}
+  .bar{position:sticky;bottom:0;background:var(--bg);padding:10px 0;display:flex;gap:8px;justify-content:flex-end}
+</style>
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
+</head>
+<body>
+<header><h1>GCT and freight</h1><nav><a href="/inventory-bulk.html">Bulk change inventory</a><a href="/admin.html">Admin</a></nav></header>
+<main id="out"><div class="card">Loading…</div></main>
+<div class="toast" id="toast"></div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 3500); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); }
+        return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; });
+      });
+  }
+  var C, CATS = [];
+  var KIND = { standard: 'Taxed at this rate', zero: 'Zero-rated (0%, still reported)', exempt: 'Exempt (no GCT)' };
+
+  function classRow(c, i) {
+    return '<tr data-c="' + i + '"><td><input data-k="code" value="' + esc(c.code) + '" style="width:90px"' + (c.code ? ' readonly' : '') + ' placeholder="PHONE"></td>' +
+      '<td><input data-k="name" value="' + esc(c.name) + '" placeholder="Phones and telecom"></td>' +
+      '<td><select data-k="kind">' + Object.keys(KIND).map(function (k) { return '<option value="' + k + '"' + (c.kind === k ? ' selected' : '') + '>' + KIND[k] + '</option>'; }).join('') + '</select></td>' +
+      '<td><input data-k="rate" type="number" min="0" max="100" step="0.01" value="' + esc(c.kind === 'standard' ? c.rate : 0) + '" style="width:80px"' + (c.kind !== 'standard' ? ' disabled' : '') + '> %</td>' +
+      '<td><input type="radio" name="def" data-k="is_default"' + (c.is_default ? ' checked' : '') + '></td></tr>';
+  }
+  function method(m, label) {
+    var f = C.freight[m] || { label: label, mode: 'flat', flat: 0, parishes: {}, free_over: 0 };
+    return '<div class="card" data-m="' + m + '"><h2>' + label + '</h2><p class="sub">' + (m === 'delivery' ? 'Your own van or driver.' : 'Courier or freight company.') + ' The till fills this in when this method is picked; staff can still type a different fee. It only shows on the bill when there is a charge.</p>' +
+      '<div class="row"><div><label>Name on the bill</label><input data-f="label" value="' + esc(f.label) + '"></div>' +
+      '<div><label>Charge</label><select data-f="mode"><option value="flat"' + (f.mode === 'flat' ? ' selected' : '') + '>Same fee everywhere</option><option value="parish"' + (f.mode === 'parish' ? ' selected' : '') + '>Fee by parish</option></select></div>' +
+      '<div><label>Fee (J$)</label><input data-f="flat" type="number" min="0" step="0.01" value="' + esc(f.flat) + '" style="width:120px"></div>' +
+      '<div><label>Free when goods are over (J$, 0 = never)</label><input data-f="free_over" type="number" min="0" step="0.01" value="' + esc(f.free_over) + '" style="width:140px"></div></div>' +
+      '<div class="parishes" data-par' + (f.mode === 'parish' ? '' : ' style="display:none"') + '>' + C.parishes.map(function (p) {
+        return '<div><label>' + esc(p) + '</label><input type="number" min="0" step="0.01" data-p="' + esc(p) + '" value="' + esc(f.parishes && f.parishes[p] != null ? f.parishes[p] : '') + '" placeholder="Fee above"></div>';
+      }).join('') + '</div></div>';
+  }
+  function draw() {
+    var h = '<div class="card"><h2>GCT for the store</h2>' +
+      '<label class="sw"><input type="checkbox" id="en"' + (C.enabled ? ' checked' : '') + '><span><b>Charge GCT on sales</b><small>Off: no GCT on any sale, quote or work order, for example while the business is not GCT-registered.</small></span></label>' +
+      '<label class="sw"><input type="checkbox" id="fr"' + (C.freight_taxable ? ' checked' : '') + '><span><b>Charge GCT on freight and delivery</b><small>At the standard rate.</small></span></label>' +
+      '<label class="sw"><input type="checkbox" id="tt"' + (C.ticket_toggle ? ' checked' : '') + '><span><b>Let the till switch GCT off for one sale</b><small>Off: the GCT switch on the till is locked. Tax-exempt customers are set on their account (Customers → edit → Tax exempt) and pay no GCT either way.</small></span></label></div>';
+    if ((C.stores || []).length) h += '<div class="card"><h2>GCT by store</h2><p class="sub">Untick a store that is not taxable: its tills charge no GCT on any sale. A sale belongs to the store its till is set up in (Terminal → tills); a browser not set up as a till counts as the main store.</p>' +
+      C.stores.map(function (s) { return '<label class="sw"><input type="checkbox" data-store="' + s.id + '"' + (s.gct_enabled !== false ? ' checked' : '') + '><span><b>' + esc(s.name) + (s.is_default ? ' (main store)' : '') + '</b><small>' + (s.gct_enabled !== false ? 'Charges GCT' : 'Not taxable: no GCT') + '</small></span></label>'; }).join('') + '</div>';
+    h += '<div class="card"><h2>Tax rates</h2><p class="sub">Every item uses a rate: the one set on the item, else its category\'s, else the default (●). Add a rate for items taxed differently, e.g. phones at 20%.</p>' +
+      '<div class="scroll"><table><thead><tr><th>Code</th><th>Name</th><th>Kind</th><th>Rate</th><th>Default</th></tr></thead><tbody id="cls">' + C.classes.map(classRow).join('') + '</tbody></table></div>' +
+      '<button class="sm" id="addCls" style="margin-top:8px">+ Add a rate</button></div>';
+    h += '<div class="card"><h2>Rate by category</h2><p class="sub">A category set here gives all its items that rate, unless an item has its own. Use Bulk change inventory to set items one by one or in groups.</p>' +
+      '<div class="scroll"><table><thead><tr><th>Category</th><th>Items</th><th>Tax rate</th></tr></thead><tbody>' + CATS.map(function (c) {
+        var cat = String(c.category).toLowerCase(), cur = C.categories[cat] || 'default';
+        return '<tr><td>' + esc(c.category) + '</td><td>' + c.n + '</td><td><select data-cat="' + esc(cat) + '"><option value="default">Default</option>' +
+          C.classes.map(function (k) { return '<option value="' + esc(k.code) + '"' + (cur === k.code ? ' selected' : '') + '>' + esc(k.name) + ' (' + (k.kind === 'standard' ? k.rate + '%' : k.kind) + ')</option>'; }).join('') + '</select></td></tr>';
+      }).join('') + '</tbody></table></div></div>';
+    h += '<div class="grid">' + method('delivery', 'Local delivery') + method('shipping', 'Courier / freight') + '</div>';
+    h += '<div class="bar"><button class="primary" id="save">Save</button></div>';
+    $('#out').innerHTML = h;
+    all('[data-m] [data-f="mode"]').forEach(function (s) { s.onchange = function () { $('[data-par]', s.closest('[data-m]')).style.display = s.value === 'parish' ? '' : 'none'; }; });
+    all('#cls [data-k="kind"]').forEach(function (s) { s.onchange = function () { var r = $('[data-k="rate"]', s.closest('tr')); r.disabled = s.value !== 'standard'; if (s.value !== 'standard') r.value = 0; }; });
+    $('#addCls').onclick = function () { C.classes.push({ code: '', name: '', kind: 'standard', rate: 20 }); keep(); draw(); };
+    $('#save').onclick = save;
+  }
+  function keep() {   // read the class table back into C before a redraw
+    all('#cls tr').forEach(function (tr, i) { var c = C.classes[i]; if (!c) return; ['code', 'name', 'kind', 'rate'].forEach(function (k) { c[k] = $('[data-k="' + k + '"]', tr).value; }); c.is_default = $('[data-k="is_default"]', tr).checked; });
+  }
+  function save() {
+    keep();
+    var classes = C.classes.filter(function (c) { return String(c.code || '').trim(); }).map(function (c, i) { return { code: c.code, name: c.name, kind: c.kind, rate: Number(c.rate) || 0, is_default: !!c.is_default, sort: i }; });
+    var cats = {}; all('[data-cat]').forEach(function (s) { cats[s.getAttribute('data-cat')] = s.value; });
+    var freight = {};
+    all('[data-m]').forEach(function (box) {
+      var m = box.getAttribute('data-m'), par = {};
+      all('[data-p]', box).forEach(function (i) { if (i.value !== '') par[i.getAttribute('data-p')] = Number(i.value); });
+      freight[m] = { label: $('[data-f="label"]', box).value, mode: $('[data-f="mode"]', box).value, flat: Number($('[data-f="flat"]', box).value) || 0, free_over: Number($('[data-f="free_over"]', box).value) || 0, parishes: par };
+    });
+    api('/api/store/tax-config', 'PUT', { enabled: $('#en').checked, freight_taxable: $('#fr').checked, ticket_toggle: $('#tt').checked, stores: all('[data-store]').map(function (i) { return { id: Number(i.getAttribute('data-store')), gct_enabled: i.checked }; }), classes: classes, categories: cats, freight: freight })
+      .then(function (r) { C = r; draw(); toast('Saved. The tills pick this up on their next sale screen load.'); }).catch(function (e) { toast(e.message); });
+  }
+  Promise.all([api('/api/store/tax-config'), api('/api/inventory/bulk/options').catch(function () { return { categories: [] }; })]).then(function (r) { C = r[0]; CATS = r[1].categories || []; draw(); })
+    .catch(function (e) { $('#out').innerHTML = '<div class="card">' + esc(e.message) + '</div>'; });
+})();
+</script>
+<script src="/assets/module-look.js?v=20261101" defer></script>
+</body>
+</html>

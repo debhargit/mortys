@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Replace reminders · Vision Auto Solutions</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --bad:#b91c1c; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --ok:#22c55e; --bad:#f87171; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0}
+  header nav{margin-left:auto;display:flex;gap:14px;font-size:13px}
+  header a{color:#fff;opacity:.85}
+  main{max-width:1100px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 8px}
+  .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
+  .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  input,select,button,textarea{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  button{cursor:pointer;background:var(--card)}
+  button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600}
+  button.sm,a.sm{padding:4px 9px;font-size:12.5px;border-radius:7px;border:1px solid var(--line);text-decoration:none;color:var(--ink);background:var(--card);display:inline-block}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  td.n{text-align:right}
+  .muted{color:var(--muted)} .err{color:var(--bad)}
+  textarea{width:100%;min-height:70px}
+  .acts{display:flex;gap:5px;flex-wrap:wrap}
+  @media (max-width:700px){ .hide-sm{display:none} }
+</style>
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
+</head>
+<body>
+<header>
+  <h1>Time to replace</h1>
+  <nav><a href="/scorecard.html">Scorecard</a><a href="/messages.html">Messages</a><a href="/admin.html">Admin</a></nav>
+</header>
+<main>
+  <div class="card">
+    <h2>Customers due for a replacement</h2>
+    <p class="muted" style="margin:0 0 8px">Known customers whose part has reached its usual life and who haven't bought it again. Walk-in sales show here once the cashier types a phone number for points.</p>
+    <div id="msg" class="muted"></div>
+    <table><thead><tr><th>Customer</th><th>Part</th><th class="n">Bought</th><th class="hide-sm">Message</th><th></th></tr></thead><tbody id="due"></tbody></table>
+  </div>
+
+  <div class="card">
+    <h2>Automatic sending</h2>
+    <div class="controls">
+      <div><label for="auto">Send by SMS or email each day</label><select id="auto"><option value="off">Off: I'll use the list</option><option value="on">On</option></select></div>
+      <div><label for="at">Time (Jamaica)</label><input type="time" id="at"></div>
+      <button id="save">Save</button>
+      <button id="sendNow" class="primary">Send to everyone due now</button>
+    </div>
+    <p class="muted" style="margin:8px 0 4px">Only customers who haven't opted out of messages are sent to. Others stay on the list for a call or WhatsApp.</p>
+    <label class="muted" for="tpl" style="font-size:12px">Message ({name}, {age}, {part}, {shop})</label>
+    <textarea id="tpl"></textarea>
+    <p id="smsg" class="muted" style="margin:6px 0 0"></p>
+  </div>
+
+  <div class="card">
+    <h2>How long parts last</h2>
+    <p class="muted" style="margin:0 0 8px">Words are matched in the part name or category; separate them with |.</p>
+    <table><thead><tr><th>Name</th><th>Words</th><th class="n">Days</th><th></th></tr></thead><tbody id="rules"></tbody></table>
+    <div class="controls" style="margin-top:8px"><button id="addRule">Add a rule</button><button id="saveRules" class="primary">Save rules</button><span id="rmsg" class="muted"></span></div>
+  </div>
+</main>
+<script>
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const err = (el, e) => { el.innerHTML = '<span class="err">' + esc(e.message) + '</span>'; };
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.statusText); return j; }));
+  }
+  let DUE = [], RULES = [];
+  function loadDue() {
+    $('msg').textContent = 'Loading…';
+    api('/api/replace/due').then((r) => {
+      DUE = r.due; $('msg').textContent = DUE.length ? DUE.length + ' due' : '';
+      $('due').innerHTML = DUE.length ? DUE.map((d, i) =>
+        '<tr><td><b>' + esc(d.name) + '</b><br><span class="muted">' + esc(d.phone || d.email || 'no contact') + '</span></td>' +
+        '<td>' + esc(d.rule_label) + '<br><span class="muted">' + esc(d.description) + '</span></td>' +
+        '<td class="n">' + d.age_days + ' days ago</td>' +
+        '<td class="hide-sm muted" style="max-width:340px">' + esc(d.message) + '</td>' +
+        '<td><div class="acts">' +
+          (d.wa_link ? '<a class="sm" target="_blank" rel="noopener" data-i="' + i + '" data-o="whatsapp" href="' + esc(d.wa_link) + '">WhatsApp</a>' : '') +
+          (d.phone ? '<a class="sm" data-i="' + i + '" data-o="called" href="tel:' + esc(d.phone) + '">Call</a>' : '') +
+          '<button class="sm" data-i="' + i + '" data-o="done">Done</button>' +
+          '<button class="sm" data-i="' + i + '" data-o="skipped">Skip</button>' +
+        '</div></td></tr>').join('') : '<tr><td colspan="5" class="muted">Nobody is due right now.</td></tr>';
+    }).catch((e) => err($('msg'), e));
+  }
+  $('due').addEventListener('click', (ev) => {
+    const el = ev.target.closest('[data-o]'); if (!el) return;
+    const d = DUE[Number(el.dataset.i)];
+    api('/api/replace/mark', 'POST', { customer_id: d.customer_id, sale_id: d.sale_id, rule_key: d.rule_key, bought_at: d.bought_at, outcome: el.dataset.o })
+      .then(() => { const row = el.closest('tr'); if (row) row.style.opacity = '.4'; })
+      .catch((e) => err($('msg'), e));
+  });
+  function paintRules() {
+    $('rules').innerHTML = RULES.map((r, i) =>
+      '<tr><td><input data-i="' + i + '" data-k="label" value="' + esc(r.label) + '"></td>' +
+      '<td><input style="width:100%" data-i="' + i + '" data-k="words" value="' + esc(r.words) + '"></td>' +
+      '<td class="n"><input type="number" style="width:90px" data-i="' + i + '" data-k="days" value="' + esc(r.days) + '"></td>' +
+      '<td><button class="sm" data-del="' + i + '">Remove</button></td></tr>').join('');
+  }
+  $('rules').addEventListener('input', (ev) => { const t = ev.target; if (t.dataset.k) RULES[Number(t.dataset.i)][t.dataset.k] = t.dataset.k === 'days' ? Number(t.value) : t.value; });
+  $('rules').addEventListener('click', (ev) => { const b = ev.target.closest('[data-del]'); if (b) { RULES.splice(Number(b.dataset.del), 1); paintRules(); } });
+  $('addRule').onclick = () => { RULES.push({ label: '', words: '', days: 365 }); paintRules(); };
+  $('saveRules').onclick = () => api('/api/replace/settings', 'PUT', { rules: RULES })
+    .then((s) => { RULES = s.rules; paintRules(); $('rmsg').textContent = 'Saved'; loadDue(); }).catch((e) => err($('rmsg'), e));
+  function loadSettings() {
+    api('/api/replace/settings').then((s) => {
+      RULES = s.rules; paintRules();
+      $('auto').value = s.replace_auto_send; $('at').value = s.replace_send_at; $('tpl').value = s.replace_message;
+      $('smsg').textContent = s.replace_last_run ? 'Last automatic run ' + s.replace_last_run : '';
+    }).catch((e) => err($('smsg'), e));
+  }
+  $('save').onclick = () => api('/api/replace/settings', 'PUT', { replace_auto_send: $('auto').value, replace_send_at: $('at').value, replace_message: $('tpl').value })
+    .then(() => { $('smsg').textContent = 'Saved'; loadDue(); }).catch((e) => err($('smsg'), e));
+  $('sendNow').onclick = async () => { if (!(await vasConfirm('Send a reminder to every customer due now who hasn\'t opted out?'))) return;
+    $('smsg').textContent = 'Sending…';
+    api('/api/replace/send', 'POST', {}).then((r) => { $('smsg').textContent = r.sent + ' sent, ' + r.skipped + ' left for a call or WhatsApp'; loadDue(); }).catch((e) => err($('smsg'), e)); };
+  loadDue(); loadSettings();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,735 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Asset register · Vision Auto Solutions</title>
+<link rel="stylesheet" href="/assets/books.css">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<style>
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px} .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .grid2 label,.grid3 label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px} .grid2 input,.grid2 select,.grid3 input,.grid3 select,.grid2 textarea{width:100%}
+  @media (max-width:700px){ .grid2,.grid3{grid-template-columns:1fr} }
+  .hint{font-size:12px;color:var(--muted);margin-top:3px}
+  .nw-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px} .nw-grid > *{min-width:0} .bs td:first-child{overflow-wrap:anywhere} @media (max-width:900px){ .nw-grid{grid-template-columns:1fr} }
+  .bs td{padding:4px 8px} .bs tr.grp td{font-weight:600;border-bottom:0;padding-top:10px} .bs tr.sub td:first-child{padding-left:22px;color:var(--muted)} .bs tr.tot td{font-weight:700;border-top:2px solid var(--line)}
+  .trend{width:100%;height:170px} .trend text{font-size:10px;fill:var(--muted)}
+  .tile small{display:block;font-size:11.5px;color:var(--muted)} .tile b{overflow-wrap:anywhere}
+  .pos{color:var(--ok)} .neg{color:var(--red)}
+  fieldset{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0 0 10px} legend{font-size:12.5px;font-weight:600;padding:0 4px}
+</style>
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
+</head>
+<body>
+<header><h1>Asset register</h1><nav><a href="/accounting.html">Ledger</a><a href="/payables.html">Payables</a><a href="/banking.html">Banking</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"><button data-t="reg" class="on">Register</button><button data-t="dep">Depreciation</button><button data-t="rpt">Asset schedule</button><button data-t="own">Costs &amp; income</button><button data-t="inv">Investments</button><button data-t="shares">Shares</button><button data-t="nw">Net worth</button><button data-t="cls">Asset classes</button></div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<script src="/assets/books-common.js?v=20261103"></script>
+<script>
+(function () {
+  'use strict';
+  var B = window.Books, $ = B.$, all = B.all, esc = B.esc, J = B.J, api = B.api, toast = B.toast, modal = B.modal, close = B.close;
+  var tab = 'reg', meta = null;
+  var METHOD = { straight_line: 'Straight line', declining_balance: 'Declining balance', none: 'Not depreciated' };
+  var FUNDING = { in_ledger: 'Already in the books (a bill or cheque coded to the asset account)', account: 'Paid from an account (post it now)', opening: 'Owned before the ledger started' };
+  var KIND = { sold: 'Sold', scrapped: 'Scrapped', written_off: 'Written off', traded_in: 'Traded in', stolen: 'Stolen / lost' };
+  var SRC = { fa_acquire: 'Cost', fa_acquire_void: 'Cost voided', fa_run: 'Depreciation', fa_run_void: 'Depreciation voided', fa_dispose: 'Disposal', fa_dispose_void: 'Disposal voided' };
+  try { tab = localStorage.getItem('vision.faTab') || 'reg'; } catch (_) {}
+  var thisMonth = function () { return B.today().slice(0, 7); };
+  var life = function (m) { if (!m) return ''; var y = Math.floor(m / 12), r = m % 12; return (y ? y + ' yr' : '') + (y && r ? ' ' : '') + (r ? r + ' mo' : ''); };
+  function opts(list, sel, label, blank) {
+    return (blank ? '<option value="">' + esc(blank) + '</option>' : '') + list.map(function (x) { return '<option value="' + x.id + '"' + (String(sel) === String(x.id) ? ' selected' : '') + '>' + esc(label(x)) + '</option>'; }).join('');
+  }
+  var acctLabel = function (a) { return a.code + ' ' + a.name; };
+  function loadMeta() { return api('/api/assets/meta').then(function (m) { meta = m; return m; }); }
+
+  // ------------------------------------------------------------ register --
+  var regFilter = 'active';
+  function reg() {
+    return Promise.all([loadMeta(), api('/api/assets')]).then(function (r) {
+      var d = r[1], list = d.assets.filter(function (a) { return regFilter === 'all' || a.status === regFilter; });
+      var warn = !meta.ledger_start ? '<div class="note warn">The ledger has not been started (Accounting). Assets can be entered now; their entries post once it starts.</div>'
+        : d.due.assets ? '<div class="note warn">Depreciation is behind: a run through ' + esc(d.due.through) + ' would charge ' + J(d.due.amount) + ' on ' + d.due.assets + ' asset' + (d.due.assets > 1 ? 's' : '') + '. <a href="#" id="goDep">Run depreciation ›</a></div>' : '';
+      $('#out').innerHTML = '<div class="tiles"><div class="tile"><span class="k">Assets in use</span><b>' + d.totals.count + '</b></div><div class="tile"><span class="k">Cost</span><b>' + J(d.totals.cost) + '</b></div>' +
+        '<div class="tile"><span class="k">Depreciation to date</span><b>' + J(d.totals.accumulated) + '</b></div><div class="tile"><span class="k">Book value</span><b>' + J(d.totals.book_value) + '</b></div></div>' + warn +
+        '<div class="card"><div class="controls"><button class="primary" id="add">+ Add an asset</button><div><label>Show</label><select id="flt"><option value="active">In use</option><option value="disposed">Disposed of</option><option value="void">Voided</option><option value="all">All</option></select></div>' +
+        '<span style="margin-left:auto"></span><button id="csv">Download CSV</button></div><div class="scroll"><table><thead><tr><th>No.</th><th>Asset</th><th>Class</th><th>In use from</th><th>Method</th><th class="n">Cost</th><th class="n">Depreciation</th><th class="n">Book value</th><th>Charged to</th><th></th></tr></thead><tbody>' +
+        (list.length ? list.map(function (a) {
+          return '<tr class="click" data-a="' + a.id + '"><td><b>' + esc(a.number) + '</b></td><td>' + esc(a.name) + (a.serial_no ? '<br><small style="color:var(--muted)">S/N ' + esc(a.serial_no) + '</small>' : '') + (a.location ? '<br><small style="color:var(--muted)">' + esc(a.location) + '</small>' : '') + (a.ownership_pct < 100 ? ' <span class="pill" title="' + esc(a.co_owners || 'held with others') + '">' + a.ownership_pct + '% owned</span>' : '') + '</td><td>' + esc(a.class_name) + '</td><td>' + esc(a.in_service_on) + '</td><td>' + esc(METHOD[a.method]) + (a.life_months ? '<br><small style="color:var(--muted)">' + life(a.life_months) + '</small>' : a.rate_pct ? '<br><small style="color:var(--muted)">' + a.rate_pct + '% a year</small>' : '') + '</td>' +
+            '<td class="n">' + J(a.cost) + '</td><td class="n">' + J(a.accumulated) + '</td><td class="n"><b>' + J(a.book_value) + '</b></td><td>' + esc(a.last_month || a.opening_through || '') + '</td><td>' +
+            (a.status === 'disposed' ? '<span class="pill">disposed</span>' : a.status === 'void' ? '<span class="pill bad">void</span>' : a.funding !== 'in_ledger' && !a.posted ? '<span class="pill warn">not posted</span>' : '') + '</td></tr>';
+        }).join('') : '<tr><td colspan="10" class="empty">' + (regFilter === 'active' ? 'No assets yet. Add the shop\'s furniture, workshop equipment, vehicles and computers.' : 'None.') + '</td></tr>') + '</tbody></table></div></div>';
+      $('#flt').value = regFilter;
+      $('#flt').onchange = function () { regFilter = this.value; reg(); };
+      $('#add').onclick = function () { assetForm(null); };
+      if ($('#goDep')) $('#goDep').onclick = function (e) { e.preventDefault(); tab = 'dep'; mark(); show(); };
+      $('#csv').onclick = function () {
+        B.csv('fixed-assets-' + B.today() + '.csv', [['Number', 'Name', 'Class', 'Serial', 'Location', 'Bought', 'In use from', 'Method', 'Life (months)', 'Rate %', 'Cost', 'Salvage', 'Depreciation to date', 'Book value', 'Charged to', 'Status']]
+          .concat(list.map(function (a) { return [a.number, a.name, a.class_name, a.serial_no, a.location, a.acquired_on, a.in_service_on, METHOD[a.method], a.life_months, a.rate_pct, a.cost, a.salvage, a.accumulated, a.book_value, a.last_month || a.opening_through, a.status]; })));
+      };
+      all('[data-a]').forEach(function (tr) { tr.onclick = function () { detail(+tr.getAttribute('data-a')); }; });
+    }).catch(function (e) { $('#out').innerHTML = '<div class="note bad">' + esc(e.message) + '</div>'; });
+  }
+
+  function assetForm(a) {
+    var x = a || { funding: 'in_ledger', acquired_on: B.today(), class_id: (meta.classes.find(function (k) { return k.is_active; }) || {}).id };
+    var locked = a && (a.posted || a.last_month);
+    var classes = meta.classes.filter(function (k) { return k.is_active || (a && k.id === a.class_id); });
+    modal('<h2>' + (a ? 'Change ' + esc(a.number) : 'Add an asset') + '</h2>' +
+      '<fieldset><legend>What it is</legend><div class="grid2">' +
+        '<div><label>Name</label><input id="fName" value="' + esc(x.name || '') + '" placeholder="e.g. 2-post vehicle lift"></div>' +
+        '<div><label>Class</label><select id="fClass"' + (locked ? ' disabled' : '') + '>' + opts(classes, x.class_id, function (k) { return k.name; }) + '</select></div>' +
+        '<div><label>Serial number</label><input id="fSerial" value="' + esc(x.serial_no || '') + '"></div>' +
+        '<div><label>Where it is</label><input id="fLoc" value="' + esc(x.location || '') + '" placeholder="Bay 2, front office…"></div>' +
+        '<div><label>Who has it</label><input id="fCust" value="' + esc(x.custodian || '') + '"></div>' +
+        '<div><label>Supplier</label><select id="fSup">' + opts(meta.suppliers, x.supplier_id, function (s) { return s.name; }, 'None') + '</select></div>' +
+        '<div><label>Invoice / cheque that paid for it</label><input id="fRef" value="' + esc(x.reference || '') + '"></div>' +
+        '<div><label>Class (QuickBooks)</label><select id="fGlc">' + opts(meta.gl_classes, x.gl_class_id, function (c) { return c.name; }, 'No class') + '</select></div>' +
+        '<div style="grid-column:1/-1"><label>Description</label><textarea id="fDesc" rows="2">' + esc(x.description || '') + '</textarea></div></div></fieldset>' +
+      '<fieldset><legend>Cost and how it reached the books</legend><div class="grid3">' +
+        '<div><label>Date bought</label><input type="date" id="fBought" value="' + esc(x.acquired_on || '') + '"' + (locked ? ' disabled' : '') + '></div>' +
+        '<div><label>Date it went into use</label><input type="date" id="fInUse" value="' + esc(x.in_service_on || x.acquired_on || '') + '"' + (a && a.last_month ? ' disabled' : '') + '></div>' +
+        '<div><label>Cost (J$)</label><input type="number" step="0.01" id="fCost" value="' + (x.cost || '') + '"' + (locked ? ' disabled' : '') + '></div></div>' +
+        '<div style="margin-top:8px"><label style="font-size:12px;color:var(--muted)">Paid for</label><select id="fFund" style="width:100%"' + (locked ? ' disabled' : '') + '>' + Object.keys(FUNDING).map(function (k) { return '<option value="' + k + '"' + (x.funding === k ? ' selected' : '') + '>' + esc(FUNDING[k]) + '</option>'; }).join('') + '</select>' +
+        '<div class="hint" id="fFundHint"></div></div>' +
+        '<div id="fAcctWrap" style="margin-top:8px"><label style="font-size:12px;color:var(--muted)">Paid from</label><select id="fAcct" style="width:100%"' + (locked ? ' disabled' : '') + '>' + opts(meta.accounts, x.funding_account_id, acctLabel, 'Choose…') + '</select></div>' +
+        '<div class="grid2" style="margin-top:8px"><div><label>Depreciation already taken (J$)</label><input type="number" step="0.01" id="fOpen" value="' + (x.opening_accum || '') + '"' + (locked ? ' disabled' : '') + '><div class="hint">For something owned before: what has been written off up to now. Left blank for one owned before the ledger, it is worked out to the month before the ledger started.</div></div>' +
+        '<div><label>…up to the end of (month)</label><input type="month" id="fThr" value="' + esc(x.opening_through || '') + '"' + (locked ? ' disabled' : '') + '></div></div></fieldset>' +
+      '<fieldset><legend>Depreciation</legend><div class="grid3">' +
+        '<div><label>Method</label><select id="fMethod">' + Object.keys(METHOD).map(function (k) { return '<option value="' + k + '"' + (x.method === k ? ' selected' : '') + '>' + METHOD[k] + '</option>'; }).join('') + '</select></div>' +
+        '<div id="fLifeWrap"><label>Useful life (months)</label><input type="number" id="fLife" value="' + (x.life_months || '') + '"></div>' +
+        '<div id="fRateWrap"><label>Rate (% a year)</label><input type="number" step="0.01" id="fRate" value="' + (x.rate_pct || '') + '"></div>' +
+        '<div><label>Salvage value (J$)</label><input type="number" step="0.01" id="fSalv" value="' + (a ? x.salvage : '') + '" placeholder="the class\'s usual %"></div></div>' +
+        (a && a.last_month ? '<div class="hint">A change of life or salvage spreads the book value left over the months that are left; months already charged stay as they are.</div>' : '') + '</fieldset>' +
+      '<fieldset><legend>Ownership and value</legend><div class="grid3">' +
+        '<div><label>The business owns (%)</label><input type="number" step="0.01" min="0.01" max="100" id="fPct" value="' + (x.ownership_pct == null ? 100 : x.ownership_pct) + '"><div class="hint">Held with others? Enter the business\'s share here, and its share of the cost above.</div></div>' +
+        '<div><label>Who owns the rest</label><input id="fCo" value="' + esc(x.co_owners || '') + '" placeholder="e.g. a partner, another company"></div>' +
+        '<div><label>Market value of that share (J$)</label><input type="number" step="0.01" id="fMv" value="' + (x.market_value == null ? '' : x.market_value) + '" placeholder="optional"><div class="hint">An appraisal, for the net worth report only. Nothing is posted.</div></div>' +
+        '<div><label>Valued on</label><input type="date" id="fMvOn" value="' + esc(x.market_value_on || '') + '"></div></div></fieldset>' +
+      '<div><label style="font-size:12px;color:var(--muted)">Notes</label><textarea id="fNotes" rows="2" style="width:100%">' + esc(x.notes || '') + '</textarea></div>' +
+      (locked ? '<div class="note info" style="margin-top:8px">This asset is in the books: its cost, class and how it was paid for are fixed.</div>' : '') +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="fSave">' + (a ? 'Save' : 'Add the asset') + '</button><button id="fX">Cancel</button></div>');
+    function sync(fromClass) {
+      var k = meta.classes.find(function (c) { return String(c.id) === $('#fClass').value; }) || {};
+      if (fromClass && !a) { $('#fMethod').value = k.method || 'straight_line'; $('#fLife').value = k.life_months || ''; $('#fRate').value = k.rate_pct || ''; }
+      var m = $('#fMethod').value, f = $('#fFund').value;
+      $('#fLifeWrap').style.display = m === 'straight_line' || m === 'declining_balance' ? '' : 'none';
+      $('#fRateWrap').style.display = m === 'declining_balance' ? '' : 'none';
+      $('#fAcctWrap').style.display = f === 'account' ? '' : 'none';
+      $('#fFundHint').textContent = f === 'in_ledger' ? 'Nothing more posts for the cost: the bill or cheque already debited ' + (k.asset_account || 'the class\'s asset account') + '. Check the bill was coded there.'
+        : f === 'account' ? 'Posts Dr ' + (k.asset_account || 'the asset account') + ', Cr the account it was paid from.'
+        : 'Posts Dr ' + (k.asset_account || 'the asset account') + ', Cr ' + (k.accum_account || 'accumulated depreciation') + ' for the depreciation already taken, Cr Opening Balance Equity for the rest, on the ledger start.';
+    }
+    $('#fClass').onchange = function () { sync(true); };
+    $('#fMethod').onchange = $('#fFund').onchange = function () { sync(false); };
+    sync(!a);
+    $('#fX').onclick = close;
+    $('#fSave').onclick = function () {
+      var btn = this; btn.disabled = true;
+      var body = { name: $('#fName').value, class_id: $('#fClass').value, serial_no: $('#fSerial').value, location: $('#fLoc').value, custodian: $('#fCust').value, supplier_id: $('#fSup').value,
+        reference: $('#fRef').value, gl_class_id: $('#fGlc').value, description: $('#fDesc').value, acquired_on: $('#fBought').value, in_service_on: $('#fInUse').value, cost: $('#fCost').value,
+        funding: $('#fFund').value, funding_account_id: $('#fAcct').value, opening_accum: $('#fOpen').value, opening_through: $('#fThr').value,
+        method: $('#fMethod').value, life_months: $('#fLife').value, rate_pct: $('#fRate').value, salvage: $('#fSalv').value, notes: $('#fNotes').value,
+        ownership_pct: $('#fPct').value, co_owners: $('#fCo').value, market_value: $('#fMv').value, market_value_on: $('#fMvOn').value };
+      api(a ? '/api/assets/' + a.id : '/api/assets', a ? 'PUT' : 'POST', body).then(function (r) { close(); toast(a ? 'Saved' : r.asset.number + ' added'); detail(r.asset.id); reg(); })
+        .catch(function (e) { btn.disabled = false; toast(e.message); });
+    };
+  }
+
+  function detail(id) {
+    api('/api/assets/' + id).then(function (d) {
+      var a = d.asset;
+      var byYear = {};
+      d.charged.forEach(function (c) { var y = c.month.slice(0, 4); (byYear[y] = byYear[y] || { done: 0, todo: 0 }).done += c.amount; });
+      d.projected.forEach(function (c) { var y = c.month.slice(0, 4); (byYear[y] = byYear[y] || { done: 0, todo: 0 }).todo += c.amount; });
+      var nbv = a.cost - a.opening_accum, years = Object.keys(byYear).sort();
+      modal('<h2>' + esc(a.number) + ' · ' + esc(a.name) + ' ' + (a.status === 'disposed' ? '<span class="pill">disposed</span>' : a.status === 'void' ? '<span class="pill bad">void</span>' : '') + '</h2>' +
+        '<p class="sub">' + esc(a.class_name) + ' · bought ' + esc(a.acquired_on) + ', in use from ' + esc(a.in_service_on) + (a.supplier ? ' · ' + esc(a.supplier) : '') + (a.serial_no ? ' · S/N ' + esc(a.serial_no) : '') + (a.location ? ' · ' + esc(a.location) : '') + '</p>' +
+        '<div class="tiles"><div class="tile"><span class="k">Cost</span><b>' + J(a.cost) + '</b></div><div class="tile"><span class="k">Depreciation to date</span><b>' + J(a.accumulated) + '</b></div><div class="tile"><span class="k">Book value</span><b>' + J(a.book_value) + '</b></div><div class="tile"><span class="k">Salvage</span><b>' + J(a.salvage) + '</b></div></div>' +
+        '<p class="sub">' + esc(METHOD[a.method]) + (a.life_months ? ' over ' + life(a.life_months) : '') + (a.rate_pct ? ' at ' + a.rate_pct + '% a year' : '') + ' · ' + esc(FUNDING[a.funding]) + (a.funding_account ? ': ' + esc(a.funding_account) : '') +
+          (a.opening_accum ? ' · ' + J(a.opening_accum) + ' depreciation brought forward to ' + esc(a.opening_through) : '') + '</p>' +
+        (d.disposal ? '<div class="note info">' + esc(KIND[d.disposal.kind]) + ' on ' + esc(d.disposal.disposed_on) + (Number(d.disposal.proceeds) ? ' for ' + J(d.disposal.proceeds) : '') + (d.disposal.note ? ' · ' + esc(d.disposal.note) : '') +
+          ' · gain / loss ' + J(Number(d.disposal.proceeds) - (a.cost - Number(d.disposal.accum_at))) + ' <button class="sm" id="vDisp">Void the disposal</button></div>' : '') +
+        (years.length ? '<h3 style="font-size:14px;margin:10px 0 4px">Schedule by year</h3><div class="scroll"><table><thead><tr><th>Year</th><th class="n">Charged</th><th class="n">Still to charge</th><th class="n">Book value at year end</th></tr></thead><tbody>' +
+          years.map(function (y) { nbv -= byYear[y].done + byYear[y].todo; return '<tr><td>' + y + '</td><td class="n">' + (byYear[y].done ? J(byYear[y].done) : '') + '</td><td class="n">' + (byYear[y].todo ? J(byYear[y].todo) : '') + '</td><td class="n">' + J(nbv) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '') +
+        '<h3 style="font-size:14px;margin:12px 0 4px">In the ledger</h3><div class="scroll"><table><tbody>' +
+          (d.entries.length ? d.entries.map(function (e) { return '<tr><td><a href="/accounting.html#entry=' + e.id + '" target="_blank" rel="noopener">' + esc(e.number) + '</a></td><td>' + esc(e.entry_date) + '</td><td>' + esc(SRC[e.source_kind] || e.source_kind) + '</td><td>' + esc(e.memo || '') + '</td><td class="n">' + J(e.total) + '</td><td>' + (e.reversed_by ? '<span class="pill warn">reversed</span>' : '') + '</td></tr>'; }).join('')
+            : '<tr><td class="empty">' + (a.funding === 'in_ledger' ? 'Its cost came in through a bill or cheque; depreciation shows here once it is run.' : 'Nothing yet: it posts once the ledger has started.') + '</td></tr>') + '</tbody></table></div>' +
+        (a.ownership_pct < 100 || a.market_value != null ? '<p class="sub">' + (a.ownership_pct < 100 ? 'The business owns ' + a.ownership_pct + '%' + (a.co_owners ? ', with ' + esc(a.co_owners) : '') + ' (the whole asset at book value ' + J(a.book_value * 100 / a.ownership_pct) + ')' : '') +
+          (a.market_value != null ? (a.ownership_pct < 100 ? ' · ' : '') + 'Market value ' + J(a.market_value) + (a.market_value_on ? ' on ' + esc(a.market_value_on) : '') : '') + '</p>' : '') +
+        ownPart(a, d) + linkPart(a, d) +
+        '<div class="controls" style="margin-top:12px">' + (a.status === 'active' ? '<button id="dEdit">Change</button><button id="dRent">Rent out…</button><button id="dDisp">Sold / scrapped…</button>' + (!a.last_month ? '<button id="dVoid">Void (entered by mistake)</button>' : '') : '') + '<button id="dX">Close</button></div>');
+      $('#dX').onclick = close;
+      if ($('#dEdit')) $('#dEdit').onclick = function () { assetForm(a); };
+      if ($('#dDisp')) $('#dDisp').onclick = function () { disposeForm(a); };
+      wireOwn(a); wireLinks(a, d);
+      if ($('#dVoid')) $('#dVoid').onclick = async function () { var r = await vasPrompt('Why is this asset being voided?'); if (!r) return; api('/api/assets/' + a.id + '/void', 'POST', { reason: r }).then(function () { close(); toast('Voided'); reg(); }).catch(function (e) { toast(e.message); }); };
+      if ($('#vDisp')) $('#vDisp').onclick = async function () { var r = await vasPrompt('Why is the disposal being voided?'); if (!r) return; api('/api/assets/disposals/' + d.disposal.id + '/void', 'POST', { reason: r }).then(function () { toast('Disposal voided: the asset is back in use'); detail(a.id); reg(); }).catch(function (e) { toast(e.message); }); };
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  function disposeForm(a) {
+    modal('<h2>' + esc(a.number) + ' · sold, scrapped or written off</h2><p class="sub">Book value now ' + J(a.book_value) + '. Depreciation must be run to the month before; the cost and depreciation come off and the difference to what was received is a gain or loss.</p>' +
+      '<div class="grid2"><div><label>Date</label><input type="date" id="xDay" value="' + B.today() + '"></div><div><label>What happened</label><select id="xKind">' + Object.keys(KIND).map(function (k) { return '<option value="' + k + '">' + KIND[k] + '</option>'; }).join('') + '</select></div>' +
+      '<div><label>Received for it (J$)</label><input type="number" step="0.01" id="xAmt" value="0"></div><div><label>Money went to</label><select id="xAcct">' + opts(meta.accounts, '', acctLabel, 'Choose… (if anything was received)') + '</select></div>' +
+      '<div style="grid-column:1/-1"><label>Note</label><input id="xNote" placeholder="Buyer, reason…"></div></div><p class="sub" id="xGain"></p>' +
+      '<div class="controls"><button class="primary" id="xGo">Record it</button><button id="xX">Cancel</button></div>');
+    var gain = function () { var g = Number($('#xAmt').value || 0) - a.book_value; $('#xGain').innerHTML = (g >= 0 ? 'Gain on disposal ' : 'Loss on disposal ') + J(Math.abs(g)) + ' (at today\'s book value).'; };
+    $('#xAmt').oninput = gain; gain();
+    $('#xX').onclick = function () { detail(a.id); };
+    $('#xGo').onclick = function () {
+      var btn = this; btn.disabled = true;
+      api('/api/assets/' + a.id + '/dispose', 'POST', { disposed_on: $('#xDay').value, kind: $('#xKind').value, proceeds: $('#xAmt').value, proceeds_account_id: $('#xAcct').value, note: $('#xNote').value })
+        .then(function () { toast('Recorded'); detail(a.id); reg(); }).catch(function (e) { btn.disabled = false; toast(e.message); });
+    };
+  }
+
+  // ---------------------------------------------------- costs and income --
+  // What each asset cost to run and what it earned: running costs from bills,
+  // banking and journals that name it, rent from its invoices, depreciation and
+  // the result of selling it.
+  var op = null;
+  function own() {
+    if (!op) { var y = B.today().slice(0, 4); op = { from: y + '-01-01', to: B.today() }; }
+    return api('/api/assets/ownership?from=' + op.from + '&to=' + op.to).then(function (d) {
+      var cols = [['income', 'Income (rent)'], ['costs', 'Running costs'], ['depreciation', 'Depreciation'], ['disposal', 'Sale gain / loss'], ['net', 'Net'], ['book_value', 'Book value now']];
+      var rows = d.assets.filter(function (a) { return a.status === 'active' || a.income || a.costs || a.depreciation || a.disposal; });
+      $('#out').innerHTML = '<div class="card"><h2>Costs and income by asset</h2><p class="sub">Running costs are bill, banking and journal lines that name the asset (repairs, fuel, insurance); income is rent invoiced for it. To put a cost against an asset, choose it in the Asset column when entering the bill or payment.</p>' +
+        '<div class="controls"><div><label>From</label><input type="date" id="oF" value="' + op.from + '"></div><div><label>To</label><input type="date" id="oT" value="' + op.to + '"></div><button class="primary" id="oGo">Show</button><button id="oCsv">Download CSV</button><button onclick="window.print()">Print</button></div>' +
+        '<div class="scroll"><table><thead><tr><th>Asset</th><th>Class</th>' + cols.map(function (c) { return '<th class="n">' + c[1] + '</th>'; }).join('') + '</tr></thead><tbody>' +
+        (rows.length ? rows.map(function (a) {
+          return '<tr class="click" data-a="' + a.id + '"><td><b>' + esc(a.number) + '</b> ' + esc(a.name) + (a.rented ? ' <span class="pill ok">rented out</span>' : '') + (a.status === 'disposed' ? ' <span class="pill">disposed</span>' : '') + '</td><td>' + esc(a.class_name) + '</td>' +
+            cols.map(function (c) { var v = a[c[0]]; return '<td class="n"' + (c[0] === 'net' && v < 0 ? ' style="color:var(--red,#c00)"' : '') + '>' + (v ? J(v) : '') + '</td>'; }).join('') + '</tr>';
+        }).join('') + '<tr><td colspan="2"><b>Total</b></td>' + cols.map(function (c) { var v = c[0] === 'book_value' ? rows.reduce(function (t, a) { return t + a.book_value; }, 0) : d.totals[c[0]]; return '<td class="n"><b>' + J(v) + '</b></td>'; }).join('') + '</tr>'
+          : '<tr><td colspan="8" class="empty">No assets yet.</td></tr>') + '</tbody></table></div></div>';
+      $('#oGo').onclick = function () { op = { from: $('#oF').value, to: $('#oT').value }; own(); };
+      all('[data-a]').forEach(function (tr) { tr.onclick = function () { detail(tr.getAttribute('data-a')); }; });
+      $('#oCsv').onclick = function () { B.csv('asset-costs-income-' + op.from + '-to-' + op.to + '.csv', [['Asset', 'Name', 'Class'].concat(cols.map(function (c) { return c[1]; }))].concat(rows.map(function (a) { return [a.number, a.name, a.class_name].concat(cols.map(function (c) { return a[c[0]]; })); }))); };
+    }).catch(function (e) { $('#out').innerHTML = '<div class="note bad">' + esc(e.message) + '</div>'; });
+  }
+
+  // Renting an asset out: a recurring invoice to the customer for it (Receivables
+  // raises each one and chases payment; the rent shows against the asset).
+  var FREQ = { weekly: 'Weekly', fortnightly: 'Every two weeks', monthly: 'Monthly', quarterly: 'Quarterly', yearly: 'Yearly' };
+  function rentForm(a) {
+    Promise.all([loadMeta(), api('/api/ar/customers').catch(function () { return { customers: [] }; })]).then(function (r) {
+      var custs = r[1].customers || [], income = meta.accounts.filter(function (x) { return ['income', 'other_income'].indexOf(x.type) >= 0; });
+      var rental = income.find(function (x) { return x.system_key === 'rental_income'; });
+      modal('<h2>Rent out ' + esc(a.number) + ' · ' + esc(a.name) + '</h2><p class="sub">Sets up a recurring invoice to the customer for this asset. Each invoice goes to Receivables, posts to the income account and shows as income against the asset.</p>' +
+        '<div class="grid2"><div style="grid-column:1/-1"><label>Customer (must have an account in Receivables)</label><input id="rC" list="rCl" placeholder="Start typing a name"><datalist id="rCl">' + custs.map(function (c) { return '<option value="' + esc(c.name + (c.account_number ? ' · ' + c.account_number : '')) + '">'; }).join('') + '</datalist></div>' +
+        '<div><label>Rent each period (J$, before GCT)</label><input type="number" step="0.01" id="rAmt"></div><div><label>How often</label><select id="rF">' + Object.keys(FREQ).map(function (k) { return '<option value="' + k + '"' + (k === 'monthly' ? ' selected' : '') + '>' + FREQ[k] + '</option>'; }).join('') + '</select></div>' +
+        '<div><label>First invoice date</label><input type="date" id="rS" value="' + B.today() + '"></div><div><label>Ends (blank = until you end it)</label><input type="date" id="rE"></div>' +
+        '<div><label>Days to pay</label><input type="number" id="rD" value="7"></div><div><label><input type="checkbox" id="rG"> Charge GCT (15%)</label></div>' +
+        '<div style="grid-column:1/-1"><label>Income account</label><select id="rA">' + opts(income, rental ? rental.id : '', acctLabel, 'Choose…') + '</select></div></div>' +
+        '<div class="controls" style="margin-top:10px"><button class="primary" id="rGo">Start the rental</button><button id="rX">Cancel</button></div>');
+      $('#rX').onclick = function () { detail(a.id); };
+      $('#rGo').onclick = function () {
+        var name = $('#rC').value.trim(), c = custs.find(function (x) { return x.name + (x.account_number ? ' · ' + x.account_number : '') === name; }) || custs.find(function (x) { return x.name === name; });
+        if (!c) return toast('Choose the customer from the list');
+        var amt = Math.round(Number($('#rAmt').value || 0) * 100) / 100;
+        if (!(amt > 0)) return toast('Enter the rent');
+        var btn = this; btn.disabled = true;
+        api('/api/billing/plans', 'POST', { side: 'ar', name: 'Rent of ' + a.number + ' ' + a.name.slice(0, 50), customer_id: c.id, frequency: $('#rF').value, start_date: $('#rS').value, end_date: $('#rE').value,
+          due_days: $('#rD').value, gct_amount: $('#rG').checked ? Math.round(amt * 0.15 * 100) / 100 : 0, asset_id: a.id,
+          lines: [{ account_id: $('#rA').value, amount: amt, description: 'Rent of ' + a.number + ' ' + a.name.slice(0, 60) + ' · {period}', asset_id: a.id }] })
+          .then(function () { toast('Rental started: the first invoice is raised on ' + $('#rS').value); detail(a.id); }).catch(function (e) { btn.disabled = false; toast(e.message); });
+      };
+    }).catch(function (e) { toast(e.message); });
+  }
+  // The costs-and-income and rentals part of an asset's page.
+  function ownPart(a, d) {
+    var o = d.ownership || { income: 0, costs: 0, depreciation: 0, disposal: 0, net: 0, accounts: [] }, KN = { income: 'Income', costs: 'Running cost', depreciation: 'Depreciation', disposal: 'Sale gain / loss' };
+    return '<h3 style="font-size:14px;margin:12px 0 4px">Costs and income, since it was bought</h3>' +
+      '<div class="tiles"><div class="tile"><span class="k">Income (rent)</span><b>' + J(o.income) + '</b></div><div class="tile"><span class="k">Running costs</span><b>' + J(o.costs) + '</b></div><div class="tile"><span class="k">Depreciation</span><b>' + J(o.depreciation) + '</b></div><div class="tile"><span class="k">Net</span><b' + (o.net < 0 ? ' style="color:var(--red,#c00)"' : '') + '>' + J(o.net) + '</b></div></div>' +
+      (o.accounts.length ? '<div class="scroll"><table><tbody>' + o.accounts.map(function (x) { return '<tr><td>' + esc(KN[x.kind]) + '</td><td>' + esc(x.code + ' ' + x.name) + '</td><td class="n">' + J(x.amount) + '</td></tr>'; }).join('') + '</tbody></table></div>'
+        : '<p class="sub">No costs or income against it yet. Choose this asset in the Asset column of a bill, a banking payment or a journal line to put a repair, fuel or insurance against it.</p>') +
+      '<h3 style="font-size:14px;margin:12px 0 4px">Rented out</h3>' +
+      (d.rentals.length ? '<div class="scroll"><table><thead><tr><th>Customer</th><th class="n">Rent</th><th>How often</th><th>From</th><th>Next invoice</th><th class="n">Invoices</th><th></th></tr></thead><tbody>' + d.rentals.map(function (p) {
+        return '<tr><td>' + esc(p.customer || '') + '</td><td class="n">' + J(p.amount) + '</td><td>' + esc(FREQ[p.frequency] || p.frequency) + '</td><td>' + esc(p.start_date) + (p.end_date ? ' to ' + esc(p.end_date) : '') + '</td><td>' + (p.status === 'active' ? esc(p.next_run || '–') : '<span class="pill">' + esc(p.status) + '</span>') + '</td><td class="n">' + p.invoices + '</td>' +
+          '<td>' + (p.status !== 'ended' ? '<button class="sm" data-rend="' + p.id + '">End rental</button>' : '') + '</td></tr>';
+      }).join('') + '</tbody></table></div>' : '<p class="sub">Not rented out.</p>');
+  }
+  function wireOwn(a) {
+    all('[data-rend]').forEach(function (b) {
+      b.onclick = async function () {
+        var r = await vasPrompt('End this rental? No more invoices will be raised; ones already raised stay in Receivables. Reason:', 'Returned');
+        if (r == null) return;
+        api('/api/billing/plans/' + b.getAttribute('data-rend') + '/status', 'POST', { status: 'ended', reason: r }).then(function () { toast('Rental ended'); detail(a.id); }).catch(function (e) { toast(e.message); });
+      };
+    });
+    if ($('#dRent')) $('#dRent').onclick = function () { rentForm(a); };
+  }
+
+  // -------------------------------------------------------- depreciation --
+  function dep() {
+    return Promise.all([loadMeta(), api('/api/assets/runs')]).then(function (r) {
+      var runs = r[1].runs, latest = runs.find(function (x) { return !x.voided_at; });
+      $('#out').innerHTML = '<div class="card"><h2>Run depreciation</h2><p class="sub">Charges every asset in use through the month chosen, catching up any months missed, and posts one entry: Dr depreciation expense, Cr accumulated depreciation, per asset. Run it once a month, before closing the month.</p>' +
+        (!meta.ledger_start ? '<div class="note warn">Start the ledger (Accounting) first.</div>' : '') +
+        '<div class="controls"><div><label>Through the end of</label><input type="month" id="rM" value="' + thisMonth() + '" max="' + thisMonth() + '"' + (meta.ledger_start ? ' min="' + meta.ledger_start.slice(0, 7) + '"' : '') + '></div><button id="rPrev">Preview</button></div><div id="rPlan"></div></div>' +
+        '<div class="card"><h2>Runs</h2><div class="scroll"><table><thead><tr><th>Through</th><th class="n">Assets</th><th class="n">Charged</th><th>Entry</th><th>Run by</th><th></th></tr></thead><tbody>' +
+        (runs.length ? runs.map(function (x) {
+          return '<tr style="' + (x.voided_at ? 'opacity:.55' : '') + '"><td><b>' + esc(x.month) + '</b></td><td class="n">' + x.assets + '</td><td class="n">' + J(x.total) + '</td><td>' + (x.entry_number ? '<a href="/accounting.html#entry=' + x.entry_id + '" target="_blank" rel="noopener">' + esc(x.entry_number) + '</a>' : '<span class="pill warn">not posted yet</span>') + '</td><td>' + esc(x.created_by_name || '') + ' <small style="color:var(--muted)">' + esc(B.dt(x.created_at)) + '</small></td><td>' +
+            (x.voided_at ? '<span class="pill bad">void</span> <small>' + esc(x.void_reason || '') + '</small>' : latest && latest.id === x.id ? '<button class="sm" data-v="' + x.id + '">Void</button>' : '') + '</td></tr>';
+        }).join('') : '<tr><td colspan="6" class="empty">No runs yet.</td></tr>') + '</tbody></table></div></div>';
+      $('#rPrev').onclick = function () {
+        var m = $('#rM').value;
+        api('/api/assets/runs/preview?month=' + encodeURIComponent(m)).then(function (p) {
+          $('#rPlan').innerHTML = p.plan.length ? '<div class="scroll"><table><thead><tr><th>Asset</th><th>Class</th><th>Months</th><th class="n">Charge</th></tr></thead><tbody>' +
+            p.plan.map(function (x) { return '<tr><td>' + esc(x.number + ' ' + x.name) + '</td><td>' + esc(x.class_name) + '</td><td>' + esc(x.months[0].month + (x.months.length > 1 ? ' to ' + x.months[x.months.length - 1].month + ' (' + x.months.length + ')' : '')) + '</td><td class="n">' + J(x.amount) + '</td></tr>'; }).join('') +
+            '<tr><td colspan="3"><b>Total</b></td><td class="n"><b>' + J(p.total) + '</b></td></tr></tbody></table></div><div class="controls" style="margin-top:8px"><button class="primary" id="rGo">Post depreciation through ' + esc(m) + '</button></div>'
+            : '<div class="note info">Nothing to charge through ' + esc(m) + ': every asset is up to date.</div>';
+          if ($('#rGo')) $('#rGo').onclick = function () {
+            var btn = this; btn.disabled = true;
+            api('/api/assets/runs', 'POST', { month: m }).then(function (x) { toast(J(x.total) + ' charged on ' + x.assets + ' assets'); dep(); }).catch(function (e) { btn.disabled = false; toast(e.message); });
+          };
+        }).catch(function (e) { $('#rPlan').innerHTML = '<div class="note bad">' + esc(e.message) + '</div>'; });
+      };
+      all('[data-v]').forEach(function (b) { b.onclick = async function () { var r = await vasPrompt('Why is this run being voided?'); if (!r) return; api('/api/assets/runs/' + b.getAttribute('data-v') + '/void', 'POST', { reason: r }).then(function () { toast('Run voided: the ledger reverses it'); dep(); }).catch(function (e) { toast(e.message); }); }; });
+    }).catch(function (e) { $('#out').innerHTML = '<div class="note bad">' + esc(e.message) + '</div>'; });
+  }
+
+  // -------------------------------------------------------------- report --
+  var rp = null;
+  function rpt() {
+    if (!rp) { var y = B.today().slice(0, 4); rp = { from: y + '-01-01', to: B.today() }; }
+    return api('/api/assets/report?from=' + rp.from + '&to=' + rp.to).then(function (d) {
+      var cols = [['cost_open', 'Cost at start'], ['additions', 'Bought'], ['cost_disposed', 'Disposed of'], ['cost_close', 'Cost at end'], ['accum_open', 'Depreciation at start'], ['charge', 'Charged'], ['accum_disposed', 'Taken off'], ['accum_close', 'Depreciation at end'], ['book_value', 'Book value']];
+      $('#out').innerHTML = '<div class="card"><h2>Fixed asset schedule</h2><p class="sub">For the accounts and the tax return: cost and depreciation by class over the period. The ledger\'s own balances are on the Accounting tie-out.</p>' +
+        '<div class="controls"><div><label>From</label><input type="date" id="pF" value="' + rp.from + '"></div><div><label>To</label><input type="date" id="pT" value="' + rp.to + '"></div><button class="primary" id="pGo">Show</button><button id="pCsv">Download CSV</button><button onclick="window.print()">Print</button></div>' +
+        '<div class="scroll"><table><thead><tr><th>Class</th>' + cols.map(function (c) { return '<th class="n">' + c[1] + '</th>'; }).join('') + '</tr></thead><tbody>' +
+        (d.rows.length ? d.rows.map(function (r) { return '<tr><td>' + esc(r.class_name) + '</td>' + cols.map(function (c) { return '<td class="n">' + J(r[c[0]]) + '</td>'; }).join('') + '</tr>'; }).join('') +
+          '<tr><td><b>Total</b></td>' + cols.map(function (c) { return '<td class="n"><b>' + J(d.totals[c[0]]) + '</b></td>'; }).join('') + '</tr>' : '<tr><td colspan="10" class="empty">No assets in this period.</td></tr>') + '</tbody></table></div></div>';
+      $('#pGo').onclick = function () { rp = { from: $('#pF').value, to: $('#pT').value }; rpt(); };
+      $('#pCsv').onclick = function () { B.csv('asset-schedule-' + rp.from + '-to-' + rp.to + '.csv', [['Class'].concat(cols.map(function (c) { return c[1]; }))].concat(d.rows.map(function (r) { return [r.class_name].concat(cols.map(function (c) { return r[c[0]]; })); }))); };
+    }).catch(function (e) { $('#out').innerHTML = '<div class="note bad">' + esc(e.message) + '</div>'; });
+  }
+
+  // ------------------------------------------------------------- classes --
+  function cls() {
+    return loadMeta().then(function () {
+      $('#out').innerHTML = '<div class="card"><h2>Asset classes</h2><p class="sub">Each class says where an asset\'s cost, accumulated depreciation and depreciation expense go in the chart of accounts, and the usual method, life and salvage for new assets.</p>' +
+        '<div class="controls"><button class="primary" id="cAdd">+ New class</button></div><div class="scroll"><table><thead><tr><th>Class</th><th>Cost account</th><th>Accumulated depreciation</th><th>Expense</th><th>Usual method</th><th class="n">In use</th><th></th></tr></thead><tbody>' +
+        meta.classes.map(function (k) { return '<tr class="click" data-k="' + k.id + '" style="' + (k.is_active ? '' : 'opacity:.55') + '"><td><b>' + esc(k.name) + '</b></td><td>' + esc(k.asset_account) + '</td><td>' + esc(k.accum_account || '–') + '</td><td>' + esc(k.expense_account || '–') + '</td><td>' + esc(METHOD[k.method]) + (k.life_months ? ', ' + life(k.life_months) : '') + (k.rate_pct ? ', ' + k.rate_pct + '%' : '') + (Number(k.salvage_pct) ? ', salvage ' + k.salvage_pct + '%' : '') + '</td><td class="n">' + k.assets + '</td><td>' + (k.is_active ? '' : '<span class="pill">retired</span>') + '</td></tr>'; }).join('') + '</tbody></table></div></div>';
+      $('#cAdd').onclick = function () { classForm(null); };
+      all('[data-k]').forEach(function (tr) { tr.onclick = function () { classForm(meta.classes.find(function (k) { return String(k.id) === tr.getAttribute('data-k'); })); }; });
+    });
+  }
+  function classForm(k) {
+    var x = k || { method: 'straight_line', life_months: 60, salvage_pct: 0, is_active: true };
+    var assets = meta.accounts.filter(function (a) { return a.type === 'asset'; }), exp = meta.accounts.filter(function (a) { return ['expense', 'other_expense', 'cogs'].indexOf(a.type) >= 0; });
+    modal('<h2>' + (k ? esc(k.name) : 'New asset class') + '</h2><div class="grid2">' +
+      '<div><label>Name</label><input id="kName" value="' + esc(x.name || '') + '"></div><div><label>Usual method</label><select id="kMethod">' + Object.keys(METHOD).map(function (m) { return '<option value="' + m + '"' + (x.method === m ? ' selected' : '') + '>' + METHOD[m] + '</option>'; }).join('') + '</select></div>' +
+      '<div><label>Cost account</label><select id="kA">' + opts(assets, x.asset_account_id, acctLabel, 'Choose…') + '</select></div>' +
+      '<div><label>Accumulated depreciation account</label><select id="kAd">' + opts(assets, x.accum_account_id, acctLabel, 'None (not depreciated)') + '</select></div>' +
+      '<div><label>Depreciation expense account</label><select id="kEx">' + opts(exp, x.expense_account_id, acctLabel, 'None (not depreciated)') + '</select></div>' +
+      '<div><label>Usual life (months)</label><input type="number" id="kLife" value="' + (x.life_months || '') + '"></div>' +
+      '<div><label>Declining balance rate (% a year)</label><input type="number" step="0.01" id="kRate" value="' + (x.rate_pct || '') + '"></div>' +
+      '<div><label>Usual salvage (% of cost)</label><input type="number" step="0.01" id="kSalv" value="' + (x.salvage_pct || 0) + '"></div>' +
+      '<div><label><input type="checkbox" id="kOn"' + (x.is_active ? ' checked' : '') + '> In use for new assets</label></div></div>' +
+      (k && k.assets ? '<div class="note info" style="margin-top:8px">Assets in this class are in the books on these accounts, so the accounts cannot change: make a new class instead.</div>' : '') +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="kSave">Save</button><button id="kX">Cancel</button></div>');
+    $('#kX').onclick = close;
+    $('#kSave').onclick = function () {
+      api(k ? '/api/assets/classes/' + k.id : '/api/assets/classes', k ? 'PUT' : 'POST', { name: $('#kName').value, method: $('#kMethod').value, asset_account_id: $('#kA').value, accum_account_id: $('#kAd').value,
+        expense_account_id: $('#kEx').value, life_months: $('#kLife').value, rate_pct: $('#kRate').value, salvage_pct: $('#kSalv').value, is_active: $('#kOn').checked })
+        .then(function () { close(); toast('Saved'); cls(); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  // ------------------------------------------- loans and contracts on an asset --
+  // Loans that bought it or are secured on it, and maintenance, software support
+  // or insurance contracts (recurring bills) for it.
+  function linkPart(a, d) {
+    var loans = d.loans || [], cons = d.contracts || [];
+    var owed = loans.reduce(function (t, l) { return t + l.balance; }, 0);
+    return '<h3 style="font-size:14px;margin:12px 0 4px">Loans on it</h3>' +
+      (loans.length ? '<div class="scroll"><table><thead><tr><th>Loan</th><th>Lender</th><th class="n">Borrowed</th><th class="n">Still owed</th><th class="n">Interest billed</th><th></th></tr></thead><tbody>' + loans.map(function (l) {
+        return '<tr><td>' + esc(l.name) + (l.reference ? ' <small style="color:var(--muted)">' + esc(l.reference) + '</small>' : '') + (l.status !== 'active' ? ' <span class="pill">' + esc(l.status === 'paid' ? 'fully billed' : l.status) + '</span>' : '') + '</td><td>' + esc(l.lender) + '</td><td class="n">' + J(l.principal) + '</td><td class="n"><b>' + J(l.balance) + '</b></td><td class="n">' + J(l.interest_billed) + '</td>' +
+          '<td>' + (a.status === 'active' ? '<button class="sm" data-unlink="' + l.id + '">Unlink</button>' : '') + '</td></tr>';
+      }).join('') + '<tr><td colspan="3"><b>The business\'s equity in it</b> <small style="color:var(--muted)">(' + (a.market_value != null ? 'market value' : 'book value') + ' less still owed)</small></td><td class="n"><b>' + J((a.market_value != null ? a.market_value : a.book_value) - owed) + '</b></td><td colspan="2"></td></tr></tbody></table></div>'
+        : '<p class="sub">No loan is linked to it. Register a loan in Payables › Loans and choose this asset, or link one already registered.</p>') +
+      (a.status === 'active' ? '<div class="controls"><button id="dLoan">Link a loan…</button></div>' : '') +
+      '<h3 style="font-size:14px;margin:12px 0 4px">Maintenance, support and service contracts</h3>' +
+      (cons.length ? '<div class="scroll"><table><thead><tr><th>Contract</th><th>Supplier</th><th class="n">Each period</th><th>How often</th><th>From</th><th>Next bill</th><th class="n">Bills</th><th></th></tr></thead><tbody>' + cons.map(function (p) {
+        return '<tr><td>' + esc(p.name) + '</td><td>' + esc(p.supplier) + '</td><td class="n">' + J(p.amount) + '</td><td>' + esc(FREQ[p.frequency] || p.frequency) + '</td><td>' + esc(p.start_date) + (p.end_date ? ' to ' + esc(p.end_date) : '') + '</td><td>' + (p.status === 'active' ? esc(p.next_run || '–') : '<span class="pill">' + esc(p.status) + '</span>') + '</td><td class="n">' + p.bills + '</td>' +
+          '<td>' + (p.status !== 'ended' ? '<button class="sm" data-cend="' + p.id + '">End</button>' : '') + '</td></tr>';
+      }).join('') + '</tbody></table></div>' : '<p class="sub">None. Software maintenance, a service plan or insurance for this asset is a recurring bill: each one goes to Payables and shows as a running cost of the asset.</p>') +
+      (a.status === 'active' ? '<div class="controls"><button id="dCon">Add a contract…</button></div>' : '');
+  }
+  function wireLinks(a, d) {
+    all('[data-unlink]').forEach(function (b) {
+      b.onclick = async function () {
+        if (!(await vasConfirm('Unlink this loan from ' + a.number + '? The loan itself does not change.'))) return;
+        api('/api/capital/assets/' + a.id + '/loans', 'POST', { loan_id: b.getAttribute('data-unlink'), unlink: true }).then(function () { toast('Unlinked'); detail(a.id); }).catch(function (e) { toast(e.message); });
+      };
+    });
+    all('[data-cend]').forEach(function (b) {
+      b.onclick = async function () {
+        var r = await vasPrompt('End this contract? No more bills will be raised; bills already raised stay in Payables. Reason:', 'Contract ended');
+        if (r == null) return;
+        api('/api/billing/plans/' + b.getAttribute('data-cend') + '/status', 'POST', { status: 'ended', reason: r }).then(function () { toast('Contract ended'); detail(a.id); }).catch(function (e) { toast(e.message); });
+      };
+    });
+    if ($('#dLoan')) $('#dLoan').onclick = function () {
+      api('/api/capital/loans').then(function (r) {
+        var free = r.loans.filter(function (l) { return !l.asset_id && l.status !== 'cancelled'; });
+        if (!free.length) return toast('Every loan is linked already, or none is registered: register it in Payables › Loans');
+        modal('<h2>Link a loan to ' + esc(a.number) + '</h2><p class="sub">A loan that bought this asset or is secured on it. Its interest from now on shows as a running cost of the asset, and the net worth report shows the business\'s equity in the asset after the loan.</p>' +
+          '<div class="controls"><div style="flex:1"><label>Loan</label><select id="lkL" style="width:100%">' + free.map(function (l) { return '<option value="' + l.id + '">' + esc(l.name + ' · ' + l.lender + ' · owed ' + J(l.balance)) + '</option>'; }).join('') + '</select></div></div>' +
+          '<div class="controls"><button class="primary" id="lkGo">Link it</button><button id="lkX">Cancel</button></div>');
+        $('#lkX').onclick = function () { detail(a.id); };
+        $('#lkGo').onclick = function () { api('/api/capital/assets/' + a.id + '/loans', 'POST', { loan_id: $('#lkL').value }).then(function () { toast('Linked'); detail(a.id); }).catch(function (e) { toast(e.message); }); };
+      }).catch(function (e) { toast(e.message); });
+    };
+    if ($('#dCon')) $('#dCon').onclick = function () { contractForm(a); };
+  }
+  function contractForm(a) {
+    loadMeta().then(function () {
+      var sups = meta.suppliers || [], exp = meta.accounts.filter(function (x) { return ['expense', 'other_expense', 'cogs'].indexOf(x.type) >= 0; });
+      var sw = exp.find(function (x) { return x.system_key === 'software_maint'; }), rep = exp.find(function (x) { return /repairs/i.test(x.name); });
+      var dflt = a.class_kind === 'intangible' || /computer/i.test(a.class_name) ? sw : rep || sw;
+      modal('<h2>Contract for ' + esc(a.number) + ' · ' + esc(a.name) + '</h2><p class="sub">Software maintenance, support, a service plan or insurance: a recurring bill from the supplier. Each bill goes to Payables, posts to the expense account and shows as a running cost of this asset.</p>' +
+        '<div class="grid2"><div style="grid-column:1/-1"><label>Supplier</label><input id="cS" list="cSl" placeholder="Start typing a supplier"><datalist id="cSl">' + sups.map(function (s) { return '<option value="' + esc(s.name) + '">'; }).join('') + '</datalist></div>' +
+        '<div><label>What it is</label><input id="cN" value="' + esc((a.class_kind === 'intangible' ? 'Support for ' : 'Service plan for ') + a.name.slice(0, 50)) + '"></div><div><label>Amount each period (J$, before GCT)</label><input type="number" step="0.01" id="cAmt"></div>' +
+        '<div><label>How often</label><select id="cF">' + Object.keys(FREQ).map(function (k) { return '<option value="' + k + '"' + (k === 'monthly' ? ' selected' : '') + '>' + FREQ[k] + '</option>'; }).join('') + '</select></div>' +
+        '<div><label>First bill date</label><input type="date" id="cD" value="' + B.today() + '"></div><div><label>Ends (blank = until you end it)</label><input type="date" id="cE"></div>' +
+        '<div><label>Days to pay</label><input type="number" id="cDue" value="0"></div><div><label><input type="checkbox" id="cG"> GCT on the bill (15%)</label></div>' +
+        '<div><label>Paid by</label><select id="cPm"><option value="manual">We pay it</option><option value="standing_order">Standing order / card on file</option></select></div>' +
+        '<div style="grid-column:1/-1"><label>Expense account</label><select id="cA">' + opts(exp, dflt ? dflt.id : '', acctLabel, 'Choose…') + '</select></div></div>' +
+        '<div class="controls" style="margin-top:10px"><button class="primary" id="cGo">Start the contract</button><button id="cX">Cancel</button></div>');
+      $('#cX').onclick = function () { detail(a.id); };
+      $('#cGo').onclick = function () {
+        var nm = $('#cS').value.trim().toLowerCase(), s = sups.find(function (x) { return x.name.toLowerCase() === nm; });
+        if (!s) return toast('Choose the supplier from the list (add new suppliers in Payables first)');
+        var amt = Math.round(Number($('#cAmt').value || 0) * 100) / 100;
+        if (!(amt > 0)) return toast('Enter the amount');
+        var btn = this; btn.disabled = true;
+        api('/api/billing/plans', 'POST', { side: 'ap', name: $('#cN').value || 'Contract for ' + a.number, supplier_id: s.id, frequency: $('#cF').value, start_date: $('#cD').value, end_date: $('#cE').value,
+          due_days: $('#cDue').value, pay_mode: $('#cPm').value, gct_amount: $('#cG').checked ? Math.round(amt * 0.15 * 100) / 100 : 0, asset_id: a.id,
+          lines: [{ account_id: $('#cA').value, amount: amt, description: ($('#cN').value || 'Contract') + ' · {period}', asset_id: a.id }] })
+          .then(function () { toast('Contract started: the first bill is raised on ' + $('#cD').value); detail(a.id); }).catch(function (e) { btn.disabled = false; toast(e.message); });
+      };
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // ------------------------------------------------------- investments --
+  // Stakes in other companies and businesses, bonds, deposits and funds.
+  var cm = null;
+  function loadCap() { return api('/api/capital/meta').then(function (m) { cm = m; return m; }); }
+  var pct = function (v) { return v == null ? '–' : (Math.round(v * 100) / 100).toLocaleString('en-JM') + '%'; };
+  var num = function (v) { return Number(v || 0).toLocaleString('en-JM', { maximumFractionDigits: 4 }); };
+  var invFilter = 'active';
+  function inv() {
+    return Promise.all([loadCap(), api('/api/capital/investments')]).then(function (r) {
+      var d = r[1], list = d.investments.filter(function (x) { return invFilter === 'all' || x.status === invFilter; });
+      $('#out').innerHTML = '<div class="tiles"><div class="tile"><span class="k">Holdings</span><b>' + d.totals.count + '</b></div><div class="tile"><span class="k">Book value</span><b>' + J(d.totals.carrying) + '</b></div>' +
+        '<div class="tile"><span class="k">Worth (market where known)</span><b>' + J(d.totals.value) + '</b></div><div class="tile"><span class="k">Dividends and interest</span><b>' + J(d.totals.income) + '</b></div><div class="tile"><span class="k">Gains on sales</span><b>' + J(d.totals.realised) + '</b></div></div>' +
+        '<div class="card"><h2>Investments in other businesses</h2><p class="sub">Shares or a stake in another company or business, partnerships and joint ventures, bonds, fixed deposits and funds. Buying, selling, dividends, interest, revaluations and a share of profit all post to the ledger.</p>' +
+        '<div class="controls"><button class="primary" id="iAdd">+ Add an investment</button><div><label>Show</label><select id="iF"><option value="active">Held</option><option value="sold">Sold</option><option value="void">Voided</option><option value="all">All</option></select></div><span style="margin-left:auto"></span><button id="iCsv">Download CSV</button></div>' +
+        '<div class="scroll"><table><thead><tr><th>No.</th><th>Investment</th><th>Kind</th><th>Method</th><th class="n">Shares</th><th class="n">Owned</th><th class="n">Book value</th><th class="n">Market value</th><th class="n">Income</th><th></th></tr></thead><tbody>' +
+        (list.length ? list.map(function (x) {
+          return '<tr class="click" data-i="' + x.id + '"><td><b>' + esc(x.number) + '</b></td><td>' + esc(x.name) + (x.registration_no ? '<br><small style="color:var(--muted)">' + esc(x.registration_no) + '</small>' : '') + '</td><td>' + esc(x.kind_label) + '</td><td>' + esc(METHOD_I[x.method]) + '</td>' +
+            '<td class="n">' + (x.state.shares ? num(x.state.shares) : '') + '</td><td class="n">' + pct(x.state.pct) + '</td><td class="n"><b>' + J(x.carrying) + '</b></td><td class="n">' + (x.market_value != null ? J(x.market_value) + (x.unrealised ? '<br><small class="' + (x.unrealised > 0 ? 'pos' : 'neg') + '">' + (x.unrealised > 0 ? '+' : '') + J(x.unrealised) + '</small>' : '') : '') + '</td>' +
+            '<td class="n">' + (x.state.income ? J(x.state.income) : '') + '</td><td>' + (x.status !== 'active' ? '<span class="pill' + (x.status === 'void' ? ' bad' : '') + '">' + esc(x.status) + '</span>' : x.funding !== 'in_ledger' && !x.posted ? '<span class="pill warn">not posted</span>' : '') + '</td></tr>';
+        }).join('') : '<tr><td colspan="10" class="empty">' + (invFilter === 'active' ? 'No investments yet. Add a stake the business holds in another company, a partnership, bonds or a fixed deposit.' : 'None.') + '</td></tr>') + '</tbody></table></div></div>';
+      $('#iF').value = invFilter;
+      $('#iF').onchange = function () { invFilter = this.value; inv(); };
+      $('#iAdd').onclick = function () { invForm(null); };
+      all('[data-i]').forEach(function (tr) { tr.onclick = function () { invDetail(+tr.getAttribute('data-i')); }; });
+      $('#iCsv').onclick = function () {
+        B.csv('investments-' + B.today() + '.csv', [['Number', 'Name', 'Registration', 'Kind', 'Method', 'Bought', 'Shares', 'Owned %', 'Cost', 'Book value', 'Market value', 'Income', 'Gains on sales', 'Status']]
+          .concat(list.map(function (x) { return [x.number, x.name, x.registration_no, x.kind_label, METHOD_I[x.method], x.acquired_on, x.state.shares, x.state.pct, x.state.bought, x.carrying, x.market_value, x.state.income, x.state.realised, x.status]; })));
+      };
+    }).catch(function (e) { $('#out').innerHTML = '<div class="note bad">' + esc(e.message) + '</div>'; });
+  }
+  var METHOD_I = { cost: 'At cost', equity: 'Equity method', fair_value: 'Fair value' };
+  var FUND_I = { account: 'Paid from an account (post it now)', in_ledger: 'Already in the books (a cheque or bill coded to the investment account)', opening: 'Held before the ledger started' };
+  function invForm(x0) {
+    var x = x0 || { kind: 'company_shares', method: 'cost', funding: 'account', acquired_on: B.today(), funding_account_id: cm.keys.bank };
+    var locked = x0 && (x0.posted || (x0.state && x0.state.last_date));
+    var assetAccts = cm.accounts.filter(function (a) { return a.type === 'asset'; });
+    var dis = locked ? ' disabled' : '';
+    modal('<h2>' + (x0 ? 'Change ' + esc(x0.number) : 'Add an investment') + '</h2>' +
+      '<fieldset><legend>What it is</legend><div class="grid2">' +
+        '<div><label>Company, business or investment</label><input id="iN" value="' + esc(x.name || '') + '" placeholder="e.g. Kingston Tyre Co Ltd"></div>' +
+        '<div><label>Kind</label><select id="iK"' + dis + '>' + Object.keys(cm.investment_kinds).map(function (k) { return '<option value="' + k + '"' + (x.kind === k ? ' selected' : '') + '>' + esc(cm.investment_kinds[k]) + '</option>'; }).join('') + '</select></div>' +
+        '<div><label>Company number / TRN</label><input id="iReg" value="' + esc(x.registration_no || '') + '"></div>' +
+        '<div><label>Contact</label><input id="iCt" value="' + esc(x.contact || '') + '"></div></div></fieldset>' +
+      '<fieldset><legend>The holding</legend><div class="grid3">' +
+        '<div><label>Shares held</label><input type="number" step="any" id="iSh" value="' + (x.shares || '') + '"' + (x0 && x0.state && x0.state.last_date ? ' disabled' : '') + '></div>' +
+        '<div><label>Shares the company has in issue</label><input type="number" step="any" id="iOut" value="' + (x.shares_outstanding || '') + '"><div class="hint">Gives the % owned.</div></div>' +
+        '<div><label>Share class</label><input id="iCl" value="' + esc(x.share_class || '') + '" placeholder="Ordinary"></div>' +
+        '<div><label>Or: stake (% of the business)</label><input type="number" step="any" id="iSt" value="' + (x.stake_pct || '') + '"' + (x0 && x0.state && x0.state.last_date ? ' disabled' : '') + '><div class="hint">For a partnership or joint venture with no shares.</div></div>' +
+        '<div><label>Held</label><select id="iM"' + (x0 && x0.state && x0.state.last_date ? ' disabled' : '') + '>' + Object.keys(cm.methods).map(function (k) { return '<option value="' + k + '"' + (x.method === k ? ' selected' : '') + '>' + esc(cm.methods[k]) + '</option>'; }).join('') + '</select><div class="hint" id="iMh"></div></div></div></fieldset>' +
+      '<fieldset><legend>Cost and how it reached the books</legend><div class="grid3">' +
+        '<div><label>Date bought</label><input type="date" id="iD" value="' + esc(x.acquired_on || '') + '"' + dis + '></div>' +
+        '<div><label>Cost (J$)</label><input type="number" step="0.01" id="iC" value="' + (x.cost || '') + '"' + dis + '></div>' +
+        '<div><label>Held on account</label><select id="iA"' + dis + '>' + opts(assetAccts, x.account_id || '', acctLabel, 'The usual one for the kind') + '</select></div></div>' +
+        '<div style="margin-top:8px"><label style="font-size:12px;color:var(--muted)">Paid for</label><select id="iFu" style="width:100%"' + dis + '>' + Object.keys(FUND_I).map(function (k) { return '<option value="' + k + '"' + (x.funding === k ? ' selected' : '') + '>' + FUND_I[k] + '</option>'; }).join('') + '</select></div>' +
+        '<div id="iFaW" style="margin-top:8px"><label style="font-size:12px;color:var(--muted)">Paid from</label><select id="iFa" style="width:100%"' + dis + '>' + opts(cm.accounts, x.funding_account_id, acctLabel, 'Choose…') + '</select></div></fieldset>' +
+      '<fieldset><legend>Market value (report only)</legend><div class="grid2"><div><label>What the holding would fetch now (J$)</label><input type="number" step="0.01" id="iMv" value="' + (x.market_value == null ? '' : x.market_value) + '"></div><div><label>Valued on</label><input type="date" id="iMvOn" value="' + esc(x.market_value_on || '') + '"></div></div>' +
+        '<div class="hint">Shown in the net worth report beside the book value; nothing is posted. To put a new value in the books, use Revalue (fair value) or write it down.</div></fieldset>' +
+      '<div><label style="font-size:12px;color:var(--muted)">Notes</label><textarea id="iNo" rows="2" style="width:100%">' + esc(x.notes || '') + '</textarea></div>' +
+      (locked ? '<div class="note info" style="margin-top:8px">This investment is in the books: what it cost, its account and how it was paid for are fixed.</div>' : '') +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="iGo">' + (x0 ? 'Save' : 'Add the investment') + '</button><button id="iX">Cancel</button></div>');
+    var MH = { cost: 'Kept at cost; written down only if it loses value. Dividends are income.', equity: 'For a big stake (about 20 to 50%): its share of the business\'s profit is added each year, and dividends come off it.', fair_value: 'Revalued to what it is worth; the change is a gain or loss.' };
+    var sync = function () { $('#iFaW').style.display = $('#iFu').value === 'account' ? '' : 'none'; $('#iMh').textContent = MH[$('#iM').value] || ''; };
+    $('#iFu').onchange = $('#iM').onchange = sync; sync();
+    $('#iX').onclick = function () { x0 ? invDetail(x0.id) : close(); };
+    $('#iGo').onclick = function () {
+      var btn = this; btn.disabled = true;
+      var body = { name: $('#iN').value, kind: $('#iK').value, registration_no: $('#iReg').value, contact: $('#iCt').value, shares: $('#iSh').value, shares_outstanding: $('#iOut').value, share_class: $('#iCl').value,
+        stake_pct: $('#iSt').value, method: $('#iM').value, acquired_on: $('#iD').value, cost: $('#iC').value, account_id: $('#iA').value, funding: $('#iFu').value, funding_account_id: $('#iFa').value,
+        market_value: $('#iMv').value, market_value_on: $('#iMvOn').value, notes: $('#iNo').value };
+      api(x0 ? '/api/capital/investments/' + x0.id : '/api/capital/investments', x0 ? 'PUT' : 'POST', body).then(function (r) { toast(x0 ? 'Saved' : r.investment.number + ' added'); invDetail(r.investment.id); inv(); })
+        .catch(function (e) { btn.disabled = false; toast(e.message); });
+    };
+  }
+  var ESRC = { inv_acquire: 'Bought', inv_acquire_void: 'Purchase voided', inv_event: 'Event', inv_event_void: 'Event voided' };
+  function invDetail(id) {
+    api('/api/capital/investments/' + id).then(function (d) {
+      var x = d.investment, s = x.state, evs = d.events, lastLive = evs.filter(function (e) { return !e.voided_at; }).pop();
+      modal('<h2>' + esc(x.number) + ' · ' + esc(x.name) + ' ' + (x.status !== 'active' ? '<span class="pill' + (x.status === 'void' ? ' bad' : '') + '">' + esc(x.status) + '</span>' : '') + '</h2>' +
+        '<p class="sub">' + esc(x.kind_label) + ' · ' + esc(METHOD_I[x.method]) + ' · bought ' + esc(x.acquired_on) + ' for ' + J(x.cost) + ' · on ' + esc(x.account) + (x.registration_no ? ' · ' + esc(x.registration_no) : '') + '</p>' +
+        '<div class="tiles"><div class="tile"><span class="k">Owned</span><b>' + pct(s.pct) + '</b>' + (s.shares ? '<small>' + num(s.shares) + ' shares' + (x.shares_outstanding ? ' of ' + num(x.shares_outstanding) : '') + '</small>' : '') + '</div>' +
+        '<div class="tile"><span class="k">Book value</span><b>' + J(x.carrying) + '</b></div><div class="tile"><span class="k">Market value</span><b>' + (x.market_value != null ? J(x.market_value) : '–') + '</b>' + (x.market_value_on ? '<small>' + esc(x.market_value_on) + '</small>' : '') + '</div>' +
+        '<div class="tile"><span class="k">Dividends / interest</span><b>' + J(s.income) + '</b></div><div class="tile"><span class="k">Gains on sales</span><b>' + J(s.realised) + '</b></div></div>' +
+        '<h3 style="font-size:14px;margin:10px 0 4px">What has happened</h3><div class="scroll"><table><thead><tr><th>Date</th><th>What</th><th class="n">Amount</th><th class="n">Shares / stake</th><th class="n">Book value off</th><th>Account</th><th>Note</th><th></th></tr></thead><tbody>' +
+        '<tr><td>' + esc(x.acquired_on) + '</td><td>Bought</td><td class="n">' + J(x.cost) + '</td><td class="n">' + (x.shares ? num(x.shares) : x.stake_pct ? pct(x.stake_pct) : '') + '</td><td></td><td>' + esc(x.funding === 'account' ? x.funding_account : FUND_I[x.funding]) + '</td><td></td><td></td></tr>' +
+        evs.map(function (e) {
+          return '<tr style="' + (e.voided_at ? 'opacity:.55' : '') + '"><td>' + esc(e.event_date) + '</td><td>' + esc(e.label) + '</td><td class="n">' + J(e.amount) + '</td><td class="n">' + (e.shares ? num(e.shares) : e.stake_pct ? pct(e.stake_pct) : '') + '</td><td class="n">' + (e.carrying ? J(e.carrying) : '') + '</td><td>' + esc(e.account || '') + '</td><td>' + esc(e.note || '') + '</td>' +
+            '<td>' + (e.voided_at ? '<span class="pill bad">void</span>' : lastLive && lastLive.id === e.id ? '<button class="sm" data-ev="' + e.id + '">Void</button>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div>' +
+        '<h3 style="font-size:14px;margin:12px 0 4px">In the ledger</h3><div class="scroll"><table><tbody>' +
+          (d.entries.length ? d.entries.map(function (e) { return '<tr><td><a href="/accounting.html#entry=' + e.id + '" target="_blank" rel="noopener">' + esc(e.number) + '</a></td><td>' + esc(e.entry_date) + '</td><td>' + esc(ESRC[e.source_kind] || e.source_kind) + '</td><td>' + esc(e.memo || '') + '</td><td class="n">' + J(e.total) + '</td><td>' + (e.reversed_by ? '<span class="pill warn">reversed</span>' : '') + '</td></tr>'; }).join('')
+            : '<tr><td class="empty">' + (x.funding === 'in_ledger' ? 'Its cost came in through a cheque or bill coded to ' + esc(x.account) + '.' : 'Nothing yet: it posts once the ledger has started.') + '</td></tr>') + '</tbody></table></div>' +
+        '<div class="controls" style="margin-top:12px">' + (x.status === 'active' ? '<button class="primary" id="xEv">Record…</button><button id="xEd">Change</button>' + (!evs.some(function (e) { return !e.voided_at; }) ? '<button id="xVo">Void (entered by mistake)</button>' : '') : '') + '<button id="xX">Close</button></div>');
+      $('#xX').onclick = close;
+      if ($('#xEd')) $('#xEd').onclick = function () { invForm(x); };
+      if ($('#xEv')) $('#xEv').onclick = function () { eventForm(x); };
+      if ($('#xVo')) $('#xVo').onclick = async function () { var r = await vasPrompt('Why is this investment being voided?'); if (!r) return; api('/api/capital/investments/' + x.id + '/void', 'POST', { reason: r }).then(function () { close(); toast('Voided'); inv(); }).catch(function (e) { toast(e.message); }); };
+      all('[data-ev]').forEach(function (b) { b.onclick = async function () { var r = await vasPrompt('Why is this being voided? The ledger reverses it.'); if (!r) return; api('/api/capital/inv-events/' + b.getAttribute('data-ev') + '/void', 'POST', { reason: r }).then(function () { toast('Voided'); invDetail(x.id); inv(); }).catch(function (e) { toast(e.message); }); }; });
+    }).catch(function (e) { toast(e.message); });
+  }
+  function eventForm(x) {
+    var s = x.state, kinds = Object.keys(cm.events).filter(function (k) { return k !== 'share_of_profit' || x.method === 'equity'; });
+    var cash = cm.accounts.filter(function (a) { return a.id !== x.account_id; });
+    modal('<h2>' + esc(x.number) + ' · record something</h2><p class="sub">Book value now ' + J(x.carrying) + (s.shares ? ' on ' + num(s.shares) + ' shares' : s.stake ? ' for a ' + pct(s.stake) + ' stake' : '') + '. Things are entered in date order; each one posts to the ledger.</p>' +
+      '<div class="grid2"><div><label>What happened</label><select id="eK">' + kinds.map(function (k) { return '<option value="' + k + '">' + esc(cm.events[k]) + '</option>'; }).join('') + '</select></div><div><label>Date</label><input type="date" id="eD" value="' + B.today() + '"></div>' +
+      '<div id="eAmtW"><label id="eAmtL">Amount (J$)</label><input type="number" step="0.01" id="eAmt"></div>' +
+      '<div id="eShW"><label>' + (s.shares > 0 ? 'Shares' : s.stake > 0 ? 'Points of the business (e.g. 5 of a 15% stake)' : 'Share of the holding sold (%)') + '</label><input type="number" step="any" id="eSh"></div>' +
+      '<div id="eNvW"><label>Its value now (J$)</label><input type="number" step="0.01" id="eNv"></div>' +
+      '<div id="eAW"><label id="eAL">Account</label><select id="eA">' + opts(cash, cm.keys.bank, acctLabel, 'Choose…') + '</select></div>' +
+      '<div style="grid-column:1/-1"><label>Note</label><input id="eN" placeholder="Broker, cheque, the investee\'s accounts for the year…"></div></div><p class="sub" id="eHint"></p>' +
+      '<div class="controls"><button class="primary" id="eGo">Record it</button><button id="eX">Cancel</button></div>');
+    var HINT = { buy: 'Dr the investment, Cr the account paid from.', sell: 'The book value of the part sold comes off; the difference to what was received is a gain or loss on investments.',
+      revalue: x.method === 'fair_value' ? 'The change to the new value is a gain or loss on investments.' : 'A write-down only (impairment): the fall is a loss on investments.',
+      share_of_profit: 'The business\'s share of the investee\'s profit for the period (negative for a loss): added to the holding, income in Share of Profit of Associates.',
+      dividend: x.method === 'equity' ? 'On the equity method a dividend is paid out of profit already counted: it comes off the holding.' : 'Dividend income.', interest: 'Interest income.' };
+    var sync = function () {
+      var k = $('#eK').value;
+      $('#eAmtW').style.display = k === 'revalue' ? 'none' : '';
+      $('#eAmtL').textContent = k === 'sell' ? 'Received (J$)' : k === 'buy' ? 'Paid (J$)' : k === 'share_of_profit' ? 'Share of profit (J$, negative for a loss)' : 'Received (J$)';
+      $('#eShW').style.display = k === 'sell' || (k === 'buy' && (s.shares > 0 || s.stake > 0 || x.shares_outstanding)) ? '' : 'none';
+      $('#eNvW').style.display = k === 'revalue' ? '' : 'none';
+      $('#eAW').style.display = ['buy', 'sell', 'dividend', 'interest'].indexOf(k) >= 0 ? '' : 'none';
+      $('#eAL').textContent = k === 'buy' ? 'Paid from' : 'Money went to';
+      $('#eHint').textContent = HINT[k] || '';
+    };
+    $('#eK').onchange = sync; sync();
+    $('#eX').onclick = function () { invDetail(x.id); };
+    $('#eGo').onclick = function () {
+      var k = $('#eK').value, btn = this; btn.disabled = true;
+      var body = { kind: k, event_date: $('#eD').value, amount: $('#eAmt').value, new_value: $('#eNv').value, account_id: $('#eA').value, note: $('#eN').value };
+      var q = $('#eSh').value;
+      if (s.shares > 0 || (k === 'buy' && x.shares_outstanding)) body.shares = q; else if (s.stake > 0) body.stake_pct = q; else body.portion_pct = q;
+      api('/api/capital/investments/' + x.id + '/events', 'POST', body).then(function () { toast('Recorded'); invDetail(x.id); inv(); }).catch(function (e) { btn.disabled = false; toast(e.message); });
+    };
+  }
+
+  // ------------------------------------------------------------- shares --
+  // The business's own shares: who holds them, and every issue, transfer and buy-back.
+  function shares() {
+    return Promise.all([loadCap(), api('/api/capital/shares')]).then(function (r) {
+      var d = r[1], t = d.cap_table, classes = d.classes;
+      var multi = classes.filter(function (k) { return t.by_class[k.id]; }).length > 1;
+      $('#out').innerHTML = '<div class="tiles"><div class="tile"><span class="k">Shares in issue</span><b>' + num(t.total_shares) + '</b></div><div class="tile"><span class="k">Shareholders</span><b>' + t.rows.length + '</b></div>' +
+        '<div class="tile"><span class="k">Paid in (register)</span><b>' + J(d.paid_in) + '</b></div><div class="tile' + (Math.abs(d.paid_in - d.ledger_capital) >= 0.01 ? ' bad' : '') + '"><span class="k">Share capital + premium (ledger)</span><b>' + J(d.ledger_capital) + '</b></div></div>' +
+        '<div class="card"><h2>Who owns the business</h2><p class="sub">From the share register below. The percentage of the shares is each holder\'s part of the business; the vote is their say at meetings.</p>' +
+        '<div class="controls"><button class="primary" id="sTx">Record shares…</button><button id="sH">+ Shareholder</button><span style="margin-left:auto"></span><button id="sCsv">Download CSV</button><button onclick="window.print()">Print</button></div>' +
+        '<div class="scroll"><table><thead><tr><th>Shareholder</th>' + (multi ? classes.filter(function (k) { return t.by_class[k.id]; }).map(function (k) { return '<th class="n">' + esc(k.name) + '</th>'; }).join('') : '') + '<th class="n">Shares</th><th class="n">Of the shares</th><th class="n">Of the votes</th></tr></thead><tbody>' +
+        (t.rows.length ? t.rows.map(function (h) {
+          return '<tr class="click" data-h="' + h.shareholder_id + '"><td><b>' + esc(h.name) + '</b> <small style="color:var(--muted)">' + esc(h.kind) + '</small></td>' + (multi ? classes.filter(function (k) { return t.by_class[k.id]; }).map(function (k) { return '<td class="n">' + num(h.by_class[k.id] || 0) + '</td>'; }).join('') : '') +
+            '<td class="n">' + num(h.shares) + '</td><td class="n"><b>' + pct(h.pct) + '</b></td><td class="n">' + pct(h.vote_pct) + '</td></tr>';
+        }).join('') + '<tr><td><b>Total</b></td>' + (multi ? classes.filter(function (k) { return t.by_class[k.id]; }).map(function (k) { return '<td class="n"><b>' + num(t.by_class[k.id]) + '</b></td>'; }).join('') : '') + '<td class="n"><b>' + num(t.total_shares) + '</b></td><td class="n"><b>100%</b></td><td class="n"><b>100%</b></td></tr>'
+          : '<tr><td colspan="5" class="empty">No shares recorded. Add the shareholders, then record the shares each one holds (opening, for shares held before) or is issued.</td></tr>') + '</tbody></table></div></div>' +
+        '<div class="card"><h2>Share register</h2><div class="scroll"><table><thead><tr><th>No.</th><th>Date</th><th>What</th><th>Class</th><th>From</th><th>To</th><th class="n">Shares</th><th class="n">Price</th><th class="n">Amount</th><th>Certificate</th><th></th></tr></thead><tbody>' +
+        (d.txns.length ? d.txns.map(function (x) {
+          return '<tr style="' + (x.voided_at ? 'opacity:.55' : '') + '"><td>' + esc(x.number) + '</td><td>' + esc(x.txn_date) + '</td><td>' + esc(x.label) + '</td><td>' + esc(x.class_name) + '</td><td>' + esc(x.from_holder || (x.kind === 'issue' ? 'the business' : '')) + '</td><td>' + esc(x.holder || (x.kind === 'buyback' ? 'the business' : '')) + '</td>' +
+            '<td class="n">' + num(x.shares) + '</td><td class="n">' + (x.price ? J(x.price) : '') + '</td><td class="n">' + (x.amount ? J(x.amount) : '') + '</td><td>' + esc(x.certificate_no || '') + '</td><td>' + (x.voided_at ? '<span class="pill bad">void</span>' : '<button class="sm" data-sv="' + x.id + '">Void</button>') + '</td></tr>';
+        }).join('') : '<tr><td colspan="11" class="empty">Nothing yet.</td></tr>') + '</tbody></table></div></div>' +
+        '<div class="card"><h2>Share classes</h2><div class="controls"><button id="sCl">+ New class</button></div><div class="scroll"><table><thead><tr><th>Class</th><th class="n">Par value</th><th class="n">Votes a share</th><th class="n">Authorised</th><th class="n">In issue</th><th class="n">Paid in</th><th>Rights</th></tr></thead><tbody>' +
+        classes.map(function (k) { return '<tr class="click" data-k="' + k.id + '" style="' + (k.is_active ? '' : 'opacity:.55') + '"><td><b>' + esc(k.name) + '</b></td><td class="n">' + (k.par_value ? J(k.par_value) : 'no par') + '</td><td class="n">' + num(k.votes_per_share) + '</td><td class="n">' + (k.authorised ? num(k.authorised) : 'no limit') + '</td><td class="n">' + num(k.issued) + '</td><td class="n">' + J(k.paid_in) + '</td><td>' + esc(k.rights || '') + '</td></tr>'; }).join('') + '</tbody></table></div></div>' +
+        '<div class="card"><h2>Shareholders</h2><div class="scroll"><table><thead><tr><th>Name</th><th>Kind</th><th>TRN / company no.</th><th>Email</th><th>Phone</th></tr></thead><tbody>' +
+        (d.shareholders.length ? d.shareholders.map(function (h) { return '<tr class="click" data-h="' + h.id + '"><td>' + esc(h.name) + '</td><td>' + esc(h.kind) + '</td><td>' + esc(h.id_no || '') + '</td><td>' + esc(h.email || '') + '</td><td>' + esc(h.phone || '') + '</td></tr>'; }).join('') : '<tr><td colspan="5" class="empty">None yet.</td></tr>') + '</tbody></table></div></div>';
+      $('#sTx').onclick = function () { shareTxnForm(d); };
+      $('#sH').onclick = function () { holderForm(null); };
+      $('#sCl').onclick = function () { shareClassForm(null, d); };
+      all('[data-h]').forEach(function (tr) { tr.onclick = function () { holderForm(d.shareholders.find(function (h) { return String(h.id) === tr.getAttribute('data-h'); })); }; });
+      all('[data-k]').forEach(function (tr) { tr.onclick = function () { shareClassForm(classes.find(function (k) { return String(k.id) === tr.getAttribute('data-k'); }), d); }; });
+      all('[data-sv]').forEach(function (b) { b.onclick = async function () { var r = await vasPrompt('Why is this being voided? Anything it posted is reversed.'); if (!r) return; api('/api/capital/share-txns/' + b.getAttribute('data-sv') + '/void', 'POST', { reason: r }).then(function () { toast('Voided'); shares(); }).catch(function (e) { toast(e.message); }); }; });
+      $('#sCsv').onclick = function () { B.csv('shareholders-' + B.today() + '.csv', [['Shareholder', 'Kind', 'Shares', '% of shares', '% of votes']].concat(t.rows.map(function (h) { return [h.name, h.kind, h.shares, h.pct, h.vote_pct]; }))); };
+    }).catch(function (e) { $('#out').innerHTML = '<div class="note bad">' + esc(e.message) + '</div>'; });
+  }
+  function holderForm(h) {
+    var x = h || { kind: 'person' };
+    modal('<h2>' + (h ? esc(h.name) : 'New shareholder') + '</h2><div class="grid2">' +
+      '<div><label>Name</label><input id="hN" value="' + esc(x.name || '') + '"></div><div><label>Kind</label><select id="hK">' + ['person', 'company', 'trust'].map(function (k) { return '<option' + (x.kind === k ? ' selected' : '') + '>' + k + '</option>'; }).join('') + '</select></div>' +
+      '<div><label>TRN / company number</label><input id="hI" value="' + esc(x.id_no || '') + '"></div><div><label>Email</label><input id="hE" value="' + esc(x.email || '') + '"></div>' +
+      '<div><label>Phone</label><input id="hP" value="' + esc(x.phone || '') + '"></div><div><label>Address</label><input id="hA" value="' + esc(x.address || '') + '"></div>' +
+      '<div style="grid-column:1/-1"><label>Notes</label><textarea id="hNo" rows="2">' + esc(x.notes || '') + '</textarea></div></div>' +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="hGo">Save</button><button id="hX">Cancel</button></div>');
+    $('#hX').onclick = close;
+    $('#hGo').onclick = function () {
+      api(h ? '/api/capital/shareholders/' + h.id : '/api/capital/shareholders', h ? 'PUT' : 'POST', { name: $('#hN').value, kind: $('#hK').value, id_no: $('#hI').value, email: $('#hE').value, phone: $('#hP').value, address: $('#hA').value, notes: $('#hNo').value })
+        .then(function () { close(); toast('Saved'); shares(); }).catch(function (e) { toast(e.message); });
+    };
+  }
+  function shareClassForm(k, d) {
+    var x = k || { votes_per_share: 1, par_value: 0, is_active: true };
+    modal('<h2>' + (k ? esc(k.name) + ' shares' : 'New share class') + '</h2><div class="grid2">' +
+      '<div><label>Name</label><input id="kN" value="' + esc(x.name || '') + '" placeholder="Ordinary, Preference…"></div><div><label>Par value (J$ a share, 0 = no par)</label><input type="number" step="any" id="kP" value="' + (x.par_value || 0) + '"' + (k && k.paid_in ? ' disabled' : '') + '></div>' +
+      '<div><label>Votes a share</label><input type="number" step="any" id="kV" value="' + x.votes_per_share + '"></div><div><label>Authorised (blank = no limit)</label><input type="number" id="kA" value="' + (x.authorised || '') + '"></div>' +
+      '<div style="grid-column:1/-1"><label>Rights (dividends, return of capital…)</label><input id="kR" value="' + esc(x.rights || '') + '"></div><div><label><input type="checkbox" id="kOn"' + (x.is_active ? ' checked' : '') + '> Still issued</label></div></div>' +
+      '<p class="sub">On an issue, the par value of the shares goes to Share Capital and anything paid over it to Share Premium; with no par value it all goes to Share Capital.</p>' +
+      '<div class="controls"><button class="primary" id="kGo">Save</button><button id="kX">Cancel</button></div>');
+    $('#kX').onclick = close;
+    $('#kGo').onclick = function () {
+      api(k ? '/api/capital/share-classes/' + k.id : '/api/capital/share-classes', k ? 'PUT' : 'POST', { name: $('#kN').value, par_value: $('#kP').value, votes_per_share: $('#kV').value, authorised: $('#kA').value, rights: $('#kR').value, is_active: $('#kOn').checked })
+        .then(function () { close(); toast('Saved'); shares(); }).catch(function (e) { toast(e.message); });
+    };
+  }
+  function shareTxnForm(d) {
+    if (!d.shareholders.length) return toast('Add the shareholders first');
+    var hOpts = function (blank) { return opts(d.shareholders, '', function (h) { return h.name; }, blank); };
+    var cash = cm.accounts.filter(function (a) { return ['asset', 'equity', 'liability'].indexOf(a.type) >= 0 && ['share_capital', 'share_premium'].indexOf(a.system_key) < 0; });
+    modal('<h2>Record shares</h2><div class="grid2">' +
+      '<div><label>What happened</label><select id="tK">' + Object.keys(cm.share_kinds).map(function (k) { return '<option value="' + k + '">' + esc(cm.share_kinds[k]) + '</option>'; }).join('') + '</select></div><div><label>Date</label><input type="date" id="tD" value="' + B.today() + '"></div>' +
+      '<div><label>Class</label><select id="tC">' + opts(d.classes.filter(function (k) { return k.is_active; }), (d.classes[0] || {}).id, function (k) { return k.name; }) + '</select></div><div><label>Number of shares</label><input type="number" step="1" id="tS"></div>' +
+      '<div id="tFw"><label>From shareholder</label><select id="tF">' + hOpts('Choose…') + '</select></div><div id="tTw"><label>To shareholder</label><select id="tT">' + hOpts('Choose…') + '</select></div>' +
+      '<div id="tPw"><label>Price a share (J$)</label><input type="number" step="any" id="tP"></div><div id="tAw"><label id="tAl">Money went to</label><select id="tA">' + opts(cash, cm.keys.bank, acctLabel, 'Choose…') + '</select></div>' +
+      '<div><label>Certificate no.</label><input id="tCe"></div><div><label>Note</label><input id="tN"></div></div><p class="sub" id="tH"></p>' +
+      '<div class="controls"><button class="primary" id="tGo">Record it</button><button id="tX">Cancel</button></div>');
+    var H = { opening: 'Shares a holder had before the books started. Nothing posts: the capital is already in the equity accounts.',
+      issue: 'New shares from the business. Posts Dr the account the money went to (or Owner\'s Capital, to turn the owner\'s capital into shares), Cr Share Capital at par and Share Premium for the rest.',
+      transfer: 'One holder sells or gives shares to another. The business receives nothing, so nothing posts; the price is kept for the record.',
+      buyback: 'The business buys shares back and cancels them. Posts Dr Share Capital for their paid-in capital, the rest to Retained Earnings, Cr the account paid from.' };
+    var sync = function () {
+      var k = $('#tK').value;
+      $('#tFw').style.display = k === 'transfer' || k === 'buyback' ? '' : 'none';
+      $('#tTw').style.display = k === 'buyback' ? 'none' : '';
+      $('#tAw').style.display = k === 'issue' || k === 'buyback' ? '' : 'none';
+      $('#tPw').style.display = k === 'opening' ? 'none' : '';
+      $('#tAl').textContent = k === 'buyback' ? 'Paid from' : 'Money went to';
+      $('#tH').textContent = H[k];
+    };
+    $('#tK').onchange = sync; sync();
+    $('#tX').onclick = close;
+    $('#tGo').onclick = function () {
+      var btn = this; btn.disabled = true;
+      api('/api/capital/share-txns', 'POST', { kind: $('#tK').value, txn_date: $('#tD').value, class_id: $('#tC').value, shares: $('#tS').value, shareholder_id: $('#tT').value, from_shareholder_id: $('#tF').value,
+        price: $('#tP').value, account_id: $('#tA').value, certificate_no: $('#tCe').value, note: $('#tN').value })
+        .then(function () { close(); toast('Recorded'); shares(); }).catch(function (e) { btn.disabled = false; toast(e.message); });
+    };
+  }
+
+  // ---------------------------------------------------------- net worth --
+  // What the business owns less what it owes, from the ledger, with the
+  // registers behind each part, market values, and who owns what.
+  var nwDate = null;
+  function trendSvg(tr) {
+    if (tr.length < 2) return '<p class="sub">The trend shows once the books cover more than one month.</p>';
+    var W = 640, H = 170, P = 34, vals = tr.map(function (t) { return t.net_worth; }), mx = Math.max.apply(null, vals.concat([0])), mn = Math.min.apply(null, vals.concat([0])), rng = mx - mn || 1;
+    var x = function (i) { return P + i * (W - P - 8) / (tr.length - 1); }, y = function (v) { return 8 + (mx - v) * (H - 30) / rng; };
+    var pts = tr.map(function (t, i) { return x(i).toFixed(1) + ',' + y(t.net_worth).toFixed(1); }).join(' ');
+    var short = function (v) { var a = Math.abs(v); return (v < 0 ? '-' : '') + (a >= 1e6 ? (a / 1e6).toFixed(1) + 'M' : a >= 1e3 ? Math.round(a / 1e3) + 'k' : Math.round(a)); };
+    return '<svg class="trend" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Net worth by month">' +
+      '<line x1="' + P + '" x2="' + W + '" y1="' + y(0) + '" y2="' + y(0) + '" stroke="currentColor" stroke-opacity=".25"/>' +
+      '<polyline points="' + pts + '" fill="none" stroke="#0b6bcb" stroke-width="2"/>' +
+      tr.map(function (t, i) { return '<circle cx="' + x(i) + '" cy="' + y(t.net_worth) + '" r="3" fill="#0b6bcb"><title>' + t.month + ': ' + J(t.net_worth) + '</title></circle><text x="' + x(i) + '" y="' + (H - 4) + '" text-anchor="middle">' + t.month.slice(2) + '</text>'; }).join('') +
+      '<text x="2" y="' + (y(mx) + 4) + '">' + short(mx) + '</text>' + (mn < 0 ? '<text x="2" y="' + (y(mn) + 4) + '">' + short(mn) + '</text>' : '') + '</svg>';
+  }
+  function nw() {
+    var q = nwDate ? '?as_of=' + nwDate : '';
+    return api('/api/capital/networth' + q).then(function (d) {
+      if (!d.ready) { $('#out').innerHTML = '<div class="note warn">' + esc(d.reason) + '</div>'; return; }
+      var G = {}; d.groups.forEach(function (g) { G[g.key] = g; });
+      var section = function (keys, title, total) {
+        return '<tr class="grp"><td colspan="2">' + title + '</td></tr>' + keys.map(function (k) {
+          var g = G[k]; if (!g.lines.length) return '';
+          return '<tr><td>' + esc(g.label) + '</td><td class="n">' + J(g.total) + '</td></tr>' + g.lines.map(function (l) { return '<tr class="sub"><td>' + esc((l.code ? l.code + ' ' : '') + l.name) + '</td><td class="n">' + J(l.amount) + '</td></tr>'; }).join('');
+        }).join('') + '<tr class="tot"><td>Total ' + title.toLowerCase() + '</td><td class="n">' + J(total) + '</td></tr>';
+      };
+      var fa = d.fixed_assets.by_class;
+      $('#out').innerHTML = '<div class="card noprint"><div class="controls" style="margin:0"><div><label>As of</label><input type="date" id="nD" value="' + esc(d.as_of) + '" max="' + B.today() + '"></div><button class="primary" id="nGo">Show</button><span style="margin-left:auto"></span><button id="nCsv">Download CSV</button><button onclick="window.print()">Print / PDF</button></div></div>' +
+        '<div class="card"><h2>Company net worth · ' + esc(d.as_of) + '</h2><p class="sub">What the business owns less what it owes, from the ledger. The adjusted figure puts in the market values entered on assets and investments.</p>' +
+        '<div class="tiles"><div class="tile"><span class="k">Owns</span><b>' + J(d.assets) + '</b></div><div class="tile"><span class="k">Owes</span><b>' + J(d.liabilities) + '</b></div>' +
+        '<div class="tile' + (d.net_worth < 0 ? ' bad' : '') + '"><span class="k">Net worth (book)</span><b>' + J(d.net_worth) + '</b></div><div class="tile"><span class="k">Net worth at market values</span><b>' + J(d.adjusted_net_worth) + '</b></div>' +
+        (d.shares.per_share ? '<div class="tile"><span class="k">Per share (' + num(d.shares.total_shares) + ')</span><b>' + J(d.shares.per_share.book) + '</b><small>' + J(d.shares.per_share.adjusted) + ' at market</small></div>' : '') + '</div>' +
+        (!d.balanced ? '<div class="note bad">The books are out of balance: net worth ' + J(d.net_worth) + ' but equity ' + J(d.equity) + '. Find the entry that does not balance before relying on this.</div>' : '') + '</div>' +
+        '<div class="nw-grid"><div class="card"><h2>What it owns and owes</h2><table class="bs"><tbody>' + section(['cash', 'ar', 'stock', 'other_ca', 'fixed', 'intangible', 'investments', 'other_a'], 'Assets', d.assets) +
+          section(['cl', 'loans', 'ltl'], 'Liabilities', d.liabilities) + '<tr class="tot"><td>Net worth</td><td class="n">' + J(d.net_worth) + '</td></tr>' +
+          (d.adjustments.length ? '<tr class="grp"><td colspan="2">At market value</td></tr>' + d.adjustments.map(function (a) { return '<tr class="sub"><td>' + esc(a.label) + '</td><td class="n ' + (a.amount < 0 ? 'neg' : 'pos') + '">' + (a.amount > 0 ? '+' : '') + J(a.amount) + '</td></tr>'; }).join('') + '<tr class="tot"><td>Net worth at market values</td><td class="n">' + J(d.adjusted_net_worth) + '</td></tr>' : '') +
+          '</tbody></table></div>' +
+        '<div><div class="card"><h2>Net worth over the last 12 months</h2>' + trendSvg(d.trend) + '</div>' +
+        '<div class="card"><h2>Who owns it</h2>' + (d.shares.holders.length ? '<div class="scroll"><table><thead><tr><th>Shareholder</th><th class="n">Shares</th><th class="n">Owns</th><th class="n">Part of net worth</th><th class="n">At market</th></tr></thead><tbody>' +
+          d.shares.holders.map(function (h) { return '<tr><td>' + esc(h.name) + '</td><td class="n">' + num(h.shares) + '</td><td class="n">' + pct(h.pct) + '</td><td class="n">' + J(h.book) + '</td><td class="n">' + J(h.adjusted) + '</td></tr>'; }).join('') + '</tbody></table></div>'
+          : '<p class="sub">No shareholders recorded. Enter them on the Shares tab to see each one\'s part.</p>') + '</div></div></div>' +
+        '<div class="card"><h2>Fixed assets and intangibles</h2><p class="sub">From the register, with depreciation and amortisation posted by the date.</p><div class="scroll"><table><thead><tr><th>Class</th><th class="n">Assets</th><th class="n">Cost</th><th class="n">Depreciation / amortisation</th><th class="n">Book value</th></tr></thead><tbody>' +
+          (fa.length ? fa.map(function (c) { return '<tr><td>' + esc(c.class_name) + (c.kind === 'intangible' ? ' <span class="pill">intangible</span>' : '') + '</td><td class="n">' + c.count + '</td><td class="n">' + J(c.cost) + '</td><td class="n">' + J(c.accum) + '</td><td class="n"><b>' + J(c.book_value) + '</b></td></tr>'; }).join('') : '<tr><td colspan="5" class="empty">No assets in the register.</td></tr>') + '</tbody></table></div></div>' +
+        (d.shared_assets.length ? '<div class="card"><h2>Held with others</h2><div class="scroll"><table><thead><tr><th>Asset</th><th>With</th><th class="n">The business owns</th><th class="n">Its share (book)</th><th class="n">The whole asset (book)</th></tr></thead><tbody>' +
+          d.shared_assets.map(function (a) { return '<tr><td>' + esc(a.number + ' ' + a.name) + '</td><td>' + esc(a.co_owners || '') + '</td><td class="n">' + pct(a.ownership_pct) + '</td><td class="n">' + J(a.book_value) + '</td><td class="n">' + J(a.whole_book_value) + '</td></tr>'; }).join('') + '</tbody></table></div></div>' : '') +
+        (d.asset_equity.length ? '<div class="card"><h2>Assets with loans on them</h2><div class="scroll"><table><thead><tr><th>Asset</th><th>Loans</th><th class="n">Value</th><th class="n">Still owed</th><th class="n">The business\'s equity</th></tr></thead><tbody>' +
+          d.asset_equity.map(function (a) { return '<tr><td>' + esc(a.number + ' ' + a.name) + '</td><td>' + a.loans.map(function (l) { return esc(l.name + ' (' + l.lender + ')'); }).join('<br>') + '</td><td class="n">' + J(a.market_value != null ? a.market_value : a.book_value) + (a.market_value != null ? '<br><small>market</small>' : '') + '</td><td class="n">' + J(a.owed) + '</td><td class="n"><b class="' + (a.equity < 0 ? 'neg' : '') + '">' + J(a.equity) + '</b></td></tr>'; }).join('') + '</tbody></table></div></div>' : '') +
+        (d.investments.length ? '<div class="card"><h2>Investments</h2><div class="scroll"><table><thead><tr><th>Investment</th><th>Kind</th><th>Method</th><th class="n">Owned</th><th class="n">Book value</th><th class="n">Market value</th><th class="n">Income</th></tr></thead><tbody>' +
+          d.investments.map(function (i) { return '<tr><td>' + esc(i.number + ' ' + i.name) + '</td><td>' + esc(i.kind) + '</td><td>' + esc(i.method) + '</td><td class="n">' + pct(i.pct) + '</td><td class="n">' + J(i.carrying) + '</td><td class="n">' + (i.market_value != null ? J(i.market_value) : '') + '</td><td class="n">' + J(i.income) + '</td></tr>'; }).join('') + '</tbody></table></div></div>' : '') +
+        (d.loans.length ? '<div class="card"><h2>Loans</h2><div class="scroll"><table><thead><tr><th>Loan</th><th>Lender</th><th class="n">Rate</th><th class="n">Borrowed</th><th class="n">Still owed</th></tr></thead><tbody>' +
+          d.loans.map(function (l) { return '<tr><td>' + esc(l.name) + '</td><td>' + esc(l.lender) + '</td><td class="n">' + l.annual_rate + '%</td><td class="n">' + J(l.principal) + '</td><td class="n">' + J(l.owed) + '</td></tr>'; }).join('') + '</tbody></table></div><p class="sub">Still owed is the principal not yet billed; an instalment billed and not yet paid is in Payables.</p></div>' : '') +
+        '<div class="card"><h2>Registers against the ledger</h2><p class="sub">A difference means something reached the ledger that is not in the register, or the other way round: a cheque coded to an asset account, an asset or investment marked as already in the books that was not, a run not yet posted.</p><div class="scroll"><table><thead><tr><th></th><th class="n">Ledger</th><th class="n">Register</th><th class="n">Difference</th></tr></thead><tbody>' +
+          d.checks.map(function (c) { return '<tr><td>' + esc(c.label) + '</td><td class="n">' + J(c.ledger) + '</td><td class="n">' + J(c.register) + '</td><td class="n">' + (Math.abs(c.difference) >= 0.01 ? '<b class="neg">' + J(c.difference) + '</b>' : '<span class="pos">✓</span>') + '</td></tr>'; }).join('') + '</tbody></table></div></div>';
+      $('#nGo').onclick = function () { nwDate = $('#nD').value || null; nw(); };
+      $('#nCsv').onclick = function () {
+        var rows = [['Section', 'Line', 'Amount']];
+        d.groups.forEach(function (g) { g.lines.forEach(function (l) { rows.push([g.label, (l.code ? l.code + ' ' : '') + l.name, l.amount]); }); rows.push([g.label, 'Total', g.total]); });
+        rows.push(['', 'Assets', d.assets], ['', 'Liabilities', d.liabilities], ['', 'Net worth (book)', d.net_worth]);
+        d.adjustments.forEach(function (a) { rows.push(['Market value', a.label, a.amount]); });
+        rows.push(['', 'Net worth at market values', d.adjusted_net_worth]);
+        d.shares.holders.forEach(function (h) { rows.push(['Shareholders', h.name + ' (' + h.pct + '%)', h.book]); });
+        B.csv('net-worth-' + d.as_of + '.csv', rows);
+      };
+    }).catch(function (e) { $('#out').innerHTML = '<div class="note bad">' + esc(e.message) + '</div>'; });
+  }
+
+  // --------------------------------------------------------------- tabs --
+  var VIEWS = { reg: reg, dep: dep, rpt: rpt, own: own, inv: inv, shares: shares, nw: nw, cls: cls };
+  // A link straight to a tab: /assets.html#networth, #investments, #shares.
+  var HASH = { networth: 'nw', 'net-worth': 'nw', nw: 'nw', investments: 'inv', inv: 'inv', shares: 'shares', register: 'reg', depreciation: 'dep' };
+  if (HASH[location.hash.slice(1)]) tab = HASH[location.hash.slice(1)];
+  window.addEventListener('hashchange', function () { var t = HASH[location.hash.slice(1)]; if (t && t !== tab) { tab = t; mark(); show(); } });
+  function mark() { all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); }); try { localStorage.setItem('vision.faTab', tab); } catch (_) {} }
+  function show() { (VIEWS[tab] || reg)(); }
+  all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); mark(); show(); }; });
+  if (!VIEWS[tab]) tab = 'reg';
+  mark(); show();
+})();
+</script>
+</body>
+</html>

@@ -43,10 +43,10 @@
     .actions{display:none}
   }
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
 </head>
 <body>
 
@@ -96,6 +96,9 @@ function render(d){
           '<div class="num">' + esc(w.wo_number) + '</div>' +
           '<div style="font-size:11px;color:var(--muted);margin-top:6px">Intake: ' + fmtDate(w.intake_date) + '</div>' +
           (w.completed_at ? '<div style="font-size:11px;color:var(--muted)">Completed: ' + fmtDate(w.completed_at) + '</div>' : '') +
+          (w.advisor_name ? '<div style="font-size:11px;color:var(--muted)">Advisor: ' + esc(w.advisor_name) + '</div>' : '') +
+          (w.mechanic_name ? '<div style="font-size:11px;color:var(--muted)">Technician: ' + esc(w.mechanic_name) + '</div>' : '') +
+          (w.transport ? '<div style="font-size:11px;color:var(--muted)">Transport: ' + esc(w.transport) + '</div>' : '') +
         '</div>' +
       '</div>' +
       '<div class="panels">' +
@@ -123,6 +126,11 @@ function render(d){
         (d.payments).map(function(p){ return '✓ ' + fmtMoney(p.amt) + ' via ' + esc(p.method) + (p.reference ? ' · ref ' + esc(p.reference) : '') + ' on ' + fmtDate(p.received_at); }).join('<br/>') +
         '<br/><br/><b>Balance ' + (balance > 0 ? 'outstanding: ' + fmtMoney(balance) : '— PAID IN FULL') + '</b>' +
       '</div>' : '') +
+      (s.service_terms ? '<div style="margin-top:22px;padding-top:14px;border-top:1px solid var(--line);font-size:10.5px;color:var(--muted);line-height:1.6"><b style="display:block;color:var(--ink);font-size:11px;margin-bottom:3px">Terms</b>' + esc(s.service_terms) + '</div>' : '') +
+      '<div style="margin-top:26px;display:grid;grid-template-columns:1fr 1fr;gap:28px;font-size:11px;color:var(--muted)">' +
+        '<div>' + (w.customer_signature ? '<img src="' + esc(w.customer_signature) + '" style="max-height:48px;max-width:100%;display:block;margin-bottom:4px" alt=""/>' : '<div style="height:40px"></div>') + '<div style="border-top:1px solid #9ca3af;padding-top:4px">Customer signature' + (w.customer_signed_at ? ' · ' + fmtDate(w.customer_signed_at) : '') + '</div></div>' +
+        '<div><div style="height:40px"></div><div style="border-top:1px solid #9ca3af;padding-top:4px">Date</div></div>' +
+      '</div>' +
       '<div class="footer">' +
         '<b>Thank you for your business!</b>' +
         'Questions about this invoice? Call ' + esc(s.phone) + '<br/>' +

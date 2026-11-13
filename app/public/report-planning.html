@@ -52,10 +52,11 @@
   .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:50}
   @media print{ header,.controls,.tabs,.noprint{display:none !important} body{background:#fff;color:#000;font-size:11px} .card{break-inside:avoid;border:1px solid #bbb} main{max-width:none;padding:0} }
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
 <header><h1>Planning</h1><nav><a href="/report-balancing.html">Balancing report</a><a href="/messages.html">Customer messages</a><a href="/warehouse.html">Warehouse</a><a href="/admin.html">Admin</a></nav></header>
@@ -80,7 +81,7 @@
   <div id="out"><div class="empty">Loading…</div></div>
 </main>
 <div class="toast" id="toast"></div>
-<script src="/assets/lost-sale.js"></script>
+<script src="/assets/lost-sale.js?v=3"></script>
 <script>
 (function () {
   'use strict';
@@ -93,7 +94,7 @@
     short_not_found: 'Short pick: not found', short_damaged: 'Short pick: damaged', short_wrong_part: 'Short pick: wrong part', short_other: 'Short pick: other',
     order_expired: 'Order expired at cashier', order_cancelled: 'Order cancelled' };
   var SOURCE = { manual: 'Recorded', short_pick: 'Short pick', order_expired: 'Order expired', order_cancelled: 'Order cancelled' };
-  var tab = 'dash', dash = null, cache = {};
+  var tab = 'dash', dash = null, cache = {}, lostRep = '';
   try { tab = localStorage.getItem('vision.planTab') || 'dash'; } catch (_) {}
 
   function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 2600); }
@@ -174,6 +175,19 @@
   }
 
   // ---------------------------------------------------------- lost sales --
+  // Who recorded it (counter), picked it short (warehouse) or took the order.
+  function repOf(x) { return x.recorded_by || '(no name)'; }
+  function lostRows(r) { return lostRep ? r.rows.filter(function (x) { return repOf(x) === lostRep; }) : r.rows; }
+  function renderByRep(r) {
+    var m = {};
+    r.rows.forEach(function (x) { var k = repOf(x), e = m[k] || (m[k] = { rep: k, lines: 0, units: 0, value: 0, calls: 0 }); e.lines++; e.units += Number(x.qty) || 0; e.value += Number(x.value) || 0; if (x.follow_up && !x.followed_up_at) e.calls++; });
+    var list = Object.keys(m).map(function (k) { return m[k]; }).sort(function (a, b) { return b.value - a.value; });
+    var opts = '<option value="">Everyone</option>' + list.map(function (e) { return '<option' + (e.rep === lostRep ? ' selected' : '') + '>' + esc(e.rep) + '</option>'; }).join('');
+    return '<div class="card"><h2>By rep <span class="noprint" style="font-size:13px;font-weight:400;margin-left:8px"><label for="lostRep">Show</label> <select id="lostRep">' + opts + '</select></span></h2>' +
+      '<p class="sub">Who recorded each lost sale (or picked it short, or took the order). Click a name to see only their lines.</p><div class="scroll"><table><thead><tr><th>Rep</th><th class="n">Lines</th><th class="n">Units</th><th class="n">Value</th><th class="n">Call-backs open</th></tr></thead><tbody>' +
+      (list.length ? list.map(function (e) { return '<tr' + (e.rep === lostRep ? ' style="font-weight:700"' : '') + '><td><a href="#" data-rep="' + esc(e.rep) + '">' + esc(e.rep) + '</a></td><td class="n">' + N(e.lines) + '</td><td class="n">' + N(e.units) + '</td><td class="n">' + J(e.value) + '</td><td class="n">' + N(e.calls) + '</td></tr>'; }).join('') : '<tr><td colspan="5" class="empty">None.</td></tr>') +
+      '</tbody></table></div></div>';
+  }
   function renderLost(r) {
     var h = '<div class="card"><h2>Lost sales <button class="sm noprint" id="lostCsv">CSV</button></h2><p class="sub">' + N(r.summary.lines) + ' lines · ' + N(r.summary.units) + ' units · ' + J(r.summary.value) +
       '. Recorded at the counter, short picks in the warehouse, and orders that expired or were cancelled at the cashier.</p>';
@@ -183,8 +197,10 @@
       '</tbody></table></div><div><table><thead><tr><th>Most asked for</th><th class="n">Times</th><th class="n">Units</th><th class="n">Value</th><th class="n">Stock now</th></tr></thead><tbody>' +
       (r.top.length ? r.top.slice(0, 15).map(function (x) { return '<tr><td>' + (x.sku ? '<b>' + esc(x.sku) + '</b> ' : '<span class="pill">not carried</span> ') + esc(x.name) + '</td><td class="n">' + N(x.times) + '</td><td class="n">' + N(x.units) + '</td><td class="n">' + J(x.value) + '</td><td class="n">' + (x.product_img ? N(x.stock_now) : '–') + '</td></tr>'; }).join('') : '<tr><td colspan="5" class="empty">None.</td></tr>') +
       '</tbody></table></div></div></div>';
-    h += '<div class="card"><h2>Every lost line</h2><div class="scroll"><table><thead><tr><th>When</th><th>From</th><th>Part</th><th class="n">Qty</th><th class="n">Value</th><th>Why</th><th>Customer</th><th>By</th><th></th></tr></thead><tbody>' +
-      (r.rows.length ? r.rows.map(function (x) {
+    h += renderByRep(r);
+    var rows = lostRows(r), fv = rows.reduce(function (a, x) { return a + (Number(x.value) || 0); }, 0), fu = rows.reduce(function (a, x) { return a + (Number(x.qty) || 0); }, 0);
+    h += '<div class="card"><h2>Every lost line' + (lostRep ? ': ' + esc(lostRep) + ' <small style="font-weight:400">(' + N(rows.length) + ' lines · ' + N(fu) + ' units · ' + J(fv) + ')</small> <button class="sm noprint" data-rep="">Show everyone</button>' : '') + '</h2><div class="scroll"><table><thead><tr><th>When</th><th>From</th><th>Part</th><th class="n">Qty</th><th class="n">Value</th><th>Why</th><th>Customer</th><th>By</th><th></th></tr></thead><tbody>' +
+      (rows.length ? rows.map(function (x) {
         return '<tr><td>' + esc(new Date(x.created_at).toLocaleString('en-JM', { dateStyle: 'short', timeStyle: 'short' })) + '</td><td><span class="pill">' + esc(SOURCE[x.source] || x.source) + '</span>' + (x.source !== 'manual' ? '<br><small>' + esc(x.ref) + '</small>' : '') + '</td>' +
           '<td>' + (x.sku ? '<b>' + esc(x.sku) + '</b> ' : '') + esc(x.name) + (x.vehicle ? '<br><small>' + esc(x.vehicle) + '</small>' : '') + (x.competitor ? '<br><small>went to ' + esc(x.competitor) + '</small>' : '') + '</td>' +
           '<td class="n">' + N(x.qty) + '</td><td class="n">' + J(x.value) + '</td><td>' + esc(REASON[x.reason] || x.reason) + (x.note ? '<br><small>' + esc(x.note) + '</small>' : '') + '</td>' +
@@ -271,7 +287,7 @@
   function wire(d) {
     var on = function (id, fn) { var el = document.getElementById(id); if (el) el.onclick = fn; };
     on('lostCsv', function () { csv('lost-sales.csv', ['when', 'source', 'ref', 'sku', 'part', 'asked_for', 'vehicle', 'qty', 'unit_price', 'value', 'reason', 'channel', 'competitor', 'customer', 'phone', 'recorded_by'],
-      d.rows.map(function (x) { return [x.created_at, x.source, x.ref, x.sku, x.name, x.asked_for, x.vehicle, x.qty, x.unit_price, x.value, x.reason, x.channel, x.competitor, x.customer_name, x.customer_phone, x.recorded_by]; })); });
+      lostRows(d).map(function (x) { return [x.created_at, x.source, x.ref, x.sku, x.name, x.asked_for, x.vehicle, x.qty, x.unit_price, x.value, x.reason, x.channel, x.competitor, x.customer_name, x.customer_phone, x.recorded_by]; })); });
     on('deadCsv', function () { csv('dead-stock.csv', ['sku', 'part', 'category', 'on_hand', 'cost', 'value', 'last_sold'], (d.ageing.dead ? d.ageing.dead.top : []).map(function (x) { return [x.sku, x.name, x.category, x.stock_count, x.cost, x.value, x.last_sold]; })); });
     on('oosCsv', function () { csv('out-of-stock-sellers.csv', ['sku', 'part', 'sold_90d', 'sales_90d', 'on_hand', 'on_order'], d.out_of_stock.top.map(function (x) { return [x.sku, x.name, x.sold_90d, x.sales_90d, x.stock_count, x.on_order]; })); });
     on('saveTargets', function () {
@@ -279,9 +295,12 @@
       Array.prototype.forEach.call(document.querySelectorAll('input[data-k]'), function (i) { body[i.getAttribute('data-k')] = i.value; });
       api('/api/plan/targets', 'PUT', body).then(function () { dash = null; toast('Targets saved'); }).catch(function (e) { toast(e.message); });
     });
+    var rs = document.getElementById('lostRep');
+    if (rs) rs.onchange = function () { lostRep = rs.value; show(); };
+    Array.prototype.forEach.call(document.querySelectorAll('[data-rep]'), function (a) { a.onclick = function (e) { e.preventDefault(); lostRep = a.getAttribute('data-rep'); show(); }; });
     Array.prototype.forEach.call(document.querySelectorAll('[data-del]'), function (b) {
-      b.onclick = function () {
-        if (!confirm('Remove this lost-sale entry?')) return;
+      b.onclick = async function () {
+        if (!(await vasConfirm('Remove this lost-sale entry?'))) return;
         api('/api/plan/lost-sales/' + b.getAttribute('data-del'), 'DELETE').then(function () { cache = {}; dash = null; toast('Removed'); show(); }).catch(function (e) { toast(e.message); });
       };
     });
@@ -299,8 +318,8 @@
       };
     });
     Array.prototype.forEach.call(document.querySelectorAll('[data-called]'), function (b) {
-      b.onclick = function () {
-        var note = prompt('Outcome of the call (optional), e.g. "bought", "no answer", "went elsewhere"');
+      b.onclick = async function () {
+        var note = await vasPrompt('Outcome of the call (optional), e.g. "bought", "no answer", "went elsewhere"');
         if (note === null) return;
         api('/api/plan/lost-sales/' + b.getAttribute('data-called') + '/followed-up', 'POST', { note: note }).then(function () { toast('Marked as called'); show(); }).catch(function (e) { toast(e.message); });
       };
@@ -317,6 +336,7 @@
   show();
 })();
 </script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
 <script src="/assets/module-look.js?v=20261101" defer></script>
 </body>
 </html>

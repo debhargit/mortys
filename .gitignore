@@ -75,3 +75,11 @@ app/public/*.bak-*
 
 # ---- deploy scratch (a dated copy of functions/ and tools/ before a port)
 app/deploy-backup-*/
+
+# Protect-Vision-Database.ps1 marker (per machine)
+/protected.json
+
+# ---- live/development split (Separate Live From Development.bat)
+/_separate-backup/
+/live-location.txt
+/data-dev-*/

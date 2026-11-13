@@ -20,6 +20,21 @@
 //  Rates come from payroll_rates by pay date (add a row when the law changes);
 //  each run keeps a copy of the rates it used.
 //
+//  Income tax method, per person: non-cumulative (above), or cumulative: tax
+//  on the statutory income for the year to date (pay and tax from an earlier
+//  employer this year included, off the P45) less the tax-free pay for the
+//  year to date, less the tax already paid. Someone who starts in the middle
+//  of the year, or whose pay goes up and down, is then taxed on the year as a
+//  whole. Age relief (payroll_rates.age_relief) is added to the tax-free pay
+//  from the age in the rates. Year-to-date figures are worked from pay dates,
+//  so they start again by themselves every 1 January; "Year end" closes the
+//  year (no more runs in it) and carries vacation days forward.
+//
+//  Benefits in kind (payroll_items.notional: a company vehicle used privately,
+//  housing provided): taxed through their ticks, never paid and never posted.
+//  Savings (payroll_items.is_savings): a deduction that builds up a balance;
+//  staff savings held by the business are paid back out on a payslip.
+//
 //  Capabilities (manager-only unless granted): payroll.view (runs, payslips,
 //  reports), payroll.run (people, pay runs, payments, remittances, rates,
 //  settings), payroll.approve (approve and void runs).
@@ -30,12 +45,23 @@ const PERIODS = { weekly: 52, fortnightly: 26, monthly: 12 };
 const SETTINGS = {
   payroll_module: 'off', payroll_use_timeclock: 'on', payroll_include_commission: 'on', payroll_post_ledger: 'on',
   payroll_self_service: 'on', payroll_two_person: 'off', payroll_heart: 'on', payroll_vacation_days: '10', payroll_sick_days: '10',
-  payroll_employer_trn: '', payroll_employer_nis: '', payroll_wht_agent: 'off',
+  payroll_employer_trn: '', payroll_employer_nis: '', payroll_wht_agent: 'off', payroll_carry_vacation_max: '0',
 };
 const STAT = ['gross', 'statutory', 'nis_ee', 'nis_er', 'nht_ee', 'nht_er', 'ed_ee', 'ed_er', 'heart_er', 'paye', 'pension_ee', 'pension_er', 'levy', 'wht', 'other_ded', 'net', 'er_benefits', 'taxable_benefits'];
 const WORK_CODE = { days: 'day_work', piece: 'piece_work', hours: 'extra_hours', invoice: 'contract_work' };
 // Deductions that are the business's own money back (not paid on to anyone).
-const OWN_DEDUCTIONS = ['loan', 'advance', 'staff_purchase', 'cash_shortage', 'uniform', 'salary_deduction'];
+const OWN_DEDUCTIONS = ['loan', 'advance', 'staff_purchase', 'cash_shortage', 'uniform', 'salary_deduction', 'staff_savings'];
+// Company vehicle used privately: the yearly taxable value by what the vehicle
+// cost, its age and how much of its use is private. A starting point only:
+// check it against the Income Tax Act schedule / TAJ and change it under
+// Rates (setting payroll_mv_schedule). Rows: [cost up to, up to half private
+// and up to 5 years old, up to half and older, over half and up to 5 years, over half and older].
+const MV_SCHEDULE = [[300000, 40000, 30000, 48000, 40000], [700000, 50000, 40000, 60000, 48000], [1000000, 75000, 50000, 90000, 60000],
+  [1500000, 90000, 60000, 108000, 72000], [null, 100000, 80000, 140000, 96000]];
+// Paid with the wages but not pay: a loan handed out, the person's own savings coming back, expenses repaid.
+// Never in gross pay (so not in the S01 / S02 / P24 figures); added to net pay.
+const NOT_PAY = ['advance_paid', 'savings_payout', 'reimbursement', 'mileage'];
+const PRIOR = ['prior_gross', 'prior_statutory', 'prior_paye', 'prior_nis', 'prior_nht', 'prior_ed', 'prior_pension'];
 
 function register(app, deps) {
   const { query, getPool, requireAdmin, requireCap, userCan, mailer, glPost, getShop, weekFor } = deps;
@@ -105,7 +131,7 @@ function register(app, deps) {
       for (const k of Object.keys(SETTINGS)) {
         if (!(k in b) || k === 'payroll_module') continue;
         let v = String(b[k] == null ? '' : b[k]).trim().slice(0, 60);
-        if (/_days$/.test(k)) v = String(Math.max(0, Math.min(60, n(v))));
+        if (/_days$|_max$/.test(k)) v = String(Math.max(0, Math.min(60, n(v))));
         else if (!/_trn$|_nis$/.test(k)) v = (v === 'on' || v === 'true') ? 'on' : 'off';
         await query(`INSERT INTO warehouse_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [k, v]);
       }
@@ -128,13 +154,13 @@ function register(app, deps) {
     } catch (e) { fail(res, e); }
   });
   const RATE_COLS = ['paye_threshold', 'paye_rate1', 'paye_band2_from', 'paye_rate2', 'nis_ee', 'nis_er', 'nis_ceiling', 'nht_ee', 'nht_er', 'ed_ee', 'ed_er', 'heart_er', 'pension_cap', 'min_wage_week', 'min_wage_hours',
-    'levy_rate', 'wht_rate', 'wht_threshold', 'wht_aggregate'];
+    'levy_rate', 'wht_rate', 'wht_threshold', 'wht_aggregate', 'age_relief', 'age_relief_from'];
   app.post('/api/payroll/rates', ...PR, async (req, res) => {
     try {
       const b = req.body || {};
       if (!isDate(b.effective_from)) throw httpError(400, 'Choose the date the rates take effect');
       if (!(n(b.paye_threshold) > 0)) throw httpError(400, 'Enter the annual tax-free threshold');
-      for (const k of RATE_COLS) if (/_(ee|er|rate1|rate2|cap)$|^(levy|wht)_rate$/.test(k) && (n(b[k]) < 0 || n(b[k]) > 1)) throw httpError(400, k + ' is a fraction: 3% is 0.03');
+      for (const k of RATE_COLS) if (/_(ee|er|rate1|rate2|cap)$|^(levy|wht)_rate$/.test(k) && k !== 'age_relief' && (n(b[k]) < 0 || n(b[k]) > 1)) throw httpError(400, k + ' is a fraction: 3% is 0.03');
       const vals = RATE_COLS.map((k) => (b[k] === '' || b[k] == null ? null : n(b[k])));
       const { rows: cur } = await query(`SELECT * FROM payroll_rates WHERE effective_from <= $1 ORDER BY effective_from DESC LIMIT 1`, [b.effective_from]);
       RATE_COLS.forEach((k, i) => { if (vals[i] == null && k !== 'min_wage_week') vals[i] = cur.length ? n(cur[0][k]) : null; });
@@ -153,6 +179,21 @@ function register(app, deps) {
     const { rows } = await q(`SELECT * FROM payroll_items`);
     const m = {}; for (const r of rows) m[r.code] = r; return m;
   }
+  // No two with the same name: capitals and extra spaces do not make a name different.
+  const sameName = (s) => String(s == null ? '' : s).trim().replace(/\s+/g, ' ').toLowerCase();
+  const SAME_NAME_SQL = (col) => `lower(regexp_replace(btrim(${col}), '\\s+', ' ', 'g'))`;
+  async function itemNameFree(label, exceptCode) {
+    if (!sameName(label)) return;
+    const { rows } = await query(`SELECT label, kind FROM payroll_items WHERE ${SAME_NAME_SQL('label')} = $1 AND ($2::text IS NULL OR code <> $2) LIMIT 1`, [sameName(label), exceptCode]);
+    if (rows.length) throw httpError(409, 'There is already ' + (rows[0].kind === 'earning' ? 'an earning' : rows[0].kind === 'deduction' ? 'a deduction' : 'an employer item') + ' called "' + rows[0].label + '". Give this one a different name.');
+  }
+  async function employeeNameFree(name, exceptId) {
+    const { rows } = await query(`SELECT id, name, is_active, employee_no FROM payroll_employees WHERE ${SAME_NAME_SQL('name')} = $1 AND ($2::int IS NULL OR id <> $2) ORDER BY is_active DESC LIMIT 1`, [sameName(name), exceptId]);
+    if (rows.length) {
+      throw httpError(409, '"' + rows[0].name + '" is already on payroll' + (rows[0].employee_no ? ' (no. ' + rows[0].employee_no + ')' : '') + (rows[0].is_active ? '' : ', marked not active')
+        + '. Open that record instead, or if this is a different person add something to tell them apart (a middle name or initial).');
+    }
+  }
   app.get('/api/payroll/items', ...PV, async (req, res) => {
     try {
       const { rows } = await query(`SELECT i.*, a.code AS gl_code, a.name AS gl_name FROM payroll_items i LEFT JOIN gl_accounts a ON a.id = i.gl_account_id ORDER BY i.kind DESC, i.sort, i.label`);
@@ -167,13 +208,15 @@ function register(app, deps) {
       const kind = ['deduction', 'employer'].includes(b.kind) ? b.kind : 'earning';
       let code = String(b.code || label).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30);
       if (!code) throw httpError(400, 'Give it a code');
+      await itemNameFree(label, null);
       const { rows: ex } = await query(`SELECT 1 FROM payroll_items WHERE code = $1`, [code]);
       if (ex.length) code = code + '_' + Date.now().toString(36).slice(-4);
       const f = (k) => (kind === 'deduction' ? false : b[k] !== false);
       // paid_outside: an earning the person already has (cash tips kept): taxed as ticked, not paid again.
-      await query(`INSERT INTO payroll_items (code, label, kind, paye, nis, nht, ed, heart, gl_account_id, sort, paid_outside) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      // notional: a benefit in kind (nothing is paid to anyone). is_savings: a deduction that builds up a balance.
+      await query(`INSERT INTO payroll_items (code, label, kind, paye, nis, nht, ed, heart, gl_account_id, sort, paid_outside, notional, is_savings) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
         [code, label, kind, kind === 'employer' ? !!b.paye : f('paye'), kind === 'employer' ? !!b.nis : f('nis'), kind === 'employer' ? !!b.nht : f('nht'), kind === 'employer' ? !!b.ed : f('ed'), kind === 'employer' ? !!b.heart : f('heart'), parseInt(b.gl_account_id, 10) || null, kind === 'deduction' ? 140 : kind === 'employer' ? 210 : 70,
-          kind === 'earning' && !!b.paid_outside]);
+          kind === 'earning' && !!b.paid_outside, kind === 'employer' && !!b.notional, kind === 'deduction' && !!b.is_savings]);
       res.json({ ok: true, code });
     } catch (e) { fail(res, e); }
   });
@@ -183,33 +226,42 @@ function register(app, deps) {
       const { rows } = await query(`SELECT * FROM payroll_items WHERE code = $1`, [req.params.code]);
       if (!rows.length) throw httpError(404, 'Not found');
       const it = rows[0], ded = it.kind === 'deduction';
+      if ('label' in b && sameName(b.label) !== sameName(it.label)) await itemNameFree(String(b.label || '').trim(), it.code);
       const flag = (k) => (ded ? false : (k in b ? !!b[k] : it[k]));
       // Worked-out items (basic pay, overtime...) are always paid through payroll.
       const outside = it.kind === 'earning' && !it.is_system && 'paid_outside' in b ? !!b.paid_outside : it.paid_outside;
-      await query(`UPDATE payroll_items SET label = $2, paye = $3, nis = $4, nht = $5, ed = $6, heart = $7, gl_account_id = $8, is_active = $9, pension_relief = $10, paid_outside = $11 WHERE code = $1`,
+      await query(`UPDATE payroll_items SET label = $2, paye = $3, nis = $4, nht = $5, ed = $6, heart = $7, gl_account_id = $8, is_active = $9, pension_relief = $10, paid_outside = $11, notional = $12, is_savings = $13 WHERE code = $1`,
         [it.code, String(b.label || it.label).trim().slice(0, 60), flag('paye'), flag('nis'), flag('nht'), flag('ed'), flag('heart'),
-          'gl_account_id' in b ? (parseInt(b.gl_account_id, 10) || null) : it.gl_account_id, it.is_system ? true : ('is_active' in b ? !!b.is_active : it.is_active), ded && 'pension_relief' in b ? !!b.pension_relief : it.pension_relief, outside]);
+          'gl_account_id' in b ? (parseInt(b.gl_account_id, 10) || null) : it.gl_account_id, it.is_system ? true : ('is_active' in b ? !!b.is_active : it.is_active), ded && 'pension_relief' in b ? !!b.pension_relief : it.pension_relief, outside,
+          it.kind === 'employer' && 'notional' in b ? !!b.notional : it.notional, ded && !it.is_system && 'is_savings' in b ? !!b.is_savings : it.is_savings]);
       res.json({ ok: true });
     } catch (e) { fail(res, e); }
   });
 
   // ------------------------------------------------------------- employees --
-  const EMP_TEXT = ['employee_no', 'name', 'email', 'phone', 'address', 'trn', 'nis_no', 'termination_reason', 'job_title', 'department', 'bank_name', 'bank_branch', 'bank_account', 'bank_account_type', 'pension_scheme', 'notes', 'business_name', 'tcc_no'];
+  const EMP_TEXT = ['employee_no', 'name', 'email', 'phone', 'address', 'trn', 'nis_no', 'termination_reason', 'job_title', 'department', 'bank_name', 'bank_branch', 'bank_account', 'bank_account_type', 'pension_scheme', 'notes', 'business_name', 'tcc_no', 'prior_employer'];
   const EMP_DATE = ['date_of_birth', 'hire_date', 'termination_date', 'tcc_expiry'];
-  const EMP_NUM = ['salary_annual', 'hourly_rate', 'ot_rate', 'hours_per_period', 'hours_per_day', 'pension_ee_pct', 'pension_er_pct', 'extra_threshold', 'vacation_days', 'sick_days', 'day_rate', 'fee_per_period'];
-  const EMP_BOOL = ['use_timeclock', 'paye_exempt', 'nis_exempt', 'nht_exempt', 'ed_exempt', 'is_active', 'levy_applies', 'wht_applies'];
+  const EMP_NUM = ['salary_annual', 'hourly_rate', 'ot_rate', 'hours_per_period', 'hours_per_day', 'pension_ee_pct', 'pension_er_pct', 'extra_threshold', 'vacation_days', 'sick_days', 'day_rate', 'fee_per_period', ...PRIOR];
+  const EMP_BOOL = ['use_timeclock', 'paye_exempt', 'nis_exempt', 'nht_exempt', 'ed_exempt', 'is_active', 'levy_applies', 'wht_applies', 'age_relief'];
   const PAY_TYPES = ['salary', 'hourly', 'daily', 'piece', 'contract'], WORKER_TYPES = ['employee', 'day_worker', 'contractor'];
   function empValues(b, cur) {
     const out = {};
     for (const k of EMP_TEXT) out[k] = k in b ? (String(b[k] == null ? '' : b[k]).trim().slice(0, k === 'notes' || k === 'address' ? 500 : 120) || null) : (cur ? cur[k] : null);
     for (const k of EMP_DATE) out[k] = k in b ? (isDate(b[k]) ? b[k] : null) : (cur ? cur[k] : null);
     for (const k of EMP_NUM) out[k] = k in b ? (b[k] === '' || b[k] == null ? null : n(b[k])) : (cur ? cur[k] : null);
-    for (const k of EMP_BOOL) out[k] = k in b ? !!b[k] : (cur ? cur[k] : (k === 'use_timeclock' || k === 'is_active'));
+    for (const k of EMP_BOOL) out[k] = k in b ? !!b[k] : (cur ? cur[k] : (k === 'use_timeclock' || k === 'is_active' || k === 'age_relief'));
     out.worker_type = WORKER_TYPES.includes(b.worker_type) ? b.worker_type : (cur ? cur.worker_type : 'employee');
     out.pay_type = PAY_TYPES.includes(b.pay_type) ? b.pay_type : (cur ? cur.pay_type : (out.worker_type === 'contractor' ? 'contract' : out.worker_type === 'day_worker' ? 'daily' : 'salary'));
     out.frequency = PERIODS[b.frequency] ? b.frequency : (cur ? cur.frequency : 'monthly');
     out.pay_method = ['bank', 'cheque', 'cash'].includes(b.pay_method) ? b.pay_method : (cur ? cur.pay_method : 'bank');
     out.user_id = 'user_id' in b ? (parseInt(b.user_id, 10) || null) : (cur ? cur.user_id : null);
+    out.paye_method = ['non_cumulative', 'cumulative'].includes(b.paye_method) ? b.paye_method : (cur ? cur.paye_method : 'non_cumulative');
+    // Pay and deductions with an earlier employer belong to one year (the P45's).
+    out.prior_year = 'prior_year' in b ? (/^\d{4}$/.test(String(b.prior_year || '')) ? Number(b.prior_year) : null) : (cur ? cur.prior_year : null);
+    const hasPrior = PRIOR.some((k) => n(out[k]) > 0);
+    if (hasPrior && !out.prior_year) out.prior_year = Number((out.hire_date || today()).slice(0, 4));
+    if (hasPrior && !(n(out.prior_statutory) > 0) && n(out.prior_gross) > 0) out.prior_statutory = r2(Math.max(0, n(out.prior_gross) - n(out.prior_nis) - n(out.prior_pension)));
+    for (const k of PRIOR) if (n(out[k]) < 0) throw httpError(400, 'The figures from the earlier employer cannot be negative');
     if (out.ot_rate == null) out.ot_rate = 1.5;
     if (out.hours_per_day == null) out.hours_per_day = 8;
     for (const k of ['pension_ee_pct', 'pension_er_pct', 'extra_threshold']) if (out[k] == null) out[k] = 0;
@@ -223,7 +275,7 @@ function register(app, deps) {
     if (n(out.pension_ee_pct) > 100 || n(out.pension_er_pct) > 100) throw httpError(400, 'Pension is a percentage of pay');
     return out;
   }
-  const empCols = () => [...EMP_TEXT, ...EMP_DATE, ...EMP_NUM, ...EMP_BOOL, 'pay_type', 'worker_type', 'frequency', 'pay_method', 'user_id'];
+  const empCols = () => [...EMP_TEXT, ...EMP_DATE, ...EMP_NUM, ...EMP_BOOL, 'pay_type', 'worker_type', 'frequency', 'pay_method', 'user_id', 'paye_method', 'prior_year'];
   const EMP_SELECT = `e.*, to_char(e.date_of_birth, 'YYYY-MM-DD') AS date_of_birth, to_char(e.hire_date, 'YYYY-MM-DD') AS hire_date, to_char(e.termination_date, 'YYYY-MM-DD') AS termination_date, to_char(e.tcc_expiry, 'YYYY-MM-DD') AS tcc_expiry, u.email AS user_email, u.name AS user_name`;
 
   app.get('/api/payroll/employees', ...PV, async (req, res) => {
@@ -242,13 +294,14 @@ function register(app, deps) {
       const { rows: items } = await query(`SELECT x.*, i.label, i.kind FROM payroll_employee_items x JOIN payroll_items i ON i.code = x.code WHERE x.employee_id = $1 ORDER BY x.is_active DESC, i.kind DESC, i.sort`, [e.id]);
       const year = today().slice(0, 4);
       res.json({ employee: e, items, ytd: await ytd(e.id, year + '-01-01', year + '-12-31'), leave: await leaveBalance(e, year),
-        work: await workList(e.id), contracts: await contractList(e.id), loans: await loanList(e.id),
+        work: await workList(e.id), contracts: await contractList(e.id), loans: await loanList(e.id), savings: await savingsList(e.id), prior: priorFor(e, year),
         slips: (await query(`SELECT s.id, s.gross, s.net, s.paye, r.number, r.status, to_char(r.pay_date, 'YYYY-MM-DD') AS pay_date FROM payroll_slips s JOIN payroll_runs r ON r.id = s.run_id WHERE s.employee_id = $1 ORDER BY r.pay_date DESC LIMIT 60`, [e.id])).rows });
     } catch (e) { fail(res, e); }
   });
   app.post('/api/payroll/employees', ...PR, async (req, res) => {
     try {
       const v = empValues(req.body || {}, null), cols = empCols();
+      await employeeNameFree(v.name, null);
       if (v.user_id) { const { rows } = await query(`SELECT 1 FROM payroll_employees WHERE user_id = $1`, [v.user_id]); if (rows.length) throw httpError(409, 'That staff member is already on payroll'); }
       const { rows } = await query(`INSERT INTO payroll_employees (${cols.join(', ')}, updated_by) VALUES (${cols.map((_, i) => '$' + (i + 1)).join(', ')}, $${cols.length + 1}) RETURNING id`, [...cols.map((k) => v[k]), req.session.userId]);
       res.json({ ok: true, id: rows[0].id });
@@ -260,6 +313,9 @@ function register(app, deps) {
       const { rows: cur } = await query(`SELECT ${EMP_SELECT} FROM payroll_employees e LEFT JOIN users u ON u.id = e.user_id WHERE e.id = $1`, [id]);
       if (!cur.length) throw httpError(404, 'Not found');
       const v = empValues(req.body || {}, cur[0]), cols = empCols();
+      // Checked when the name changes or the person is made active again, so a
+      // record that already shares a name can still be opened and put right.
+      if (sameName(v.name) !== sameName(cur[0].name) || (v.is_active && !cur[0].is_active)) await employeeNameFree(v.name, id);
       if (v.user_id && v.user_id !== cur[0].user_id) { const { rows } = await query(`SELECT 1 FROM payroll_employees WHERE user_id = $1 AND id <> $2`, [v.user_id, id]); if (rows.length) throw httpError(409, 'That staff member is already on payroll'); }
       await query(`UPDATE payroll_employees SET ${cols.map((k, i) => k + ' = $' + (i + 2)).join(', ')}, updated_by = $${cols.length + 2}, updated_at = NOW() WHERE id = $1`, [id, ...cols.map((k) => v[k]), req.session.userId]);
       res.json({ ok: true });
@@ -279,7 +335,10 @@ function register(app, deps) {
       const ids = (Array.isArray(req.body && req.body.user_ids) ? req.body.user_ids : []).map((x) => parseInt(x, 10)).filter(Boolean);
       if (!ids.length) throw httpError(400, 'Tick the staff to add');
       let added = 0;
+      const dupes = [];
       for (const uid of ids) {
+        const { rows: nm } = await query(`SELECT name FROM users WHERE id = $1`, [uid]);
+        if (nm.length) { try { await employeeNameFree(nm[0].name, null); } catch (e) { if (e.status !== 409) throw e; dupes.push(nm[0].name); continue; } }
         const { rows } = await query(
           `INSERT INTO payroll_employees (user_id, name, email, employee_no, pay_type, frequency, hourly_rate, is_active, updated_by)
            SELECT u.id, u.name, CASE WHEN u.email ~* '\\.local$' THEN NULL ELSE u.email END, u.employee_no,
@@ -289,7 +348,7 @@ function register(app, deps) {
             WHERE u.id = $1 AND u.is_staff AND NOT EXISTS (SELECT 1 FROM payroll_employees e WHERE e.user_id = u.id) RETURNING id`, [uid, req.session.userId]);
         added += rows.length;
       }
-      res.json({ ok: true, added, note: 'People without an hourly rate on the time clock were added as not active: open each one, enter the pay, TRN and NIS number, then tick Active.' });
+      res.json({ ok: true, added, skipped: dupes, note: (dupes.length ? 'Not added, the name is already on payroll: ' + dupes.join(', ') + '. ' : '') + 'People without an hourly rate on the time clock were added as not active: open each one, enter the pay, TRN and NIS number, then tick Active.' });
     } catch (e) { fail(res, e); }
   });
   // Recurring earnings and deductions.
@@ -310,6 +369,27 @@ function register(app, deps) {
         [id, it[0].code, pct > 0 ? 0 : r2(b.amount), bal == null ? null : r2(bal), String(b.note || '').slice(0, 120) || null, String(b.payee || '').trim().slice(0, 80) || null,
           String(b.reference || '').trim().slice(0, 60) || null, isDate(b.end_date) ? b.end_date : null, req.session.userId, pct > 0 ? pct : null]);
       res.json({ ok: true, id: rows[0].id });
+    } catch (e) { fail(res, e); }
+  });
+  // Savings: what has built up, per item.
+  async function savingsList(empId, q = query) {
+    const { rows } = await q(
+      `SELECT x.id, x.code, i.label, x.amount::float AS per_pay, x.pct::float AS pct, x.saved::float AS saved, x.payout_pending::float AS payout_pending, x.is_active, x.payee, x.reference
+         FROM payroll_employee_items x JOIN payroll_items i ON i.code = x.code WHERE x.employee_id = $1 AND i.is_savings ORDER BY x.id`, [empId]);
+    return rows.map((r) => Object.assign(r, { held: r.code === 'staff_savings' }));
+  }
+  // Pay savings held by the business back to the person on their next payslip.
+  app.post('/api/payroll/employee-items/:id/payout', ...PR, async (req, res) => {
+    try {
+      const { rows } = await query(`SELECT x.*, i.is_savings FROM payroll_employee_items x JOIN payroll_items i ON i.code = x.code WHERE x.id = $1`, [parseInt(req.params.id, 10) || 0]);
+      if (!rows.length || !rows[0].is_savings) throw httpError(404, 'Not a savings item');
+      const x = rows[0];
+      if (x.code !== 'staff_savings') throw httpError(409, 'These savings are paid over to someone else (a credit union or partner plan): the person takes them out there');
+      const b = req.body || {};
+      const amount = b.amount === '' || b.amount == null ? n(x.saved) : r2(b.amount);
+      if (amount < 0 || amount > n(x.saved) + 0.004) throw httpError(400, 'No more than has been saved (' + r2(x.saved).toFixed(2) + ')');
+      await query(`UPDATE payroll_employee_items SET payout_pending = $2 WHERE id = $1`, [x.id, amount]);
+      res.json({ ok: true, amount, note: amount > 0 ? 'It is added to the next payslip (not taxed: it is their own money).' : 'The payout is cancelled.' });
     } catch (e) { fail(res, e); }
   });
   app.put('/api/payroll/employee-items/:id', ...PR, async (req, res) => {
@@ -480,6 +560,9 @@ function register(app, deps) {
         `SELECT l.kind, COUNT(*)::int AS days FROM staff_leave l, generate_series(GREATEST(l.from_date, $2::date), LEAST(l.to_date, $3::date), interval '1 day') g(d)
           WHERE l.user_id = $1 AND l.to_date >= $2::date AND l.from_date <= $3::date AND EXTRACT(DOW FROM g.d) <> 0 GROUP BY l.kind`, [e.user_id, year + '-01-01', year + '-12-31']);
       for (const r of rows) { if (r.kind === 'vacation') out.vacation_taken = r.days; else if (r.kind === 'sick') out.sick_taken = r.days; else if (r.kind === 'unpaid') out.unpaid_taken = r.days; }
+      // Days carried forward at year end, and other adjustments made in People.
+      const { rows: adj } = await query(`SELECT kind, COALESCE(SUM(days), 0)::float AS days FROM hr_leave_adjustments WHERE user_id = $1 AND year = $2 GROUP BY kind`, [e.user_id, Number(year)]);
+      for (const a of adj) { if (a.kind === 'vacation') { out.vacation_entitled += a.days; out.vacation_adjusted = a.days; } else if (a.kind === 'sick') { out.sick_entitled += a.days; out.sick_adjusted = a.days; } }
     }
     out.vacation_left = out.vacation_entitled - out.vacation_taken;
     out.sick_left = out.sick_entitled - out.sick_taken;
@@ -494,18 +577,65 @@ function register(app, deps) {
     return rows[0];
   }
 
+  // Pay and deductions with an earlier employer in this year (off the P45).
+  function priorFor(e, year) {
+    if (!e || Number(e.prior_year) !== Number(year) || !PRIOR.some((k) => n(e[k]) > 0)) return null;
+    return { year: Number(year), employer: e.prior_employer || null, gross: n(e.prior_gross), statutory: n(e.prior_statutory), paye: n(e.prior_paye), nis: n(e.prior_nis), nht: n(e.prior_nht), ed: n(e.prior_ed), pension: n(e.prior_pension) };
+  }
+  const ageOn = (dob, date) => { if (!dob || !date) return null; const a = Number(date.slice(0, 4)) - Number(String(dob).slice(0, 4)); return date.slice(5) < String(dob).slice(5, 10) ? a - 1 : a; };
+  // Tax-free income a year: the threshold, the person's own extra amount, and age relief from the age in the rates.
+  function freeYear(emp, rt, date) {
+    const age = ageOn(emp.date_of_birth, date);
+    const relief = emp.age_relief !== false && age != null && n(rt.age_relief) > 0 && age >= (n(rt.age_relief_from) || 65) ? n(rt.age_relief) : 0;
+    return { threshold: n(rt.paye_threshold), extra: n(emp.extra_threshold), age_relief: relief, total: n(rt.paye_threshold) + n(emp.extra_threshold) + relief };
+  }
+  // Which pay of the year a pay date is (1..52 / 26 / 12).
+  function periodNo(freq, payDate) {
+    if (freq === 'monthly') return Number(payDate.slice(5, 7));
+    const len = freq === 'weekly' ? 7 : 14;
+    const doy = Math.round((new Date(payDate + 'T12:00:00Z') - new Date(payDate.slice(0, 4) + '-01-01T12:00:00Z')) / 86400000) + 1;
+    return Math.min(PERIODS[freq], Math.ceil(doy / len));
+  }
+  // Cumulative income tax: what the year so far looks like before this payslip:
+  // tax-free pay and the higher-rate band for the pays gone by (at the rates in
+  // force then), and statutory income and tax from approved runs and from an
+  // earlier employer this year.
+  async function cumFor(emp, run) {
+    if (!emp || emp.paye_method !== 'cumulative' || emp.worker_type === 'contractor') return null;
+    const freq = run.frequency, PP = PERIODS[freq], year = run.pay_date.slice(0, 4), jan1 = year + '-01-01', k = periodNo(freq, run.pay_date);
+    const { rows: rates } = await query(`SELECT *, to_char(effective_from, 'YYYY-MM-DD') AS ef FROM payroll_rates ORDER BY effective_from`);
+    const rateAt = (d) => { let r = rates[0]; for (const x of rates) if (x.ef <= d) r = x; return r; };
+    let free = 0, band = 0;
+    for (let i = 1; i < k; i++) {
+      const d = freq === 'monthly' ? monthEnd(year + '-' + String(i).padStart(2, '0')) : addDays(jan1, i * (freq === 'weekly' ? 7 : 14) - 1);
+      const r = rateAt(d);
+      if (!r) continue;
+      free += freeYear(emp, r, d).total / PP; band += n(r.paye_band2_from) / PP;
+    }
+    const { rows } = await query(
+      `SELECT COALESCE(SUM(s.statutory), 0)::float AS statutory, COALESCE(SUM(s.paye), 0)::float AS paye, COUNT(*)::int AS slips
+         FROM payroll_slips s JOIN payroll_runs r ON r.id = s.run_id
+        WHERE s.employee_id = $1 AND r.status IN ('approved', 'paid') AND r.id <> $2 AND r.pay_date >= $3 AND (r.pay_date < $4 OR (r.pay_date = $4 AND r.id < $2))`, [emp.id, run.id || 0, jan1, run.pay_date]);
+    const prior = priorFor(emp, year);
+    return { period: k, free, band, statutory: r2(rows[0].statutory + (prior ? prior.statutory : 0)), paye: r2(rows[0].paye + (prior ? prior.paye : 0)), prior, slips: rows[0].slips };
+  }
+
   // ------------------------------------------------------------- the maths --
   // Statutory figures for one payslip from its lines.
-  function compute(lines, emp, rt, P, s, items) {
+  // ctx: { date (the pay date, for age relief), cum (cumFor's result: cumulative income tax) }.
+  function compute(lines, emp, rt, P, s, items, ctx) {
     const flag = (l, f) => (items[l.code] ? items[l.code][f] : l.kind === 'earning');
     const earn = lines.filter((l) => l.kind === 'earning'), ded = lines.filter((l) => l.kind === 'deduction'), er = lines.filter((l) => l.kind === 'employer');
     const sum = (arr) => r2(arr.reduce((t, l) => t + n(l.amount), 0));
     // Employer contributions are not cash: a ticked one is a taxable benefit and
     // joins that contribution's base; gross and net pay stay as paid.
     const base = (f) => Math.max(0, sum(earn.filter((l) => flag(l, f))) + sum(er.filter((l) => flag(l, f))));
-    const gross = sum(earn), bPaye = base('paye'), bNis = base('nis'), bNht = base('nht'), bEd = base('ed'), bHeart = base('heart');
+    const nonPay = sum(earn.filter((l) => NOT_PAY.includes(l.code)));
+    const gross = r2(sum(earn) - nonPay), bPaye = base('paye'), bNis = base('nis'), bNht = base('nht'), bEd = base('ed'), bHeart = base('heart');
     const cashPaye = Math.max(0, sum(earn.filter((l) => flag(l, 'paye'))));   // pensionable pay
-    const other_ded0 = sum(ded), er_benefits = sum(er), taxable_benefits = sum(er.filter((l) => flag(l, 'paye')));
+    // A benefit in kind (a company vehicle, housing) costs nothing extra to pay over: taxed, not an employer cost here.
+    const notional = (l) => !!(items[l.code] && items[l.code].notional);
+    const other_ded0 = sum(ded), er_benefits = sum(er.filter((l) => !notional(l))), taxable_benefits = sum(er.filter((l) => flag(l, 'paye')));
     // Already in the person's hand (cash tips kept): in gross and taxed as ticked, not paid again.
     const received = sum(earn.filter((l) => items[l.code] && items[l.code].paid_outside));
     // A contractor is self-employed: no PAYE / NIS / NHT / Education Tax / HEART.
@@ -522,7 +652,7 @@ function register(app, deps) {
       }
       wht = r2(wht);
       const z = { statutory: 0, nis_ee: 0, nis_er: 0, nht_ee: 0, nht_er: 0, ed_ee: 0, ed_er: 0, heart_er: 0, paye: 0, pension_ee: 0, pension_er: 0 };
-      return Object.assign(z, { gross, levy, wht, other_ded: other_ded0, net: r2(gross - levy - wht - other_ded0 - received), er_benefits, taxable_benefits: 0 });
+      return Object.assign(z, { gross, levy, wht, other_ded: other_ded0, net: r2(gross + nonPay - levy - wht - other_ded0 - received), er_benefits, taxable_benefits: 0 });
     }
     const pension_ee = r2(cashPaye * n(emp.pension_ee_pct) / 100);
     const pension_er = r2(cashPaye * n(emp.pension_er_pct) / 100);
@@ -540,11 +670,23 @@ function register(app, deps) {
     const ed_er = emp.ed_exempt ? 0 : r2(edBase * n(rt.ed_er));
     const heart_er = on(s, 'payroll_heart') ? r2(bHeart * n(rt.heart_er)) : 0;
     const statutory = r2(Math.max(0, bPaye - nis_ee - pensionRelief));
-    const thr = (n(rt.paye_threshold) + n(emp.extra_threshold)) / P, band = n(rt.paye_band2_from) / P;
-    const paye = emp.paye_exempt ? 0 : r2(n(rt.paye_rate1) * Math.max(0, Math.min(statutory, band) - thr) + n(rt.paye_rate2) * Math.max(0, statutory - Math.max(band, thr)));
+    const fy = freeYear(emp, rt, ctx && ctx.date), cum = ctx && ctx.cum;
+    const thr = fy.total / P, band = n(rt.paye_band2_from) / P;
+    const taxOn = (st, t, b) => n(rt.paye_rate1) * Math.max(0, Math.min(st, b) - t) + n(rt.paye_rate2) * Math.max(0, st - Math.max(b, t));
+    let paye, tax;
+    if (cum) {
+      // Year to date: tax on everything so far, less the tax already paid.
+      const statTD = r2(cum.statutory + statutory), freeTD = cum.free + thr, due = taxOn(statTD, freeTD, cum.band + band);
+      paye = emp.paye_exempt ? 0 : r2(Math.max(0, due - cum.paye));
+      tax = { method: 'cumulative', period: cum.period, periods: P, free_to_date: r2(freeTD), statutory_to_date: statTD, tax_to_date: r2(due), paid_before: r2(cum.paye), prior: cum.prior || null };
+    } else {
+      paye = emp.paye_exempt ? 0 : r2(taxOn(statutory, thr, band));
+      tax = { method: 'non_cumulative', periods: P, free_period: r2(thr) };
+    }
+    Object.assign(tax, { threshold: fy.threshold, extra: fy.extra, age_relief: fy.age_relief, exempt: !!emp.paye_exempt });
     const other_ded = other_ded0;
-    const net = r2(gross - nis_ee - nht_ee - ed_ee - paye - pension_ee - other_ded - received);
-    return { gross, statutory, nis_ee, nis_er, nht_ee, nht_er, ed_ee, ed_er, heart_er, paye, pension_ee, pension_er, levy: 0, wht: 0, other_ded, net, er_benefits, taxable_benefits };
+    const net = r2(gross + nonPay - nis_ee - nht_ee - ed_ee - paye - pension_ee - other_ded - received);
+    return { gross, statutory, nis_ee, nis_er, nht_ee, nht_er, ed_ee, ed_er, heart_er, paye, pension_ee, pension_er, levy: 0, wht: 0, other_ded, net, er_benefits, taxable_benefits, tax };
   }
 
   // Working days (by the person's shifts, else Monday-Saturday) between two dates.
@@ -685,8 +827,16 @@ function register(app, deps) {
       for (const c of rows) { lines.push({ code: 'commission', label: 'Commission ' + c.number, kind: 'earning', qty: 1, rate: n(c.total), amount: r2(c.total), source: 'auto', ref: c.id }); commissionIds.push(c.id); }
     }
 
+    // Savings the person asked to take out (their own money back: not pay, not taxed).
+    const { rows: pay } = await query(`SELECT x.id, x.payout_pending, x.saved, i.label FROM payroll_employee_items x JOIN payroll_items i ON i.code = x.code
+                                        WHERE x.employee_id = $1 AND x.payout_pending > 0 AND i.is_savings ORDER BY x.id`, [emp.id]);
+    for (const x of pay) {
+      const amt = r2(Math.min(n(x.payout_pending), n(x.saved)));
+      if (amt > 0) lines.push({ code: 'savings_payout', label: 'Savings paid out · ' + x.label, kind: 'earning', qty: 1, rate: amt, amount: amt, source: 'auto', savings_id: x.id });
+    }
+
     // Recurring items. A loan never takes more than is still owed.
-    const { rows: rec } = await query(`SELECT x.*, i.label, i.kind FROM payroll_employee_items x JOIN payroll_items i ON i.code = x.code WHERE x.employee_id = $1 AND x.is_active ORDER BY i.sort, x.id`, [emp.id]);
+    const { rows: rec } = await query(`SELECT x.*, i.label, i.kind, i.is_savings FROM payroll_employee_items x JOIN payroll_items i ON i.code = x.code WHERE x.employee_id = $1 AND x.is_active ORDER BY i.sort, x.id`, [emp.id]);
     // A percentage item is worked on the person's pensionable / taxable cash pay.
     const { rows: flagsRows } = await query(`SELECT code FROM payroll_items WHERE paye`);
     const taxableCodes = new Set(flagsRows.map((f) => f.code));
@@ -696,14 +846,33 @@ function register(app, deps) {
       let amt = x.pct != null && n(x.pct) > 0 ? r2(Math.max(0, payBase) * n(x.pct) / 100) : n(x.amount);
       if (!(amt > 0)) continue;
       if (x.balance != null) { amt = Math.min(amt, n(x.balance)); if (!(amt > 0)) continue; }
-      const line = { code: x.code, label: x.label + (x.pct != null && n(x.pct) > 0 ? ' (' + n(x.pct) + '% of pay)' : '') + (x.note ? ' · ' + x.note : '') + (x.balance != null ? ' (owed ' + r2(x.balance).toFixed(2) + ')' : ''), kind: x.kind, qty: 1, rate: r2(amt), amount: r2(amt), source: 'auto', item_id: x.id };
+      const line = { code: x.code, label: x.label + (x.pct != null && n(x.pct) > 0 ? ' (' + n(x.pct) + '% of pay)' : '') + (x.note ? ' · ' + x.note : '') + (x.balance != null ? ' (owed ' + r2(x.balance).toFixed(2) + ')' : '') +
+        (x.is_savings && n(x.saved) > 0 ? ' (saved so far ' + r2(x.saved).toFixed(2) + ')' : ''), kind: x.kind, qty: 1, rate: r2(amt), amount: r2(amt), source: 'auto', item_id: x.id };
       if (x.payee) line.payee = x.payee;
       if (x.reference) line.reference = x.reference;
       lines.push(line);
     }
 
+    // Starting and leaving in this period.
+    if (!contractor && emp.hire_date && emp.hire_date >= start && emp.hire_date <= end) {
+      const first = emp.hire_date.slice(5) > '01-31' && emp.paye_method !== 'cumulative' && !priorFor(emp, emp.hire_date.slice(0, 4));
+      warnings.push('Started ' + emp.hire_date + ': first pay' + (first ? '. If they have a P45, or earned nothing earlier this year, enter that on their page and choose year-to-date income tax so the tax-free pay not used earlier in the year is given' : ''));
+    }
+    if (emp.termination_date && emp.termination_date >= start && emp.termination_date <= end) {
+      const bits = [];
+      const owed = rec.filter((x) => x.balance != null && n(x.balance) > 0.004).reduce((t, x) => t + n(x.balance), 0);
+      if (owed > 0.004) bits.push('loans / advances still owed ' + r2(owed).toFixed(2));
+      const { rows: sv } = await query(`SELECT COALESCE(SUM(x.saved - x.payout_pending), 0)::float AS v FROM payroll_employee_items x WHERE x.employee_id = $1 AND x.code = 'staff_savings'`, [emp.id]);
+      if (sv[0].v > 0.004) bits.push('staff savings to pay out ' + r2(sv[0].v).toFixed(2));
+      if (!contractor && emp.user_id) {
+        const lb = await leaveBalance(emp, end.slice(0, 4));
+        if (lb.vacation_left > 0) bits.push(lb.vacation_left + ' vacation day(s) not taken to pay in lieu');
+      }
+      warnings.push('Final pay (leaving ' + emp.termination_date + ')' + (bits.length ? ': ' + bits.join('; ') : '') + '. Add notice pay or redundancy if due, and print the P45');
+    }
+
     // Checks.
-    const gross = lines.filter((l) => l.kind === 'earning').reduce((t, l) => t + n(l.amount), 0);
+    const gross = lines.filter((l) => l.kind === 'earning' && !NOT_PAY.includes(l.code)).reduce((t, l) => t + n(l.amount), 0);
     const own = lines.filter((l) => l.kind === 'deduction' && l.code !== 'child_maint' && l.code !== 'court_order').reduce((t, l) => t + n(l.amount), 0);
     if (gross > 0 && own > gross / 2) warnings.push('Deductions other than statutory and court orders are more than half the pay: make sure each is agreed in writing');
     if (lines.some((l) => ['salary_deduction', 'cash_shortage'].includes(l.code))) warnings.push('A salary deduction or cash shortage is on this payslip: keep the signed agreement on file');
@@ -729,7 +898,8 @@ function register(app, deps) {
     const snapshot = { name: emp.name, employee_no: emp.employee_no, trn: emp.trn, nis_no: emp.nis_no, job_title: emp.job_title, department: emp.department, pay_type: emp.pay_type,
       worker_type: emp.worker_type, business_name: emp.business_name, tcc_no: emp.tcc_no, day_rate: emp.day_rate, address: emp.address,
       frequency: emp.frequency, salary_annual: emp.salary_annual, hourly_rate: emp.hourly_rate, pay_method: emp.pay_method, bank_name: emp.bank_name, bank_masked: mask(emp.bank_account),
-      email: emp.email || emp.user_email || null, pension_ee_pct: emp.pension_ee_pct, pension_er_pct: emp.pension_er_pct };
+      email: emp.email || emp.user_email || null, pension_ee_pct: emp.pension_ee_pct, pension_er_pct: emp.pension_er_pct,
+      paye_method: emp.paye_method, hire_date: emp.hire_date, termination_date: emp.termination_date };
     return { lines, warnings, commissionIds, snapshot };
   }
 
@@ -750,13 +920,16 @@ function register(app, deps) {
       const b = await build(emp, run, s, rt, slipRow.id);
       lines = b.lines; warnings = b.warnings; cids = b.commissionIds; snapshot = b.snapshot;
     }
-    const v = compute(lines, emp, rt, PERIODS[run.frequency], s, items);
+    const v = compute(lines, emp, rt, PERIODS[run.frequency], s, items, { date: run.pay_date, cum: await cumFor(emp, run) });
     // The payslip and the ledger read this from the line, so a later change to the item leaves this slip as worked out.
-    for (const l of lines) { if (l.kind === 'earning' && items[l.code] && items[l.code].paid_outside) l.received = true; else delete l.received; }
+    for (const l of lines) {
+      if (l.kind === 'earning' && items[l.code] && items[l.code].paid_outside) l.received = true; else delete l.received;
+      if (l.kind === 'employer' && items[l.code] && items[l.code].notional) l.notional = true; else delete l.notional;
+    }
     warnings = warnings.filter((w) => !/^Net pay is below/.test(w));
     if (v.net < 0) warnings.push('Net pay is below zero: reduce the deductions');
-    await query(`UPDATE payroll_slips SET lines = $2, warnings = $3, commission_ids = $4, snapshot = $5, edited = $6, ${STAT.map((k, i) => k + ' = $' + (i + 7)).join(', ')} WHERE id = $1`,
-      [slipRow.id, JSON.stringify(lines), JSON.stringify(warnings), cids, JSON.stringify(snapshot), rebuild ? false : slipRow.edited, ...STAT.map((k) => v[k])]);
+    await query(`UPDATE payroll_slips SET lines = $2, warnings = $3, commission_ids = $4, snapshot = $5, edited = $6, ${STAT.map((k, i) => k + ' = $' + (i + 7)).join(', ')}, tax = $${STAT.length + 7} WHERE id = $1`,
+      [slipRow.id, JSON.stringify(lines), JSON.stringify(warnings), cids, JSON.stringify(snapshot), rebuild ? false : slipRow.edited, ...STAT.map((k) => v[k]), v.tax ? JSON.stringify(v.tax) : null]);
     await linkSlip(slipRow.id, emp.id, lines);
   }
   // The work and payslip loans a payslip pays: claimed by it, so no other run pays them.
@@ -788,6 +961,13 @@ function register(app, deps) {
       `SELECT r.number FROM payroll_slips s JOIN payroll_runs r ON r.id = s.run_id
         WHERE s.employee_id = $1 AND r.status <> 'void' AND r.id <> $2 AND r.period_start <= $4 AND r.period_end >= $3 LIMIT 1`, [empId, run.id || 0, run.period_start, run.period_end]);
     return rows.length ? rows[0].number : null;
+  }
+
+  // A closed payroll year takes no new, approved or voided pay runs.
+  async function yearOpen(date) {
+    const y = Number(String(date).slice(0, 4));
+    const { rows } = await query(`SELECT 1 FROM payroll_years WHERE year = $1 AND closed`, [y]);
+    if (rows.length) throw httpError(409, 'The payroll year ' + y + ' is closed. Someone who may approve pay runs can reopen it under Year end.');
   }
 
   // --------------------------------------------------------------- pay runs --
@@ -824,6 +1004,7 @@ function register(app, deps) {
       if (!isDate(b.pay_date)) throw httpError(400, 'Choose the pay date');
       const days = (new Date(b.period_end) - new Date(b.period_start)) / 86400000 + 1;
       if (days > 31) throw httpError(400, 'A pay period is at most a month');
+      await yearOpen(b.pay_date);
       const ids = Array.isArray(b.employee_ids) && b.employee_ids.length ? b.employee_ids.map((x) => parseInt(x, 10)).filter(Boolean) : null;
       const { rows: emps } = await query(
         `SELECT id FROM payroll_employees WHERE is_active AND frequency = $1 AND ($2::int[] IS NULL OR id = ANY($2))
@@ -898,6 +1079,7 @@ function register(app, deps) {
         if (l.item_id) out.item_id = parseInt(l.item_id, 10) || undefined;
         if (l.work_id) out.work_id = parseInt(l.work_id, 10) || undefined;
         if (l.loan_id) out.loan_id = parseInt(l.loan_id, 10) || undefined;
+        if (l.savings_id && it.code === 'savings_payout') out.savings_id = parseInt(l.savings_id, 10) || undefined;
         if (l.payee) out.payee = String(l.payee).slice(0, 80);
         if (l.reference) out.reference = String(l.reference).slice(0, 60);
         if (it.kind !== 'earning' && amount < 0) throw httpError(400, 'A deduction or contribution is a positive amount');
@@ -907,8 +1089,9 @@ function register(app, deps) {
       // them stays as worked out (scaled if the amount was changed).
       const prev = rows[0].lines || [];
       for (const l of lines) {
-        const was = prev.find((p) => (l.work_id && p.work_id === l.work_id) || (l.loan_id && p.loan_id === l.loan_id));
-        if ((l.work_id || l.loan_id) && !was) throw httpError(400, 'Work, invoices and loans are added from the employee\'s page, not typed on a payslip');
+        const was = prev.find((p) => (l.work_id && p.work_id === l.work_id) || (l.loan_id && p.loan_id === l.loan_id) || (l.savings_id && p.code === 'savings_payout' && p.savings_id === l.savings_id));
+        if ((l.work_id || l.loan_id || l.code === 'savings_payout') && !was) throw httpError(400, 'Work, invoices, loans and savings payouts are added from the employee\'s page, not typed on a payslip');
+        if (l.code === 'savings_payout' && r2(l.amount) !== r2(was.amount)) throw httpError(400, 'Change a savings payout on the employee\'s page, then recalculate the run');
         if (was && was.wht != null) { l.wht = n(was.amount) ? r2(n(was.wht) * n(l.amount) / n(was.amount)) : 0; if (was.wht_prior) l.wht_prior = was.wht_prior; }
         if (l.loan_id && was && r2(l.amount) !== r2(was.amount)) throw httpError(400, 'A loan paid out on the payslip cannot be changed here: cancel it and enter it again');
       }
@@ -933,6 +1116,7 @@ function register(app, deps) {
     try {
       const s = await settings();
       const run = await draft(req.params.id);
+      await yearOpen(run.pay_date);
       const uid = req.session.userId;
       const { rows: slips } = await query(`SELECT s.*, e.user_id FROM payroll_slips s JOIN payroll_employees e ON e.id = s.employee_id WHERE s.run_id = $1`, [run.id]);
       if (!slips.length) throw httpError(409, 'There is nobody on this run');
@@ -941,6 +1125,12 @@ function register(app, deps) {
       if (on(s, 'payroll_two_person')) {
         if (run.created_by === uid) throw httpError(403, 'Someone other than the person who prepared this run must approve it');
         if (slips.some((x) => x.user_id === uid)) throw httpError(403, 'Your own pay is on this run: someone else must approve it');
+      }
+      // Year-to-date income tax depends on the runs approved before this one: it must be current.
+      for (const sl of slips.filter((x) => x.tax && x.tax.method === 'cumulative')) {
+        const c = await cumFor(await loadEmp(sl.employee_id), run);
+        if (!c || Math.abs(c.paye - n(sl.tax.paid_before)) > 0.011 || Math.abs(r2(c.statutory + n(sl.statutory)) - n(sl.tax.statutory_to_date)) > 0.011)
+          throw httpError(409, sl.snapshot.name + '\'s year-to-date income tax has changed since this run was worked out (another run was approved or voided, or their earlier pay was changed): recalculate the run');
       }
       await tx(async (c) => {
         const { rows: lock } = await c.query(`SELECT status FROM payroll_runs WHERE id = $1 FOR UPDATE`, [run.id]);
@@ -956,8 +1146,14 @@ function register(app, deps) {
             if (l.work_id) await c.query(`UPDATE payroll_work SET wht = $2 WHERE id = $1`, [l.work_id, r2(l.wht || 0)]);
             // Earlier small invoices now taxed on this payslip: mark them so they are not taxed again.
             if (l.wht_prior && l.wht_prior.length) await c.query(`UPDATE payroll_work SET wht = ROUND(amount * $2, 2) WHERE id = ANY($1::int[]) AND wht = 0`, [l.wht_prior, n(run.rates && run.rates.wht_rate)]);
+            if (l.code === 'savings_payout' && l.savings_id) {
+              const { rowCount } = await c.query(`UPDATE payroll_employee_items SET saved = saved - $2, payout_pending = GREATEST(payout_pending - $2, 0) WHERE id = $1 AND saved >= $2 - 0.004`, [l.savings_id, n(l.amount)]);
+              if (!rowCount) throw httpError(409, 'A savings payout on ' + sl.snapshot.name + '\'s payslip is more than is saved: recalculate the run');
+              continue;
+            }
             if (l.kind !== 'deduction' || !l.item_id) continue;
             await c.query(`UPDATE payroll_employee_items SET balance = GREATEST(balance - $2, 0), is_active = (balance - $2) > 0.004 WHERE id = $1 AND balance IS NOT NULL`, [l.item_id, n(l.amount)]);
+            await c.query(`UPDATE payroll_employee_items x SET saved = x.saved + $2 FROM payroll_items i WHERE x.id = $1 AND i.code = x.code AND i.is_savings`, [l.item_id, n(l.amount)]);
           }
         }
         // Loans paid out on these payslips start being repaid from the next pay.
@@ -969,32 +1165,84 @@ function register(app, deps) {
     } catch (e) { fail(res, e); }
   });
   // Void an approved run (its payment must be voided first): commission and loans go back.
+  async function voidRun(run, reason, userId) {
+    if (run.status === 'paid') throw httpError(409, 'Void the payment first');
+    if (run.status !== 'approved') throw httpError(409, 'Only an approved run can be voided (a draft is just deleted)');
+    await yearOpen(run.pay_date);
+    const { rows: repaid } = await query(`SELECT 1 FROM payroll_loans l JOIN payroll_slips s ON s.id = l.slip_id JOIN payroll_employee_items i ON i.id = l.item_id
+                                           WHERE s.run_id = $1 AND l.voided_at IS NULL AND i.balance < l.amount - 0.004 LIMIT 1`, [run.id]);
+    if (repaid.length) throw httpError(409, 'A loan paid out on this run has already had repayments taken on a later run: void that run first');
+    await tx(async (c) => {
+      const { rows: slips } = await c.query(`SELECT * FROM payroll_slips WHERE run_id = $1`, [run.id]);
+      await c.query(`UPDATE commission_statements SET status = 'approved', paid_at = NULL, paid_by = NULL, payroll_run_id = NULL WHERE payroll_run_id = $1`, [run.id]);
+      // Work and payslip loans on this run are free to be paid again.
+      await c.query(`UPDATE payroll_employee_items SET is_active = false WHERE id IN (SELECT l.item_id FROM payroll_loans l JOIN payroll_slips s ON s.id = l.slip_id WHERE s.run_id = $1)`, [run.id]);
+      await c.query(`UPDATE payroll_loans SET slip_id = NULL WHERE slip_id IN (SELECT id FROM payroll_slips WHERE run_id = $1)`, [run.id]);
+      await c.query(`UPDATE payroll_work SET slip_id = NULL, wht = 0 WHERE slip_id IN (SELECT id FROM payroll_slips WHERE run_id = $1)`, [run.id]);
+      for (const sl of slips) for (const l of sl.lines || []) {
+        if (l.wht_prior && l.wht_prior.length) await c.query(`UPDATE payroll_work SET wht = 0 WHERE id = ANY($1::int[])`, [l.wht_prior]);
+        // A savings payout goes back to being saved, and waits for the next payslip again.
+        if (l.code === 'savings_payout' && l.savings_id) { await c.query(`UPDATE payroll_employee_items SET saved = saved + $2, payout_pending = $2 WHERE id = $1`, [l.savings_id, n(l.amount)]); continue; }
+        if (l.kind !== 'deduction' || !l.item_id) continue;
+        await c.query(`UPDATE payroll_employee_items SET balance = balance + $2, is_active = true WHERE id = $1 AND balance IS NOT NULL`, [l.item_id, n(l.amount)]);
+        await c.query(`UPDATE payroll_employee_items x SET saved = GREATEST(x.saved - $2, 0) FROM payroll_items i WHERE x.id = $1 AND i.code = x.code AND i.is_savings`, [l.item_id, n(l.amount)]);
+      }
+      await c.query(`UPDATE payroll_runs SET status = 'void', voided_at = NOW(), voided_by = $2, void_reason = $3 WHERE id = $1`, [run.id, userId, reason]);
+    });
+  }
+  async function voidPayment(paymentId, reason, userId) {
+    const { rows } = await query(`SELECT * FROM payroll_payments WHERE id = $1 AND voided_at IS NULL`, [parseInt(paymentId, 10) || 0]);
+    if (!rows.length) throw httpError(404, 'Payment not found or already voided');
+    const { rows: rec } = await query(`SELECT 1 FROM bank_cleared bc JOIN gl_lines l ON l.id = bc.gl_line_id JOIN gl_entries e ON e.id = l.entry_id
+                                        WHERE e.source_kind = 'payroll_payment' AND e.source_id = $1 LIMIT 1`, [rows[0].id]);
+    if (rec.length) throw httpError(409, 'This payment is ticked on a bank reconciliation: undo that first');
+    await tx(async (c) => {
+      await c.query(`UPDATE payroll_payments SET voided_at = NOW(), voided_by = $2, void_reason = $3 WHERE id = $1`, [rows[0].id, userId, reason]);
+      await c.query(`UPDATE payroll_runs SET status = 'approved' WHERE id = $1 AND status = 'paid'`, [rows[0].run_id]);
+    });
+  }
   app.post('/api/payroll/runs/:id/void', ...PA, async (req, res) => {
     try {
       const reason = String((req.body && req.body.reason) || '').trim().slice(0, 200);
       if (!reason) throw httpError(400, 'Say why the run is voided');
-      const run = await loadRun(req.params.id);
-      if (run.status === 'paid') throw httpError(409, 'Void the payment first');
-      if (run.status !== 'approved') throw httpError(409, 'Only an approved run can be voided (a draft is just deleted)');
-      const { rows: repaid } = await query(`SELECT 1 FROM payroll_loans l JOIN payroll_slips s ON s.id = l.slip_id JOIN payroll_employee_items i ON i.id = l.item_id
-                                             WHERE s.run_id = $1 AND l.voided_at IS NULL AND i.balance < l.amount - 0.004 LIMIT 1`, [run.id]);
-      if (repaid.length) throw httpError(409, 'A loan paid out on this run has already had repayments taken on a later run: void that run first');
-      await tx(async (c) => {
-        const { rows: slips } = await c.query(`SELECT * FROM payroll_slips WHERE run_id = $1`, [run.id]);
-        await c.query(`UPDATE commission_statements SET status = 'approved', paid_at = NULL, paid_by = NULL, payroll_run_id = NULL WHERE payroll_run_id = $1`, [run.id]);
-        // Work and payslip loans on this run are free to be paid again.
-        await c.query(`UPDATE payroll_employee_items SET is_active = false WHERE id IN (SELECT l.item_id FROM payroll_loans l JOIN payroll_slips s ON s.id = l.slip_id WHERE s.run_id = $1)`, [run.id]);
-        await c.query(`UPDATE payroll_loans SET slip_id = NULL WHERE slip_id IN (SELECT id FROM payroll_slips WHERE run_id = $1)`, [run.id]);
-        await c.query(`UPDATE payroll_work SET slip_id = NULL, wht = 0 WHERE slip_id IN (SELECT id FROM payroll_slips WHERE run_id = $1)`, [run.id]);
-        for (const sl of slips) for (const l of sl.lines || []) {
-          if (l.wht_prior && l.wht_prior.length) await c.query(`UPDATE payroll_work SET wht = 0 WHERE id = ANY($1::int[])`, [l.wht_prior]);
-          if (l.kind !== 'deduction' || !l.item_id) continue;
-          await c.query(`UPDATE payroll_employee_items SET balance = balance + $2, is_active = true WHERE id = $1 AND balance IS NOT NULL`, [l.item_id, n(l.amount)]);
-        }
-        await c.query(`UPDATE payroll_runs SET status = 'void', voided_at = NOW(), voided_by = $2, void_reason = $3 WHERE id = $1`, [run.id, req.session.userId, reason]);
-      });
+      await voidRun(await loadRun(req.params.id), reason, req.session.userId);
       await post();
       res.json({ ok: true });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Reverse and rerun: a run that was approved (or already paid) and turns out
+  // wrong is reversed in full -- the wages payment, then the run, each with
+  // its own reversing ledger entry -- and a new draft is opened for the same
+  // people, period and pay date, worked out again from the records as they
+  // are now. Nothing is lost: the reversed run stays on file, marked void.
+  app.post('/api/payroll/runs/:id/rerun', ...PA, async (req, res) => {
+    try {
+      const reason = String((req.body && req.body.reason) || '').trim().slice(0, 180);
+      if (!reason) throw httpError(400, 'Say why the run is reversed');
+      let run = await loadRun(req.params.id);
+      if (!['approved', 'paid'].includes(run.status)) throw httpError(409, run.status === 'draft' ? 'A draft has posted nothing: change it, or use Recalculate' : 'This run is already void');
+      await yearOpen(run.pay_date);
+      const uid = req.session.userId, why = 'Reversed to rerun: ' + reason;
+      if (run.status === 'paid') {
+        const { rows: p } = await query(`SELECT id FROM payroll_payments WHERE run_id = $1 AND voided_at IS NULL`, [run.id]);
+        for (const x of p) await voidPayment(x.id, why, uid);
+        run = await loadRun(run.id);
+      }
+      const { rows: old } = await query(`SELECT s.employee_id, e.name, e.is_active FROM payroll_slips s JOIN payroll_employees e ON e.id = s.employee_id WHERE s.run_id = $1 ORDER BY e.name`, [run.id]);
+      await voidRun(run, why, uid);
+      const { rows: r } = await query(`INSERT INTO payroll_runs (frequency, period_start, period_end, pay_date, note, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+        [run.frequency, run.period_start, run.period_end, run.pay_date, ('Rerun of ' + run.number + ': ' + reason).slice(0, 200), uid]);
+      const id = r[0].id;
+      await query(`UPDATE payroll_runs SET number = 'PR-' || lpad(id::text, 6, '0') WHERE id = $1`, [id]);
+      const fresh = await loadRun(id), left = [];
+      for (const e of old) {
+        if (!e.is_active || (await overlapping(e.employee_id, fresh))) { left.push(e.name); continue; }
+        await query(`INSERT INTO payroll_slips (run_id, employee_id, snapshot) VALUES ($1, $2, '{}')`, [id, e.employee_id]);
+      }
+      const totals = await recalcRun(fresh, true);
+      await post();
+      res.json({ ok: true, id, number: fresh.number, reversed: run.number, totals, left_out: left });
     } catch (e) { fail(res, e); }
   });
 
@@ -1027,15 +1275,7 @@ function register(app, deps) {
     try {
       const reason = String((req.body && req.body.reason) || '').trim().slice(0, 200);
       if (!reason) throw httpError(400, 'Say why the payment is voided');
-      const { rows } = await query(`SELECT * FROM payroll_payments WHERE id = $1 AND voided_at IS NULL`, [parseInt(req.params.id, 10) || 0]);
-      if (!rows.length) throw httpError(404, 'Payment not found or already voided');
-      const { rows: rec } = await query(`SELECT 1 FROM bank_cleared bc JOIN gl_lines l ON l.id = bc.gl_line_id JOIN gl_entries e ON e.id = l.entry_id
-                                          WHERE e.source_kind = 'payroll_payment' AND e.source_id = $1 LIMIT 1`, [rows[0].id]);
-      if (rec.length) throw httpError(409, 'This payment is ticked on a bank reconciliation: undo that first');
-      await tx(async (c) => {
-        await c.query(`UPDATE payroll_payments SET voided_at = NOW(), voided_by = $2, void_reason = $3 WHERE id = $1`, [rows[0].id, req.session.userId, reason]);
-        await c.query(`UPDATE payroll_runs SET status = 'approved' WHERE id = $1 AND status = 'paid'`, [rows[0].run_id]);
-      });
+      await voidPayment(req.params.id, reason, req.session.userId);
       await post();
       res.json({ ok: true });
     } catch (e) { fail(res, e); }
@@ -1069,7 +1309,12 @@ function register(app, deps) {
     const sl = rows[0];
     const y = await ytd(sl.employee_id, sl.pay_date.slice(0, 4) + '-01-01', sl.pay_date);
     if (sl.status === 'draft') for (const k of STAT) y[k] = r2(n(y[k]) + n(sl[k]));
-    return { slip: sl, ytd: y, employer: await employer() };
+    const emp = await loadEmp(sl.employee_id), year = sl.pay_date.slice(0, 4), ctr = emp.worker_type === 'contractor';
+    return { slip: sl, ytd: y, employer: await employer(), prior: ctr ? null : priorFor(emp, year),
+      // As they stand today (not as at the pay date).
+      loans: (await loanList(emp.id)).filter((l) => !l.voided_at && n(l.balance) > 0.004).map((l) => ({ kind: l.kind, issue_date: l.issue_date, amount: n(l.amount), per_pay: n(l.per_pay), balance: n(l.balance), repaid: l.repaid })),
+      savings: (await savingsList(emp.id)).filter((x) => x.saved > 0.004 || x.is_active),
+      leave: !ctr && emp.user_id ? await leaveBalance(emp, year) : null };
   }
   app.get('/api/payroll/slips/:id', requireAdmin, async (req, res) => {
     try {
@@ -1090,7 +1335,12 @@ function register(app, deps) {
       const { rows } = await query(`SELECT s.id, s.gross, s.net, r.number, to_char(r.pay_date, 'YYYY-MM-DD') AS pay_date, to_char(r.period_start, 'YYYY-MM-DD') AS period_start, to_char(r.period_end, 'YYYY-MM-DD') AS period_end
                                       FROM payroll_slips s JOIN payroll_runs r ON r.id = s.run_id WHERE s.employee_id = $1 AND r.status IN ('approved', 'paid') ORDER BY r.pay_date DESC LIMIT 60`, [e[0].id]);
       const year = today().slice(0, 4);
-      res.json({ employee: { id: e[0].id, name: e[0].name }, slips: rows, ytd: await ytd(e[0].id, year + '-01-01', year + '-12-31'), leave: await leaveBalance(e[0], year) });
+      const { rows: items } = await query(`SELECT i.label, i.kind, x.amount::float AS amount, x.pct::float AS pct, x.balance::float AS balance, x.payee FROM payroll_employee_items x JOIN payroll_items i ON i.code = x.code
+                                             WHERE x.employee_id = $1 AND x.is_active AND x.code NOT IN ('loan', 'advance') ORDER BY i.kind DESC, i.sort`, [e[0].id]);
+      res.json({ employee: { id: e[0].id, name: e[0].name, job_title: e[0].job_title, frequency: e[0].frequency, pay_method: e[0].pay_method, bank_masked: mask(e[0].bank_account), paye_method: e[0].paye_method },
+        slips: rows, ytd: await ytd(e[0].id, year + '-01-01', year + '-12-31'), leave: await leaveBalance(e[0], year), year, prior: priorFor(e[0], year), items,
+        loans: (await loanList(e[0].id)).filter((l) => !l.voided_at).map((l) => ({ kind: l.kind, issue_date: l.issue_date, amount: n(l.amount), per_pay: n(l.per_pay), balance: n(l.balance), repaid: l.repaid, status: l.status })),
+        savings: await savingsList(e[0].id) });
     } catch (e) { fail(res, e); }
   });
   // Email payslips (text) to everyone on the run with a real address.
@@ -1108,7 +1358,7 @@ function register(app, deps) {
         if (!to || /\.local$/i.test(to)) { skipped++; continue; }
         const v = await slipView(r.id), sl = v.slip;
         const text = [emp.name + ' - payslip ' + run.number, 'Period ' + sl.period_start + ' to ' + sl.period_end + ', paid ' + sl.pay_date, '',
-          ...sl.lines.map((l) => (l.kind === 'deduction' ? '  less ' : '  ') + l.label + ': ' + J(l.amount)),
+          ...sl.lines.filter((l) => l.kind !== 'employer').map((l) => (l.kind === 'deduction' ? '  less ' : '  ') + l.label + (NOT_PAY.includes(l.code) ? ' (not pay)' : '') + ': ' + J(l.amount)),
           '', 'Gross pay: ' + J(sl.gross), 'NIS: ' + J(sl.nis_ee), 'NHT: ' + J(sl.nht_ee), 'Education Tax: ' + J(sl.ed_ee), 'Income tax (PAYE): ' + J(sl.paye),
           ...(n(sl.pension_ee) ? ['Pension: ' + J(sl.pension_ee)] : []), ...(n(sl.levy) ? ['Contractor levy: ' + J(sl.levy)] : []), ...(n(sl.wht) ? ['Withholding tax: ' + J(sl.wht)] : []),
           ...((sl.lines || []).some((l) => l.received) ? ['Already received, not paid again (e.g. cash tips): ' + J((sl.lines || []).filter((l) => l.received).reduce((t, l) => t + n(l.amount), 0))] : []), 'NET PAY: ' + J(sl.net), '', 'Year to date: gross ' + J(v.ytd.gross) + ', PAYE ' + J(v.ytd.paye) + ', net ' + J(v.ytd.net)].join('\n');
@@ -1180,7 +1430,7 @@ function register(app, deps) {
     const { rows: ded } = await query(
       `SELECT l->>'code' AS code, COALESCE(NULLIF(l->>'payee', ''), i.label) AS payee, i.label, i.kind, COUNT(DISTINCT s.employee_id)::int AS people, SUM((l->>'amount')::numeric)::float AS deducted
          FROM payroll_slips s JOIN payroll_runs r ON r.id = s.run_id CROSS JOIN LATERAL jsonb_array_elements(s.lines) l JOIN payroll_items i ON i.code = l->>'code'
-        WHERE r.status IN ('approved', 'paid') AND r.pay_date BETWEEN $1 AND $2 AND l->>'kind' IN ('deduction', 'employer') AND NOT (l->>'code' = ANY($3::text[]))
+        WHERE r.status IN ('approved', 'paid') AND r.pay_date BETWEEN $1 AND $2 AND l->>'kind' IN ('deduction', 'employer') AND NOT (l->>'code' = ANY($3::text[])) AND COALESCE(l->>'notional', '') <> 'true'
         GROUP BY 1, 2, 3, 4 ORDER BY 3, 2`, [from, to, OWN_DEDUCTIONS]);
     const { rows: pays } = await query(`SELECT p.*, to_char(p.pay_date, 'YYYY-MM-DD') AS pay_date, a.code || ' ' || a.name AS account FROM payroll_ded_payments p JOIN gl_accounts a ON a.id = p.account_id WHERE p.month = $1 ORDER BY p.id`, [from]);
     for (const d of ded) {
@@ -1251,6 +1501,103 @@ function register(app, deps) {
     } catch (e) { fail(res, e); }
   });
 
+  // ------------------------------------------------- company vehicle schedule --
+  async function mvSchedule() {
+    const { rows } = await query(`SELECT value FROM warehouse_settings WHERE key = 'payroll_mv_schedule'`);
+    try {
+      const j = JSON.parse((rows[0] && rows[0].value) || '');
+      if (Array.isArray(j) && j.length && j.every((r) => Array.isArray(r) && r.length === 5)) return { rows: j, custom: true };
+    } catch (_) {}
+    return { rows: MV_SCHEDULE, custom: false };
+  }
+  app.get('/api/payroll/mv-schedule', ...PV, async (req, res) => { try { res.json(await mvSchedule()); } catch (e) { fail(res, e); } });
+  app.put('/api/payroll/mv-schedule', ...PR, async (req, res) => {
+    try {
+      const b = req.body || {};
+      let v = '';
+      if (!b.reset) {
+        const rows = (Array.isArray(b.rows) ? b.rows : []).slice(0, 12).map((r) => [r[0] === '' || r[0] == null ? null : n(r[0]), r2(r[1]), r2(r[2]), r2(r[3]), r2(r[4])]);
+        if (!rows.length) throw httpError(400, 'Enter at least one row');
+        rows.sort((a, c) => (a[0] == null ? Infinity : a[0]) - (c[0] == null ? Infinity : c[0]));
+        if (rows.some((r) => r.slice(1).some((x) => x < 0)) || rows.slice(0, -1).some((r) => !(r[0] > 0))) throw httpError(400, 'Each row needs a cost limit (the last row can be blank: any cost above) and four yearly values');
+        rows[rows.length - 1][0] = null;
+        v = JSON.stringify(rows);
+      }
+      await query(`INSERT INTO warehouse_settings (key, value) VALUES ('payroll_mv_schedule', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [v]);
+      res.json(Object.assign({ ok: true }, await mvSchedule()));
+    } catch (e) { fail(res, e); }
+  });
+
+  // -------------------------------------------------------------- year end --
+  // The year's figures start again by themselves on 1 January (they are worked
+  // from pay dates). Closing a year checks it is complete, locks it, and
+  // carries vacation days not taken into the next year.
+  const CARRY_REASON = (y) => 'Carried forward from ' + y + ' (payroll year end)';
+  async function yearEnd(year) {
+    const from = year + '-01-01', to = year + '-12-31', next = String(Number(year) + 1), s = await settings();
+    const { rows: yr } = await query(`SELECT y.*, u.name AS closed_by_name, ru.name AS reopened_by_name FROM payroll_years y LEFT JOIN users u ON u.id = y.closed_by LEFT JOIN users ru ON ru.id = y.reopened_by WHERE y.year = $1`, [Number(year)]);
+    const { rows: open } = await query(`SELECT id, number, status, to_char(pay_date, 'YYYY-MM-DD') AS pay_date, totals FROM payroll_runs WHERE pay_date BETWEEN $1 AND $2 AND status IN ('draft', 'approved') ORDER BY pay_date, id`, [from, to]);
+    const { rows: tot } = await query(
+      `SELECT ${STAT.map((k) => `COALESCE(SUM(s.${k}), 0)::float AS ${k}`).join(', ')}, COUNT(DISTINCT s.employee_id)::int AS people, COUNT(DISTINCT r.id)::int AS runs
+         FROM payroll_slips s JOIN payroll_runs r ON r.id = s.run_id WHERE r.status IN ('approved', 'paid') AND r.pay_date BETWEEN $1 AND $2`, [from, to]);
+    const { rows: months } = await query(`SELECT DISTINCT to_char(pay_date, 'YYYY-MM') AS m FROM payroll_runs WHERE status IN ('approved', 'paid') AND pay_date BETWEEN $1 AND $2 ORDER BY 1`, [from, to]);
+    const owing = [];
+    for (const m of months) { const r = await s01(m.m); const o = r2(r.owing.paye + r.owing.nis + r.owing.nht + r.owing.ed + r.owing.heart + r.owing.levy + r.owing.wht); if (o > 0.004) owing.push({ month: m.m, owing: o, due_date: r.due_date }); }
+    const { rows: noIds } = await query(
+      `SELECT DISTINCT e.id, e.name FROM payroll_slips s JOIN payroll_runs r ON r.id = s.run_id JOIN payroll_employees e ON e.id = s.employee_id
+        WHERE r.status IN ('approved', 'paid') AND r.pay_date BETWEEN $1 AND $2 AND e.worker_type <> 'contractor' AND (e.trn IS NULL OR e.nis_no IS NULL) ORDER BY e.name`, [from, to]);
+    const { rows: loans } = await query(`SELECT COUNT(*)::int AS n, COALESCE(SUM(balance), 0)::float AS v FROM payroll_employee_items WHERE code IN ('loan', 'advance') AND balance > 0.004`);
+    const { rows: sav } = await query(`SELECT COUNT(*) FILTER (WHERE x.saved > 0.004)::int AS n, COALESCE(SUM(x.saved), 0)::float AS v, COALESCE(SUM(x.saved) FILTER (WHERE x.code = 'staff_savings'), 0)::float AS held
+                                         FROM payroll_employee_items x JOIN payroll_items i ON i.code = x.code WHERE i.is_savings`);
+    const { rows: emps } = await query(`SELECT ${EMP_SELECT} FROM payroll_employees e LEFT JOIN users u ON u.id = e.user_id WHERE e.is_active AND e.worker_type <> 'contractor' AND e.user_id IS NOT NULL AND e.termination_date IS NULL ORDER BY e.name`);
+    const max = n(s.payroll_carry_vacation_max), leave = [];
+    for (const e of emps) { const lb = await leaveBalance(e, year); leave.push({ id: e.id, user_id: e.user_id, name: e.name, entitled: lb.vacation_entitled, taken: lb.vacation_taken, left: lb.vacation_left, carry: Math.max(0, Math.min(lb.vacation_left, max)) }); }
+    const { rows: nextRates } = await query(`SELECT to_char(effective_from, 'YYYY-MM-DD') AS effective_from, paye_threshold::float AS paye_threshold FROM payroll_rates WHERE effective_from BETWEEN $1 AND $2 ORDER BY 1`, [next + '-01-01', next + '-12-31']);
+    const { rows: prior } = await query(`SELECT COUNT(*)::int AS n FROM payroll_employees WHERE prior_year = $1`, [Number(year)]);
+    const { rows: cumul } = await query(`SELECT COUNT(*)::int AS n FROM payroll_employees WHERE is_active AND paye_method = 'cumulative'`);
+    const drafts = open.filter((r) => r.status === 'draft'), unpaid = open.filter((r) => r.status === 'approved');
+    const blockers = [];
+    if (drafts.length) blockers.push(drafts.length + ' draft pay run(s) dated in ' + year + ': approve or delete them');
+    if (today() < year + '-12-01') blockers.push('The year can be closed from 1 December, once its last pay run is approved');
+    return { year, next, closed: !!(yr[0] && yr[0].closed), record: yr[0] || null, totals: tot[0], drafts, unpaid, s01_owing: owing, missing_ids: noIds, loans: loans[0], savings: sav[0], leave, carry_max: max,
+      next_rates: nextRates, prior_employment: prior[0].n, cumulative: cumul[0].n, blockers, can_close: !blockers.length, s02_due: next + '-03-31' };
+  }
+  const yearOf = (v) => (/^\d{4}$/.test(String(v || '')) ? String(v) : (today().slice(5, 7) <= '03' ? String(Number(today().slice(0, 4)) - 1) : today().slice(0, 4)));
+  app.get('/api/payroll/year-end', ...PV, async (req, res) => {
+    try { res.json(await yearEnd(yearOf(req.query.year))); } catch (e) { fail(res, e); }
+  });
+  app.post('/api/payroll/year-end/close', ...PA, async (req, res) => {
+    try {
+      const b = req.body || {};
+      if (!/^\d{4}$/.test(String(b.year || ''))) throw httpError(400, 'Choose the year');
+      if ('carry_max' in b && b.carry_max !== '' && b.carry_max != null)
+        await query(`INSERT INTO warehouse_settings (key, value) VALUES ('payroll_carry_vacation_max', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [String(Math.max(0, Math.min(60, n(b.carry_max))))]);
+      const ye = await yearEnd(String(b.year));
+      if (ye.closed) throw httpError(409, ye.year + ' is already closed');
+      if (ye.blockers.length) throw httpError(409, ye.blockers.join('. '));
+      const carried = ye.leave.filter((l) => l.carry > 0).map((l) => ({ employee_id: l.id, user_id: l.user_id, name: l.name, days: l.carry }));
+      await tx(async (c) => {
+        // Closing again after a reopen writes the carried days afresh.
+        await c.query(`DELETE FROM hr_leave_adjustments WHERE year = $1 AND kind = 'vacation' AND reason = $2`, [Number(ye.next), CARRY_REASON(ye.year)]);
+        for (const l of carried) await c.query(`INSERT INTO hr_leave_adjustments (user_id, year, kind, days, reason, by_user) VALUES ($1, $2, 'vacation', $3, $4, $5)`, [l.user_id, Number(ye.next), l.days, CARRY_REASON(ye.year), req.session.userId]);
+        await c.query(
+          `INSERT INTO payroll_years (year, closed, closed_at, closed_by, summary, carried) VALUES ($1, true, NOW(), $2, $3, $4)
+           ON CONFLICT (year) DO UPDATE SET closed = true, closed_at = NOW(), closed_by = EXCLUDED.closed_by, summary = EXCLUDED.summary, carried = EXCLUDED.carried`,
+          [Number(ye.year), req.session.userId, JSON.stringify(Object.assign({}, ye.totals, { s01_owing: ye.s01_owing, loans: ye.loans, savings: ye.savings })), JSON.stringify(carried)]);
+      });
+      res.json({ ok: true, year: ye.year, carried: carried.length, note: 'Pay dated in ' + ye.next + ' starts its year-to-date figures from zero. Loans and savings carry on as they are.' });
+    } catch (e) { fail(res, e); }
+  });
+  app.post('/api/payroll/year-end/reopen', ...PA, async (req, res) => {
+    try {
+      const b = req.body || {}, reason = String(b.reason || '').trim().slice(0, 200);
+      if (!reason) throw httpError(400, 'Say why the year is reopened');
+      const { rowCount } = await query(`UPDATE payroll_years SET closed = false, reopened_at = NOW(), reopened_by = $2, reopen_reason = $3 WHERE year = $1 AND closed`, [parseInt(b.year, 10) || 0, req.session.userId, reason]);
+      if (!rowCount) throw httpError(404, 'That year is not closed');
+      res.json({ ok: true });
+    } catch (e) { fail(res, e); }
+  });
+
   // --------------------------------------------------------------- summary --
   app.get('/api/payroll/summary', ...PV, async (req, res) => {
     try {
@@ -1263,11 +1610,19 @@ function register(app, deps) {
       for (const m of months) { const r = await s01(m.m); const o = r2(r.owing.paye + r.owing.nis + r.owing.nht + r.owing.ed + r.owing.heart + r.owing.levy + r.owing.wht); if (o > 0.004) owing.push({ month: m.m, owing: o, due_date: r.due_date, late: r.due_date < today() }); }
       const st = {}; for (const r of runs) st[r.status] = r.n;
       const { rows: unpaid } = await query(`SELECT COUNT(*)::int AS n, COALESCE(SUM((totals->>'net')::numeric), 0)::float AS v FROM payroll_runs WHERE status = 'approved'`);
-      res.json({ employees: emp[0], runs: st, last, s01_owing: owing, net_unpaid: unpaid[0], settings: await settings() });
+      // From December to March: is the year just gone (or ending) closed?
+      const mm = today().slice(5, 7), yy = Number(today().slice(0, 4));
+      let year_end = null;
+      if (mm === '12' || mm <= '03') {
+        const y = mm === '12' ? yy : yy - 1;
+        const { rows: ye } = await query(`SELECT (SELECT COUNT(*)::int FROM payroll_runs WHERE status <> 'void' AND EXTRACT(YEAR FROM pay_date) = $1) AS runs, EXISTS (SELECT 1 FROM payroll_years WHERE year = $1 AND closed) AS closed`, [y]);
+        if (ye[0].runs && !ye[0].closed) year_end = { year: y };
+      }
+      res.json({ employees: emp[0], runs: st, last, s01_owing: owing, net_unpaid: unpaid[0], settings: await settings(), year_end });
     } catch (e) { fail(res, e); }
   });
 
-  return { settings, compute };
+  return { settings, compute, cumFor, yearEnd };
 }
 
-module.exports = { register, PERIODS };
+module.exports = { register, PERIODS, NOT_PAY };

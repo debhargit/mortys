@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Owner controls · Vision Auto Solutions</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --bad:#b91c1c; --chip:#eef2f7; --warn:#b45309; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --ok:#22c55e; --bad:#f87171; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0}
+  header nav{margin-left:auto;display:flex;gap:14px;font-size:13px}
+  header a{color:#fff;opacity:.85}
+  main{max-width:1100px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;overflow-x:auto}
+  .card h2{font-size:15px;margin:0 0 8px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  input,select,button{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);max-width:100%}
+  .grid input,.grid select{width:100%}
+  button{cursor:pointer;background:var(--card)}
+  button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600}
+  button.sm{padding:3px 9px;font-size:12.5px}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 12px}
+  .tabs button{border-radius:999px;padding:6px 13px;font-size:13px}
+  .tabs button.on{background:var(--navy);border-color:var(--navy);color:#fff}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  td.n,th.n{text-align:right;white-space:nowrap}
+  .chip{display:inline-block;padding:1px 8px;border-radius:999px;background:var(--chip);font-size:12px;white-space:nowrap}
+  .chip.requested{background:#fef3c7;color:#92400e} .chip.approved{background:#dcfce7;color:#166534} .chip.rejected{background:#fee2e2;color:#991b1b}
+  .muted{color:var(--muted)} .err{color:var(--bad)} .ok{color:var(--ok)}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}
+</style>
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
+</head>
+<body>
+<header>
+  <h1>Owner controls</h1>
+  <nav><a href="/scorecard.html">Scorecard</a><a href="/supplier-scorecard.html">Suppliers</a><a href="/admin.html">Admin</a></nav>
+</header>
+<main>
+  <div class="tabs"><button data-tab="po" class="on">PO approvals <span id="poCount"></span></button><button data-tab="alerts">Alerts</button><button data-tab="settings">Settings</button></div>
+
+  <section id="po">
+    <div class="card">
+      <h2>Purchase orders</h2>
+      <p class="muted" id="poNote" style="margin:0 0 8px"></p>
+      <table><thead><tr><th>PO</th><th>Supplier</th><th class="n">Total</th><th>Asked by</th><th>When</th><th>Status</th><th></th></tr></thead><tbody id="poRows"></tbody></table>
+    </div>
+  </section>
+
+  <section id="alerts" style="display:none">
+    <div class="card">
+      <div class="row" style="margin:0 0 8px"><h2 style="margin:0">Things that happened</h2><button class="sm" id="checkNow">Check now</button><span id="aMsg" class="muted"></span></div>
+      <table><thead><tr><th>When</th><th>What</th><th>Detail</th><th class="n">Amount</th><th>Sent</th></tr></thead><tbody id="aRows"></tbody></table>
+    </div>
+  </section>
+
+  <section id="settings" style="display:none">
+    <div class="card">
+      <h2>Alerts to your phone</h2>
+      <p class="muted" style="margin:0 0 10px">Every two minutes the app looks for anything below and sends one message with all of it. Leave the phone and email boxes blank to use the daily scorecard's.</p>
+      <div class="grid">
+        <div><label for="alerts_enabled">Send alerts</label><select id="alerts_enabled"><option value="off">Off (keep a list here only)</option><option value="on">On</option></select></div>
+        <div><label for="alerts_phones">Phones for SMS (commas between)</label><input id="alerts_phones" placeholder="876-555-1234"></div>
+        <div><label for="alerts_emails">Emails (commas between)</label><input id="alerts_emails" type="email" multiple></div>
+      </div>
+      <h2 style="margin-top:16px">Tell me when</h2>
+      <div class="grid">
+        <div><label for="alert_void_jmd">A sale is voided, J$ or more</label><input id="alert_void_jmd" type="number" min="0" step="500"></div>
+        <div><label for="alert_refund_jmd">A refund is given, J$ or more</label><input id="alert_refund_jmd" type="number" min="0" step="500"></div>
+        <div><label for="alert_discount_pct">A sale is discounted, % or more</label><input id="alert_discount_pct" type="number" min="0" max="100"></div>
+        <div><label for="alert_price_cut_pct">A price is cut at the till, % or more</label><input id="alert_price_cut_pct" type="number" min="0" max="100"></div>
+        <div><label for="alert_drawer_jmd">The drawer is over or short, J$ or more</label><input id="alert_drawer_jmd" type="number" min="0" step="100"></div>
+        <div><label for="alert_adjust_jmd">Stock is changed by hand, J$ at cost or more</label><input id="alert_adjust_jmd" type="number" min="0" step="1000"></div>
+        <div><label for="alert_payout_jmd">Cash is paid out, J$ or more</label><input id="alert_payout_jmd" type="number" min="0" step="1000"></div>
+      </div>
+      <h2 style="margin-top:16px">Purchase order approval</h2>
+      <div class="grid">
+        <div><label for="po_approval_over">POs of J$ this much or more need approval (0 = off)</label><input id="po_approval_over" type="number" min="0" step="10000"></div>
+      </div>
+      <p class="muted" style="margin:6px 0 0">A PO at or over this cannot be sent to the supplier until someone allowed to approve POs approves it. Their own POs go straight through.</p>
+      <div class="row"><button class="primary" id="save">Save</button><span id="sMsg"></span></div>
+    </div>
+  </section>
+</main>
+<script>
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const jm = (v) => (Number(v) < 0 ? '-' : '') + 'J$' + Math.round(Math.abs(Number(v) || 0)).toLocaleString('en-US');
+  const when = (d) => (d ? new Date(d).toLocaleString('en-JM', { timeZone: 'America/Jamaica', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '');
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.statusText); return j; }));
+  }
+  const tabs = ['po', 'alerts', 'settings'];
+  document.querySelector('.tabs').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-tab]'); if (!b) return;
+    document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('on', x === b));
+    tabs.forEach((t) => { $(t).style.display = b.dataset.tab === t ? '' : 'none'; });
+    if (b.dataset.tab === 'alerts') loadAlerts();
+  });
+
+  const FIELDS = ['alerts_enabled', 'alerts_phones', 'alerts_emails', 'alert_void_jmd', 'alert_refund_jmd', 'alert_discount_pct', 'alert_price_cut_pct', 'alert_drawer_jmd', 'alert_adjust_jmd', 'alert_payout_jmd', 'po_approval_over'];
+  let SET = {};
+  function loadSettings() {
+    return api('/api/owner/settings').then((s) => {
+      SET = s;
+      FIELDS.forEach((k) => { $(k).value = s[k] == null ? '' : s[k]; });
+      $('alerts_phones').placeholder = s.scorecard_phones || '876-555-1234';
+      $('alerts_emails').placeholder = s.scorecard_emails || '';
+      const lim = Number(s.po_approval_over) || 0;
+      $('poNote').textContent = lim > 0 ? 'POs of ' + jm(lim) + ' or more need approval before they go to the supplier.' : 'PO approval is off. Set a limit under Settings to switch it on.';
+    }).catch((e) => { $('sMsg').className = 'err'; $('sMsg').textContent = e.message; });
+  }
+  $('save').onclick = () => {
+    const body = {}; FIELDS.forEach((k) => { body[k] = $(k).value.trim(); });
+    if (String(Number(body.po_approval_over) || 0) === String(Number(SET.po_approval_over) || 0)) delete body.po_approval_over;
+    $('sMsg').className = 'muted'; $('sMsg').textContent = 'Saving…';
+    api('/api/owner/settings', 'PUT', body).then(() => loadSettings()).then(() => { $('sMsg').className = 'ok'; $('sMsg').textContent = 'Saved'; })
+      .catch((e) => { $('sMsg').className = 'err'; $('sMsg').textContent = e.message; });
+  };
+
+  function loadPos() {
+    api('/api/owner/po-approvals').then((r) => {
+      const waiting = r.approvals.filter((a) => a.status === 'requested').length;
+      $('poCount').textContent = waiting ? '(' + waiting + ')' : '';
+      $('poRows').innerHTML = r.approvals.length ? r.approvals.map((a) =>
+        '<tr><td>' + esc(a.po_number) + '</td><td>' + esc(a.supplier || '') + '</td><td class="n">' + jm(a.total) + '</td><td>' + esc(a.requested_by_name || '') + '</td><td>' + when(a.created_at) + '</td>' +
+        '<td><span class="chip ' + esc(a.status) + '">' + (a.status === 'requested' ? 'Waiting' : a.status === 'approved' ? 'Approved' : 'Rejected') + '</span>' +
+        (a.decided_by_name ? ' <span class="muted">' + esc(a.decided_by_name) + '</span>' : '') + (a.note ? '<div class="muted">' + esc(a.note) + '</div>' : '') + '</td>' +
+        '<td style="white-space:nowrap">' + (a.status === 'requested' ? '<button class="sm" data-po="' + a.po_id + '" data-d="approve">Approve</button> <button class="sm" data-po="' + a.po_id + '" data-d="reject">Reject</button>' : '') + '</td></tr>').join('')
+        : '<tr><td colspan="7" class="muted">Nothing in the last 60 days.</td></tr>';
+    }).catch((e) => { $('poRows').innerHTML = '<tr><td colspan="7" class="err">' + esc(e.message) + '</td></tr>'; });
+  }
+  $('poRows').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-po]'); if (!b) return;
+    let note = '';
+    if (b.dataset.d === 'reject') { note = await vasPrompt('Why reject it? (the buyer sees this)', ''); if (note === null) return; }
+    b.disabled = true;
+    api('/api/owner/po-approvals/' + b.dataset.po + '/' + b.dataset.d, 'POST', { note }).then(loadPos).catch(async (err) => { b.disabled = false; await vasAlert(err.message); });
+  });
+
+  function loadAlerts() {
+    api('/api/owner/alerts').then((r) => {
+      $('aRows').innerHTML = r.alerts.length ? r.alerts.map((a) =>
+        '<tr><td style="white-space:nowrap">' + when(a.happened_at || a.created_at) + '</td><td>' + esc(a.kind_label) + '</td><td>' + esc(a.text) + '</td><td class="n">' + (a.amount == null ? '' : jm(a.amount)) + '</td><td>' + (a.sent ? '✓' : '') + '</td></tr>').join('')
+        : '<tr><td colspan="5" class="muted">Nothing yet. New things show here within two minutes.</td></tr>';
+    }).catch((e) => { $('aRows').innerHTML = '<tr><td colspan="5" class="err">' + esc(e.message) + '</td></tr>'; });
+  }
+  $('checkNow').onclick = () => {
+    $('aMsg').textContent = 'Checking…';
+    api('/api/owner/alerts/check', 'POST', {}).then((r) => { $('aMsg').textContent = r.found ? r.found + ' new' + (r.sent ? ', sent' : '') : 'Nothing new'; loadAlerts(); })
+      .catch((e) => { $('aMsg').textContent = e.message; });
+  };
+
+  loadSettings(); loadPos();
+})();
+</script>
+</body>
+</html>

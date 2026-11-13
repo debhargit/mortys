@@ -26,10 +26,11 @@
   .sub{color:var(--muted);font-size:14px}
   video{width:100%;border-radius:10px;background:#000}
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b"></script>
 </head>
 <body>
 <header><h1>Time clock</h1><span class="t" id="now"></span></header>
@@ -163,7 +164,7 @@
     c.getContext('2d').drawImage(v, 0, 0, c.width, c.height); photo = c.toDataURL('image/jpeg', 0.7); stopCam(); $('#cam').style.display = 'none'; post();
   };
   function devShow() { $('#devName').textContent = VisionClockCtx.deviceName() || 'not named (' + String(VisionClockCtx.deviceId() || '').slice(0, 8) + ')'; }
-  $('#devRename').onclick = function (e) { e.preventDefault(); var n = prompt('Name this device for the clock-in log (e.g. "Front till", "Warehouse tablet")', VisionClockCtx.deviceName()); if (n !== null) { VisionClockCtx.setDeviceName(n); devShow(); } };
+  $('#devRename').onclick = async function (e) { e.preventDefault(); var n = await vasPrompt('Name this device for the clock-in log (e.g. "Front till", "Warehouse tablet")', VisionClockCtx.deviceName()); if (n !== null) { VisionClockCtx.setDeviceName(n); devShow(); } };
   devShow();
   reset();
 })();

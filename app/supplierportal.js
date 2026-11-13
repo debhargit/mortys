@@ -364,7 +364,7 @@ exports.register = function register(app, deps) {
     }
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
-    res.send('<!doctype html><html><head><meta charset="utf-8"><title>' + title + ' ' + esc(o.number) + '</title><style>' +
+    res.send('<!doctype html><html><head><meta charset="utf-8"><link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml"><link rel="icon" href="/favicon.ico?v=vision2" sizes="any"><link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2"><title>' + title + ' ' + esc(o.number) + '</title><style>' +
       'body{font-family:Arial,sans-serif;max-width:720px;margin:20px auto;padding:0 16px;color:#111}h1{border-bottom:3px solid #d61f2b;padding-bottom:6px}' +
       'table{border-collapse:collapse;width:100%;margin-top:10px}th,td{border:1px solid #ccc;padding:7px 9px;text-align:left}th{background:#f3f4f5}' +
       '.label{border:2px solid #111;padding:18px;margin-top:12px}.label h2{margin:8px 0}.to{font-size:20px;font-weight:bold}.bc{font-family:monospace;font-size:22px;margin-top:12px;letter-spacing:2px}.from{color:#555}' +

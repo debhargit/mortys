@@ -272,7 +272,7 @@ foreach ($v in 'data\admin.lock','data\pgdata\postmaster.pid','data\pgdata\postm
 
 # ------------------------------------------------------------ drop in the tools
 Head '3. Adding the restore tool and instructions'
-foreach ($name in 'Restore On New PC.exe','Restore-On-New-PC.ps1','MIGRATION-README.txt','START HERE.txt') {
+foreach ($name in 'Restore Vision On New PC.bat','Restore-On-New-PC.ps1','MIGRATION-README.txt','START HERE.txt') {
   $src = Join-Path $SOURCE $name
   if ((Test-Path $src) -and -not (Test-Path (Join-Path $dest $name))) {
     Copy-Item $src $dest -Force; Info "added $name"

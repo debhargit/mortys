@@ -20,7 +20,7 @@ Brand: red `#d62828`, navy `#0b1b2b`, and the site's yellow `#ffc300` as the hig
 | 0:11–0:15 | Pan down the "In stock at the counter" cards with their "Ask for a price" buttons | "Engine, brakes, suspension, wheels, ask for a price in one tap." | ENGINE. BRAKES. SUSPENSION. **WHEELS.** · chip: *Ask for a price in one tap* |
 | 0:15–0:19 | Zoom into "Visit us on Waltham Park Road": WhatsApp, phone, email | "Can't find it? WhatsApp us your VIN, and we'll source it." | WE'LL **SOURCE IT.** · green chip: *WhatsApp your VIN: 876-553-4458* |
 | 0:19–0:22 | The Track Your Service page | "Same-day pickup, and islandwide delivery." | SAME-DAY PICKUP. **ISLANDWIDE DELIVERY.** · chip: *Track your service online* |
-| 0:22–0:30 | End card: logo, name, "Your auto parts visionary · Since 2017", web address, a pulsing phone button, address | "Vision Auto Solutions, Waltham Park Road, Kingston. Call eight seven six, seven two eight, forty-seven thirty-five." | **visionautosolutions.com** · **(876) 728-4735** · 112C Waltham Park Road, Kingston, Jamaica |
+| 0:22–0:30 | End card: logo, name, "Your auto parts visionary · Since 2009", web address, a pulsing phone button, address | "Vision Auto Solutions, Waltham Park Road, Kingston. Call eight seven six, seven two eight, forty-seven thirty-five." | **visionautosolutions.com** · **(876) 728-4735** · 112C Waltham Park Road, Kingston, Jamaica |
 
 Every line of the voice-over also appears as a subtitle, so the ad works with the sound off. A red-and-yellow wipe covers each cut.
 

@@ -161,11 +161,11 @@ function register(app, deps) {
     if (!rows.length) throw httpError(400, 'Choose the supplier');
     return rows[0];
   }
-  // Lines [{account_id, description, amount, class_id}] checked against the chart (not A/R or A/P) and the classes.
+  // Lines [{account_id, description, amount, class_id, asset_id}] checked against the chart (not A/R or A/P), the classes and the fixed asset register.
   async function cleanLines(raw) {
-    const lines = (Array.isArray(raw) ? raw : []).map((l) => ({ account_id: parseInt(l.account_id, 10), description: String(l.description || '').trim().slice(0, 200) || null, amount: r2(l.amount), class_id: l.class_id })).filter((l) => l.amount > 0);
+    const lines = (Array.isArray(raw) ? raw : []).map((l) => ({ account_id: parseInt(l.account_id, 10), description: String(l.description || '').trim().slice(0, 200) || null, amount: r2(l.amount), class_id: l.class_id, asset_id: l.asset_id })).filter((l) => l.amount > 0);
     if (!lines.length) throw httpError(400, 'Add at least one line with an account and amount');
-    for (const l of lines) { await books.lineAccount(l.account_id); l.class_id = await books.classId(l.class_id); }
+    for (const l of lines) { await books.lineAccount(l.account_id); l.class_id = await books.classId(l.class_id); l.asset_id = await books.assetId(l.asset_id); }
     return lines;
   }
   const lateFee = (b) => {
@@ -192,14 +192,14 @@ function register(app, deps) {
     if (!rows.length) return null;
     const id = rows[0].id, number = 'INV-' + String(id).padStart(6, '0');
     await c.query(`UPDATE ar_invoices SET number = $2 WHERE id = $1`, [id, number]);
-    for (const l of d.lines) await c.query(`INSERT INTO ar_invoice_lines (invoice_id, account_id, description, amount, class_id) VALUES ($1,$2,$3,$4,$5)`, [id, l.account_id, l.description, l.amount, l.class_id || null]);
+    for (const l of d.lines) await c.query(`INSERT INTO ar_invoice_lines (invoice_id, account_id, description, amount, class_id, asset_id) VALUES ($1,$2,$3,$4,$5,$6)`, [id, l.account_id, l.description, l.amount, l.class_id || null, l.asset_id || null]);
     return { id, number, total };
   }
   async function createBill(c, d) {
     const total = r2(d.lines.reduce((t, l) => t + l.amount, 0) + r2(d.gct_amount));
     const { rows } = await c.query(`INSERT INTO ap_bills (kind, supplier_id, number, bill_date, due_date, memo, gct_amount, total, created_by) VALUES ('bill',$1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
       [d.supplier_id, d.number || null, d.bill_date, d.due_date || d.bill_date, d.memo || null, r2(d.gct_amount), total, d.userId || null]);
-    for (const l of d.lines) await c.query(`INSERT INTO ap_bill_lines (bill_id, account_id, description, amount, class_id) VALUES ($1,$2,$3,$4,$5)`, [rows[0].id, l.account_id, l.description, l.amount, l.class_id || null]);
+    for (const l of d.lines) await c.query(`INSERT INTO ap_bill_lines (bill_id, account_id, description, amount, class_id, asset_id) VALUES ($1,$2,$3,$4,$5,$6)`, [rows[0].id, l.account_id, l.description, l.amount, l.class_id || null, l.asset_id || null]);
     return { id: rows[0].id, total };
   }
   // Applied payments on an invoice (voided payments do not count: the view excludes them).
@@ -248,7 +248,7 @@ function register(app, deps) {
     try {
       const { rows } = await query(
         `SELECT l.id, l.name, l.reference, l.principal::float AS principal, l.annual_rate::float AS annual_rate, l.instalments, l.frequency, l.method, l.pay_mode, l.status,
-                to_char(l.start_date, 'YYYY-MM-DD') AS start_date, s.name AS lender, x.principal_billed, x.interest_billed, to_char(x.next_due, 'YYYY-MM-DD') AS next_due, x.left_count,
+                to_char(l.start_date, 'YYYY-MM-DD') AS start_date, s.name AS lender, l.asset_id, (SELECT fa.number FROM fa_assets fa WHERE fa.id = l.asset_id) AS asset_number, x.principal_billed, x.interest_billed, to_char(x.next_due, 'YYYY-MM-DD') AS next_due, x.left_count,
                 (SELECT li.payment::float FROM loan_instalments li WHERE li.loan_id = l.id AND li.status = 'scheduled' ORDER BY li.due_date, li.n LIMIT 1) AS next_payment
            FROM loans l JOIN suppliers s ON s.id = l.supplier_id JOIN (${LOAN_SUMS}) x ON x.id = l.id
           ORDER BY (l.status = 'active') DESC, x.next_due NULLS LAST, l.id`);
@@ -262,7 +262,7 @@ function register(app, deps) {
       const id = parseInt(req.params.id, 10);
       const { rows } = await query(
         `SELECT l.*, l.principal::float AS principal, l.annual_rate::float AS annual_rate, to_char(l.start_date, 'YYYY-MM-DD') AS start_date, to_char(l.first_due, 'YYYY-MM-DD') AS first_due,
-                s.name AS lender, la.code || ' ' || la.name AS liability_account, ia.code || ' ' || ia.name AS interest_account, x.principal_billed, x.interest_billed
+                s.name AS lender, (SELECT fa.number || ' ' || fa.name FROM fa_assets fa WHERE fa.id = l.asset_id) AS asset, la.code || ' ' || la.name AS liability_account, ia.code || ' ' || ia.name AS interest_account, x.principal_billed, x.interest_billed
            FROM loans l JOIN suppliers s ON s.id = l.supplier_id JOIN gl_accounts la ON la.id = l.liability_account_id JOIN gl_accounts ia ON ia.id = l.interest_account_id
            JOIN (${LOAN_SUMS}) x ON x.id = l.id WHERE l.id = $1`, [id]);
       if (!rows.length) throw httpError(404, 'Loan not found');
@@ -297,6 +297,8 @@ function register(app, deps) {
       const liability = b.liability_account_id ? (await books.lineAccount(b.liability_account_id)).id : await systemAccount('loans_payable');
       const interest = b.interest_account_id ? (await books.lineAccount(b.interest_account_id)).id : await systemAccount('interest_expense');
       const received = b.received === 'existing' ? 'existing' : 'deposit';
+      // The asset the loan bought or is secured on (its interest is then a running cost of that asset).
+      const assetId = await books.assetId(b.asset_id);
       const dep = received === 'deposit' ? await books.bankAccount(b.deposit_account_id) : null;
       const id = await tx(async (c) => {
         let txnId = null;
@@ -305,10 +307,10 @@ function register(app, deps) {
             reference: String(b.reference || '').slice(0, 60) || null, memo: 'Loan received: ' + name, lines: [{ account_id: liability, amount: x.principal, memo: 'Loan from ' + lender.name }], userId: req.session.userId })).id;
         }
         const { rows: l } = await c.query(
-          `INSERT INTO loans (name, supplier_id, reference, principal, annual_rate, instalments, frequency, method, start_date, first_due, pay_mode, liability_account_id, interest_account_id, received, deposit_txn_id, notes, created_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
+          `INSERT INTO loans (name, supplier_id, reference, principal, annual_rate, instalments, frequency, method, start_date, first_due, pay_mode, liability_account_id, interest_account_id, received, deposit_txn_id, notes, created_by, asset_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING id`,
           [name, lender.id, String(b.reference || '').trim().slice(0, 60) || null, x.principal, x.annual_rate, x.instalments, x.frequency, x.method, startDate, x.first_due,
-            b.pay_mode === 'standing_order' ? 'standing_order' : 'manual', liability, interest, received, txnId, String(b.notes || '').slice(0, 500) || null, req.session.userId]);
+            b.pay_mode === 'standing_order' ? 'standing_order' : 'manual', liability, interest, received, txnId, String(b.notes || '').slice(0, 500) || null, req.session.userId, assetId]);
         for (const r of rows) {
           await c.query(`INSERT INTO loan_instalments (loan_id, n, due_date, opening, principal, interest, payment, closing) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
             [l[0].id, r.n, r.due_date, r.opening, r.principal, r.interest, r.payment, r.closing]);
@@ -412,12 +414,12 @@ function register(app, deps) {
   async function billInstalment(instId, userId) {
     return tx(async (c) => {
       const { rows } = await c.query(
-        `SELECT li.*, to_char(li.due_date, 'YYYY-MM-DD') AS due, l.name, l.reference, l.supplier_id, l.liability_account_id, l.interest_account_id, l.id AS lid
+        `SELECT li.*, to_char(li.due_date, 'YYYY-MM-DD') AS due, l.name, l.reference, l.supplier_id, l.liability_account_id, l.interest_account_id, l.id AS lid, l.asset_id
            FROM loan_instalments li JOIN loans l ON l.id = li.loan_id WHERE li.id = $1 AND li.status = 'scheduled' AND l.status = 'active' FOR UPDATE OF li`, [instId]);
       if (!rows.length) return null;   // billed by another run already
       const i = rows[0], lines = [];
       if (n(i.principal) > 0) lines.push({ account_id: i.liability_account_id, description: 'Loan principal', amount: r2(i.principal) });
-      if (n(i.interest) > 0) lines.push({ account_id: i.interest_account_id, description: 'Interest', amount: r2(i.interest) });
+      if (n(i.interest) > 0) lines.push({ account_id: i.interest_account_id, description: 'Interest', amount: r2(i.interest), asset_id: i.asset_id || null });
       let billId = null;
       if (lines.length) {
         billId = (await createBill(c, { supplier_id: i.supplier_id, number: (i.reference || 'LOAN-' + i.lid) + '/' + i.n, bill_date: i.due, due_date: i.due,
@@ -528,14 +530,14 @@ function register(app, deps) {
     try {
       const side = req.query.side === 'ap' ? 'ap' : 'ar';
       const { rows } = await query(
-        `SELECT p.id, p.side, p.name, p.frequency, p.status, p.status_reason, p.pay_mode, p.due_days, p.memo, p.lines, p.gct_amount::float AS gct_amount,
+        `SELECT p.id, p.side, p.name, p.frequency, p.status, p.status_reason, p.pay_mode, p.due_days, p.memo, p.lines, p.gct_amount::float AS gct_amount, p.asset_id, (SELECT number FROM fa_assets fa WHERE fa.id = p.asset_id) AS asset_number,
                 to_char(p.start_date, 'YYYY-MM-DD') AS start_date, to_char(p.end_date, 'YYYY-MM-DD') AS end_date, p.max_runs, to_char(p.next_run, 'YYYY-MM-DD') AS next_run,
                 p.late_fee_type, p.late_fee_amount::float AS late_fee_amount, p.late_fee_grace_days, p.late_fee_repeat, p.late_fee_min::float AS late_fee_min, p.late_fee_max::float AS late_fee_max,
                 p.customer_id, p.supplier_id, COALESCE(NULLIF(u.name, ''), u.email, s.name) AS party,
                 (SELECT COUNT(*)::int FROM billing_runs r WHERE r.plan_id = p.id) AS runs, (SELECT to_char(MAX(period_date), 'YYYY-MM-DD') FROM billing_runs r WHERE r.plan_id = p.id) AS last_run
            FROM billing_plans p LEFT JOIN users u ON u.id = p.customer_id LEFT JOIN suppliers s ON s.id = p.supplier_id
-          WHERE p.side = $1 AND ($2::int IS NULL OR p.customer_id = $2) AND ($3::int IS NULL OR p.supplier_id = $3)
-          ORDER BY (p.status = 'active') DESC, p.next_run NULLS LAST, p.id`, [side, parseInt(req.query.customer_id, 10) || null, parseInt(req.query.supplier_id, 10) || null]);
+          WHERE p.side = $1 AND ($2::int IS NULL OR p.customer_id = $2) AND ($3::int IS NULL OR p.supplier_id = $3) AND ($4::int IS NULL OR p.asset_id = $4)
+          ORDER BY (p.status = 'active') DESC, p.next_run NULLS LAST, p.id`, [side, parseInt(req.query.customer_id, 10) || null, parseInt(req.query.supplier_id, 10) || null, parseInt(req.query.asset_id, 10) || null]);
       for (const r of rows) r.amount = r2(r.lines.reduce((t, l) => t + n(l.amount), 0) + r.gct_amount);
       res.json({ plans: rows });
     } catch (e) { fail(res, e); }
@@ -559,12 +561,19 @@ function register(app, deps) {
       // Back-dating past the catch-up limit would bill a burst of periods at once: start from a recent period instead.
       if (addPeriod(b.start_date, x.frequency, MAX_BEHIND) <= today()) throw httpError(400, 'The first period is ' + MAX_BEHIND + ' or more periods ago. Start the plan from the current period and enter older ones as single invoices or bills.');
       const party = side === 'ar' ? await customer(b.customer_id) : await supplier(b.supplier_id);
+      // Renting out a fixed asset ('ar'), or a maintenance, software support or
+      // insurance contract for one ('ap'): the plan, and every invoice or bill it raises, is for that asset.
+      const assetId = await books.assetId(b.asset_id);
+      if (assetId) {
+        const { rows: fa } = await query(`SELECT status FROM fa_assets WHERE id = $1`, [assetId]);
+        if (fa[0].status !== 'active') throw httpError(409, 'This asset has been disposed of: it cannot be ' + (side === 'ar' ? 'rented out' : 'given a new contract'));
+      }
       const { rows } = await query(
         `INSERT INTO billing_plans (side, name, customer_id, supplier_id, frequency, start_date, end_date, max_runs, next_run, due_days, lines, gct_amount, memo, pay_mode,
-                                    late_fee_type, late_fee_amount, late_fee_grace_days, late_fee_repeat, late_fee_min, late_fee_max, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$6,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING id`,
+                                    late_fee_type, late_fee_amount, late_fee_grace_days, late_fee_repeat, late_fee_min, late_fee_max, created_by, asset_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$6,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING id`,
         [side, x.name, side === 'ar' ? party.id : null, side === 'ap' ? party.id : null, x.frequency, b.start_date, x.end_date, x.max_runs, x.due_days, JSON.stringify(x.lines), x.gct_amount, x.memo, x.pay_mode,
-          x.late_fee_type || null, x.late_fee_amount || null, x.late_fee_grace_days || 0, x.late_fee_repeat || 'once', x.late_fee_min == null ? null : x.late_fee_min, x.late_fee_max == null ? null : x.late_fee_max, req.session.userId]);
+          x.late_fee_type || null, x.late_fee_amount || null, x.late_fee_grace_days || 0, x.late_fee_repeat || 'once', x.late_fee_min == null ? null : x.late_fee_min, x.late_fee_max == null ? null : x.late_fee_max, req.session.userId, assetId]);
       res.json({ ok: true, id: rows[0].id });
       runSoon();
     } catch (e) { fail(res, e); }
@@ -630,7 +639,7 @@ function register(app, deps) {
         const ins = await c.query(`INSERT INTO billing_runs (plan_id, period_date, created_by) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING RETURNING plan_id`, [p.id, p.period, userId || null]);
         if (ins.rows.length) {
           const label = periodLabel(p.period, p.frequency), due = addDays(p.period, p.due_days);
-          const lines = p.lines.map((l) => ({ account_id: l.account_id, class_id: l.class_id || null, amount: r2(l.amount), description: (l.description ? String(l.description).replace(/\{period\}/g, label) : p.name + ' · ' + label).slice(0, 200) }));
+          const lines = p.lines.map((l) => ({ account_id: l.account_id, class_id: l.class_id || null, asset_id: l.asset_id || p.asset_id || null, amount: r2(l.amount), description: (l.description ? String(l.description).replace(/\{period\}/g, label) : p.name + ' · ' + label).slice(0, 200) }));
           if (p.side === 'ar') {
             const inv = await createInvoice(c, { customer_id: p.customer_id, invoice_date: p.period, due_date: due, memo: (p.memo || p.name) + ' · ' + label, gct_amount: p.gct_amount, lines, plan_id: p.id, userId });
             await c.query(`UPDATE billing_runs SET ar_invoice_id = $3 WHERE plan_id = $1 AND period_date = $2`, [p.id, p.period, inv.id]);
@@ -963,7 +972,7 @@ function register(app, deps) {
                   (SELECT string_agg(i.number, ', ' ORDER BY i.number) FROM ar_applications x JOIN ar_invoices i ON i.id = x.invoice_id WHERE x.payment_id = ap.id) AS applied
              FROM account_payments ap JOIN users u ON u.id = ap.customer_id
             WHERE EXISTS (SELECT 1 FROM ar_applications x WHERE x.payment_id = ap.id AND x.invoice_id IS NOT NULL)`);
-        for (const p of pays) out.push({ type: 'payment', id: p.id, number: p.reference || 'Payment ' + p.id, day: p.day, party: p.party, party_id: p.customer_id, agreement: 'Paid ' + p.applied, amount: p.amount, open: 0, status: p.method });
+        for (const p of pays) out.push({ type: 'payment', id: p.id, number: p.reference || 'Payment ' + p.id, day: p.day, party: p.party, party_id: p.customer_id, agreement: (p.method === 'writeoff' ? 'Written off ' : p.method === 'credit_note' ? 'Credit note against ' : 'Paid ') + p.applied, amount: p.amount, open: 0, status: p.method === 'writeoff' ? 'written off' : p.method === 'credit_note' ? 'credit note' : p.method });
         const { rows: rem } = await query(
           `SELECT l.doc, l.doc_id, l.stage, l.status, to_char(l.created_at AT TIME ZONE 'America/Jamaica', 'YYYY-MM-DD') AS day, l.customer_id, COALESCE(NULLIF(u.name, ''), u.email) AS party,
                   COALESCE(s.receipt_number, i.number) AS number

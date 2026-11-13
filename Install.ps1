@@ -169,6 +169,8 @@ try {
   # to refuse.
   $s.TargetPath = "http://localhost:$port/admin.html"
   $s.Description = 'Open the Vision Auto Solutions admin panel and POS'
+  $ico = Join-Path $Destination 'app\Vision.ico'
+  if (Test-Path $ico) { $s.IconLocation = "$ico,0" }
   $s.Save()
   Ok "created for all users -> http://localhost:$port/admin.html"
 } catch { Bad "could not create the shortcut: $($_.Exception.Message)" }

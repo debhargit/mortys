@@ -153,11 +153,31 @@ function register(app, deps) {
   }
 
   // The shift for a person on a day: {start, end, break_minutes} or {off: reason}.
+  // Order: leave, then the work roster for that date (roster.js), then a
+  // public holiday, then the weekly pattern.
+  let rosterOn = false, rosterAt = 0;
+  async function rosterTable() {
+    if (rosterOn || Date.now() - rosterAt < 60000) return rosterOn;
+    rosterAt = Date.now();
+    try { const { rows } = await query(`SELECT to_regclass('public.roster_entries') IS NOT NULL AS ok`); rosterOn = !!rows[0].ok; } catch (_) {}
+    return rosterOn;
+  }
   async function shiftFor(uid, day, q = query) {
-    const { rows: hol } = await q(`SELECT name FROM public_holidays WHERE day = $1`, [day]);
-    if (hol.length) return { off: 'Holiday: ' + hol[0].name };
     const { rows: lv } = await q(`SELECT kind FROM staff_leave WHERE user_id = $1 AND $2::date BETWEEN from_date AND to_date LIMIT 1`, [uid, day]);
     if (lv.length) return { off: 'On ' + lv[0].kind + ' leave' };
+    if (await rosterTable()) {
+      const { rows: re } = await q(`SELECT kind, reason, to_char(start_time, 'HH24:MI') AS s, to_char(end_time, 'HH24:MI') AS e, break_minutes FROM roster_entries WHERE user_id = $1 AND day = $2`, [uid, day]);
+      if (re.length && re[0].kind === 'off') return { off: 'Day off (roster)' };
+      if (re.length && re[0].kind === 'away') return { off: 'Away (roster): ' + String(re[0].reason || 'other').replace('_', ' ') };
+      if (re.length && re[0].kind === 'shift') {
+        const start = at(day, re[0].s);
+        let end = at(day, re[0].e);
+        if (end <= start) end = new Date(end.getTime() + 86400000);
+        return { start, end, break_minutes: re[0].break_minutes, roster: true };
+      }
+    }
+    const { rows: hol } = await q(`SELECT name FROM public_holidays WHERE day = $1`, [day]);
+    if (hol.length) return { off: 'Holiday: ' + hol[0].name };
     const { rows } = await q(`SELECT to_char(start_time, 'HH24:MI') AS s, to_char(end_time, 'HH24:MI') AS e, break_minutes FROM staff_shifts WHERE user_id = $1 AND weekday = $2`, [uid, weekday(day)]);
     if (!rows.length) return { off: 'No shift today' };
     const start = at(day, rows[0].s);
@@ -1014,7 +1034,7 @@ function register(app, deps) {
     const close = o.level === 1 ? 'This letter is a first written warning and is kept in your staff file.'
       : o.level === 2 ? 'This is a second written warning this month. Further lateness may lead to disciplinary action.'
         : 'This is a final written warning. Further lateness will lead to disciplinary action.';
-    return '<!doctype html><html><head><meta charset="utf-8"><title>' + h(LEVEL(o.level)) + ' - lateness</title><style>body{font:15px/1.55 Georgia,"Times New Roman",serif;color:#111;max-width:720px;margin:30px auto;padding:0 20px;background:#fff}h1{font-size:20px;margin:18px 0 10px}table{border-collapse:collapse;width:100%;margin:10px 0 14px}th,td{border:1px solid #bbb;padding:5px 8px;text-align:left;font-size:14px}th{background:#f2f2f2}.sig{margin-top:34px}.small{font-size:12px;color:#555;margin-top:26px}</style></head><body>' +
+    return '<!doctype html><html><head><meta charset="utf-8"><link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml"><link rel="icon" href="/favicon.ico?v=vision2" sizes="any"><link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2"><title>' + h(LEVEL(o.level)) + ' - lateness</title><style>body{font:15px/1.55 Georgia,"Times New Roman",serif;color:#111;max-width:720px;margin:30px auto;padding:0 20px;background:#fff}h1{font-size:20px;margin:18px 0 10px}table{border-collapse:collapse;width:100%;margin:10px 0 14px}th,td{border:1px solid #bbb;padding:5px 8px;text-align:left;font-size:14px}th{background:#f2f2f2}.sig{margin-top:34px}.small{font-size:12px;color:#555;margin-top:26px}</style></head><body>' +
       '<p><b>' + h(o.shop) + '</b></p><p>' + h(new Date().toLocaleDateString('en-JM', { day: 'numeric', month: 'long', year: 'numeric', timeZone: TZ })) + '</p>' +
       '<p>To: <b>' + h(o.name) + '</b></p><h1>' + h(LEVEL(o.level)) + ': lateness in ' + h(monthName(o.month)) + '</h1>' +
       '<p>The time clock shows that you clocked in late on <b>' + o.days.length + '</b> working days in ' + h(monthName(o.month)) + (o.level > 1 ? ', after an earlier warning this month' : '') + ':</p>' +
@@ -1221,7 +1241,22 @@ function register(app, deps) {
   // The client's own address (for setting up the shop Wi-Fi rule from a phone on it).
   app.get('/api/clock/my-address', ...can('clock.manage'), (req, res) => res.json({ address: ipOf(req), on_shop_network: isLocal(req) }));
 
-  return { presence, weekFor, useNotices(fn) { notify = fn; } };
+  // For clocklink.js: starting work elsewhere (a till, a driver shift, devotion)
+  // clocks the signed-in person in, with the same rules as My time.
+  const link = {
+    openEntry: (uid) => openEntry(uid),
+    exempt: async (uid) => { const s = await settings(); const u = await staffRow(uid); return !u || s.exempt.includes(u.admin_role); },
+    punch: async (req, b) => {
+      b = b || {};
+      let ctx = {};
+      ctx = await ctxOf(req, b);
+      const u = await staffRow(req.session.userId);
+      if (!u || u.disabled) throw httpError(403, 'Unknown user');
+      try { return await doPunch(req, u, 'session', b, ctx); }
+      catch (e) { logRefusal(req, Object.assign({ method: 'session' }, b), ctx, u.id, e); throw e; }
+    },
+  };
+  return { presence, weekFor, useNotices(fn) { notify = fn; }, link };
 }
 
 module.exports = { register };

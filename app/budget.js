@@ -1244,11 +1244,13 @@ function register(app, deps) {
 
     // Every account's balance now and at the start of the period. Debits are +.
     const { rows: acc } = await query(
-      `SELECT a.id, a.code, a.name, a.type, a.qb_type, a.system_key,
+      `SELECT a.id, a.parent_id, a.code, a.name, a.type, a.qb_type, a.system_key,
               COALESCE(SUM(l.amount) FILTER (WHERE e.entry_date <= $1), 0)::float AS bal,
               COALESCE(SUM(l.amount) FILTER (WHERE e.entry_date <= $2), 0)::float AS bal0
          FROM gl_accounts a JOIN gl_lines l ON l.account_id = a.id JOIN gl_entries e ON e.id = l.entry_id
         WHERE e.entry_date <= $1 GROUP BY a.id ORDER BY a.code`, [now, from]);
+    // Main accounts, so a sub-account folds under its main account even when the main one has no postings.
+    const { rows: chart } = await query(`SELECT id, parent_id, code, name FROM gl_accounts`);
     const G = {
       cash: ['Money on hand', 'asset'], ar: ['Customers owe', 'asset'], stock: ['Stock at cost', 'asset'], other_ca: ['Other current assets', 'asset'],
       fixed: ['Fixed assets (cost less depreciation)', 'asset'], other_a: ['Other assets', 'asset'],
@@ -1256,7 +1258,7 @@ function register(app, deps) {
     };
     const groups = {};
     for (const k in G) groups[k] = { key: k, label: G[k][0], side: G[k][1], lines: [], total: 0 };
-    const put = (k, a, v) => { if (Math.abs(v) < 0.005) return; groups[k].lines.push({ id: a.id, code: a.code, name: a.name, amount: r2(v) }); groups[k].total = r2(groups[k].total + v); };
+    const put = (k, a, v) => { if (Math.abs(v) < 0.005) return; groups[k].lines.push({ id: a.id, parent_id: a.parent_id, code: a.code, name: a.name, amount: r2(v) }); groups[k].total = r2(groups[k].total + v); };
     let pl = 0, pl0 = 0, suspense = 0;
     const eq = { opening: 0, capital: 0, drawings: 0, retained: 0 };
     for (const a of acc) {
@@ -1381,7 +1383,7 @@ function register(app, deps) {
     recs.sort((a, b) => order[a.rating] - order[b.rating]);
     return {
       ready: true, as_of: now, period: { from: addDays(from, 1), to: now, days },
-      balance_sheet: { groups: Object.values(groups), assets, current_assets: current, liabilities, net_assets: netAssets, equity },
+      balance_sheet: { groups: Object.values(groups), chart, assets, current_assets: current, liabilities, net_assets: netAssets, equity },
       equity: { opening: eqOpen, movement, closing: eqClose, check: r2(eqClose - equity) },
       profit: { income, cogs, overheads, other_income: otherIncome, net, interest, depreciation, ebitda, net_year: netY, ebitda_year: ebitdaY },
       valuation: { book: netAssets, adjustments, adjusted, multiples: mult, earnings: earn, debt, cash, value, basis, goodwill },

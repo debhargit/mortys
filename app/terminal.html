@@ -28,12 +28,17 @@
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px} @media (max-width:860px){ .grid{grid-template-columns:1fr} }
   .chips{display:flex;flex-wrap:wrap;gap:6px} .chips label{display:flex;gap:5px;align-items:center;background:var(--chip);padding:3px 9px;border-radius:999px;font-size:12.5px;color:inherit;margin:0}
   .empty{color:var(--muted);text-align:center;padding:20px}
+  details.rules{margin-top:12px;border-top:1px solid var(--line);padding-top:8px} details.rules summary{cursor:pointer;font-weight:600}
+  .rgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:8px} @media (max-width:960px){ .rgrid{grid-template-columns:1fr} }
+  .rgrid h3{font-size:13px;margin:4px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+  .rule{display:block;margin:0 0 8px;font-size:13px} label.rule{display:flex;gap:6px;align-items:center} .rl2{display:block;font-size:12.5px;color:var(--muted);margin-bottom:3px}
   .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60;max-width:90vw}
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
 <header><h1>Terminal journal</h1><nav><a href="/security.html">Security</a><a href="/admin.html">Admin</a></nav></header>
@@ -113,8 +118,60 @@
     });
   }
 
-  function dept() {
-    return api('/api/dept').then(function (d) {
+  // Departments: type, rules, branch, staff, tills, categories (types + rules 2026-11-05).
+  var TYPES = null;
+  function ruleInput(g, f, v, dflt) {
+    var id = 'r_' + g + '_' + f.key, changed = JSON.stringify(v) !== JSON.stringify(dflt);
+    var mark = changed ? ' <span class="pill warn" title="Type default: ' + esc(JSON.stringify(dflt)) + '">changed</span>' : '';
+    var when = f.when ? ' data-when="' + g + '.' + f.when[0] + '=' + String(f.when[1]) + '"' : '';
+    var lab = '<span class="rl">' + esc(f.label) + mark + '</span>';
+    var inp;
+    if (f.type === 'bool') return '<label class="rule"' + when + '><input type="checkbox" data-r="' + g + '.' + f.key + '"' + (v ? ' checked' : '') + '> ' + lab + '</label>';
+    if (f.type === 'choice') inp = '<select data-r="' + g + '.' + f.key + '">' + f.options.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === v ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select>';
+    else if (f.type === 'multi') inp = '<div class="chips" data-r="' + g + '.' + f.key + '" data-multi="1">' + f.options.map(function (o) { return '<label><input type="checkbox" value="' + o[0] + '"' + ((v || []).indexOf(o[0]) >= 0 ? ' checked' : '') + '> ' + esc(o[1]) + '</label>'; }).join('') + '</div>';
+    else if (f.type === 'list') inp = '<input data-r="' + g + '.' + f.key + '" data-list="1" value="' + esc((v || []).join(', ')) + '" placeholder="Any (comma separated)" style="width:100%">';
+    else inp = '<input type="number" min="0" step="any" data-r="' + g + '.' + f.key + '" value="' + esc(v == null ? '' : v) + '" style="width:120px">';
+    return '<div class="rule"' + when + '><label class="rl2" for="' + id + '">' + lab + '</label>' + inp + '</div>';
+  }
+  function rulesPanel(dp) {
+    var t = TYPES.types.filter(function (x) { return x.key === dp.kind; })[0] || TYPES.types[0];
+    var eff = JSON.parse(JSON.stringify(t.defaults)), ov = dp.rules || {};
+    ['billing', 'stock', 'customer'].forEach(function (g) { Object.keys(ov[g] || {}).forEach(function (k) { eff[g][k] = ov[g][k]; }); });
+    var names = { billing: 'Billing', stock: 'Stock', customer: 'Customer' };
+    var n = ['billing', 'stock', 'customer'].reduce(function (a, g) { return a + Object.keys(ov[g] || {}).length; }, 0);
+    return '<details class="rules"' + (dp._open ? ' open' : '') + '><summary>Rules for this department <small>(' + esc(t.label) + ' defaults' + (n ? ', ' + n + ' changed' : '') + ')</small></summary>' +
+      '<div class="rgrid">' + ['billing', 'stock', 'customer'].map(function (g) {
+        return '<div><h3>' + names[g] + '</h3>' + TYPES.fields[g].map(function (f) { return ruleInput(g, f, eff[g][f.key], t.defaults[g][f.key]); }).join('') + '</div>';
+      }).join('') + '</div><p class="sub">A rule left at the type default follows the type. Changed rules are saved on this department only. <button class="sm" data-reset="' + dp.id + '">Back to ' + esc(t.label) + ' defaults</button></p></details>';
+  }
+  function readRules(box) {
+    var r = { billing: {}, stock: {}, customer: {} };
+    all('[data-r]', box).forEach(function (el) {
+      var k = el.getAttribute('data-r').split('.'), v;
+      if (el.getAttribute('data-multi')) v = all('input:checked', el).map(function (x) { return x.value; });
+      else if (el.getAttribute('data-list')) v = el.value.split(',').map(function (x) { return x.trim(); }).filter(Boolean);
+      else if (el.type === 'checkbox') v = el.checked;
+      else if (el.type === 'number') { if (el.value === '') return; v = Number(el.value); }
+      else v = el.value;
+      r[k[0]][k[1]] = v;
+    });
+    return r;
+  }
+  function applyWhen(box) {
+    all('[data-when]', box).forEach(function (el) {
+      var w = el.getAttribute('data-when').split('='), k = w[0].split('.'), src = $('[data-r="' + k[0] + '.' + k[1] + '"]', box), cur;
+      if (!src) return;
+      cur = src.type === 'checkbox' ? String(src.checked) : src.value;
+      el.style.display = cur === w[1] ? '' : 'none';
+    });
+  }
+  function typeSelect(attr, cur, withGeneral) {
+    return '<select ' + attr + '>' + TYPES.types.filter(function (t) { return withGeneral || t.key !== 'general'; }).map(function (t) { return '<option value="' + t.key + '"' + (t.key === cur ? ' selected' : '') + '>' + t.icon + ' ' + esc(t.label) + '</option>'; }).join('') + '</select>';
+  }
+
+  function dept(openId) {
+    return Promise.all([api('/api/dept'), TYPES ? TYPES : api('/api/dept/types')]).then(function (res) {
+      var d = res[0]; TYPES = res[1];
       var s = d.settings;
       var h = '<div class="card"><h2>Rules</h2>' +
         '<label style="display:flex;gap:8px;align-items:center;font-size:14px;margin-bottom:10px"><input type="checkbox" id="enf"' + (s.dept_enforce === 'on' ? ' checked' : '') + '> Staff with departments can only sell their departments\' parts (others need a manager PIN)</label>' +
@@ -122,30 +179,72 @@
         '<div class="controls"><div><label>Void / refund alert (J$)</label><input id="s1" type="number" value="' + esc(s.tj_void_alert) + '" style="width:120px"></div><div><label>Discount alert (%)</label><input id="s2" type="number" value="' + esc(s.tj_discount_pct_alert) + '" style="width:100px"></div>' +
         '<div><label>No-sales per day</label><input id="s3" type="number" value="' + esc(s.tj_nosale_per_day) + '" style="width:100px"></div><div><label>Items removed per day</label><input id="s4" type="number" value="' + esc(s.tj_removed_per_day) + '" style="width:100px"></div>' +
         '<button class="primary" id="saveRules">Save rules</button></div></div>';
-      h += '<div class="card"><h2>Departments</h2><p class="sub">Each department is a set of product categories. Tick who works in it and which stations it covers.</p>' +
-        '<div class="controls"><div><label>New department</label><input id="nName" placeholder="e.g. Batteries and electrical"></div><button id="nAdd">Add</button></div></div>';
-      h += d.departments.map(function (dp) {
+      h += '<div class="card"><h2>Departments</h2><p class="sub">Each department has a type (which brings its billing, stock and customer rules), a set of product categories, a branch, and the staff and tills that work in it. Remove deletes a department that was never used; one with staff, tills or history is switched off instead.</p>' +
+        '<div class="controls"><div><label>New department</label><input id="nName" placeholder="e.g. Batteries and electrical"></div><div><label>Type</label>' + typeSelect('id="nKind"', 'parts', false) + '</div>' +
+        (d.locations && d.locations.length > 1 ? '<div><label>Branch</label><select id="nLoc">' + d.locations.map(function (l) { return '<option value="' + l.id + '"' + (l.is_default ? ' selected' : '') + '>' + esc(l.name) + '</option>'; }).join('') + '</select></div>' : '') +
+        '<button class="primary" id="nAdd">Add</button></div><p class="sub" id="nBlurb"></p></div>';
+      h += d.departments.slice().sort(function (a, b) { return (b.is_active - a.is_active) || a.name.localeCompare(b.name); }).map(function (dp) {
+        dp._open = String(dp.id) === String(openId);
         var uids = (dp.users || []).map(function (u) { return u.id; }), sids = (dp.stations || []).map(function (x) { return x.id; });
-        return '<div class="card" data-d="' + dp.id + '"><h2><input data-f="name" value="' + esc(dp.name) + '" style="font-weight:700"> <label style="display:flex;gap:5px;align-items:center;font-size:13px"><input type="checkbox" data-f="is_active"' + (dp.is_active ? ' checked' : '') + '> active</label></h2>' +
+        var t = TYPES.types.filter(function (x) { return x.key === dp.kind; })[0];
+        return '<div class="card" data-d="' + dp.id + '" data-kind="' + esc(dp.kind) + '"' + (dp.is_active ? '' : ' style="opacity:.6"') + '><h2>' + (t ? t.icon + ' ' : '') + '<input data-f="name" value="' + esc(dp.name) + '" style="font-weight:700"> ' +
+          (dp.kind === 'general' ? '<span class="pill">General</span>' : typeSelect('data-f="kind"', dp.kind, false)) +
+          (d.locations && d.locations.length > 1 ? ' <select data-f="location_id">' + d.locations.map(function (l) { return '<option value="' + l.id + '"' + (l.id === dp.location_id ? ' selected' : '') + '>' + esc(l.name) + '</option>'; }).join('') + '</select>' : '') +
+          ' <label style="display:flex;gap:5px;align-items:center;font-size:13px"><input type="checkbox" data-f="is_active"' + (dp.is_active ? ' checked' : '') + '> active</label>' +
+          (dp.kind === 'general' ? '' : ' <button class="sm" data-del="' + dp.id + '" style="margin-left:auto">Remove</button>') + '</h2>' +
           '<div class="grid"><div><p class="sub">Categories</p><div class="chips">' + d.categories.map(function (c) { return '<label><input type="checkbox" data-cat="' + esc(c.category) + '"' + (dp.categories.indexOf(c.category) >= 0 ? ' checked' : '') + '> ' + esc(c.category) + ' <small>(' + c.parts + ')</small></label>'; }).join('') + '</div></div>' +
           '<div><p class="sub">Staff</p><div class="chips">' + d.staff.map(function (u) { return '<label><input type="checkbox" data-u="' + u.id + '"' + (uids.indexOf(u.id) >= 0 ? ' checked' : '') + '> ' + esc(u.name) + '</label>'; }).join('') + '</div>' +
           '<p class="sub" style="margin-top:10px">Cashier stations</p><div class="chips">' + (d.stations.length ? d.stations.map(function (x) { return '<label><input type="checkbox" data-s="' + x.id + '"' + (sids.indexOf(x.id) >= 0 ? ' checked' : '') + '> ' + esc(x.name) + '</label>'; }).join('') : '<small>No stations set up (Cashier module).</small>') + '</div></div></div>' +
+          (dp.kind === 'general' ? '' : rulesPanel(dp)) +
           '<div style="margin-top:10px"><button class="primary sm" data-save="' + dp.id + '">Save</button></div></div>';
       }).join('');
       $('#out').innerHTML = h;
+      var blurb = function () { var t = TYPES.types.filter(function (x) { return x.key === $('#nKind').value; })[0]; $('#nBlurb').textContent = t ? t.blurb : ''; };
+      $('#nKind').onchange = blurb; blurb();
+      all('[data-d]').forEach(function (box) {
+        applyWhen(box);
+        box.addEventListener('change', async function (e) {
+          applyWhen(box);
+          if (e.target.getAttribute('data-f') === 'kind') {
+            var t = TYPES.types.filter(function (x) { return x.key === e.target.value; })[0];
+            if (!(await vasConfirm('Change this department to ' + t.label + '? Its rules go back to the ' + t.label + ' defaults.'))) { e.target.value = box.getAttribute('data-kind'); return; }
+            api('/api/dept/' + box.getAttribute('data-d'), 'PATCH', { kind: e.target.value }).then(function () { toast('Type changed: ' + t.label); dept(box.getAttribute('data-d')); }).catch(function (er) { toast(er.message); });
+          }
+        });
+      });
       $('#saveRules').onclick = function () {
         api('/api/dept/settings', 'PUT', { dept_enforce: $('#enf').checked ? 'on' : 'off', tj_void_alert: $('#s1').value, tj_discount_pct_alert: $('#s2').value, tj_nosale_per_day: $('#s3').value, tj_removed_per_day: $('#s4').value })
           .then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); });
       };
-      $('#nAdd').onclick = function () { api('/api/dept', 'POST', { name: $('#nName').value }).then(function () { toast('Added'); dept(); }).catch(function (e) { toast(e.message); }); };
+      $('#nAdd').onclick = function () {
+        var body = { name: $('#nName').value, kind: $('#nKind').value };
+        if ($('#nLoc')) body.location_id = $('#nLoc').value;
+        api('/api/dept', 'POST', body).then(function (r) { toast('Added'); dept(r.department && r.department.id); }).catch(function (e) { toast(e.message); });
+      };
+      all('[data-del]').forEach(function (b) {
+        b.onclick = async function () {
+          var box = b.closest('[data-d]'), name = $('[data-f="name"]', box).value;
+          if (!(await vasConfirm('Remove the ' + name + ' department? If it has staff, tills or history it will be switched off instead of deleted.'))) return;
+          api('/api/dept/' + b.getAttribute('data-del'), 'DELETE').then(function (r) { toast(r.removed ? name + ' removed' : (r.reason || 'Switched off')); dept(); }).catch(function (e) { toast(e.message); });
+        };
+      });
+      all('[data-reset]').forEach(function (b) {
+        b.onclick = function (e) {
+          e.preventDefault();
+          api('/api/dept/' + b.getAttribute('data-reset'), 'PATCH', { rules: {} }).then(function () { toast('Back to type defaults'); dept(b.getAttribute('data-reset')); }).catch(function (er) { toast(er.message); });
+        };
+      });
       all('[data-save]').forEach(function (b) {
         b.onclick = function () {
           var box = b.closest('[data-d]'), id = box.getAttribute('data-d');
+          var body = { name: $('[data-f="name"]', box).value, is_active: $('[data-f="is_active"]', box).checked, categories: all('[data-cat]:checked', box).map(function (x) { return x.getAttribute('data-cat'); }) };
+          if ($('[data-f="location_id"]', box)) body.location_id = $('[data-f="location_id"]', box).value;
+          if (box.getAttribute('data-kind') !== 'general') body.rules = readRules(box);
           Promise.all([
-            api('/api/dept/' + id, 'PATCH', { name: $('[data-f="name"]', box).value, is_active: $('[data-f="is_active"]', box).checked, categories: all('[data-cat]:checked', box).map(function (x) { return x.getAttribute('data-cat'); }) }),
+            api('/api/dept/' + id, 'PATCH', body),
             api('/api/dept/' + id + '/users', 'PUT', { user_ids: all('[data-u]:checked', box).map(function (x) { return x.getAttribute('data-u'); }) }),
             api('/api/dept/' + id + '/stations', 'PUT', { station_ids: all('[data-s]:checked', box).map(function (x) { return x.getAttribute('data-s'); }) }),
-          ]).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); });
+          ]).then(function () { toast('Saved'); dept(id); }).catch(function (e) { toast(e.message); });
         };
       });
     });

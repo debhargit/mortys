@@ -766,7 +766,7 @@ function register(app, deps) {
     } catch (e) { fail(res, e); }
   });
 
-  return { unsubLink, invalidate };
+  return { unsubLink, invalidate, dispose };   // dispose: returns.js moves a damaged return on with it
 }
 
 module.exports = { register };

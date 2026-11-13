@@ -31,6 +31,12 @@
 //             be run to the month before; posts cost and depreciation off and
 //             the gain or loss. A disposal can be voided.
 //
+//  Rentals   an asset rented out is a recurring invoice (billing.js plan) that
+//             names it; disposing of it needs the rental ended first.
+//  Costs     bills, banking, invoice and journal lines can name an asset; with
+//             its depreciation and disposal they give each asset's cost of
+//             ownership and what it earned (/api/assets/ownership).
+//
 //  Every posting is made by gl.js (fa_acquire, fa_run, fa_dispose and their
 //  _void); glPost() runs it straight after a save so the ledger shows it.
 // =============================================================================
@@ -128,7 +134,7 @@ function register(app, deps) {
     return a.id;
   }
   const ASSET_SQL = `SELECT a.*, to_char(a.acquired_on, 'YYYY-MM-DD') AS acquired_on, to_char(a.in_service_on, 'YYYY-MM-DD') AS in_service_on,
-        to_char(a.opening_through, 'YYYY-MM') AS opening_through, k.name AS class_name, k.asset_account_id, k.accum_account_id, k.expense_account_id,
+        to_char(a.opening_through, 'YYYY-MM') AS opening_through, to_char(a.market_value_on, 'YYYY-MM-DD') AS market_value_on, k.name AS class_name, k.kind AS class_kind, k.asset_account_id, k.accum_account_id, k.expense_account_id,
         s.name AS supplier, gc.name AS gl_class, fa.code || ' ' || fa.name AS funding_account,
         COALESCE((SELECT SUM(d.amount) FROM fa_depreciation d WHERE d.asset_id = a.id), 0) AS depreciated,
         (SELECT to_char(MAX(d.month), 'YYYY-MM') FROM fa_depreciation d WHERE d.asset_id = a.id) AS last_month,
@@ -138,6 +144,7 @@ function register(app, deps) {
   const shape = (a) => {
     const accum = r2(n(a.opening_accum) + n(a.depreciated));
     return { ...a, cost: r2(a.cost), salvage: r2(a.salvage), opening_accum: r2(a.opening_accum), rate_pct: a.rate_pct == null ? null : Number(a.rate_pct),
+      ownership_pct: a.ownership_pct == null ? 100 : Number(a.ownership_pct), market_value: a.market_value == null ? null : r2(a.market_value),
       depreciated: r2(a.depreciated), accumulated: accum, book_value: r2(n(a.cost) - accum) };
   };
   async function loadAsset(id, q = query) {
@@ -237,6 +244,92 @@ function register(app, deps) {
     } catch (e) { fail(res, e); }
   });
 
+  // ------------------------------------------- costs, income and rentals --
+  // What each asset has cost to run and what it has earned, from the ledger
+  // lines that name it (gl_lines.asset_id): bills, banking and journal lines
+  // for repairs, fuel or insurance; invoices for renting it out; and its own
+  // depreciation and disposal entries.
+  async function ownership(from, to, assetId) {
+    const { rows } = await query(
+      `SELECT l.asset_id, ac.id AS account_id, ac.code, ac.name, ac.type, e.source_kind, SUM(l.amount)::float AS amt
+         FROM gl_lines l JOIN gl_entries e ON e.id = l.entry_id JOIN gl_accounts ac ON ac.id = l.account_id
+        WHERE l.asset_id IS NOT NULL AND ac.type IN ('income', 'other_income', 'cogs', 'expense', 'other_expense')
+          AND ($1::date IS NULL OR e.entry_date >= $1) AND ($2::date IS NULL OR e.entry_date <= $2) AND ($3::int IS NULL OR l.asset_id = $3)
+        GROUP BY 1, 2, 3, 4, 5, 6`, [from, to, assetId || null]);
+    const by = {};
+    for (const r of rows) {
+      const x = by[r.asset_id] = by[r.asset_id] || { income: 0, costs: 0, depreciation: 0, disposal: 0, accounts: {} };
+      const fa = /^fa_run/.test(r.source_kind) ? 'depreciation' : /^fa_dispose/.test(r.source_kind) ? 'disposal' : null;
+      let key, v;
+      if (fa === 'depreciation') { key = 'depreciation'; v = r.amt; }
+      else if (fa === 'disposal') { key = 'disposal'; v = -r.amt; }               // + a gain, - a loss
+      else if (['income', 'other_income'].includes(r.type)) { key = 'income'; v = -r.amt; }
+      else { key = 'costs'; v = r.amt; }
+      x[key] = r2(x[key] + v);
+      const k = r.account_id + ':' + key, acc = x.accounts[k] = x.accounts[k] || { account_id: r.account_id, code: r.code, name: r.name, kind: key, amount: 0 };
+      acc.amount = r2(acc.amount + v);
+    }
+    for (const id in by) {
+      const x = by[id];
+      x.net = r2(x.income + x.disposal - x.costs - x.depreciation);
+      x.accounts = Object.values(x.accounts).filter((a) => a.amount).sort((a, b) => String(a.code).localeCompare(String(b.code)));
+    }
+    return by;
+  }
+  const EMPTY_OWN = { income: 0, costs: 0, depreciation: 0, disposal: 0, net: 0, accounts: [] };
+  async function rentals(assetId) {
+    const { rows } = await query(
+      `SELECT p.id, p.name, p.frequency, p.status, p.status_reason, to_char(p.start_date, 'YYYY-MM-DD') AS start_date, to_char(p.end_date, 'YYYY-MM-DD') AS end_date,
+              to_char(p.next_run, 'YYYY-MM-DD') AS next_run, p.gct_amount::float AS gct_amount, p.lines, COALESCE(NULLIF(u.name, ''), u.email) AS customer, p.customer_id,
+              (SELECT COUNT(*)::int FROM billing_runs r WHERE r.plan_id = p.id) AS invoices
+         FROM billing_plans p LEFT JOIN users u ON u.id = p.customer_id
+        WHERE p.asset_id = $1 AND p.side = 'ar' ORDER BY (p.status = 'active') DESC, p.start_date DESC`, [assetId]);
+    return rows.map((p) => ({ ...p, amount: r2(p.lines.reduce((t, l) => t + n(l.amount), 0) + n(p.gct_amount)), lines: undefined }));
+  }
+
+  // Maintenance, service, software support and insurance contracts for the asset: recurring bills naming it.
+  async function contracts(assetId) {
+    const { rows } = await query(
+      `SELECT p.id, p.name, p.frequency, p.status, p.status_reason, p.pay_mode, to_char(p.start_date, 'YYYY-MM-DD') AS start_date, to_char(p.end_date, 'YYYY-MM-DD') AS end_date,
+              to_char(p.next_run, 'YYYY-MM-DD') AS next_run, p.gct_amount::float AS gct_amount, p.lines, s.name AS supplier, (SELECT COUNT(*)::int FROM billing_runs r WHERE r.plan_id = p.id) AS bills
+         FROM billing_plans p JOIN suppliers s ON s.id = p.supplier_id
+        WHERE p.asset_id = $1 AND p.side = 'ap' ORDER BY (p.status = 'active') DESC, p.start_date DESC`, [assetId]);
+    return rows.map((p) => ({ ...p, amount: r2(p.lines.reduce((t, l) => t + n(l.amount), 0) + n(p.gct_amount)), lines: undefined }));
+  }
+  // Loans that bought the asset or are secured on it: what is still owed (principal not yet billed).
+  async function assetLoans(assetId) {
+    const { rows } = await query(
+      `SELECT l.id, l.name, l.reference, l.status, s.name AS lender, l.principal::float AS principal, l.annual_rate::float AS annual_rate,
+              (l.principal - COALESCE((SELECT SUM(li.principal) FROM loan_instalments li LEFT JOIN ap_bills b ON b.id = li.ap_bill_id
+                                        WHERE li.loan_id = l.id AND li.status = 'billed' AND b.voided_at IS NULL), 0))::float AS balance,
+              COALESCE((SELECT SUM(li.interest) FROM loan_instalments li LEFT JOIN ap_bills b ON b.id = li.ap_bill_id WHERE li.loan_id = l.id AND li.status = 'billed' AND b.voided_at IS NULL), 0)::float AS interest_billed
+         FROM loans l JOIN suppliers s ON s.id = l.supplier_id WHERE l.asset_id = $1 ORDER BY l.id`, [assetId]);
+    return rows.map((l) => ({ ...l, balance: l.status === 'cancelled' ? 0 : r2(l.balance), interest_billed: r2(l.interest_billed) }));
+  }
+
+  // Assets to choose from on a bill, banking, invoice or journal line (any staff
+  // who enter those may see the list, not only accounting).
+  app.get('/api/assets/pick', requireAdmin, async (req, res) => {
+    try {
+      const { rows } = await query(`SELECT id, number, name, status FROM fa_assets WHERE status <> 'void' ORDER BY number`);
+      res.json({ assets: rows });
+    } catch (e) { fail(res, e); }
+  });
+  // Every asset's running costs, income, depreciation and disposal result for a period.
+  app.get('/api/assets/ownership', ...VIEW, async (req, res) => {
+    try {
+      const from = isDate(req.query.from) ? req.query.from : null, to = isDate(req.query.to) ? req.query.to : null;
+      if (from && to && from > to) throw httpError(400, 'The from date is after the to date');
+      const own = await ownership(from, to, null);
+      const { rows } = await query(ASSET_SQL + ` WHERE a.status <> 'void' ORDER BY a.number`);
+      const { rows: rented } = await query(`SELECT asset_id, COUNT(*)::int AS n FROM billing_plans WHERE asset_id IS NOT NULL AND side = 'ar' AND status = 'active' GROUP BY 1`);
+      const live = Object.fromEntries(rented.map((r) => [r.asset_id, r.n]));
+      const list = rows.map(shape).map((a) => Object.assign({ id: a.id, number: a.number, name: a.name, class_name: a.class_name, status: a.status, cost: a.cost, book_value: a.status === 'active' ? a.book_value : 0, rented: !!live[a.id] }, own[a.id] || EMPTY_OWN));
+      const sum = (k) => r2(list.reduce((t, a) => t + n(a[k]), 0));
+      res.json({ from, to, assets: list, totals: { income: sum('income'), costs: sum('costs'), depreciation: sum('depreciation'), disposal: sum('disposal'), net: sum('net') } });
+    } catch (e) { fail(res, e); }
+  });
+
   app.get('/api/assets/:id(\\d+)', ...VIEW, async (req, res) => {
     try {
       const a = shape(await loadAsset(req.params.id));
@@ -257,7 +350,9 @@ function register(app, deps) {
              OR (e.source_kind IN ('fa_run', 'fa_run_void') AND e.source_id IN (SELECT DISTINCT run_id FROM fa_depreciation WHERE asset_id = $1))
           ORDER BY e.entry_date, e.id`, [a.id]);
       const { rows: disposals } = await query(`SELECT d.*, to_char(d.disposed_on, 'YYYY-MM-DD') AS disposed_on, g.code || ' ' || g.name AS proceeds_account FROM fa_disposals d LEFT JOIN gl_accounts g ON g.id = d.proceeds_account_id WHERE d.asset_id = $1 ORDER BY d.id`, [a.id]);
-      res.json({ asset: a, charged: done.map((d) => ({ month: d.month, amount: r2(d.amount) })), projected, disposal, disposals, entries: entries.map((e) => ({ ...e, total: r2(e.total) })) });
+      const own = (await ownership(null, null, a.id))[a.id] || EMPTY_OWN;
+      res.json({ asset: a, charged: done.map((d) => ({ month: d.month, amount: r2(d.amount) })), projected, disposal, disposals, entries: entries.map((e) => ({ ...e, total: r2(e.total) })),
+        ownership: own, rentals: await rentals(a.id), contracts: await contracts(a.id), loans: await assetLoans(a.id) });
     } catch (e) { fail(res, e); }
   });
 
@@ -266,7 +361,17 @@ function register(app, deps) {
     const out = {};
     const text = (k, max) => { if (b[k] !== undefined) out[k] = String(b[k] || '').trim().slice(0, max) || null; };
     if (!cur || b.name !== undefined) { out.name = String(b.name || '').trim().slice(0, 120); if (!out.name) throw httpError(400, 'Give the asset a name'); }
-    text('description', 500); text('serial_no', 80); text('location', 80); text('custodian', 80); text('reference', 80); text('notes', 1000);
+    text('description', 500); text('serial_no', 80); text('location', 80); text('custodian', 80); text('reference', 80); text('notes', 1000); text('co_owners', 200);
+    // The business's share of an asset held with others (the cost entered is that share), and what that share would fetch (report only).
+    if (b.ownership_pct !== undefined) {
+      out.ownership_pct = b.ownership_pct === '' || b.ownership_pct == null ? 100 : Math.round(Number(b.ownership_pct) * 100) / 100;
+      if (!(out.ownership_pct > 0 && out.ownership_pct <= 100)) throw httpError(400, 'The business\'s share is a percentage, more than 0 and up to 100');
+    }
+    if (b.market_value !== undefined) {
+      out.market_value = b.market_value === '' || b.market_value == null ? null : r2(b.market_value);
+      if (out.market_value != null && out.market_value < 0) throw httpError(400, 'The market value cannot be negative');
+      out.market_value_on = out.market_value == null ? null : isDate(b.market_value_on) ? String(b.market_value_on).slice(0, 10) : today();
+    }
     if (b.supplier_id !== undefined) out.supplier_id = parseInt(b.supplier_id, 10) || null;
     if (b.gl_class_id !== undefined) {
       out.gl_class_id = parseInt(b.gl_class_id, 10) || null;
@@ -463,6 +568,8 @@ function register(app, deps) {
       if (day > today()) throw httpError(400, 'The date cannot be in the future');
       const kind = DISPOSALS.includes(b.kind) ? b.kind : null;
       if (!kind) throw httpError(400, 'Say what happened to it (sold, scrapped...)');
+      const { rows: rent } = await query(`SELECT name FROM billing_plans WHERE asset_id = $1 AND side = 'ar' AND status <> 'ended' LIMIT 1`, [parseInt(req.params.id, 10) || 0]);
+      if (rent.length) throw httpError(409, 'It is rented out (' + rent[0].name + '): end the rental first');
       const proceeds = r2(b.proceeds);
       if (proceeds < 0) throw httpError(400, 'The amount received cannot be negative');
       const acct = proceeds ? await plainAccount(b.proceeds_account_id, 'the money went to') : null;

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="referrer" content="no-referrer" />
 <title>Own a Vision Auto Solutions franchise</title>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
 <style>
   :root { --red:#d62828; --navy:#0b1b2b; --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --ok:#16a34a; --bg:#f6f7f9; --card:#fff; }
   @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; } }
@@ -33,6 +33,7 @@
   .hp{position:absolute;left:-9999px}
   .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px} .tabs button{padding:7px 14px;border-radius:999px} .tabs button.on{background:var(--red);border-color:var(--red);color:#fff}
 </style>
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
 <header class="top"><h1 id="shop">Vision Auto Solutions</h1><small id="sub">Franchise</small></header>
@@ -83,7 +84,7 @@
         call(url, { name: name, image: pad.png(), agree: true }).then(function () { out.innerHTML = '<div class="card"><div class="ok">Thank you, ' + esc(name) + '. ' + esc(d.title) + ' is signed.</div><p class="muted">We will send you a copy. You can close this page.</p></div>'; })
           .catch(function (e) { $('go').disabled = false; m.innerHTML = '<div class="msg">' + esc(e.message) + '</div>'; });
       };
-      $('no').onclick = function () { if (!confirm('Decline to sign this document?')) return; call(url, { decline: true, reason: $('why').value }).then(function () { out.innerHTML = '<div class="card"><div class="ok">We have noted that you declined. We will be in touch.</div></div>'; }).catch(function (e) { stop(e.message); }); };
+      $('no').onclick = async function () { if (!(await vasConfirm('Decline to sign this document?'))) return; call(url, { decline: true, reason: $('why').value }).then(function () { out.innerHTML = '<div class="card"><div class="ok">We have noted that you declined. We will be in touch.</div></div>'; }).catch(function (e) { stop(e.message); }); };
     }).catch(function (e) { stop(e.message); });
     try { history.replaceState(null, '', location.pathname + '?s=' + encodeURIComponent(token)); } catch (_) {}
     return;
@@ -188,7 +189,7 @@
               .catch(function (e) { b.disabled = false; $('pM').innerHTML = '<div class="msg">' + esc(e.message) + '</div>'; });
           };
         }
-        Array.prototype.forEach.call(document.querySelectorAll('[data-recv]'), function (x) { x.onclick = function () { x.disabled = true; call(purl + '/orders/' + x.getAttribute('data-recv') + '/receive', {}).then(draw).catch(function (e) { x.disabled = false; alert(e.message); }); }; });
+        Array.prototype.forEach.call(document.querySelectorAll('[data-recv]'), function (x) { x.onclick = function () { x.disabled = true; call(purl + '/orders/' + x.getAttribute('data-recv') + '/receive', {}).then(draw).catch(async function (e) { x.disabled = false; await vasAlert(e.message); }); }; });
         if ($('cGo')) $('cGo').onclick = function () {
           var b = this; b.disabled = true;
           call(purl + '/coop', { description: $('cW').value, media: $('cMd').value, spend_date: $('cD').value, spend: $('cA').value, proof: $('cP').value })

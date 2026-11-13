@@ -61,6 +61,12 @@ function register(app, deps) {
     if (!isBank(a)) throw httpError(400, 'Choose a bank or cash account');
     return a;
   }
+  // Pay Bills can also be paid with a company credit card (a CCARD account, method "card"; cards.js).
+  async function payFromAccount(id, method) {
+    const a = await account(id);
+    if (a && a.is_active && a.qb_type === 'CCARD') { if (method !== 'card') throw httpError(400, 'A credit card pays by card: choose Card as the method'); return a; }
+    return bankAccount(id);
+  }
   async function lineAccount(id) {
     const a = await account(id);
     if (!a || !a.is_active) throw httpError(400, 'Choose an account for every line');
@@ -74,6 +80,13 @@ function register(app, deps) {
     if (!rows.length) throw httpError(400, 'Choose an active class (or none)');
     return rows[0].id;
   }
+  // The fixed asset a line is for (repairs, fuel, rent of it): any asset in the register that is not voided.
+  async function assetId(v) {
+    if (v == null || v === '') return null;
+    const { rows } = await query(`SELECT id FROM fa_assets WHERE id = $1 AND status <> 'void'`, [parseInt(v, 10) || 0]);
+    if (!rows.length) throw httpError(400, 'Choose a fixed asset from the register (or none)');
+    return rows[0].id;
+  }
   // Shop name and address for printed statements, cheques and deposit slips.
   app.get('/api/books/shop', requireAdmin, async (req, res) => {
     try { const s = (await getShop()) || {}; res.json({ name: s.name || 'Vision Auto Solutions', address: s.address || '', phone: s.phone || '', email: s.email || '' }); } catch (e) { fail(res, e); }
@@ -81,7 +94,7 @@ function register(app, deps) {
   app.get('/api/books/accounts', requireAdmin, async (req, res) => {
     try {
       const { rows } = await query(`SELECT id, code, name, type, qb_type, system_key FROM gl_accounts WHERE is_active ORDER BY code`);
-      res.json({ accounts: rows.map((a) => Object.assign(a, { bank: isBank(Object.assign({ is_active: true }, a)), ar_ap: ['ar', 'ap'].includes(a.system_key) || ['AR', 'AP'].includes(a.qb_type) })) });
+      res.json({ accounts: rows.map((a) => Object.assign(a, { bank: isBank(Object.assign({ is_active: true }, a)), ar_ap: ['ar', 'ap'].includes(a.system_key) || ['AR', 'AP'].includes(a.qb_type), card: a.qb_type === 'CCARD' })) });
     } catch (e) { fail(res, e); }
   });
 
@@ -102,12 +115,14 @@ function register(app, deps) {
   app.get('/api/ar/customers', ...AR, async (req, res) => {
     try {
       const q = String(req.query.q || '').trim().slice(0, 60), f = String(req.query.filter || '');
+      // all=1 (the paged list on the Customer centre): every row, up to 10,000; filter=all: every customer, owing or not.
+      const cap = req.query.all === '1' ? 10000 : 300;
       const { rows } = await query(
         `WITH inv AS (SELECT customer_id, SUM(open) AS open, SUM(open) FILTER (WHERE COALESCE(due_date, created_at::date) < CURRENT_DATE) AS overdue,
                              MAX(CURRENT_DATE - COALESCE(due_date, created_at::date)) AS oldest, COUNT(*)::int AS invoices
                         FROM (${OPEN_SQL}) z WHERE customer_id IS NOT NULL GROUP BY customer_id),
               cr AS (${CREDIT_SQL})
-         SELECT u.id, COALESCE(NULLIF(u.name, ''), u.email) AS name, u.account_number, u.phone, u.credit_limit_usd::float AS credit_limit, u.payment_terms_days,
+         SELECT u.id, COALESCE(NULLIF(u.name, ''), u.email) AS name, u.account_number, u.phone, u.email, u.credit_limit_usd::float AS credit_limit, u.payment_terms_days,
                 u.credit_hold, COALESCE(inv.open, 0)::float AS open, COALESCE(inv.overdue, 0)::float AS overdue, GREATEST(COALESCE(inv.oldest, 0), 0)::int AS oldest_days,
                 COALESCE(inv.invoices, 0) AS invoices, COALESCE(cr.credit, 0)::float AS credit,
                 (COALESCE(inv.open, 0) - COALESCE(cr.credit, 0))::float AS balance,
@@ -115,13 +130,13 @@ function register(app, deps) {
            FROM users u LEFT JOIN inv ON inv.customer_id = u.id LEFT JOIN cr ON cr.customer_id = u.id
           WHERE NOT u.is_staff AND NOT COALESCE(u.is_admin, false)
             AND ($1 = '' OR u.name ILIKE '%' || $1 || '%' OR u.account_number ILIKE $1 || '%' OR regexp_replace(COALESCE(u.phone, ''), '[^0-9]', '', 'g') LIKE '%' || NULLIF(regexp_replace($1, '[^0-9]', '', 'g'), '') || '%')
-            AND ($1 <> '' OR COALESCE(inv.open, 0) > 0.005 OR COALESCE(cr.credit, 0) > 0.005 OR u.credit_hold)
-            AND ($2 = '' OR ($2 = 'overdue' AND COALESCE(inv.overdue, 0) > 0.005) OR ($2 = 'hold' AND u.credit_hold) OR ($2 = 'credit' AND COALESCE(cr.credit, 0) > 0.005)
+            AND ($1 <> '' OR $2 = 'all' OR COALESCE(inv.open, 0) > 0.005 OR COALESCE(cr.credit, 0) > 0.005 OR u.credit_hold)
+            AND ($2 = '' OR $2 = 'all' OR ($2 = 'overdue' AND COALESCE(inv.overdue, 0) > 0.005) OR ($2 = 'hold' AND u.credit_hold) OR ($2 = 'credit' AND COALESCE(cr.credit, 0) > 0.005)
                  OR ($2 = 'over_limit' AND u.credit_limit_usd IS NOT NULL AND COALESCE(inv.open, 0) - COALESCE(cr.credit, 0) > u.credit_limit_usd))
-          ORDER BY COALESCE(inv.overdue, 0) DESC, COALESCE(inv.open, 0) DESC LIMIT 300`, [q, f]);
+          ORDER BY COALESCE(inv.overdue, 0) DESC, COALESCE(inv.open, 0) DESC, u.name LIMIT $3`, [q, f, cap]);
       for (const r of rows) { r.open = r2(r.open); r.overdue = r2(r.overdue); r.credit = r2(r.credit); r.balance = r2(r.balance); }
       const tot = rows.reduce((t, r) => ({ open: t.open + r.open, overdue: t.overdue + r.overdue, credit: t.credit + r.credit }), { open: 0, overdue: 0, credit: 0 });
-      res.json({ customers: rows, totals: { open: r2(tot.open), overdue: r2(tot.overdue), credit: r2(tot.credit) } });
+      res.json({ customers: rows, capped: rows.length >= cap, totals: { open: r2(tot.open), overdue: r2(tot.overdue), credit: r2(tot.credit) } });
     } catch (e) { fail(res, e); }
   });
 
@@ -152,7 +167,7 @@ function register(app, deps) {
       if (!cu.length) throw httpError(404, 'Customer not found');
       const invoices = await openInvoices(id);
       const { rows: pays } = await query(
-        `SELECT ap.id, to_char(COALESCE(ap.paid_on, ap.created_at::date), 'YYYY-MM-DD') AS day, ap.amount_usd::float AS amount, ap.method, ap.reference, ap.notes, ap.voided_at, ap.void_reason,
+        `SELECT ap.id, to_char(COALESCE(ap.paid_on, ap.created_at::date), 'YYYY-MM-DD') AS day, ap.amount_usd::float AS amount, ap.method, ap.reference, ap.notes, ap.voided_at, ap.void_reason, ap.return_id,
                 ga.name AS deposit_to, u.name AS by_name,
                 COALESCE((SELECT json_agg(json_build_object('receipt', COALESCE(s.receipt_number, i.number), 'amount', x.amount::float)) FROM ar_applications x LEFT JOIN pos_sales s ON s.id = x.sale_id LEFT JOIN ar_invoices i ON i.id = x.invoice_id WHERE x.payment_id = ap.id), '[]') AS applied_to
            FROM account_payments_all ap LEFT JOIN gl_accounts ga ON ga.id = ap.deposit_account_id LEFT JOIN users u ON u.id = ap.received_by
@@ -342,12 +357,55 @@ function register(app, deps) {
       res.json(Object.assign({ ok: true }, out));
     } catch (e) { fail(res, e); }
   });
+  // Bad debt: write off invoices and till charges the customer will never pay.
+  // Recorded as a "payment" with method 'writeoff' and no money account, applied
+  // to exactly the items chosen, so every balance in the system drops; the
+  // ledger posts Dr Bad Debts, Cr A/R. Undo it with the payment's Void (the
+  // customer pays after all), then receive the payment as usual.
+  app.post('/api/ar/writeoffs', ...AR, async (req, res) => {
+    try {
+      const b = req.body || {};
+      const cid = parseInt(b.customer_id, 10);
+      const reason = String(b.reason || '').trim().slice(0, 300);
+      if (reason.length < 3) throw httpError(400, 'Say why it is being written off (e.g. customer closed down, cannot be traced)');
+      const day = isDate(b.written_off_on) ? b.written_off_on : today();
+      if (day > today()) throw httpError(400, 'The date cannot be in the future');
+      const apps = (Array.isArray(b.applications) ? b.applications : []).filter((a) => r2(a && a.amount) > 0);
+      const amount = r2(apps.reduce((t, a) => t + r2(a.amount), 0));
+      if (!(amount > 0)) throw httpError(400, 'Choose the invoices or charges to write off, with an amount');
+      const { rows: cu } = await query(`SELECT id FROM users WHERE id = $1 AND NOT is_staff`, [cid]);
+      if (!cu.length) throw httpError(404, 'Customer not found');
+      const out = await tx(async (c) => {
+        const { rows } = await c.query(
+          `INSERT INTO account_payments (customer_id, amount_usd, method, reference, notes, received_by, paid_on, deposit_account_id) VALUES ($1,$2,'writeoff','Bad debt',$3,$4,$5,NULL) RETURNING id`,
+          [cid, amount, reason, req.session.userId, day]);
+        await applyAll(c, cid, rows[0].id, apps, amount, req.session.userId);
+        return { id: rows[0].id, amount };
+      });
+      post();
+      res.json(Object.assign({ ok: true }, out));
+    } catch (e) { fail(res, e); }
+  });
+  // Bad debts written off in a period, for the accountant (and GCT relief claims).
+  app.get('/api/ar/writeoffs', ...AR, async (req, res) => {
+    try {
+      const from = isDate(req.query.from) ? req.query.from : '1900-01-01', to = isDate(req.query.to) ? req.query.to : today();
+      const { rows } = await query(
+        `SELECT ap.id, to_char(COALESCE(ap.paid_on, ap.created_at::date), 'YYYY-MM-DD') AS day, ap.customer_id, COALESCE(NULLIF(u.name, ''), u.email) AS customer, ap.amount_usd::float AS amount, ap.notes AS reason,
+                ap.voided_at, ap.void_reason, b.name AS by_name,
+                COALESCE((SELECT json_agg(json_build_object('receipt', COALESCE(s.receipt_number, i.number), 'amount', x.amount::float)) FROM ar_applications x LEFT JOIN pos_sales s ON s.id = x.sale_id LEFT JOIN ar_invoices i ON i.id = x.invoice_id WHERE x.payment_id = ap.id), '[]') AS items
+           FROM account_payments_all ap JOIN users u ON u.id = ap.customer_id LEFT JOIN users b ON b.id = ap.received_by
+          WHERE ap.method = 'writeoff' AND COALESCE(ap.paid_on, ap.created_at::date) BETWEEN $1 AND $2 ORDER BY 2 DESC, ap.id DESC`, [from, to]);
+      res.json({ writeoffs: rows, total: r2(rows.filter((w) => !w.voided_at).reduce((t, w) => t + w.amount, 0)) });
+    } catch (e) { fail(res, e); }
+  });
   app.post('/api/ar/payments/:id/apply', ...AR, async (req, res) => {
     try {
       const pid = parseInt(req.params.id, 10);
       const out = await tx(async (c) => {
         const { rows } = await c.query(`SELECT * FROM account_payments_all WHERE id = $1 AND voided_at IS NULL FOR UPDATE`, [pid]);
         if (!rows.length) throw httpError(404, 'Payment not found (or voided)');
+        if (rows[0].method === 'writeoff') throw httpError(409, 'A write-off covers only the items it was made for');
         const cr = await paymentCredit(pid, c.query.bind(c));
         if (!(cr.unapplied > 0.005)) throw httpError(409, 'Nothing left on this payment to apply');
         return applyAll(c, rows[0].customer_id, pid, (req.body || {}).applications, cr.unapplied, req.session.userId);
@@ -360,6 +418,9 @@ function register(app, deps) {
       const reason = String((req.body || {}).reason || '').trim().slice(0, 200);
       if (reason.length < 3) throw httpError(400, 'Say why the payment is voided');
       const id = parseInt(req.params.id, 10);
+      // A credit note is the return itself: undone by voiding the return, so stock, the ledger and commission go back with it.
+      const { rows: cnp } = await query(`SELECT reference FROM account_payments_all WHERE id = $1 AND method = 'credit_note'`, [id]);
+      if (cnp.length) throw httpError(409, 'This is credit note ' + (cnp[0].reference || '') + ' from a return. Void the return at the till (Recall, Credit Notes) instead.');
       const { rows: cl } = await query(`SELECT 1 FROM bank_cleared bc JOIN gl_lines l ON l.id = bc.gl_line_id JOIN gl_entries e ON e.id = l.entry_id JOIN bank_recons r ON r.id = bc.recon_id WHERE e.source_kind = 'account_payment' AND e.source_id = $1 AND r.status = 'done'`, [id]);
       if (cl.length) throw httpError(409, 'This payment is in a finished bank reconciliation; undo that reconciliation first');
       const { rows: dep } = await query(`SELECT 1 FROM bank_txn_lines bl JOIN bank_txns t ON t.id = bl.txn_id JOIN gl_lines l ON l.id = bl.gl_line_id JOIN gl_entries e ON e.id = l.entry_id WHERE e.source_kind = 'account_payment' AND e.source_id = $1 AND t.voided_at IS NULL`, [id]);
@@ -426,7 +487,7 @@ function register(app, deps) {
   app.get('/api/ar/aging', ...AR, async (req, res) => {
     try {
       const { rows } = await query(
-        `SELECT o.customer_id, COALESCE(NULLIF(u.name, ''), o.customer_name) AS name,
+        `SELECT o.customer_id, COALESCE(NULLIF(u.name, ''), o.customer_name) AS name, u.account_number, u.phone,
                 COALESCE(SUM(o.open) FILTER (WHERE CURRENT_DATE - COALESCE(o.due_date, o.created_at::date) <= 0), 0)::float AS current,
                 COALESCE(SUM(o.open) FILTER (WHERE CURRENT_DATE - COALESCE(o.due_date, o.created_at::date) BETWEEN 1 AND 30), 0)::float AS d30,
                 COALESCE(SUM(o.open) FILTER (WHERE CURRENT_DATE - COALESCE(o.due_date, o.created_at::date) BETWEEN 31 AND 60), 0)::float AS d60,
@@ -434,7 +495,7 @@ function register(app, deps) {
                 COALESCE(SUM(o.open) FILTER (WHERE CURRENT_DATE - COALESCE(o.due_date, o.created_at::date) > 90), 0)::float AS over90,
                 SUM(o.open)::float AS total
            FROM (${OPEN_SQL}) o LEFT JOIN users u ON u.id = o.customer_id
-          GROUP BY o.customer_id, COALESCE(NULLIF(u.name, ''), o.customer_name) ORDER BY total DESC LIMIT 500`);
+          GROUP BY o.customer_id, COALESCE(NULLIF(u.name, ''), o.customer_name), u.account_number, u.phone ORDER BY total DESC LIMIT 10000`);
       const t = { current: 0, d30: 0, d60: 0, d90: 0, over90: 0, total: 0 };
       for (const r of rows) for (const k of Object.keys(t)) { r[k] = r2(r[k]); t[k] = r2(t[k] + r[k]); }
       res.json({ rows, totals: t, as_of: today() });
@@ -447,9 +508,9 @@ function register(app, deps) {
         `WITH inv AS (SELECT customer_id, SUM(open) FILTER (WHERE COALESCE(due_date, created_at::date) < CURRENT_DATE) AS overdue,
                              MAX(CURRENT_DATE - COALESCE(due_date, created_at::date)) AS oldest
                         FROM (${OPEN_SQL}) z WHERE customer_id IS NOT NULL GROUP BY customer_id)
-         SELECT u.id, COALESCE(NULLIF(u.name, ''), u.email) AS name, u.phone, u.email, u.credit_hold, inv.overdue::float AS overdue, inv.oldest::int AS oldest_days,
+         SELECT u.id, COALESCE(NULLIF(u.name, ''), u.email) AS name, u.account_number, u.phone, u.email, u.credit_hold, inv.overdue::float AS overdue, inv.oldest::int AS oldest_days,
                 (SELECT row_to_json(x) FROM (SELECT kind, note, created_at, to_char(promise_date, 'YYYY-MM-DD') AS promise_day FROM ar_notes WHERE customer_id = u.id ORDER BY created_at DESC LIMIT 1) x) AS last
-           FROM inv JOIN users u ON u.id = inv.customer_id WHERE inv.overdue > 0.005 AND NOT u.is_staff ORDER BY inv.oldest DESC LIMIT 300`);
+           FROM inv JOIN users u ON u.id = inv.customer_id WHERE inv.overdue > 0.005 AND NOT u.is_staff ORDER BY inv.oldest DESC LIMIT 10000`);
       for (const r of rows) {
         r.overdue = r2(r.overdue);
         const promised = r.last && r.last.kind === 'promise' && r.last.promise_day >= today();
@@ -543,7 +604,7 @@ function register(app, deps) {
   });
   app.get('/api/ap/supplier-list', ...AP, async (req, res) => {
     try {
-      const { rows } = await query(`SELECT s.id, s.name, s.payment_terms_days, s.default_account_id, s.default_class_id FROM suppliers s WHERE s.name IS NOT NULL AND s.name <> '' ORDER BY s.name LIMIT 3000`);
+      const { rows } = await query(`SELECT s.id, s.name, s.payment_terms_days, s.default_account_id, s.default_class_id FROM suppliers s WHERE s.name IS NOT NULL AND s.name <> '' AND s.merged_into_id IS NULL ORDER BY s.name LIMIT 3000`);
       res.json({ suppliers: rows });
     } catch (e) { fail(res, e); }
   });
@@ -611,9 +672,9 @@ function register(app, deps) {
       const { rows: sup } = await query(`SELECT id, payment_terms_days FROM suppliers WHERE id = $1`, [sid || 0]);
       if (!sup.length) throw httpError(400, 'Choose the supplier');
       if (!isDate(b.bill_date)) throw httpError(400, 'Bill date');
-      const lines = (Array.isArray(b.lines) ? b.lines : []).map((l) => ({ account_id: parseInt(l.account_id, 10), description: String(l.description || '').slice(0, 200) || null, amount: r2(l.amount), class_id: l.class_id })).filter((l) => l.amount > 0);
+      const lines = (Array.isArray(b.lines) ? b.lines : []).map((l) => ({ account_id: parseInt(l.account_id, 10), description: String(l.description || '').slice(0, 200) || null, amount: r2(l.amount), class_id: l.class_id, asset_id: l.asset_id })).filter((l) => l.amount > 0);
       if (!lines.length) throw httpError(400, 'Add at least one line with an amount');
-      for (const l of lines) { await lineAccount(l.account_id); l.class_id = await classId(l.class_id); }
+      for (const l of lines) { await lineAccount(l.account_id); l.class_id = await classId(l.class_id); l.asset_id = await assetId(l.asset_id); }
       const gct = r2(b.gct_amount);
       if (gct < 0) throw httpError(400, 'GCT cannot be negative');
       const total = r2(lines.reduce((t, l) => t + l.amount, 0) + gct);
@@ -627,7 +688,7 @@ function register(app, deps) {
       const id = await tx(async (c) => {
         const { rows } = await c.query(`INSERT INTO ap_bills (kind, supplier_id, number, bill_date, due_date, memo, gct_amount, total, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
           [kind, sid, number, b.bill_date, kind === 'bill' ? due : null, String(b.memo || '').slice(0, 300) || null, gct, total, req.session.userId]);
-        for (const l of lines) await c.query(`INSERT INTO ap_bill_lines (bill_id, account_id, description, amount, class_id) VALUES ($1,$2,$3,$4,$5)`, [rows[0].id, l.account_id, l.description, l.amount, l.class_id]);
+        for (const l of lines) await c.query(`INSERT INTO ap_bill_lines (bill_id, account_id, description, amount, class_id, asset_id) VALUES ($1,$2,$3,$4,$5,$6)`, [rows[0].id, l.account_id, l.description, l.amount, l.class_id, l.asset_id]);
         return rows[0].id;
       });
       post();
@@ -653,7 +714,7 @@ function register(app, deps) {
       const sid = parseInt(b.supplier_id, 10);
       if (!['cheque', 'transfer', 'cash', 'card'].includes(b.method)) throw httpError(400, 'Cheque, transfer, cash or card?');
       const payDate = isDate(b.pay_date) ? b.pay_date : today();
-      const acct = await bankAccount(b.account_id);
+      const acct = await payFromAccount(b.account_id, b.method);
       const bills = (Array.isArray(b.bills) ? b.bills : []).map((x) => ({ kind: String(x.kind), id: parseInt(x.id, 10), amount: r2(x.amount) })).filter((x) => x.amount > 0);
       const credits = (Array.isArray(b.credits) ? b.credits : []).map((x) => ({ kind: 'credit', id: parseInt(x.id, 10), amount: r2(x.amount) })).filter((x) => x.amount > 0);
       if (!bills.length) throw httpError(400, 'Choose the bills to pay');
@@ -773,7 +834,7 @@ function register(app, deps) {
     const { rows } = await c.query(
       `INSERT INTO bank_txns (kind, account_id, txn_date, payee, supplier_id, cheque_number, reference, memo, amount, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
       [kind, accountId, date, payee, supplierId, cheque, reference, memo, amount, userId]);
-    for (const l of lines) await c.query(`INSERT INTO bank_txn_lines (txn_id, account_id, amount, memo, gl_line_id, class_id) VALUES ($1,$2,$3,$4,$5,$6)`, [rows[0].id, l.account_id, l.amount, l.memo || null, l.gl_line_id || null, l.class_id || null]);
+    for (const l of lines) await c.query(`INSERT INTO bank_txn_lines (txn_id, account_id, amount, memo, gl_line_id, class_id, asset_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`, [rows[0].id, l.account_id, l.amount, l.memo || null, l.gl_line_id || null, l.class_id || null, l.asset_id || null]);
     return { id: rows[0].id, amount };
   }
   app.post('/api/bank/txns', ...BK, async (req, res) => {
@@ -783,8 +844,8 @@ function register(app, deps) {
       if (!kind) throw httpError(400, 'Payment, deposit or transfer?');
       const acct = await bankAccount(b.account_id);
       const date = isDate(b.txn_date) ? b.txn_date : today();
-      let lines = (Array.isArray(b.lines) ? b.lines : []).map((l) => ({ account_id: parseInt(l.account_id, 10), amount: r2(l.amount), memo: String(l.memo || '').slice(0, 200) || null, class_id: l.class_id })).filter((l) => l.amount > 0);
-      for (const l of lines) l.class_id = await classId(l.class_id);
+      let lines = (Array.isArray(b.lines) ? b.lines : []).map((l) => ({ account_id: parseInt(l.account_id, 10), amount: r2(l.amount), memo: String(l.memo || '').slice(0, 200) || null, class_id: l.class_id, asset_id: l.asset_id })).filter((l) => l.amount > 0);
+      for (const l of lines) { l.class_id = await classId(l.class_id); l.asset_id = await assetId(l.asset_id); }
       if (kind === 'transfer') {
         const toAcct = await bankAccount(b.to_account_id);
         if (toAcct.id === acct.id) throw httpError(400, 'Transfer to a different account');
@@ -1263,9 +1324,13 @@ function register(app, deps) {
     return t && !/^total\b/i.test(t) ? t : null;
   }
   async function supplierMatcher() {
-    const { rows } = await query(`SELECT id, name, phone, email, address, contact_name, payment_terms, payment_terms_days, account_number, tax_id FROM suppliers WHERE name IS NOT NULL AND name <> ''`);
+    const { rows } = await query(`SELECT id, name, phone, email, address, contact_name, payment_terms, payment_terms_days, account_number, tax_id, merged_into_id FROM suppliers WHERE name IS NOT NULL AND name <> ''`);
     const exact = new Map(), loose = new Map();
-    for (const s of rows) { exact.set(s.name.trim().toLowerCase(), s); if (!loose.has(qnorm(s.name))) loose.set(qnorm(s.name), s); }
+    // A supplier merged into another (supplier-hub.js) answers to its old name with the one it was merged into.
+    const byId = new Map(rows.map((s) => [s.id, s]));
+    const live = (s) => { for (let i = 0; s && s.merged_into_id && byId.get(s.merged_into_id) && i < 10; i++) s = byId.get(s.merged_into_id); return s; };
+    for (const s of rows.filter((x) => !x.merged_into_id)) { exact.set(s.name.trim().toLowerCase(), s); if (!loose.has(qnorm(s.name))) loose.set(qnorm(s.name), s); }
+    for (const s of rows.filter((x) => x.merged_into_id)) { const k = s.name.trim().toLowerCase(); if (!exact.has(k)) exact.set(k, live(s)); if (!loose.has(qnorm(s.name))) loose.set(qnorm(s.name), live(s)); }
     return (name) => {
       const e = exact.get(String(name || '').trim().toLowerCase());
       if (e) return { s: e, how: 'exact' };
@@ -1615,7 +1680,7 @@ function register(app, deps) {
   // For billing.js: the same open items, reminder email and supplier bills these screens use.
   // Every open customer item (sales on account and invoices), for the cash forecast (budget.js).
   const arOpenItems = async () => (await query(`SELECT o.doc, o.id, o.customer_id, o.open::float AS open, to_char(COALESCE(o.due_date, o.created_at::date), 'YYYY-MM-DD') AS due FROM (${OPEN_SQL}) o`)).rows;
-  return { openInvoices, statement, statementHtml, statementText, statementSms, reminderEmail, canEmail, apDocs, arOpenItems, makeTxn, lineAccount, bankAccount, classId, post };
+  return { openInvoices, statement, statementHtml, statementText, statementSms, reminderEmail, canEmail, apDocs, arOpenItems, makeTxn, lineAccount, bankAccount, classId, assetId, post };
 }
 
 module.exports = { register };
