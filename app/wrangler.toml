@@ -13,6 +13,21 @@ migrations_dir = "migrations"
 # (ce557e06f410b0e79dbd1cbe3adeef8b). Created 2026-09-03.
 database_id = "bf998f24-7329-467f-959e-898589aa5c17"
 
+# KV cache for the signed-out storefront catalogue. The catalogue-cache cron
+# (functions/_lib/jobs.js) writes the whole packed catalogue here once a day and
+# guests read it instead of scanning ~36k products in D1 per edge rebuild -- the
+# fix for the free-tier 5M-reads/day limit. The code falls back to a live build
+# when this binding is absent, so it is safe to deploy commented out.
+#
+# To turn it on:
+#   1) npx wrangler kv namespace create CATALOG_KV
+#   2) paste the printed id below and uncomment these three lines
+#   3) redeploy:  npm run cf:deploy
+#   4) prime it once:  POST /api/cron/catalogue-cache  (Bearer CRON_SECRET)
+# [[kv_namespaces]]
+# binding = "CATALOG_KV"
+# id = "<id printed by step 1>"
+
 # Where new-order alerts go, and the From line for outbound email. Override
 # any of these without touching code.
 [vars]
@@ -22,6 +37,16 @@ EMAIL_FROM = "Morty's Auto Parts <noreply@mortsautoparts.com>"
 # The hosted site is HTTPS-only, so the session cookie must carry Secure.
 # (_lib/session.js reads this; unset = no Secure flag.)
 COOKIE_SECURE = "true"
+
+# Reports and sales history are read from the till's full database over the
+# tunnel (functions/_lib/till_gateway.js) -- D1 only holds 2026. Needs the
+# shared secret too; the same value goes in the till's app\server-config.json
+# under "gateway": { "secret": ... }:
+#   npx wrangler pages secret put TILL_GATEWAY_SECRET --project-name mortysautoparts
+# Without the secret, or with this line removed, everything answers from D1.
+# Off until a tunnel routes till.mortsautoparts.com to the shop PC
+# (cloudflared-config.yml); then uncomment.
+# TILL_ORIGIN = "https://till.mortsautoparts.com"
 
 # Settings -> "Local / offline server" download panel (functions/_routes/
 # admin_misc.js GET /api/admin/local-server). Publish the portable-edition
@@ -71,6 +96,9 @@ COOKIE_SECURE = "true"
 # UUID, display currency and on/off live in shop_settings (Admin -> Settings).
 # The JWT signing secret is a wrangler secret:
 #   npx wrangler pages secret put FYGARO_JWT_SECRET --project-name mortysautoparts
+# The webhook is verified with a second, different secret (the one Fygaro signs
+# its callback with). The webhook rejects everything until this is set:
+#   npx wrangler pages secret put FYGARO_WEBHOOK_SECRET --project-name mortysautoparts
 # In the Fygaro dashboard, set the button's webhook URL to
 #   https://<site>/api/webhooks/fygaro
 # and its return URL to https://<site>/order-success.html (the checkout also

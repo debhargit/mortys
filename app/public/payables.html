@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Payables · Morty's Auto Parts</title>
+<link rel="stylesheet" href="/assets/books.css">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Suppliers &amp; payables</h1><nav><a href="/receivables.html">Receivables</a><a href="/banking.html">Banking</a><a href="/accounting.html">Ledger</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"><button data-t="sup" class="on">Supplier centre</button><button data-t="pay">Pay bills</button><button data-t="bill">Enter a bill</button><button data-t="credit">Enter a supplier credit</button><button data-t="aging">A/P aging</button><button data-t="loans">Loans</button><button data-t="rec">Recurring bills</button><button data-t="qb">Import from QuickBooks</button></div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<datalist id="suppliers"></datalist>
+<script src="/assets/books-common.js?v=20261019"></script>
+<script src="/assets/billing-ui.js?v=20261019"></script>
+<script src="/assets/doc-attach.js"></script>
+<script src="/assets/invoice-scan.js?v=20261028"></script>
+<script>
+(function () {
+  'use strict';
+  var B = window.Books, $ = B.$, all = B.all, esc = B.esc, J = B.J, api = B.api, toast = B.toast, modal = B.modal, close = B.close;
+  var tab = 'sup', suppliers = [], KIND = { receipt: 'Goods received', po: 'Purchase order', bill: 'Bill', credit: 'Credit' };
+
+  function supplierByName(v) { v = String(v || '').trim().toLowerCase(); return suppliers.find(function (s) { return s.name.toLowerCase() === v; }); }
+
+  // ------------------------------------------------------------ supplier centre --
+  function sup() {
+    return api('/api/ap/suppliers?q=' + encodeURIComponent(sup.q || '')).then(function (d) {
+      $('#out').innerHTML = '<div class="tiles"><div class="tile"><span class="k">Unpaid bills</span><b>' + J(d.totals.open) + '</b></div><div class="tile bad"><span class="k">Overdue</span><b>' + J(d.totals.overdue) + '</b></div><div class="tile"><span class="k">Supplier credits</span><b>' + J(d.totals.credits) + '</b></div></div>' +
+        '<div class="card"><div class="controls"><div style="flex:1"><label>Find a supplier</label><input id="q" value="' + esc(sup.q || '') + '" style="width:100%"></div></div><div class="scroll"><table><thead><tr><th>Supplier</th><th class="n">Bills</th><th class="n">Unpaid</th><th class="n">Overdue</th><th class="n">Credits</th><th>Next due</th></tr></thead><tbody>' +
+        (d.suppliers.length ? d.suppliers.map(function (s) { return '<tr data-s="' + s.id + '" class="click"><td><b>' + esc(s.name) + '</b></td><td class="n">' + s.bills + '</td><td class="n">' + J(s.open) + '</td><td class="n">' + (s.overdue ? '<span class="pill bad">' + J(s.overdue) + '</span>' : '') + '</td><td class="n">' + (s.credits ? J(s.credits) : '') + '</td><td>' + esc(s.next_due || '') + '</td></tr>'; }).join('') : '<tr><td colspan="6" class="empty">No unpaid bills. Search to open any supplier.</td></tr>') + '</tbody></table></div></div>';
+      $('#q').onkeydown = function (e) { if (e.key === 'Enter') { sup.q = this.value.trim(); sup(); } };
+      all('[data-s]').forEach(function (r) { r.onclick = function () { detail(+r.getAttribute('data-s')); }; });
+    });
+  }
+  function docRows(list, withPay) {
+    return list.map(function (b) { return '<tr><td>' + esc(KIND[b.kind]) + '</td><td>' + esc(b.number) + (b.kind === 'bill' || b.kind === 'credit' ? ' <a href="#" data-bv="' + b.id + '">view</a>' : '') + '</td><td>' + esc(b.day) + '</td><td>' + esc(b.due || '') + '</td><td class="n">' + J(b.amount) + '</td><td class="n">' + J(b.paid) + '</td><td class="n"><b>' + J(b.open) + '</b></td><td class="n">' + (b.days_overdue ? '<span class="pill bad">' + b.days_overdue + ' d</span>' : '') + '</td></tr>'; }).join('');
+  }
+  function detail(id) {
+    return api('/api/ap/suppliers/' + id).then(function (d) {
+      var s = d.supplier;
+      $('#out').innerHTML = '<div class="controls"><button id="bk">◀ All suppliers</button><button id="er" title="Company, addresses, tax ID, bills and items purchased">Edit supplier record ›</button></div><div class="card"><h2>' + esc(s.name) + '</h2>' +
+        '<div class="controls"><button class="primary" id="pb">Pay bills</button><button id="eb">Enter a bill</button><button id="ec">Enter a credit</button><span style="margin-left:auto"></span>' +
+        '<div><label>Terms (days)</label><input id="tm" type="number" value="' + (s.payment_terms_days == null ? '' : s.payment_terms_days) + '" style="width:80px"></div><div><label>Usual expense account</label><select id="da">' + B.accountOptions('line', s.default_account_id) + '</select></div><div><label>Usual class</label><select id="dc">' + B.classOptions(s.default_class_id) + '</select></div><button id="sv">Save</button></div></div>' +
+        '<div class="card"><h2>Unpaid</h2><div class="scroll"><table><thead><tr><th>Type</th><th>Number</th><th>Date</th><th>Due</th><th class="n">Amount</th><th class="n">Paid</th><th class="n">Open</th><th class="n">Overdue</th></tr></thead><tbody>' + (d.open.length ? docRows(d.open) : '<tr><td colspan="8" class="empty">Nothing unpaid.</td></tr>') + '</tbody></table></div></div>' +
+        '<div class="card"><h2>Payments</h2><div class="scroll"><table><thead><tr><th>Date</th><th>Method</th><th>Cheque / ref</th><th>Paid from</th><th class="n">Amount</th><th></th></tr></thead><tbody>' +
+        (d.payments.length ? d.payments.map(function (p) { return '<tr style="' + (p.voided_at ? 'opacity:.5' : '') + '"><td>' + esc(p.day) + '</td><td>' + esc(p.method) + '</td><td>' + esc(p.cheque_number || p.reference || '') + '</td><td>' + esc(p.paid_from) + '</td><td class="n">' + J(p.amount) + '</td><td style="white-space:nowrap"><button class="sm" data-pp="' + p.id + '">Print</button> ' + (p.voided_at ? '<span class="pill bad">void</span> <small>' + esc(p.void_reason || '') + '</small>' : '<button class="sm" data-vp="' + p.id + '">Void</button>') + '</td></tr>'; }).join('') : '<tr><td colspan="6" class="empty">No payments.</td></tr>') + '</tbody></table></div></div>' +
+        (d.history.length ? '<div class="card"><h2>Paid bills</h2><div class="scroll"><table><tbody>' + docRows(d.history) + '</tbody></table></div></div>' : '') +
+        '<div class="card"><h2>Supplier invoices &amp; documents</h2><p class="sub">Invoices, statements and anything else from this supplier, kept in the document centre. A bill\'s own invoice is filed with the bill (Enter a bill → Scan the supplier\'s invoice).</p><div id="supdocs"></div></div>';
+      $('#bk').onclick = show;
+      if (window.VADocs) window.VADocs.mount($('#supdocs'), 'supplier', id, { category: 'payables' });
+      $('#er').onclick = function () { location.href = '/admin.html#tab=suppliers&id=' + id; };
+      $('#pb').onclick = function () { tab = 'pay'; mark(); pay(id); };
+      $('#eb').onclick = function () { tab = 'bill'; mark(); billForm('bill', s); };
+      $('#ec').onclick = function () { tab = 'credit'; mark(); billForm('credit', s); };
+      $('#sv').onclick = function () { api('/api/ap/suppliers/' + id, 'PUT', { payment_terms_days: $('#tm').value, default_account_id: $('#da').value, default_class_id: $('#dc').value }).then(function () { toast('Saved'); return loadSuppliers(); }).catch(function (e) { toast(e.message); }); };
+      all('[data-vp]').forEach(function (b) { b.onclick = function () { var r = prompt('Why is this payment voided? (e.g. cheque lost, wrong amount)'); if (!r) return; api('/api/ap/payments/' + b.getAttribute('data-vp') + '/void', 'POST', { reason: r }).then(function () { toast('Voided: the bills are unpaid again'); detail(id); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-pp]').forEach(function (b) { b.onclick = function () { printPayment(+b.getAttribute('data-pp')); }; });
+      all('[data-bv]').forEach(function (a) { a.onclick = function (e) { e.preventDefault(); viewBill(+a.getAttribute('data-bv'), function () { detail(id); }); }; });
+    }).catch(function (e) { toast(e.message); });
+  }
+  function viewBill(id, after) {
+    api('/api/ap/bills/' + id).then(function (d) {
+      var b = d.bill;
+      modal('<h2>' + (b.kind === 'credit' ? 'Supplier credit' : 'Bill') + ' ' + esc(b.number || '#' + b.id) + ' · ' + esc(b.supplier) + (b.voided_at ? ' <span class="pill bad">void</span>' : '') + '</h2><p class="sub">' + esc(b.day) + (b.due ? ' · due ' + esc(b.due) : '') + (b.memo ? ' · ' + esc(b.memo) : '') + '</p>' +
+        '<table><tbody>' + d.lines.map(function (l) { return '<tr><td>' + esc(l.code + ' ' + l.account) + '</td><td>' + esc(l.description || '') + '</td><td class="n">' + J(l.amount) + '</td></tr>'; }).join('') + (b.gct_amount ? '<tr><td>GCT</td><td></td><td class="n">' + J(b.gct_amount) + '</td></tr>' : '') + '<tr><td><b>Total</b></td><td></td><td class="n"><b>' + J(b.total) + '</b></td></tr></tbody></table>' +
+        '<div id="billdocs"></div>' +
+        '<div class="controls" style="margin-top:10px">' + (b.voided_at ? '' : '<button id="vb">Void</button>') + '<button id="x">Close</button></div>');
+      $('#x').onclick = close;
+      // The supplier's invoice and anything else filed for this bill (document centre).
+      if (window.VADocs) window.VADocs.mount($('#billdocs'), 'bill', b.id, { category: 'payables' });
+      if ($('#vb')) $('#vb').onclick = function () { var r = prompt('Why is it voided?'); if (!r) return; api('/api/ap/bills/' + id + '/void', 'POST', { reason: r }).then(function () { close(); toast('Voided'); after && after(); }).catch(function (e) { toast(e.message); }); };
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // ------------------------------------------------------------ pay bills --
+  function pay(supplierId) {
+    var dueBy = pay.due || '';
+    return api('/api/ap/bills?due_by=' + dueBy + (supplierId ? '&supplier=' + supplierId : '')).then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>Pay bills</h2><p class="sub">Tick the bills to pay; change an amount to pay part of a bill. One payment (cheque or transfer) is made per supplier, using any credits you tick for that supplier.</p>' +
+        '<div class="controls"><div><label>Show bills due by</label><input type="date" id="db" value="' + esc(dueBy) + '"></div>' + (supplierId ? '<button id="allsup">All suppliers</button>' : '') + '</div>' +
+        '<div class="scroll"><table><thead><tr><th></th><th>Supplier</th><th>Type</th><th>Number</th><th>Due</th><th class="n">Open</th><th class="n">Pay</th></tr></thead><tbody>' +
+        (d.bills.length ? d.bills.map(function (b, i) { return '<tr><td><input type="checkbox" data-ck="' + i + '"></td><td>' + esc(b.supplier) + '</td><td>' + esc(KIND[b.kind]) + '</td><td>' + esc(b.number) + '</td><td>' + esc(b.due || b.day) + (b.days_overdue ? ' <span class="pill bad">' + b.days_overdue + ' d late</span>' : '') + '</td><td class="n">' + J(b.open) + '</td><td class="n"><input type="number" step="0.01" data-am="' + i + '" style="width:120px"></td></tr>'; }).join('') : '<tr><td colspan="7" class="empty">No unpaid bills.</td></tr>') +
+        '</tbody></table></div>' +
+        (d.credits.length ? '<h2 style="margin-top:12px">Supplier credits to use</h2><table><tbody>' + d.credits.map(function (c, i) { return '<tr><td><input type="checkbox" data-cc="' + i + '"></td><td>' + esc(c.supplier) + '</td><td>' + esc(c.number) + '</td><td class="n">' + J(c.open) + ' available</td><td class="n"><input type="number" step="0.01" data-ca="' + i + '" style="width:120px"></td></tr>'; }).join('') + '</tbody></table>' : '') +
+        '<div class="controls" style="margin-top:12px"><div><label>Pay from</label><select id="pf">' + B.accountOptions('bank') + '</select></div><div><label>Method</label><select id="pm"><option value="cheque">Cheque</option><option value="transfer">Bank transfer</option><option value="cash">Cash</option><option value="card">Card</option></select></div>' +
+        '<div><label>First cheque no.</label><input id="pc" style="width:110px"></div><div><label>Payment date</label><input type="date" id="pd" value="' + B.today() + '"></div><div><label>Memo</label><input id="pmemo"></div></div>' +
+        '<p id="sum" class="sub"></p><button class="primary" id="go">Pay selected bills</button></div>';
+      var bank = B.accounts().find(function (a) { return a.system_key === 'bank'; }); if (bank) $('#pf').value = bank.id;
+      $('#db').onchange = function () { pay.due = this.value; pay(supplierId); };
+      if ($('#allsup')) $('#allsup').onclick = function () { pay(); };
+      var summary = function () {
+        var by = {};
+        all('[data-am]').forEach(function (x) { var v = +x.value || 0; if (v > 0) { var b = d.bills[+x.getAttribute('data-am')]; by[b.supplier_id] = (by[b.supplier_id] || 0) + v; } });
+        all('[data-ca]').forEach(function (x) { var v = +x.value || 0; if (v > 0) { var c = d.credits[+x.getAttribute('data-ca')]; by[c.supplier_id] = (by[c.supplier_id] || 0) - v; } });
+        var ids = Object.keys(by), tot = ids.reduce(function (t, k) { return t + by[k]; }, 0);
+        $('#sum').textContent = ids.length ? ids.length + ' payment(s), total ' + J(tot) : 'Nothing selected';
+        return by;
+      };
+      all('[data-ck]').forEach(function (cb) { cb.onchange = function () { var x = $('[data-am="' + cb.getAttribute('data-ck') + '"]'); x.value = cb.checked ? d.bills[+cb.getAttribute('data-ck')].open.toFixed(2) : ''; summary(); }; });
+      all('[data-am]').forEach(function (x) { x.oninput = function () { $('[data-ck="' + x.getAttribute('data-am') + '"]').checked = +x.value > 0; summary(); }; });
+      all('[data-cc]').forEach(function (cb) { cb.onchange = function () { var x = $('[data-ca="' + cb.getAttribute('data-cc') + '"]'); x.value = cb.checked ? d.credits[+cb.getAttribute('data-cc')].open.toFixed(2) : ''; summary(); }; });
+      all('[data-ca]').forEach(function (x) { x.oninput = summary; });
+      summary();
+      $('#go').onclick = function () {
+        var by = {};
+        all('[data-am]').forEach(function (x) { var v = +x.value || 0; if (v > 0) { var b = d.bills[+x.getAttribute('data-am')]; (by[b.supplier_id] = by[b.supplier_id] || { bills: [], credits: [] }).bills.push({ kind: b.kind, id: b.id, amount: v }); } });
+        all('[data-ca]').forEach(function (x) { var v = +x.value || 0; if (v > 0) { var c = d.credits[+x.getAttribute('data-ca')]; (by[c.supplier_id] = by[c.supplier_id] || { bills: [], credits: [] }).credits.push({ id: c.id, amount: v }); } });
+        var sids = Object.keys(by).filter(function (k) { return by[k].bills.length; });
+        if (!sids.length) return toast('Tick the bills to pay');
+        var cheque = $('#pc').value.trim(), method = $('#pm').value, made = [];
+        if (method === 'cheque' && !/\d+$/.test(cheque)) return toast('First cheque number');
+        if (!confirm('Make ' + sids.length + ' payment(s)?')) return;
+        var nextCheque = function (i) { if (method !== 'cheque') return null; var m = /^(.*?)(\d+)$/.exec(cheque); return m[1] + String(+m[2] + i).padStart(m[2].length, '0'); };
+        var run = function (i) {
+          if (i >= sids.length) { toast(made.length + ' payment(s) made'); if (made.length) printPayment(made[0]); pay(supplierId); return; }
+          var s = by[sids[i]];
+          api('/api/ap/payments', 'POST', { supplier_id: +sids[i], pay_date: $('#pd').value, method: method, account_id: $('#pf').value, cheque_number: nextCheque(i), memo: $('#pmemo').value, bills: s.bills, credits: s.credits })
+            .then(function (r) { made.push(r.id); run(i + 1); }).catch(function (e) { toast(e.message + (made.length ? ' (' + made.length + ' made before this)' : '')); pay(supplierId); });
+        };
+        run(0);
+      };
+    });
+  }
+  // A cheque voucher: cheque on top, remittance stub below.
+  function printPayment(id) {
+    api('/api/ap/payments/' + id).then(function (d) {
+      var p = d.payment, w = window.open('', '_blank');
+      if (!w) return toast('Allow pop-ups to print');
+      w.document.write('<!doctype html><title>Payment ' + p.id + '</title><body style="font:14px system-ui;margin:30px;max-width:780px">' +
+        '<div style="border:1px solid #999;padding:18px;margin-bottom:24px"><div style="display:flex;justify-content:space-between"><b>' + esc(B.shopName()) + '</b><span>' + (p.cheque_number ? 'Cheque ' + esc(p.cheque_number) : esc(p.method)) + '</span></div>' +
+        '<p style="text-align:right">Date: ' + esc(p.day) + '</p><p>Pay to the order of <b>' + esc(p.supplier) + '</b><span style="float:right;border:1px solid #333;padding:2px 10px"><b>' + J(p.amount) + '</b></span></p><p>' + esc(B.words(p.amount)) + '</p><p style="margin-top:30px">Memo: ' + esc(p.memo || '') + '<span style="float:right">____________________ Signature</span></p></div>' +
+        '<h3>Remittance advice · ' + esc(p.supplier) + '</h3><p>Paid ' + esc(p.day) + ' from ' + esc(p.paid_from) + (p.voided_at ? ' · VOID' : '') + '</p><table style="width:100%;border-collapse:collapse" border="1" cellpadding="6"><tr><th>Bill</th><th>Date</th><th>Bill amount</th><th>Paid / used</th></tr>' +
+        d.lines.map(function (l) { return '<tr><td>' + esc((l.bill_kind === 'credit' ? 'Credit ' : '') + (l.number || '')) + '</td><td>' + esc(l.day || '') + '</td><td style="text-align:right">' + J(l.bill_amount) + '</td><td style="text-align:right">' + (l.bill_kind === 'credit' ? '-' : '') + J(l.amount) + '</td></tr>'; }).join('') +
+        '<tr><td colspan="3"><b>Total paid</b></td><td style="text-align:right"><b>' + J(p.amount) + '</b></td></tr></table><script>print()<\/script></body>');
+      w.document.close();
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // ------------------------------------------------------------ enter bill / credit --
+  function billForm(kind, pre) {
+    var isCredit = kind === 'credit';
+    $('#out').innerHTML = '<div class="card"><h2>' + (isCredit ? 'Supplier credit' : 'Enter a bill') + '</h2><p class="sub">' + (isCredit ? 'A credit note from a supplier (a refund owed to you, or a discount). Use it in Pay Bills to reduce a payment.' : 'For bills that did not come through a purchase order: rent, light, phone, repairs, services. Stock bought on a purchase order comes in through receiving.') + '</p>' +
+      '<div class="controls" id="scanbar"></div><div id="scaninfo"></div>' +
+      '<div class="controls"><div style="flex:1;min-width:220px"><label>Supplier</label><input id="bs" list="suppliers" style="width:100%" value="' + esc(pre ? pre.name : '') + '"></div><div><label>' + (isCredit ? 'Credit note no.' : 'Supplier invoice no.') + '</label><input id="bn" style="width:150px"></div>' +
+      '<div><label>Date</label><input type="date" id="bd" value="' + B.today() + '"></div>' + (isCredit ? '' : '<div><label>Due (blank = from terms)</label><input type="date" id="bdu"></div>') + '</div>' +
+      '<table class="lines"><thead><tr><th style="width:32%">Category (account)</th><th style="width:15%">Class</th><th>Description</th><th class="n" style="width:150px">Amount</th><th style="width:40px"></th></tr></thead><tbody id="bl"></tbody></table>' +
+      '<div class="controls" style="margin-top:6px"><button class="sm" id="add">Add a line</button></div>' +
+      '<div class="controls"><div><label>GCT on the bill (J$)</label><input id="bg" type="number" step="0.01" style="width:130px"></div><button class="sm" id="g15">Add 15% GCT</button><div style="flex:1"><label>Memo</label><input id="bm" style="width:100%"></div></div>' +
+      '<h3 id="bt" style="text-align:right"></h3><div class="controls"><button class="primary" id="bsv">Save ' + (isCredit ? 'credit' : 'bill') + '</button></div></div>';
+    var addLine = function (acct, cls) {
+      var tr = document.createElement('tr');
+      if (acct === undefined || cls === undefined) { var sd = supNow && supNow(); if (acct === undefined) acct = sd && sd.default_account_id; if (cls === undefined) cls = sd && sd.default_class_id; }
+      tr.innerHTML = '<td><select data-la>' + B.accountOptions('line', acct) + '</select></td><td><select data-lc>' + B.classOptions(cls) + '</select></td><td><input data-ld></td><td><input data-lm type="number" step="0.01" style="text-align:right"></td><td><button class="sm" data-lx>✕</button></td>';
+      $('#bl').appendChild(tr);
+      tr.querySelector('[data-lx]').onclick = function () { tr.remove(); total(); };
+      tr.querySelector('[data-lm]').oninput = total;
+    };
+    var sub = function () { return all('[data-lm]').reduce(function (t, x) { return t + (+x.value || 0); }, 0); };
+    var total = function () { $('#bt').textContent = 'Total ' + J(sub() + (+$('#bg').value || 0)); };
+    var supNow = function () { return supplierByName($('#bs').value); };
+    addLine(pre ? pre.default_account_id : null, pre ? pre.default_class_id : null);
+    // The supplier's default category and class fill the first line if it is still blank.
+    $('#bs').onchange = function () { var s = supNow(); if (!s) return; var first = $('[data-la]'), fc = $('[data-lc]'); if (first && !first.value && s.default_account_id) first.value = s.default_account_id; if (fc && !fc.value && s.default_class_id) fc.value = s.default_class_id; };
+    $('#add').onclick = function () { addLine(); };
+    // The supplier's invoice: read it to fill the bill, or just attach it. Either way the
+    // original is filed in the document centre against the bill when the bill is saved.
+    var invFile = null;
+    var showFile = function (extra) {
+      $('#scaninfo').innerHTML = (invFile ? '<p class="sub">📎 <b>' + esc(invFile.name) + '</b> will be filed with this ' + (isCredit ? 'credit' : 'bill') + ' in the document centre. <a href="#" id="unfile">remove</a></p>' : '') + (extra || '');
+      if ($('#unfile')) $('#unfile').onclick = function (e) { e.preventDefault(); invFile = null; showFile(); };
+    };
+    var fill = function (r) {
+      var v = r.invoice, warn = [];
+      if (!v.is_invoice) warn.push('This does not look like an invoice: check it.');
+      if (r.supplier) { $('#bs').value = r.supplier.name; $('#bs').onchange(); }
+      else if (v.supplier_name) warn.push('The supplier "' + esc(v.supplier_name) + '" is not on file: choose or add them.');
+      if (v.invoice_number) $('#bn').value = v.invoice_number;
+      if (v.invoice_date) $('#bd').value = v.invoice_date;
+      if (v.due_date && $('#bdu')) $('#bdu').value = v.due_date;
+      if (v.currency && v.currency !== 'JMD') warn.push('The invoice is in ' + esc(v.currency) + ': convert the amounts to J$ before saving.');
+      var s = supNow(), acct = s && s.default_account_id, cls = s && s.default_class_id;
+      $('#bl').innerHTML = '';
+      var put = function (desc, amt) { addLine(acct || undefined, cls || undefined); var tr = $('#bl').lastChild; tr.querySelector('[data-ld]').value = desc; if (amt != null) tr.querySelector('[data-lm]').value = (+amt).toFixed(2); };
+      v.lines.forEach(function (l) {
+        var amt = l.amount != null ? l.amount : (l.qty != null && l.unit_cost != null ? Math.round(l.qty * l.unit_cost * 100) / 100 : null);
+        put((l.qty != null && l.qty !== 1 ? l.qty + ' × ' : '') + (l.sku ? l.sku + ' ' : '') + l.description, amt);
+      });
+      if (!v.lines.length) put(v.supplier_name ? 'Invoice ' + (v.invoice_number || '') : '', v.subtotal != null ? v.subtotal : (v.total != null ? v.total - (v.tax || 0) - (v.freight || 0) : null));
+      if (v.freight) put('Freight', v.freight);
+      if (v.tax != null) $('#bg').value = (+v.tax).toFixed(2);
+      if (v.notes) $('#bm').value = v.notes.slice(0, 200);
+      total();
+      var got = Math.round((sub() + (+$('#bg').value || 0)) * 100) / 100;
+      if (v.total != null && Math.abs(got - v.total) > 0.01) warn.push('The lines add up to ' + J(got) + ' but the invoice total is ' + J(v.total) + ': check the lines.');
+      showFile('<div class="note ' + (warn.length ? 'warn' : 'info') + '">Read from the invoice: check every field before saving. Choose the category (account) for each line.' + (warn.length ? '<br>' + warn.join('<br>') : '') + '</div>');
+    };
+    if (window.VAScan) {
+      $('#scanbar').appendChild(window.VAScan.button('📷 Scan the supplier\'s invoice', function (f) {
+        invFile = f; showFile('<p class="sub">Reading the invoice…</p>');
+        window.VAScan.read(f).then(fill).catch(function (e) { showFile('<div class="note bad">' + esc(e.message) + '</div>'); });
+      }, { primary: true }));
+      $('#scanbar').appendChild(window.VAScan.button('📎 Attach it without reading', function (f) { invFile = f; showFile(); }));
+    }
+    $('#bg').oninput = total;
+    $('#g15').onclick = function () { $('#bg').value = (Math.round(sub() * 0.15 * 100) / 100).toFixed(2); total(); };
+    total();
+    $('#bsv').onclick = function () {
+      var s = supNow();
+      if (!s) return toast('Choose the supplier from the list');
+      var lines = all('#bl tr').map(function (tr) { return { account_id: tr.querySelector('[data-la]').value, class_id: tr.querySelector('[data-lc]').value, description: tr.querySelector('[data-ld]').value, amount: tr.querySelector('[data-lm]').value }; }).filter(function (l) { return +l.amount > 0; });
+      api('/api/ap/bills', 'POST', { kind: kind, supplier_id: s.id, number: $('#bn').value, bill_date: $('#bd').value, due_date: $('#bdu') ? $('#bdu').value : '', gct_amount: $('#bg').value, memo: $('#bm').value, lines: lines })
+        .then(function (r) {
+          var said = (isCredit ? 'Credit' : 'Bill') + ' saved: ' + J(r.total) + (r.due_date ? ', due ' + r.due_date : '');
+          if (!invFile) { toast(said); return billForm(kind); }
+          return window.VAScan.fileIt(invFile, { category: 'payables', title: (isCredit ? 'Credit note ' : 'Supplier invoice ') + ($('#bn').value || '') + ' - ' + s.name, reference: $('#bn').value, issuer: s.name, issue_date: $('#bd').value,
+            links: [{ type: 'bill', id: r.id }, { type: 'supplier', id: s.id }] })
+            .then(function (d) { toast(said + '; invoice filed as ' + d.number); }, function (e) { toast(said + '. The invoice was NOT filed (' + e.message + '): file it from the bill.'); })
+            .then(function () { billForm(kind); });
+        })
+        .catch(function (e) { toast(e.message); });
+    };
+  }
+
+  function aging() {
+    return api('/api/ap/aging').then(function (d) {
+      var t = d.totals;
+      $('#out').innerHTML = '<div class="card"><h2>A/P aging summary · ' + esc(d.as_of) + ' <button class="sm" id="csv">Download CSV</button></h2><p class="sub">Aged from each bill\'s due date.</p><div class="scroll"><table><thead><tr><th>Supplier</th><th class="n">Current</th><th class="n">1-30</th><th class="n">31-60</th><th class="n">61-90</th><th class="n">Over 90</th><th class="n">Total</th></tr></thead><tbody>' +
+        d.rows.map(function (r) { return '<tr data-s="' + r.supplier_id + '" class="click"><td>' + esc(r.name) + '</td><td class="n">' + J(r.current) + '</td><td class="n">' + J(r.d30) + '</td><td class="n">' + J(r.d60) + '</td><td class="n">' + J(r.d90) + '</td><td class="n">' + J(r.over90) + '</td><td class="n"><b>' + J(r.total) + '</b></td></tr>'; }).join('') +
+        '<tr><td><b>Total</b></td><td class="n"><b>' + J(t.current) + '</b></td><td class="n"><b>' + J(t.d30) + '</b></td><td class="n"><b>' + J(t.d60) + '</b></td><td class="n"><b>' + J(t.d90) + '</b></td><td class="n"><b>' + J(t.over90) + '</b></td><td class="n"><b>' + J(t.total) + '</b></td></tr></tbody></table></div></div>';
+      all('[data-s]').forEach(function (r) { r.onclick = function () { tab = 'sup'; mark(); detail(+r.getAttribute('data-s')); }; });
+      $('#csv').onclick = function () { B.csv('ap-aging-' + d.as_of + '.csv', [['supplier', 'current', '1-30', '31-60', '61-90', 'over 90', 'total']].concat(d.rows.map(function (r) { return [r.name, r.current, r.d30, r.d60, r.d90, r.over90, r.total]; }))); };
+    });
+  }
+
+  // ------------------------------------------------------- loans and recurring bills --
+  function loans() { return window.BillingUI.loans($('#out'), supplierByName); }
+  function rec() {
+    $('#out').innerHTML = '<div class="card"><h2>Recurring bills <button class="sm primary" id="np">New recurring bill</button></h2><p class="sub">Standing orders and fixed monthly costs. Each period&#39;s bill is raised on its date; pay it with Pay bills (for a standing order, when it shows on the bank statement). Bills we pay ourselves are emailed to the accounts address a few days ahead.</p><div id="plans"></div></div>' +
+      '<div class="card"><h2>Coming up (30 days)</h2><div id="up"></div></div>';
+    var again = function () { rec(); };
+    $('#np').onclick = function () { window.BillingUI.planEditor('ap', null, supplierByName, again); };
+    window.BillingUI.upcoming($('#up'), ['ap', 'loan']);
+    return window.BillingUI.planList($('#plans'), { side: 'ap' });
+  }
+  // ------------------------------------------------------- QuickBooks import --
+  // Supplier list (IIF or CSV) and the Unpaid Bills report (CSV): previewed, then the ticked rows imported.
+  function qbImport() {
+    $('#out').innerHTML = '<div class="card"><h2>Import from QuickBooks</h2><p class="sub">Bring suppliers, and what is still owed to them, over from QuickBooks. The file is compared with what is here first: you see what is new, what has changed (old and new side by side) and what is unchanged, before anything is saved.</p>' +
+      '<div class="controls"><div><label>What is in the file</label><select id="qk"><option value="bills">Unpaid bills</option><option value="suppliers">Supplier (vendor) list</option></select></div>' +
+      '<div><label>File from QuickBooks</label><input type="file" id="qf" accept=".csv,.iif,.txt,text/csv"></div>' +
+      '<div><label>Dates are</label><select id="qo"><option value="mdy">month/day/year (QuickBooks)</option><option value="dmy">day/month/year</option></select></div>' +
+      '<div><label>What is here already</label><select id="qm"><option value="update">Update only what changed</option><option value="replace">Replace with the file</option></select></div><button class="primary" id="qp">Preview</button></div>' +
+      '<div id="qhelp"></div></div><div id="qout"></div>';
+    var help = function () {
+      var mode = $('#qm').value === 'replace'
+        ? ($('#qk').value === 'bills' ? ' <b>Replace:</b> bills brought over from QuickBooks before are made to match the file: changed ones are corrected and ones no longer in it are voided. Bills paid here, and bills entered here by hand, are never touched.'
+          : ' <b>Replace:</b> each supplier already here takes every detail from the file, blanks and name included.')
+        : ($('#qk').value === 'bills' ? ' <b>Update:</b> new bills are added and changed ones corrected; bills no longer in the file are listed for you to void if you choose.'
+          : ' <b>Update:</b> new suppliers are added; for one already here, only details the file gives that differ are changed.');
+      $('#qhelp').innerHTML = ($('#qk').value === 'bills'
+        ? '<p class="sub"><b>QuickBooks Desktop:</b> Reports › Vendors &amp; Payables › Unpaid Bills Detail, dated today, then Excel › Create New Worksheet › Create a comma separated values (.csv) file. <b>QuickBooks Online:</b> Reports › Unpaid Bills › Export to CSV (or to Excel, then save as CSV).'
+        : '<p class="sub"><b>QuickBooks Desktop:</b> File › Utilities › Export › Lists to IIF Files › Vendor List; or Reports › List › Vendor Contact List › Excel › CSV. <b>QuickBooks Online:</b> Expenses › Vendors › Export to Excel, then save as CSV.') + mode + '</p>';
+    };
+    var file = null;
+    var preview = function () {
+      var kind = $('#qk').value;
+      return api('/api/ap/import/' + kind, 'POST', { file: file, date_order: $('#qo').value, mode: $('#qm').value, preview: true })
+        .then(function (d) { (kind === 'bills' ? qbBills : qbSuppliers)(d, file, $('#qm').value); }).catch(function (e) { toast(e.message); });
+    };
+    $('#qk').onchange = function () { help(); file = null; $('#qout').innerHTML = ''; };
+    $('#qm').onchange = function () { help(); if (file) preview(); };
+    help();
+    $('#qp').onclick = function () {
+      var f = $('#qf').files[0]; if (!f) return toast('Choose the file');
+      f.text().then(function (t) { file = t; return preview(); });
+    };
+    return Promise.resolve();
+  }
+  // Old -> new for each difference a row makes.
+  function changeList(ch, money) {
+    return (ch || []).map(function (x) { var f = function (v) { return v === '' || v == null ? '(blank)' : money ? J(v) : esc(v); }; return '<div><small>' + esc(x.label) + ': <s>' + f(x.from) + '</s> → <b>' + f(x.to) + '</b></small></div>'; }).join('');
+  }
+  var QST = { new: ['ok', 'New'], changed: ['warn', 'Changed'], same: ['', 'Unchanged'], gone: ['bad', 'Not in the file'], locked: ['', 'Left alone'], in_system: ['warn', 'Check'], duplicate: ['', 'Already here'], error: ['bad', 'Problem'] };
+  function qbBills(d, file, mode) {
+    var oe = d.opening_equity, cnt = function (s) { return d.rows.filter(function (r) { return r.status === s; }).length; };
+    // Ticked to start with: new and changed; with "replace", the ones no longer in the file too.
+    var on = function (r) { return r.status === 'new' || r.status === 'changed' || (r.status === 'gone' && mode === 'replace'); };
+    var can = function (r) { return ['new', 'changed', 'gone', 'in_system'].indexOf(r.status) >= 0; };
+    $('#qout').innerHTML = '<div class="card"><h2>Unpaid bills: ' + cnt('new') + ' new, ' + cnt('changed') + ' changed, ' + cnt('same') + ' unchanged' + (cnt('gone') ? ', ' + cnt('gone') + ' no longer in QuickBooks' : '') + '</h2>' +
+      (d.ledger_start ? '' : '<div class="note bad">The ledger has not been started. Bills imported now show in Payables, but the ledger\'s opening balances will not include them: start the ledger first (Accounting), then import.</div>') +
+      '<p class="sub">A new bill is added for what is still owed (its open balance). A changed one is voided and entered again as it is now, so the ledger shows the correction. QuickBooks has already counted these costs, so book them against Opening Balance Equity: only what you owe is added to the books. "Check" means the supplier is already owed that amount or number from purchasing; tick it only if it is a different bill.</p>' +
+      '<div class="controls"><div><label>Book new and changed bills against</label><select id="qa">' + B.accountOptions('line', oe && oe.id) + '</select></div><div><label>Class</label><select id="qc">' + B.classOptions() + '</select></div>' +
+      '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="qn" checked> Add suppliers that are not here yet</label></div>' +
+      '<div class="scroll"><table><thead><tr><th><input type="checkbox" id="qall"></th><th>Supplier in QuickBooks</th><th>Supplier here</th><th>Type</th><th>No.</th><th>Date</th><th>Due</th><th class="n">Owed</th><th>Status</th></tr></thead><tbody>' +
+      d.rows.map(function (r) {
+        return '<tr style="' + (r.status === 'same' ? 'opacity:.55' : '') + '"><td>' + (can(r) ? '<input type="checkbox" data-q="' + r.i + '"' + (on(r) ? ' checked' : '') + '>' : '') + '</td><td>' + esc(r.vendor) + '</td>' +
+          '<td>' + (r.supplier_id ? esc(r.supplier) + (r.how === 'similar' ? ' <span class="pill warn">similar name</span>' : '') : '<span class="pill">new</span>') + '</td>' +
+          '<td>' + (r.kind === 'credit' ? 'Credit' : 'Bill') + '</td><td>' + esc(r.number) + '</td><td>' + esc(r.date) + '</td><td>' + esc(r.due || '') + '</td><td class="n">' + J(r.kind === 'credit' ? -r.amount : r.amount) + '</td>' +
+          '<td><span class="pill ' + QST[r.status][0] + '">' + QST[r.status][1] + '</span>' + changeList(r.changes && r.changes.filter(function (x) { return x.field !== 'amount'; })) + changeList(r.changes && r.changes.filter(function (x) { return x.field === 'amount'; }), true) +
+          (r.reason && r.status !== 'same' ? '<br><small>' + esc(r.reason) + '</small>' : '') + '</td></tr>';
+      }).join('') + '</tbody></table></div><div class="controls" style="margin-top:10px"><b id="qt"></b><span style="margin-left:auto"></span><button class="primary" id="qgo">Import</button></div></div>';
+    var tot = function () {
+      var n = { add: 0, upd: 0, gone: 0 };
+      all('[data-q]:checked').forEach(function (x) { var r = d.rows[+x.getAttribute('data-q')]; n[r.status === 'changed' ? 'upd' : r.status === 'gone' ? 'gone' : 'add']++; });
+      $('#qt').textContent = n.add + ' to add, ' + n.upd + ' to correct, ' + n.gone + ' to void';
+      $('#qgo').textContent = 'Import'; $('#qgo').disabled = !(n.add + n.upd + n.gone);
+    };
+    all('[data-q]').forEach(function (x) { x.onchange = tot; });
+    $('#qall').onchange = function () { var v = this.checked; all('[data-q]').forEach(function (x) { x.checked = v; }); tot(); };
+    tot();
+    $('#qgo').onclick = function () {
+      var ticked = all('[data-q]:checked').map(function (x) { return +x.getAttribute('data-q'); });
+      var voids = ticked.filter(function (i) { return d.rows[i].status === 'gone'; }).length;
+      if (voids && !confirm('Void ' + voids + ' bill(s) that are no longer unpaid in QuickBooks? The ledger reverses them.')) return;
+      if (ticked.some(function (i) { return d.rows[i].status !== 'gone'; }) && !$('#qa').value) return toast('Choose the account to book them against');
+      var b = this; b.disabled = true;
+      api('/api/ap/import/bills', 'POST', { file: file, date_order: $('#qo').value, include: ticked, account_id: $('#qa').value, class_id: $('#qc').value, create_suppliers: $('#qn').checked })
+        .then(function (r) { toast('Added ' + (r.bills + r.credits) + ', corrected ' + r.updated + ', voided ' + r.voided + (r.suppliers ? '; ' + r.suppliers + ' new supplier(s)' : '')); return loadSuppliers(); })
+        .then(function () { tab = 'sup'; show(); }).catch(function (e) { b.disabled = false; toast(e.message); });
+    };
+  }
+  function qbSuppliers(d, file, mode) {
+    var cnt = function (s) { return d.rows.filter(function (r) { return r.status === s; }).length; };
+    $('#qout').innerHTML = '<div class="card"><h2>Suppliers: ' + cnt('new') + ' new, ' + cnt('changed') + ' changed, ' + cnt('same') + ' unchanged</h2><p class="sub">' +
+      (mode === 'replace' ? 'Replacing: a supplier already here takes every detail from the file, so a detail left blank in QuickBooks is blanked here too.' : 'Updating: a supplier already here changes only the details the file gives that differ; details the file leaves blank are kept.') + '</p>' +
+      '<div class="scroll"><table><thead><tr><th><input type="checkbox" id="qall" checked></th><th>Name</th><th>Here</th><th>Phone</th><th>Email</th><th>Terms</th><th>Status and changes</th></tr></thead><tbody>' +
+      d.rows.map(function (r) {
+        var can = r.status === 'new' || r.status === 'changed';
+        return '<tr style="' + (r.status === 'same' ? 'opacity:.55' : '') + '"><td>' + (can ? '<input type="checkbox" data-q="' + r.i + '" checked>' : '') + '</td><td>' + esc(r.name) + '</td><td>' + (r.supplier ? esc(r.supplier) + (r.how === 'similar' ? ' <span class="pill warn">similar name</span>' : '') : '') + '</td>' +
+          '<td>' + esc(r.phone) + '</td><td>' + esc(r.email) + '</td><td>' + esc(r.terms) + (r.terms_days != null ? ' <small>(' + r.terms_days + ' days)</small>' : '') + '</td>' +
+          '<td><span class="pill ' + QST[r.status][0] + '">' + (r.status === 'duplicate' ? 'Twice in the file' : QST[r.status][1]) + '</span>' + changeList(r.changes) + '</td></tr>';
+      }).join('') + '</tbody></table></div><div class="controls" style="margin-top:10px"><span style="margin-left:auto"></span><button class="primary" id="qgo">Import ticked suppliers</button></div></div>';
+    $('#qall').onchange = function () { var v = this.checked; all('[data-q]').forEach(function (x) { x.checked = v; }); };
+    $('#qgo').onclick = function () {
+      var b = this; b.disabled = true;
+      api('/api/ap/import/suppliers', 'POST', { file: file, mode: mode, include: all('[data-q]:checked').map(function (x) { return +x.getAttribute('data-q'); }) })
+        .then(function (r) { toast('Added ' + r.added + ' supplier(s); updated ' + r.updated); $('#qout').innerHTML = ''; return loadSuppliers(); })
+        .catch(function (e) { b.disabled = false; toast(e.message); });
+    };
+  }
+  function loadSuppliers() { return api('/api/ap/supplier-list').then(function (d) { suppliers = d.suppliers; $('#suppliers').innerHTML = suppliers.map(function (s) { return '<option value="' + esc(s.name) + '">'; }).join(''); }); }
+  function mark() { all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); }); }
+  function show() {
+    mark();
+    var f = { sup: sup, pay: function () { return pay(); }, bill: function () { billForm('bill'); return Promise.resolve(); }, credit: function () { billForm('credit'); return Promise.resolve(); }, aging: aging, loans: loans, rec: rec, qb: qbImport }[tab];
+    f().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
+  Promise.all([B.loadAccounts(), loadSuppliers()]).then(show).catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+})();
+</script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+<script src="/assets/module-look.js?v=20261101" defer></script>
+</body>
+</html>

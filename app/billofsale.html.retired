@@ -110,7 +110,7 @@ function render(d){
       '<h2 class="section">Signatures</h2>' +
       '<div class="sigblock">' +
         '<div>' + (s.customer_signature ? '<img src="' + s.customer_signature + '"/>' : '') + '<div class="line">Buyer signature · ' + (s.signed_at ? fmtDate(s.signed_at) : 'Date') + '</div></div>' +
-        '<div><div class="line">Seller signature · ' + esc(s.salesperson_name || 'Morty\'s Auto Parts') + '</div></div>' +
+        '<div><div class="line">Seller signature · ' + esc(s.salesperson_name || 'Morty's Auto Parts') + '</div></div>' +
       '</div>' +
       '<div class="terms">' +
         '<b>Terms of sale:</b> Vehicle is sold AS-IS unless a written warranty is attached. Buyer acknowledges they have inspected the vehicle and accept it in its present condition. Title transfer is contingent on full payment of any balance due. Any deposit is non-refundable after 72 hours unless the seller fails to deliver the vehicle as described. This document serves as proof of sale once signed by both parties.' +

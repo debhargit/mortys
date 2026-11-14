@@ -1,0 +1,1011 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Franchise · Morty's Auto Parts</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0} header nav{margin-left:auto;display:flex;gap:14px;font-size:13px;align-items:center;flex-wrap:wrap} header a{color:#fff;opacity:.85}
+  main{max-width:1250px;margin:0 auto;padding:14px 16px 60px}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px} .tabs button{border-radius:999px} .tabs button.on{background:var(--red);border-color:var(--red);color:#fff}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  input,select,button,textarea{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  textarea{width:100%} button{cursor:pointer;background:var(--card)} button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600} button.sm{padding:3px 9px;font-size:12.5px}
+  button:disabled{opacity:.5;cursor:default} button.link{border:0;background:none;color:var(--red);padding:0;font-weight:600}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px} .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px 12px;margin-bottom:10px} .grid label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px} .grid input,.grid select,.grid textarea{width:100%}
+  .grid .wide{grid-column:1/-1}
+  .scroll{overflow-x:auto}
+  table{width:100%;border-collapse:collapse} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top} td.n,th.n{text-align:right;white-space:nowrap}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600}
+  tr.row{cursor:pointer} tr.row:hover td{background:var(--chip)}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip)} .pill.ok{background:#16a34a22;color:var(--ok)} .pill.warn{background:#f59e0b22;color:var(--warn)} .pill.bad{background:#d6282822;color:var(--red)}
+  .modal{position:fixed;inset:0;background:rgba(10,15,25,.55);display:flex;align-items:flex-start;justify-content:center;padding:4vh 12px;overflow:auto;z-index:9990} .modal .card{max-width:980px;width:100%}
+  .modal.top{z-index:9995} .modal.top .card{max-width:720px}
+  .empty{color:var(--muted);text-align:center;padding:20px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:9999;max-width:90vw}
+  .ftabs{display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:8px 0 12px} .ftabs button{border:0;border-bottom:2px solid transparent;border-radius:0;background:none;padding:6px 10px} .ftabs button.on{border-bottom-color:var(--red);font-weight:600}
+  .item{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:6px} .item small{color:var(--muted)}
+  .warn{background:#f59e0b18;border-left:3px solid var(--warn);padding:8px 10px;border-radius:8px;margin:8px 0}
+  h4{margin:14px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:12px} .kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px} .kpi b{display:block;font-size:22px} .kpi span{color:var(--muted);font-size:12px}
+  .bar{height:8px;background:var(--chip);border-radius:4px;overflow:hidden;min-width:60px} .bar i{display:block;height:100%;background:var(--red)}
+  .task{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid var(--line)} .task span{flex:1} .task.done span{color:var(--muted);text-decoration:line-through}
+  .funnel{display:flex;gap:6px;flex-wrap:wrap} .funnel div{flex:1;min-width:110px;background:var(--chip);border-radius:8px;padding:8px;text-align:center} .funnel b{display:block;font-size:20px}
+  iframe.doc{width:100%;height:60vh;border:1px solid var(--line);border-radius:8px;background:#fff}
+  .padbox canvas{width:100%;height:160px;border:1px dashed var(--muted);border-radius:8px;background:#fff;touch-action:none}
+  .score button{padding:2px 9px;font-size:12.5px} .score button.on{background:var(--red);border-color:var(--red);color:#fff}
+  @media print{ header,.tabs,.controls,button{display:none!important} .card{border:0} }
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Franchise</h1><nav><a href="/receivables.html">Receivables</a><a href="/documents.html">Documents</a><a href="/training.html">Training</a><a href="/franchisee.html" target="_blank" rel="noopener">Enquiry form</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"></div>
+  <div id="view"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div><div id="modal2"></div>
+<div class="toast" id="toast"></div>
+<script src="/assets/invoice-scan.js?v=20261028"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var day = function (t) { return t ? new Date(String(t).length === 10 ? t + 'T12:00:00' : t).toLocaleDateString('en-JM') : ''; };
+  var when = function (t) { return t ? new Date(t).toLocaleString('en-JM', { dateStyle: 'short', timeStyle: 'short' }) : ''; };
+  var jmd = function (v) { return v == null ? '' : 'J$' + Number(v).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+  var today = function () { var d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+  var lastMonth = function () { var d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); };
+  var monthName = function (p) { return p ? new Date(p.slice(0, 7) + '-15T12:00:00').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) : ''; };
+  var META = null, tab = 'dash';
+  var STATUS = { onboarding: 'Setting up', open: 'Open', suspended: 'Suspended', terminated: 'Terminated', expired: 'Expired', transferred: 'Transferred' };
+  var DOCSTATUS = { draft: 'Draft', sent: 'Sent for signing', signed: 'Signed', countersigned: 'Signed by both', declined: 'Declined', cancelled: 'Cancelled', filed: 'Filed' };
+  var ACTK = { renewal: 'Renewal', transfer: 'Transfer', 'default': 'Notice of default', suspension: 'Suspension', termination: 'Termination' };
+  var AUDK = { pre_opening: 'Pre-opening', routine: 'Routine visit', mystery_shop: 'Mystery shop', follow_up: 'Follow-up' };
+
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 4000); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); }
+        return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; });
+      });
+  }
+  function modal(h, layer) {
+    var host = $(layer === 2 ? '#modal2' : '#modal');
+    host.innerHTML = '<div class="modal' + (layer === 2 ? ' top' : '') + '"><div class="card">' + h + '</div></div>';
+    host.firstChild.addEventListener('mousedown', function (e) { if (e.target.classList.contains('modal')) close(layer); });
+    return host.firstChild;
+  }
+  function close(layer) { $(layer === 2 ? '#modal2' : '#modal').innerHTML = ''; if (layer !== 2 && /^#(lead|fr)=/.test(location.hash)) history.replaceState(null, '', '#' + tab); }
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { if ($('#modal2').innerHTML) close(2); else close(); } });
+  var opts = function (list, cur, blank) { return (blank != null ? '<option value="">' + esc(blank) + '</option>' : '') + list.map(function (p) { var id = p.id != null ? p.id : p[0], nm = p.name != null ? p.name : p[1]; return '<option value="' + esc(id) + '"' + (String(cur) === String(id) ? ' selected' : '') + '>' + esc(nm) + '</option>'; }).join(''); };
+  var field = function (label, html, wide) { return '<div' + (wide ? ' class="wide"' : '') + '><label>' + esc(label) + '</label>' + html + '</div>'; };
+  var inp = function (id, v, type, ph) { return '<input id="' + id + '" type="' + (type || 'text') + '" value="' + esc(v == null ? '' : v) + '"' + (ph ? ' placeholder="' + esc(ph) + '"' : '') + '>'; };
+  var area = function (id, v, rows) { return '<textarea id="' + id + '" rows="' + (rows || 3) + '">' + esc(v || '') + '</textarea>'; };
+  var val = function (id, root) { var el = $('#' + id, root); return el ? el.value : undefined; };
+  var terrOpts = function (cur) { return opts((META.territories || []).map(function (t) { return [t.id, t.code + ' ' + t.name + (t.status !== 'open' ? ' (' + t.status + ')' : '')]; }), cur, '-'); };
+  function frPill(s) { return '<span class="pill' + (s === 'open' ? ' ok' : s === 'onboarding' || s === 'suspended' ? ' warn' : ' bad') + '">' + esc(STATUS[s] || s) + '</span>'; }
+  function docPill(s) { return '<span class="pill' + (s === 'signed' || s === 'countersigned' || s === 'filed' ? ' ok' : s === 'sent' ? ' warn' : s === 'draft' ? '' : ' bad') + '">' + esc(DOCSTATUS[s] || s) + '</span>'; }
+  function stageLabel(k) { var s = (META.stages || []).find(function (x) { return x.key === k; }); return s ? s.label : k; }
+  // Disables the button while the call runs; on an error, says why and stops there (the .then after it never runs).
+  function guard(btn, p) { if (btn) btn.disabled = true; return p.finally(function () { if (btn) btn.disabled = false; }).catch(function (e) { toast(e.message); return new Promise(function () {}); }); }
+  function csv(name, rows) {
+    var text = rows.map(function (r) { return r.map(function (v) { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(','); }).join('\r\n');
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + text], { type: 'text/csv' })); a.download = name + '-' + today() + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  // ---------------------------------------------------------------- tabs --
+  var TABS = [['dash', '📊 Overview'], ['leads', '📥 Enquiries & leads'], ['franchisees', '🏪 Franchisees'], ['territories', '🗺 Territories'], ['billing', '🧾 Royalties & fees'],
+    ['performance', '📈 Performance'], ['audits', '✅ Audits'], ['templates', '📄 Templates & manual'], ['settings', '⚙ Settings']];
+  var TABS2 = [['network', '🏬 Stores & DCs'], ['catalogue', '📚 Catalogue & lookup'], ['supply', '🚚 Supply orders'], ['commercial', '🔧 Commercial accounts'], ['programmes', '🎁 Rebates, co-op & loyalty'], ['certs', '🎓 Certification'], ['scorecard', '🎯 Scorecard']];
+  function drawTabs() {
+    var b = function (t) { return '<button data-t="' + t[0] + '"' + (t[0] === tab ? ' class="on"' : '') + '>' + t[1] + '</button>'; };
+    $('#tabs').innerHTML = TABS.map(b).join('') + (NET ? '<span style="flex-basis:100%;height:0"></span><span class="sub" style="margin:6px 4px 0 0">Store network:</span>' + TABS2.map(b).join('') : '');
+    all('[data-t]').forEach(function (b) { b.onclick = function () { location.hash = b.getAttribute('data-t'); }; });
+  }
+  function show() {
+    var h = location.hash.replace(/^#/, '');
+    var m = /^(lead|fr)=(\d+)/.exec(h);
+    if (m) { if (!$('#view').getAttribute('data-shown')) { tab = m[1] === 'lead' ? 'leads' : 'franchisees'; drawTabs(); VIEWS[tab](); } if (m[1] === 'lead') openLead(+m[2]); else openFr(+m[2]); return; }
+    tab = VIEWS[h] ? h : 'dash'; drawTabs(); $('#view').setAttribute('data-shown', '1'); VIEWS[tab]();
+  }
+  window.addEventListener('hashchange', show);
+  function reloadMeta() { return api('/api/franchise/meta').then(function (m) { META = m; }); }
+
+  // ------------------------------------------------------------ overview --
+  function dash() {
+    $('#view').innerHTML = '<div class="empty">Loading…</div>';
+    api('/api/franchise/dashboard').then(function (d) {
+      var st = d.stages || {}, fs = d.statuses || {};
+      var active = ['enquiry', 'qualified', 'nda', 'disclosed', 'application', 'approved', 'agreement'];
+      var h = '<div class="kpis">' +
+        kpi(active.reduce(function (x, k) { return x + (st[k] || 0); }, 0), 'Leads in the pipeline') + kpi(fs.open || 0, 'Open franchises') + kpi(fs.onboarding || 0, 'Being set up') +
+        kpi(jmd(d.owed.owed), 'Owed by franchisees') + kpi(jmd(d.owed.overdue), 'Of which overdue') + kpi(d.tasks.overdue + ' / ' + d.tasks.open, 'Checklist items overdue / open') +
+        kpi(d.signatures.out, 'Documents out for signing') + kpi(d.signatures.countersign, 'Waiting for our signature') + '</div>';
+      h += '<div class="card"><h2>Pipeline</h2><div class="funnel">' + active.concat(['signed']).map(function (k) { return '<div><b>' + (st[k] || 0) + '</b>' + esc(stageLabel(k)) + '</div>'; }).join('') + '</div>' +
+        '<p class="sub" style="margin-top:8px">Declined ' + (st.declined || 0) + ' · withdrawn ' + (st.withdrawn || 0) + '. Industry order: enquiry → qualify → NDA → disclosure document → application → approve → agreement (no sooner than ' + META.settings.wait_days + ' days after the disclosure document) → opening.</p></div>';
+      h += '<div class="card"><h2>Needs attention</h2>';
+      var items = [];
+      d.missing_reports.forEach(function (r) { items.push('📄 <b>' + esc(r.name) + '</b> has not sent the sales report for ' + esc(monthName(d.last_period)) + ' <button class="sm" data-fr="' + r.id + '">Open</button>'); });
+      d.unbilled.forEach(function (r) { items.push('🧾 <b>' + esc(r.name) + '</b>: ' + esc(monthName(r.period)) + ' reported (' + jmd(r.net_sales) + ' net) but not invoiced <button class="sm" data-bill="' + r.franchisee_id + '" data-period="' + esc(r.period.slice(0, 7)) + '">Invoice now</button>'); });
+      d.renewals_due.forEach(function (r) { items.push('🔁 <b>' + esc(r.name) + '</b>: term ends ' + esc(day(r.term_end)) + ' <button class="sm" data-fr="' + r.id + '">Open</button>'); });
+      d.open_actions.forEach(function (a) { items.push('⚠ ' + esc(ACTK[a.kind]) + ': <b>' + esc(a.name) + '</b>' + (a.cure_by ? ', put right by ' + esc(day(a.cure_by)) : a.effective_date ? ', from ' + esc(day(a.effective_date)) : '') + ' <button class="sm" data-fr="' + a.franchisee_id + '">Open</button>'); });
+      d.audits_due.forEach(function (r) { items.push('✅ <b>' + esc(r.name) + '</b>: no audit in 100 days' + (r.last_audit ? ' (last ' + esc(day(r.last_audit)) + ')' : ' (never audited)') + ' <button class="sm" data-audit="' + r.id + '">Start audit</button>'); });
+      if (NET) { var na = NET.attention;
+        if (na.orders_waiting) items.push('🚚 ' + na.orders_waiting + ' supply order(s) waiting to ship' + (na.hot_waiting ? ', ' + na.hot_waiting + ' of them hot shots' : '') + ' <button class="sm" data-go="supply">Open</button>');
+        if (na.claims_waiting) items.push('🎁 ' + na.claims_waiting + ' co-op claim(s) to decide <button class="sm" data-go="programmes">Open</button>');
+        if (na.credits_owed) items.push('💵 ' + jmd(na.credits_amount) + ' owed to stores (' + na.credits_owed + ' item(s)) <button class="sm" data-go="programmes">Open</button>');
+        if (na.certs_expiring) items.push('🎓 ' + na.certs_expiring + ' certificate(s) expire within 30 days <button class="sm" data-go="certs">Open</button>');
+        if (na.stores_missing_systems) items.push('🖥 ' + na.stores_missing_systems + ' store(s) without every required system verified <button class="sm" data-go="network">Open</button>'); }
+      h += items.length ? items.map(function (x) { return '<div class="item">' + x + '</div>'; }).join('') : '<div class="empty">Nothing waiting.</div>';
+      h += '</div><div class="card"><h2>Recent activity</h2><table><tbody>' + (d.recent.map(function (l) { return '<tr><td>' + esc(when(l.at)) + '</td><td>' + esc(l.action) + (l.detail ? ' · ' + esc(l.detail) : '') + '</td><td>' + esc(l.by_name || '') + '</td></tr>'; }).join('') || '<tr><td class="empty">No activity yet.</td></tr>') + '</tbody></table></div>';
+      $('#view').innerHTML = h;
+      all('[data-fr]').forEach(function (b) { b.onclick = function () { location.hash = 'fr=' + b.getAttribute('data-fr'); }; });
+      all('[data-bill]').forEach(function (b) { b.onclick = function () { guard(b, api('/api/franchise/franchisees/' + b.getAttribute('data-bill') + '/bill', 'POST', { period: b.getAttribute('data-period') })).then(function (r) { toast('Invoice ' + r.invoice.number + ' for ' + jmd(r.invoice.total)); dash(); }); }; });
+      all('[data-audit]').forEach(function (b) { b.onclick = function () { auditForm(+b.getAttribute('data-audit')); }; });
+      all('[data-go]').forEach(function (b) { b.onclick = function () { location.hash = b.getAttribute('data-go'); }; });
+    }).catch(function (e) { $('#view').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  function kpi(v, l) { return '<div class="kpi"><b>' + esc(v) + '</b><span>' + esc(l) + '</span></div>'; }
+
+  // --------------------------------------------------------------- leads --
+  function leads() {
+    $('#view').innerHTML = '<div class="card"><div class="controls"><div><label>Stage</label><select id="lStage"><option value="active">Still in progress</option><option value="">All</option>' + opts(META.stages.map(function (s) { return [s.key, s.label]; })) + '</select></div>' +
+      '<div><label>Find</label><input id="lQ" placeholder="Name, phone, email, area"></div><button class="primary" id="lNew">+ New enquiry</button><button id="lCsv">Export</button></div><div class="scroll" id="lList"><div class="empty">Loading…</div></div></div>';
+    var rows = [];
+    var load = function () {
+      api('/api/franchise/leads?stage=' + encodeURIComponent(val('lStage')) + '&q=' + encodeURIComponent(val('lQ'))).then(function (d) {
+        rows = d.leads;
+        $('#lList').innerHTML = rows.length ? '<table><thead><tr><th>Received</th><th>Name</th><th>Area</th><th>Source</th><th class="n">Cash to invest</th><th>Score</th><th>Stage</th></tr></thead><tbody>' + rows.map(function (l) {
+          return '<tr class="row" data-l="' + l.id + '"><td>' + esc(day(l.created_day)) + '</td><td><b>' + esc(l.name) + '</b>' + (l.company ? '<br><small>' + esc(l.company) + '</small>' : '') + '<br><small>' + esc([l.phone, l.email].filter(Boolean).join(' · ')) + '</small></td><td>' + esc(l.territory_name || l.area_wanted || l.parish || '') + '</td><td>' + esc(l.source || '') + (l.programme === 'affiliate' ? ' <span class="pill warn">affiliate</span>' : '') + '</td><td class="n">' + (l.capital != null ? jmd(l.capital) : '') + '</td><td>' + (l.score != null ? l.score + '/100' : '') + '</td><td><span class="pill">' + esc(stageLabel(l.stage)) + '</span></td></tr>';
+        }).join('') + '</tbody></table>' : '<div class="empty">No leads here. Enquiries from the website form (franchisee.html) arrive here too.</div>';
+        all('[data-l]').forEach(function (tr) { tr.onclick = function () { location.hash = 'lead=' + tr.getAttribute('data-l'); }; });
+      }).catch(function (e) { toast(e.message); });
+    };
+    $('#lStage').onchange = load; $('#lQ').oninput = function () { clearTimeout(load.h); load.h = setTimeout(load, 300); };
+    $('#lNew').onclick = function () { leadForm(null); };
+    $('#lCsv').onclick = function () { csv('franchise-leads', [['Received', 'Name', 'Company', 'Phone', 'Email', 'Area', 'Source', 'Cash', 'Score', 'Stage']].concat(rows.map(function (l) { return [l.created_day, l.name, l.company, l.phone, l.email, l.territory_name || l.area_wanted, l.source, l.capital, l.score, stageLabel(l.stage)]; }))); };
+    load();
+  }
+  function leadFields(l) {
+    l = l || {};
+    return '<div class="grid">' + field('Wants', '<select id="fProg">' + opts([['franchise', 'A franchise'], ['affiliate', 'To join as an affiliate store']], l.programme || 'franchise') + '</select>') + field('Their store today (affiliates)', inp('fCur', l.current_store)) + field('Name', inp('fName', l.name)) + field('Company (if any)', inp('fCompany', l.company)) + field('Phone', inp('fPhone', l.phone)) + field('Email', inp('fEmail', l.email, 'email')) +
+      field('Address', inp('fAddress', l.address)) + field('Parish', inp('fParish', l.parish)) + field('Area wanted', inp('fArea', l.area_wanted)) + field('Territory', '<select id="fTerr">' + terrOpts(l.territory_id) + '</select>') +
+      field('Where they heard of us', inp('fSource', l.source, 'text', 'walk-in, referral, expo, website…')) + field('Cash to invest (J$)', inp('fCapital', l.capital)) + field('Net worth (J$)', inp('fNet', l.net_worth)) +
+      field('When they want to open', inp('fTimeline', l.timeline)) + field('Handled by', '<select id="fOwner">' + opts(META.staff, l.owner_id, '-') + '</select>') +
+      field('Experience', area('fExp', l.experience, 2), true) + field('Their message', area('fMsg', l.message, 2), true) + field('Notes', area('fNotes', l.notes, 2), true) + '</div>';
+  }
+  function leadBody(root) {
+    return { programme: val('fProg', root), current_store: val('fCur', root), name: val('fName', root), company: val('fCompany', root), phone: val('fPhone', root), email: val('fEmail', root), address: val('fAddress', root), parish: val('fParish', root), area_wanted: val('fArea', root),
+      territory_id: val('fTerr', root), source: val('fSource', root), capital: val('fCapital', root), net_worth: val('fNet', root), timeline: val('fTimeline', root), owner_id: val('fOwner', root),
+      experience: val('fExp', root), message: val('fMsg', root), notes: val('fNotes', root) };
+  }
+  function leadForm() {
+    var m = modal('<h2>New franchise enquiry</h2>' + leadFields(null) + '<div class="controls"><button class="primary" id="fSave">Save</button><button id="fX">Cancel</button></div>');
+    $('#fX', m).onclick = function () { close(); };
+    $('#fSave', m).onclick = function () { guard(this, api('/api/franchise/leads', 'POST', leadBody(m))).then(function (r) { close(); location.hash = 'lead=' + r.id; }); };
+  }
+  function openLead(id) {
+    api('/api/franchise/leads/' + id).then(function (d) {
+      var l = d.lead, sub = openLead.sub || 'details';
+      var closed = l.stage === 'declined' || l.stage === 'withdrawn';
+      var steps = [['Qualified', l.score != null && STAGE_I(l.stage) >= 1], ['NDA signed', !!l.nda_signed_at], ['Disclosure received', !!l.fdd_received_at], ['Applied', !!l.applied_at], ['Approved', STAGE_I(l.stage) >= 5], ['Franchisee record', !!l.franchisee_id]];
+      var h = '<h2>' + esc(l.name) + (l.company ? ' · ' + esc(l.company) : '') + ' <span class="pill">' + esc(stageLabel(l.stage)) + '</span><button class="sm" style="margin-left:auto" id="lX">Close</button></h2>' +
+        '<p class="sub">' + steps.map(function (s) { return (s[1] ? '✅ ' : '⬜ ') + esc(s[0]); }).join(' &nbsp; ') + (d.agreement_from ? '<br>The agreement can be signed from ' + esc(day(d.agreement_from)) + '.' : '') + '</p>' +
+        '<div class="ftabs">' + [['details', 'Details'], ['qualify', 'Qualify'], ['docs', 'NDA, disclosure & documents'], ['application', 'Application'], ['decide', 'Decision'], ['log', 'Log']].map(function (t) { return '<button data-s="' + t[0] + '"' + (t[0] === sub ? ' class="on"' : '') + '>' + t[1] + '</button>'; }).join('') + '</div><div id="lBody"></div>';
+      var m = modal(h);
+      $('#lX', m).onclick = function () { close(); };
+      all('[data-s]', m).forEach(function (b) { b.onclick = function () { openLead.sub = b.getAttribute('data-s'); openLead(id); }; });
+      var body = $('#lBody', m);
+      if (sub === 'details') {
+        body.innerHTML = leadFields(l) + '<div class="controls"><button class="primary" id="fSave">Save</button></div>';
+        $('#fSave', body).onclick = function () { guard(this, api('/api/franchise/leads/' + id, 'PUT', leadBody(body))).then(function () { toast('Saved'); openLead(id); }); };
+      } else if (sub === 'qualify') {
+        var q = (l.qualification && l.qualification.checks) || [];
+        var had = function (k) { var c = q.find(function (x) { return x.key === k; }); return c && c.ok; };
+        body.innerHTML = '<p class="sub">Cash and net worth are scored from the details (minimums ' + jmd(META.settings.min_capital) + ' and ' + jmd(META.settings.min_net_worth) + '). A score of ' + META.settings.qualify_score + ' or more qualifies.</p>' +
+          [['experience', 'Business, retail or motor-trade experience (15)'], ['territory', 'The area wanted is available (15)'], ['timeline', 'Ready to open within 12 months (10)'], ['interview', 'First interview held and went well (10)']].map(function (c) {
+            return '<label style="display:block;margin:6px 0"><input type="checkbox" data-q="' + c[0] + '"' + (had(c[0]) ? ' checked' : '') + '> ' + esc(c[1]) + '</label>'; }).join('') +
+          field('Notes', area('qNotes', l.qualification && l.qualification.notes, 2)) + '<div class="controls" style="margin-top:8px"><button class="primary" id="qGo"' + (closed ? ' disabled' : '') + '>Score it</button></div><div id="qOut">' +
+          (l.score != null ? '<p>Last score: <b>' + l.score + '/100</b></p>' + q.map(function (c) { return '<div>' + (c.ok ? '✅' : '❌') + ' ' + esc(c.label) + ' (' + c.points + ')</div>'; }).join('') : '') + '</div>';
+        $('#qGo', body).onclick = function () {
+          var checks = {}; all('[data-q]', body).forEach(function (x) { checks[x.getAttribute('data-q')] = x.checked; });
+          guard(this, api('/api/franchise/leads/' + id + '/qualify', 'POST', { checks: checks, notes: val('qNotes', body) })).then(function (r) { toast('Score ' + r.score + '/100' + (r.passed ? ': qualified' : ': not yet')); openLead(id); });
+        };
+      } else if (sub === 'docs') {
+        body.innerHTML = docsPanel(d.documents, ['nda', 'fdd', 'application', 'site_report'], closed) ;
+        wireDocs(body, { lead_id: id }, function () { openLead(id); });
+      } else if (sub === 'application') {
+        var a = l.application || {};
+        var f = META.templates.find(function (t) { return t.key === 'application'; }).fields;
+        body.innerHTML = '<p class="sub">' + (l.applied_at ? 'Recorded ' + esc(when(l.applied_at)) + '. ' : '') + 'Type in their application here, or send them the application form to sign under "NDA, disclosure & documents".</p><div class="grid">' +
+          f.map(function (x) { return field(x.label, x.type === 'textarea' ? area('a_' + x.key, a[x.key], 2) : inp('a_' + x.key, a[x.key] != null ? a[x.key] : (x.key === 'capital' ? l.capital : x.key === 'net_worth' ? l.net_worth : x.key === 'area' ? l.area_wanted : x.key === 'experience' ? l.experience : '')), x.type === 'textarea'); }).join('') +
+          '</div><div class="controls"><button class="primary" id="aGo"' + (closed ? ' disabled' : '') + '>Save application</button></div>';
+        $('#aGo', body).onclick = function () { var ans = {}; f.forEach(function (x) { ans[x.key] = val('a_' + x.key, body); }); guard(this, api('/api/franchise/leads/' + id + '/application', 'POST', { answers: ans })).then(function () { toast('Application saved'); openLead(id); }); };
+      } else if (sub === 'decide') {
+        body.innerHTML = closed ? '<p>' + esc(stageLabel(l.stage)) + (l.decline_reason ? ': ' + esc(l.decline_reason) : '') + '</p><button id="dRe">Reopen</button>' :
+          (l.franchisee_id ? '<p>Franchisee record made. <button class="sm" id="dFr">Open it</button></p>' :
+          '<p class="sub">Approve once they have applied and signed for the disclosure document. Then make the franchisee record: it opens their account in Receivables and the opening checklist.</p>' +
+          '<div class="controls"><button class="primary" id="dOk"' + (l.stage === 'approved' ? ' disabled' : '') + '>Approve</button><button id="dConv"' + (l.stage !== 'approved' ? ' disabled' : '') + '>Make the franchisee record</button></div>' +
+          '<h4>Decline or withdrawn</h4>' + field('Reason (kept on file)', area('dWhy', '', 2)) + '<div class="controls" style="margin-top:6px"><button id="dNo">Decline</button><button id="dW">They withdrew</button></div>');
+        var go = function (dec) { return api('/api/franchise/leads/' + id + '/decide', 'POST', { decision: dec, reason: val('dWhy', body) }).then(function () { toast('Done'); openLead(id); }).catch(function (e) { toast(e.message); }); };
+        if ($('#dRe', body)) $('#dRe', body).onclick = function () { go('reopen'); };
+        if ($('#dFr', body)) $('#dFr', body).onclick = function () { location.hash = 'fr=' + l.franchisee_id; };
+        if ($('#dOk', body)) $('#dOk', body).onclick = function () { go('approve'); };
+        if ($('#dNo', body)) $('#dNo', body).onclick = function () { go('decline'); };
+        if ($('#dW', body)) $('#dW', body).onclick = function () { go('withdrawn'); };
+        if ($('#dConv', body)) $('#dConv', body).onclick = function () { convertForm(l); };
+      } else {
+        body.innerHTML = logTable(d.log);
+      }
+    }).catch(function (e) { toast(e.message); });
+  }
+  function STAGE_I(s) { return ['enquiry', 'qualified', 'nda', 'disclosed', 'application', 'approved', 'agreement', 'signed'].indexOf(s); }
+  function logTable(rows) { return '<table><tbody>' + (rows.map(function (x) { return '<tr><td>' + esc(when(x.at)) + '</td><td>' + esc(x.action) + (x.detail ? ' · ' + esc(x.detail) : '') + '</td><td>' + esc(x.by_name || '') + '</td></tr>'; }).join('') || '<tr><td class="empty">Nothing yet.</td></tr>') + '</tbody></table>'; }
+  function frFields(f, s) {
+    f = f || {};
+    var dv = function (k) { return f[k] != null ? f[k] : ''; };
+    return '<div class="grid">' + field('Kind of store', '<select id="gType">' + opts([['franchise', 'Franchised store'], ['affiliate', 'Affiliate (dealer-member) store'], ['company', 'Company-owned store']], f.store_type || 'franchise') + '</select>') + field('Legal name (company or person signing)', inp('gLegal', f.legal_name)) + field('Trading name', inp('gTrade', f.trading_name, 'text', 'Morty\'s Auto Parts Mandeville')) +
+      field('Principal (who runs it)', inp('gPrin', f.principal)) + field('TRN', inp('gTrn', f.trn)) + field('Phone', inp('gPhone', f.phone)) + field('Email', inp('gEmail', f.email, 'email')) +
+      field('Address', inp('gAddr', f.address)) + field('Territory', '<select id="gTerr">' + terrOpts(f.territory_id) + '</select>') + field('Term (years)', inp('gTerm', f.term_years, 'number', s.term_years)) +
+      field('Initial fee (J$)', inp('gInit', dv('initial_fee'), 'text', s.initial_fee)) + field('Royalty % of net sales', inp('gRoy', dv('royalty_pct'), 'text', s.royalty_pct)) + field('Brand fund %', inp('gMkt', dv('marketing_pct'), 'text', s.marketing_pct)) +
+      field('Technology fee a month (J$)', inp('gTech', dv('tech_fee'), 'text', s.tech_fee)) + field('Minimum royalty a month (J$)', inp('gMin', dv('min_royalty'), 'text', s.min_royalty)) +
+      field('Renewal fee (J$)', inp('gRen', dv('renewal_fee'), 'text', s.renewal_fee)) + field('Transfer fee (J$)', inp('gTr', dv('transfer_fee'), 'text', s.transfer_fee)) +
+      field('Affiliate membership fee a month (J$)', inp('gMem', dv('member_fee'), 'text', s.member_fee)) + field('Buy through the DC at least (%)', inp('gCom', dv('commit_pct'), 'text', s.commit_pct)) + field('Co-op allowance (% of DC purchases)', inp('gCoop', dv('coop_pct'), 'text', s.coop_pct)) + field('Notes', area('gNotes', f.notes, 2), true) + '</div>' +
+      '<p class="sub">Blank fee boxes take the current defaults (Settings). Affiliates pay the membership fee instead of a royalty; company-owned stores pay no fees. Place the store in the network (format, DC, hub) on its Store tab.</p>';
+  }
+  function frBody(root) {
+    return { legal_name: val('gLegal', root), trading_name: val('gTrade', root), principal: val('gPrin', root), trn: val('gTrn', root), phone: val('gPhone', root), email: val('gEmail', root), address: val('gAddr', root),
+      territory_id: val('gTerr', root), term_years: val('gTerm', root), initial_fee: val('gInit', root), royalty_pct: val('gRoy', root), marketing_pct: val('gMkt', root), tech_fee: val('gTech', root),
+      min_royalty: val('gMin', root), renewal_fee: val('gRen', root), transfer_fee: val('gTr', root), notes: val('gNotes', root), store_type: val('gType', root), member_fee: val('gMem', root), commit_pct: val('gCom', root), coop_pct: val('gCoop', root) };
+  }
+  function convertForm(l) {
+    var m = modal('<h2>Make the franchisee record</h2>' + frFields({ store_type: l.programme, legal_name: l.company || l.name, trading_name: l.programme === 'affiliate' ? l.current_store : '', principal: l.name, phone: l.phone, email: l.email, address: l.address, territory_id: l.territory_id }, META.settings) +
+      '<div class="controls"><button class="primary" id="cGo">Make it</button><button id="cX">Cancel</button></div>', 2);
+    $('#cX', m).onclick = function () { close(2); };
+    $('#cGo', m).onclick = function () { guard(this, api('/api/franchise/leads/' + l.id + '/convert', 'POST', frBody(m))).then(function (r) { close(2); close(); reloadMeta().then(function () { location.hash = 'fr=' + r.franchisee_id; }); }); };
+  }
+
+  // ------------------------------------------------- documents and signing --
+  function docsPanel(list, kinds, closed) {
+    var tpls = META.templates.filter(function (t) { return kinds.indexOf(t.key) >= 0; });
+    return '<div class="controls">' + tpls.map(function (t) { return '<button class="sm" data-mk="' + t.key + '"' + (closed ? ' disabled' : '') + '>+ ' + esc(t.title) + '</button>'; }).join('') + '</div>' +
+      (list.length ? '<table><thead><tr><th>Number</th><th>Document</th><th>Status</th><th>Signed</th><th></th></tr></thead><tbody>' + list.map(function (x) {
+        var acts = '<button class="sm" data-view="' + x.id + '">View</button> ';
+        if (x.status === 'draft' || x.status === 'sent') {
+          if (x.needs_signature) acts += '<button class="sm" data-send="' + x.id + '">' + (x.status === 'sent' ? 'New link' : 'Send link') + '</button> <button class="sm" data-sign="' + x.id + '">Sign here</button> ';
+          else acts += '<button class="sm" data-file="' + x.id + '">File it</button> ';
+          acts += '<button class="sm" data-cancel="' + x.id + '">Cancel</button>';
+        }
+        if (x.status === 'signed' && x.countersign) acts += '<button class="sm primary" data-counter="' + x.id + '">Sign for us</button>';
+        if (x.signed_document_id) acts += ' <a href="/api/docs/' + x.signed_document_id + '/file" target="_blank" rel="noopener">Filed copy ›</a>';
+        var chk = x.signed_at ? (x.sealed && x.unchanged ? ' <span class="pill ok">seal checks out</span>' : ' <span class="pill bad">seal broken</span>') : '';
+        return '<tr><td>' + esc(x.number) + '</td><td>' + esc(x.title) + (x.sent_to ? '<br><small>to ' + esc(x.sent_to) + (x.viewed_at ? ', opened ' + esc(when(x.viewed_at)) : '') + '</small>' : '') + '</td><td>' + docPill(x.status) + chk + (x.decline_reason ? '<br><small>' + esc(x.decline_reason) + '</small>' : '') + '</td><td>' +
+          (x.signed_at ? esc(x.signer_name) + '<br><small>' + esc(when(x.signed_at)) + (x.method === 'in_person' ? ' (in person)' : ' (link)') + '</small>' : '') + (x.counter_at ? '<br><small>Us: ' + esc(x.counter_name) + '</small>' : '') + '</td><td>' + acts + '</td></tr>';
+      }).join('') + '</tbody></table>' : '<div class="empty">No documents yet.</div>');
+  }
+  function wireDocs(root, owner, refresh) {
+    all('[data-mk]', root).forEach(function (b) { b.onclick = function () { makeDoc(b.getAttribute('data-mk'), owner, refresh); }; });
+    all('[data-view]', root).forEach(function (b) { b.onclick = function () { viewDoc(+b.getAttribute('data-view')); }; });
+    all('[data-send]', root).forEach(function (b) { b.onclick = function () { sendDoc(+b.getAttribute('data-send'), refresh); }; });
+    all('[data-sign]', root).forEach(function (b) { b.onclick = function () { signDoc(+b.getAttribute('data-sign'), false, refresh); }; });
+    all('[data-counter]', root).forEach(function (b) { b.onclick = function () { signDoc(+b.getAttribute('data-counter'), true, refresh); }; });
+    all('[data-file]', root).forEach(function (b) { b.onclick = function () { guard(b, api('/api/franchise/documents/' + b.getAttribute('data-file') + '/file', 'POST', {})).then(function (r) { toast('Filed' + (r.document ? ' as ' + r.document.number : '')); refresh(); }); }; });
+    all('[data-cancel]', root).forEach(function (b) { b.onclick = function () { if (!confirm('Cancel this document? Any link sent stops working.')) return; guard(b, api('/api/franchise/documents/' + b.getAttribute('data-cancel') + '/cancel', 'POST', {})).then(refresh); }; });
+  }
+  function makeDoc(key, owner, refresh) {
+    var t = META.templates.find(function (x) { return x.key === key; });
+    var m = modal('<h2>' + esc(t.title) + '</h2>' + (t.reviewed_at ? '<p class="sub">Template reviewed by ' + esc(t.reviewer) + ' on ' + esc(day(t.reviewed_at)) + '.</p>' :
+      '<div class="warn">This template has not been reviewed by a Jamaican attorney yet, so the copy carries a "starting point only" notice. Record the review under Templates & manual once it is done.</div>') +
+      '<p class="sub">Names, addresses, territory, fees and dates are filled in from the records. Fill in the rest:</p><div class="grid">' +
+      (t.fields || []).map(function (f) { return field(f.label + (f.required ? ' *' : ''), f.type === 'textarea' ? area('v_' + f.key, f.default, 3) : inp('v_' + f.key, f.default, f.type === 'date' ? 'date' : f.type === 'number' ? 'number' : 'text'), f.type === 'textarea'); }).join('') +
+      '</div><div class="controls"><button class="primary" id="mGo">Make it</button><button id="mX">Cancel</button></div>', 2);
+    $('#mX', m).onclick = function () { close(2); };
+    $('#mGo', m).onclick = function () {
+      var values = {}; (t.fields || []).forEach(function (f) { values[f.key] = val('v_' + f.key, m); });
+      guard(this, api('/api/franchise/documents', 'POST', Object.assign({ kind: key, values: values }, owner))).then(function (r) { close(2); toast(r.number + ' made'); refresh(); viewDoc(r.id); });
+    };
+  }
+  function viewDoc(id) {
+    var m = modal('<h2>Document <button class="sm" style="margin-left:auto" id="vP">Print</button><button class="sm" id="vX">Close</button></h2><iframe class="doc" sandbox="allow-modals allow-same-origin" src="/api/franchise/documents/' + id + '/view"></iframe>', 2);
+    $('#vX', m).onclick = function () { close(2); };
+    $('#vP', m).onclick = function () { var f = $('iframe', m); try { f.contentWindow.print(); } catch (_) { window.open(f.src); } };
+  }
+  function sendDoc(id, refresh) {
+    var m = modal('<h2>Send for signing</h2><p class="sub">A one-time link. Only its fingerprint is kept, so copy it now if you will send it by WhatsApp.</p><div class="grid">' + field('Email it to (optional)', inp('sEmail', '', 'email')) + field('Link lasts (days)', inp('sDays', META.settings.link_days, 'number')) +
+      '</div><div class="controls"><button class="primary" id="sGo">Make the link</button><button id="sX">Close</button></div><div id="sOut"></div>', 2);
+    $('#sX', m).onclick = function () { close(2); };
+    $('#sGo', m).onclick = function () {
+      guard(this, api('/api/franchise/documents/' + id + '/send', 'POST', { email: val('sEmail', m), days: val('sDays', m) })).then(function (r) {
+        $('#sOut', m).innerHTML = '<div class="item"><input style="width:100%" readonly value="' + esc(r.link) + '"><small>' + (r.emailed ? 'Emailed. ' : 'Not emailed: copy the link. ') + 'Expires in ' + r.expires_in_days + ' days.</small></div>';
+        $('#sOut input', m).select(); refresh();
+      });
+    };
+  }
+  function signDoc(id, counter, refresh) {
+    var m = modal('<h2>' + (counter ? 'Sign for the franchisor' : 'Sign in person') + '</h2><p class="sub">' + (counter ? 'You sign for ' + esc('Morty\'s Auto Parts') + '. Read the document first.' : 'Hand the screen to the person signing. You are recorded as the witness.') +
+      ' <button class="link sm" id="pV">Read the document</button></p>' + field('Name of the person signing', inp('pName')) + '<div class="padbox" id="pPad" style="margin-top:8px"></div>' +
+      '<div class="controls" style="margin-top:8px"><button id="pClr">Clear</button><button class="primary" id="pGo">Sign</button><button id="pX">Cancel</button></div>', 2);
+    var pad = window.VAScan.pad($('#pPad', m));
+    $('#pV', m).onclick = function () { window.open('/api/franchise/documents/' + id + '/view', '_blank'); };
+    $('#pClr', m).onclick = pad.clear; $('#pX', m).onclick = function () { close(2); };
+    $('#pGo', m).onclick = function () {
+      if (pad.empty()) return toast('Sign in the box first');
+      guard(this, api('/api/franchise/documents/' + id + (counter ? '/countersign' : '/sign'), 'POST', { name: val('pName', m), image: pad.png() })).then(function (r) { close(2); toast('Signed' + (r.document ? ', filed as ' + r.document.number : '')); refresh(); });
+    };
+  }
+
+  // --------------------------------------------------------- franchisees --
+  function franchisees() {
+    $('#view').innerHTML = '<div class="card"><div class="controls"><button class="primary" id="nFr">+ Add an existing franchisee</button><span class="sub" style="margin:0">New franchisees normally come from an approved lead.</span></div><div class="scroll" id="fList"><div class="empty">Loading…</div></div></div>';
+    $('#nFr').onclick = function () {
+      var m = modal('<h2>Add a franchisee</h2>' + frFields(null, META.settings) + '<div class="controls"><button class="primary" id="nGo">Save</button><button id="nX">Cancel</button></div>');
+      $('#nX', m).onclick = function () { close(); };
+      $('#nGo', m).onclick = function () { guard(this, api('/api/franchise/franchisees', 'POST', frBody(m))).then(function (r) { close(); reloadMeta().then(function () { location.hash = 'fr=' + r.id; }); }); };
+    };
+    api('/api/franchise/franchisees').then(function (d) {
+      $('#fList').innerHTML = d.franchisees.length ? '<table><thead><tr><th>No.</th><th>Franchisee</th><th>Territory</th><th>Status</th><th>Opened</th><th>Term ends</th><th>Checklist</th><th>Last audit</th></tr></thead><tbody>' + d.franchisees.map(function (f) {
+        var pct = f.tasks_all ? Math.round((f.tasks_all - f.tasks_open) / f.tasks_all * 100) : 0;
+        return '<tr class="row" data-f="' + f.id + '"><td>' + esc(f.number) + '<br>' + typePill(f.store_type) + '</td><td><b>' + esc(f.trading_name || f.legal_name) + '</b><br><small>' + esc(f.legal_name) + (f.principal ? ' · ' + esc(f.principal) : '') + '</small></td><td>' + esc(f.territory_name || '') + '</td><td>' + frPill(f.status) + '</td><td>' + esc(day(f.opened_on)) + '</td><td>' + esc(day(f.term_end)) + '</td>' +
+          '<td><div class="bar"><i style="width:' + pct + '%"></i></div><small>' + pct + '%</small></td><td>' + (f.last_audit != null ? f.last_audit + '%' : '') + '</td></tr>';
+      }).join('') + '</tbody></table>' : '<div class="empty">No franchisees yet.</div>';
+      all('[data-f]').forEach(function (tr) { tr.onclick = function () { location.hash = 'fr=' + tr.getAttribute('data-f'); }; });
+    }).catch(function (e) { toast(e.message); });
+  }
+  function openFr(id) {
+    api('/api/franchise/franchisees/' + id).then(function (d) {
+      var f = d.franchisee, sub = openFr.sub || 'overview', tr = d.terms;
+      var h = '<h2>' + esc(f.number) + ' · ' + esc(f.trading_name || f.legal_name) + ' ' + frPill(f.status) + ' ' + typePill(f.store_type) + '<button class="sm" style="margin-left:auto" id="fX">Close</button></h2>' +
+        '<p class="sub">' + esc(f.legal_name) + (f.territory_name ? ' · ' + esc(f.territory_name) : '') + (f.term_end ? ' · term ' + esc(day(f.term_start)) + ' to ' + esc(day(f.term_end)) : ' · agreement not yet signed') +
+        ' · balance owed ' + jmd(d.statement.balance) + (d.statement.overdue ? ' (<b>' + jmd(d.statement.overdue) + ' overdue</b>)' : '') + '</p>' +
+        '<div class="ftabs">' + [['overview', 'Overview'], ['checklist', 'Opening checklist'], ['docs', 'Agreement & documents'], ['store', 'Store & systems'], ['sales', 'Sales & fees'], ['audits', 'Audits'], ['actions', 'Renewal, transfer & exit'], ['edit', 'Details & terms'], ['log', 'Log']].map(function (t) { return '<button data-s="' + t[0] + '"' + (t[0] === sub ? ' class="on"' : '') + '>' + t[1] + '</button>'; }).join('') + '</div><div id="fBody"></div>';
+      var m = modal(h);
+      $('#fX', m).onclick = function () { close(); };
+      all('[data-s]', m).forEach(function (b) { b.onclick = function () { openFr.sub = b.getAttribute('data-s'); openFr(id); }; });
+      var body = $('#fBody', m), again = function () { openFr(id); };
+      if (sub === 'overview') {
+        var open = d.tasks.filter(function (k) { return !k.done_at; }).length;
+        body.innerHTML = '<div class="kpis">' + (f.store_type === 'affiliate' ? kpi(jmd(tr.member_fee), 'Membership fee a month') : f.store_type === 'company' ? kpi('None', 'Fees (company-owned)') : kpi(tr.royalty_pct + '%', 'Royalty')) + kpi(tr.marketing_pct + '%', 'Brand fund') + kpi(jmd(tr.tech_fee), 'Technology fee a month') + kpi(jmd(tr.min_royalty), 'Minimum royalty') +
+          kpi(open + ' of ' + d.tasks.length, 'Checklist items open') + kpi(d.audits[0] ? d.audits[0].score_pct + '%' : '-', 'Last audit') + '</div>' +
+          '<div class="item">Principal: <b>' + esc(f.principal || '') + '</b> · ' + esc([f.phone, f.email].filter(Boolean).join(' · ')) + '<br>Address: ' + esc(f.address || '') + ' · TRN ' + esc(f.trn || '-') +
+          '<br>Account in Receivables: ' + (f.customer_id ? '<a href="/admin.html#tab=customers&id=' + f.customer_id + '" target="_blank" rel="noopener">' + esc(f.account_number || f.customer_name) + ' ›</a>' : 'none yet') + '</div>' +
+          '<div class="controls">' + (f.status === 'onboarding' ? '<button class="primary" id="oOpen"' + (f.signed_on ? '' : ' disabled title="Sign the agreement first"') + '>Mark the shop open</button>' : '') +
+          (f.status === 'open' || f.status === 'expired' && f.term_end && f.term_end <= today() ? '' : '') + (f.term_end && f.term_end < today() && f.status === 'open' ? '<button id="oExp">Mark expired</button>' : '') +
+          '<button id="oLink">Franchisee link (reports, statement, manual)</button></div><div id="oOut"></div>' + (d.lead ? '<p class="sub">From lead <a href="#lead=' + d.lead.id + '">#' + d.lead.id + '</a>.</p>' : '');
+        if ($('#oOpen', body)) $('#oOpen', body).onclick = function () { var dt = prompt('Opening date (YYYY-MM-DD)', today()); if (!dt) return; guard(this, api('/api/franchise/franchisees/' + id + '/status', 'POST', { status: 'open', opened_on: dt })).then(again); };
+        if ($('#oExp', body)) $('#oExp', body).onclick = function () { if (!confirm('Mark this franchise expired? The territory opens again.')) return; guard(this, api('/api/franchise/franchisees/' + id + '/status', 'POST', { status: 'expired' })).then(again); };
+        $('#oLink', body).onclick = function () {
+          if (!confirm('Make a new link for the franchisee? Any earlier link stops working.')) return;
+          guard(this, api('/api/franchise/franchisees/' + id + '/portal-link', 'POST', {})).then(function (r) { $('#oOut', body).innerHTML = '<div class="item"><input style="width:100%" readonly value="' + esc(r.link) + '"><small>Shown once. Send it to the franchisee; it lets them send sales reports and see their statement.</small></div>'; $('#oOut input', body).select(); });
+        };
+      } else if (sub === 'checklist') {
+        var phases = Object.assign({}, META.phases, { exit: 'After the franchise ends' }), by = {};
+        d.tasks.forEach(function (k) { (by[k.phase] = by[k.phase] || []).push(k); });
+        body.innerHTML = Object.keys(phases).filter(function (p) { return by[p]; }).map(function (p) {
+          return '<h4>' + esc(phases[p]) + '</h4>' + by[p].map(function (k) { return '<div class="task' + (k.done_at ? ' done' : '') + '"><input type="checkbox" data-k="' + k.id + '"' + (k.done_at ? ' checked' : '') + '><span>' + esc(k.title) +
+            (k.note ? '<br><small>' + esc(k.note) + '</small>' : '') + '</span><small>' + (k.done_at ? 'done ' + esc(day(k.done_at)) + (k.done_by_name ? ' by ' + esc(k.done_by_name) : '') : (k.due_on ? (k.due_on < today() ? '<b style="color:var(--red)">due ' + esc(day(k.due_on)) + '</b>' : 'due ' + esc(day(k.due_on))) : '')) + '</small></div>'; }).join('');
+        }).join('') + '<h4>Add an item</h4><div class="controls"><select id="kPh">' + opts(Object.keys(phases).map(function (p) { return [p, phases[p]]; })) + '</select><input id="kT" placeholder="What needs doing" style="flex:1"><input id="kD" type="date"><button id="kAdd">Add</button></div>';
+        all('[data-k]', body).forEach(function (x) { x.onchange = function () { api('/api/franchise/tasks/' + x.getAttribute('data-k'), 'PUT', { done: x.checked }).then(again).catch(function (e) { toast(e.message); }); }; });
+        $('#kAdd', body).onclick = function () { guard(this, api('/api/franchise/franchisees/' + id + '/tasks', 'POST', { phase: val('kPh', body), title: val('kT', body), due_on: val('kD', body) })).then(again); };
+      } else if (sub === 'docs') {
+        body.innerHTML = '<p class="sub">The agreement can only be signed ' + META.settings.wait_days + ' days after the disclosure document was received. The NDA, agreement, renewal and transfer are signed by both sides.</p>' +
+          docsPanel(d.documents, (f.store_type === 'affiliate' ? ['affiliate'] : f.store_type === 'company' ? [] : ['agreement']).concat(['supply', 'systems', 'loyalty', 'manual', 'training', 'certification', 'opening']).concat(f.network_role === 'hub' ? ['hub_service'] : []).concat(['commercial_app', 'coop', 'nda', 'fdd', 'default_notice', 'termination', 'renewal', 'transfer']), ['terminated', 'transferred'].indexOf(f.status) >= 0);
+        wireDocs(body, { franchisee_id: id }, again);
+      } else if (sub === 'store') {
+        storePanel(f, body, again);
+      } else if (sub === 'sales') {
+        var st = d.statement;
+        body.innerHTML = '<h4>Monthly sales report</h4><div class="grid">' + field('Month', inp('rP', lastMonth(), 'month')) + field('Gross sales incl. GCT (J$)', inp('rG')) + field('Refunds (J$)', inp('rR')) + field('GCT collected (J$)', inp('rT')) +
+          field('Number of sales', inp('rN', '', 'number')) + field('Local marketing spent (J$)', inp('rL')) + '</div>' +
+          '<details><summary class="sub" style="cursor:pointer">For the scorecard: DIY and commercial sales, cost of sales, stock, shrink, purchases, loyalty, deliveries</summary><div class="grid" style="margin-top:8px">' +
+          field('DIY (walk-in) net sales (J$)', inp('rDiy')) + field('Commercial net sales (J$)', inp('rCom')) + field('Cost of goods sold (J$)', inp('rCogs')) + field('Stock at cost, month end (J$)', inp('rInv')) + field('Shrink at cost (J$)', inp('rSh')) + field('All stock bought this month (J$)', inp('rPur')) +
+          field('Loyalty points given', inp('rLi', '', 'number')) + field('Loyalty points redeemed', inp('rLr', '', 'number')) + field('New loyalty members', inp('rLm', '', 'number')) + field('Commercial deliveries', inp('rDel', '', 'number')) + field('Average delivery time (minutes)', inp('rDm', '', 'number')) + '</div></details>' +
+          '<div class="controls"><button class="primary" id="rGo">Save report</button><span class="sub" style="margin:0">Net sales = gross − refunds − GCT. DIY + commercial should equal net sales.</span></div>' +
+          '<table><thead><tr><th>Month</th><th class="n">Gross</th><th class="n">Refunds</th><th class="n">GCT</th><th class="n">Net sales</th><th>From</th><th></th></tr></thead><tbody>' + (d.reports.map(function (r) {
+            return '<tr><td>' + esc(monthName(r.period)) + '</td><td class="n">' + jmd(r.gross_sales) + '</td><td class="n">' + jmd(r.refunds) + '</td><td class="n">' + jmd(r.gct_collected) + '</td><td class="n"><b>' + jmd(r.net_sales) + '</b></td><td>' + esc(r.source === 'portal' ? 'their link' : 'staff') + '</td><td>' +
+              (r.billed ? '<span class="pill ok">invoiced</span>' : f.store_type === 'company' ? '<small>no fees</small>' : '<button class="sm primary" data-bp="' + esc(r.period.slice(0, 7)) + '"' + (['open', 'suspended'].indexOf(f.status) < 0 ? ' disabled' : '') + '>Invoice fees</button>') + '</td></tr>'; }).join('') || '<tr><td colspan="7" class="empty">No reports yet.</td></tr>') + '</tbody></table>' +
+          '<h4>One-off charge</h4><div class="controls"><select id="cK">' + opts(META.charge_kinds.map(function (k) { return [k.key, k.label]; })) + '</select><input id="cA" placeholder="Amount before GCT (blank = their fee)"><input id="cD" placeholder="Description (optional)" style="flex:1"><label style="display:flex;gap:4px;align-items:center"><input type="checkbox" id="cG" checked> add GCT</label><button id="cGo">Invoice</button></div>' +
+          '<h4>Statement</h4><p>Billed ' + jmd(st.billed) + ' · paid ' + jmd(st.paid) + ' · <b>owed ' + jmd(st.balance) + '</b>' + (st.overdue ? ' · <b style="color:var(--red)">overdue ' + jmd(st.overdue) + '</b>' : '') + (f.customer_id ? ' · <a href="/receivables.html" target="_blank" rel="noopener">Take a payment in Receivables ›</a>' : '') + '</p>' +
+          '<table><thead><tr><th>Invoice</th><th>Date</th><th>Due</th><th>For</th><th class="n">Total</th><th class="n">Paid</th><th class="n">Owed</th></tr></thead><tbody>' + (st.invoices.map(function (i) {
+            return '<tr' + (i.voided_at ? ' style="opacity:.5"' : '') + '><td>' + esc(i.number) + (i.voided_at ? ' (void)' : '') + '</td><td>' + esc(day(i.invoice_date)) + '</td><td>' + esc(day(i.due_date)) + '</td><td>' + esc(i.memo || '') + '</td><td class="n">' + jmd(i.total) + '</td><td class="n">' + jmd(i.paid) + '</td><td class="n">' + jmd(i.balance) + '</td></tr>'; }).join('') || '<tr><td colspan="7" class="empty">No invoices yet.</td></tr>') + '</tbody></table>';
+        $('#rGo', body).onclick = function () { guard(this, api('/api/franchise/franchisees/' + id + '/reports', 'POST', { period: val('rP', body), gross_sales: val('rG', body), refunds: val('rR', body), gct_collected: val('rT', body), transactions: val('rN', body), local_marketing: val('rL', body),
+          diy_sales: val('rDiy', body), commercial_sales: val('rCom', body), cogs: val('rCogs', body), inventory_value: val('rInv', body), shrink: val('rSh', body), purchases_total: val('rPur', body),
+          loyalty_issued: val('rLi', body), loyalty_redeemed: val('rLr', body), loyalty_members: val('rLm', body), deliveries: val('rDel', body), delivery_minutes: val('rDm', body) })).then(function (r) { toast('Saved: net ' + jmd(r.net_sales)); again(); }); };
+        all('[data-bp]', body).forEach(function (b) { b.onclick = function () { guard(b, api('/api/franchise/franchisees/' + id + '/bill', 'POST', { period: b.getAttribute('data-bp') })).then(function (r) { toast('Invoice ' + r.invoice.number + ' for ' + jmd(r.invoice.total) + ', due ' + day(r.invoice.due) + (r.loyalty_credit ? '; ' + jmd(r.loyalty_credit.amount) + ' loyalty owed back to them' : '')); again(); }); }; });
+        $('#cGo', body).onclick = function () { guard(this, api('/api/franchise/franchisees/' + id + '/charge', 'POST', { kind: val('cK', body), amount: val('cA', body), description: val('cD', body), gct: $('#cG', body).checked })).then(function (r) { toast('Invoice ' + r.invoice.number + ' for ' + jmd(r.invoice.total)); again(); }); };
+      } else if (sub === 'audits') {
+        body.innerHTML = '<div class="controls"><button class="primary" id="aNew">+ New audit</button></div>' + auditTable(d.audits, false);
+        $('#aNew', body).onclick = function () { auditForm(id, again); };
+        wireAudits(body, again);
+      } else if (sub === 'actions') {
+        body.innerHTML = '<div class="controls">' + ['renewal', 'transfer', 'default', 'suspension', 'termination'].map(function (k) { return '<button class="sm" data-act="' + k + '">+ ' + esc(ACTK[k]) + '</button>'; }).join('') + '</div>' +
+          (d.actions.length ? d.actions.map(function (a) {
+            var x = a.details || {};
+            return '<div class="item"><b>' + esc(ACTK[a.kind]) + '</b> <span class="pill' + (a.status === 'open' ? ' warn' : ' ok') + '">' + esc(a.status) + '</span> <small>' + esc(when(a.created_at)) + ' by ' + esc(a.created_by_name || '') + '</small><br>' +
+              esc([x.reason, x.breach && ('Breach: ' + x.breach), x.remedy && ('To do: ' + x.remedy), x.buyer_name && ('Buyer: ' + x.buyer_name + (x.price ? ' for ' + jmd(x.price) : '')), x.new_term_years && (x.new_term_years + ' more years'), x.conditions].filter(Boolean).join(' · ')) +
+              (a.cure_by ? '<br>Put right by ' + esc(day(a.cure_by)) : '') + (a.effective_date ? '<br>Effective ' + esc(day(a.effective_date)) : '') + (a.close_note ? '<br><small>' + esc(a.close_note) + '</small>' : '') +
+              (a.status === 'open' ? '<div class="controls" style="margin:6px 0 0">' + (a.kind === 'default' ? '<button class="sm" data-close="' + a.id + '" data-st="cured">Put right</button>' : '<button class="sm primary" data-close="' + a.id + '" data-st="done">' + esc(a.kind === 'suspension' ? 'Lift the suspension' : a.kind === 'termination' ? 'Carry out the termination' : 'Complete') + '</button>') +
+                '<button class="sm" data-close="' + a.id + '" data-st="cancelled">Cancel</button></div>' : '') + '</div>';
+          }).join('') : '<div class="empty">No renewals, transfers or notices.</div>') +
+          '<p class="sub">Make the matching letter under "Agreement & documents" (notice of default, notice of termination, renewal letter, transfer consent). Invoice renewal and transfer fees under "Sales & fees".</p>';
+        all('[data-act]', body).forEach(function (b) { b.onclick = function () { actionForm(f, b.getAttribute('data-act'), again); }; });
+        all('[data-close]', body).forEach(function (b) { b.onclick = function () {
+          var st = b.getAttribute('data-st');
+          var note = prompt(st === 'done' ? 'Note (optional). This changes the franchise record.' : 'Note (optional)', ''); if (note === null) return;
+          guard(b, api('/api/franchise/actions/' + b.getAttribute('data-close') + '/close', 'POST', { status: st, note: note })).then(function (r) { toast('Done'); if (r.new_franchisee_id) { reloadMeta(); location.hash = 'fr=' + r.new_franchisee_id; } else again(); });
+        }; });
+      } else if (sub === 'edit') {
+        body.innerHTML = frFields(f, META.settings) + '<div class="controls"><button class="primary" id="eGo">Save</button></div>';
+        $('#eGo', body).onclick = function () { guard(this, api('/api/franchise/franchisees/' + id, 'PUT', frBody(body))).then(function () { toast('Saved'); reloadMeta().then(again); }); };
+      } else body.innerHTML = logTable(d.log);
+    }).catch(function (e) { toast(e.message); });
+  }
+  function actionForm(f, kind, done) {
+    var fl = {
+      renewal: field('Renewal term (years)', inp('xY', META.settings.term_years, 'number')) + field('Conditions (refit, training…)', area('xC', '', 2), true),
+      transfer: field('Buyer (legal name)', inp('xB')) + field('Buyer principal', inp('xBP')) + field('Buyer email', inp('xBE')) + field('Buyer phone', inp('xBPh')) + field('Buyer TRN', inp('xBT')) + field('Price (J$)', inp('xPr')) + field('Transfer date', inp('xE', '', 'date')) + field('Conditions', area('xC', '', 2), true),
+      'default': field('What is wrong (the breach)', area('xBr', '', 2), true) + field('Agreement section', inp('xCl')) + field('Put right by', inp('xCu', addDaysJs(30), 'date')) + field('What must be done', area('xRe', '', 2), true),
+      suspension: field('Reason', area('xR', '', 2), true),
+      termination: field('Reason', area('xR', '', 2), true) + field('Takes effect', inp('xE', today(), 'date')),
+    };
+    var m = modal('<h2>' + esc(ACTK[kind]) + ' · ' + esc(f.trading_name || f.legal_name) + '</h2>' + (kind === 'termination' ? '<div class="warn">Take legal advice before ending a franchise. Carrying it out closes the franchise, opens the territory and adds the after-termination checklist.</div>' : '') +
+      '<div class="grid">' + fl[kind] + '</div><div class="controls"><button class="primary" id="xGo">Save</button><button id="xX">Cancel</button></div>', 2);
+    $('#xX', m).onclick = function () { close(2); };
+    $('#xGo', m).onclick = function () {
+      var b = { kind: kind, effective_date: val('xE', m), cure_by: val('xCu', m), details: { new_term_years: val('xY', m), conditions: val('xC', m), buyer_name: val('xB', m), buyer_principal: val('xBP', m), buyer_email: val('xBE', m), buyer_phone: val('xBPh', m), buyer_trn: val('xBT', m),
+        price: val('xPr', m), breach: val('xBr', m), clause: val('xCl', m), remedy: val('xRe', m), reason: val('xR', m) } };
+      guard(this, api('/api/franchise/franchisees/' + f.id + '/actions', 'POST', b)).then(function () { close(2); done(); });
+    };
+  }
+  function addDaysJs(k) { var d = new Date(Date.now() + k * 86400000); return d.toISOString().slice(0, 10); }
+
+  // ---------------------------------------------------------- territories --
+  function territories() {
+    var t = META.territories;
+    $('#view').innerHTML = '<div class="card"><h2>Territories</h2><p class="sub">Exclusive areas: while a franchisee is not in default, no other Morty\'s shop opens inside theirs.</p><div class="controls"><button class="primary" id="tNew">+ New territory</button></div>' +
+      (t.length ? '<table><thead><tr><th>Code</th><th>Name</th><th>Area</th><th class="n">Population</th><th>Status</th><th>Franchisee</th><th></th></tr></thead><tbody>' + t.map(function (x) {
+        return '<tr><td>' + esc(x.code) + '</td><td><b>' + esc(x.name) + '</b></td><td>' + esc(x.description || '') + '</td><td class="n">' + (x.population ? Number(x.population).toLocaleString() : '') + '</td><td><span class="pill' + (x.status === 'open' ? ' ok' : ' warn') + '">' + esc(x.status) + '</span>' + (x.exclusive ? '' : ' <small>not exclusive</small>') + '</td><td>' +
+          (x.franchisee_id ? '<a href="#fr=' + x.franchisee_id + '">' + esc(x.trading_name || x.legal_name) + '</a>' : '') + '</td><td><button class="sm" data-te="' + x.id + '">Edit</button></td></tr>'; }).join('') + '</tbody></table>' : '<div class="empty">No territories yet.</div>') + '</div>';
+    $('#tNew').onclick = function () { terrForm(null); };
+    all('[data-te]').forEach(function (b) { b.onclick = function () { terrForm(t.find(function (x) { return String(x.id) === b.getAttribute('data-te'); })); }; });
+  }
+  function terrForm(x) {
+    x = x || { exclusive: true, status: 'open' };
+    var m = modal('<h2>' + (x.id ? 'Territory ' + esc(x.code) : 'New territory') + '</h2><div class="grid">' + field('Code', inp('tC', x.code, 'text', 'MAN-01')) + field('Name', inp('tN', x.name, 'text', 'Mandeville')) + field('Population (about)', inp('tP', x.population, 'number')) +
+      field('Status', '<select id="tS">' + opts([['open', 'Open (for sale)'], ['reserved', 'Reserved'], ['sold', 'Sold'], ['company', 'Company-run']], x.status) + '</select>') + field('Area (parishes, towns, boundaries)', area('tD', x.description, 2), true) + field('Notes', area('tNo', x.notes, 2), true) +
+      '</div><label><input type="checkbox" id="tE"' + (x.exclusive ? ' checked' : '') + '> Exclusive</label><div class="controls" style="margin-top:8px"><button class="primary" id="tGo">Save</button><button id="tX">Cancel</button></div>');
+    $('#tX', m).onclick = function () { close(); };
+    $('#tGo', m).onclick = function () {
+      var b = { code: val('tC', m), name: val('tN', m), population: val('tP', m), status: val('tS', m), description: val('tD', m), notes: val('tNo', m), exclusive: $('#tE', m).checked };
+      guard(this, api('/api/franchise/territories' + (x.id ? '/' + x.id : ''), x.id ? 'PUT' : 'POST', b)).then(function () { close(); reloadMeta().then(territories); });
+    };
+  }
+
+  // ------------------------------------------------------ royalties & fees --
+  function billing() {
+    $('#view').innerHTML = '<div class="card"><h2>Monthly royalty run</h2><p class="sub">For each open franchise: the month\'s sales report, then one invoice for the royalty (' + META.settings.royalty_pct + '% by default), the brand fund (' + META.settings.marketing_pct + '%) and the technology fee, plus GCT at ' + META.settings.gct_rate +
+      '%. Invoices go on the franchisee\'s account in Receivables (royalties and fees to 4600, the brand fund to 2170) and post to the ledger like any invoice. Payment is due by day ' + META.settings.royalty_due_day + ' of the next month.</p>' +
+      '<div class="controls"><div><label>Month</label><input type="month" id="bP" value="' + lastMonth() + '"></div><button id="bLoad">Show</button></div><div id="bOut"></div></div>';
+    var load = function () {
+      var p = val('bP') + '-01';
+      Promise.all([api('/api/franchise/franchisees'), api('/api/franchise/dashboard')]).then(function (r) {
+        var list = r[0].franchisees.filter(function (f) { return (f.status === 'open' || f.status === 'suspended') && f.store_type !== 'company'; });
+        return Promise.all(list.map(function (f) { return api('/api/franchise/franchisees/' + f.id).then(function (d) { return d; }); }));
+      }).then(function (ds) {
+        $('#bOut').innerHTML = ds.length ? '<table><thead><tr><th>Franchisee</th><th class="n">Net sales</th><th>Report</th><th>Invoice</th><th></th></tr></thead><tbody>' + ds.map(function (d) {
+          var f = d.franchisee, rep = d.reports.find(function (x) { return x.period === p; }), ch = d.charges.find(function (c) { return c.kind === 'royalty' && c.period === p; });
+          return '<tr><td><a href="#fr=' + f.id + '">' + esc(f.trading_name || f.legal_name) + '</a></td><td class="n">' + (rep ? jmd(rep.net_sales) : '') + '</td><td>' + (rep ? '<span class="pill ok">in</span> ' + esc(when(rep.submitted_at)) : '<span class="pill bad">missing</span>') + '</td><td>' + (ch ? esc(ch.invoice_number || '') : '') + '</td><td>' +
+            (rep && !ch ? '<button class="sm primary" data-b="' + f.id + '">Invoice</button>' : '') + '</td></tr>'; }).join('') + '</tbody></table><div class="controls" style="margin-top:8px"><button id="bAll">Invoice every report not yet invoiced</button></div>' : '<div class="empty">No open franchises.</div>';
+        var one = function (id) { return api('/api/franchise/franchisees/' + id + '/bill', 'POST', { period: val('bP') }); };
+        all('[data-b]').forEach(function (b) { b.onclick = function () { guard(b, one(b.getAttribute('data-b'))).then(function (r) { toast(r.invoice.number + ' ' + jmd(r.invoice.total)); load(); }); }; });
+        if ($('#bAll')) $('#bAll').onclick = function () {
+          var ids = all('[data-b]').map(function (b) { return b.getAttribute('data-b'); }); var n = 0;
+          ids.reduce(function (pr, id) { return pr.then(function () { return one(id).then(function () { n++; }).catch(function (e) { toast(e.message); }); }); }, Promise.resolve()).then(function () { toast(n + ' invoice(s) made'); load(); });
+        };
+      }).catch(function (e) { toast(e.message); });
+    };
+    $('#bLoad').onclick = load; load();
+  }
+
+  // --------------------------------------------------------- performance --
+  function performance() {
+    $('#view').innerHTML = '<div class="card"><h2>Performance by franchisee</h2><div class="controls"><div><label>Period</label><select id="pM">' + opts([[3, 'Last 3 months'], [6, 'Last 6 months'], [12, 'Last 12 months'], [24, 'Last 24 months']], 12) + '</select></div><button id="pCsv">Export</button></div><div id="pOut"><div class="empty">Loading…</div></div></div>';
+    var data = null;
+    var load = function () {
+      api('/api/franchise/performance?months=' + val('pM')).then(function (d) {
+        data = d;
+        var max = Math.max.apply(null, d.series.map(function (s) { return s.net_sales; }).concat([1]));
+        $('#pOut').innerHTML = '<div class="kpis">' + kpi(jmd(d.totals.net_sales), 'Network net sales') + kpi(jmd(d.totals.royalty), 'Royalty billed') + kpi(jmd(d.totals.fund), 'Brand fund billed') + kpi(jmd(d.totals.balance), 'Owed now') + '</div>' +
+          (d.series.length ? '<h4>Network net sales by month</h4><table><tbody>' + d.series.map(function (s) { return '<tr><td style="width:140px">' + esc(monthName(s.period)) + '</td><td><div class="bar"><i style="width:' + Math.round(s.net_sales / max * 100) + '%"></i></div></td><td class="n">' + jmd(s.net_sales) + '</td><td class="n">' + s.reports + ' shop(s)</td></tr>'; }).join('') + '</tbody></table>' : '') +
+          '<h4>Franchisees</h4><div class="scroll"><table><thead><tr><th>Franchisee</th><th class="n">Net sales</th><th class="n">vs before</th><th class="n">Share</th><th class="n">Avg / month</th><th class="n">Reports (late)</th><th class="n">Royalty</th><th class="n">Owed</th><th class="n">Overdue</th><th class="n">Last audit</th><th>Defaults</th></tr></thead><tbody>' +
+          (d.franchisees.map(function (r) {
+            return '<tr class="row" data-pf="' + r.id + '"><td><b>' + esc(r.name) + '</b><br><small>' + esc(r.territory_name || '') + '</small></td><td class="n">' + jmd(r.net_sales) + '</td><td class="n">' + (r.growth_pct == null ? '' : (r.growth_pct > 0 ? '+' : '') + r.growth_pct + '%') + '</td><td class="n">' + r.share_pct + '%</td><td class="n">' + jmd(r.avg_month) + '</td>' +
+              '<td class="n">' + r.reports + (r.late_reports ? ' (' + r.late_reports + ')' : '') + '</td><td class="n">' + jmd(r.royalty) + '</td><td class="n">' + jmd(r.balance) + '</td><td class="n">' + (r.overdue ? '<b style="color:var(--red)">' + jmd(r.overdue) + '</b>' : '') + '</td>' +
+              '<td class="n">' + (r.last_audit != null ? r.last_audit + '% <span class="pill' + (r.last_result === 'pass' ? ' ok' : r.last_result === 'fail' ? ' bad' : ' warn') + '">' + esc(r.last_result) + '</span>' : '') + '</td><td>' + (r.open_defaults ? '<span class="pill bad">' + r.open_defaults + ' open</span>' : '') + '</td></tr>'; }).join('') || '<tr><td colspan="11" class="empty">No trading franchises yet.</td></tr>') + '</tbody></table></div>';
+        all('[data-pf]').forEach(function (tr) { tr.onclick = function () { openFr.sub = 'sales'; location.hash = 'fr=' + tr.getAttribute('data-pf'); }; });
+      }).catch(function (e) { toast(e.message); });
+    };
+    $('#pM').onchange = load;
+    $('#pCsv').onclick = function () { if (data) csv('franchise-performance', [['Franchisee', 'Territory', 'Net sales', 'Growth %', 'Share %', 'Reports', 'Late reports', 'Royalty', 'Brand fund', 'Owed', 'Overdue', 'Last audit %', 'Open defaults']].concat(data.franchisees.map(function (r) { return [r.name, r.territory_name, r.net_sales, r.growth_pct, r.share_pct, r.reports, r.late_reports, r.royalty, r.fund, r.balance, r.overdue, r.last_audit, r.open_defaults]; }))); };
+    load();
+  }
+
+  // -------------------------------------------------------------- audits --
+  function auditTable(list, withName) {
+    return list.length ? '<table><thead><tr><th>Date</th>' + (withName ? '<th>Franchisee</th>' : '') + '<th>Kind</th><th class="n">Score</th><th>Result</th><th>Follow-up</th><th></th></tr></thead><tbody>' + list.map(function (a) {
+      return '<tr><td>' + esc(day(a.audit_date)) + '</td>' + (withName ? '<td><a href="#fr=' + a.franchisee_id + '">' + esc(a.name) + '</a></td>' : '') + '<td>' + esc(AUDK[a.kind] || a.kind) + '</td><td class="n">' + a.score_pct + '%</td><td><span class="pill' + (a.result === 'pass' ? ' ok' : a.result === 'fail' ? ' bad' : ' warn') + '">' + esc(a.result) + '</span></td><td>' +
+        (a.closed_at ? 'closed' : a.follow_up_on ? esc(day(a.follow_up_on)) : '') + '</td><td><button class="sm" data-av="' + a.id + '">Open</button>' + (!a.closed_at && a.result !== 'pass' ? ' <button class="sm" data-ac="' + a.id + '">Close actions</button>' : '') + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="empty">No audits yet.</div>';
+  }
+  function wireAudits(root, again) {
+    all('[data-av]', root).forEach(function (b) { b.onclick = function () { api('/api/franchise/audits/' + b.getAttribute('data-av')).then(function (r) { var a = r.audit;
+      var m = modal('<h2>' + esc(a.name) + ' · ' + esc(day(a.audit_date)) + ' · ' + a.score_pct + '% ' + esc(a.result) + '<button class="sm" style="margin-left:auto" id="avP">Print</button><button class="sm" id="avX">Close</button></h2><p class="sub">' + esc(AUDK[a.kind]) + ' by ' + esc(a.auditor || '') + '</p><table><tbody>' +
+        a.items.map(function (i) { return '<tr><td>' + esc(i.section) + '</td><td>' + esc(i.item) + (i.note ? '<br><small>' + esc(i.note) + '</small>' : '') + '</td><td class="n">' + (i.score == null ? 'N/A' : i.score + '/2') + '</td></tr>'; }).join('') + '</tbody></table>' +
+        (a.findings ? '<h4>Findings</h4><p>' + esc(a.findings) + '</p>' : '') + (a.actions ? '<h4>Actions</h4><p>' + esc(a.actions) + '</p>' : ''), 2);
+      $('#avX', m).onclick = function () { close(2); }; $('#avP', m).onclick = function () { window.print(); }; }).catch(function (e) { toast(e.message); }); }; });
+    all('[data-ac]', root).forEach(function (b) { b.onclick = function () { var note = prompt('How were the actions closed?', ''); if (note === null) return; guard(b, api('/api/franchise/audits/' + b.getAttribute('data-ac') + '/close', 'POST', { note: note })).then(again); }; });
+  }
+  function auditForm(frId, done) {
+    var sections = {};
+    META.audit_items.forEach(function (x, i) { (sections[x[0]] = sections[x[0]] || []).push([i, x[1]]); });
+    var m = modal('<h2>Field audit</h2><div class="grid">' + field('Kind', '<select id="auK">' + opts(META.audit_kinds.map(function (k) { return [k, AUDK[k]]; }), 'routine') + '</select>') + field('Date', inp('auD', today(), 'date')) +
+      field('Auditor', '<select id="auA">' + opts(META.staff, '', '(me)') + '</select>') + '</div><p class="sub">2 = meets the standard, 1 = partly, 0 = does not, N/A = does not apply. Pass ' + META.settings.pass_pct + '%+, conditional ' + META.settings.conditional_pct + '%+.</p>' +
+      Object.keys(sections).map(function (s) { return '<h4>' + esc(s) + '</h4>' + sections[s].map(function (it) { return '<div class="task"><span>' + esc(it[1]) + '<br><input data-note="' + it[0] + '" placeholder="Note" style="width:100%;margin-top:3px"></span><div class="score" data-i="' + it[0] + '">' +
+        ['2', '1', '0', 'N/A'].map(function (v) { return '<button type="button" data-v="' + v + '"' + (v === '2' ? ' class="on"' : '') + '>' + v + '</button>'; }).join(' ') + '</div></div>'; }).join(''); }).join('') +
+      '<div class="grid" style="margin-top:10px">' + field('Findings', area('auF', '', 3), true) + field('Actions agreed', area('auAc', '', 3), true) + field('Follow-up visit', inp('auFu', '', 'date')) + '</div>' +
+      '<div class="controls"><button class="primary" id="auGo">Save audit</button><button id="auX">Cancel</button></div>', 2);
+    all('.score', m).forEach(function (g) { all('button', g).forEach(function (b) { b.onclick = function () { all('button', g).forEach(function (x) { x.classList.remove('on'); }); b.classList.add('on'); }; }); });
+    $('#auX', m).onclick = function () { close(2); };
+    $('#auGo', m).onclick = function () {
+      var items = META.audit_items.map(function (x, i) { var on = $('.score[data-i="' + i + '"] button.on', m); var v = on ? on.getAttribute('data-v') : 'N/A'; return { section: x[0], item: x[1], score: v === 'N/A' ? null : +v, note: $('[data-note="' + i + '"]', m).value }; });
+      guard(this, api('/api/franchise/audits', 'POST', { franchisee_id: frId, kind: val('auK', m), audit_date: val('auD', m), auditor_id: val('auA', m), items: items, findings: val('auF', m), actions: val('auAc', m), follow_up_on: val('auFu', m) })).then(function (r) {
+        close(2); toast('Audit saved: ' + r.score_pct + '% (' + r.result + ')' + (r.fails_12m >= 2 ? '. Two failed audits in 12 months: a ground for termination.' : ''));
+        if (done) done(); else if (tab === 'audits') audits(); else dash();
+      });
+    };
+  }
+  function audits() {
+    $('#view').innerHTML = '<div class="card"><h2>Audits and inspections</h2><div class="controls"><div><label>Franchisee</label><select id="auFr"></select></div><button class="primary" id="auNew">+ New audit</button><button id="auPrint">Blank audit form</button></div><div id="auList"><div class="empty">Loading…</div></div></div>';
+    api('/api/franchise/franchisees').then(function (d) {
+      $('#auFr').innerHTML = opts(d.franchisees.filter(function (f) { return ['open', 'onboarding', 'suspended'].indexOf(f.status) >= 0; }).map(function (f) { return [f.id, f.trading_name || f.legal_name]; }), '', 'Choose…');
+    });
+    $('#auNew').onclick = function () { var id = +val('auFr'); if (!id) return toast('Choose the franchisee'); auditForm(id); };
+    $('#auPrint').onclick = function () { window.open('/api/franchise/templates/audit/preview', '_blank'); };
+    api('/api/franchise/audits').then(function (d) { $('#auList').innerHTML = auditTable(d.audits, true); wireAudits($('#auList'), audits); }).catch(function (e) { toast(e.message); });
+  }
+
+  // ----------------------------------------------------------- templates --
+  function templates() {
+    $('#view').innerHTML = '<div class="card"><h2>Franchise documents</h2><div class="warn"><b>These are starting points, not legal advice.</b> They follow common franchise practice (the 23-item disclosure document, the usual agreement terms, a standard operations manual) set to Jamaican terms. Jamaica has no franchise law of its own, so contract, competition, trade-mark, data-protection and tax law all apply. Have a Jamaican attorney review each one before use, then record the review here; until then every copy keeps the notice.</div>' +
+      (META.templates_in_docs ? '<p class="sub">Each template is kept in the Document centre (Templates), where a document manager can change the wording. {{words}} in double braces are filled in from the records.</p>' : '<p class="sub">The templates are added to the Document centre the first time it is opened; until then the built-in wording is used.</p>') +
+      '<table><thead><tr><th>Template</th><th>Signed by</th><th>Document centre</th><th>Attorney review</th><th></th></tr></thead><tbody>' + META.templates.map(function (t) {
+        return '<tr><td><b>' + esc(t.title) + '</b></td><td>' + (t.sign ? (t.countersign ? 'Both sides' : 'The franchisee') : 'Not signed (filed)') + '</td><td>' + (t.document_id ? '<a href="/documents.html#forms" target="_blank" rel="noopener">' + esc(t.doc_number || 'Edit') + ' ›</a>' : '') + '</td><td>' +
+          (t.reviewed_at ? '<span class="pill ok">reviewed</span> ' + esc(t.reviewer) + ', ' + esc(day(t.reviewed_at)) : '<span class="pill warn">not yet</span>') + '</td><td><button class="sm" data-pv="' + t.key + '">Preview</button> ' +
+          (t.reviewed_at ? '<button class="sm" data-un="' + t.key + '">Withdraw review</button>' : '<button class="sm" data-rv="' + t.key + '">Record review</button>') + '</td></tr>'; }).join('') + '</tbody></table>' +
+      '<p class="sub">The operations manual is issued to each franchisee as a numbered copy they sign for (Franchisee > Agreement & documents > Franchise operations manual), and they can read it from their franchisee link.</p></div>';
+    all('[data-pv]').forEach(function (b) { b.onclick = function () { window.open('/api/franchise/templates/' + b.getAttribute('data-pv') + '/preview', '_blank'); }; });
+    all('[data-rv]').forEach(function (b) { b.onclick = function () { var who = prompt('Which attorney or firm reviewed it?', ''); if (!who) return; guard(b, api('/api/franchise/templates/' + b.getAttribute('data-rv') + '/review', 'POST', { reviewer: who })).then(function () { reloadMeta().then(templates); }); }; });
+    all('[data-un]').forEach(function (b) { b.onclick = function () { guard(b, api('/api/franchise/templates/' + b.getAttribute('data-un') + '/review', 'POST', { reviewed: false })).then(function () { reloadMeta().then(templates); }); }; });
+  }
+
+  // ------------------------------------------------------------- settings --
+  function settingsView() {
+    var s = META.settings;
+    var F = [['initial_fee', 'Initial franchise fee (J$)'], ['royalty_pct', 'Royalty (% of net sales)'], ['marketing_pct', 'Brand marketing fund (%)'], ['tech_fee', 'Technology fee a month (J$)'], ['min_royalty', 'Minimum royalty a month (J$)'],
+      ['renewal_fee', 'Renewal fee (J$)'], ['transfer_fee', 'Transfer fee (J$)'], ['term_years', 'Term (years)'], ['local_marketing_pct', 'Local marketing spend (% of net sales)'], ['gct_rate', 'GCT rate (%)'],
+      ['wait_days', 'Days between disclosure and signing'], ['report_day', 'Sales report due (day of month)'], ['royalty_due_day', 'Payment due (day of month)'], ['opening_months', 'Months to open after signing'],
+      ['min_capital', 'Minimum cash to invest (J$)'], ['min_net_worth', 'Minimum net worth (J$)'], ['qualify_score', 'Score to qualify (of 100)'], ['renewal_notice_months', 'Warn of renewals (months ahead)'],
+      ['pass_pct', 'Audit pass mark (%)'], ['conditional_pct', 'Audit conditional mark (%)'], ['link_days', 'Signing links last (days)'],
+      ['member_fee', 'Affiliate membership fee a month (J$)'], ['affiliate_marketing_pct', 'Affiliate network marketing (% of net sales)'], ['commit_pct', 'Buy through the DC at least (%)'], ['coop_pct', 'Co-op allowance (% of DC purchases)'], ['coop_claim_pct', 'Co-op pays (% of each approved spend)'],
+      ['loyalty_points_per_100', 'Loyalty points per J$100'], ['loyalty_point_value', 'Value of a loyalty point (J$)'], ['hot_shot_minutes', 'Hub hot-shot promise (minutes)'], ['delivery_promise_minutes', 'Commercial delivery promise (minutes)'],
+      ['spend_per_vehicle', 'Parts spend per vehicle a year (J$)'], ['spend_per_garage', 'Parts spend per garage a year (J$)'], ['target_commercial_pct', 'Target commercial share (%)'], ['target_fill_rate', 'Target DC fill rate (%)'],
+      ['target_turns', 'Target inventory turns a year'], ['max_shrink_pct', 'Most shrink allowed (% of sales)'], ['target_margin_pct', 'Target gross margin (%)'], ['target_cert_pct', 'Target certification (%)']];
+    $('#view').innerHTML = '<div class="card"><h2>Franchise settings</h2><p class="sub">The defaults for new franchisees and new documents. Each franchisee can have their own fees (their Details & terms). The starting figures are placeholders: set your own with your accountant and attorney.</p><div class="grid">' +
+      F.map(function (x) { return field(x[1], inp('s_' + x[0], s[x[0]])); }).join('') + '</div><div class="controls"><button class="primary" id="sGo">Save</button></div></div>';
+    $('#sGo').onclick = function () { var b = {}; F.forEach(function (x) { b[x[0]] = val('s_' + x[0]); }); guard(this, api('/api/franchise/settings', 'PUT', b)).then(function () { toast('Saved'); reloadMeta(); }); };
+  }
+
+
+  // =================================================== the store network ==
+  var NET = null;
+  var TYPEK = { franchise: 'Franchised', affiliate: 'Affiliate', company: 'Company-owned' };
+  var ROLEK = { hub: 'Hub', spoke: 'Spoke', standalone: 'Stand-alone' };
+  var OSTAT = { submitted: 'Waiting to ship', shipped: 'Shipped', received: 'Received', cancelled: 'Cancelled' };
+  var SYSST = { missing: 'Missing', installed: 'Installed', verified: 'Verified', not_needed: 'Not needed' };
+  function reloadNet() { return api('/api/franchise/network/meta').then(function (m) { NET = m; }).catch(function () { NET = null; }); }
+  function typePill(t) { return '<span class="pill' + (t === 'company' ? '' : t === 'affiliate' ? ' warn' : ' ok') + '">' + esc(TYPEK[t] || t || '') + '</span>'; }
+  function gradeCell(v, g, suffix) { return '<td class="n"' + (g ? ' style="color:' + (g === 'ok' ? 'var(--ok)' : g === 'warn' ? 'var(--warn)' : 'var(--red)') + ';font-weight:600"' : '') + '>' + (v == null ? '<small>-</small>' : esc(v) + (suffix || '')) + '</td>'; }
+  function storeOpts(cur, blank, filter) { return opts((NET ? NET.stores : []).filter(filter || function () { return true; }).map(function (s) { return [s.id, s.number + ' ' + s.name]; }), cur, blank); }
+  function dcOpts(cur, blank) { return opts((NET ? NET.dcs : []).map(function (d) { return [d.id, d.code + ' ' + d.name]; }), cur, blank); }
+  function fmtOpts(cur, blank) { return opts((NET ? NET.formats : []).map(function (f) { return [f.key, f.name]; }), cur, blank); }
+  function tierOpts(cur, blank) { return opts((NET ? NET.tiers : []).map(function (t) { return [t.id, t.code + ' ' + t.name]; }), cur, blank); }
+  function netGuard() { if (!NET) { $('#view').innerHTML = '<div class="card empty">The store network is not set up on this till yet (it needs the latest update and database changes).</div>'; return false; } return true; }
+
+  // -------------------------------------------------------- stores & DCs --
+  function network() {
+    if (!netGuard()) return;
+    $('#view').innerHTML = '<div class="empty">Loading…</div>';
+    Promise.all([api('/api/franchise/network/stores'), api('/api/franchise/network/territories'), reloadNet()]).then(function (r) {
+      var st = r[0].stores, terr = r[1].territories, a = NET.attention;
+      var h = '<div class="kpis">' + kpi(st.filter(function (s) { return s.store_type === 'franchise'; }).length, 'Franchised stores') + kpi(st.filter(function (s) { return s.store_type === 'affiliate'; }).length, 'Affiliate stores') +
+        kpi(st.filter(function (s) { return s.store_type === 'company'; }).length, 'Company-owned stores') + kpi(st.filter(function (s) { return s.network_role === 'hub'; }).length, 'Hub stores') + kpi(NET.dcs.length, 'Distribution centres') +
+        kpi(a.orders_waiting + (a.hot_waiting ? ' (' + a.hot_waiting + ' hot)' : ''), 'Orders to ship') + kpi(a.claims_waiting, 'Co-op claims to decide') + kpi(jmd(a.credits_amount), 'Owed to stores') + '</div>';
+      var warn = [];
+      if (a.stores_missing_systems) warn.push(a.stores_missing_systems + ' store(s) without every required system verified');
+      if (a.certs_expiring) warn.push(a.certs_expiring + ' certificate(s) expire in the next 30 days');
+      if (warn.length) h += '<div class="warn">' + warn.map(esc).join(' · ') + '</div>';
+      h += '<div class="card"><h2>Stores</h2><p class="sub">Franchised, affiliate (independent dealer-member) and company-owned stores share one system. Each store is supplied by a distribution centre; spoke stores also get same-day parts from their hub.</p><div class="scroll"><table><thead><tr><th>Store</th><th>Kind</th><th>Role</th><th>Format</th><th>DC</th><th>Hub</th><th class="n">Sq ft</th><th class="n">Systems</th><th class="n">Accounts</th><th class="n">Certs</th><th class="n">Below min</th><th></th></tr></thead><tbody>' +
+        (st.map(function (s) {
+          return '<tr><td><a href="#fr=' + s.id + '"><b>' + esc(s.name) + '</b></a><br><small>' + esc(s.number) + ' · ' + esc(STATUS[s.status] || s.status) + (s.territory_name ? ' · ' + esc(s.territory_name) : '') + '</small></td><td>' + typePill(s.store_type) + '</td><td>' + esc(ROLEK[s.network_role]) + (s.spokes ? '<br><small>' + s.spokes + ' spoke(s)</small>' : '') + '</td><td>' + esc(s.format_name || '') + '</td><td>' + esc(s.dc_code || '') + '</td><td>' + esc(s.hub_name || '') + '</td><td class="n">' + (s.sq_ft ? Number(s.sq_ft).toLocaleString() : '') + '</td>' +
+            '<td class="n">' + s.systems_ok + ' / ' + r[0].systems_total + '</td><td class="n">' + s.accounts + (s.routes ? '<br><small>' + s.routes + ' route(s)</small>' : '') + '</td><td class="n">' + s.certs + '</td><td class="n">' + (s.below_min ? '<b style="color:var(--red)">' + s.below_min + '</b>' : '') + '</td><td><button class="sm" data-pl="' + s.id + '">Place</button></td></tr>';
+        }).join('') || '<tr><td colspan="12" class="empty">No stores yet. Add them under Franchisees (choose the kind of store).</td></tr>') + '</tbody></table></div>';
+      var hubs = st.filter(function (s) { return s.network_role === 'hub'; });
+      if (hubs.length) h += '<h4>Hubs and their spokes</h4>' + hubs.map(function (hb) { var sp = st.filter(function (s) { return s.hub_id === hb.id; }); return '<div class="item"><b>' + esc(hb.name) + '</b> (hub' + (hb.dc_code ? ', DC ' + esc(hb.dc_code) : '') + ') → ' + (sp.length ? sp.map(function (s) { return esc(s.name); }).join(', ') : '<small>no spokes yet</small>') + '</div>'; }).join('');
+      h += '</div>';
+      h += '<div class="card"><h2>Distribution centres <button class="sm" id="dcNew" style="margin-left:auto">+ New DC</button></h2><table><thead><tr><th>Code</th><th>Name</th><th>Where</th><th>Cut-off</th><th>Delivers</th><th class="n">Stores</th><th class="n">Fill rate</th><th></th></tr></thead><tbody>' +
+        (NET.dcs.map(function (d) { return '<tr><td>' + esc(d.code) + '</td><td><b>' + esc(d.name) + '</b>' + (d.active ? '' : ' <small>(closed)</small>') + '<br><small>' + esc([d.manager, d.phone].filter(Boolean).join(' · ')) + '</small></td><td>' + esc([d.address, d.parish].filter(Boolean).join(', ')) + '</td><td>' + esc(d.cutoff_time) + '</td><td>' + esc(d.delivery_days) + (d.runs_per_day > 1 ? ', ' + d.runs_per_day + ' runs a day' : '') + '</td><td class="n">' + d.stores + '</td><td class="n" data-dcfill="' + d.id + '"></td><td><button class="sm" data-dc="' + d.id + '">Edit</button> <button class="sm" data-dcs="' + d.id + '">Stock</button></td></tr>'; }).join('') || '<tr><td colspan="8" class="empty">No distribution centre yet.</td></tr>') + '</tbody></table></div>';
+      h += '<div class="card"><h2>Store formats</h2><p class="sub">The store sizes the network builds. The disclosure document gives the investment range for each.</p><table><thead><tr><th>Format</th><th>What it is</th><th class="n">Sq ft</th><th class="n">Parts carried</th><th class="n">Staff</th><th class="n">Investment</th><th></th></tr></thead><tbody>' +
+        NET.formats.map(function (f) { return '<tr><td><b>' + esc(f.name) + '</b></td><td>' + esc(f.description || '') + '</td><td class="n">' + esc([f.sq_ft_min, f.sq_ft_max].filter(function (x) { return x != null; }).map(function (x) { return Number(x).toLocaleString(); }).join(' to ')) + '</td><td class="n">' + (f.sku_target ? Number(f.sku_target).toLocaleString() : '') + '</td><td class="n">' + (f.staff || '') + '</td><td class="n">' + (f.investment_low ? jmd(f.investment_low) + '<br>to ' + jmd(f.investment_high) : '') + '</td><td><button class="sm" data-fm="' + esc(f.key) + '">Edit</button></td></tr>'; }).join('') + '</tbody></table><div class="controls" style="margin-top:8px"><button class="sm" id="fmNew">+ New format</button></div></div>';
+      h += '<div class="card"><h2>Territory planning</h2><p class="sub">Market size = vehicles × ' + jmd(META.settings.spend_per_vehicle) + ' + garages and fleets × ' + jmd(META.settings.spend_per_garage) + ' a year (Settings). Share = the last 12 months\' sales of the stores in it.</p><div class="scroll"><table><thead><tr><th>#</th><th>Territory</th><th>Status</th><th class="n">People</th><th class="n">Vehicles</th><th class="n">Garages</th><th class="n">Market a year</th><th class="n">Share</th><th>DC</th><th>Stores</th><th>Next store</th><th></th></tr></thead><tbody>' +
+        (terr.map(function (t) { return '<tr><td>' + (t.priority || '') + '</td><td><b>' + esc(t.code) + '</b> ' + esc(t.name) + '</td><td><span class="pill">' + esc(t.status) + '</span></td><td class="n">' + (t.population ? Number(t.population).toLocaleString() : '') + '</td><td class="n">' + (t.vehicles ? Number(t.vehicles).toLocaleString() : '') + '</td><td class="n">' + (t.garages || '') + '</td><td class="n">' + (t.potential ? jmd(t.potential) : '') + '</td><td class="n">' + (t.share_pct != null ? t.share_pct + '%' : '') + '</td><td>' + esc(t.dc_code || '') + (t.dc_minutes ? '<br><small>' + t.dc_minutes + ' min</small>' : '') + '</td><td>' + esc(t.store_names || '') + '</td><td>' + esc([t.planned_type && TYPEK[t.planned_type], t.planned_format_name].filter(Boolean).join(', ')) + '</td><td><button class="sm" data-tp="' + t.id + '">Plan</button></td></tr>'; }).join('') || '<tr><td colspan="12" class="empty">Add territories under Territories first.</td></tr>') + '</tbody></table></div></div>';
+      $('#view').innerHTML = h;
+      api('/api/franchise/network/scorecard?months=3').then(function (sc) { all('[data-dcfill]').forEach(function (td) { var f = sc.dc_fill[td.getAttribute('data-dcfill')]; td.textContent = f && f.fill_pct != null ? f.fill_pct + '%' : ''; }); }).catch(function () {});
+      all('[data-pl]').forEach(function (b) { b.onclick = function () { placeForm(st.find(function (s) { return String(s.id) === b.getAttribute('data-pl'); }), network); }; });
+      $('#dcNew').onclick = function () { dcForm(null); };
+      all('[data-dc]').forEach(function (b) { b.onclick = function () { dcForm(NET.dcs.find(function (d) { return String(d.id) === b.getAttribute('data-dc'); })); }; });
+      all('[data-dcs]').forEach(function (b) { b.onclick = function () { stockForm({ dc_id: +b.getAttribute('data-dcs') }); }; });
+      all('[data-fm]').forEach(function (b) { b.onclick = function () { formatForm(NET.formats.find(function (f) { return f.key === b.getAttribute('data-fm'); })); }; });
+      $('#fmNew').onclick = function () { formatForm(null); };
+      all('[data-tp]').forEach(function (b) { b.onclick = function () { planForm(terr.find(function (t) { return String(t.id) === b.getAttribute('data-tp'); })); }; });
+    }).catch(function (e) { $('#view').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  function placeForm(s, done) {
+    var m = modal('<h2>Where ' + esc(s.name) + ' sits in the network</h2><div class="grid">' + field('Format', '<select id="plF">' + fmtOpts(s.format_key, '-') + '</select>') + field('Role', '<select id="plR">' + opts([['standalone', 'Stand-alone'], ['hub', 'Hub (serves spokes)'], ['spoke', 'Spoke (served by a hub)']], s.network_role) + '</select>') +
+      field('Distribution centre', '<select id="plD">' + dcOpts(s.dc_id, '-') + '</select>') + field('Hub (spokes only)', '<select id="plH">' + storeOpts(s.hub_id, '-', function (x) { return x.network_role === 'hub' && x.id !== s.id; }) + '</select>') + field('Selling floor (sq ft)', inp('plS', s.sq_ft, 'number')) +
+      '</div><div class="controls"><button class="primary" id="plGo">Save</button><button id="plX">Cancel</button></div>', 2);
+    $('#plX', m).onclick = function () { close(2); };
+    $('#plGo', m).onclick = function () { guard(this, api('/api/franchise/network/stores/' + s.id + '/placement', 'POST', { format_key: val('plF', m), network_role: val('plR', m), dc_id: val('plD', m), hub_id: val('plH', m), sq_ft: val('plS', m) })).then(function () { close(2); toast('Saved'); reloadNet().then(done); }); };
+  }
+  function dcForm(x) {
+    x = x || { cutoff_time: '14:00', delivery_days: 'Mon-Sat', runs_per_day: 1, active: true };
+    var m = modal('<h2>' + (x.id ? 'Distribution centre ' + esc(x.code) : 'New distribution centre') + '</h2><div class="grid">' + field('Code', inp('dC', x.code, 'text', 'KGN')) + field('Name', inp('dN', x.name, 'text', 'Kingston DC')) + field('Address', inp('dA', x.address)) + field('Parish', inp('dP', x.parish)) +
+      field('Manager', inp('dM', x.manager)) + field('Phone', inp('dPh', x.phone)) + field('Order cut-off (HH:MM)', inp('dCu', x.cutoff_time)) + field('Delivery days', inp('dDd', x.delivery_days)) + field('Runs a day', inp('dR', x.runs_per_day, 'number')) + field('Notes', area('dNo', x.notes, 2), true) +
+      '</div><label><input type="checkbox" id="dAc"' + (x.active ? ' checked' : '') + '> Open</label><div class="controls" style="margin-top:8px"><button class="primary" id="dGo">Save</button><button id="dX">Cancel</button></div>', 2);
+    $('#dX', m).onclick = function () { close(2); };
+    $('#dGo', m).onclick = function () { var b = { code: val('dC', m), name: val('dN', m), address: val('dA', m), parish: val('dP', m), manager: val('dM', m), phone: val('dPh', m), cutoff_time: val('dCu', m), delivery_days: val('dDd', m), runs_per_day: val('dR', m), notes: val('dNo', m), active: $('#dAc', m).checked };
+      guard(this, api('/api/franchise/network/dcs' + (x.id ? '/' + x.id : ''), x.id ? 'PUT' : 'POST', b)).then(function () { close(2); reloadNet().then(network); }); };
+  }
+  function formatForm(x) {
+    x = x || {};
+    var m = modal('<h2>' + (x.key ? esc(x.name) : 'New store format') + '</h2><div class="grid">' + (x.key ? '' : field('Key (short, no spaces)', inp('fK', '', 'text', 'superstore'))) + field('Name', inp('fN', x.name)) + field('Sq ft from', inp('fS1', x.sq_ft_min, 'number')) + field('Sq ft to', inp('fS2', x.sq_ft_max, 'number')) +
+      field('Parts carried (SKUs)', inp('fSk', x.sku_target, 'number')) + field('Staff', inp('fSt', x.staff, 'number')) + field('Investment from (J$)', inp('fI1', x.investment_low)) + field('Investment to (J$)', inp('fI2', x.investment_high)) + field('Order on the list', inp('fO', x.sort, 'number')) + field('What it is', area('fD', x.description, 2), true) +
+      '</div><div class="controls"><button class="primary" id="fGo">Save</button><button id="fX">Cancel</button></div>', 2);
+    $('#fX', m).onclick = function () { close(2); };
+    $('#fGo', m).onclick = function () { var key = x.key || val('fK', m); guard(this, api('/api/franchise/network/formats/' + encodeURIComponent(key), 'PUT', { name: val('fN', m), sq_ft_min: val('fS1', m), sq_ft_max: val('fS2', m), sku_target: val('fSk', m), staff: val('fSt', m), investment_low: val('fI1', m), investment_high: val('fI2', m), sort: val('fO', m), description: val('fD', m) })).then(function () { close(2); reloadNet().then(network); }); };
+  }
+  function planForm(t) {
+    var m = modal('<h2>Plan ' + esc(t.code) + ' ' + esc(t.name) + '</h2><div class="grid">' + field('Registered vehicles', inp('pV', t.vehicles, 'number')) + field('Garages and fleets', inp('pG', t.garages, 'number')) + field('Supplied from DC', '<select id="pD">' + dcOpts(t.dc_id, '-') + '</select>') + field('Drive time from the DC (minutes)', inp('pM', t.dc_minutes, 'number')) +
+      field('Next store: kind', '<select id="pT">' + opts([['franchise', 'Franchised'], ['affiliate', 'Affiliate'], ['company', 'Company-owned']], t.planned_type, '-') + '</select>') + field('Next store: format', '<select id="pF">' + fmtOpts(t.planned_format, '-') + '</select>') + field('Priority (1 = next)', inp('pP', t.priority, 'number')) +
+      '</div><p class="sub">Make a written assessment with "Site and territory assessment" on a lead\'s documents.</p><div class="controls"><button class="primary" id="pGo">Save</button><button id="pX">Cancel</button></div>', 2);
+    $('#pX', m).onclick = function () { close(2); };
+    $('#pGo', m).onclick = function () { guard(this, api('/api/franchise/network/territories/' + t.id, 'PUT', { vehicles: val('pV', m), garages: val('pG', m), dc_id: val('pD', m), dc_minutes: val('pM', m), planned_type: val('pT', m), planned_format: val('pF', m), priority: val('pP', m) })).then(function () { close(2); network(); }); };
+  }
+  // Stock levels at a DC or a store: edit in the table, or paste "SKU, on hand, min, max" lines.
+  function stockForm(where) {
+    var q = where.dc_id ? 'dc_id=' + where.dc_id : 'store_id=' + where.franchisee_id;
+    api('/api/franchise/network/stock?' + q).then(function (d) {
+      var m = modal('<h2>Stock ' + (where.dc_id ? 'at the DC' : 'in the store') + ' <small style="margin-left:8px;color:var(--muted)">value ' + jmd(d.value) + ' at dealer cost</small><button class="sm" style="margin-left:auto" id="skX">Close</button></h2>' +
+        '<div class="scroll" style="max-height:45vh"><table><thead><tr><th>SKU</th><th>Part</th><th class="n">On hand</th><th class="n">Min</th><th class="n">Max</th></tr></thead><tbody>' + (d.stock.map(function (r) {
+          return '<tr><td>' + esc(r.sku) + '</td><td>' + esc(r.description) + '</td><td class="n"><input data-oh="' + r.catalogue_id + '" value="' + r.on_hand + '" style="width:80px"></td><td class="n"><input data-mn="' + r.catalogue_id + '" value="' + (r.min_qty == null ? '' : r.min_qty) + '" style="width:70px"></td><td class="n"><input data-mx="' + r.catalogue_id + '" value="' + (r.max_qty == null ? '' : r.max_qty) + '" style="width:70px"></td></tr>'; }).join('') || '<tr><td colspan="5" class="empty">No stock recorded yet.</td></tr>') + '</tbody></table></div>' +
+        '<h4>Add or count by pasting</h4>' + field('One line per part: SKU, on hand, min, max (min and max optional)', area('skP', '', 4)) + '<div class="controls" style="margin-top:6px"><button class="primary" id="skGo">Save</button></div><div id="skOut"></div>', 2);
+      $('#skX', m).onclick = function () { close(2); };
+      $('#skGo', m).onclick = function () {
+        var rows = d.stock.map(function (r) { return { catalogue_id: r.catalogue_id, on_hand: $('[data-oh="' + r.catalogue_id + '"]', m).value, min_qty: $('[data-mn="' + r.catalogue_id + '"]', m).value, max_qty: $('[data-mx="' + r.catalogue_id + '"]', m).value }; });
+        val('skP', m).split(/\r?\n/).forEach(function (line) { var p = line.split(/[,\t;]/).map(function (x) { return x.trim(); }); if (p[0]) rows.push({ sku: p[0], on_hand: p[1], min_qty: p[2], max_qty: p[3] }); });
+        guard(this, api('/api/franchise/network/stock', 'PUT', Object.assign({ rows: rows }, where))).then(function (r) { toast(r.saved + ' line(s) saved'); if (r.unknown.length) $('#skOut', m).innerHTML = '<div class="warn">Not in the catalogue: ' + esc(r.unknown.join(', ')) + '</div>'; else { close(2); } });
+      };
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // ------------------------------------------------------ catalogue & lookup --
+  function catalogue() {
+    if (!netGuard()) return;
+    $('#view').innerHTML = '<div class="card"><h2>Parts catalogue and lookup</h2><p class="sub">One catalogue for every store: part and interchange numbers, what each part fits, the dealer cost a store pays the DC and the list price. Look up by words or number, or by vehicle.</p>' +
+      '<div class="controls"><div><label>Words or part number</label><input id="cQ" placeholder="brake pad, 04465-02220, NGK…"></div><div><label>Make</label><input id="cMk" list="cMakes" style="width:120px"><datalist id="cMakes"></datalist></div><div><label>Model</label><input id="cMo" style="width:120px"></div><div><label>Year</label><input id="cY" type="number" style="width:90px"></div>' +
+      '<div><label>Category</label><select id="cCat"><option value="">All</option></select></div><div><label>Price for</label><select id="cTier">' + tierOpts('', 'List price') + '</select></div><button id="cGo">Find</button><button class="primary" id="cNew">+ New part</button><button id="cImp">Import the till\'s products</button></div><div class="scroll" id="cOut"></div></div>';
+    var load = function () {
+      var q = 'q=' + encodeURIComponent(val('cQ')) + '&make=' + encodeURIComponent(val('cMk')) + '&model=' + encodeURIComponent(val('cMo')) + '&year=' + encodeURIComponent(val('cY')) + '&category=' + encodeURIComponent(val('cCat')) + '&tier_id=' + encodeURIComponent(val('cTier')) + '&all=1';
+      api('/api/franchise/network/catalogue?' + q).then(function (d) {
+        if (!$('#cCat').options[1]) { $('#cCat').innerHTML = '<option value="">All</option>' + d.categories.map(function (c) { return '<option>' + esc(c.category) + '</option>'; }).join(''); $('#cMakes').innerHTML = d.makes.map(function (x) { return '<option value="' + esc(x) + '">'; }).join(''); }
+        $('#cOut').innerHTML = d.items.length ? '<table><thead><tr><th>SKU</th><th>Part</th><th>Fits</th><th class="n">Dealer cost</th><th class="n">List</th>' + (val('cTier') ? '<th class="n">Tier price</th>' : '') + '<th class="n">At DCs</th><th>Stocked at</th></tr></thead><tbody>' + d.items.map(function (i) {
+          return '<tr class="row" data-ci="' + i.id + '"' + (i.active ? '' : ' style="opacity:.5"') + '><td>' + esc(i.sku) + (i.part_number ? '<br><small>' + esc(i.part_number) + '</small>' : '') + '</td><td><b>' + esc(i.description) + '</b><br><small>' + esc([i.brand, i.category].filter(Boolean).join(' · ')) + (i.interchange ? ' · also ' + esc(i.interchange) : '') + '</small></td><td><small>' + esc(i.fits || 'No fitment listed') + '</small></td><td class="n">' + jmd(i.dealer_cost) + '</td><td class="n">' + jmd(i.list_price) + '</td>' + (val('cTier') ? '<td class="n"><b>' + jmd(i.tier_price) + '</b></td>' : '') + '<td class="n">' + i.dc_on_hand + '</td><td>' + esc({ store: 'Every store', hub: 'Hubs', dc: 'DC only' }[i.stocking]) + '</td></tr>';
+        }).join('') + '</tbody></table>' + (d.items.length >= 100 ? '<p class="sub">First 100 shown; narrow the search.</p>' : '') : '<div class="empty">Nothing found.</div>';
+        all('[data-ci]').forEach(function (tr) { tr.onclick = function () { partForm(+tr.getAttribute('data-ci'), load); }; });
+      }).catch(function (e) { toast(e.message); });
+    };
+    $('#cGo').onclick = load; $('#cQ').onkeydown = function (e) { if (e.key === 'Enter') load(); }; $('#cTier').onchange = load; $('#cCat').onchange = load;
+    $('#cNew').onclick = function () { partForm(null, load); };
+    $('#cImp').onclick = function () { if (!confirm('Add every active till product not yet in the catalogue? Its SKU, name, cost, price, core charge and "make model years" come across; check them after.')) return; guard(this, api('/api/franchise/network/catalogue/import', 'POST', {})).then(function (r) { toast(r.added + ' part(s) added' + (r.skipped ? ', ' + r.skipped + ' SKU(s) already there' : '') + (r.remaining ? '. ' + r.remaining + ' more to go: press Import again.' : '')); load(); }); };
+    load();
+  }
+  function fitRow(x) { x = x || {}; return '<tr class="fit"><td><input data-f="make" value="' + esc(x.make || '') + '" style="width:100px"></td><td><input data-f="model" value="' + esc(x.model || '') + '" style="width:110px"></td><td><input data-f="year_from" value="' + esc(x.year_from || '') + '" style="width:70px"></td><td><input data-f="year_to" value="' + esc(x.year_to || '') + '" style="width:70px"></td><td><input data-f="engine" value="' + esc(x.engine || '') + '" style="width:90px"></td><td><input data-f="note" value="' + esc(x.note || '') + '"></td><td><button class="sm" data-rm>✕</button></td></tr>'; }
+  function partForm(id, done) {
+    var go = function (d) {
+      var i = d ? d.item : { stocking: 'store', active: true, core_charge: 0 };
+      var m = modal('<h2>' + (id ? esc(i.sku) + ' · ' + esc(i.description) : 'New part') + '<button class="sm" style="margin-left:auto" id="ptX">Close</button></h2><div class="grid">' + field('SKU', inp('ptS', i.sku)) + field('Maker\'s part number', inp('ptP', i.part_number)) + field('Brand', inp('ptB', i.brand)) + field('Category', inp('ptC', i.category, 'text', 'Brakes, Filters, Electrical…')) +
+        field('Description', inp('ptD', i.description), true) + field('Interchange numbers (other makers)', inp('ptI', i.interchange), true) + field('Dealer cost (J$)', inp('ptCo', i.dealer_cost)) + field('List price (J$)', inp('ptL', i.list_price)) + field('Core charge (J$)', inp('ptCc', i.core_charge)) + field('Warranty (months)', inp('ptW', i.warranty_months, 'number')) +
+        field('Stocked at', '<select id="ptSt">' + opts([['store', 'Every store'], ['hub', 'Hub stores (and DCs)'], ['dc', 'The DC only']], i.stocking) + '</select>') + '</div><label><input type="checkbox" id="ptA"' + (i.active ? ' checked' : '') + '> In the catalogue (untick to stop selling it)</label>' +
+        '<h4>What it fits</h4><table id="ptFit"><thead><tr><th>Make</th><th>Model</th><th>From year</th><th>To year</th><th>Engine</th><th>Note</th><th></th></tr></thead><tbody>' + ((d ? d.fitment : []).map(fitRow).join('') || fitRow()) + '</tbody></table><button class="sm" id="ptAdd">+ Another vehicle</button>' +
+        '<div class="controls" style="margin-top:10px"><button class="primary" id="ptGo">Save</button></div>' +
+        (d ? '<h4>Prices by tier</h4><p>' + d.prices.map(function (p) { return esc(p.name) + ': <b>' + jmd(p.price) + '</b>'; }).join(' · ') + '</p><h4>Stock</h4>' + (d.stock.length ? '<table><tbody>' + d.stock.map(function (s) { return '<tr><td>' + esc(s.dc_id ? 'DC ' + s.dc_code + ' ' + s.dc_name : s.store_name + (s.network_role === 'hub' ? ' (hub)' : '')) + '</td><td class="n">' + s.on_hand + '</td><td class="n"><small>' + (s.min_qty != null ? 'min ' + s.min_qty + ' / max ' + (s.max_qty == null ? '-' : s.max_qty) : '') + '</small></td></tr>'; }).join('') + '</tbody></table>' : '<p class="sub">None recorded.</p>') +
+          '<h4>Can a store get it?</h4><div class="controls"><select id="avS">' + storeOpts('', 'Choose the store…') + '</select><button id="avGo">Check</button></div><div id="avOut"></div>' : ''), 2);
+      $('#ptX', m).onclick = function () { close(2); };
+      var wireRm = function () { all('[data-rm]', m).forEach(function (b) { b.onclick = function () { b.closest('tr').remove(); }; }); };
+      wireRm();
+      $('#ptAdd', m).onclick = function () { $('#ptFit tbody', m).insertAdjacentHTML('beforeend', fitRow()); wireRm(); };
+      $('#ptGo', m).onclick = function () {
+        var fit = all('#ptFit tr.fit', m).map(function (tr) { var o = {}; all('[data-f]', tr).forEach(function (x) { o[x.getAttribute('data-f')] = x.value; }); return o; }).filter(function (o) { return o.make; });
+        var b = { sku: val('ptS', m), part_number: val('ptP', m), brand: val('ptB', m), category: val('ptC', m), description: val('ptD', m), interchange: val('ptI', m), dealer_cost: val('ptCo', m), list_price: val('ptL', m), core_charge: val('ptCc', m), warranty_months: val('ptW', m), stocking: val('ptSt', m), active: $('#ptA', m).checked, fitment: fit };
+        guard(this, api('/api/franchise/network/catalogue' + (id ? '/' + id : ''), id ? 'PUT' : 'POST', b)).then(function (r) { toast('Saved'); close(2); if (done) done(); if (!id && r.id) partForm(r.id, done); });
+      };
+      if ($('#avGo', m)) $('#avGo', m).onclick = function () { var s = val('avS', m); if (!s) return toast('Choose the store'); api('/api/franchise/network/availability?catalogue_id=' + id + '&store_id=' + s).then(function (a) {
+        $('#avOut', m).innerHTML = '<div class="item"><b>' + esc(a.answer) + '</b>' + (a.options.length ? '<table style="margin-top:6px"><tbody>' + a.options.map(function (o) { return '<tr><td>' + esc(o.name) + '</td><td class="n">' + o.on_hand + ' on hand</td><td>' + esc(o.eta) + '</td></tr>'; }).join('') + '</tbody></table>' : '') + '</div>'; }).catch(function (e) { toast(e.message); }); };
+    };
+    if (id) api('/api/franchise/network/catalogue/' + id).then(go).catch(function (e) { toast(e.message); }); else go(null);
+  }
+
+  // ------------------------------------------------------------ supply orders --
+  function supply() {
+    if (!netGuard()) return;
+    $('#view').innerHTML = '<div class="card"><h2>Supply orders</h2><p class="sub">Stores order stock and special orders from their distribution centre, and urgent parts from their hub as a same-day hot shot. Shipping an order takes the stock out at the DC (or hub) and invoices the store in Receivables (account 4610); receiving it adds the stock to the store. Company-owned stores are not invoiced.</p>' +
+      '<div class="controls"><div><label>Status</label><select id="oS"><option value="submitted">Waiting to ship</option><option value="shipped">Shipped, not received</option><option value="received">Received</option><option value="">All</option></select></div><div><label>Store</label><select id="oSt">' + storeOpts('', 'All') + '</select></div><div><label>DC</label><select id="oD">' + dcOpts('', 'All') + '</select></div><button class="primary" id="oNew">+ New order</button><button id="oRep">Replenishment list</button></div><div class="scroll" id="oOut"></div></div>';
+    var load = function () {
+      api('/api/franchise/network/orders?status=' + val('oS') + '&store_id=' + val('oSt') + '&dc_id=' + val('oD')).then(function (d) {
+        $('#oOut').innerHTML = d.orders.length ? '<table><thead><tr><th>Order</th><th>Store</th><th>Kind</th><th>From</th><th class="n">Lines</th><th class="n">Cost</th><th>Status</th><th class="n">Fill</th><th>Invoice</th></tr></thead><tbody>' + d.orders.map(function (o) {
+          return '<tr class="row" data-o="' + o.id + '"><td><b>' + esc(o.number) + '</b><br><small>' + esc(when(o.created_at)) + (o.source !== 'staff' ? ' · ' + esc(o.source === 'portal' ? 'their link' : o.source) : '') + '</small></td><td>' + esc(o.store_name) + '</td><td>' + (o.kind === 'hot' ? '<span class="pill bad">hot shot</span>' : esc(NET.order_kinds[o.kind])) + '</td><td>' + esc(o.hub_name ? o.hub_name + ' (hub)' : o.dc_code || '') + '</td><td class="n">' + o.lines + '</td><td class="n">' + jmd(o.total_cost) + '</td><td><span class="pill' + (o.status === 'received' ? ' ok' : o.status === 'cancelled' ? '' : ' warn') + '">' + esc(OSTAT[o.status]) + '</span></td><td class="n">' + (o.fill_pct != null ? o.fill_pct + '%' : '') + '</td><td>' + esc(o.invoice_number || '') + '</td></tr>';
+        }).join('') + '</tbody></table>' : '<div class="empty">No orders here.</div>';
+        all('[data-o]').forEach(function (tr) { tr.onclick = function () { orderView(+tr.getAttribute('data-o'), load); }; });
+      }).catch(function (e) { toast(e.message); });
+    };
+    $('#oS').onchange = load; $('#oSt').onchange = load; $('#oD').onchange = load;
+    $('#oNew').onclick = function () { orderForm(+val('oSt') || null, load); };
+    $('#oRep').onclick = function () { var s = +val('oSt'); if (!s) return toast('Choose the store first'); replenish(s, load); };
+    load();
+  }
+  function replenish(storeId, done) {
+    api('/api/franchise/network/stores/' + storeId + '/replenish').then(function (d) {
+      var m = modal('<h2>Replenishment list</h2><p class="sub">Parts below their minimum, ordered back up to the maximum (less what is already on order).</p>' + (d.lines.length ? '<table><thead><tr><th>SKU</th><th>Part</th><th class="n">On hand</th><th class="n">Min / max</th><th class="n">On order</th><th class="n">Order</th></tr></thead><tbody>' + d.lines.map(function (l) { return '<tr><td>' + esc(l.sku) + '</td><td>' + esc(l.description) + '</td><td class="n">' + l.on_hand + '</td><td class="n">' + l.min_qty + ' / ' + (l.max_qty == null ? '-' : l.max_qty) + '</td><td class="n">' + l.on_order + '</td><td class="n"><b>' + l.suggest + '</b></td></tr>'; }).join('') + '</tbody></table><p>About ' + jmd(d.cost) + ' at dealer cost.</p>' : '<div class="empty">Nothing is below its minimum.</div>') +
+        '<div class="controls"><button class="primary" id="rpGo"' + (d.lines.length ? '' : ' disabled') + '>Place the order with the DC</button><button id="rpX">Close</button></div>', 2);
+      $('#rpX', m).onclick = function () { close(2); };
+      $('#rpGo', m).onclick = function () { guard(this, api('/api/franchise/network/stores/' + storeId + '/replenish', 'POST', {})).then(function (r) { close(2); toast(r.number + ' placed: ' + jmd(r.total_cost)); if (done) done(); }); };
+    }).catch(function (e) { toast(e.message); });
+  }
+  function orderForm(storeId, done) {
+    var m = modal('<h2>New supply order</h2><div class="grid">' + field('Store', '<select id="nfS">' + storeOpts(storeId, 'Choose…') + '</select>') + field('Kind', '<select id="nfK">' + opts([['stock', 'Stock order (DC)'], ['special', 'Special order (DC)'], ['hot', 'Hot shot from the hub (same day)']], 'stock') + '</select>') + field('Needed by', inp('nfN', '', 'date')) + field('Notes', inp('nfNo')) + '</div>' +
+      '<h4>Parts</h4><div class="controls"><input id="nfQ" placeholder="Find a part (words or number)" style="flex:1"><button id="nfF">Find</button></div><div id="nfR"></div><table id="nfL"><thead><tr><th>SKU</th><th>Part</th><th class="n">Dealer cost</th><th class="n">Qty</th><th></th></tr></thead><tbody></tbody></table>' +
+      '<p class="sub">Or paste "SKU, quantity" lines:</p>' + area('nfP', '', 3) + '<div class="controls" style="margin-top:8px"><button class="primary" id="nfGo">Place the order</button><button id="nfX">Cancel</button></div>', 2);
+    $('#nfX', m).onclick = function () { close(2); };
+    var add = function (i) { if ($('[data-line="' + i.id + '"]', m)) return; $('#nfL tbody', m).insertAdjacentHTML('beforeend', '<tr data-line="' + i.id + '"><td>' + esc(i.sku) + '</td><td>' + esc(i.description) + '</td><td class="n">' + jmd(i.dealer_cost) + '</td><td class="n"><input data-q value="1" style="width:70px"></td><td><button class="sm" data-rm>✕</button></td></tr>'); all('[data-rm]', m).forEach(function (b) { b.onclick = function () { b.closest('tr').remove(); }; }); };
+    $('#nfF', m).onclick = function () { api('/api/franchise/network/catalogue?limit=15&q=' + encodeURIComponent(val('nfQ', m))).then(function (d) {
+      $('#nfR', m).innerHTML = d.items.map(function (i) { return '<div class="item" style="cursor:pointer" data-add="' + i.id + '">' + esc(i.sku) + ' · ' + esc(i.description) + ' <small>' + jmd(i.dealer_cost) + ' · ' + esc(i.fits || '') + '</small></div>'; }).join('') || '<div class="empty">Nothing found.</div>';
+      all('[data-add]', m).forEach(function (el) { el.onclick = function () { add(d.items.find(function (i) { return String(i.id) === el.getAttribute('data-add'); })); }; }); }).catch(function (e) { toast(e.message); }); };
+    $('#nfGo', m).onclick = function () {
+      var lines = all('[data-line]', m).map(function (tr) { return { catalogue_id: +tr.getAttribute('data-line'), qty: $('[data-q]', tr).value }; });
+      val('nfP', m).split(/\r?\n/).forEach(function (l) { var p = l.split(/[,\t;]/).map(function (x) { return x.trim(); }); if (p[0]) lines.push({ sku: p[0], qty: p[1] || 1 }); });
+      guard(this, api('/api/franchise/network/orders', 'POST', { franchisee_id: val('nfS', m), kind: val('nfK', m), needed_by: val('nfN', m), notes: val('nfNo', m), lines: lines })).then(function (r) { close(2); toast(r.number + ' placed: ' + jmd(r.total_cost)); if (done) done(); });
+    };
+  }
+  function orderView(id, done) {
+    api('/api/franchise/network/orders/' + id).then(function (d) {
+      var o = d.order, ship = o.status === 'submitted', recv = o.status === 'shipped';
+      var m = modal('<h2>' + esc(o.number) + ' · ' + esc(d.store.name) + ' <span class="pill">' + esc(OSTAT[o.status]) + '</span><button class="sm" style="margin-left:auto" id="ovX">Close</button></h2><p class="sub">' + esc(NET.order_kinds[o.kind]) + (o.needed_by ? ' · needed by ' + esc(day(o.needed_by)) : '') + (o.notes ? ' · ' + esc(o.notes) : '') + (o.invoice_number ? ' · invoice ' + esc(o.invoice_number) : '') + (o.receive_note ? '<br>' + esc(o.receive_note) : '') + '</p>' +
+        '<table><thead><tr><th>SKU</th><th>Part</th><th class="n">Ordered</th>' + (ship ? '<th class="n">At source</th>' : '') + '<th class="n">Shipped</th><th class="n">Received</th><th class="n">Cost</th></tr></thead><tbody>' + o.lines.map(function (l) {
+          return '<tr><td>' + esc(l.sku) + '</td><td>' + esc(l.description) + '</td><td class="n">' + l.qty + '</td>' + (ship ? '<td class="n">' + (l.source_on_hand == null ? '<small>not tracked</small>' : l.source_on_hand) + '</td>' : '') + '<td class="n">' + (ship ? '<input data-sh="' + l.id + '" value="' + (l.source_on_hand == null ? l.qty : Math.max(0, Math.min(l.qty, l.source_on_hand))) + '" style="width:70px">' : l.qty_shipped == null ? '' : l.qty_shipped) + '</td><td class="n">' + (recv ? '<input data-rc="' + l.id + '" value="' + (l.qty_shipped || 0) + '" style="width:70px">' : l.qty_received == null ? '' : l.qty_received) + '</td><td class="n">' + jmd(l.unit_cost * (l.qty_shipped == null ? l.qty : l.qty_shipped)) + '</td></tr>'; }).join('') + '</tbody></table>' +
+        '<div class="controls" style="margin-top:8px">' + (ship ? '<button class="primary" id="ovShip">Ship it' + (d.store.store_type === 'company' ? '' : ' and invoice the store') + '</button><button id="ovCan">Cancel the order</button>' : '') + (recv ? field('Note (damage, wrong part…)', inp('ovNote')) + '<button class="primary" id="ovRecv">Received at the store</button>' : '') + '</div>', 2);
+      $('#ovX', m).onclick = function () { close(2); };
+      if ($('#ovShip', m)) $('#ovShip', m).onclick = function () { guard(this, api('/api/franchise/network/orders/' + id + '/ship', 'POST', { lines: o.lines.map(function (l) { return { id: l.id, qty_shipped: $('[data-sh="' + l.id + '"]', m).value }; }) })).then(function (r) { close(2); toast('Shipped: fill ' + r.fill_pct + '%' + (r.invoice ? ', invoice ' + r.invoice.number + ' ' + jmd(r.invoice.total) : '')); if (done) done(); }); };
+      if ($('#ovCan', m)) $('#ovCan', m).onclick = function () { var why = prompt('Why is it cancelled?', ''); if (why === null) return; guard(this, api('/api/franchise/network/orders/' + id + '/cancel', 'POST', { reason: why })).then(function () { close(2); if (done) done(); }); };
+      if ($('#ovRecv', m)) $('#ovRecv', m).onclick = function () { guard(this, api('/api/franchise/network/orders/' + id + '/receive', 'POST', { note: val('ovNote', m), lines: o.lines.map(function (l) { return { id: l.id, qty_received: $('[data-rc="' + l.id + '"]', m).value }; }) })).then(function (r) { close(2); toast('Received' + (r.short.length ? '. Short: ' + r.short.join(', ') : '')); if (done) done(); }); };
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // --------------------------------------------------------------- commercial --
+  function commercial() {
+    if (!netGuard()) return;
+    $('#view').innerHTML = '<div class="card"><h2>Commercial (do-it-for-me) customers</h2><p class="sub">Garages, fleets and trade customers buy on account at a pro price tier and have parts delivered on the store\'s routes. The commercial share of sales is on the scorecard (target ' + META.settings.target_commercial_pct + '%).</p>' +
+      '<div class="controls"><div><label>Store</label><select id="cmS">' + storeOpts('', 'All stores') + '</select></div><button class="primary" id="cmNew">+ New account</button><button id="cmRt">+ New route</button></div><div id="cmOut"><div class="empty">Loading…</div></div></div>' +
+      '<div class="card"><h2>Price tiers <button class="sm" id="tNewT" style="margin-left:auto">+ New tier</button></h2><p class="sub">Price = list price less the tier discount, but never below the dealer cost plus the margin floor.</p><div id="tOut"></div></div>';
+    var load = function () {
+      api('/api/franchise/network/commercial' + (val('cmS') ? '?store_id=' + val('cmS') : '')).then(function (d) {
+        $('#cmOut').innerHTML = '<h4>Accounts</h4>' + (d.accounts.length ? '<div class="scroll"><table><thead><tr><th>Account</th><th>Kind</th><th>Store</th><th>Tier</th><th class="n">Credit limit</th><th class="n">Terms</th><th>Route (stop)</th><th class="n">Target a month</th><th>Status</th><th></th></tr></thead><tbody>' + d.accounts.map(function (a) {
+          return '<tr><td><b>' + esc(a.name) + '</b><br><small>' + esc([a.contact, a.phone].filter(Boolean).join(' · ')) + '</small></td><td>' + esc(NET.comm_kinds[a.kind]) + (a.bays ? '<br><small>' + a.bays + ' bays</small>' : '') + '</td><td>' + esc(a.store_name) + '</td><td>' + esc(a.tier_code || '') + '</td><td class="n">' + (a.credit_limit != null ? jmd(a.credit_limit) : '') + '</td><td class="n">' + a.terms_days + ' days</td><td>' + esc(a.route_name || '') + (a.stop_order ? ' (' + a.stop_order + ')' : '') + '</td><td class="n">' + (a.monthly_target ? jmd(a.monthly_target) : '') + '</td><td><span class="pill' + (a.status === 'active' ? ' ok' : a.status === 'on_hold' ? ' bad' : '') + '">' + esc(a.status.replace('_', ' ')) + '</span></td><td><button class="sm" data-ca="' + a.id + '">Edit</button></td></tr>'; }).join('') + '</tbody></table></div>' : '<div class="empty">No commercial accounts yet.</div>') +
+          '<h4>Delivery routes</h4>' + (d.routes.length ? '<table><thead><tr><th>Route</th><th>Store</th><th>Driver / vehicle</th><th>Runs</th><th class="n">Promise</th><th class="n">Stops</th><th></th></tr></thead><tbody>' + d.routes.map(function (r) {
+            return '<tr' + (r.active ? '' : ' style="opacity:.5"') + '><td><b>' + esc(r.name) + '</b></td><td>' + esc(r.store_name) + '</td><td>' + esc([r.driver, r.vehicle].filter(Boolean).join(' · ')) + '</td><td>' + esc(r.runs || '') + '</td><td class="n">' + (r.promise_minutes ? r.promise_minutes + ' min' : '') + '</td><td class="n">' + r.stops + '</td><td><button class="sm" data-cr="' + r.id + '">Edit</button></td></tr>'; }).join('') + '</tbody></table>' : '<div class="empty">No routes yet.</div>');
+        all('[data-ca]').forEach(function (b) { b.onclick = function () { accountForm(d.accounts.find(function (a) { return String(a.id) === b.getAttribute('data-ca'); }), d.routes, load); }; });
+        all('[data-cr]').forEach(function (b) { b.onclick = function () { routeForm(d.routes.find(function (r) { return String(r.id) === b.getAttribute('data-cr'); }), load); }; });
+        $('#cmNew').onclick = function () { accountForm({ franchisee_id: +val('cmS') || null, status: 'active', terms_days: 30, kind: 'garage' }, d.routes, load); };
+        $('#cmRt').onclick = function () { routeForm({ franchisee_id: +val('cmS') || null, active: true, promise_minutes: META.settings.delivery_promise_minutes }, load); };
+      }).catch(function (e) { toast(e.message); });
+      $('#tOut').innerHTML = '<table><thead><tr><th>Code</th><th>Tier</th><th>For</th><th class="n">Discount</th><th class="n">Floor over cost</th><th class="n">Qualifies at</th><th></th></tr></thead><tbody>' + NET.tiers.map(function (t) { return '<tr><td>' + esc(t.code) + '</td><td><b>' + esc(t.name) + '</b><br><small>' + esc(t.description || '') + '</small></td><td>' + esc(t.kind) + '</td><td class="n">' + t.discount_pct + '%</td><td class="n">' + t.floor_pct + '%</td><td class="n">' + (t.min_monthly ? jmd(t.min_monthly) + ' a month' : '') + '</td><td><button class="sm" data-tt="' + t.id + '">Edit</button></td></tr>'; }).join('') + '</tbody></table>';
+      all('[data-tt]').forEach(function (b) { b.onclick = function () { tierForm(NET.tiers.find(function (t) { return String(t.id) === b.getAttribute('data-tt'); })); }; });
+    };
+    $('#cmS').onchange = load; $('#tNewT').onclick = function () { tierForm(null); };
+    load();
+  }
+  function accountForm(a, routes, done) {
+    var m = modal('<h2>' + (a.id ? esc(a.name) : 'New commercial account') + '</h2><div class="grid">' + field('Store', '<select id="aS"' + (a.id ? ' disabled' : '') + '>' + storeOpts(a.franchisee_id, 'Choose…') + '</select>') + field('Business name', inp('aN', a.name)) + field('Kind', '<select id="aK">' + opts(Object.keys(NET.comm_kinds).map(function (k) { return [k, NET.comm_kinds[k]]; }), a.kind) + '</select>') +
+      field('Contact', inp('aC', a.contact)) + field('Phone', inp('aP', a.phone)) + field('Email', inp('aE', a.email, 'email')) + field('Address', inp('aA', a.address)) + field('TRN', inp('aT', a.trn)) + field('Price tier', '<select id="aTi">' + tierOpts(a.tier_id, '-') + '</select>') +
+      field('Credit limit (J$)', inp('aL', a.credit_limit)) + field('Terms (days)', inp('aD', a.terms_days, 'number')) + field('Route', '<select id="aR">' + opts(routes.filter(function (r) { return !a.franchisee_id || r.franchisee_id === a.franchisee_id; }).map(function (r) { return [r.id, r.name + ' (' + r.store_name + ')']; }), a.route_id, '-') + '</select>') + field('Stop number', inp('aSo', a.stop_order, 'number')) +
+      field('Target a month (J$)', inp('aMt', a.monthly_target)) + field('Service bays', inp('aB', a.bays, 'number')) + field('Status', '<select id="aSt">' + opts([['prospect', 'Prospect'], ['active', 'Active'], ['on_hold', 'On hold'], ['closed', 'Closed']], a.status) + '</select>') + field('Notes', area('aNo', a.notes, 2), true) +
+      '</div><p class="sub">Print the application and credit terms from the store\'s documents ("Commercial account application").</p><div class="controls"><button class="primary" id="aGo">Save</button><button id="aX">Cancel</button></div>', 2);
+    $('#aX', m).onclick = function () { close(2); };
+    $('#aGo', m).onclick = function () { var b = { franchisee_id: val('aS', m), name: val('aN', m), kind: val('aK', m), contact: val('aC', m), phone: val('aP', m), email: val('aE', m), address: val('aA', m), trn: val('aT', m), tier_id: val('aTi', m), credit_limit: val('aL', m), terms_days: val('aD', m), route_id: val('aR', m), stop_order: val('aSo', m), monthly_target: val('aMt', m), bays: val('aB', m), status: val('aSt', m), notes: val('aNo', m) };
+      guard(this, api('/api/franchise/network/commercial' + (a.id ? '/' + a.id : ''), a.id ? 'PUT' : 'POST', b)).then(function () { close(2); done(); }); };
+  }
+  function routeForm(r, done) {
+    var m = modal('<h2>' + (r.id ? esc(r.name) : 'New delivery route') + '</h2><div class="grid">' + field('Store', '<select id="rS"' + (r.id ? ' disabled' : '') + '>' + storeOpts(r.franchisee_id, 'Choose…') + '</select>') + field('Route name', inp('rN', r.name, 'text', 'Morning west')) + field('Driver', inp('rD', r.driver)) + field('Vehicle', inp('rV', r.vehicle)) + field('Runs (times)', inp('rR', r.runs, 'text', '8:30, 11:00, 14:00')) + field('Delivery promise (minutes)', inp('rP', r.promise_minutes, 'number')) +
+      '</div><label><input type="checkbox" id="rA"' + (r.active ? ' checked' : '') + '> Running</label><div class="controls" style="margin-top:8px"><button class="primary" id="rGo">Save</button><button id="rX">Cancel</button></div>', 2);
+    $('#rX', m).onclick = function () { close(2); };
+    $('#rGo', m).onclick = function () { guard(this, api('/api/franchise/network/routes' + (r.id ? '/' + r.id : ''), r.id ? 'PUT' : 'POST', { franchisee_id: val('rS', m), name: val('rN', m), driver: val('rD', m), vehicle: val('rV', m), runs: val('rR', m), promise_minutes: val('rP', m), active: $('#rA', m).checked })).then(function () { close(2); done(); }); };
+  }
+  function tierForm(x) {
+    x = x || { kind: 'commercial', floor_pct: 10, discount_pct: 0 };
+    var m = modal('<h2>' + (x.id ? esc(x.name) : 'New price tier') + '</h2><div class="grid">' + field('Code', inp('tiC', x.code)) + field('Name', inp('tiN', x.name)) + field('For', '<select id="tiK">' + opts([['retail', 'Retail'], ['loyalty', 'Loyalty members'], ['commercial', 'Commercial accounts']], x.kind) + '</select>') +
+      field('Discount off list (%)', inp('tiD', x.discount_pct)) + field('Margin floor over dealer cost (%)', inp('tiF', x.floor_pct)) + field('Qualifies at (J$ a month)', inp('tiM', x.min_monthly)) + field('Order on the list', inp('tiO', x.sort, 'number')) + field('Description', area('tiDe', x.description, 2), true) +
+      '</div><div class="controls"><button class="primary" id="tiGo">Save</button><button id="tiX">Cancel</button></div>', 2);
+    $('#tiX', m).onclick = function () { close(2); };
+    $('#tiGo', m).onclick = function () { guard(this, api('/api/franchise/network/tiers' + (x.id ? '/' + x.id : ''), x.id ? 'PUT' : 'POST', { code: val('tiC', m), name: val('tiN', m), kind: val('tiK', m), discount_pct: val('tiD', m), floor_pct: val('tiF', m), min_monthly: val('tiM', m), sort: val('tiO', m), description: val('tiDe', m) })).then(function () { close(2); reloadNet().then(commercial); }); };
+  }
+
+  // ------------------------------------------------ rebates, co-op & loyalty --
+  function programmes() {
+    if (!netGuard()) return;
+    var yr = programmes.year || new Date().getFullYear();
+    $('#view').innerHTML = '<div class="empty">Loading…</div>';
+    api('/api/franchise/network/programmes?year=' + yr).then(function (d) {
+      var owed = d.credits.filter(function (c) { return c.status === 'owed'; });
+      var h = '<div class="card"><h2>Purchasing commitment, rebates and co-op <select id="pgY" style="margin-left:auto">' + opts([yr - 1, yr, yr + 1].map(function (y) { return [y, y]; }), yr) + '</select></h2><p class="sub">Each store buys at least its committed share through the DC (default ' + d.commit_pct + '%), measured against the total purchases in its monthly reports. It earns a quarterly rebate on DC purchases and a co-op allowance (' + d.coop.pct + '% of DC purchases, claimed at ' + d.coop.claim_pct + '% of approved advertising spend). Affiliate and franchised stores only.</p>' +
+        '<div class="scroll"><table><thead><tr><th>Store</th><th>Kind</th><th class="n">DC purchases</th><th class="n">All purchases reported</th><th class="n">Through the DC</th><th class="n">Commitment</th><th class="n">Rebates</th><th class="n">Co-op earned (12 mo)</th><th class="n">Co-op used</th><th class="n">Co-op left</th><th class="n">Owed to them</th></tr></thead><tbody>' +
+        (d.stores.map(function (s) { var bad = s.compliance_pct != null && s.compliance_pct < s.commit_pct;
+          return '<tr><td><a href="#fr=' + s.id + '">' + esc(s.name) + '</a></td><td>' + typePill(s.store_type) + '</td><td class="n">' + jmd(s.dc_purchases) + '</td><td class="n">' + (s.reported_purchases ? jmd(s.reported_purchases) : '<small>not reported</small>') + '</td><td class="n"' + (bad ? ' style="color:var(--red);font-weight:600"' : '') + '>' + (s.compliance_pct != null ? s.compliance_pct + '%' : '') + '</td><td class="n">' + s.commit_pct + '%</td><td class="n">' + jmd(s.rebates) + '</td><td class="n">' + jmd(s.coop.earned) + '</td><td class="n">' + jmd(s.coop.used) + '</td><td class="n"><b>' + jmd(s.coop.balance) + '</b></td><td class="n">' + (s.owed ? jmd(s.owed) : '') + '</td></tr>'; }).join('') || '<tr><td colspan="11" class="empty">No franchised or affiliate stores yet.</td></tr>') + '</tbody></table></div></div>';
+      h += '<div class="card"><h2>Quarterly purchasing rebate</h2><div class="grid" id="rbT">' + d.rebate_tiers.map(function (t, i) { return field('Step ' + (i + 1) + ': DC purchases from (J$)', '<input data-rmin value="' + t.min_quarter + '">') + field('Rebate %', '<input data-rpct value="' + t.rebate_pct + '">'); }).join('') + field('New step: from (J$)', '<input data-rmin>') + field('Rebate %', '<input data-rpct>') + '</div>' +
+        '<div class="controls"><button id="rbSave">Save the scale</button><div><label>Quarter</label><input id="rbQ" placeholder="' + yr + '-Q3" style="width:110px"></div><button class="primary" id="rbRun">Work out and credit the rebates</button></div><div id="rbOut"></div></div>';
+      h += '<div class="card"><h2>Co-op advertising claims <button class="sm" id="ccNew" style="margin-left:auto">+ New claim</button></h2>' + (d.claims.length ? '<table><thead><tr><th>Store</th><th>Advertising</th><th>Date</th><th class="n">Spent</th><th class="n">Claimed</th><th>Status</th><th></th></tr></thead><tbody>' + d.claims.map(function (c) {
+          return '<tr><td>' + esc(c.store_name) + '</td><td>' + esc(c.description) + (c.media ? ' <small>(' + esc(c.media) + ')</small>' : '') + (c.proof ? '<br><small>Proof: ' + esc(c.proof) + '</small>' : '') + (c.decision_note ? '<br><small>' + esc(c.decision_note) + '</small>' : '') + '</td><td>' + esc(day(c.spend_date)) + '</td><td class="n">' + jmd(c.spend) + '</td><td class="n">' + jmd(c.claimed) + (c.approved != null ? '<br><small>approved ' + jmd(c.approved) + '</small>' : '') + '</td><td><span class="pill' + (c.status === 'approved' ? ' ok' : c.status === 'declined' ? ' bad' : ' warn') + '">' + esc(c.status) + '</span></td><td>' +
+            (c.status === 'submitted' ? '<button class="sm primary" data-cok="' + c.id + '" data-amt="' + c.claimed + '">Approve</button> <button class="sm" data-cno="' + c.id + '">Decline</button>' : '') + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="empty">No claims yet.</div>') + '</div>';
+      h += '<div class="card"><h2>Money owed to stores</h2><p class="sub">Rebates, approved co-op claims, loyalty points redeemed at the store and hot-shot parts a hub sent. Pay by cheque or transfer (Banking / Payables) or set it against their invoices in Receivables, then record it here.</p>' + (d.credits.length ? '<table><thead><tr><th>Store</th><th>For</th><th>Period</th><th class="n">Amount</th><th>Status</th><th></th></tr></thead><tbody>' + d.credits.map(function (c) {
+          return '<tr' + (c.status === 'cancelled' ? ' style="opacity:.5"' : '') + '><td>' + esc(c.store_name) + '</td><td>' + esc(c.description) + '</td><td>' + esc(c.period || '') + '</td><td class="n">' + jmd(c.amount) + '</td><td>' + (c.status === 'owed' ? '<span class="pill warn">owed</span>' : '<span class="pill' + (c.status === 'settled' ? ' ok' : '') + '">' + esc(c.status) + '</span><br><small>' + esc([c.settled_how && c.settled_how.replace('_', ' '), c.settled_ref].filter(Boolean).join(' ')) + '</small>') + '</td><td>' +
+            (c.status === 'owed' ? '<button class="sm primary" data-cs="' + c.id + '">Paid</button> <button class="sm" data-cx="' + c.id + '">Cancel</button>' : '') + '</td></tr>'; }).join('') + '</tbody></table><p>Still owed: <b>' + jmd(owed.reduce(function (x, c) { return x + c.amount; }, 0)) + '</b></p>' : '<div class="empty">Nothing owed.</div>') + '</div>';
+      h += '<div class="card"><h2>Loyalty programme</h2><p>Customers earn <b>' + d.loyalty.points_per_100 + ' point(s) per J$100</b>; each point is worth <b>' + jmd(d.loyalty.point_value) + '</b>. Each month a store pays into the network loyalty fund (account 2175) for the points it gave and is paid back for the points redeemed with it, from its monthly report. Change the rates under Settings; the rules for stores are the "Loyalty programme rules" document.</p></div>';
+      $('#view').innerHTML = h;
+      $('#pgY').onchange = function () { programmes.year = +val('pgY'); programmes(); };
+      $('#rbSave').onclick = function () { var mins = all('[data-rmin]'), pcts = all('[data-rpct]'); var tiers = mins.map(function (x, i) { return { min_quarter: x.value, rebate_pct: pcts[i].value }; }).filter(function (t) { return t.min_quarter !== '' && t.rebate_pct !== ''; }); guard(this, api('/api/franchise/network/rebate-tiers', 'PUT', { tiers: tiers })).then(function () { toast('Saved'); programmes(); }); };
+      $('#rbRun').onclick = function () { guard(this, api('/api/franchise/network/rebates/run', 'POST', { quarter: val('rbQ').trim().toUpperCase() })).then(function (r) {
+        $('#rbOut').innerHTML = '<table><tbody>' + r.stores.map(function (s) { return '<tr><td>' + esc(s.name) + '</td><td class="n">' + jmd(s.dc_purchases) + '</td><td class="n">' + (s.compliance_pct != null ? s.compliance_pct + '% via DC' : '') + '</td><td class="n">' + s.rebate_pct + '%</td><td class="n">' + jmd(s.amount) + '</td><td>' + esc(s.result) + '</td></tr>'; }).join('') + '</tbody></table><p>Credited ' + jmd(r.total) + '.</p>'; }); };
+      $('#ccNew').onclick = function () { claimForm(programmes); };
+      all('[data-cok]').forEach(function (b) { b.onclick = function () { var a = prompt('Amount to approve (J$). The store\'s co-op allowance limits it.', b.getAttribute('data-amt')); if (a === null) return; guard(b, api('/api/franchise/network/coop-claims/' + b.getAttribute('data-cok') + '/decide', 'POST', { decision: 'approve', amount: a })).then(function (r) { toast('Approved ' + jmd(r.approved)); programmes(); }); }; });
+      all('[data-cno]').forEach(function (b) { b.onclick = function () { var why = prompt('Why is it declined?', ''); if (!why) return; guard(b, api('/api/franchise/network/coop-claims/' + b.getAttribute('data-cno') + '/decide', 'POST', { decision: 'decline', note: why })).then(programmes); }; });
+      all('[data-cs]').forEach(function (b) { b.onclick = function () { settleForm(+b.getAttribute('data-cs')); }; });
+      all('[data-cx]').forEach(function (b) { b.onclick = function () { var why = prompt('Why is it cancelled?', ''); if (!why) return; guard(b, api('/api/franchise/network/credits/' + b.getAttribute('data-cx') + '/cancel', 'POST', { reason: why })).then(programmes); }; });
+    }).catch(function (e) { $('#view').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  function claimForm(done) {
+    var m = modal('<h2>Co-op advertising claim</h2><div class="grid">' + field('Store', '<select id="clS">' + storeOpts('', 'Choose…', function (s) { return s.store_type !== 'company'; }) + '</select>') + field('Media', inp('clM', '', 'text', 'radio, print, social, event…')) + field('Date it ran', inp('clD', today(), 'date')) + field('Amount spent (J$, before GCT)', inp('clA')) +
+      field('The advertising', area('clW', '', 2), true) + field('Proof (invoice number, link)', inp('clP'), true) + '</div><p class="sub">The claim is ' + META.settings.coop_claim_pct + '% of the spend, approved up to the store\'s co-op allowance.</p><div class="controls"><button class="primary" id="clGo">Save the claim</button><button id="clX">Cancel</button></div>', 2);
+    $('#clX', m).onclick = function () { close(2); };
+    $('#clGo', m).onclick = function () { guard(this, api('/api/franchise/network/coop-claims', 'POST', { franchisee_id: val('clS', m), media: val('clM', m), spend_date: val('clD', m), spend: val('clA', m), description: val('clW', m), proof: val('clP', m) })).then(function (r) { close(2); toast('Claim for ' + jmd(r.claimed) + ' saved'); done(); }); };
+  }
+  function settleForm(id) {
+    var m = modal('<h2>Record the payment</h2><div class="grid">' + field('How', '<select id="seH">' + opts([['transfer', 'Bank transfer'], ['cheque', 'Cheque'], ['set_off', 'Set against their invoices'], ['other', 'Other']], 'transfer') + '</select>') + field('Reference', inp('seR', '', 'text', 'cheque number, transfer reference…')) + '</div><div class="controls"><button class="primary" id="seGo">Save</button><button id="seX">Cancel</button></div>', 2);
+    $('#seX', m).onclick = function () { close(2); };
+    $('#seGo', m).onclick = function () { guard(this, api('/api/franchise/network/credits/' + id + '/settle', 'POST', { how: val('seH', m), reference: val('seR', m) })).then(function () { close(2); programmes(); }); };
+  }
+
+  // ------------------------------------------------------------ certification --
+  function certs() {
+    if (!netGuard()) return;
+    $('#view').innerHTML = '<div class="empty">Loading…</div>';
+    Promise.all([api('/api/franchise/network/certs'), reloadNet()]).then(function (r) {
+      var d = r[0];
+      var h = '<div class="card"><h2>Certification by store</h2><p class="sub">Each store keeps the certified people each certificate requires. A certificate is earned by finishing its lessons on the Training screen and passing the quiz at the pass mark, then recorded here; it lasts the months shown and must be renewed.</p><div class="scroll"><table><thead><tr><th>Store</th><th class="n">Requirement met</th><th>Short of</th></tr></thead><tbody>' +
+        (d.stores.map(function (s) { return '<tr><td><a href="#fr=' + s.id + '">' + esc(s.name) + '</a></td>' + gradeCell(s.compliance.pct, s.compliance.pct >= 100 ? 'ok' : s.compliance.pct >= 80 ? 'warn' : 'bad', '%') + '<td>' + esc(s.compliance.short.join(', ')) + '</td></tr>'; }).join('') || '<tr><td colspan="3" class="empty">No stores yet.</td></tr>') + '</tbody></table></div></div>';
+      h += '<div class="card"><h2>Certificates held <button class="sm primary" id="ceNew" style="margin-left:auto">+ Record a certificate</button></h2><div class="controls"><select id="ceF"><option value="">All</option><option value="expiring">Expiring in 60 days</option><option value="expired">Expired</option></select><button id="ceCsv">Export</button></div><div class="scroll" id="ceOut"></div></div>';
+      h += '<div class="card"><h2>Certificates offered <button class="sm" id="cpNew" style="margin-left:auto">+ New certificate</button></h2><table><thead><tr><th>Code</th><th>Certificate</th><th>For</th><th class="n">Lasts</th><th class="n">Each store needs</th><th class="n">Pass mark</th><th>Lesson</th><th></th></tr></thead><tbody>' + NET.programs.map(function (p) {
+        return '<tr' + (p.active ? '' : ' style="opacity:.5"') + '><td>' + esc(p.code) + '</td><td><b>' + esc(p.name) + '</b><br><small>' + esc(p.description || '') + '</small></td><td>' + esc(p.for_role || '') + '</td><td class="n">' + p.valid_months + ' months</td><td class="n">' + p.required_per_store + '</td><td class="n">' + p.pass_pct + '%</td><td>' + (p.lesson_key ? '<a href="/training.html" target="_blank" rel="noopener">' + esc(p.lesson_key) + '</a>' : '') + '</td><td><button class="sm" data-cp="' + esc(p.code) + '">Edit</button></td></tr>'; }).join('') + '</tbody></table></div>';
+      $('#view').innerHTML = h;
+      var draw = function () { var f = val('ceF'); var rows = d.certs.filter(function (c) { return !f || c.state === f; });
+        $('#ceOut').innerHTML = rows.length ? '<table><thead><tr><th>Person</th><th>Store</th><th>Certificate</th><th>Earned</th><th>Expires</th><th class="n">Score</th><th>Number</th><th></th></tr></thead><tbody>' + rows.map(function (c) {
+          return '<tr' + (c.state === 'revoked' ? ' style="opacity:.5"' : '') + '><td><b>' + esc(c.person) + '</b>' + (c.role ? '<br><small>' + esc(c.role) + '</small>' : '') + '</td><td>' + esc(c.store_name) + '</td><td>' + esc(c.program_name) + '</td><td>' + esc(day(c.earned_on)) + '</td><td>' + esc(day(c.expires_on)) + ' <span class="pill' + (c.state === 'current' ? ' ok' : c.state === 'expiring' ? ' warn' : ' bad') + '">' + esc(c.state) + '</span></td><td class="n">' + (c.score != null ? c.score + '%' : '') + '</td><td>' + esc(c.certificate_no || '') + '</td><td>' + (c.state !== 'revoked' ? '<button class="sm" data-rv="' + c.id + '">Withdraw</button>' : '') + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="empty">None.</div>';
+        all('[data-rv]').forEach(function (b) { b.onclick = function () { var why = prompt('Why is it withdrawn?', ''); if (why === null) return; guard(b, api('/api/franchise/network/certs/' + b.getAttribute('data-rv') + '/revoke', 'POST', { reason: why })).then(certs); }; }); };
+      $('#ceF').onchange = draw; draw();
+      $('#ceCsv').onclick = function () { csv('franchise-certificates', [['Person', 'Role', 'Store', 'Certificate', 'Earned', 'Expires', 'State', 'Score', 'Number']].concat(d.certs.map(function (c) { return [c.person, c.role, c.store_name, c.program_name, c.earned_on, c.expires_on, c.state, c.score, c.certificate_no]; }))); };
+      $('#ceNew').onclick = function () { certForm(null, certs); };
+      $('#cpNew').onclick = function () { programForm(null); };
+      all('[data-cp]').forEach(function (b) { b.onclick = function () { programForm(NET.programs.find(function (p) { return p.code === b.getAttribute('data-cp'); })); }; });
+    }).catch(function (e) { $('#view').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  function certForm(storeId, done) {
+    var m = modal('<h2>Record a certificate</h2><div class="grid">' + field('Store', '<select id="cfS">' + storeOpts(storeId, 'Choose…') + '</select>') + field('Person', inp('cfP')) + field('Their job', inp('cfR', '', 'text', 'Counter, driver, manager…')) +
+      field('Certificate', '<select id="cfC">' + opts(NET.programs.filter(function (p) { return p.active; }).map(function (p) { return [p.code, p.name]; }), '') + '</select>') + field('Earned on', inp('cfD', today(), 'date')) + field('Quiz score (%)', inp('cfSc', '', 'number')) + field('Certificate number (blank = made for you)', inp('cfN')) +
+      '</div><div class="controls"><button class="primary" id="cfGo">Save</button><button id="cfX">Cancel</button></div>', 2);
+    $('#cfX', m).onclick = function () { close(2); };
+    $('#cfGo', m).onclick = function () { guard(this, api('/api/franchise/network/certs', 'POST', { franchisee_id: val('cfS', m), person: val('cfP', m), role: val('cfR', m), program_code: val('cfC', m), earned_on: val('cfD', m), score: val('cfSc', m), certificate_no: val('cfN', m) })).then(function (r) { close(2); toast('Saved; valid to ' + day(r.expires_on) + '. Store now ' + r.compliance_pct + '% of the requirement.'); if (done) done(); }); };
+  }
+  function programForm(p) {
+    p = p || { valid_months: 24, required_per_store: 0, pass_pct: 80, active: true };
+    var m = modal('<h2>' + (p.code ? esc(p.name) : 'New certificate') + '</h2><div class="grid">' + field('Code', inp('pgC', p.code)) + field('Name', inp('pgN', p.name)) + field('For', inp('pgR', p.for_role)) + field('Lasts (months)', inp('pgV', p.valid_months, 'number')) + field('Each store needs', inp('pgQ', p.required_per_store, 'number')) + field('Pass mark (%)', inp('pgP', p.pass_pct, 'number')) +
+      field('Training lesson key', inp('pgL', p.lesson_key)) + field('Order on the list', inp('pgO', p.sort, 'number')) + field('What it covers', area('pgD', p.description, 2), true) + '</div><label><input type="checkbox" id="pgA"' + (p.active ? ' checked' : '') + '> Offered</label><div class="controls" style="margin-top:8px"><button class="primary" id="pgGo">Save</button><button id="pgX">Cancel</button></div>', 2);
+    $('#pgX', m).onclick = function () { close(2); };
+    $('#pgGo', m).onclick = function () { guard(this, api('/api/franchise/network/cert-programs/' + encodeURIComponent(p.code || val('pgC', m)), 'PUT', { name: val('pgN', m), for_role: val('pgR', m), valid_months: val('pgV', m), required_per_store: val('pgQ', m), pass_pct: val('pgP', m), lesson_key: val('pgL', m), sort: val('pgO', m), description: val('pgD', m), active: $('#pgA', m).checked })).then(function () { close(2); certs(); }); };
+  }
+
+  // ---------------------------------------------------------------- scorecard --
+  function scorecardView() {
+    if (!netGuard()) return;
+    $('#view').innerHTML = '<div class="card"><h2>Store scorecard</h2><div class="controls"><div><label>Period</label><select id="scM">' + opts([[1, 'Last month'], [3, 'Last 3 months'], [6, 'Last 6 months'], [12, 'Last 12 months']], 3) + '</select></div><button id="scCsv">Export</button></div><div id="scOut"><div class="empty">Loading…</div></div></div>';
+    var data = null;
+    var load = function () {
+      api('/api/franchise/network/scorecard?months=' + val('scM')).then(function (d) {
+        data = d; var t = d.targets, nw = d.network;
+        var h = '<div class="kpis">' + kpi(jmd(nw.net_sales), 'Network net sales') + kpi(jmd(nw.per_store), 'Sales per store') + kpi(nw.commercial_pct != null ? nw.commercial_pct + '%' : '-', 'Commercial share (target ' + t.commercial_pct + '%)') + kpi(nw.margin_pct != null ? nw.margin_pct + '%' : '-', 'Gross margin') +
+          kpi(nw.turns != null ? nw.turns : '-', 'Inventory turns a year') + kpi(nw.shrink_pct != null ? nw.shrink_pct + '%' : '-', 'Shrink of sales') + kpi(nw.fill_pct != null ? nw.fill_pct + '%' : '-', 'DC fill rate') + kpi(nw.score != null ? nw.score : '-', 'Average store score') + '</div>' +
+          '<p class="sub">Green is on target, amber close, red well off. Targets (Settings): commercial ' + t.commercial_pct + '%, margin ' + t.margin_pct + '%, turns ' + t.turns + ', shrink at most ' + t.shrink_pct + '%, fill ' + t.fill_pct + '%, through the DC ' + t.dc_share_pct + '%, delivery within ' + t.delivery_minutes + ' minutes, certification ' + t.cert_pct + '%, audit ' + t.last_audit + '%. Figures come from the monthly reports, supply orders, certificates, systems and audits; a dash means the report did not include it.</p>' +
+          '<div class="scroll"><table><thead><tr><th>Store</th><th class="n">Net sales</th><th class="n">A month</th><th class="n">Per sq ft a year</th><th class="n">Commercial</th><th class="n">Avg sale</th><th class="n">Margin</th><th class="n">Turns</th><th class="n">Shrink</th><th class="n">Fill</th><th class="n">Via DC</th><th class="n">Delivery</th><th class="n">Certified</th><th class="n">Systems</th><th class="n">Audit</th><th class="n">Score</th></tr></thead><tbody>' +
+          (d.stores.map(function (s) { var g = s.grades;
+            return '<tr class="row" data-sc="' + s.id + '"><td><b>' + esc(s.name) + '</b><br><small>' + esc([TYPEK[s.store_type], s.format_name, ROLEK[s.network_role]].filter(Boolean).join(' · ')) + ' · ' + s.months_reported + ' report(s)</small></td><td class="n">' + jmd(s.net_sales) + '</td><td class="n">' + (s.per_month != null ? jmd(s.per_month) : '') + '</td><td class="n">' + (s.sales_per_sqft != null ? jmd(s.sales_per_sqft) : '') + '</td>' +
+              gradeCell(s.commercial_pct, g.commercial_pct, '%') + '<td class="n">' + (s.avg_ticket != null ? jmd(s.avg_ticket) : '') + '</td>' + gradeCell(s.margin_pct, g.margin_pct, '%') + gradeCell(s.turns, g.turns) + gradeCell(s.shrink_pct, g.shrink_pct, '%') + gradeCell(s.fill_pct, g.fill_pct, '%') + gradeCell(s.dc_share_pct, g.dc_share_pct, '%') +
+              gradeCell(s.delivery_minutes, g.delivery_minutes, ' min') + gradeCell(s.cert_pct, g.cert_pct, '%') + gradeCell(s.systems_pct, g.systems_pct, '%') + gradeCell(s.last_audit, g.last_audit, '%') + '<td class="n"><b>' + (s.score != null ? s.score : '') + '</b></td></tr>'; }).join('') || '<tr><td colspan="16" class="empty">No trading stores yet.</td></tr>') + '</tbody></table></div>';
+        var grp = function (title, g, label) { var k = Object.keys(g); return k.length ? '<h4>' + title + '</h4><table><tbody>' + k.map(function (x) { return '<tr><td>' + esc(label(x)) + '</td><td class="n">' + g[x].stores + ' store(s)</td><td class="n">' + jmd(g[x].net_sales) + '</td><td class="n">' + jmd(g[x].per_store) + ' per store</td></tr>'; }).join('') + '</tbody></table>' : ''; };
+        h += grp('By kind of store', d.by_type, function (x) { return TYPEK[x] || x; }) + grp('By format', d.by_format, function (x) { var f = NET.formats.find(function (y) { return y.key === x; }); return f ? f.name : 'No format set'; });
+        $('#scOut').innerHTML = h;
+        all('[data-sc]').forEach(function (tr) { tr.onclick = function () { openFr.sub = 'store'; location.hash = 'fr=' + tr.getAttribute('data-sc'); }; });
+      }).catch(function (e) { toast(e.message); });
+    };
+    $('#scM').onchange = load;
+    $('#scCsv').onclick = function () { if (data) csv('store-scorecard', [['Store', 'Kind', 'Format', 'Net sales', 'Per month', 'Per sq ft a year', 'Commercial %', 'Avg sale', 'Margin %', 'Turns', 'Shrink %', 'Fill %', 'Via DC %', 'Delivery min', 'Certified %', 'Systems %', 'Last audit %', 'Score']].concat(data.stores.map(function (s) { return [s.name, TYPEK[s.store_type], s.format_name, s.net_sales, s.per_month, s.sales_per_sqft, s.commercial_pct, s.avg_ticket, s.margin_pct, s.turns, s.shrink_pct, s.fill_pct, s.dc_share_pct, s.delivery_minutes, s.cert_pct, s.systems_pct, s.last_audit, s.score]; }))); };
+    load();
+  }
+
+  // The store tab on a franchisee: its place in the network, systems, certificates and stock.
+  function storePanel(f, body, again) {
+    if (!NET) { body.innerHTML = '<div class="empty">The store network is not set up on this till yet.</div>'; return; }
+    Promise.all([api('/api/franchise/network/stores/' + f.id + '/systems'), api('/api/franchise/network/certs?store_id=' + f.id), api('/api/franchise/network/scorecard?months=3&store_id=' + f.id)]).then(function (r) {
+      var sys = r[0].systems, cs = r[1], sc = r[2].stores[0];
+      body.innerHTML = '<div class="item">' + typePill(f.store_type) + ' · ' + esc(ROLEK[f.network_role] || '') + (f.format_name ? ' · ' + esc(f.format_name) : '') + (f.sq_ft ? ' · ' + Number(f.sq_ft).toLocaleString() + ' sq ft' : '') + '<br>DC: <b>' + esc(f.dc_name || 'not set') + '</b>' + (f.network_role === 'spoke' ? ' · hub: <b>' + esc(f.hub_name || 'not set') + '</b>' : '') +
+        ' <button class="sm" id="spPl">Change</button></div>' +
+        (sc ? '<div class="kpis">' + kpi(sc.commercial_pct != null ? sc.commercial_pct + '%' : '-', 'Commercial share') + kpi(sc.margin_pct != null ? sc.margin_pct + '%' : '-', 'Gross margin') + kpi(sc.turns != null ? sc.turns : '-', 'Inventory turns') + kpi(sc.fill_pct != null ? sc.fill_pct + '%' : '-', 'DC fill rate') + kpi(sc.score != null ? sc.score : '-', 'Scorecard (3 months)') + '</div>' : '') +
+        '<h4>Required systems</h4><table><tbody>' + sys.map(function (s) { return '<tr><td><b>' + esc(s.name) + '</b><br><small>' + esc(s.what) + '</small></td><td><select data-sy="' + s.key + '">' + opts(Object.keys(SYSST).map(function (k) { return [k, SYSST[k]]; }), s.status) + '</select></td><td><input data-sd="' + s.key + '" value="' + esc(s.detail || '') + '" placeholder="version, serial, provider"></td><td><small>' + (s.checked_at ? esc(day(s.checked_at)) + (s.checked_by_name ? ' ' + esc(s.checked_by_name) : '') : '') + '</small></td></tr>'; }).join('') + '</tbody></table>' +
+        '<h4>Certificates (' + (cs.stores[0] ? cs.stores[0].compliance.pct : 0) + '% of the requirement)</h4>' + (cs.stores[0] && cs.stores[0].compliance.short.length ? '<div class="warn">Short of: ' + esc(cs.stores[0].compliance.short.join(', ')) + '</div>' : '') +
+        (cs.certs.length ? '<table><tbody>' + cs.certs.map(function (c) { return '<tr><td>' + esc(c.person) + '</td><td>' + esc(c.program_name) + '</td><td>to ' + esc(day(c.expires_on)) + ' <span class="pill' + (c.state === 'current' ? ' ok' : c.state === 'expiring' ? ' warn' : ' bad') + '">' + esc(c.state) + '</span></td></tr>'; }).join('') + '</tbody></table>' : '<p class="sub">None recorded.</p>') +
+        '<div class="controls" style="margin-top:8px"><button id="spCe">+ Record a certificate</button><button id="spSt">Stock levels</button><button id="spRp">Replenishment list</button><button id="spOr">+ Supply order</button></div>';
+      $('#spPl', body).onclick = function () { placeForm({ id: f.id, name: f.trading_name || f.legal_name, format_key: f.format_key, network_role: f.network_role, dc_id: f.dc_id, hub_id: f.hub_id, sq_ft: f.sq_ft }, again); };
+      all('[data-sy]', body).forEach(function (s) { s.onchange = function () { var k = s.getAttribute('data-sy'); api('/api/franchise/network/stores/' + f.id + '/systems/' + k, 'PUT', { status: s.value, detail: $('[data-sd="' + k + '"]', body).value }).then(function (r) { toast(r.all_verified ? 'Saved: every system is verified' : 'Saved'); }).catch(function (e) { toast(e.message); }); }; });
+      $('#spCe', body).onclick = function () { certForm(f.id, again); };
+      $('#spSt', body).onclick = function () { stockForm({ franchisee_id: f.id }); };
+      $('#spRp', body).onclick = function () { replenish(f.id, again); };
+      $('#spOr', body).onclick = function () { orderForm(f.id, again); };
+    }).catch(function (e) { body.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+
+  var VIEWS = { dash: dash, leads: leads, franchisees: franchisees, territories: territories, billing: billing, performance: performance, audits: audits, templates: templates, settings: settingsView,
+    network: network, catalogue: catalogue, supply: supply, commercial: commercial, programmes: programmes, certs: certs, scorecard: scorecardView };
+  Promise.all([reloadMeta(), reloadNet()]).then(show).catch(function (e) { $('#view').innerHTML = '<div class="card empty">' + esc(/permission|403|not allowed/i.test(e.message) ? 'You need the Franchise permission (Users & Staff > Roles & Permissions).' : e.message) + '</div>'; });
+})();
+</script>
+<script src="/assets/module-look.js?v=20261101" defer></script>
+</body>
+</html>

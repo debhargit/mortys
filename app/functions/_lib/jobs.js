@@ -9,6 +9,7 @@
 import { d1 } from './db.js';
 import { sendEmail, templates } from './mailer.js';
 import { generateRecurringCharges } from './recurring.js';
+import { assembleGuestCatalogue, GUEST_BASE_WHERE } from './catalogue.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -131,11 +132,28 @@ export async function lowStockDigest(env) {
   return { low: low.length, out_of_stock: out, emailed: !!to };
 }
 
+// ---- guest catalogue -> KV: precompute the storefront's full catalogue once
+// so signed-out browsing reads it from KV instead of scanning ~36k products in
+// D1 per edge rebuild (the free-tier 5M-reads/day killer). Keep this on the
+// DAILY trigger only -- each run re-scans the catalogue, so running it often
+// would recreate the very read load it removes. Guests see no prices, and stock
+// is confirmed at the counter, so a once-daily refresh is fine.
+export async function cacheGuestCatalogue(env) {
+  const kv = env && env.CATALOG_KV;
+  if (!kv) return { skipped: 'CATALOG_KV binding not configured' };
+  const db = d1(env);
+  const { cats, rows, total } = await assembleGuestCatalogue(db, GUEST_BASE_WHERE, [], 'name');
+  const payload = JSON.stringify({ cats, rows, total, at: Date.now() });
+  await kv.put('guest-catalogue:v1', payload);
+  return { total, bytes: payload.length };
+}
+
 export const JOBS = {
   'back-in-stock': notifyBackInStock,
   'reminders-digest': remindersDigest,
   'low-stock-digest': lowStockDigest,
   'recurring-charges': generateRecurringCharges,
+  'catalogue-cache': cacheGuestCatalogue,
 };
 
 // Run one job by name, logging the outcome to job_runs. Throws for an unknown

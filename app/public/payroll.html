@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Payroll · Morty's Auto Parts</title>
+<link rel="stylesheet" href="/assets/books.css">
+<style>
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px 12px}
+  .grid label{display:block;font-size:12px;color:var(--muted);margin-bottom:2px} .grid input,.grid select,.grid textarea{width:100%}
+  .chk{display:flex;gap:6px;align-items:center;font-size:13px} .chk input{width:auto}
+  fieldset{border:1px solid var(--line);border-radius:10px;margin:0 0 10px;padding:10px 12px} legend{font-size:12.5px;font-weight:700;padding:0 6px}
+  .warnlist{margin:4px 0 0;padding-left:18px;font-size:12.5px;color:var(--warn)}
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Payroll</h1><nav><a href="/attendance.html">Attendance</a><a href="/banking.html">Banking</a><a href="/accounting.html">Ledger</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"></div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<script src="/assets/books-common.js?v=20261019"></script>
+<script>
+(function () {
+  'use strict';
+  var B = window.Books, $ = B.$, all = B.all, esc = B.esc, J = B.J, api = B.api, toast = B.toast, modal = B.modal, close = B.close;
+  var me = {}, tab = '', items = [], FREQ = { weekly: 'Weekly', fortnightly: 'Fortnightly', monthly: 'Monthly' };
+  var STATUS = { draft: '', approved: 'warn', paid: 'ok', void: 'bad' };
+  var val = function (id) { var el = $('#' + id); return el ? (el.type === 'checkbox' ? el.checked : el.value) : undefined; };
+  var num = function (v) { return Number(v || 0); };
+  function fail(e) { toast(e.message || String(e)); }
+
+  // ------------------------------------------------------------- start --
+  function start() {
+    api('/api/payroll/module').then(function (m) {
+      me = m;
+      if (!m.on) return off();
+      var t = [];
+      if (m.can_view) t = [['home', 'Overview'], ['emp', 'Employees'], ['runs', 'Pay runs'], ['work', 'Work & invoices'], ['returns', 'Returns & deductions'], ['rates', 'Rates & pay items'], ['set', 'Settings']];
+      if (m.self_service) t.push(['mine', 'My payslips']);
+      if (!t.length) { $('#out').innerHTML = '<div class="card empty">You are not on payroll, and your account cannot see payroll.</div>'; return; }
+      $('#tabs').innerHTML = t.map(function (x) { return '<button data-t="' + x[0] + '">' + x[1] + '</button>'; }).join('');
+      all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
+      tab = (location.hash || '').slice(1) || t[0][0];
+      if (!t.some(function (x) { return x[0] === tab; })) tab = t[0][0];
+      if (m.can_view) B.loadAccounts().catch(function () {});
+      show();
+    }).catch(fail);
+  }
+  function mark() { all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); }); history.replaceState(null, '', '#' + tab); }
+  function show() {
+    mark();
+    $('#out').innerHTML = '<div class="empty">Loading…</div>';
+    ({ home: home, emp: employees, runs: runs, work: workTab, returns: returns, rates: rates, set: settings, mine: mine }[tab] || home)();
+  }
+  function off() {
+    $('#tabs').innerHTML = '';
+    $('#out').innerHTML = '<div class="card"><h2>Payroll is switched off</h2><p>Payroll is a separate module. While it is off, nothing in it runs or posts to the books, and the time clock, commission and accounting work as before.</p>' +
+      '<p class="sub">Once it is on you choose which parts to use: pay from the time clock, commission through payroll, posting to the ledger, staff seeing their own payslips, and a second person to approve. Only the people you add are paid by it.</p>' +
+      (me.can_run ? '<button class="primary" id="on">Switch payroll on</button>' : '<p class="sub">A manager with the payroll permission can switch it on.</p>') + '</div>';
+    if ($('#on')) $('#on').onclick = function () { api('/api/payroll/module', 'POST', { on: true }).then(function () { toast('Payroll is on'); start(); }).catch(fail); };
+  }
+
+  // ------------------------------------------------------------ overview --
+  function home() {
+    api('/api/payroll/summary').then(function (d) {
+      var s = d.settings, todo = [];
+      if (!s.payroll_employer_trn) todo.push('Enter the company TRN and NIS employer number under Settings (they go on the S01 / S02 and payslips).');
+      if (!d.employees.active) todo.push('Add your employees under Employees (you can bring in staff from the system in one go).');
+      if (d.employees.missing_ids) todo.push(d.employees.missing_ids + ' active employee(s) have no TRN or NIS number.');
+      $('#out').innerHTML = '<div class="tiles"><div class="tile"><span class="k">On payroll</span><b>' + d.employees.active + '</b></div>' +
+        '<div class="tile' + (d.runs.draft ? ' click" data-go="runs' : '') + '"><span class="k">Draft runs</span><b>' + (d.runs.draft || 0) + '</b></div>' +
+        '<div class="tile' + (d.net_unpaid.n ? ' bad' : '') + '"><span class="k">Approved, wages not paid</span><b>' + J(d.net_unpaid.v) + '</b></div>' +
+        '<div class="tile' + (d.s01_owing.some(function (x) { return x.late; }) ? ' bad' : '') + '"><span class="k">Owing to TAJ</span><b>' + J(d.s01_owing.reduce(function (t, x) { return t + x.owing; }, 0)) + '</b></div></div>' +
+        (todo.length ? '<div class="card"><h2>To set up</h2>' + todo.map(function (t) { return '<div class="note warn">' + esc(t) + '</div>'; }).join('') + '</div>' : '') +
+        '<div class="card"><h2>Statutory payments (S01)</h2><p class="sub">PAYE, NIS, NHT, Education Tax and HEART deducted in a month are paid to TAJ by the 14th of the next month.</p>' +
+        (d.s01_owing.length ? '<table><thead><tr><th>Month</th><th>Due</th><th class="n">Owing</th><th></th></tr></thead><tbody>' + d.s01_owing.map(function (x) { return '<tr><td>' + esc(x.month) + '</td><td>' + esc(x.due_date) + (x.late ? ' <span class="pill bad">late</span>' : '') + '</td><td class="n">' + J(x.owing) + '</td><td><button class="sm" data-m="' + esc(x.month) + '">Open</button></td></tr>'; }).join('') + '</tbody></table>' : '<div class="empty">Nothing owing.</div>') + '</div>' +
+        (d.last ? '<div class="card"><h2>Last pay run</h2><p>' + esc(d.last.number) + ' · paid ' + esc(d.last.pay_date) + ' · <span class="pill ' + STATUS[d.last.status] + '">' + esc(d.last.status) + '</span> · ' + d.last.totals.people + ' people · gross ' + J(d.last.totals.gross) + ' · net ' + J(d.last.totals.net) + ' <button class="sm" id="lr">Open</button></p></div>' : '');
+      all('[data-go]').forEach(function (t) { t.onclick = function () { tab = t.getAttribute('data-go'); show(); }; });
+      all('[data-m]').forEach(function (b) { b.onclick = function () { returns.month = b.getAttribute('data-m'); tab = 'returns'; show(); }; });
+      if ($('#lr')) $('#lr').onclick = function () { tab = 'runs'; mark(); runView(d.last.id); };
+    }).catch(fail);
+  }
+
+  // ----------------------------------------------------------- employees --
+  var WTYPE = { employee: 'Employee', day_worker: 'Day worker', contractor: 'Contractor' };
+  function payText(e) {
+    return { hourly: J(e.hourly_rate) + '/h', daily: J(e.day_rate) + '/day', piece: 'by the job', contract: 'by invoice' + (num(e.fee_per_period) ? ' + ' + J(e.fee_per_period) + ' fee' : '') }[e.pay_type] || J(e.salary_annual) + '/yr';
+  }
+  function employees() {
+    api('/api/payroll/employees?all=1').then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>Employees</h2><p class="sub">Only the people listed here are paid by payroll. Link someone to their staff login to pay them from the time clock and commission, and to let them see their own payslips.</p>' +
+        (me.can_run ? '<div class="controls"><button class="primary" id="add">Add an employee</button><button id="imp">Add staff from the system</button></div>' : '') +
+        '<div class="scroll"><table><thead><tr><th>Name</th><th>Job</th><th>Pay</th><th>Paid</th><th>TRN</th><th>NIS</th><th>Linked login</th><th></th></tr></thead><tbody>' +
+        (d.employees.length ? d.employees.map(function (e) {
+          return '<tr class="' + (me.can_run ? 'click' : '') + '" data-e="' + e.id + '" style="' + (e.is_active ? '' : 'opacity:.55') + '"><td><b>' + esc(e.name) + '</b>' + (e.employee_no ? ' <small>#' + esc(e.employee_no) + '</small>' : '') + (e.worker_type !== 'employee' ? ' <span class="pill' + (e.worker_type === 'contractor' ? ' warn' : '') + '">' + WTYPE[e.worker_type] + '</span>' : '') + (e.business_name ? '<br><small>' + esc(e.business_name) + '</small>' : '') + '</td><td>' + esc(e.job_title || '') + '</td><td>' + payText(e) + '<br><small>' + FREQ[e.frequency] + (e.pay_type === 'hourly' && e.use_timeclock && e.user_id ? ', time clock' : '') + '</small></td>' +
+            '<td>' + esc(e.pay_method) + (e.pay_method === 'bank' ? '<br><small>' + esc(e.bank_masked || 'no account') + '</small>' : '') + '</td><td>' + (e.trn ? esc(e.trn) : '<span class="pill warn">missing</span>') + '</td><td>' + (e.nis_no ? esc(e.nis_no) : '<span class="pill warn">missing</span>') + '</td><td>' + esc(e.user_name || '') + '</td>' +
+            '<td>' + (e.is_active ? '' : '<span class="pill">not active</span>') + (e.termination_date ? ' <span class="pill bad">left ' + esc(e.termination_date) + '</span>' : '') + '</td></tr>';
+        }).join('') : '<tr><td colspan="8" class="empty">Nobody yet.</td></tr>') + '</tbody></table></div></div>';
+      if ($('#add')) $('#add').onclick = function () { empForm(null); };
+      if ($('#imp')) $('#imp').onclick = importStaff;
+      if (me.can_run) all('[data-e]').forEach(function (r) { r.onclick = function () { empForm(+r.getAttribute('data-e')); }; });
+    }).catch(fail);
+  }
+  function importStaff() {
+    api('/api/payroll/staff-not-on-payroll').then(function (d) {
+      modal('<h2>Add staff from the system</h2><p class="sub">Staff with an hourly rate on the time clock come in as hourly, fortnightly and active. Everyone else comes in as salaried, monthly and not active, until you enter their salary.</p>' +
+        (d.staff.length ? '<table><tbody>' + d.staff.map(function (s) { return '<tr><td><input type="checkbox" data-u="' + s.id + '" checked></td><td>' + esc(s.name) + '</td><td>' + esc(s.email || '') + '</td><td class="n">' + (s.hourly_rate ? J(s.hourly_rate) + '/h' : '') + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="empty">Every staff member is already on payroll.</div>') +
+        '<div class="controls" style="margin-top:10px">' + (d.staff.length ? '<button class="primary" id="go">Add the ticked people</button>' : '') + '<button id="x">Close</button></div>');
+      $('#x').onclick = close;
+      if ($('#go')) $('#go').onclick = function () {
+        var ids = all('[data-u]').filter(function (c) { return c.checked; }).map(function (c) { return +c.getAttribute('data-u'); });
+        api('/api/payroll/employees/import-staff', 'POST', { user_ids: ids }).then(function (r) { close(); toast(r.added + ' added. ' + r.note); employees(); }).catch(fail);
+      };
+    }).catch(fail);
+  }
+  function field(id, label, value, type, extra) { return '<div><label for="' + id + '">' + label + '</label><input id="' + id + '" type="' + (type || 'text') + '" value="' + esc(value == null ? '' : value) + '"' + (extra || '') + '></div>'; }
+  function check(id, label, on) { return '<label class="chk"><input type="checkbox" id="' + id + '"' + (on ? ' checked' : '') + '> ' + label + '</label>'; }
+  function sel(id, label, opts, value) { return '<div><label for="' + id + '">' + label + '</label><select id="' + id + '">' + opts.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (String(o[0]) === String(value == null ? '' : value) ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select></div>'; }
+  function empForm(id) {
+    Promise.all([id ? api('/api/payroll/employees/' + id) : Promise.resolve({ employee: { worker_type: 'employee', pay_type: 'salary', frequency: 'monthly', pay_method: 'bank', ot_rate: 1.5, hours_per_day: 8, use_timeclock: true, is_active: true, pension_ee_pct: 0, pension_er_pct: 0, extra_threshold: 0 }, items: [], slips: [], work: [], contracts: [], loans: [] }),
+      api('/api/payroll/staff-not-on-payroll'), loadItems(), B.loadAccounts()]).then(function (r) {
+      var d = r[0], e = d.employee, staff = r[1].staff, ctr = e.worker_type === 'contractor';
+      var users = [['', '(not linked)']].concat(e.user_id ? [[e.user_id, e.user_name || 'Linked']] : []).concat(staff.map(function (s) { return [s.id, s.name]; }));
+      var openContracts = (d.contracts || []).filter(function (c) { return c.status === 'open'; });
+      $('#out').innerHTML = '<div class="controls"><button id="bk">◀ Employees</button></div><div class="card"><h2>' + (id ? esc(e.name) + ' <span class="pill">' + WTYPE[e.worker_type] + '</span>' : 'New employee or contractor') + '</h2>' +
+        '<fieldset><legend>Person</legend><div class="grid">' + sel('worker_type', 'Works as', [['employee', 'Employee'], ['day_worker', 'Day worker (casual, paid by the day)'], ['contractor', 'Contractor (self-employed)']], e.worker_type) +
+          field('name', 'Name', e.name) + field('employee_no', 'Employee / supplier no.', e.employee_no) + sel('user_id', 'Staff login (time clock, commission, own payslips)', users, e.user_id) +
+          field('job_title', 'Job title / trade', e.job_title) + field('department', 'Department', e.department) + field('email', 'Email (payslips)', e.email) + field('phone', 'Phone', e.phone) + field('address', 'Address', e.address) +
+          field('date_of_birth', 'Date of birth', e.date_of_birth, 'date') + field('hire_date', 'Started', e.hire_date, 'date') + field('termination_date', 'Left on', e.termination_date, 'date') + field('termination_reason', 'Reason for leaving', e.termination_reason) + '</div></fieldset>' +
+        '<fieldset id="ctrbox"' + (ctr ? '' : ' hidden') + '><legend>Contractor</legend><p class="sub">A contractor is self-employed: no PAYE, NIS, NHT, Education Tax or HEART is deducted. The business deducts the contractor levy (2%) on construction, haulage and tillage work, and withholding tax (3%) on specified services if it is a withholding agent (Settings).</p><div class="grid">' +
+          field('business_name', 'Business name', e.business_name) + field('tcc_no', 'Tax compliance certificate no.', e.tcc_no) + field('tcc_expiry', 'TCC expires', e.tcc_expiry, 'date') +
+          field('fee_per_period', 'Fixed fee each pay (retainer, optional)', e.fee_per_period, 'number', ' step="0.01"') +
+          '<div>' + check('levy_applies', 'Construction, haulage or tillage work (contractor levy)', e.levy_applies) + check('wht_applies', 'A specified service (withholding tax)', e.wht_applies) + '</div></div></fieldset>' +
+        '<fieldset><legend>Pay</legend><div class="grid">' + sel('pay_type', 'Paid', [['salary', 'Salary'], ['hourly', 'By the hour'], ['daily', 'By the day'], ['piece', 'By the job / piece (work entered)'], ['contract', 'By invoice / contract']], e.pay_type) +
+          sel('frequency', 'How often', [['weekly', 'Weekly'], ['fortnightly', 'Fortnightly'], ['monthly', 'Monthly']], e.frequency) +
+          field('salary_annual', 'Salary a year (J$)', e.salary_annual, 'number', ' step="0.01"') + field('hourly_rate', 'Hourly rate (J$)', e.hourly_rate, 'number', ' step="0.01"') + field('day_rate', 'Day rate (J$)', e.day_rate, 'number', ' step="0.01"') + field('ot_rate', 'Overtime rate (x)', e.ot_rate, 'number', ' step="0.05"') +
+          field('hours_per_period', 'Usual hours a pay (not on the clock)', e.hours_per_period, 'number', ' step="0.25"') + field('hours_per_day', 'Hours in a day (leave, holidays)', e.hours_per_day, 'number', ' step="0.25"') +
+          '<div>' + check('use_timeclock', 'Hours / days from the time clock', e.use_timeclock) + check('is_active', 'Active (paid by payroll)', e.is_active) + '</div></div></fieldset>' +
+        '<fieldset id="statbox"' + (ctr ? ' hidden' : '') + '><legend>Tax and statutory</legend><div class="grid">' + field('nis_no', 'NIS number', e.nis_no) + field('extra_threshold', 'Extra tax-free amount a year (e.g. pensioner)', e.extra_threshold, 'number', ' step="0.01"') +
+          '<div>' + check('paye_exempt', 'No income tax (PAYE)', e.paye_exempt) + check('nis_exempt', 'No NIS', e.nis_exempt) + check('nht_exempt', 'No NHT', e.nht_exempt) + check('ed_exempt', 'No Education Tax', e.ed_exempt) + '</div></div></fieldset>' +
+        '<fieldset><legend>TRN</legend><div class="grid">' + field('trn', 'TRN', e.trn) + '</div></fieldset>' +
+        '<fieldset id="penbox"' + (ctr ? ' hidden' : '') + '><legend>Approved pension</legend><div class="grid">' + field('pension_scheme', 'Scheme', e.pension_scheme) + field('pension_ee_pct', 'Employee % of pay', e.pension_ee_pct, 'number', ' step="0.1"') + field('pension_er_pct', 'Employer % of pay', e.pension_er_pct, 'number', ' step="0.1"') + '</div></fieldset>' +
+        '<fieldset><legend>Payment</legend><div class="grid">' + sel('pay_method', 'Paid by', [['bank', 'Bank transfer'], ['cheque', 'Cheque'], ['cash', 'Cash']], e.pay_method) + field('bank_name', 'Bank', e.bank_name) + field('bank_branch', 'Branch / transit', e.bank_branch) + field('bank_account', 'Account number', e.bank_account) + sel('bank_account_type', 'Account type', [['', ''], ['savings', 'Savings'], ['chequing', 'Chequing']], e.bank_account_type) + '</div></fieldset>' +
+        '<fieldset id="leavebox"' + (ctr ? ' hidden' : '') + '><legend>Leave a year (blank: the shop setting)</legend><div class="grid">' + field('vacation_days', 'Vacation days', e.vacation_days, 'number') + field('sick_days', 'Sick days', e.sick_days, 'number') + '</div></fieldset>' +
+        '<div><label for="notes">Notes</label><textarea id="notes" rows="2" style="width:100%">' + esc(e.notes || '') + '</textarea></div>' +
+        '<div class="controls" style="margin-top:8px"><button class="primary" id="sv">Save</button>' + (id && e.termination_date && !ctr ? '<button id="p45">Print P45</button>' : '') + '</div></div>' +
+        (id ? workCard(d, openContracts) + contractCard(d) + loanCard(d) +
+          '<div class="card"><h2>Every pay: earnings, deductions and employer contributions</h2><p class="sub">Deductions: medical, life insurance, pension, union, credit union, child maintenance, NHT mortgage, student loan, staff purchases and agreed salary deductions. Employer contributions: health, life and dental insurance and extra pension the business pays for the person (not cash: they appear on the payslip and, if ticked as taxable under Rates &amp; pay items, are taxed as a benefit). Any item can be a fixed amount or a percentage of pay. Say who each is paid to: they are listed under Returns &gt; Deductions to pay over. Loans and advances are set up below the work, and stop by themselves when repaid.</p><table><thead><tr><th>Item</th><th class="n">Each pay</th><th class="n">Still owed</th><th>Paid to / reference</th><th>Until</th><th></th></tr></thead><tbody>' +
+          (d.items.length ? d.items.map(function (x) { return '<tr style="' + (x.is_active ? '' : 'opacity:.5') + '"><td>' + esc(x.label) + ' <small>(' + x.kind + ')</small>' + (x.note ? '<br><small>' + esc(x.note) + '</small>' : '') + '</td><td class="n">' + (num(x.pct) ? num(x.pct) + '% of pay' : J(x.amount)) + '</td><td class="n">' + (x.balance == null ? '' : J(x.balance)) + '</td><td>' + esc(x.payee || '') + (x.reference ? ' · ' + esc(x.reference) : '') + '</td><td>' + esc(x.end_date ? String(x.end_date).slice(0, 10) : '') + '</td><td>' + (x.is_active ? '<button class="sm" data-stop="' + x.id + '">Stop</button>' : '<button class="sm" data-go="' + x.id + '">Restart</button>') + '</td></tr>'; }).join('') : '<tr><td colspan="6" class="empty">None.</td></tr>') +
+          '</tbody></table><div class="controls" style="margin-top:8px"><div><label>Add</label><select id="ic">' + items.filter(function (i) { return i.is_active && !i.is_system && i.code !== 'loan' && i.code !== 'advance'; }).map(function (i) { return '<option value="' + esc(i.code) + '">' + esc(i.label) + ' (' + (i.kind === 'employer' ? 'paid by the business' : i.kind) + ')</option>'; }).join('') + '</select></div>' +
+          '<div><label>Amount each pay</label><input id="ia" type="number" step="0.01" style="width:120px"></div><div><label>or % of pay</label><input id="ipct" type="number" step="0.01" style="width:80px"></div><div><label>Total owed (stops when paid)</label><input id="ib" type="number" step="0.01" style="width:120px"></div><div><label>Paid to</label><input id="ip" placeholder="e.g. Resident Magistrate\'s Court"></div><div><label>Reference</label><input id="ir" style="width:120px"></div><div><label>Until</label><input id="ie" type="date"></div><div><label>Note</label><input id="in"></div><button id="iadd">Add</button></div></div>' +
+          (ctr ? '' : '<div class="card"><h2>This year</h2>' + leaveHtml(d.leave) + ytdHtml(d.ytd) + '</div>') +
+          '<div class="card"><h2>Payslips</h2><table><tbody>' + (d.slips.length ? d.slips.map(function (s) { return '<tr><td>' + esc(s.pay_date) + '</td><td>' + esc(s.number) + ' <span class="pill ' + STATUS[s.status] + '">' + s.status + '</span></td><td class="n">gross ' + J(s.gross) + '</td><td class="n">net ' + J(s.net) + '</td><td><button class="sm" data-ps="' + s.id + '">Payslip</button></td></tr>'; }).join('') : '<tr><td class="empty">None yet.</td></tr>') + '</tbody></table></div>' : '');
+      $('#bk').onclick = employees;
+      $('#worker_type').onchange = function () { var c = this.value === 'contractor'; ['ctrbox'].forEach(function (b) { $('#' + b).hidden = !c; }); ['statbox', 'penbox', 'leavebox'].forEach(function (b) { $('#' + b).hidden = c; });
+        if (c && $('#pay_type').value === 'salary') $('#pay_type').value = 'contract'; if (this.value === 'day_worker') $('#pay_type').value = 'daily'; };
+      $('#sv').onclick = function () {
+        var b = {};
+        ['worker_type', 'name', 'employee_no', 'user_id', 'job_title', 'department', 'email', 'phone', 'address', 'date_of_birth', 'hire_date', 'termination_date', 'termination_reason', 'pay_type', 'frequency', 'salary_annual', 'hourly_rate', 'day_rate', 'ot_rate', 'hours_per_period', 'hours_per_day',
+          'use_timeclock', 'is_active', 'trn', 'nis_no', 'extra_threshold', 'paye_exempt', 'nis_exempt', 'nht_exempt', 'ed_exempt', 'pension_scheme', 'pension_ee_pct', 'pension_er_pct', 'pay_method', 'bank_name', 'bank_branch', 'bank_account', 'bank_account_type', 'vacation_days', 'sick_days', 'notes',
+          'business_name', 'tcc_no', 'tcc_expiry', 'fee_per_period', 'levy_applies', 'wht_applies'].forEach(function (k) { b[k] = val(k); });
+        (id ? api('/api/payroll/employees/' + id, 'PUT', b) : api('/api/payroll/employees', 'POST', b)).then(function (r) { toast('Saved'); empForm(id || r.id); }).catch(fail);
+      };
+      var again = function () { empForm(id); };
+      if ($('#p45')) $('#p45').onclick = function () { printP45(id); };
+      if ($('#iadd')) $('#iadd').onclick = function () { api('/api/payroll/employees/' + id + '/items', 'POST', { code: val('ic'), amount: val('ia'), pct: val('ipct'), balance: val('ib'), payee: val('ip'), reference: val('ir'), end_date: val('ie'), note: val('in') }).then(again).catch(fail); };
+      all('[data-stop]').forEach(function (b) { b.onclick = function () { api('/api/payroll/employee-items/' + b.getAttribute('data-stop'), 'PUT', { is_active: false }).then(again).catch(fail); }; });
+      all('[data-go]').forEach(function (b) { b.onclick = function () { api('/api/payroll/employee-items/' + b.getAttribute('data-go'), 'PUT', { is_active: true }).then(again).catch(fail); }; });
+      all('[data-ps]').forEach(function (b) { b.onclick = function () { printSlips([+b.getAttribute('data-ps')]); }; });
+      if (!id) return;
+      // work and invoices
+      var wk = function () { var k = val('wkind'); $('#wqtybox').hidden = k === 'invoice'; $('#wratebox').hidden = k === 'invoice'; $('#wamtbox').hidden = k !== 'invoice'; $('#winvbox').hidden = k !== 'invoice'; };
+      $('#wkind').onchange = wk; wk();
+      $('#wadd').onclick = function () { api('/api/payroll/employees/' + id + '/work', 'POST', { kind: val('wkind'), work_date: val('wdate'), description: val('wdesc'), qty: val('wqty'), rate: val('wrate'), amount: val('wamt'), invoice_no: val('winv'), contract_id: val('wcon'), over_ok: val('wover') }).then(function (x) { toast('Entered: ' + J(x.amount)); again(); }).catch(fail); };
+      all('[data-wv]').forEach(function (b) { b.onclick = function () { confirmBox('Remove this work entry?', function () { api('/api/payroll/work/' + b.getAttribute('data-wv') + '/void', 'POST', {}).then(again).catch(fail); }); }; });
+      // contracts
+      $('#cadd').onclick = function () { api('/api/payroll/employees/' + id + '/contracts', 'POST', { title: val('ctitle'), value: val('cval'), start_date: val('cstart'), end_date: val('cend') }).then(again).catch(fail); };
+      all('[data-cs]').forEach(function (b) { b.onclick = function () { api('/api/payroll/contracts/' + b.getAttribute('data-cs'), 'PUT', { status: b.getAttribute('data-st') }).then(again).catch(fail); }; });
+      // loans and advances
+      var lm = function () { $('#lacctbox').hidden = val('lmethod') !== 'bank'; };
+      $('#lmethod').onchange = lm; lm();
+      $('#ladd').onclick = function () { api('/api/payroll/employees/' + id + '/loans', 'POST', { kind: val('lkind'), amount: val('lamt'), repay_per_pay: val('lrep'), method: val('lmethod'), account_id: val('lacct'), issue_date: val('ldate'), reference: val('lref'), note: val('lnote') }).then(function (x) { toast(x.note); again(); }).catch(fail); };
+      all('[data-lv]').forEach(function (b) { b.onclick = function () { reasonBox('Why is this loan / advance cancelled?', function (why) { api('/api/payroll/loans/' + b.getAttribute('data-lv') + '/void', 'POST', { reason: why }).then(again).catch(fail); }); }; });
+    }).catch(fail);
+  }
+  function workCard(d, openContracts) {
+    var e = d.employee;
+    return '<div class="card"><h2>Work, jobs and invoices to pay</h2><p class="sub">Days worked, piece or job work, extra hours, and contractor invoices or contract stages. The next pay run takes everything not yet paid, dated on or before its end date.</p>' +
+      '<div class="scroll"><table><thead><tr><th>Date</th><th>Work</th><th class="n">Qty</th><th class="n">Rate</th><th class="n">Amount</th><th class="n">WHT</th><th>Status</th><th></th></tr></thead><tbody>' +
+      (d.work.length ? d.work.map(function (w) { return '<tr style="' + (w.status === 'void' ? 'opacity:.45' : '') + '"><td>' + esc(w.work_date) + '</td><td>' + esc(w.description) + (w.invoice_no ? ' <small>inv ' + esc(w.invoice_no) + '</small>' : '') + (w.contract ? '<br><small>' + esc(w.contract) + '</small>' : '') + '</td><td class="n">' + (w.kind === 'invoice' ? '' : num(w.qty) + ' ' + ({ days: 'd', hours: 'h', piece: '' }[w.kind] || '')) + '</td><td class="n">' + (w.kind === 'invoice' ? '' : J(w.rate)) + '</td><td class="n">' + J(w.amount) + '</td><td class="n">' + (num(w.wht) ? J(w.wht) : '') + '</td>' +
+        '<td><span class="pill ' + ({ open: 'warn', paid: 'ok', void: 'bad' }[w.status] || '') + '">' + esc(w.status) + '</span>' + (w.run_number ? ' <small>' + esc(w.run_number) + '</small>' : '') + '</td><td>' + (w.status === 'open' ? '<button class="sm" data-wv="' + w.id + '">Remove</button>' : '') + '</td></tr>'; }).join('') : '<tr><td colspan="8" class="empty">Nothing entered.</td></tr>') + '</tbody></table></div>' +
+      '<div class="controls" style="margin-top:8px"><div><label>Kind</label><select id="wkind"><option value="days"' + (e.pay_type === 'daily' ? ' selected' : '') + '>Days worked</option><option value="piece"' + (e.pay_type === 'piece' ? ' selected' : '') + '>Piece / job</option><option value="hours">Extra hours</option><option value="invoice"' + (e.pay_type === 'contract' ? ' selected' : '') + '>Invoice / contract stage</option></select></div>' +
+        '<div><label>Date</label><input type="date" id="wdate" value="' + esc(B.today()) + '"></div><div style="flex:1;min-width:180px"><label>What was done</label><input id="wdesc" style="width:100%"></div>' +
+        '<div id="wqtybox"><label>How many</label><input id="wqty" type="number" step="0.01" style="width:90px"></div><div id="wratebox"><label>Rate (blank: their rate)</label><input id="wrate" type="number" step="0.01" style="width:110px"></div>' +
+        '<div id="winvbox"><label>Invoice no.</label><input id="winv" style="width:110px"></div><div id="wamtbox"><label>Amount (J$)</label><input id="wamt" type="number" step="0.01" style="width:120px"></div>' +
+        (openContracts.length ? '<div><label>Contract</label><select id="wcon"><option value="">—</option>' + openContracts.map(function (c) { return '<option value="' + c.id + '">' + esc(c.title) + '</option>'; }).join('') + '</select></div><label class="chk"><input type="checkbox" id="wover"> over the price is agreed</label>' : '') +
+        '<button id="wadd">Enter</button></div></div>';
+  }
+  function contractCard(d) {
+    return '<div class="card"><h2>Contracts</h2><p class="sub">A job agreed at a price, paid in stages (enter each stage or invoice above against the contract). Warns before the stages go over the price.</p><table><thead><tr><th>Contract</th><th>Dates</th><th class="n">Price</th><th class="n">Billed</th><th class="n">Paid</th><th class="n">Left</th><th>Status</th><th></th></tr></thead><tbody>' +
+      (d.contracts.length ? d.contracts.map(function (c) { return '<tr><td>' + esc(c.title) + '</td><td>' + esc(c.start_date || '') + (c.end_date ? ' – ' + esc(c.end_date) : '') + '</td><td class="n">' + (c.value == null ? 'open' : J(c.value)) + '</td><td class="n">' + J(c.billed) + '</td><td class="n">' + J(c.paid) + '</td><td class="n">' + (c.remaining == null ? '' : J(c.remaining)) + '</td><td>' + esc(c.status) + '</td><td>' + (c.status === 'open' ? '<button class="sm" data-cs="' + c.id + '" data-st="done">Finished</button> <button class="sm" data-cs="' + c.id + '" data-st="cancelled">Cancel</button>' : '<button class="sm" data-cs="' + c.id + '" data-st="open">Reopen</button>') + '</td></tr>'; }).join('') : '<tr><td colspan="8" class="empty">None.</td></tr>') +
+      '</tbody></table><div class="controls" style="margin-top:8px"><div style="flex:1"><label>New contract (the job)</label><input id="ctitle" style="width:100%"></div><div><label>Agreed price (blank: open)</label><input id="cval" type="number" step="0.01" style="width:130px"></div><div><label>From</label><input id="cstart" type="date"></div><div><label>To</label><input id="cend" type="date"></div><button id="cadd">Add contract</button></div></div>';
+  }
+  function loanCard(d) {
+    return '<div class="card"><h2>Loans and salary advances</h2><p class="sub">Handed out from the bank or cash now, or added to the next payslip. Repayments come off each pay until it is paid back.</p><table><thead><tr><th>Date</th><th>Kind</th><th class="n">Amount</th><th class="n">Each pay</th><th class="n">Repaid</th><th class="n">Owed</th><th>Paid out</th><th>Status</th><th></th></tr></thead><tbody>' +
+      (d.loans.length ? d.loans.map(function (l) { return '<tr style="' + (l.voided_at ? 'opacity:.45' : '') + '"><td>' + esc(l.issue_date) + '</td><td>' + (l.kind === 'loan' ? 'Loan' : 'Salary advance') + (l.reference ? ' <small>' + esc(l.reference) + '</small>' : '') + '</td><td class="n">' + J(l.amount) + '</td><td class="n">' + J(l.per_pay) + '</td><td class="n">' + J(l.repaid) + '</td><td class="n">' + (l.voided_at ? '' : J(l.balance)) + '</td><td>' + (l.method === 'bank' ? esc(l.account || '') : 'on payslip' + (l.paid_on_run ? ' ' + esc(l.paid_on_run) : '')) + '</td><td>' + esc(l.status) + '</td><td>' + (!l.voided_at && l.repaid === 0 ? '<button class="sm" data-lv="' + l.id + '">Cancel</button>' : '') + '</td></tr>'; }).join('') : '<tr><td colspan="9" class="empty">None.</td></tr>') +
+      '</tbody></table><div class="controls" style="margin-top:8px"><div><label>Kind</label><select id="lkind"><option value="advance">Salary advance</option><option value="loan">Loan</option></select></div><div><label>Amount</label><input id="lamt" type="number" step="0.01" style="width:120px"></div><div><label>Repay each pay</label><input id="lrep" type="number" step="0.01" style="width:120px"></div>' +
+        '<div><label>Paid out</label><select id="lmethod"><option value="bank">Now, from an account</option><option value="payslip">On the next payslip</option></select></div><div id="lacctbox"><label>From</label><select id="lacct">' + B.accountOptions('bank') + '</select></div>' +
+        '<div><label>Date</label><input id="ldate" type="date" value="' + esc(B.today()) + '"></div><div><label>Reference / cheque</label><input id="lref" style="width:110px"></div><div><label>Note</label><input id="lnote"></div><button id="ladd">Give</button></div></div>';
+  }
+  function leaveHtml(l) {
+    if (!l) return '';
+    return '<p>Vacation: ' + l.vacation_taken + ' of ' + l.vacation_entitled + ' days taken (' + l.vacation_left + ' left) · Sick: ' + l.sick_taken + ' of ' + l.sick_entitled + ' (' + l.sick_left + ' left)' + (l.unpaid_taken ? ' · Unpaid: ' + l.unpaid_taken : '') + ' <small class="sub">(from the leave entered on the time clock)</small></p>';
+  }
+  function ytdHtml(y) {
+    if (!y) return '';
+    return '<table><tbody><tr><td>Gross pay</td><td class="n">' + J(y.gross) + '</td><td>Income tax (PAYE)</td><td class="n">' + J(y.paye) + '</td><td>NIS</td><td class="n">' + J(y.nis_ee) + '</td></tr>' +
+      '<tr><td>NHT</td><td class="n">' + J(y.nht_ee) + '</td><td>Education Tax</td><td class="n">' + J(y.ed_ee) + '</td><td>Pension</td><td class="n">' + J(y.pension_ee) + '</td></tr><tr><td><b>Net pay</b></td><td class="n"><b>' + J(y.net) + '</b></td><td colspan="4"></td></tr></tbody></table>';
+  }
+  function loadItems() { return api('/api/payroll/items').then(function (d) { items = d.items; return items; }); }
+
+  // ------------------------------------------------------------ pay runs --
+  function runs() {
+    api('/api/payroll/runs').then(function (d) {
+      var sug = d.suggest;
+      $('#out').innerHTML = (me.can_run ? '<div class="card"><h2>New pay run</h2><p class="sub">Everyone active on that pay frequency is put on the run, worked out from their salary or the time clock, leave, holidays, approved commission and their usual deductions. Check it, change anything by hand, then approve.</p>' +
+        '<div class="controls"><div><label>Frequency</label><select id="fq"><option value="monthly">Monthly</option><option value="fortnightly">Fortnightly</option><option value="weekly">Weekly</option></select></div>' +
+        '<div><label>From</label><input type="date" id="ps"></div><div><label>To</label><input type="date" id="pe"></div><div><label>Pay date</label><input type="date" id="pd"></div><div style="flex:1"><label>Note</label><input id="pn" style="width:100%"></div><button class="primary" id="mk">Prepare</button></div></div>' : '') +
+        '<div class="card"><h2>Pay runs</h2><div class="scroll"><table><thead><tr><th>Run</th><th>Period</th><th>Pay date</th><th>Status</th><th class="n">People</th><th class="n">Gross</th><th class="n">PAYE</th><th class="n">Net</th><th class="n">Employer cost</th></tr></thead><tbody>' +
+        (d.runs.length ? d.runs.map(function (r) { var t = r.totals || {}; return '<tr class="click" data-r="' + r.id + '"><td><b>' + esc(r.number) + '</b> <small>' + FREQ[r.frequency] + '</small></td><td>' + esc(r.period_start) + ' – ' + esc(r.period_end) + '</td><td>' + esc(r.pay_date) + '</td><td><span class="pill ' + STATUS[r.status] + '">' + r.status + '</span>' + (r.with_warnings && r.status === 'draft' ? ' <span class="pill warn">' + r.with_warnings + ' to check</span>' : '') + '</td><td class="n">' + (t.people || 0) + '</td><td class="n">' + J(t.gross) + '</td><td class="n">' + J(t.paye) + '</td><td class="n"><b>' + J(t.net) + '</b></td><td class="n">' + J(t.employer_cost) + '</td></tr>'; }).join('') : '<tr><td colspan="9" class="empty">No pay runs yet.</td></tr>') + '</tbody></table></div></div>';
+      all('[data-r]').forEach(function (r) { r.onclick = function () { runView(+r.getAttribute('data-r')); }; });
+      if (!$('#mk')) return;
+      var fill = function () { var s = sug[val('fq')]; $('#ps').value = s.start; $('#pe').value = s.end; $('#pd').value = s.pay; };
+      $('#fq').onchange = fill; fill();
+      $('#mk').onclick = function () {
+        this.disabled = true;
+        api('/api/payroll/runs', 'POST', { frequency: val('fq'), period_start: val('ps'), period_end: val('pe'), pay_date: val('pd'), note: val('pn') })
+          .then(function (r) { if (r.skipped.length) toast('Left off (already paid for these dates): ' + r.skipped.join(', ')); runView(r.id); }).catch(function (e) { $('#mk').disabled = false; fail(e); });
+      };
+    }).catch(fail);
+  }
+  var cur = null;
+  function runView(id) {
+    api('/api/payroll/runs/' + id).then(function (d) {
+      cur = d;
+      var r = d.run, t = r.totals || {}, dr = r.status === 'draft';
+      var warn = d.slips.filter(function (s) { return s.warnings.length; });
+      $('#out').innerHTML = '<div class="controls"><button id="bk">◀ Pay runs</button></div>' +
+        '<div class="card"><h2>' + esc(r.number) + ' <span class="pill ' + STATUS[r.status] + '">' + r.status + '</span></h2><p class="sub">' + FREQ[r.frequency] + ' · ' + esc(r.period_start) + ' to ' + esc(r.period_end) + ' · pay date ' + esc(r.pay_date) + ' · prepared by ' + esc(r.created_by_name || '') + (r.approved_by_name ? ' · approved by ' + esc(r.approved_by_name) : '') + (r.void_reason ? ' · void: ' + esc(r.void_reason) : '') + (r.note ? ' · ' + esc(r.note) : '') + '</p>' +
+        '<div class="tiles"><div class="tile"><span class="k">People</span><b>' + (t.people || 0) + '</b></div><div class="tile"><span class="k">Gross pay</span><b>' + J(t.gross) + '</b></div><div class="tile"><span class="k">PAYE</span><b>' + J(t.paye) + '</b></div>' +
+        '<div class="tile"><span class="k">NIS (both)</span><b>' + J(num(t.nis_ee) + num(t.nis_er)) + '</b></div><div class="tile"><span class="k">NHT (both)</span><b>' + J(num(t.nht_ee) + num(t.nht_er)) + '</b></div><div class="tile"><span class="k">Education Tax (both)</span><b>' + J(num(t.ed_ee) + num(t.ed_er)) + '</b></div>' +
+        '<div class="tile"><span class="k">HEART</span><b>' + J(t.heart_er) + '</b></div>' + (num(t.er_benefits) ? '<div class="tile"><span class="k">Insurance / pension paid by the business</span><b>' + J(t.er_benefits) + '</b></div>' : '') + (num(t.levy) || num(t.wht) ? '<div class="tile"><span class="k">Contractor levy / WHT</span><b>' + J(num(t.levy) + num(t.wht)) + '</b></div>' : '') + '<div class="tile"><span class="k">Net pay</span><b>' + J(t.net) + '</b></div><div class="tile"><span class="k">Cost to the business</span><b>' + J(t.employer_cost) + '</b></div><div class="tile"><span class="k">To TAJ</span><b>' + J(t.to_taj) + '</b></div></div>' +
+        '<div class="controls">' +
+          (dr && me.can_run ? '<button id="rc">Recalculate</button><button id="rs">Recalculate, dropping hand changes</button>' + (d.not_in_run.length ? '<select id="ap"><option value="">Add someone…</option>' + d.not_in_run.map(function (e) { return '<option value="' + e.id + '">' + esc(e.name) + '</option>'; }).join('') + '</select>' : '') : '') +
+          (dr && me.can_approve ? '<button class="primary" id="apv">Approve</button>' : '') + (dr && me.can_run ? '<button id="del">Delete draft</button>' : '') +
+          (r.status === 'approved' && me.can_run ? '<button class="primary" id="pay">Pay wages</button>' : '') + (r.status === 'approved' && me.can_approve ? '<button id="vd">Void run</button>' : '') +
+          (!dr && r.status !== 'void' && me.can_run ? '<a class="noprint" href="/api/payroll/runs/' + r.id + '/bank.csv"><button>Bank file</button></a><button id="em">Email payslips</button>' : '') +
+          '<button id="pp">Print payslips</button><button id="reg">Print register</button></div>' +
+        (warn.length ? '<div class="note warn"><b>To check before approving</b><ul class="warnlist">' + warn.map(function (s) { return s.warnings.map(function (w) { return '<li><b>' + esc(s.name) + ':</b> ' + esc(w) + '</li>'; }).join(''); }).join('') + '</ul></div>' : '') +
+        '<div class="scroll"><table><thead><tr><th>Employee</th><th class="n">Gross</th><th class="n">NIS</th><th class="n">NHT</th><th class="n">Ed. Tax</th><th class="n">PAYE</th><th class="n">Pension</th><th class="n">Levy / WHT</th><th class="n">Other</th><th class="n">Net</th><th></th></tr></thead><tbody>' +
+        d.slips.map(function (s) { return '<tr><td><b>' + esc(s.name) + '</b> <small>' + esc(s.pay_method) + (s.cheque_number ? ' ' + esc(s.cheque_number) : '') + '</small>' + (s.edited ? ' <span class="pill">changed by hand</span>' : '') + (s.warnings.length ? ' <span class="pill warn" title="' + esc(s.warnings.join('\n')) + '">' + s.warnings.length + '</span>' : '') + '</td>' +
+          '<td class="n">' + J(s.gross) + '</td><td class="n">' + J(s.nis_ee) + '</td><td class="n">' + J(s.nht_ee) + '</td><td class="n">' + J(s.ed_ee) + '</td><td class="n">' + J(s.paye) + '</td><td class="n">' + J(s.pension_ee) + '</td><td class="n">' + J(num(s.levy) + num(s.wht)) + '</td><td class="n">' + J(s.other_ded) + '</td><td class="n"><b>' + J(s.net) + '</b></td>' +
+          '<td style="white-space:nowrap">' + (dr && me.can_run ? '<button class="sm" data-ed="' + s.id + '">Change</button> <button class="sm" data-rm="' + s.id + '">Remove</button> ' : '') + '<button class="sm" data-ps="' + s.id + '">Payslip</button>' + (num(s.wht) && r.status !== 'draft' ? ' <button class="sm" data-wc="' + s.id + '">WHT certificate</button>' : '') + '</td></tr>'; }).join('') +
+        '<tr><td><b>Total</b></td><td class="n"><b>' + J(t.gross) + '</b></td><td class="n">' + J(t.nis_ee) + '</td><td class="n">' + J(t.nht_ee) + '</td><td class="n">' + J(t.ed_ee) + '</td><td class="n">' + J(t.paye) + '</td><td class="n">' + J(t.pension_ee) + '</td><td class="n">' + J(num(t.levy) + num(t.wht)) + '</td><td class="n">' + J(t.other_ded) + '</td><td class="n"><b>' + J(t.net) + '</b></td><td></td></tr></tbody></table></div></div>' +
+        (d.payments.length ? '<div class="card"><h2>Wages paid</h2><table><tbody>' + d.payments.map(function (p) { return '<tr style="' + (p.voided_at ? 'opacity:.5' : '') + '"><td>' + esc(p.pay_date) + '</td><td>' + esc(p.account) + '</td><td>' + esc(p.reference || '') + (p.per_person ? '' : ' (one bank line)') + '</td><td class="n">' + J(p.amount) + '</td><td>' + (p.voided_at ? '<span class="pill bad">void</span> ' + esc(p.void_reason || '') : (me.can_run ? '<button class="sm" data-vp="' + p.id + '">Void</button>' : '')) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '') +
+        (d.journal.length ? '<p class="sub">Ledger: ' + d.journal.map(function (j) { return esc(j.number) + ' (' + esc(j.source_kind.replace(/_/g, ' ')) + ')'; }).join(', ') + '</p>' : (r.status !== 'draft' && r.post_gl ? '<p class="sub">Not in the ledger yet (posts once the ledger is started).</p>' : ''));
+      $('#bk').onclick = runs;
+      var reload = function () { runView(id); };
+      if ($('#rc')) $('#rc').onclick = function () { api('/api/payroll/runs/' + id + '/recalculate', 'POST', {}).then(function () { toast('Recalculated'); reload(); }).catch(fail); };
+      if ($('#rs')) $('#rs').onclick = function () { confirmBox('Work every payslip out again from the records, throwing away changes made by hand?', function () { api('/api/payroll/runs/' + id + '/recalculate', 'POST', { reset: true }).then(reload).catch(fail); }); };
+      if ($('#ap')) $('#ap').onchange = function () { if (this.value) api('/api/payroll/runs/' + id + '/add', 'POST', { employee_id: this.value }).then(reload).catch(fail); };
+      if ($('#apv')) $('#apv').onclick = function () { confirmBox('Approve ' + r.number + '? Net pay ' + J(t.net) + ' for ' + t.people + ' people. The run is locked, commission statements on it are marked paid, loan balances go down' + (r.post_gl ? ', and it posts to the ledger' : '') + '.', function () { api('/api/payroll/runs/' + id + '/approve', 'POST', {}).then(function () { toast('Approved'); reload(); }).catch(fail); }); };
+      if ($('#del')) $('#del').onclick = function () { confirmBox('Delete this draft run?', function () { api('/api/payroll/runs/' + id, 'DELETE').then(function () { toast('Deleted'); runs(); }).catch(fail); }); };
+      if ($('#vd')) $('#vd').onclick = function () { reasonBox('Why is ' + r.number + ' voided? Commission statements go back to approved and loan balances are restored.', function (why) { api('/api/payroll/runs/' + id + '/void', 'POST', { reason: why }).then(function () { toast('Voided'); reload(); }).catch(fail); }); };
+      if ($('#pay')) $('#pay').onclick = function () { payModal(d); };
+      if ($('#em')) $('#em').onclick = function () { api('/api/payroll/runs/' + id + '/email', 'POST', {}).then(function (x) { toast(x.sent + ' emailed, ' + x.skipped + ' without an email address'); }).catch(fail); };
+      $('#pp').onclick = function () { printSlips(d.slips.map(function (s) { return s.id; })); };
+      $('#reg').onclick = function () { printRegister(d); };
+      all('[data-wc]').forEach(function (b) { b.onclick = function () { printWht(+b.getAttribute('data-wc')); }; });
+      all('[data-ed]').forEach(function (b) { b.onclick = function () { slipEdit(id, d.slips.find(function (s) { return s.id === +b.getAttribute('data-ed'); })); }; });
+      all('[data-rm]').forEach(function (b) { b.onclick = function () { api('/api/payroll/runs/' + id + '/slips/' + b.getAttribute('data-rm'), 'DELETE').then(reload).catch(fail); }; });
+      all('[data-ps]').forEach(function (b) { b.onclick = function () { printSlips([+b.getAttribute('data-ps')]); }; });
+      all('[data-vp]').forEach(function (b) { b.onclick = function () { reasonBox('Why is this payment voided? The run goes back to approved, waiting to be paid.', function (why) { api('/api/payroll/payments/' + b.getAttribute('data-vp') + '/void', 'POST', { reason: why }).then(reload).catch(fail); }); }; });
+    }).catch(fail);
+  }
+  function confirmBox(text, yes) {
+    modal('<h2>Please confirm</h2><p>' + esc(text) + '</p><div class="controls"><button class="primary" id="y">Yes</button><button id="x">Cancel</button></div>');
+    $('#x').onclick = close; $('#y').onclick = function () { close(); yes(); };
+  }
+  function reasonBox(text, done) {
+    modal('<h2>Reason</h2><p>' + esc(text) + '</p><input id="why" style="width:100%"><div class="controls" style="margin-top:10px"><button class="primary" id="y">Void</button><button id="x">Cancel</button></div>');
+    $('#x').onclick = close; $('#why').focus();
+    $('#y').onclick = function () { var w = val('why').trim(); if (!w) return toast('Give a reason'); close(); done(w); };
+  }
+  function slipEdit(runId, s) {
+    loadItems().then(function () {
+      var rows = s.lines.map(function (l) { return Object.assign({}, l); });
+      var opts = function (kind, code) { return items.filter(function (i) { return i.kind === kind && (i.is_active || i.code === code); }).map(function (i) { return '<option value="' + esc(i.code) + '"' + (i.code === code ? ' selected' : '') + '>' + esc(i.label) + '</option>'; }).join(''); };
+      function draw() {
+        modal('<h2>' + esc(s.name) + '</h2><p class="sub">Change hours or amounts, add a bonus or a one-off deduction. NIS, NHT, Education Tax, PAYE and pension are worked out again when you save. Leave the quantity blank to type an amount.</p>' +
+          '<table class="lines"><thead><tr><th>Item</th><th>Description</th><th class="n">Qty / hours</th><th class="n">Rate</th><th class="n">Amount</th><th></th></tr></thead><tbody>' +
+          rows.map(function (l, i) { return '<tr><td><select data-f="code" data-i="' + i + '"' + (l.code === 'commission' ? ' disabled' : '') + '>' + opts(l.kind, l.code) + '</select></td><td><input data-f="label" data-i="' + i + '" value="' + esc(l.label) + '"></td>' +
+            '<td><input data-f="qty" data-i="' + i + '" type="number" step="0.01" value="' + (l.qty == null ? '' : l.qty) + '" style="width:90px"' + (l.code === 'commission' ? ' disabled' : '') + '></td><td><input data-f="rate" data-i="' + i + '" type="number" step="0.01" value="' + (l.rate == null ? '' : l.rate) + '" style="width:110px"' + (l.code === 'commission' ? ' disabled' : '') + '></td>' +
+            '<td class="n"><input data-f="amount" data-i="' + i + '" type="number" step="0.01" value="' + (l.amount == null ? '' : l.amount) + '" style="width:120px"' + (l.qty === '' || l.qty == null ? '' : ' disabled') + '></td><td><button class="sm" data-del="' + i + '">✕</button></td></tr>'; }).join('') +
+          '</tbody></table><div class="controls" style="margin-top:8px"><button id="ae">+ Earning</button><button id="ad">+ Deduction</button><button id="aer">+ Employer contribution</button><span style="margin-left:auto"></span><div><label>Cheque no.</label><input id="cq" value="' + esc(s.cheque_number || '') + '" style="width:120px"></div></div>' +
+          '<div class="controls"><button class="primary" id="sv">Save</button><button id="x">Cancel</button></div>');
+        all('[data-f]').forEach(function (el) {
+          el.oninput = el.onchange = function () {
+            var i = +el.getAttribute('data-i'), f = el.getAttribute('data-f'), l = rows[i];
+            l[f] = f === 'label' || f === 'code' ? el.value : (el.value === '' ? '' : Number(el.value));
+            if (f === 'code') { var it = items.find(function (x) { return x.code === el.value; }); if (it) l.label = it.label; l.source = 'manual'; draw(); return; }
+            if (f === 'qty' || f === 'rate') { if (l.qty !== '' && l.qty != null) { l.amount = Math.round(num(l.qty) * num(l.rate) * 100) / 100; var a = $('[data-f="amount"][data-i="' + i + '"]'); a.value = l.amount; a.disabled = true; } else $('[data-f="amount"][data-i="' + i + '"]').disabled = false; }
+          };
+        });
+        all('[data-del]').forEach(function (b) { b.onclick = function () { rows.splice(+b.getAttribute('data-del'), 1); draw(); }; });
+        var add = function (kind) { var it = items.find(function (x) { return x.kind === kind && x.is_active && !x.is_system; }) || items.find(function (x) { return x.kind === kind; }); rows.push({ code: it.code, label: it.label, kind: kind, qty: '', rate: '', amount: '', source: 'manual' }); draw(); };
+        $('#ae').onclick = function () { add('earning'); }; $('#ad').onclick = function () { add('deduction'); }; $('#aer').onclick = function () { add('employer'); };
+        $('#x').onclick = close;
+        $('#sv').onclick = function () { api('/api/payroll/runs/' + runId + '/slips/' + s.id, 'PUT', { lines: rows, cheque_number: val('cq') }).then(function () { close(); toast('Saved'); runView(runId); }).catch(fail); };
+      }
+      draw();
+    }).catch(fail);
+  }
+  function payModal(d) {
+    var r = d.run, cheques = d.slips.filter(function (s) { return s.pay_method === 'cheque'; });
+    modal('<h2>Pay wages · ' + esc(r.number) + '</h2><p class="sub">Records the net pay (' + J(r.totals.net) + ') leaving the account. Make the transfers with the bank file (Bank file button) or write the cheques, then record it here.</p>' +
+      '<div class="controls"><div><label>Paid from</label><select id="pa">' + B.accountOptions('bank') + '</select></div><div><label>Date</label><input type="date" id="pdt" value="' + esc(r.pay_date) + '"></div><div><label>Reference</label><input id="pref"></div></div>' +
+      '<label class="chk"><input type="checkbox" id="pper" checked> One line per person in the bank register (untick when the bank shows one total for a batch transfer)</label>' +
+      (cheques.length ? '<h2 style="margin-top:10px">Cheque numbers</h2><table><tbody>' + cheques.map(function (s) { return '<tr><td>' + esc(s.name) + '</td><td class="n">' + J(s.net) + '</td><td><input data-cq="' + s.id + '" value="' + esc(s.cheque_number || '') + '"></td></tr>'; }).join('') + '</tbody></table>' : '') +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="go">Record payment</button><button id="x">Cancel</button></div>');
+    $('#x').onclick = close;
+    $('#go').onclick = function () {
+      var cq = {}; all('[data-cq]').forEach(function (i) { cq[i.getAttribute('data-cq')] = i.value; });
+      api('/api/payroll/runs/' + r.id + '/pay', 'POST', { account_id: val('pa'), pay_date: val('pdt'), reference: val('pref'), per_person: val('pper'), cheques: cq }).then(function () { close(); toast('Wages recorded as paid'); runView(r.id); }).catch(fail);
+    };
+  }
+
+  // ------------------------------------------------------- work & invoices --
+  function workTab() {
+    Promise.all([api('/api/payroll/work?status=' + (workTab.all ? 'all' : 'open')), api('/api/payroll/employees')]).then(function (r) {
+      var w = r[0].work, emps = r[1].employees;
+      $('#out').innerHTML = '<div class="card"><h2>Work, jobs and invoices</h2><p class="sub">Days worked by day workers, piece and job work, extra hours, and contractor invoices waiting to be paid. The next pay run for each person takes everything here dated on or before its end date. Enter new work on the person\'s page.</p>' +
+        '<div class="controls"><label class="chk"><input type="checkbox" id="wall"' + (workTab.all ? ' checked' : '') + '> Show paid and removed too</label><span style="margin-left:auto"></span>' + (me.can_run ? '<div><label>Enter work for</label><select id="wto"><option value="">Choose…</option>' + emps.map(function (e) { return '<option value="' + e.id + '">' + esc(e.name) + (e.worker_type !== 'employee' ? ' (' + WTYPE[e.worker_type] + ')' : '') + '</option>'; }).join('') + '</select></div>' : '') + '</div>' +
+        '<div class="scroll"><table><thead><tr><th>Date</th><th>Person</th><th>Work</th><th class="n">Amount</th><th>Status</th></tr></thead><tbody>' +
+        (w.length ? w.map(function (x) { return '<tr class="click" data-pe="' + x.employee_id + '"><td>' + esc(x.work_date) + '</td><td>' + esc(x.employee) + (x.worker_type !== 'employee' ? ' <small>' + WTYPE[x.worker_type] + '</small>' : '') + '</td><td>' + esc(x.description) + (x.invoice_no ? ' <small>inv ' + esc(x.invoice_no) + '</small>' : '') + (x.contract ? ' <small>· ' + esc(x.contract) + '</small>' : '') + '</td><td class="n">' + J(x.amount) + '</td><td><span class="pill ' + ({ open: 'warn', paid: 'ok', void: 'bad' }[x.status] || '') + '">' + esc(x.status) + '</span>' + (x.run_number ? ' <small>' + esc(x.run_number) + '</small>' : '') + '</td></tr>'; }).join('') : '<tr><td colspan="5" class="empty">Nothing waiting to be paid.</td></tr>') +
+        '</tbody></table></div><p class="sub">Waiting: ' + J(w.filter(function (x) { return x.status === 'open'; }).reduce(function (t, x) { return t + num(x.amount); }, 0)) + '</p></div>';
+      $('#wall').onchange = function () { workTab.all = this.checked; workTab(); };
+      if ($('#wto')) $('#wto').onchange = function () { if (this.value && me.can_run) { tab = 'emp'; mark(); empForm(+this.value); } };
+      if (me.can_run) all('[data-pe]').forEach(function (tr) { tr.onclick = function () { tab = 'emp'; mark(); empForm(+tr.getAttribute('data-pe')); }; });
+    }).catch(fail);
+  }
+  // Deductions held for others, by who they are paid to.
+  function thirdPartyCard(m) {
+    api('/api/payroll/deductions?month=' + m).then(function (d) {
+      var el = $('#tp'); if (!el) return;
+      el.innerHTML = '<h2>Deductions and contributions to pay over · ' + esc(m) + '</h2><p class="sub">Employees\' deductions and the business\'s own contributions for medical and life insurance, pension schemes, union dues, credit union, child maintenance, NHT mortgage, Student Loan Bureau and the like: deducted from pay, owed to them until paid. Loans, advances and staff purchases stay with the business.</p>' +
+        '<div class="scroll"><table><thead><tr><th>Deduction</th><th>Paid to</th><th class="n">People</th><th class="n">Deducted</th><th class="n">Paid over</th><th class="n">Owing</th><th></th></tr></thead><tbody>' +
+        (d.lines.length ? d.lines.map(function (x, i) { return '<tr><td>' + esc(x.label) + (x.kind === 'employer' ? ' <small>(paid by the business)</small>' : '') + '</td><td>' + esc(x.payee) + '</td><td class="n">' + x.people + '</td><td class="n">' + J(x.deducted) + '</td><td class="n">' + J(x.paid) + '</td><td class="n"><b>' + J(x.owing) + '</b></td><td>' + (x.owing > 0.004 && me.can_run ? '<button class="sm" data-tp="' + i + '">Record payment</button>' : '') + '</td></tr>'; }).join('') : '<tr><td colspan="7" class="empty">No deductions for others in ' + esc(m) + '.</td></tr>') + '</tbody></table></div>' +
+        (d.payments.length ? '<table style="margin-top:8px"><tbody>' + d.payments.map(function (p) { return '<tr style="' + (p.voided_at ? 'opacity:.5' : '') + '"><td>' + esc(p.pay_date) + '</td><td>' + esc(p.payee) + '</td><td>' + esc(p.account) + '</td><td>' + esc(p.reference || '') + '</td><td class="n">' + J(p.amount) + '</td><td>' + (p.voided_at ? '<span class="pill bad">void</span>' : (me.can_run ? '<button class="sm" data-tpv="' + p.id + '">Void</button>' : '')) + '</td></tr>'; }).join('') + '</tbody></table>' : '');
+      all('[data-tp]').forEach(function (b) { b.onclick = function () {
+        var x = d.lines[+b.getAttribute('data-tp')];
+        modal('<h2>Pay ' + esc(x.payee) + '</h2><p class="sub">' + esc(x.label) + ' deducted in ' + esc(m) + '.</p><div class="controls"><div><label>Amount</label><input id="tpa" type="number" step="0.01" value="' + x.owing + '" style="width:130px"></div><div><label>Paid from</label><select id="tpacct">' + B.accountOptions('bank') + '</select></div><div><label>Date</label><input type="date" id="tpd" value="' + esc(B.today()) + '"></div><div><label>Reference</label><input id="tpr"></div></div>' +
+          '<div class="controls"><button class="primary" id="go">Record payment</button><button id="x">Cancel</button></div>');
+        $('#x').onclick = close;
+        $('#go').onclick = function () { api('/api/payroll/ded-payments', 'POST', { month: m, code: x.code, payee: x.payee, amount: val('tpa'), account_id: val('tpacct'), pay_date: val('tpd'), reference: val('tpr') }).then(function () { close(); toast('Recorded'); thirdPartyCard(m); }).catch(fail); };
+      }; });
+      all('[data-tpv]').forEach(function (b) { b.onclick = function () { reasonBox('Why is this payment voided?', function (why) { api('/api/payroll/ded-payments/' + b.getAttribute('data-tpv') + '/void', 'POST', { reason: why }).then(function () { thirdPartyCard(m); }).catch(fail); }); }; });
+    }).catch(function (e) { var el = $('#tp'); if (el) el.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+  // Withholding tax certificate for a contractor (TRN, invoices, amount withheld).
+  function printWht(slipId) {
+    api('/api/payroll/slips/' + slipId).then(function (v) {
+      var s = v.slip, sn = s.snapshot || {}, e = v.employer;
+      var inv = s.lines.filter(function (l) { return l.kind === 'earning' && num(l.wht); });
+      win('WHT certificate ' + sn.name, '<div class="page"><h2>Withholding tax certificate · specified services</h2><p><small>Keep a copy. The contractor can set the tax withheld against their income tax.</small></p>' +
+        '<div class="box"><b>Withholding agent:</b> ' + esc(e.name) + ' · TRN ' + esc(e.trn || '—') + '<br>' + esc(e.address || '') + '</div>' +
+        '<div class="box"><b>Service provider:</b> ' + esc(sn.business_name || sn.name) + (sn.business_name ? ' (' + esc(sn.name) + ')' : '') + ' · TRN ' + esc(sn.trn || '—') + '<br>' + esc(sn.address || '') + '</div>' +
+        '<table><thead><tr><th>Invoice / work</th><th class="n">Amount</th><th class="n">Tax withheld</th></tr></thead><tbody>' + inv.map(function (l) { return '<tr><td>' + esc(l.label) + '</td><td class="n">' + J(l.amount) + '</td><td class="n">' + J(l.wht) + '</td></tr>'; }).join('') +
+        '<tr><td><b>Total</b></td><td class="n">' + J(inv.reduce(function (t, l) { return t + num(l.amount); }, 0)) + '</td><td class="n"><b>' + J(s.wht) + '</b></td></tr></tbody></table>' +
+        '<p>Paid ' + esc(s.pay_date) + ' (' + esc(s.number) + '). Tax withheld is paid to Tax Administration Jamaica by the 14th of the following month.</p><p style="margin-top:40px">Signed for the agent ________________ &nbsp; Date ________</p></div>');
+    }).catch(fail);
+  }
+
+  // ------------------------------------------------------------ printing --
+  function win(title, body) {
+    var w = window.open('', '_blank');
+    if (!w) { toast('Allow pop-ups to print'); return; }
+    w.document.write('<!doctype html><title>' + esc(title) + '</title><style>body{font:13px system-ui;margin:24px;color:#000} table{border-collapse:collapse;width:100%} td,th{padding:4px 6px;border-bottom:1px solid #ddd;text-align:left} .n{text-align:right;white-space:nowrap} h2{margin:0 0 4px} .page{page-break-after:always;max-width:760px;margin:0 auto 30px} .page:last-child{page-break-after:auto} .box{border:1px solid #999;padding:10px;margin:8px 0} small{color:#555}</style><body>' + body + '<script>print()<\/script></body>');
+    w.document.close();
+  }
+  function slipHtml(v) {
+    var s = v.slip, e = v.employer, y = v.ytd, sn = s.snapshot || {};
+    var earn = s.lines.filter(function (l) { return l.kind === 'earning'; }), ded = s.lines.filter(function (l) { return l.kind === 'deduction'; });
+    var ctr = sn.worker_type === 'contractor';
+    var stat = ctr ? [['Contractor levy', s.levy, y.levy], ['Withholding tax', s.wht, y.wht]] : [['NIS', s.nis_ee, y.nis_ee], ['NHT', s.nht_ee, y.nht_ee], ['Education Tax', s.ed_ee, y.ed_ee], ['Income tax (PAYE)', s.paye, y.paye]];
+    if (num(s.pension_ee) || num(y.pension_ee)) stat.push(['Pension', s.pension_ee, y.pension_ee]);
+    return '<div class="page"><div style="display:flex;justify-content:space-between"><div><h2>' + esc(e.name) + '</h2><small>' + esc(e.address || '') + (e.trn ? ' · TRN ' + esc(e.trn) : '') + (e.nis ? ' · NIS ' + esc(e.nis) : '') + '</small></div><div style="text-align:right"><b>' + (sn.worker_type === 'contractor' ? 'PAYMENT ADVICE' : 'PAYSLIP') + '</b><br>' + esc(s.number) + (s.status === 'draft' ? ' (DRAFT)' : '') + '</div></div>' +
+      '<div class="box"><b>' + esc(sn.name) + '</b>' + (sn.employee_no ? ' · #' + esc(sn.employee_no) : '') + (sn.job_title ? ' · ' + esc(sn.job_title) : '') + '<br><small>TRN ' + esc(sn.trn || '—') + ' · NIS ' + esc(sn.nis_no || '—') + ' · Period ' + esc(s.period_start) + ' to ' + esc(s.period_end) + ' · Paid ' + esc(s.pay_date) + ' by ' + esc(sn.pay_method || '') + (sn.bank_masked ? ' ' + esc(sn.bank_name || '') + ' ' + esc(sn.bank_masked) : '') + (s.cheque_number ? ' chq ' + esc(s.cheque_number) : '') + '</small></div>' +
+      '<table><thead><tr><th>Earnings</th><th class="n">Hours / qty</th><th class="n">Rate</th><th class="n">Amount</th></tr></thead><tbody>' + earn.map(function (l) { return '<tr><td>' + esc(l.label) + '</td><td class="n">' + (l.qty != null && l.code !== 'commission' && l.qty !== 1 ? l.qty : '') + '</td><td class="n">' + (l.qty !== 1 && l.rate ? J(l.rate) : '') + '</td><td class="n">' + J(l.amount) + '</td></tr>'; }).join('') + '<tr><td colspan="3"><b>Gross pay</b></td><td class="n"><b>' + J(s.gross) + '</b></td></tr></tbody></table>' +
+      '<table style="margin-top:8px"><thead><tr><th>Deductions</th><th class="n">This pay</th><th class="n">Year to date</th></tr></thead><tbody>' + stat.map(function (x) { return '<tr><td>' + x[0] + '</td><td class="n">' + J(x[1]) + '</td><td class="n">' + J(x[2]) + '</td></tr>'; }).join('') +
+      ded.map(function (l) { return '<tr><td>' + esc(l.label) + '</td><td class="n">' + J(l.amount) + '</td><td></td></tr>'; }).join('') + '</tbody></table>' +
+      '<div class="box" style="display:flex;justify-content:space-between;font-size:16px"><b>NET PAY</b><b>' + J(s.net) + '</b></div>' +
+      '<small>Year to date: gross ' + J(y.gross) + ' · net ' + J(y.net) + ' · statutory income ' + J(y.statutory) + '.</small>' + (function () {
+        var erl = s.lines.filter(function (l) { return l.kind === 'employer'; });
+        var rows = ctr ? [] : [['NIS (employer)', s.nis_er], ['NHT (employer)', s.nht_er], ['Education Tax (employer)', s.ed_er], ['HEART/NSTA', s.heart_er], ['Pension (employer)', s.pension_er]].filter(function (x) { return num(x[1]); });
+        rows = rows.concat(erl.map(function (l) { return [l.label + (l.payee ? ' · ' + l.payee : ''), l.amount]; }));
+        if (!rows.length) return '';
+        return '<table style="margin-top:8px"><thead><tr><th>Paid by your employer for you (not in your pay)</th><th class="n">This pay</th></tr></thead><tbody>' + rows.map(function (x) { return '<tr><td>' + esc(x[0]) + '</td><td class="n">' + J(x[1]) + '</td></tr>'; }).join('') + '</tbody></table>' +
+          (num(s.taxable_benefits) ? '<small>Taxable benefits included in your statutory income this pay: ' + J(s.taxable_benefits) + '.</small>' : '');
+      })() + '</div>';
+  }
+  function printSlips(ids) {
+    Promise.all(ids.map(function (id) { return api('/api/payroll/slips/' + id); })).then(function (vs) { win('Payslips', vs.map(slipHtml).join('')); }).catch(fail);
+  }
+  function printRegister(d) {
+    var r = d.run, t = r.totals || {};
+    win('Payroll register ' + r.number, '<h2>' + esc(B.shopName()) + ' · Payroll register ' + esc(r.number) + (r.status === 'draft' ? ' (DRAFT)' : '') + '</h2><p>' + FREQ[r.frequency] + ', ' + esc(r.period_start) + ' to ' + esc(r.period_end) + ', paid ' + esc(r.pay_date) + '</p>' +
+      '<table><thead><tr><th>Employee</th><th>TRN</th><th class="n">Gross</th><th class="n">NIS</th><th class="n">NHT</th><th class="n">Ed Tax</th><th class="n">PAYE</th><th class="n">Pension</th><th class="n">Levy / WHT</th><th class="n">Other</th><th class="n">Net</th><th class="n">Employer NIS/NHT/Ed/HEART</th></tr></thead><tbody>' +
+      d.slips.map(function (s) { return '<tr><td>' + esc(s.name) + '</td><td>' + esc((s.snapshot || {}).trn || '') + '</td><td class="n">' + J(s.gross) + '</td><td class="n">' + J(s.nis_ee) + '</td><td class="n">' + J(s.nht_ee) + '</td><td class="n">' + J(s.ed_ee) + '</td><td class="n">' + J(s.paye) + '</td><td class="n">' + J(s.pension_ee) + '</td><td class="n">' + J(num(s.levy) + num(s.wht)) + '</td><td class="n">' + J(s.other_ded) + '</td><td class="n">' + J(s.net) + '</td><td class="n">' + J(num(s.nis_er) + num(s.nht_er) + num(s.ed_er) + num(s.heart_er)) + '</td></tr>'; }).join('') +
+      '<tr><td colspan="2"><b>Total (' + (t.people || 0) + ')</b></td><td class="n"><b>' + J(t.gross) + '</b></td><td class="n">' + J(t.nis_ee) + '</td><td class="n">' + J(t.nht_ee) + '</td><td class="n">' + J(t.ed_ee) + '</td><td class="n">' + J(t.paye) + '</td><td class="n">' + J(t.pension_ee) + '</td><td class="n">' + J(num(t.levy) + num(t.wht)) + '</td><td class="n">' + J(t.other_ded) + '</td><td class="n"><b>' + J(t.net) + '</b></td><td class="n">' + J(num(t.nis_er) + num(t.nht_er) + num(t.ed_er) + num(t.heart_er)) + '</td></tr></tbody></table>' +
+      '<p>Cost to the business ' + J(t.employer_cost) + ' · due to TAJ ' + J(t.to_taj) + '</p><p style="margin-top:40px">Prepared by ________________ &nbsp; Approved by ________________</p>');
+  }
+  function printP45(id) {
+    api('/api/payroll/employees/' + id + '/p45').then(function (d) {
+      var e = d.employee, y = d.ytd, em = d.employer;
+      win('P45 ' + e.name, '<div class="page"><h2>P45 · Certificate of pay and tax on leaving</h2><p><small>Give parts to the employee for their next employer; keep a copy for the S02.</small></p>' +
+        '<div class="box"><b>Employer:</b> ' + esc(em.name) + ' · TRN ' + esc(em.trn || '—') + ' · NIS ' + esc(em.nis || '—') + '<br>' + esc(em.address || '') + '</div>' +
+        '<div class="box"><b>Employee:</b> ' + esc(e.name) + ' · TRN ' + esc(e.trn || '—') + ' · NIS ' + esc(e.nis_no || '—') + '<br>' + esc(e.address || '') + '<br>Job: ' + esc(e.job_title || '') + ' · Started ' + esc(e.hire_date || '—') + ' · Left ' + esc(e.termination_date || '—') + (e.termination_reason ? ' (' + esc(e.termination_reason) + ')' : '') + ' · Paid ' + esc(e.frequency) + '</div>' +
+        '<table><tbody><tr><td>Gross emoluments ' + esc(d.year) + ' to leaving</td><td class="n">' + J(y.gross) + '</td></tr><tr><td>Statutory income (after NIS and pension)</td><td class="n">' + J(y.statutory) + '</td></tr><tr><td>Income tax (PAYE) deducted</td><td class="n">' + J(y.paye) + '</td></tr>' +
+        '<tr><td>NIS deducted</td><td class="n">' + J(y.nis_ee) + '</td></tr><tr><td>NHT deducted</td><td class="n">' + J(y.nht_ee) + '</td></tr><tr><td>Education Tax deducted</td><td class="n">' + J(y.ed_ee) + '</td></tr><tr><td>Approved pension</td><td class="n">' + J(y.pension_ee) + '</td></tr><tr><td>Pay periods</td><td class="n">' + y.slips + '</td></tr></tbody></table>' +
+        '<p style="margin-top:40px">Signed for the employer ________________ &nbsp; Date ________</p></div>');
+    }).catch(fail);
+  }
+
+  // ------------------------------------------------------------- returns --
+  function returns() {
+    var m = returns.month || B.today().slice(0, 7), y = returns.year || B.today().slice(0, 4);
+    Promise.all([api('/api/payroll/s01?month=' + m), api('/api/payroll/annual?year=' + y)]).then(function (r) {
+      var s = r[0], a = r[1], t = s.totals;
+      var comp = [['paye', 'PAYE'], ['nis', 'NIS'], ['nht', 'NHT'], ['ed', 'Education Tax'], ['heart', 'HEART/NSTA'], ['levy', 'Contractor levy'], ['wht', 'Withholding tax'], ['pension', 'Pension (to the scheme)']];
+      $('#out').innerHTML = '<div class="card"><h2>S01 · monthly return <input type="month" id="mo" value="' + esc(m) + '"></h2><p class="sub">For pay dated in the month. File the S01 and pay TAJ by <b>' + esc(s.due_date) + '</b>' + (s.due_date < B.today() && (s.owing.paye + s.owing.nis + s.owing.nht + s.owing.ed + s.owing.heart) > 0.004 ? ' <span class="pill bad">late</span>' : '') + '. Company TRN ' + esc(s.employer.trn || '(not set)') + ', NIS ' + esc(s.employer.nis || '(not set)') + '.</p>' +
+        '<div class="scroll"><table><thead><tr><th>Employee</th><th>TRN</th><th>NIS no.</th><th class="n">Gross</th><th class="n">NIS ee</th><th class="n">NIS er</th><th class="n">NHT ee</th><th class="n">NHT er</th><th class="n">Ed ee</th><th class="n">Ed er</th><th class="n">HEART</th><th class="n">PAYE</th></tr></thead><tbody>' +
+        (s.employees.length ? s.employees.map(function (e) { return '<tr><td>' + esc(e.name) + '</td><td>' + esc(e.trn || '') + '</td><td>' + esc(e.nis_no || '') + '</td><td class="n">' + J(e.gross) + '</td><td class="n">' + J(e.nis_ee) + '</td><td class="n">' + J(e.nis_er) + '</td><td class="n">' + J(e.nht_ee) + '</td><td class="n">' + J(e.nht_er) + '</td><td class="n">' + J(e.ed_ee) + '</td><td class="n">' + J(e.ed_er) + '</td><td class="n">' + J(e.heart_er) + '</td><td class="n">' + J(e.paye) + '</td></tr>'; }).join('') +
+          '<tr><td colspan="3"><b>Total</b></td><td class="n"><b>' + J(t.gross) + '</b></td><td class="n">' + J(t.nis_ee) + '</td><td class="n">' + J(t.nis_er) + '</td><td class="n">' + J(t.nht_ee) + '</td><td class="n">' + J(t.nht_er) + '</td><td class="n">' + J(t.ed_ee) + '</td><td class="n">' + J(t.ed_er) + '</td><td class="n">' + J(t.heart_er) + '</td><td class="n">' + J(t.paye) + '</td></tr>' : '<tr><td colspan="12" class="empty">No approved pay dated in ' + esc(m) + '.</td></tr>') + '</tbody></table></div>' +
+        '<table style="margin-top:10px;max-width:640px"><thead><tr><th>Pay to</th><th class="n">Due</th><th class="n">Paid</th><th class="n">Owing</th></tr></thead><tbody>' + comp.map(function (c) { return '<tr><td>' + c[1] + '</td><td class="n">' + J(s.due[c[0]]) + '</td><td class="n">' + J(s.paid[c[0]]) + '</td><td class="n"><b>' + J(s.owing[c[0]]) + '</b></td></tr>'; }).join('') + '</tbody></table>' +
+        (s.remittances.length ? '<h2 style="margin-top:10px">Payments made</h2><table><tbody>' + s.remittances.map(function (x) { return '<tr style="' + (x.voided_at ? 'opacity:.5' : '') + '"><td>' + esc(x.pay_date) + '</td><td>' + esc(x.account) + '</td><td>' + esc(x.reference || '') + '</td><td class="n">' + J(x.total) + '</td><td>' + (x.voided_at ? '<span class="pill bad">void</span>' : (me.can_run ? '<button class="sm" data-vr="' + x.id + '">Void</button>' : '')) + '</td></tr>'; }).join('') + '</tbody></table>' : '') +
+        '<div class="controls" style="margin-top:10px">' + (me.can_run ? '<button class="primary" id="rem">Record payment to TAJ</button>' : '') + '<button id="s1csv">S01 data (CSV)</button><button id="s1p">Print</button></div></div>' +
+        (s.contractors.length ? '<div class="card"><h2>Contractors · levy and withholding tax · ' + esc(m) + '</h2><p class="sub">Paid to TAJ with the payroll deductions above, by the same date. Give each contractor a withholding certificate from the pay run.</p><div class="scroll"><table><thead><tr><th>Contractor</th><th>TRN</th><th class="n">Paid (gross)</th><th class="n">Levy</th><th class="n">WHT</th></tr></thead><tbody>' +
+          s.contractors.map(function (c) { return '<tr><td>' + esc(c.name) + (c.business_name ? ' <small>' + esc(c.business_name) + '</small>' : '') + '</td><td>' + esc(c.trn || '') + '</td><td class="n">' + J(c.gross) + '</td><td class="n">' + J(c.levy) + '</td><td class="n">' + J(c.wht) + '</td></tr>'; }).join('') +
+          '<tr><td colspan="2"><b>Total</b></td><td class="n">' + J(s.contractor_totals.gross) + '</td><td class="n">' + J(s.contractor_totals.levy) + '</td><td class="n">' + J(s.contractor_totals.wht) + '</td></tr></tbody></table></div></div>' : '') +
+        '<div class="card" id="tp"><div class="empty">Loading deductions to pay over…</div></div>' +
+        '<div class="card"><h2>S02 · annual return and P24s <input type="number" id="yr" value="' + esc(y) + '" style="width:90px"></h2><p class="sub">The S02 for ' + esc(a.year) + ' is due by ' + esc(a.due_date) + '. Each person gets a P24 showing their pay and deductions for the year.</p>' +
+        '<div class="scroll"><table><thead><tr><th>Employee</th><th>TRN</th><th class="n">Gross</th><th class="n">Statutory income</th><th class="n">NIS</th><th class="n">NHT</th><th class="n">Ed Tax</th><th class="n">PAYE</th><th class="n">Pension</th><th></th></tr></thead><tbody>' +
+        (a.employees.length ? a.employees.map(function (e, i) { return '<tr><td>' + esc(e.name) + '</td><td>' + esc(e.trn || '') + '</td><td class="n">' + J(e.gross) + '</td><td class="n">' + J(e.statutory) + '</td><td class="n">' + J(e.nis_ee) + '</td><td class="n">' + J(e.nht_ee) + '</td><td class="n">' + J(e.ed_ee) + '</td><td class="n">' + J(e.paye) + '</td><td class="n">' + J(e.pension_ee) + '</td><td><button class="sm" data-p24="' + i + '">P24</button></td></tr>'; }).join('') : '<tr><td colspan="10" class="empty">No approved pay in ' + esc(a.year) + '.</td></tr>') + '</tbody></table></div>' +
+        '<p class="sub">Paid to TAJ for the year: PAYE ' + J(a.remitted.paye) + ', NIS ' + J(a.remitted.nis) + ', NHT ' + J(a.remitted.nht) + ', Education Tax ' + J(a.remitted.ed) + ', HEART ' + J(a.remitted.heart) + '.</p>' +
+        '<div class="controls"><button id="s2csv">S02 data (CSV)</button><button id="p24all">Print all P24s</button></div></div>' +
+        (a.contractors.length ? '<div class="card"><h2>Contractors paid in ' + esc(a.year) + '</h2><p class="sub">Not on the S02 (they are not employees). Totals for their own returns and your records.</p><table><thead><tr><th>Contractor</th><th>TRN</th><th class="n">Paid (gross)</th><th class="n">Levy</th><th class="n">WHT</th><th class="n">Net</th></tr></thead><tbody>' +
+          a.contractors.map(function (c) { return '<tr><td>' + esc(c.name) + (c.business_name ? ' <small>' + esc(c.business_name) + '</small>' : '') + '</td><td>' + esc(c.trn || '') + '</td><td class="n">' + J(c.gross) + '</td><td class="n">' + J(c.levy) + '</td><td class="n">' + J(c.wht) + '</td><td class="n">' + J(c.net) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '');
+      $('#mo').onchange = function () { returns.month = this.value; returns(); };
+      thirdPartyCard(m);
+      $('#yr').onchange = function () { returns.year = this.value; returns(); };
+      if ($('#rem')) $('#rem').onclick = function () { remitModal(s); };
+      all('[data-vr]').forEach(function (b) { b.onclick = function () { reasonBox('Why is this payment to TAJ voided?', function (why) { api('/api/payroll/remittances/' + b.getAttribute('data-vr') + '/void', 'POST', { reason: why }).then(returns).catch(fail); }); }; });
+      var s01rows = function () { return [['employee', 'trn', 'nis_no', 'gross', 'nis_employee', 'nis_employer', 'nht_employee', 'nht_employer', 'edtax_employee', 'edtax_employer', 'heart', 'paye']].concat(s.employees.map(function (e) { return [e.name, e.trn, e.nis_no, e.gross, e.nis_ee, e.nis_er, e.nht_ee, e.nht_er, e.ed_ee, e.ed_er, e.heart_er, e.paye]; })); };
+      $('#s1csv').onclick = function () { B.csv('S01-' + m + '.csv', s01rows()); };
+      $('#s1p').onclick = function () { win('S01 ' + m, '<h2>' + esc(s.employer.name) + ' · S01 for ' + esc(m) + '</h2><p>TRN ' + esc(s.employer.trn || '') + ' · NIS ' + esc(s.employer.nis || '') + ' · due ' + esc(s.due_date) + '</p><table>' + s01rows().map(function (r, i) { return '<tr>' + r.map(function (c) { return i ? '<td class="' + (typeof c === 'number' ? 'n' : '') + '">' + (typeof c === 'number' ? J(c) : esc(c || '')) + '</td>' : '<th>' + esc(c) + '</th>'; }).join('') + '</tr>'; }).join('') + '</table><p>Due to TAJ: ' + J(s.taj_total) + '</p>'); };
+      $('#s2csv').onclick = function () { B.csv('S02-' + a.year + '.csv', [['employee', 'trn', 'nis_no', 'started', 'left', 'gross', 'statutory_income', 'nis', 'nht', 'edtax', 'paye', 'pension']].concat(a.employees.map(function (e) { return [e.name, e.trn, e.nis_no, e.hire_date, e.termination_date, e.gross, e.statutory, e.nis_ee, e.nht_ee, e.ed_ee, e.paye, e.pension_ee]; }))); };
+      var p24 = function (e) { return '<div class="page"><h2>P24 · Employer\'s certificate of pay and tax deducted · ' + esc(a.year) + '</h2><div class="box"><b>Employer:</b> ' + esc(a.employer.name) + ' · TRN ' + esc(a.employer.trn || '—') + ' · NIS ' + esc(a.employer.nis || '—') + '</div>' +
+        '<div class="box"><b>Employee:</b> ' + esc(e.name) + ' · TRN ' + esc(e.trn || '—') + ' · NIS ' + esc(e.nis_no || '—') + '<br>' + esc(e.address || '') + (e.termination_date ? '<br>Left ' + esc(e.termination_date) : '') + '</div>' +
+        '<table><tbody><tr><td>Gross emoluments</td><td class="n">' + J(e.gross) + '</td></tr><tr><td>Statutory income</td><td class="n">' + J(e.statutory) + '</td></tr><tr><td>Income tax (PAYE)</td><td class="n">' + J(e.paye) + '</td></tr><tr><td>NIS</td><td class="n">' + J(e.nis_ee) + '</td></tr><tr><td>NHT</td><td class="n">' + J(e.nht_ee) + '</td></tr><tr><td>Education Tax</td><td class="n">' + J(e.ed_ee) + '</td></tr><tr><td>Approved pension</td><td class="n">' + J(e.pension_ee) + '</td></tr></tbody></table>' +
+        '<p style="margin-top:40px">Signed for the employer ________________ &nbsp; Date ________</p></div>'; };
+      all('[data-p24]').forEach(function (b) { b.onclick = function () { var e = a.employees[+b.getAttribute('data-p24')]; win('P24 ' + e.name, p24(e)); }; });
+      $('#p24all').onclick = function () { if (a.employees.length) win('P24s ' + a.year, a.employees.map(p24).join('')); };
+    }).catch(fail);
+  }
+  function remitModal(s) {
+    modal('<h2>Pay TAJ · ' + esc(s.month) + '</h2><p class="sub">Records the owing PAYE ' + J(s.owing.paye) + ', NIS ' + J(s.owing.nis) + ', NHT ' + J(s.owing.nht) + ', Education Tax ' + J(s.owing.ed) + ', HEART ' + J(s.owing.heart) + (s.owing.levy || s.owing.wht ? ', contractor levy ' + J(s.owing.levy) + ' and withholding tax ' + J(s.owing.wht) : '') + ' as paid.</p>' +
+      '<div class="controls"><div><label>Paid from</label><select id="ra">' + B.accountOptions('bank') + '</select></div><div><label>Date</label><input type="date" id="rd" value="' + esc(B.today()) + '"></div><div><label>Reference / receipt no.</label><input id="rr"></div></div>' +
+      (s.owing.pension > 0 ? '<label class="chk"><input type="checkbox" id="rp"> Also record the pension contributions (' + J(s.owing.pension) + ') as paid to the scheme</label>' : '') +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="go">Record payment</button><button id="x">Cancel</button></div>');
+    $('#x').onclick = close;
+    $('#go').onclick = function () { api('/api/payroll/remittances', 'POST', { month: s.month, account_id: val('ra'), pay_date: val('rd'), reference: val('rr'), include_pension: !!val('rp') }).then(function (r) { close(); toast(J(r.total) + ' recorded'); returns(); }).catch(fail); };
+  }
+
+  // ----------------------------------------------------- rates and items --
+  var RATE_FIELDS = [['paye_threshold', 'Tax-free threshold a year (J$)'], ['paye_rate1', 'Income tax rate 1 (0.25 = 25%)'], ['paye_band2_from', 'Higher rate from (J$ a year)'], ['paye_rate2', 'Income tax rate 2'],
+    ['nis_ee', 'NIS employee'], ['nis_er', 'NIS employer'], ['nis_ceiling', 'NIS wage ceiling a year (J$)'], ['nht_ee', 'NHT employee'], ['nht_er', 'NHT employer'], ['ed_ee', 'Education Tax employee'], ['ed_er', 'Education Tax employer'],
+    ['heart_er', 'HEART/NSTA employer'], ['pension_cap', 'Pension tax relief cap (0.2 = 20%)'], ['min_wage_week', 'Minimum wage a 40-hour week (J$)'], ['min_wage_hours', 'Hours in the minimum-wage week'],
+    ['levy_rate', 'Contractor levy (0.02 = 2%)'], ['wht_rate', 'Withholding tax (0.03 = 3%)'], ['wht_threshold', 'WHT on an invoice from (J$)'], ['wht_aggregate', 'WHT on smaller invoices adding to (J$ in 30 days)']];
+  function rates() {
+    Promise.all([api('/api/payroll/rates'), loadItems(), B.loadAccounts()]).then(function (r) {
+      var d = r[0], c = d.current || d.rates[0] || {};
+      $('#out').innerHTML = '<div class="card"><h2>Statutory rates</h2><p class="sub">Each row applies to pay dated on or after its date. When the government changes the threshold or a rate, add a new row from that date: earlier pay runs keep the rates they used. <b>Check these against TAJ before the first run.</b></p>' +
+        '<div class="scroll"><table><thead><tr><th>From</th><th class="n">Threshold</th><th class="n">PAYE</th><th class="n">NIS ee/er (ceiling)</th><th class="n">NHT ee/er</th><th class="n">Ed ee/er</th><th class="n">HEART</th><th class="n">Min. wage</th><th>Note</th></tr></thead><tbody>' +
+        d.rates.map(function (x) { var p = function (v) { return (num(v) * 100).toFixed(2).replace(/\.?0+$/, '') + '%'; }; return '<tr' + (x === d.current ? ' style="font-weight:600"' : '') + '><td>' + esc(x.effective_from) + (x === d.current ? ' <span class="pill ok">now</span>' : '') + '</td><td class="n">' + J(x.paye_threshold) + '</td><td class="n">' + p(x.paye_rate1) + ' / ' + p(x.paye_rate2) + ' over ' + J(x.paye_band2_from) + '</td><td class="n">' + p(x.nis_ee) + ' / ' + p(x.nis_er) + ' (' + J(x.nis_ceiling) + ')</td><td class="n">' + p(x.nht_ee) + ' / ' + p(x.nht_er) + '</td><td class="n">' + p(x.ed_ee) + ' / ' + p(x.ed_er) + '</td><td class="n">' + p(x.heart_er) + '</td><td class="n">' + (x.min_wage_week ? J(x.min_wage_week) : '') + '</td><td><small>' + esc(x.note || '') + '</small></td></tr>'; }).join('') + '</tbody></table></div>' +
+        (me.can_run ? '<h2 style="margin-top:12px">Add or change rates from a date</h2><div class="grid">' + field('ef', 'Takes effect', '', 'date') + RATE_FIELDS.map(function (f) { return field('r_' + f[0], f[1], c[f[0]], 'number', ' step="any"'); }).join('') + field('rnote', 'Note (e.g. the TAJ notice)', '') + '</div><div class="controls" style="margin-top:8px"><button class="primary" id="rsv">Save rates</button></div>' : '') + '</div>' +
+        '<div class="card"><h2>Earnings and deductions</h2><p class="sub">Ticks say which contributions an earning attracts, or, for something the business pays for the person, whether it is a taxable benefit. Change them only on advice (for example a tax-free allowance, or employer-paid life insurance your accountant says is taxable). "Pension relief": a deduction to an approved pension scheme that reduces income tax (with the pension %, up to the cap). The account is where it goes in the ledger: blank means Salaries and Wages for earnings, and Other Payroll Deductions Payable for deductions.</p>' +
+        '<div class="scroll"><table><thead><tr><th>Item</th><th>Type</th><th>PAYE</th><th>NIS</th><th>NHT</th><th>Ed</th><th>HEART</th><th>Pension relief</th><th>Ledger account</th><th>In use</th><th></th></tr></thead><tbody>' +
+        items.map(function (i) { var ck = function (k) { return '<input type="checkbox" data-k="' + k + '"' + (i[k] ? ' checked' : '') + (i.kind === 'deduction' || !me.can_run ? ' disabled' : '') + '>'; };
+          return '<tr data-it="' + esc(i.code) + '"><td><input data-k="label" value="' + esc(i.label) + '"' + (me.can_run ? '' : ' disabled') + '></td><td>' + (i.kind === 'employer' ? 'paid by the business' : i.kind) + (i.is_system ? ' <small>(worked out)</small>' : '') + '</td><td>' + ck('paye') + '</td><td>' + ck('nis') + '</td><td>' + ck('nht') + '</td><td>' + ck('ed') + '</td><td>' + ck('heart') + '</td><td>' + (i.kind === 'deduction' ? '<input type="checkbox" data-k="pension_relief"' + (i.pension_relief ? ' checked' : '') + (me.can_run ? '' : ' disabled') + '>' : '') + '</td>' +
+            '<td><select data-k="gl_account_id"' + (me.can_run ? '' : ' disabled') + '><option value="">(default)</option>' + B.accounts().map(function (a) { return '<option value="' + a.id + '"' + (String(a.id) === String(i.gl_account_id) ? ' selected' : '') + '>' + esc(a.code + ' ' + a.name) + '</option>'; }).join('') + '</select></td>' +
+            '<td><input type="checkbox" data-k="is_active"' + (i.is_active ? ' checked' : '') + (i.is_system || !me.can_run ? ' disabled' : '') + '></td><td>' + (me.can_run ? '<button class="sm" data-save="' + esc(i.code) + '">Save</button>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div>' +
+        (me.can_run ? '<div class="controls" style="margin-top:8px"><div><label>New item</label><input id="nl" placeholder="e.g. Uniform allowance"></div><div><label>Type</label><select id="nk"><option value="earning">Earning</option><option value="deduction">Deduction</option><option value="employer">Employer contribution</option></select></div><button id="nadd">Add</button></div>' : '') + '</div>';
+      if ($('#rsv')) $('#rsv').onclick = function () { var b = { effective_from: val('ef'), note: val('rnote') }; RATE_FIELDS.forEach(function (f) { b[f[0]] = val('r_' + f[0]); }); api('/api/payroll/rates', 'POST', b).then(function () { toast('Rates saved'); rates(); }).catch(fail); };
+      all('[data-save]').forEach(function (b) { b.onclick = function () {
+        var tr = b.closest('tr'), body = {};
+        all('[data-k]', tr).forEach(function (el) { var k = el.getAttribute('data-k'); body[k] = el.type === 'checkbox' ? el.checked : el.value; });
+        api('/api/payroll/items/' + encodeURIComponent(tr.getAttribute('data-it')), 'PUT', body).then(function () { toast('Saved'); }).catch(fail);
+      }; });
+      if ($('#nadd')) $('#nadd').onclick = function () { api('/api/payroll/items', 'POST', { label: val('nl'), kind: val('nk') }).then(function () { rates(); }).catch(fail); };
+    }).catch(fail);
+  }
+
+  // ------------------------------------------------------------ settings --
+  function settings() {
+    api('/api/payroll/settings').then(function (d) {
+      var s = d.settings, t = function (k, label, help) { return '<label class="chk" style="margin:6px 0"><input type="checkbox" id="' + k + '"' + (s[k] === 'on' ? ' checked' : '') + (me.can_run ? '' : ' disabled') + '> <span><b>' + label + '</b><br><small class="sub">' + help + '</small></span></label>'; };
+      $('#out').innerHTML = '<div class="card"><h2>Which parts of payroll to use</h2>' +
+        t('payroll_use_timeclock', 'Pay hourly staff from the time clock', 'Hours come from approved weeks on the time clock (unapproved weeks are flagged). Off: hourly staff are paid their usual hours, changed by hand.') +
+        t('payroll_include_commission', 'Pay commission through payroll', 'Approved commission statements go on the next payslip, taxed with the wages, and are marked paid. Off: commission is paid from the Commission screen as before.') +
+        t('payroll_post_ledger', 'Post to the ledger', 'Approved runs, wage payments and TAJ payments post to the general ledger (once it is started). Off: keep the books elsewhere and use payroll for payslips and returns.') +
+        t('payroll_self_service', 'Staff see their own payslips', 'Staff linked to a login see their approved payslips, year-to-date and leave here.') +
+        t('payroll_two_person', 'Two people for every run', 'The person who prepared a run, or whose own pay is on it, cannot approve it.') +
+        t('payroll_heart', 'The business pays HEART/NSTA', 'The 3% employer contribution (switch off only if the business is exempt).') +
+        t('payroll_wht_agent', 'The business is a withholding agent', 'Deduct withholding tax (3%) from contractors giving specified services (consultancy, IT, repairs, security, cleaning, transport and the others TAJ lists). Only businesses TAJ has named as agents do this.') +
+        '<h2 style="margin-top:12px">Company</h2><div class="grid">' + field('payroll_employer_trn', 'Company TRN', s.payroll_employer_trn) + field('payroll_employer_nis', 'NIS employer number', s.payroll_employer_nis) +
+          field('payroll_vacation_days', 'Vacation days a year (usual)', s.payroll_vacation_days, 'number') + field('payroll_sick_days', 'Sick days a year (usual)', s.payroll_sick_days, 'number') + '</div>' +
+        (me.can_run ? '<div class="controls" style="margin-top:10px"><button class="primary" id="sv">Save</button><span style="margin-left:auto"></span><button id="offb">Switch payroll off</button></div>' : '') + '</div>';
+      if (!$('#sv')) return;
+      $('#sv').onclick = function () {
+        var b = {};
+        ['payroll_use_timeclock', 'payroll_include_commission', 'payroll_post_ledger', 'payroll_self_service', 'payroll_two_person', 'payroll_heart', 'payroll_wht_agent'].forEach(function (k) { b[k] = val(k) ? 'on' : 'off'; });
+        ['payroll_employer_trn', 'payroll_employer_nis', 'payroll_vacation_days', 'payroll_sick_days'].forEach(function (k) { b[k] = val(k); });
+        api('/api/payroll/settings', 'PUT', b).then(function () { toast('Saved'); }).catch(fail);
+      };
+      $('#offb').onclick = function () { confirmBox('Switch payroll off? Nothing is deleted: employees, runs and payslips stay, and it can be switched on again. Staff stop seeing payslips while it is off.', function () { api('/api/payroll/module', 'POST', { on: false }).then(start).catch(fail); }); };
+    }).catch(fail);
+  }
+
+  // ---------------------------------------------------------- my payslips --
+  function mine() {
+    api('/api/payroll/me').then(function (d) {
+      if (!d.employee) { $('#out').innerHTML = '<div class="card empty">You are not on payroll.</div>'; return; }
+      $('#out').innerHTML = '<div class="card"><h2>' + esc(d.employee.name) + ' · this year</h2>' + leaveHtml(d.leave) + ytdHtml(d.ytd) + '</div>' +
+        '<div class="card"><h2>My payslips</h2><table><tbody>' + (d.slips.length ? d.slips.map(function (s) { return '<tr><td>' + esc(s.pay_date) + '</td><td>' + esc(s.period_start) + ' – ' + esc(s.period_end) + '</td><td class="n">gross ' + J(s.gross) + '</td><td class="n"><b>net ' + J(s.net) + '</b></td><td><button class="sm" data-ps="' + s.id + '">View / print</button></td></tr>'; }).join('') : '<tr><td class="empty">No payslips yet.</td></tr>') + '</tbody></table></div>';
+      all('[data-ps]').forEach(function (b) { b.onclick = function () { printSlips([+b.getAttribute('data-ps')]); }; });
+    }).catch(fail);
+  }
+
+  start();
+})();
+</script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+<script src="/assets/module-look.js?v=20261101" defer></script>
+</body>
+</html>

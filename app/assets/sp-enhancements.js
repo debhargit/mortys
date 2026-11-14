@@ -77,6 +77,14 @@ const STYLES = `
 
 .sp-vehicle-pill{display:inline-flex;align-items:center;gap:6px;background:#fffbe6;border:1.5px solid #ffcb05;color:#5e3a18;padding:5px 11px;border-radius:18px;font-size:12px;font-weight:800;cursor:pointer;letter-spacing:.02em}
 .sp-vehicle-pill:hover{background:#ffcb05;color:#0a0a0c}
+.sp-pill-short{display:none}
+@media(max-width:600px){
+  #spVehiclePillHost{margin-left:6px!important;min-width:0;max-width:46vw;display:inline-flex}
+  .sp-vehicle-pill{font-size:11px;padding:4px 9px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sp-pill-long{display:none}.sp-pill-short{display:inline}
+  .sp-fab-stack{left:10px;bottom:10px;gap:6px}
+  .sp-fab{padding:8px 12px;font-size:12px}
+}
 
 .sp-toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,30px);background:#0a0a0c;color:#fff;padding:11px 22px;border-radius:8px;font-size:14px;font-weight:600;opacity:0;transition:.3s;z-index:10500;box-shadow:0 8px 24px rgba(0,0,0,.3)}
 .sp-toast-show{opacity:1;transform:translate(-50%,0)}
@@ -147,7 +155,7 @@ function makeFitmentModal(){
   m.innerHTML = `
     <div class="sp-modal-inner">
       <div class="sp-modal-head">
-        <div><h3>🔧 Find Parts For My Vehicle</h3><p>Set your car once — every product page filters to your fitment automatically.</p></div>
+        <div><h3>🔧 Find Parts For My Vehicle</h3><p>Set your car once and the parts finder starts from it.</p></div>
         <button class="sp-close" data-act="close">×</button>
       </div>
       <div class="sp-modal-body">
@@ -164,7 +172,7 @@ function makeFitmentModal(){
           <input id="spFitVin" placeholder="17-character VIN" maxlength="17">
         </div>
         <div style="font-size:12px;color:#5a6470;background:#fafbfc;padding:10px;border-radius:8px">
-          💡 Once saved, every product card shows compatibility. Tires &amp; rims size-match by make/model lookup, brake parts and filters match by VIN where available.
+          💡 Not sure it fits? Send your VIN to the counter on WhatsApp (876-905-4111) and we will check before you buy.
         </div>
       </div>
       <div class="sp-modal-foot">
@@ -199,12 +207,15 @@ function makeFitmentModal(){
 }
 function populateMake(m){
   const sel = $('#spFitMake', m);
-  sel.innerHTML = `<option value="">— Select —</option>` + Object.keys(MAKES).map(k=>`<option>${k}</option>`).join('');
+  // The catalogue's own list (assets/vehicles.js) when the page loads it.
+  const list = window.VA_VEHICLES ? window.VA_VEHICLES.makes.map(m=>m.make) : Object.keys(MAKES);
+  sel.innerHTML = `<option value="">— Select —</option>` + list.map(k=>`<option>${k}</option>`).join('');
 }
 function populateModel(m){
   const sel = $('#spFitModel', m);
   const make = $('#spFitMake', m).value;
-  const models = MAKES[make] || [];
+  const vm = window.VA_VEHICLES && window.VA_VEHICLES.makes.find(m=>m.make===make);
+  const models = vm ? vm.models.map(x=>x.name) : (MAKES[make] || []);
   sel.innerHTML = `<option value="">— Select —</option>` + models.map(k=>`<option>${k}</option>`).join('');
 }
 
@@ -217,7 +228,7 @@ function renderVehiclePill(){
   if(v && v.year && v.make){
     pill.innerHTML = `🚗 ${v.year} ${v.make} ${v.model||''} <span style="opacity:.7;margin-left:4px">change</span>`;
   } else {
-    pill.innerHTML = `🔧 Set my vehicle for fitment`;
+    pill.innerHTML = `🔧 <span class="sp-pill-long">Set my vehicle for fitment</span><span class="sp-pill-short">My vehicle</span>`;
   }
   pill.onclick = openFitment;
   host.appendChild(pill);
@@ -263,7 +274,7 @@ function makeRewardsModal(){
   m.innerHTML = `
     <div class="sp-modal-inner">
       <div class="sp-modal-head">
-        <div><h3>⭐ Morty's Auto Rewards</h3><p>Earn points on purchases &amp; services. Redeem for discounts.</p></div>
+        <div><h3>⭐ Morty's Auto Parts Auto Rewards</h3><p>Earn points on purchases &amp; services. Redeem for discounts.</p></div>
         <button class="sp-close" data-act="close">×</button>
       </div>
       <div class="sp-modal-body">
@@ -495,16 +506,22 @@ function makeFabStack(){
   if($('#spFabStack')) return;
   const stack = el('div', { id:'spFabStack', class:'sp-fab-stack' });
   stack.innerHTML = `
-    <a class="sp-fab" id="spFabSpecial" href="special-order.html" style="text-decoration:none">📋 Special Order</a>
     <a class="sp-fab" id="spFabClearance" href="clearance.html" style="text-decoration:none;background:linear-gradient(135deg,#ea580c,#9a3412);color:#fff">🏷 Clearance</a>
-    <a class="sp-fab" id="spFabDonate" href="donations.html" style="text-decoration:none;background:linear-gradient(135deg,#0d9488,#115e59);color:#fff">💝 Donations</a>
-    <button class="sp-fab black" id="spFabRewards">⭐ Rewards <span class="badge-pts" id="spPtsBadge"></span></button>
     <button class="sp-fab red" id="spFabFit">🔧 Find My Parts</button>
   `;
   document.body.appendChild(stack);
   $('#spFabFit').onclick = openFitment;
-  $('#spFabRewards').onclick = openRewards;
   renderFabBadges();
+}
+
+// The clearance page needs the shop server's /api/clearance. Where it is not
+// available (the Cloudflare copy of the site), hide every link to it rather
+// than send shoppers to an empty page.
+function hideClearanceIfUnavailable(){
+  fetch('/api/clearance', { credentials: 'same-origin' }).then(function(res){
+    if(res.ok) return;
+    document.querySelectorAll('a[href="clearance.html"], a[href="/clearance.html"], a[href="/clearance"], #spFabClearance').forEach(function(a){ a.style.display = 'none'; });
+  }).catch(function(){});
 }
 
 function renderFabBadges(){
@@ -598,8 +615,9 @@ function boot(){
   renderVehiclePill();
   makeFabStack();
   injectBundleBar();
+  hideClearanceIfUnavailable();
   decorateProductCards();
-  hookInquirySubmission();
+  // Points live on the customer's account (/api/points); the old browser-only rewards are not used.
 
   window.addEventListener('storage', e => {
     if(e.key === 'sp_active_phone' || e.key === 'sp_loyalty' || e.key === 'va_compare') renderFabBadges();
@@ -615,26 +633,6 @@ window.spEnh = {
   loadVehicle, saveVehicle,
   addPoints, loyaltyGet, loyaltyAll,
   computeBundle, renderFabBadges
-};
-
-})();
-orage', e => {
-    if(e.key === 'sp_active_phone' || e.key === 'sp_loyalty' || e.key === 'va_compare') renderFabBadges();
-  });
-}
-
-if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
-else boot();
-
-window.spEnh = {
-  openFitment, openRewards, openCompare, openHistory,
-  loadVehicle, saveVehicle,
-  addPoints, loyaltyGet, loyaltyAll,
-  computeBundle, renderFabBadges
-};
-
-})();
-eBundle, renderFabBadges
 };
 
 })();

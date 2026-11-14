@@ -1,0 +1,728 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hiring · Morty's Auto Parts</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0} header nav{margin-left:auto;display:flex;gap:14px;font-size:13px;align-items:center} header a{color:#fff;opacity:.85}
+  header button{background:rgba(255,255,255,.12);color:#fff;border:0}
+  main{max-width:1250px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  input,select,button,textarea{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  textarea{width:100%} button{cursor:pointer;background:var(--card)} button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600} button.sm{padding:3px 9px;font-size:12.5px}
+  button.link{border:0;background:none;color:var(--red);padding:0;font-weight:600}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px} .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  .scroll{overflow-x:auto}
+  table{width:100%;border-collapse:collapse} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip)} .pill.ok{background:#16a34a22;color:var(--ok)} .pill.warn{background:#f59e0b22;color:var(--warn)}
+  .board{display:grid;grid-template-columns:repeat(8,minmax(150px,1fr));gap:10px;overflow-x:auto}
+  .stars{display:flex;gap:4px} .stars button{padding:2px 9px;font-size:13px} .stars button.on{background:var(--red);border-color:var(--red);color:#fff}
+  .sec{border-top:1px solid var(--line);margin-top:12px;padding-top:4px}
+  .pill.bad{background:#d6282822;color:var(--red)}
+  .col{background:var(--chip);border-radius:10px;padding:8px;min-height:120px} .col h3{font-size:12.5px;margin:2px 4px 8px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+  .app{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:6px;cursor:pointer} .app:hover{border-color:var(--red)} .app small{color:var(--muted)}
+  tr.row{cursor:pointer} tr.row:hover td{background:var(--chip)}
+  .modal{position:fixed;inset:0;background:rgba(10,15,25,.55);display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow:auto;z-index:9990} .modal .card{max-width:780px;width:100%}
+  .modal.top{z-index:9995}
+  .empty{color:var(--muted);text-align:center;padding:20px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:9999}
+  .pre{white-space:pre-wrap}
+  .menu{position:relative;display:inline-block} .menu > div{position:absolute;right:0;top:100%;z-index:20;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(0,0,0,.18);min-width:190px;padding:4px 0}
+  .menu > div button,.menu > div a{display:block;width:100%;text-align:left;border:0;border-radius:0;background:none;padding:7px 12px;color:var(--ink);text-decoration:none;font-size:13px}
+  .menu > div button:hover,.menu > div a:hover{background:var(--chip)}
+  .lines .ln{display:flex;gap:6px;align-items:center;margin-bottom:6px} .lines .ln input[type=text]{flex:1} .lines .ln label{display:flex;gap:4px;align-items:center;font-size:12.5px;color:var(--muted);white-space:nowrap}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 8px} .chips button{font-size:12px;padding:2px 9px;border-radius:999px}
+  .docs{margin:6px 0} .docs div{display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)} .docs div span{flex:1}
+  .warn{background:#f59e0b18;border-left:3px solid var(--warn);padding:8px 10px;border-radius:8px;margin:8px 0}
+  .qa{margin:4px 0 8px} .qa b{display:block;font-size:12.5px;color:var(--muted);font-weight:600}
+  h4{margin:14px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Hiring</h1><nav><button class="sm" id="logBtn" data-hr>📜 Decisions</button><button class="sm" id="setBtn" data-hr>⚙ Emails &amp; settings</button><a href="/people.html">People &amp; HR</a><a href="/careers.html" target="_blank" rel="noopener" data-hr>Public careers page ↗</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="card" id="myIvCard" hidden><h2>My interviews</h2><p class="sub">Interviews you are on the panel for. After each one, fill in your scorecard: the hiring team sees everyone’s scores side by side.</p><div id="myIv"></div></div>
+  <div class="card" id="myJobsCard" hidden><h2>My jobs</h2><p class="sub">Jobs you are the hiring manager or an interviewer for. As hiring manager you can read each applicant, their CV and the panel’s scores, add your notes and compare them; hiring staff move them on.</p><div id="myJobs"></div></div>
+  <div class="card" id="reqCard" hidden><h2>Requisitions <button class="sm primary" id="newReq" data-hr>+ Requisition</button></h2><p class="sub">The case for a new job, approved before it is posted. Once approved, “Post it” makes the job posting.</p><div id="reqs"></div></div>
+  <div class="card" data-hr><h2>Job postings <button class="sm primary" id="newJob">+ Job</button></h2><div id="jobs"></div></div>
+  <div class="card" data-hr><h2>Applicants</h2>
+    <div class="controls">
+      <div><label>Job</label><select id="jobF"><option value="">All jobs</option></select></div>
+      <div style="flex:1;min-width:180px"><label>Find</label><input id="q" type="search" placeholder="Name, email, phone or reference" style="width:100%"></div>
+      <div><label>View</label><select id="view"><option value="board">Board</option><option value="list">List</option></select></div>
+      <button id="csv">Export CSV</button>
+    </div>
+    <p class="sub">Applicants get an automatic reply with a link where they can add documents or withdraw. Those not hired are deleted (details, CV and documents) after the retention period. Click one to open it.</p>
+    <div id="board"></div></div>
+</main>
+<div id="modal"></div><div id="modal2"></div>
+<div class="toast" id="toast"></div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var day = function (t) { return t ? new Date(t).toLocaleDateString('en-JM') : ''; };
+  var when = function (t) { return t ? new Date(t).toLocaleString('en-JM', { dateStyle: 'short', timeStyle: 'short' }) : ''; };
+  var STAGE = { new: 'New', screen: 'Screen', shortlist: 'Shortlist', interview: 'Interview', references: 'References', offer: 'Offer', hired: 'Hired', rejected: 'Rejected' };
+  var SCREEN = { pass: 'Pass', maybe: 'Maybe', fail: 'Fail' };
+  var RECO = { strong_yes: 'Strong yes', yes: 'Yes', no: 'No', strong_no: 'Strong no' };
+  var MODE = { in_person: 'In person', phone: 'By phone', video: 'Video call' };
+  var REQ_ST = { draft: 'Draft', submitted: 'Waiting for approval', approved: 'Approved', rejected: 'Turned down', cancelled: 'Cancelled', filled: 'Filled' };
+  var OFFER_ST = { draft: 'Draft', pending_approval: 'Waiting for approval', approved: 'Approved, not sent', sent: 'Sent, waiting for answer', accepted: 'Accepted', declined: 'Declined', withdrawn: 'Withdrawn' };
+  var CONTRACT = { permanent: 'Permanent', fixed_term: 'Fixed term', part_time: 'Part time', casual: 'Casual', contractor: 'Contractor', intern: 'Internship' };
+  // People (panels, managers), departments and what this person may do; from /api/hr/requisitions.
+  var META = { people: [], departments: [], can_approve: false, can_manage: false };
+  var jmd = function (v) { return v == null ? '' : 'J$' + Number(v).toLocaleString('en-JM', { maximumFractionDigits: 2 }); };
+  var opts = function (list, cur, blank) { return (blank != null ? '<option value="">' + esc(blank) + '</option>' : '') + list.map(function (p) { return '<option value="' + p.id + '"' + (String(cur) === String(p.id) ? ' selected' : '') + '>' + esc(p.name) + '</option>'; }).join(''); };
+  var KIND = { full_time: 'Full time', part_time: 'Part time', contract: 'Contract', freelance_rep: 'Freelance rep' };
+  // Documents a job commonly asks for, one click to add.
+  var DOC_PRESETS = ['Photo ID', 'TRN card', 'NIS card', 'Police record', 'Driver’s licence', 'Certificates', 'Two references', 'Proof of address'];
+  // Stages whose change is worth an email, with the template it starts from.
+  var STAGE_MAIL = { interview: 'interview', offer: 'offer', rejected: 'rejected' };
+  var jobs = [], apps = [];
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 3500); }
+  function api(url, method, body) {
+    var isForm = body instanceof FormData;
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: isForm ? { Accept: 'application/json' } : { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? (isForm ? body : JSON.stringify(body)) : undefined })
+      .then(function (r) {
+        if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); }
+        return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; });
+      });
+  }
+  // Two layers: an application can open the email composer on top of itself.
+  function modal(h, layer) {
+    var host = $(layer === 2 ? '#modal2' : '#modal');
+    host.innerHTML = '<div class="modal' + (layer === 2 ? ' top' : '') + '"><div class="card">' + h + '</div></div>';
+    host.firstChild.addEventListener('mousedown', function (e) { if (e.target.classList.contains('modal')) close(layer); });
+    return host.firstChild;
+  }
+  function close(layer) { $(layer === 2 ? '#modal2' : '#modal').innerHTML = ''; }
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { if ($('#modal2').innerHTML) close(2); else close(); } });
+  document.addEventListener('click', function (e) { if (!e.target.closest('.menu')) all('.menu > div').forEach(function (d) { d.hidden = true; }); });
+  // For a datetime-local box: the moment in this computer's time, using that
+  // date's own offset (today's would be an hour out across daylight saving).
+  function localInput(t) { var d = new Date(t); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }
+  var jobLink = function (j) { return location.origin + '/careers.html?job=' + j.id; };
+
+  // ---------------------------------------------------------------- jobs --
+  function loadJobs() {
+    return api('/api/hr/jobs').then(function (d) {
+      jobs = d.jobs;
+      $('#jobs').innerHTML = jobs.length ? '<div class="scroll"><table><thead><tr><th>Job</th><th>Type</th><th>Posting</th><th>Asks for</th>' + Object.keys(STAGE).map(function (s) { return '<th>' + STAGE[s] + '</th>'; }).join('') + '<th></th></tr></thead><tbody>' + jobs.map(function (j, i) {
+        var docs = (j.documents || []).length, qs = (j.questions || []).length;
+        return '<tr><td><b>' + esc(j.title) + '</b>' + (j.openings > 1 ? ' <span class="pill">' + j.openings + ' openings</span>' : '') + '<br><small>' + esc([j.department, j.location].filter(Boolean).join(' · ')) + '</small></td><td>' + esc(KIND[j.kind] || j.kind) + '</td>' +
+          '<td>' + (j.is_open ? '<span class="pill ok">open</span>' + (j.closes_on ? '<br><small>to ' + esc(day(j.closes_on)) + '</small>' : '') : '<span class="pill">closed</span>') + '</td>' +
+          '<td><small>' + [j.cv_required ? 'CV' : '', docs ? docs + ' document' + (docs > 1 ? 's' : '') : '', qs ? qs + ' question' + (qs > 1 ? 's' : '') : ''].filter(Boolean).join(', ') + '</small></td>' +
+          Object.keys(STAGE).map(function (s) { return '<td>' + (j[s] || '') + '</td>'; }).join('') +
+          '<td style="white-space:nowrap"><button class="sm" data-ej="' + i + '">Edit</button> <span class="menu"><button class="sm" data-mn>▾</button><div hidden>' +
+            '<button data-cmp="' + i + '">Compare candidates</button>' +
+            '<button data-dup="' + i + '">Duplicate</button>' +
+            '<button data-tog="' + i + '">' + (j.is_open ? 'Close posting' : 'Reopen posting') + '</button>' +
+            '<button data-copy="' + i + '">Copy link</button>' +
+            '<a href="' + esc(jobLink(j)) + '" target="_blank" rel="noopener">View on careers page</a>' +
+            '<a href="https://wa.me/?text=' + encodeURIComponent(j.title + ' at Morty\'s Auto Parts: ' + jobLink(j)) + '" target="_blank" rel="noopener">Share on WhatsApp</a>' +
+            '<a href="https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(jobLink(j)) + '" target="_blank" rel="noopener">Share on Facebook</a>' +
+            '<a href="https://www.linkedin.com/sharing/share-offsite/?url=' + encodeURIComponent(jobLink(j)) + '" target="_blank" rel="noopener">Share on LinkedIn</a>' +
+          '</div></span></td></tr>';
+      }).join('') + '</tbody></table></div>' : '<div class="empty">No jobs posted yet. Press + Job.</div>';
+      var cur = $('#jobF').value;
+      $('#jobF').innerHTML = '<option value="">All jobs</option>' + jobs.map(function (j) { return '<option value="' + j.id + '">' + esc(j.title) + '</option>'; }).join('');
+      $('#jobF').value = cur;
+      all('[data-ej]').forEach(function (b) { b.onclick = function () { jobForm(jobs[+b.getAttribute('data-ej')]); }; });
+      all('[data-mn]').forEach(function (b) { b.onclick = function (e) { e.stopPropagation(); var d = b.nextElementSibling, was = d.hidden; all('.menu > div').forEach(function (x) { x.hidden = true; }); d.hidden = !was; }; });
+      all('[data-dup]').forEach(function (b) { b.onclick = function () { var j = jobs[+b.getAttribute('data-dup')]; jobForm(Object.assign({}, j, { id: null, title: 'Copy of ' + j.title, is_open: false, requisition_id: null })); }; });
+      all('[data-cmp]').forEach(function (b) { b.onclick = function () { compare(jobs[+b.getAttribute('data-cmp')]); }; });
+      all('[data-tog]').forEach(function (b) { b.onclick = function () {
+        var j = jobs[+b.getAttribute('data-tog')];
+        api('/api/hr/jobs/' + j.id, 'PATCH', { is_open: !j.is_open }).then(function () { toast(j.is_open ? 'Posting closed' : 'Posting reopened'); loadJobs(); }).catch(function (e) { toast(e.message); });
+      }; });
+      all('[data-copy]').forEach(function (b) { b.onclick = function () {
+        var link = jobLink(jobs[+b.getAttribute('data-copy')]);
+        (navigator.clipboard ? navigator.clipboard.writeText(link) : Promise.reject()).then(function () { toast('Link copied'); }, function () { prompt('Copy this link', link); });
+      }; });
+    });
+  }
+  function lineHtml(kind, x) {
+    x = x || {};
+    if (kind === 'sc') return '<div class="ln"><input type="text" class="lv" value="' + esc(x.label || '') + '" placeholder="e.g. Knows Japanese parts"><input type="hidden" class="lkey" value="' + esc(x.key || '') + '"><input type="checkbox" class="lr" hidden><button class="sm" data-x>✕</button></div>';
+    return '<div class="ln">' + (kind === 'doc'
+      ? '<input type="text" class="lv" value="' + esc(x.label || '') + '" placeholder="e.g. Police record">'
+      : '<input type="text" class="lv" value="' + esc(x.q || '') + '" placeholder="e.g. Do you have a driver’s licence?"><select class="lk"><option value="text">Written answer</option><option value="yesno"' + (x.kind === 'yesno' ? ' selected' : '') + '>Yes / No</option></select>') +
+      '<input type="hidden" class="lkey" value="' + esc(x.key || '') + '"><label><input type="checkbox" class="lr"' + (x.required ? ' checked' : '') + '> ' + (kind === 'doc' ? 'needed' : 'must answer') + '</label><button class="sm" data-x>✕</button></div>';
+  }
+  function jobForm(j) {
+    j = j || { kind: 'full_time', is_open: true, openings: 1 };
+    var mo = modal('<h2>' + (j.id ? 'Edit job' : 'New job') + '</h2>' +
+      '<div class="controls"><div style="flex:2;min-width:200px"><label>Title</label><input id="jt" value="' + esc(j.title || '') + '" style="width:100%"></div><div><label>Type</label><select id="jk">' + Object.keys(KIND).map(function (k) { return '<option value="' + k + '"' + (j.kind === k ? ' selected' : '') + '>' + KIND[k] + '</option>'; }).join('') + '</select></div><div><label>Openings</label><input id="jn" type="number" min="1" max="99" value="' + (j.openings || 1) + '" style="width:80px"></div></div>' +
+      '<div class="controls"><div><label>Department</label><input id="jd" value="' + esc(j.department || '') + '"></div><div><label>Location</label><input id="jl" value="' + esc(j.location || 'Kingston') + '"></div><div><label>Pay (shown)</label><input id="jp" value="' + esc(j.pay || '') + '"></div><div><label>Closes</label><input id="jc" type="date" value="' + esc(String(j.closes_on || '').slice(0, 10)) + '"></div></div>' +
+      '<label class="sub">One-line summary</label><input id="js" value="' + esc(j.summary || '') + '" style="width:100%"><label class="sub">The job</label><textarea id="jdesc" rows="5">' + esc(j.description || '') + '</textarea><label class="sub">What they need</label><textarea id="jr" rows="4">' + esc(j.requirements || '') + '</textarea>' +
+      '<h4>Documents to send</h4><p class="sub">Applicants attach these when they apply, or later from the link in their automatic reply. “Needed” ones show as missing until they arrive.</p>' +
+      '<div class="chips">' + DOC_PRESETS.map(function (p) { return '<button type="button" data-preset="' + esc(p) + '">+ ' + esc(p) + '</button>'; }).join('') + '</div>' +
+      '<div class="lines" id="jdocs">' + (j.documents || []).map(function (x) { return lineHtml('doc', x); }).join('') + '</div><button class="sm" id="addDoc">+ Document</button>' +
+      '<label style="display:flex;gap:6px;align-items:center;margin:10px 0 0"><input type="checkbox" id="jcv"' + (j.cv_required ? ' checked' : '') + '> A CV is required to apply</label>' +
+      '<h4>Questions</h4><p class="sub">Asked on the application form, so you can screen without a phone call.</p>' +
+      '<div class="lines" id="jqs">' + (j.questions || []).map(function (x) { return lineHtml('q', x); }).join('') + '</div><button class="sm" id="addQ">+ Question</button>' +
+      '<h4>Interview scorecard</h4><p class="sub">What the panel scores, 1 to 5, after each interview. Leave empty for the standard list (experience, parts knowledge, customer service, communication, reliability, teamwork).</p>' +
+      '<div class="lines" id="jsc">' + (j.scorecard || []).map(function (x) { return lineHtml('sc', x); }).join('') + '</div><button class="sm" id="addSc">+ Area to score</button>' +
+      '<h4>Interviewers</h4><p class="sub">Ticked for every interview for this job (you can change the panel each time). They see the interviews they sit on; the hiring manager also sees the applicants.</p>' + pickPeople('jiv', j.interviewer_ids) +
+      '<div class="controls" style="margin-top:12px"><div><label>Hiring manager</label><select id="jhm">' + opts(META.people, j.hiring_manager_id, '–') + '</select></div>' +
+        '<div><label>Requisition</label><select id="jreq">' + opts(reqs.filter(function (r) { return r.status === 'approved' || r.status === 'filled' || r.id === j.requisition_id; }).map(function (r) { return { id: r.id, name: '#' + r.id + ' ' + r.title + ' (' + REQ_ST[r.status] + ')' }; }), j.requisition_id, 'None') + '</select></div></div>' +
+      '<label style="display:flex;gap:6px;align-items:center;margin:14px 0 8px"><input type="checkbox" id="jo"' + (j.is_open !== false ? ' checked' : '') + '> Open (shown on the careers page)</label>' +
+      '<div class="controls"><button class="primary" id="jsave">Save</button><button id="jx">Cancel</button></div>');
+    function add(box, kind, x) { box.insertAdjacentHTML('beforeend', lineHtml(kind, x)); }
+    mo.addEventListener('click', function (e) { if (e.target.hasAttribute('data-x')) e.target.closest('.ln').remove(); });
+    $('#addDoc').onclick = function () { add($('#jdocs'), 'doc'); };
+    $('#addQ').onclick = function () { add($('#jqs'), 'q'); };
+    $('#addSc').onclick = function () { add($('#jsc'), 'sc'); };
+    all('[data-preset]', mo).forEach(function (b) { b.onclick = function () { add($('#jdocs'), 'doc', { label: b.getAttribute('data-preset'), required: true }); }; });
+    $('#jx').onclick = function () { close(); };
+    function lines(box, kind) {
+      return all('.ln', box).map(function (ln) {
+        var v = $('.lv', ln).value.trim();
+        if (!v) return null;
+        var o = { key: $('.lkey', ln).value, required: $('.lr', ln).checked };
+        if (kind === 'doc') o.label = v; else { o.q = v; o.kind = $('.lk', ln).value; }
+        return o;
+      }).filter(Boolean);
+    }
+    $('#jsave').onclick = function () {
+      var body = { title: $('#jt').value, kind: $('#jk').value, openings: $('#jn').value, department: $('#jd').value, location: $('#jl').value, pay: $('#jp').value, closes_on: $('#jc').value, summary: $('#js').value, description: $('#jdesc').value, requirements: $('#jr').value, is_open: $('#jo').checked,
+        documents: lines($('#jdocs'), 'doc'), questions: lines($('#jqs'), 'q'), cv_required: $('#jcv').checked,
+        scorecard: lines($('#jsc'), 'doc'), hiring_manager_id: $('#jhm').value || null, requisition_id: $('#jreq').value || null, interviewer_ids: picked('jiv') };
+      api('/api/hr/jobs' + (j.id ? '/' + j.id : ''), j.id ? 'PUT' : 'POST', body).then(function () { close(); toast('Saved'); loadJobs(); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  // ---------------------------------------------------------- applicants --
+  function loadBoard() {
+    return api('/api/hr/applications' + ($('#jobF').value ? '?job=' + $('#jobF').value : '')).then(function (d) { apps = d.applications; drawApps(d.stages); });
+  }
+  function shown() {
+    var q = $('#q').value.trim().toLowerCase();
+    return apps.filter(function (a) { return !q || [a.name, a.email, a.phone, a.ref, a.job].join(' ').toLowerCase().indexOf(q) >= 0; });
+  }
+  function badges(a) {
+    return (a.has_cv ? ' · CV' : '') + (a.docs ? ' · ' + a.docs + ' doc' + (a.docs > 1 ? 's' : '') : '') + (a.notes ? ' · ' + a.notes + ' note' + (a.notes > 1 ? 's' : '') : '') +
+      (a.docs_missing ? ' <span class="pill warn">' + a.docs_missing + ' doc' + (a.docs_missing > 1 ? 's' : '') + ' missing</span>' : '');
+  }
+  function drawApps(stages) {
+    stages = stages || Object.keys(STAGE);
+    var list = shown();
+    if ($('#view').value === 'list') {
+      $('#board').innerHTML = list.length ? '<div class="scroll"><table><thead><tr><th>Applicant</th><th>Ref</th><th>Job</th><th>Stage</th><th>Applied</th><th>Files</th><th>Rating</th></tr></thead><tbody>' + list.map(function (a) {
+        return '<tr class="row" data-a="' + a.id + '"><td><b>' + esc(a.name) + '</b><br><small>' + esc(a.email) + ' · ' + esc(a.phone) + '</small></td><td>' + esc(a.ref || '') + '</td><td>' + esc(a.job || '') + '</td><td>' + esc(STAGE[a.stage]) +
+          (a.interview_at ? '<br><small>' + esc(when(a.interview_at)) + '</small>' : '') + '</td><td>' + esc(day(a.created_at)) + '</td><td><small>' + badges(a).replace(/^ · /, '') + '</small></td><td>' + (a.rating ? '★'.repeat(a.rating) : '') + '</td></tr>';
+      }).join('') + '</tbody></table></div>' : '<div class="empty">No applicants' + ($('#q').value ? ' match' : ' yet') + '.</div>';
+    } else {
+      $('#board').innerHTML = '<div class="board">' + stages.map(function (s) {
+        var col = list.filter(function (a) { return a.stage === s; });
+        return '<div class="col"><h3>' + STAGE[s] + ' (' + col.length + ')</h3>' + col.map(function (a) {
+          return '<div class="app" data-a="' + a.id + '"><b>' + esc(a.name) + '</b>' + (a.rating ? ' ' + '★'.repeat(a.rating) : '') + '<br><small>' + esc(a.ref || '') + ' · ' + esc(a.job || '') + '<br>' + esc(day(a.created_at)) + badges(a) + (a.interview_at ? '<br>interview ' + esc(when(a.interview_at)) : '') + '</small></div>';
+        }).join('') + '</div>';
+      }).join('') + '</div>';
+    }
+    all('[data-a]').forEach(function (el) { el.onclick = function () { openApp(el.getAttribute('data-a')); }; });
+  }
+  function exportCsv() {
+    var rows = [['Reference', 'Name', 'Email', 'Phone', 'Parish', 'Job', 'Stage', 'Applied', 'Interview', 'Rating', 'CV', 'Documents', 'Documents missing']].concat(shown().map(function (a) {
+      return [a.ref, a.name, a.email, a.phone, a.parish, a.job, STAGE[a.stage], day(a.created_at), when(a.interview_at), a.rating || '', a.has_cv ? 'yes' : 'no', a.docs, a.docs_missing];
+    }));
+    var csv = rows.map(function (r) { return r.map(function (v) { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(','); }).join('\r\n');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
+    a.download = 'applicants-' + new Date().toISOString().slice(0, 10) + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  function openApp(id) {
+    api('/api/hr/applications/' + id).then(function (d) {
+      var a = d.application;
+      var answers = Array.isArray(a.answers) ? a.answers : [];
+      var mo = modal('<h2>' + esc(a.name) + ' <span class="pill">' + esc(STAGE[a.stage]) + '</span></h2><p class="sub">' + esc(a.ref || '') + ' · ' + esc(a.job || '') + ' · applied ' + esc(day(a.created_at)) + ' · kept until ' + esc(day(a.retain_until)) + '</p>' +
+        '<p>' + esc(a.email) + ' · <a href="tel:' + esc(a.phone) + '">' + esc(a.phone) + '</a>' + (a.parish ? ' · ' + esc(a.parish) : '') + ' <button class="sm" id="amail">✉ Email</button></p>' +
+        (answers.length ? '<h4>Answers</h4>' + answers.map(function (x) { return '<div class="qa"><b>' + esc(x.q) + '</b>' + esc(x.a || '—') + '</div>'; }).join('') : '') +
+        (a.cover ? '<h4>In their words</h4><div class="pre">' + esc(a.cover) + '</div>' : '') +
+        '<h4>CV and documents</h4><div class="docs">' +
+          (a.cv_name ? '<div><span>CV</span><a href="/api/hr/applications/' + a.id + '/cv" target="_blank" rel="noopener">' + esc(a.cv_name) + '</a></div>' : '<div><span class="sub">No CV.</span></div>') +
+          d.documents.map(function (x) {
+            return '<div><span>' + esc(x.label) + ' <small class="sub">' + esc(day(x.uploaded_at)) + (x.via === 'applicant' ? ' · added by them later' : x.via === 'staff' ? ' · added by staff' : '') + '</small></span>' +
+              '<a href="/api/hr/applications/' + a.id + '/documents/' + x.id + '" target="_blank" rel="noopener">' + esc(x.orig_name || 'open') + '</a><button class="sm" data-rmdoc="' + x.id + '" title="Remove">✕</button></div>';
+          }).join('') + '</div>' +
+        '<p class="sub">Opening a file is recorded.</p>' +
+        (d.missing.length ? '<div class="warn"><b>Still needed:</b> ' + esc(d.missing.join(', ')) + ' <button class="sm" id="askDocs">Ask for them</button></div>' : '') +
+        '<div class="controls"><div><label>Add a paper document (scan or photo)</label><input type="text" id="sdLabel" placeholder="What it is"></div><div><input type="file" id="sdFile" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"></div><button class="sm" id="sdGo">Upload</button></div>' +
+        pipelineHtml(a, d) +
+        '<h4>Progress</h4>' +
+        '<div class="controls">' + (a.stage !== 'hired' ? '<div><label>Stage</label><select id="ast">' + Object.keys(STAGE).filter(function (s) { return s !== 'hired'; }).map(function (s) { return '<option value="' + s + '"' + (a.stage === s ? ' selected' : '') + '>' + STAGE[s] + '</option>'; }).join('') + '</select></div>' : '') +
+        '<div><label>Rating</label><select id="art"><option value="">–</option>' + [1, 2, 3, 4, 5].map(function (r) { return '<option' + (a.rating === r ? ' selected' : '') + '>' + r + '</option>'; }).join('') + '</select></div>' +
+        '<div><label>Interview</label><input id="aiv" type="datetime-local" value="' + (a.interview_at ? localInput(a.interview_at) : '') + '"></div></div>' +
+        '<label class="sub">Add a note</label><textarea id="ano" rows="2"></textarea>' +
+        '<div class="controls" style="margin-top:8px"><button class="primary" id="asave">Save</button>' + (a.stage !== 'hired' ? '<button id="ahire">Hire</button>' : '') + '<button id="adel">Delete applicant</button><button id="ax">Close</button></div>' +
+        '<h4>History</h4>' + (d.notes.length ? d.notes.map(function (n) { return '<p class="sub"><b>' + esc(when(n.at)) + '</b> ' + esc(n.by_name || (n.kind === 'email' ? 'automatic' : '')) + ': ' + esc(n.note || n.kind) + '</p>'; }).join('') : '<p class="sub">Nothing yet.</p>'));
+      $('#ax').onclick = function () { close(); };
+      if (d.role === 'manager') return managerView(mo, a);
+      wirePipeline(mo, a, d);
+      $('#amail').onclick = function () { compose(a, 'blank'); };
+      if ($('#askDocs')) $('#askDocs').onclick = function () { compose(a, 'docs'); };
+      all('[data-rmdoc]', mo).forEach(function (b) { b.onclick = function () {
+        if (!confirm('Remove this document? The file is deleted.')) return;
+        api('/api/hr/applications/' + a.id + '/documents/' + b.getAttribute('data-rmdoc'), 'DELETE').then(function () { toast('Removed'); openApp(a.id); loadBoard(); }).catch(function (e) { toast(e.message); });
+      }; });
+      $('#sdGo').onclick = function () {
+        var f = $('#sdFile').files[0];
+        if (!f) return toast('Choose a file first');
+        if (f.size > 5 * 1024 * 1024) return toast('The file must be 5 MB or smaller');
+        var fd = new FormData(); fd.append('label', $('#sdLabel').value.trim() || 'Document handed in'); fd.append('doc_other', f);
+        api('/api/hr/applications/' + a.id + '/documents', 'POST', fd).then(function () { toast('Uploaded'); openApp(a.id); loadBoard(); }).catch(function (e) { toast(e.message); });
+      };
+      $('#asave').onclick = function () {
+        // Sent as an exact moment, so the server's time zone cannot shift it.
+        var body = { rating: $('#art').value, interview_at: $('#aiv').value ? new Date($('#aiv').value).toISOString() : null, note: $('#ano').value };
+        var to = $('#ast') ? $('#ast').value : a.stage;
+        if ($('#ast')) body.stage = to;
+        // Not taken forward: the reason is kept for the record (not sent to them).
+        if (to === 'rejected' && a.stage !== 'rejected') {
+          body.reason = prompt('Why is ' + a.name + ' not taken forward? (kept on file, not sent to them)', '');
+          if (!body.reason) return toast('Give a reason to reject');
+        }
+        api('/api/hr/applications/' + a.id, 'PATCH', body).then(function () {
+          toast('Saved'); loadBoard(); loadJobs();
+          // A stage worth telling them about: offer the email, written from its template.
+          if (to !== a.stage && STAGE_MAIL[to] && a.email) compose(a, STAGE_MAIL[to], true);
+          else close();
+        }).catch(function (e) { toast(e.message); });
+      };
+      if ($('#ahire')) $('#ahire').onclick = function () {
+        if (!confirm('Hire ' + a.name + '? A staff login is made for them, switched off until you set it up on the Staff screen.')) return;
+        api('/api/hr/applications/' + a.id + '/hire', 'POST').then(function (r) {
+          close(); loadBoard(); loadJobs(); loadReqs();
+          if (confirm('Hired. ' + r.next + '\n\nOpen their HR file now?')) location.href = '/people.html#staff=' + r.user_id;
+        }).catch(function (e) { toast(e.message); });
+      };
+      $('#adel').onclick = function () {
+        if (!confirm('Delete this applicant\'s details, CV and documents now? This cannot be undone.')) return;
+        api('/api/hr/applications/' + a.id, 'DELETE').then(function () { toast('Deleted'); close(); loadBoard(); loadJobs(); }).catch(function (e) { toast(e.message); });
+      };
+    }).catch(function (e) { toast(e.message); });
+  }
+  // The email composer: a template filled in for this applicant, to edit and send.
+  function compose(a, kind, afterStage) {
+    api('/api/hr/applications/' + a.id + '/email-draft?kind=' + kind).then(function (d) {
+      modal('<h2>' + (afterStage ? 'Tell ' + esc(a.name.split(' ')[0]) + '?' : 'Email ' + esc(a.name)) + '</h2>' +
+        (d.mail_on ? '' : '<div class="warn">Email is not set up on this till, so this is recorded on the application but does not leave. Ask whoever runs the server to set SMTP up.</div>') +
+        '<p class="sub">To ' + esc(d.to) + '. Edit before sending.</p>' +
+        '<label class="sub">Subject</label><input id="emS" value="' + esc(d.subject) + '" style="width:100%">' +
+        '<label class="sub">Message</label><textarea id="emB" rows="13">' + esc(d.body) + '</textarea>' +
+        '<div class="controls" style="margin-top:8px"><button class="primary" id="emGo">Send</button><button id="emX">' + (afterStage ? 'Don’t email' : 'Cancel') + '</button></div>', 2);
+      $('#emX').onclick = function () { close(2); if (afterStage) close(); };
+      $('#emGo').onclick = function () {
+        this.disabled = true;
+        api('/api/hr/applications/' + a.id + '/email', 'POST', { subject: $('#emS').value, body: $('#emB').value })
+          .then(function (r) { close(2); toast(r.note); if (afterStage) close(); else openApp(a.id); })
+          .catch(function (e) { $('#emGo').disabled = false; toast(e.message); });
+      };
+    }).catch(function (e) { toast(e.message); if (afterStage) close(); });
+  }
+
+  // ------------------------------------------------------ the pipeline --
+  // Inside an application: screening, interviews and scores, references, the offer, decisions.
+  function pipelineHtml(a, d) {
+    var open = a.stage !== 'hired' && a.stage !== 'rejected';
+    var h = '<div class="sec"><h4>Screening</h4>' +
+      (a.screen_result ? '<p><span class="pill ' + (a.screen_result === 'pass' ? 'ok' : a.screen_result === 'fail' ? 'bad' : 'warn') + '">' + SCREEN[a.screen_result] + '</span> ' + esc(a.screen_notes || '') + ' <small class="sub">' + esc(day(a.screened_at)) + '</small></p>' : '<p class="sub">Not screened yet.</p>') +
+      (open ? '<div class="controls"><div><label>Result</label><select id="scR"><option value="">–</option>' + Object.keys(SCREEN).map(function (k) { return '<option value="' + k + '"' + (a.screen_result === k ? ' selected' : '') + '>' + SCREEN[k] + '</option>'; }).join('') + '</select></div>' +
+        '<div style="flex:1;min-width:200px"><label>Why (what you saw in the application and answers)</label><input id="scN" value="' + esc(a.screen_notes || '') + '" style="width:100%"></div>' +
+        '<button class="sm" id="scSave">Save screening</button><button class="sm" id="scShort">Pass and shortlist</button></div>' : '') + '</div>';
+    // Interviews
+    h += '<div class="sec"><h4>Interviews ' + (open ? '<button class="sm" id="ivNew">+ Book an interview</button>' : '') + '</h4>' +
+      (d.interviews.length ? d.interviews.map(function (iv) {
+        var panel = (iv.panel || []).map(function (p) { return esc(p.name) + (p.scored ? ' ✓' : ''); }).join(', ');
+        return '<div class="docs"><div><span><b>Round ' + iv.round + '</b> · ' + esc(when(iv.starts_at)) + ' · ' + esc(MODE[iv.mode]) + (iv.location ? ' · ' + esc(iv.location) : '') +
+          ' <span class="pill' + (iv.status === 'done' ? ' ok' : iv.status === 'cancelled' || iv.status === 'no_show' ? ' bad' : '') + '">' + esc(iv.status.replace('_', ' ')) + '</span><br><small class="sub">Panel: ' + panel + ' (✓ scored)</small></span>' +
+          '<button class="sm" data-ivscore="' + iv.id + '">Scorecard</button>' + (iv.status === 'scheduled' ? '<button class="sm" data-ived="' + iv.id + '">Change</button>' : '') + '</div></div>';
+      }).join('') : '<p class="sub">None booked. Booking puts it on the staff calendar for the panel and tells them.</p>');
+    if (d.scores.length) {
+      h += '<div class="scroll"><table><thead><tr><th>Scored by</th><th>Round</th><th>Overall</th><th>Hire?</th><th>Strengths / concerns</th></tr></thead><tbody>' + d.scores.map(function (s) {
+        return '<tr><td>' + esc(s.by_name) + '</td><td>' + s.round + '</td><td>' + (s.overall ? s.overall + '/5' : '') + '</td><td>' + esc(RECO[s.recommend] || '') + '</td><td><small>' + esc([s.strengths, s.concerns].filter(Boolean).join(' · ')) +
+          '<br>' + (s.scores || []).filter(function (x) { return x.score; }).map(function (x) { return esc(x.label) + ' ' + x.score; }).join(', ') + '</small></td></tr>';
+      }).join('') + '</tbody></table></div>';
+    }
+    h += '</div>';
+    // References
+    h += '<div class="sec"><h4>References ' + (open ? '<button class="sm" id="rfNew">+ Referee</button>' : '') + '</h4>' +
+      (d.references.length ? '<div class="docs">' + d.references.map(function (r) {
+        return '<div><span><b>' + esc(r.referee_name) + '</b>' + (r.relationship ? ' (' + esc(r.relationship) + ')' : '') + (r.company ? ', ' + esc(r.company) : '') + ' <span class="pill' + (r.status === 'done' ? (r.rating === 'poor' ? ' bad' : ' ok') : '') + '">' + esc(r.status) + (r.rating ? ': ' + esc(r.rating) : '') + '</span>' +
+          '<br><small class="sub">' + esc([r.phone, r.email].filter(Boolean).join(' · ')) + (r.summary ? ' — ' + esc(r.summary) : '') + '</small></span>' +
+          (r.email && r.status !== 'done' ? '<button class="sm" data-rfmail="' + r.id + '">✉ Ask</button>' : '') + '<button class="sm" data-rfed="' + r.id + '">' + (r.status === 'done' ? 'Edit' : 'Record answer') + '</button></div>';
+      }).join('') + '</div>' : '<p class="sub">No referees yet. Add the ones they gave you; email them or phone, then record what they said.</p>') + '</div>';
+    // Offer
+    var live = d.offers.filter(function (o) { return o.status !== 'withdrawn' && o.status !== 'declined'; })[0];
+    h += '<div class="sec"><h4>Offer ' + (open && !live ? '<button class="sm" id="ofNew">+ Make an offer</button>' : '') + '</h4>' +
+      (d.offers.length ? d.offers.map(function (o) {
+        var st = o.status;
+        return '<div class="docs"><div><span><b>' + esc(o.job_title) + '</b> · ' + (o.pay_type === 'hourly' ? jmd(o.hourly_rate) + ' an hour' : jmd(o.salary_annual) + ' a year') + ' · starts ' + esc(day(o.start_date)) +
+          ' <span class="pill' + (st === 'accepted' ? ' ok' : st === 'declined' || st === 'withdrawn' ? ' bad' : ' warn') + '">' + esc(OFFER_ST[st]) + '</span>' +
+          '<br><small class="sub">' + esc([o.department, o.manager ? 'reports to ' + o.manager : '', CONTRACT[o.contract_type], o.approved_by_name ? 'approved by ' + o.approved_by_name : '', o.response_note, o.document_number ? 'filed ' + o.document_number : ''].filter(Boolean).join(' · ')) + '</small></span>' +
+          '<a href="/api/hr/offers/' + o.id + '/letter" target="_blank" rel="noopener">Letter</a>' +
+          (st === 'draft' ? '<button class="sm" data-ofed="' + o.id + '">Edit</button><button class="sm" data-ofsub="' + o.id + '">Send for approval</button>' : '') +
+          (st === 'pending_approval' && META.can_approve ? '<button class="sm primary" data-ofok="' + o.id + '">Approve</button><button class="sm" data-ofback="' + o.id + '">Send back</button>' : '') +
+          (st === 'approved' || st === 'sent' ? '<button class="sm' + (st === 'approved' ? ' primary' : '') + '" data-ofsend="' + o.id + '">' + (st === 'sent' ? 'Send again' : '✉ Send to them') + '</button><button class="sm" data-ofans="' + o.id + '">Record their answer</button>' : '') +
+          (['draft', 'pending_approval', 'approved', 'sent', 'accepted'].indexOf(st) >= 0 && a.stage !== 'hired' ? '<button class="sm" data-ofwd="' + o.id + '">Withdraw</button>' : '') + '</div></div>';
+      }).join('') : '<p class="sub">No offer yet. An offer is approved before it is sent; the candidate accepts on a private page by typing their name. Hire comes after they accept.</p>') + '</div>';
+    if (d.decisions.length) h += '<details class="sec"><summary><b>Decisions (' + d.decisions.length + ')</b></summary>' + d.decisions.map(function (x) { return '<p class="sub"><b>' + esc(when(x.at)) + '</b> ' + esc(x.by_name || 'candidate') + ': ' + esc(x.action) + (x.detail ? ' — ' + esc(x.detail) : '') + '</p>'; }).join('') + '</details>';
+    return h;
+  }
+  function wirePipeline(mo, a, d) {
+    var re = function (msg) { toast(msg); openApp(a.id); loadBoard(); };
+    var fail = function (e) { toast(e.message); };
+    function screen(stage) {
+      var body = { screen_result: $('#scR').value || (stage ? 'pass' : ''), screen_notes: $('#scN').value };
+      if (stage) body.stage = stage;
+      api('/api/hr/applications/' + a.id, 'PATCH', body).then(function () { re(stage ? 'Shortlisted' : 'Screening saved'); }).catch(fail);
+    }
+    if ($('#scSave')) $('#scSave').onclick = function () { screen(null); };
+    if ($('#scShort')) $('#scShort').onclick = function () { screen('shortlist'); };
+    if ($('#ivNew')) $('#ivNew').onclick = function () { interviewForm(a, null, d.interviews.length + 1); };
+    all('[data-ived]', mo).forEach(function (b) { b.onclick = function () { interviewForm(a, d.interviews.filter(function (x) { return String(x.id) === b.getAttribute('data-ived'); })[0]); }; });
+    all('[data-ivscore]', mo).forEach(function (b) { b.onclick = function () { scoreForm(b.getAttribute('data-ivscore'), function () { openApp(a.id); }); }; });
+    if ($('#rfNew')) $('#rfNew').onclick = function () { refForm(a, null); };
+    all('[data-rfed]', mo).forEach(function (b) { b.onclick = function () { refForm(a, d.references.filter(function (x) { return String(x.id) === b.getAttribute('data-rfed'); })[0]); }; });
+    all('[data-rfmail]', mo).forEach(function (b) { b.onclick = function () { refMail(a, b.getAttribute('data-rfmail')); }; });
+    if ($('#ofNew')) $('#ofNew').onclick = function () { offerForm(a, null); };
+    var offer = function (b, k) { return d.offers.filter(function (o) { return String(o.id) === b.getAttribute(k); })[0]; };
+    all('[data-ofed]', mo).forEach(function (b) { b.onclick = function () { offerForm(a, offer(b, 'data-ofed')); }; });
+    all('[data-ofsub]', mo).forEach(function (b) { b.onclick = function () { api('/api/hr/offers/' + b.getAttribute('data-ofsub') + '/submit', 'POST').then(function () { re('Sent for approval'); }).catch(fail); }; });
+    all('[data-ofok]', mo).forEach(function (b) { b.onclick = function () { api('/api/hr/offers/' + b.getAttribute('data-ofok') + '/decide', 'POST', { decision: 'approve', note: prompt('Approval note (optional)', '') || '' }).then(function () { re('Offer approved'); }).catch(fail); }; });
+    all('[data-ofback]', mo).forEach(function (b) { b.onclick = function () { var n = prompt('What needs changing?', ''); if (!n) return; api('/api/hr/offers/' + b.getAttribute('data-ofback') + '/decide', 'POST', { decision: 'reject', note: n }).then(function () { re('Sent back'); }).catch(fail); }; });
+    all('[data-ofsend]', mo).forEach(function (b) { b.onclick = function () { offerSend(a, b.getAttribute('data-ofsend')); }; });
+    all('[data-ofans]', mo).forEach(function (b) { b.onclick = function () {
+      var yes = confirm('Did ' + a.name + ' ACCEPT the offer?\n\nOK = accepted, Cancel = declined or not sure');
+      var n = prompt(yes ? 'How did they accept? (e.g. signed the letter in the office on Monday)' : 'If they declined, what did they say? (leave empty to cancel)', '');
+      if (!n) return;
+      api('/api/hr/offers/' + b.getAttribute('data-ofans') + '/response', 'POST', { decision: yes ? 'accept' : 'decline', note: n }).then(function () { re(yes ? 'Acceptance recorded' : 'Recorded as declined'); }).catch(fail);
+    }; });
+    all('[data-ofwd]', mo).forEach(function (b) { b.onclick = function () { var n = prompt('Why is the offer withdrawn?', ''); if (!n) return; api('/api/hr/offers/' + b.getAttribute('data-ofwd') + '/withdraw', 'POST', { reason: n }).then(function () { re('Offer withdrawn'); }).catch(fail); }; });
+  }
+  function interviewForm(a, iv, round) {
+    var job = jobs.filter(function (x) { return x.id === a.job_id; })[0] || {};
+    var dflt = (job.interviewer_ids || []).concat(job.hiring_manager_id ? [job.hiring_manager_id] : []).map(function (u) { return { id: u }; });
+    var cur = iv || { round: round || 1, minutes: 45, mode: 'in_person', location: 'Morty\'s Auto Parts, 51 Red Hills Road', panel: dflt };
+    var on = (cur.panel || []).map(function (p) { return String(p.id); });
+    modal('<h2>' + (iv ? 'Change the interview' : 'Book an interview') + ': ' + esc(a.name) + '</h2>' +
+      '<div class="controls"><div><label>When</label><input id="ivAt" type="datetime-local" value="' + (cur.starts_at ? localInput(cur.starts_at) : '') + '"></div>' +
+      '<div><label>Minutes</label><input id="ivMin" type="number" min="10" max="480" value="' + cur.minutes + '" style="width:90px"></div>' +
+      '<div><label>How</label><select id="ivMode">' + Object.keys(MODE).map(function (k) { return '<option value="' + k + '"' + (cur.mode === k ? ' selected' : '') + '>' + MODE[k] + '</option>'; }).join('') + '</select></div>' +
+      '<div><label>Round</label><input id="ivRound" type="number" min="1" max="9" value="' + cur.round + '" style="width:70px"></div></div>' +
+      '<label class="sub">Where (or the phone number / video link)</label><input id="ivLoc" value="' + esc(cur.location || '') + '" style="width:100%">' +
+      '<h4>Panel</h4><p class="sub">They get it on their staff calendar with a reminder, and a notice. Each one fills in a scorecard afterwards.</p>' +
+      '<div class="chips">' + META.people.map(function (p) { return '<label style="display:flex;gap:4px;align-items:center;font-size:13px"><input type="checkbox" class="ivP" value="' + p.id + '"' + (on.indexOf(String(p.id)) >= 0 ? ' checked' : '') + '> ' + esc(p.name) + '</label>'; }).join(' ') + '</div>' +
+      '<label class="sub">Notes for the panel</label><textarea id="ivNotes" rows="2">' + esc(cur.notes || '') + '</textarea>' +
+      '<div class="controls" style="margin-top:8px"><button class="primary" id="ivGo">' + (iv ? 'Save' : 'Book it') + '</button>' + (iv ? '<button id="ivCancel">Cancel the interview</button><button id="ivNo">Did not come</button>' : '') + '<button id="ivX">Close</button></div>', 2);
+    $('#ivX').onclick = function () { close(2); };
+    function save(extra) {
+      if (!$('#ivAt').value) return toast('Choose when');
+      var body = Object.assign({ starts_at: new Date($('#ivAt').value).toISOString(), minutes: $('#ivMin').value, mode: $('#ivMode').value, round: $('#ivRound').value, location: $('#ivLoc').value, notes: $('#ivNotes').value,
+        panel: all('.ivP').filter(function (c) { return c.checked; }).map(function (c) { return +c.value; }) }, extra || {});
+      api(iv ? '/api/hr/interviews/' + iv.id : '/api/hr/applications/' + a.id + '/interviews', iv ? 'PATCH' : 'POST', body).then(function () {
+        close(2); toast(iv ? 'Interview updated; the panel is told' : 'Booked and on the panel’s calendar'); openApp(a.id); loadBoard();
+        // Tell the candidate, from the interview template.
+        if (!extra && a.email && confirm('Email ' + a.name + ' the interview details?')) setTimeout(function () { compose(a, 'interview'); }, 300);
+      }).catch(function (e) { toast(e.message); });
+    }
+    $('#ivGo').onclick = function () { save(null); };
+    if ($('#ivCancel')) $('#ivCancel').onclick = function () { if (confirm('Cancel this interview? The panel is told.')) save({ status: 'cancelled' }); };
+    if ($('#ivNo')) $('#ivNo').onclick = function () { save({ status: 'no_show' }); };
+  }
+  // The scorecard: one per panel member per interview.
+  function scoreForm(ivId, after) {
+    api('/api/hr/interviews/' + ivId).then(function (d) {
+      var c = d.candidate, mine = d.my_score || {}, given = {};
+      (mine.scores || []).forEach(function (x) { given[x.key] = x; });
+      var mo = modal('<h2>Scorecard: ' + esc(c.name) + '</h2><p class="sub">' + esc(c.job || '') + ' · round ' + d.interview.round + ' · ' + esc(when(d.interview.starts_at)) + '. Score each area from 1 (poor) to 5 (excellent). Your scores are seen by the hiring team only.</p>' +
+        ((c.answers || []).length ? '<details><summary>Their answers on the application</summary>' + c.answers.map(function (x) { return '<div class="qa"><b>' + esc(x.q) + '</b>' + esc(x.a || '—') + '</div>'; }).join('') + '</details>' : '') +
+        (c.screen_notes ? '<p class="sub">Screening: ' + esc(c.screen_notes) + '</p>' : '') +
+        d.criteria.map(function (k) {
+          var g = given[k.key] || {};
+          return '<div class="sec" data-k="' + esc(k.key) + '"><b>' + esc(k.label) + '</b><div class="stars">' + [1, 2, 3, 4, 5].map(function (n) { return '<button type="button" data-s="' + n + '"' + (g.score === n ? ' class="on"' : '') + '>' + n + '</button>'; }).join('') + '</div>' +
+            '<input class="kc" placeholder="Comment (optional)" value="' + esc(g.comment || '') + '" style="width:100%;margin-top:4px"></div>';
+        }).join('') +
+        '<h4>Would you hire them?</h4><div class="stars" id="reco">' + Object.keys(RECO).map(function (k) { return '<button type="button" data-r="' + k + '"' + (mine.recommend === k ? ' class="on"' : '') + '>' + RECO[k] + '</button>'; }).join('') + '</div>' +
+        '<label class="sub">Strengths</label><textarea id="scS" rows="2">' + esc(mine.strengths || '') + '</textarea><label class="sub">Concerns</label><textarea id="scC" rows="2">' + esc(mine.concerns || '') + '</textarea>' +
+        '<div class="controls" style="margin-top:8px"><button class="primary" id="scGo">' + (d.my_score ? 'Update my scorecard' : 'Submit my scorecard') + '</button><button id="scX">Close</button></div>', 2);
+      all('.stars button', mo).forEach(function (b) { b.onclick = function () { all('button', b.parentNode).forEach(function (x) { x.classList.toggle('on', x === b); }); }; });
+      $('#scX').onclick = function () { close(2); };
+      $('#scGo').onclick = function () {
+        var rec = $('#reco .on');
+        var body = { scores: all('[data-k]', mo).map(function (el) { var on = $('.stars .on', el); return { key: el.getAttribute('data-k'), score: on ? +on.getAttribute('data-s') : null, comment: $('.kc', el).value }; }),
+          recommend: rec ? rec.getAttribute('data-r') : null, strengths: $('#scS').value, concerns: $('#scC').value };
+        api('/api/hr/interviews/' + ivId + '/score', 'POST', body).then(function (r) { close(2); toast('Scorecard saved (' + r.overall + '/5)'); if (after) after(); loadMine(); }).catch(function (e) { toast(e.message); });
+      };
+    }).catch(function (e) { toast(e.message); });
+  }
+  function refForm(a, r) {
+    r = r || { status: 'pending' };
+    modal('<h2>' + (r.id ? 'Reference: ' + esc(r.referee_name) : 'Add a referee') + '</h2>' +
+      '<div class="controls"><div><label>Name</label><input id="rfN" value="' + esc(r.referee_name || '') + '"></div><div><label>How they know them</label><input id="rfRel" value="' + esc(r.relationship || '') + '" placeholder="e.g. former supervisor"></div><div><label>Company</label><input id="rfCo" value="' + esc(r.company || '') + '"></div></div>' +
+      '<div class="controls"><div><label>Phone</label><input id="rfP" value="' + esc(r.phone || '') + '"></div><div><label>Email</label><input id="rfE" type="email" value="' + esc(r.email || '') + '"></div></div>' +
+      (r.id ? '<h4>What they said</h4><div class="controls"><div><label>Status</label><select id="rfSt">' + ['pending', 'asked', 'done', 'unreachable'].map(function (s) { return '<option' + (r.status === s ? ' selected' : '') + '>' + s + '</option>'; }).join('') + '</select></div>' +
+        '<div><label>Overall</label><select id="rfRt"><option value="">–</option>' + ['good', 'mixed', 'poor'].map(function (s) { return '<option' + (r.rating === s ? ' selected' : '') + '>' + s + '</option>'; }).join('') + '</select></div>' +
+        '<div><label>Would employ again</label><select id="rfRh"><option value="">–</option><option value="yes"' + (r.would_rehire === true ? ' selected' : '') + '>Yes</option><option value="no"' + (r.would_rehire === false ? ' selected' : '') + '>No</option></select></div></div>' +
+        '<textarea id="rfSum" rows="4" placeholder="Their answers: how long, what work, reliability and honesty, would they employ them again">' + esc(r.summary || '') + '</textarea>' : '') +
+      '<div class="controls" style="margin-top:8px"><button class="primary" id="rfGo">Save</button>' + (r.id ? '<button id="rfDel">Remove</button>' : '') + '<button id="rfX">Close</button></div>', 2);
+    $('#rfX').onclick = function () { close(2); };
+    $('#rfGo').onclick = function () {
+      var body = { referee_name: $('#rfN').value, relationship: $('#rfRel').value, company: $('#rfCo').value, phone: $('#rfP').value, email: $('#rfE').value };
+      if (r.id) Object.assign(body, { status: $('#rfSt').value, rating: $('#rfRt').value, summary: $('#rfSum').value, would_rehire: $('#rfRh').value ? $('#rfRh').value === 'yes' : null });
+      api(r.id ? '/api/hr/references/' + r.id : '/api/hr/applications/' + a.id + '/references', r.id ? 'PATCH' : 'POST', body).then(function () { close(2); toast('Saved'); openApp(a.id); }).catch(function (e) { toast(e.message); });
+    };
+    if ($('#rfDel')) $('#rfDel').onclick = function () { if (confirm('Remove this referee?')) api('/api/hr/references/' + r.id, 'DELETE').then(function () { close(2); openApp(a.id); }).catch(function (e) { toast(e.message); }); };
+  }
+  function refMail(a, rid) {
+    api('/api/hr/references/' + rid + '/email-draft').then(function (d) {
+      modal('<h2>Ask for a reference</h2>' + (d.mail_on ? '' : '<div class="warn">Email is not set up on this till, so this is recorded but does not leave. Phone the referee instead.</div>') +
+        '<p class="sub">To ' + esc(d.to) + '</p><label class="sub">Subject</label><input id="emS" value="' + esc(d.subject) + '" style="width:100%"><label class="sub">Message</label><textarea id="emB" rows="12">' + esc(d.body) + '</textarea>' +
+        '<div class="controls" style="margin-top:8px"><button class="primary" id="emGo">Send</button><button id="emX">Cancel</button></div>', 2);
+      $('#emX').onclick = function () { close(2); };
+      $('#emGo').onclick = function () { api('/api/hr/references/' + rid + '/email', 'POST', { subject: $('#emS').value, body: $('#emB').value }).then(function (r) { close(2); toast(r.note); openApp(a.id); }).catch(function (e) { toast(e.message); }); };
+    }).catch(function (e) { toast(e.message); });
+  }
+  function offerForm(a, o) {
+    var j = jobs.filter(function (x) { return x.id === a.job_id; })[0] || {};
+    o = o || { job_title: a.job || j.title, contract_type: 'permanent', pay_type: 'salary', frequency: 'monthly', probation_months: 3, manager_user_id: j.hiring_manager_id, hours: 'Monday to Saturday, 8:00 a.m. to 5:00 p.m., with a one-hour lunch' };
+    modal('<h2>' + (o.id ? 'Change the offer' : 'Make an offer') + ': ' + esc(a.name) + '</h2><p class="sub">Saved as a draft. Someone who may approve offers approves it before it is sent.</p>' +
+      '<div class="controls"><div style="flex:1;min-width:180px"><label>Job title</label><input id="ofT" value="' + esc(o.job_title || '') + '" style="width:100%"></div><div><label>Department</label><select id="ofD">' + opts(META.departments, o.department_id, '–') + '</select></div><div><label>Reports to</label><select id="ofM">' + opts(META.people, o.manager_user_id, '–') + '</select></div></div>' +
+      '<div class="controls"><div><label>Start date</label><input id="ofS" type="date" value="' + esc(o.start_date || '') + '"></div><div><label>Contract</label><select id="ofC">' + Object.keys(CONTRACT).map(function (k) { return '<option value="' + k + '"' + (o.contract_type === k ? ' selected' : '') + '>' + CONTRACT[k] + '</option>'; }).join('') + '</select></div>' +
+        '<div><label>Ends (fixed term)</label><input id="ofE" type="date" value="' + esc(o.contract_end || '') + '"></div><div><label>Probation (months)</label><input id="ofPm" type="number" min="0" max="12" value="' + o.probation_months + '" style="width:80px"></div></div>' +
+      '<div class="controls"><div><label>Paid</label><select id="ofPt"><option value="salary"' + (o.pay_type === 'salary' ? ' selected' : '') + '>Salary</option><option value="hourly"' + (o.pay_type === 'hourly' ? ' selected' : '') + '>By the hour</option></select></div>' +
+        '<div><label>Yearly salary (J$)</label><input id="ofSal" inputmode="decimal" value="' + esc(o.salary_annual || '') + '"></div><div><label>Hourly rate (J$)</label><input id="ofHr" inputmode="decimal" value="' + esc(o.hourly_rate || '') + '"></div>' +
+        '<div><label>Pay day</label><select id="ofF">' + ['weekly', 'fortnightly', 'monthly'].map(function (k) { return '<option' + (o.frequency === k ? ' selected' : '') + '>' + k + '</option>'; }).join('') + '</select></div><div><label>Answer by</label><input id="ofRb" type="date" value="' + esc(o.respond_by || '') + '"></div></div>' +
+      '<label class="sub">Hours</label><input id="ofH" value="' + esc(o.hours || '') + '" style="width:100%"><label class="sub">Benefits (lunch, uniform, health plan...)</label><textarea id="ofB" rows="2">' + esc(o.benefits || '') + '</textarea>' +
+      '<label class="sub">Other conditions</label><textarea id="ofCo" rows="3">' + esc(o.conditions || '') + '</textarea>' +
+      '<p class="sub">The letter says the pay is before PAYE, NIS, NHT and Education Tax, and that the offer depends on references and on their TRN, NIS number and photo ID.</p>' +
+      '<div class="controls"><button class="primary" id="ofSub">Save and send for approval</button><button id="ofSave">Save draft</button><button id="ofX">Close</button></div>', 2);
+    $('#ofX').onclick = function () { close(2); };
+    function save(submit) {
+      var body = { job_title: $('#ofT').value, department_id: $('#ofD').value, manager_user_id: $('#ofM').value, start_date: $('#ofS').value, contract_type: $('#ofC').value, contract_end: $('#ofE').value, probation_months: $('#ofPm').value,
+        pay_type: $('#ofPt').value, salary_annual: $('#ofSal').value, hourly_rate: $('#ofHr').value, frequency: $('#ofF').value, respond_by: $('#ofRb').value, hours: $('#ofH').value, benefits: $('#ofB').value, conditions: $('#ofCo').value, submit: submit };
+      api(o.id ? '/api/hr/offers/' + o.id : '/api/hr/applications/' + a.id + '/offers', o.id ? 'PUT' : 'POST', body).then(function () { close(2); toast(submit ? 'Sent for approval' : 'Draft saved'); openApp(a.id); loadBoard(); }).catch(function (e) { toast(e.message); });
+    }
+    $('#ofSub').onclick = function () { save(true); };
+    $('#ofSave').onclick = function () { save(false); };
+  }
+  // Sending: the offer email (from its template, editable) with the private link.
+  function offerSend(a, oid) {
+    api('/api/hr/applications/' + a.id + '/email-draft?kind=offer').then(function (d) {
+      modal('<h2>Send the offer to ' + esc(a.name) + '</h2>' + (d.mail_on ? '' : '<div class="warn">Email is not set up on this till: the offer is marked sent and the link is shown, so you can send it by WhatsApp or print the letter.</div>') +
+        '<p class="sub">To ' + esc(d.to) + '. The link to their offer letter is added below the message.</p><label class="sub">Subject</label><input id="emS" value="' + esc(d.subject) + '" style="width:100%"><label class="sub">Message</label><textarea id="emB" rows="12">' + esc(d.body.replace(/\n*Your offer letter[^\n]*\n\(the offer letter link is added when the offer is sent\)/, '').replace('(the offer letter link is added when the offer is sent)', '')) + '</textarea>' +
+        '<div class="controls" style="margin-top:8px"><button class="primary" id="emGo">Send</button><button id="emX">Cancel</button></div>', 2);
+      $('#emX').onclick = function () { close(2); };
+      $('#emGo').onclick = function () {
+        this.disabled = true;
+        api('/api/hr/offers/' + oid + '/send', 'POST', { subject: $('#emS').value, body: $('#emB').value }).then(function (r) { close(2); prompt(r.note + '\n\nTheir private offer link (to send by WhatsApp if needed):', r.link); openApp(a.id); })
+          .catch(function (e) { $('#emGo').disabled = false; toast(e.message); });
+      };
+    }).catch(function (e) { toast(e.message); });
+  }
+  // Side by side, for choosing.
+  function compare(j) {
+    api('/api/hr/jobs/' + j.id + '/compare').then(function (d) {
+      var mo = modal('<h2>Compare candidates: ' + esc(j.title) + '</h2><p class="sub">Everyone shortlisted or further, best average interview score first. “Choose” moves them on and records why.</p>' +
+        (d.candidates.length ? '<div class="scroll"><table><thead><tr><th>Candidate</th><th>Stage</th><th>Screen</th><th>Average</th>' + d.criteria.map(function (c) { return '<th>' + esc(c.label) + '</th>'; }).join('') + '<th>Hire?</th><th>References</th><th></th></tr></thead><tbody>' +
+          d.candidates.map(function (c) {
+            var rec = c.recommend || {};
+            return '<tr><td><button class="link" data-open="' + c.id + '">' + esc(c.name) + '</button><br><small>' + esc(c.ref || '') + '</small></td><td>' + esc(STAGE[c.stage]) + (c.offer ? '<br><small>offer: ' + esc(OFFER_ST[c.offer]) + '</small>' : '') + '</td><td>' + esc(SCREEN[c.screen_result] || '') + '</td>' +
+              '<td><b>' + (c.avg_overall != null ? c.avg_overall : '–') + '</b><br><small>' + c.n_scores + ' scorecard' + (c.n_scores === 1 ? '' : 's') + '</small></td>' +
+              d.criteria.map(function (k) { return '<td>' + ((c.by_area || {})[k.key] != null ? c.by_area[k.key] : '') + '</td>'; }).join('') +
+              '<td><small>' + Object.keys(RECO).filter(function (k) { return rec[k]; }).map(function (k) { return RECO[k] + ' ' + rec[k]; }).join('<br>') + '</small></td>' +
+              '<td><small>' + c.refs_done + ' of ' + c.refs + ' done' + (c.refs_poor ? ' <span class="pill bad">' + c.refs_poor + ' poor</span>' : '') + '</small></td>' +
+              '<td>' + (META.can_manage && ['shortlist', 'interview', 'references'].indexOf(c.stage) >= 0 ? '<button class="sm" data-choose="' + c.id + '">Choose</button>' : '') + '</td></tr>';
+          }).join('') + '</tbody></table></div>' : '<div class="empty">Nobody shortlisted for this job yet.</div>') +
+        '<div class="controls" style="margin-top:8px"><button id="cmX">Close</button></div>');
+      $('#cmX').onclick = function () { close(); };
+      all('[data-open]', mo).forEach(function (b) { b.onclick = function () { openApp(b.getAttribute('data-open')); }; });
+      all('[data-choose]', mo).forEach(function (b) { b.onclick = function () {
+        var why = prompt('Why this candidate? (kept as the record of the decision)', '');
+        if (!why) return;
+        var offerNow = confirm('References already checked?\n\nOK = go straight to the offer, Cancel = check references first');
+        api('/api/hr/applications/' + b.getAttribute('data-choose') + '/select', 'POST', { reason: why, to: offerNow ? 'offer' : 'references' }).then(function () { toast('Chosen'); compare(j); loadBoard(); }).catch(function (e) { toast(e.message); });
+      }; });
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // --------------------------------------------------------- requisitions --
+  var reqs = [];
+  function loadReqs() {
+    return api('/api/hr/requisitions').then(function (d) {
+      reqs = d.requisitions; META = d;
+      $('#reqCard').hidden = false;
+      var shown = reqs.filter(function (r) { return ['draft', 'submitted', 'approved', 'rejected'].indexOf(r.status) >= 0 || (r.decided_at && new Date(r.decided_at) > new Date(Date.now() - 60 * 86400000)); });
+      $('#reqs').innerHTML = shown.length ? '<div class="scroll"><table><thead><tr><th>#</th><th>Job</th><th>Why</th><th>Pay range</th><th>Asked by</th><th>Status</th><th></th></tr></thead><tbody>' + shown.map(function (r) {
+        var mine = META.can_manage;
+        return '<tr><td>' + r.id + '</td><td><b>' + esc(r.title) + '</b> × ' + r.openings + '<br><small>' + esc([r.department, r.reason === 'replacement' ? 'replaces ' + (r.replaces || 'someone') : r.reason, r.hiring_manager ? 'manager: ' + r.hiring_manager : '', r.start_by ? 'start by ' + day(r.start_by) : ''].filter(Boolean).join(' · ')) + '</small></td>' +
+          '<td><small>' + esc(r.justification || '') + '</small></td><td>' + (r.salary_min || r.salary_max ? jmd(r.salary_min) + ' – ' + jmd(r.salary_max) : '') + '</td><td>' + esc(r.requested_by_name || '') + '</td>' +
+          '<td><span class="pill' + (r.status === 'approved' || r.status === 'filled' ? ' ok' : r.status === 'submitted' ? ' warn' : r.status === 'rejected' ? ' bad' : '') + '">' + esc(REQ_ST[r.status]) + '</span>' + (r.decided_by_name ? '<br><small>' + esc(r.decided_by_name) + (r.decision_note ? ': ' + esc(r.decision_note) : '') + '</small>' : '') +
+            ((r.posts || []).length ? '<br><small>posted: ' + r.posts.map(function (p) { return esc(p.title) + (p.is_open ? ' (open)' : ''); }).join(', ') + '</small>' : '') + '</td><td style="white-space:nowrap">' +
+          (mine && (r.status === 'draft' || r.status === 'rejected') ? '<button class="sm" data-red="' + r.id + '">Edit</button><button class="sm" data-rsub="' + r.id + '">Send for approval</button>' : '') +
+          (META.can_approve && r.status === 'submitted' ? '<button class="sm primary" data-rok="' + r.id + '">Approve</button><button class="sm" data-rno="' + r.id + '">Turn down</button>' : '') +
+          (mine && r.status === 'approved' ? '<button class="sm primary" data-rpost="' + r.id + '">Post it</button>' : '') +
+          (mine && ['draft', 'submitted', 'approved', 'rejected'].indexOf(r.status) >= 0 ? '<button class="sm" data-rcan="' + r.id + '">Cancel</button>' : '') + '</td></tr>';
+      }).join('') + '</tbody></table></div>' : '<div class="empty">No requisitions in progress.</div>';
+      var byId = function (b, k) { return reqs.filter(function (r) { return String(r.id) === b.getAttribute(k); })[0]; };
+      var done = function (m) { return function () { toast(m); loadReqs(); }; }, fail = function (e) { toast(e.message); };
+      all('[data-red]').forEach(function (b) { b.onclick = function () { reqForm(byId(b, 'data-red')); }; });
+      all('[data-rsub]').forEach(function (b) { b.onclick = function () { api('/api/hr/requisitions/' + b.getAttribute('data-rsub') + '/submit', 'POST').then(done('Sent for approval')).catch(fail); }; });
+      all('[data-rok]').forEach(function (b) { b.onclick = function () { api('/api/hr/requisitions/' + b.getAttribute('data-rok') + '/decide', 'POST', { decision: 'approve', note: prompt('Approval note (optional)', '') || '' }).then(done('Approved')).catch(fail); }; });
+      all('[data-rno]').forEach(function (b) { b.onclick = function () { var n = prompt('Why is it turned down?', ''); if (n) api('/api/hr/requisitions/' + b.getAttribute('data-rno') + '/decide', 'POST', { decision: 'reject', note: n }).then(done('Turned down')).catch(fail); }; });
+      all('[data-rcan]').forEach(function (b) { b.onclick = function () { if (confirm('Cancel this requisition?')) api('/api/hr/requisitions/' + b.getAttribute('data-rcan') + '/cancel', 'POST', { note: prompt('Why? (optional)', '') || '' }).then(done('Cancelled')).catch(fail); }; });
+      all('[data-rpost]').forEach(function (b) { b.onclick = function () { api('/api/hr/requisitions/' + b.getAttribute('data-rpost') + '/post', 'POST').then(function (r) { loadReqs(); loadJobs().then(function () { toast('Posting made: finish it and tick Open'); jobForm(r.job); }); }).catch(fail); }; });
+    });
+  }
+  function reqForm(r) {
+    r = r || { kind: 'full_time', openings: 1, reason: 'new' };
+    modal('<h2>' + (r.id ? 'Edit requisition #' + r.id : 'New requisition') + '</h2><p class="sub">The case for the job. Someone who may approve hiring decides; once approved it becomes a posting.</p>' +
+      '<div class="controls"><div style="flex:2;min-width:200px"><label>Job title</label><input id="rqT" value="' + esc(r.title || '') + '" style="width:100%"></div><div><label>Type</label><select id="rqK">' + Object.keys(KIND).map(function (k) { return '<option value="' + k + '"' + (r.kind === k ? ' selected' : '') + '>' + KIND[k] + '</option>'; }).join('') + '</select></div><div><label>How many</label><input id="rqN" type="number" min="1" max="99" value="' + r.openings + '" style="width:70px"></div></div>' +
+      '<div class="controls"><div><label>Department</label><input id="rqD" value="' + esc(r.department || '') + '" list="rqDl"><datalist id="rqDl">' + META.departments.map(function (x) { return '<option value="' + esc(x.name) + '">'; }).join('') + '</datalist></div>' +
+        '<div><label>Why</label><select id="rqR"><option value="new"' + (r.reason === 'new' ? ' selected' : '') + '>A new job</option><option value="replacement"' + (r.reason === 'replacement' ? ' selected' : '') + '>Replacing someone</option><option value="temporary"' + (r.reason === 'temporary' ? ' selected' : '') + '>Temporary cover</option></select></div>' +
+        '<div><label>Replacing</label><select id="rqRp">' + opts(META.people, r.replaces_user_id, '–') + '</select></div><div><label>Hiring manager</label><select id="rqHm">' + opts(META.people, r.hiring_manager_id, '–') + '</select></div></div>' +
+      '<div class="controls"><div><label>Lowest pay (J$ a year)</label><input id="rqMin" inputmode="decimal" value="' + esc(r.salary_min || '') + '"></div><div><label>Highest pay (J$ a year)</label><input id="rqMax" inputmode="decimal" value="' + esc(r.salary_max || '') + '"></div><div><label>Needed by</label><input id="rqSb" type="date" value="' + esc(r.start_by || '') + '"></div></div>' +
+      '<h4>Interviewers</h4>' + pickPeople('rqIv', r.interviewer_ids) +
+      '<label class="sub">Why the shop needs this person (the approver reads this)</label><textarea id="rqJ" rows="4">' + esc(r.justification || '') + '</textarea>' +
+      '<div class="controls" style="margin-top:8px"><button class="primary" id="rqSub">Save and send for approval</button><button id="rqSave">Save draft</button><button id="rqX">Cancel</button></div>');
+    $('#rqX').onclick = function () { close(); };
+    function save(submit) {
+      var body = { title: $('#rqT').value, kind: $('#rqK').value, openings: $('#rqN').value, department: $('#rqD').value, reason: $('#rqR').value, replaces_user_id: $('#rqRp').value, hiring_manager_id: $('#rqHm').value, interviewer_ids: picked('rqIv'),
+        salary_min: $('#rqMin').value, salary_max: $('#rqMax').value, start_by: $('#rqSb').value, justification: $('#rqJ').value, submit: submit };
+      api('/api/hr/requisitions' + (r.id ? '/' + r.id : ''), r.id ? 'PUT' : 'POST', body).then(function () { close(); toast(submit ? 'Sent for approval' : 'Saved'); loadReqs(); }).catch(function (e) { toast(e.message); });
+    }
+    $('#rqSub').onclick = function () { save(true); };
+    $('#rqSave').onclick = function () { save(false); };
+  }
+
+  // -------------------------------------------- my interviews, decisions --
+  // Staff to tick (interviewers), and what was ticked.
+  function pickPeople(k, on) { on = (on || []).map(String); return '<div class="chips">' + META.people.map(function (p) { return '<label style="display:flex;gap:4px;align-items:center;font-size:13px"><input type="checkbox" data-pick="' + k + '" value="' + p.id + '"' + (on.indexOf(String(p.id)) >= 0 ? ' checked' : '') + '> ' + esc(p.name) + '</label>'; }).join(' ') + '</div>'; }
+  function picked(k) { return all('[data-pick="' + k + '"]').filter(function (c) { return c.checked; }).map(function (c) { return +c.value; }); }
+  // A hiring manager without hiring rights: the application to read, with a note box; no stage, email or file controls.
+  function managerView(mo, a) {
+    all('button, select, input, textarea', mo).forEach(function (el) { if (el.id !== 'ax' && !el.hasAttribute('data-ivscore')) el.remove(); });
+    all('.controls', mo).forEach(function (c) { if (!c.querySelector('button')) c.remove(); });
+    $('#ax', mo).insertAdjacentHTML('beforebegin', '<textarea id="mgNote" rows="2" placeholder="Your view on this applicant (added to the history)"></textarea><button class="primary" id="mgGo">Add note</button> ');
+    $('#ax').onclick = function () { close(); };
+    all('[data-ivscore]', mo).forEach(function (b) { b.onclick = function () { scoreForm(b.getAttribute('data-ivscore'), function () { openApp(a.id); }); }; });
+    $('#mgGo').onclick = function () { api('/api/hr/applications/' + a.id + '/notes', 'POST', { note: $('#mgNote').value }).then(function () { toast('Note added'); openApp(a.id); }).catch(function (e) { toast(e.message); }); };
+  }
+  function loadMyJobs() {
+    return api('/api/hr/my-jobs').then(function (d) {
+      $('#myJobsCard').hidden = !d.jobs.length;
+      $('#myJobs').innerHTML = d.jobs.map(function (j) {
+        var list = d.applications.filter(function (x) { return x.job_id === j.id; });
+        return '<h4>' + esc(j.title) + ' <span class="pill' + (j.is_open ? ' ok' : '') + '">' + (j.is_open ? 'open' : 'closed') + '</span> <span class="pill">' + (j.is_manager ? 'hiring manager' : 'interviewer') + '</span>' +
+          (j.is_manager ? ' <button class="sm" data-mjc="' + j.id + '">Compare candidates</button>' : '') + '</h4>' +
+          (j.is_manager ? (list.length ? '<div class="scroll"><table><thead><tr><th>Applicant</th><th>Stage</th><th>Screen</th><th>Interview score</th><th>Applied</th></tr></thead><tbody>' + list.map(function (x) {
+            return '<tr class="row" data-a="' + x.id + '"><td><b>' + esc(x.name || '') + '</b> <small>' + esc(x.ref || '') + '</small></td><td>' + esc(STAGE[x.stage]) + (x.interview_at ? '<br><small>' + esc(when(x.interview_at)) + '</small>' : '') + '</td><td>' + esc(SCREEN[x.screen_result] || '') + '</td><td>' + (x.avg_overall != null ? x.avg_overall + '/5' : '') + '</td><td>' + esc(day(x.created_at)) + '</td></tr>';
+          }).join('') + '</tbody></table></div>' : '<p class="sub">No applicants yet.</p>') : '<p class="sub">Your interviews for this job are under My interviews.</p>');
+      }).join('');
+      all('#myJobs [data-a]').forEach(function (el) { el.onclick = function () { openApp(el.getAttribute('data-a')); }; });
+      all('[data-mjc]').forEach(function (b) { b.onclick = function () { var j = d.jobs.filter(function (x) { return String(x.id) === b.getAttribute('data-mjc'); })[0]; compare(j); }; });
+    }).catch(function () {});
+  }
+  function loadMine() {
+    return api('/api/hr/my-interviews').then(function (d) {
+      $('#myIvCard').hidden = !d.interviews.length && d.hr;
+      $('#myIv').innerHTML = d.interviews.length ? '<div class="scroll"><table><thead><tr><th>When</th><th>Candidate</th><th>Job</th><th>How</th><th></th></tr></thead><tbody>' + d.interviews.map(function (i) {
+        return '<tr><td>' + esc(when(i.starts_at)) + '</td><td><b>' + esc(i.name || '') + '</b> <small>' + esc(i.ref || '') + '</small></td><td>' + esc(i.job || '') + ' · round ' + i.round + '</td><td>' + esc(MODE[i.mode]) + (i.location ? '<br><small>' + esc(i.location) + '</small>' : '') + '</td>' +
+          '<td>' + (i.scored ? '<span class="pill ok">scored</span> ' : '') + '<button class="sm' + (i.scored || new Date(i.starts_at) > new Date() ? '' : ' primary') + '" data-my="' + i.id + '">' + (i.scored ? 'Change scorecard' : 'Scorecard') + '</button></td></tr>';
+      }).join('') + '</tbody></table></div>' : '<div class="empty">You are not on any interview panel.</div>';
+      all('[data-my]').forEach(function (b) { b.onclick = function () { scoreForm(b.getAttribute('data-my')); }; });
+      return d;
+    });
+  }
+  function decisionsLog() {
+    api('/api/hr/audit').then(function (d) {
+      modal('<h2>Hiring decisions</h2><p class="sub">Every requisition, posting, screening, interview, scorecard, reference, offer and hire: who decided, when and why.</p>' +
+        (d.log.length ? '<div class="scroll"><table><thead><tr><th>When</th><th>Who</th><th>Applicant</th><th>Decision</th></tr></thead><tbody>' + d.log.map(function (x) {
+          return '<tr><td><small>' + esc(when(x.at)) + '</small></td><td>' + esc(x.by_name || 'candidate') + '</td><td>' + (x.application_id ? '<button class="link" data-open="' + x.application_id + '">' + esc(x.applicant || x.ref || '#' + x.application_id) + '</button>' : '') + '</td><td>' + esc(x.action) + (x.detail ? '<br><small>' + esc(x.detail) + '</small>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div>' : '<div class="empty">Nothing yet.</div>') + '<div class="controls" style="margin-top:8px"><button id="lgX">Close</button></div>');
+      $('#lgX').onclick = function () { close(); };
+      all('[data-open]').forEach(function (b) { b.onclick = function () { openApp(b.getAttribute('data-open')); }; });
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // ------------------------------------------------------------ settings --
+  function settings() {
+    api('/api/hr/settings').then(function (s) {
+      var keys = Object.keys(s.templates);
+      modal('<h2>Emails &amp; settings</h2>' +
+        (s.mail_on ? '' : '<div class="warn">Email is not set up on this till (no SMTP), so the automatic reply and these emails are recorded but not sent.</div>') +
+        '<div class="controls"><div style="flex:1;min-width:220px"><label>Tell this inbox about every new application</label><input id="stIn" type="email" value="' + esc(s.notify_email) + '" placeholder="e.g. hr@mortsautoparts.com" style="width:100%"></div>' +
+        '<div><label>Keep applicants who are not hired for (days)</label><input id="stDays" type="number" min="30" max="1095" value="' + s.retention_days + '" style="width:110px"></div></div>' +
+        '<label style="display:flex;gap:6px;align-items:center;margin:4px 0 10px"><input type="checkbox" id="stReq"' + (s.require_requisition ? ' checked' : '') + '> A job can only be posted against an approved requisition</label>' +
+        '<h4>Email templates</h4><p class="sub">Filled in for each applicant: {first} {name} {job} {ref} {link} (their status page) {missing} (documents still needed) {interview} (the interview time) {offer} (their offer letter link) {start} (the start date). The reference request also has {referee}.</p>' +
+        keys.map(function (k) {
+          return '<details style="margin-bottom:8px"' + (k === 'ack' ? ' open' : '') + '><summary><b>' + esc(s.templates[k].label) + '</b></summary>' +
+            '<label class="sub">Subject</label><input data-ts="' + k + '" value="' + esc(s.templates[k].subject) + '" style="width:100%">' +
+            '<label class="sub">Message</label><textarea data-tb="' + k + '" rows="9">' + esc(s.templates[k].body) + '</textarea>' +
+            '<button class="link" data-reset="' + k + '">Put back the original wording</button></details>';
+        }).join('') +
+        '<div class="controls" style="margin-top:10px"><button class="primary" id="stSave">Save</button><button id="stX">Cancel</button></div>');
+      all('[data-reset]').forEach(function (b) { b.onclick = function () {
+        var k = b.getAttribute('data-reset');
+        $('[data-ts="' + k + '"]').value = s.defaults[k].subject; $('[data-tb="' + k + '"]').value = s.defaults[k].body;
+      }; });
+      $('#stX').onclick = function () { close(); };
+      $('#stSave').onclick = function () {
+        var tpl = {};
+        keys.forEach(function (k) { tpl[k] = { subject: $('[data-ts="' + k + '"]').value, body: $('[data-tb="' + k + '"]').value }; });
+        api('/api/hr/settings', 'PUT', { templates: tpl, notify_email: $('#stIn').value, retention_days: $('#stDays').value, require_requisition: $('#stReq').checked })
+          .then(function () { close(); toast('Saved'); }).catch(function (e) { toast(e.message); });
+      };
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  $('#newJob').onclick = function () { jobForm(null); };
+  $('#setBtn').onclick = settings;
+  $('#jobF').onchange = loadBoard;
+  $('#q').oninput = function () { drawApps(); };
+  $('#view').onchange = function () { try { localStorage.setItem('hiring.view', this.value); } catch (_) {} drawApps(); };
+  try { if (localStorage.getItem('hiring.view') === 'list') $('#view').value = 'list'; } catch (_) {}
+  $('#csv').onclick = exportCsv;
+  $('#newReq').onclick = function () { reqForm(null); };
+  $('#logBtn').onclick = decisionsLog;
+  // Links from notices and the calendar: #requisitions, #app=12, #interview=5.
+  function fromHash() {
+    var h = location.hash, m;
+    if ((m = /^#app=(\d+)$/.exec(h))) openApp(m[1]);
+    else if ((m = /^#interview=(\d+)$/.exec(h))) scoreForm(m[1]);
+    else if (h === '#requisitions') $('#reqCard').scrollIntoView();
+  }
+  window.addEventListener('hashchange', fromHash);
+  // Panel members without hiring rights see only their interviews; approvers
+  // without hiring rights see the requisitions too.
+  loadMine().then(function (d) {
+    if (!d.hr) loadMyJobs();
+    if (!d.hr) all('[data-hr]').forEach(function (el) { el.hidden = true; });
+    var reqP = loadReqs().catch(function () {});
+    if (!d.hr) return reqP.then(fromHash);
+    return Promise.all([reqP, loadJobs().then(loadBoard)]).then(fromHash);
+  }).catch(function (e) { $('#jobs').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+})();
+</script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+<script src="/assets/module-look.js?v=20261101" defer></script>
+</body>
+</html>

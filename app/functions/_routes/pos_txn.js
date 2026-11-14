@@ -76,6 +76,19 @@ export async function createPosSale(env, b, me) {
     return { status: 403, body: { error: 'Your account is not allowed to take a charge / account sale.' } };
   if (b.no_tax === true && !userCan(me, 'pos.no_tax'))
     return { status: 403, body: { error: 'Your account is not allowed to switch GCT off.' } };
+  // pos.price_override was declared in the capability list and enforced only by
+  // making the POS price box readonly, so a cashier without it could still post
+  // any unit price straight at this endpoint -- the gap these gates exist to
+  // close for the discount permissions above.
+  //
+  // This trusts the client's price_manual flag for which lines were re-priced
+  // by hand, because the server cannot otherwise tell a typed price from a
+  // legitimate one: behind a line sits a sale price, a tier price, quantity
+  // breaks and now the account markup. It is a check on stated intent, so a
+  // caller that simply omits the flag is not caught; deriving the expected
+  // price from _lib/price_breaks.js would close that too.
+  if (items.some((it) => it.price_manual) && !userCan(me, 'pos.price_override'))
+    return { status: 403, body: { error: 'Your account is not allowed to change a line’s unit price.' } };
 
   // ----- per-product server-side rules -----
   // Trust the product record, not the client, for which images actually
@@ -198,20 +211,58 @@ export async function createPosSale(env, b, me) {
     items = expanded;
   }
 
-  // ----- tier price floor -----
+  // ----- the account's standing markup, then the tier price ceiling -----
   // A real customer on a non-retail price tier can never be charged above
   // their per-item tier price, whatever the client sent. Only ever lowers a
   // line -- matches the storefront's repriceForQty. (Percentage quantity
   // discounts are resolved client-side, same as the absolute bulk breaks.)
+  //
+  // users.markup_pct runs the other way: what this account pays ABOVE list.
+  // It is applied here, ahead of every total, so the stored line, the receipt
+  // and the invoice all read the increased figure as THE unit price instead of
+  // list plus a surcharge at the bottom. It never travels through
+  // discount_cents -- a markup is not a negative discount, and that column
+  // feeds commission and the discount totals on the reports.
+  //
+  // The two have to be resolved together, in this order. The ceiling would
+  // otherwise pull every marked-up line straight back down to the tier price
+  // and silently undo the markup for exactly the non-retail accounts most
+  // likely to carry one, so it is raised by the same rate.
+  //
+  // The POS applies the markup client-side as well, so the cashier sees the
+  // real price while ringing up, and says so with markup_applied_pct.
+  // Re-applying only when that is missing or stale (an older till, or a sale
+  // posted straight at the API) keeps this idempotent rather than compounding
+  // the rate on every ordinary sale. A manually-priced line is left alone --
+  // the cashier typed the figure they mean to charge.
+  const walkinRow = await db.one("SELECT id FROM users WHERE email = 'walkin@mortysautoparts.local' LIMIT 1");
+  const walkinId = walkinRow ? walkinRow.id : -1;
+  const isWalkin = b.customer_id && Number(b.customer_id) === walkinId;
+
+  let markupRate = 0;
   if (b.customer_id) {
-    const cust = await db.one('SELECT price_tier FROM users WHERE id = ?', b.customer_id);
+    const cust = await db.one('SELECT price_tier, markup_pct FROM users WHERE id = ?', b.customer_id);
     const tier = cust && cust.price_tier;
+    // Skipped for the shared walk-in account, like the discount rate below:
+    // that is one row sitting behind every counter sale, so a rate on it would
+    // quietly re-price all of them.
+    markupRate = (cust && !isWalkin) ? Math.max(0, Number(cust.markup_pct) || 0) : 0;
+    const mul = 1 + markupRate / 100;
+
+    if (markupRate > 0 && Math.abs((Number(b.markup_applied_pct) || 0) - markupRate) > 0.001) {
+      for (const it of items) {
+        if (it.price_manual) continue;
+        it.unit_price_usd = r2(Number(it.unit_price_usd) * mul);
+      }
+    }
     if (tier && tier !== 'retail') {
       const tImgs = [...new Set(items.filter((it) => it.product_img).map((it) => it.product_img))];
       const tierByImg = tImgs.length ? await loadTierPricesByImg(db, tImgs) : new Map();
       for (const it of items) {
         const tc = tierCentsFor(tierByImg.get(it.product_img), tier);
-        if (tc != null && Number(it.unit_price_usd) > tc / 100) it.unit_price_usd = tc / 100;
+        if (tc == null) continue;
+        const ceiling = r2((tc / 100) * mul);
+        if (Number(it.unit_price_usd) > ceiling) it.unit_price_usd = ceiling;
       }
     }
   }
@@ -250,9 +301,8 @@ export async function createPosSale(env, b, me) {
   }
 
   // ----- 2. loyalty redemption -----
-  const walkinRow = await db.one("SELECT id FROM users WHERE email = 'walkin@mortysautoparts.local' LIMIT 1");
-  const walkinId = walkinRow ? walkinRow.id : -1;
-  const isWalkin = b.customer_id && Number(b.customer_id) === walkinId;
+  // walkinId / isWalkin are resolved with the markup above -- that needs them
+  // before the totals, and they are the same two values here.
   const redeemPts = isWalkin ? 0 : Math.max(0, parseInt(b.loyalty_points_redeemed || 0, 10) || 0);
   let loyaltyDiscount = 0;
   if (redeemPts > 0) {
@@ -372,8 +422,9 @@ export async function createPosSale(env, b, me) {
        sales_rep_id, sales_rep_name, fulfilment, ship_method, ship_fee_cents, ship_name, ship_phone,
        ship_line1, ship_line2, ship_city, ship_parish, ship_instructions, tracking_number,
        payment_status, amount_paid_cents, balance_due_cents, due_date, po_number, quote_id,
-       verify_id_type, verify_id_number, verify_tax_id, restricted_approved_by, coupon_code, coupon_discount_cents)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       verify_id_type, verify_id_number, verify_tax_id, restricted_approved_by, coupon_code, coupon_discount_cents,
+       markup_pct)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     binds: [
       saleId, receipt, invoiceNumber, b.cashier_id || me.id, b.customer_id || null,
       b.customer_name || null, b.customer_phone || null, b.vehicle_info || null,
@@ -394,6 +445,9 @@ export async function createPosSale(env, b, me) {
       b.verify_tax_id ? String(b.verify_tax_id).slice(0, 40) : null,
       b.restricted_approved_by ? String(b.restricted_approved_by).slice(0, 200) : null,
       couponCode, cts(couponDiscount),
+      // The rate this sale was actually priced at, so a reprint stays right
+      // after the account's markup is changed later. NULL when there was none.
+      markupRate > 0 ? markupRate : null,
     ],
   });
 
@@ -552,7 +606,14 @@ export default function mount(app) {
   // =====================================================================
   app.post('/api/admin/pos/sale', adminMw, async (c) => {
     const b = await c.req.json().catch(() => ({}));
+    // Departments (storeops.js): staff with departments may only sell theirs.
+    if (app.__deptGuard && !b.dry_run) { const g = await app.__deptGuard(c, b.items); if (g) return c.json(g.body, g.status); }
     const r = await createPosSale(c.env, b, c.get('user'));
+    // Store + till shift (storeops.js): tag the sale with the till's store, take
+    // a branch's stock, and file it under the open shift.
+    if (r.status === 200 && r.body && r.body.ok && r.body.id && !b.dry_run && app.__afterSale) {
+      try { await app.__afterSale(c, r.body.id, b.items); } catch (e) { console.error('[afterSale]', e); }
+    }
     return c.json(r.body, r.status);
   });
 
@@ -606,6 +667,10 @@ export default function mount(app) {
       return c.json({ error: 'Your account is not allowed to give a whole-ticket discount.' }, 403);
     if (b.no_tax === true && !userCan(me, 'pos.no_tax'))
       return c.json({ error: 'Your account is not allowed to switch GCT off.' }, 403);
+    if (app.__deptGuard) { const g = await app.__deptGuard(c, items); if (g) return c.json(g.body, g.status); }
+    // Which station took it and which cashier collects (GENERAL may choose).
+    let routing = { order_station_id: null, cashier_station_id: null };
+    if (app.__orderRouting) { try { routing = await app.__orderRouting(c, b); } catch (e) { return c.json({ error: e.message }, e.status || 400); } }
 
     // Display total only -- the authoritative figures are recomputed by
     // /pos/sale when the cashier invoices it.
@@ -621,7 +686,7 @@ export default function mount(app) {
     const dispTotal = Math.max(0, r2(taxable + dispTax));
 
     const payload = { ...b };
-    delete payload.payments; delete payload.payment_method; delete payload.amount_tendered;
+    delete payload.payments; delete payload.payment_method; delete payload.amount_tendered; delete payload.collect_station_id;
 
     let orderId;
     try {
@@ -629,15 +694,15 @@ export default function mount(app) {
         `INSERT INTO orders
            (user_id, customer_name, customer_phone, total_cents, status, notes,
             payment_method, payment_status, source, pos_payload, sales_rep_id, sales_rep_name,
-            ship_instructions, taken_by, created_at)
-         VALUES (?,?,?,?, 'pending', ?, 'pos_order', 'unpaid', 'pos', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+            ship_instructions, taken_by, order_station_id, cashier_station_id, created_at)
+         VALUES (?,?,?,?, 'pending', ?, 'pos_order', 'unpaid', 'pos', ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
         Number.isInteger(b.customer_id) ? b.customer_id : null,
         b.customer_name || null, b.customer_phone || null, cts(dispTotal), b.notes || null,
         JSON.stringify(payload),
         Number.isInteger(b.sales_rep_id) ? b.sales_rep_id : null,
         b.sales_rep_name ? String(b.sales_rep_name).slice(0, 200) : null,
         b.ship_instructions ? String(b.ship_instructions).slice(0, 600) : null,
-        me.id,
+        me.id, routing.order_station_id, routing.cashier_station_id,
       );
       orderId = ins.meta.last_row_id;
       const stmts = items.filter((it) => it.product_img).map((it) => ({
@@ -655,10 +720,10 @@ export default function mount(app) {
     const status = c.req.query('status') || 'pending';
     const rows = await d1(c.env).many(
       `SELECT o.id, o.created_at, o.customer_name, o.customer_phone, o.total_cents / 100.0 AS total_usd,
-              o.status, o.sales_rep_name, o.ship_instructions, o.converted_sale_id, u.name AS taken_by_name,
+              o.status, o.sales_rep_name, o.ship_instructions, o.converted_sale_id, u.name AS taken_by_name, cs.name AS cashier_station, o.cashier_station_id,
               (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) AS line_count,
               (SELECT COALESCE(SUM(qty),0) FROM order_items WHERE order_id = o.id) AS unit_count
-         FROM orders o LEFT JOIN users u ON u.id = o.taken_by
+         FROM orders o LEFT JOIN users u ON u.id = o.taken_by LEFT JOIN pos_stations cs ON cs.id = o.cashier_station_id
         WHERE o.source = 'pos' AND o.status = ?
         ORDER BY o.created_at ASC LIMIT 200`, status);
     return c.json({ orders: rows });
@@ -721,7 +786,7 @@ export default function mount(app) {
     try {
       res = await fetch(new URL('/api/admin/pos/sale', c.req.url).toString(), {
         method: 'POST',
-        headers: { 'content-type': 'application/json', cookie: c.req.header('cookie') || '' },
+        headers: { 'content-type': 'application/json', cookie: c.req.header('cookie') || '', 'x-station-key': c.req.header('x-station-key') || '' },
         body: JSON.stringify(saleBody),
       });
       sale = await res.json().catch(() => ({}));
@@ -794,6 +859,7 @@ export default function mount(app) {
     stmts.push({ sql: `UPDATE redemption_instruments SET status = 'void' WHERE sale_id = ? AND status = 'sold' AND received_at IS NULL`, binds: [id] });
     stmts.push({ sql: `UPDATE pos_sales SET voided = 1, voided_at = CURRENT_TIMESTAMP, voided_by = ? WHERE id = ?`, binds: [c.get('user').id, id] });
     try { await db.batch(stmts); } catch (e) { return c.json({ error: e.message }, 500); }
+    if (app.__afterVoid) { try { await app.__afterVoid(c, Number(id)); } catch (e) { console.error('[afterVoid]', e); } }
     return c.json({ ok: true });
   });
 

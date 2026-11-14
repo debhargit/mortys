@@ -1,0 +1,658 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1b2b">
+<title>Warehouse · Morty's Auto Parts</title>
+<style>
+  :root{
+    --red:#d62828; --red-dark:#a31f1f; --navy:#0b1b2b; --ink:#0f1720;
+    --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb;
+    --ok:#16a34a; --warn:#b45309; --hover:#f1f5f9; --chip:#eef2f7;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --hover:#1d2935; --chip:#1f2b38; --warn:#f59e0b; }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:10px 16px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:5}
+  header h1{font-size:17px;margin:0;font-weight:700;letter-spacing:.2px}
+  header .who{margin-left:auto;font-size:13px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  header a{color:#fff;opacity:.85;font-size:13px}
+  .scanbar{background:var(--card);border-bottom:1px solid var(--line);padding:10px 16px;position:sticky;top:46px;z-index:4}
+  .scanrow{display:flex;gap:8px;max-width:980px;margin:0 auto}
+  .scanrow input{flex:1;min-width:0;font-size:17px;padding:11px 12px;border:2px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
+  .scanrow input:focus{outline:none;border-color:var(--red)}
+  button{font:inherit;cursor:pointer;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:10px 14px}
+  button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600}
+  button.primary:hover{background:var(--red-dark)}
+  button.ghost{background:transparent}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .hint{max-width:980px;margin:6px auto 0;font-size:12.5px;color:var(--muted)}
+  #camWrap{max-width:420px;margin:10px auto 0;display:none}
+  #camWrap.on{display:block}
+  #cam{width:100%;border-radius:10px;overflow:hidden;background:#000}
+  nav.tabs{display:flex;gap:4px;max-width:980px;margin:12px auto 0;padding:0 16px;overflow-x:auto}
+  nav.tabs button{border:none;background:transparent;padding:9px 12px;border-radius:8px;color:var(--muted);font-weight:600;white-space:nowrap}
+  nav.tabs button.on{background:var(--chip);color:var(--ink)}
+  main{max-width:980px;margin:0 auto;padding:12px 16px 80px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:16px;margin:0 0 8px}
+  .muted{color:var(--muted)}
+  .small{font-size:13px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;max-width:980px;margin:8px auto 0;padding:0 16px}
+  .chip{background:var(--chip);border-radius:999px;padding:4px 10px;font-size:12.5px}
+  .chip.warn{color:var(--warn);font-weight:600}
+  table{width:100%;border-collapse:collapse}
+  th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:12px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  tr.click{cursor:pointer} tr.click:hover{background:var(--hover)}
+  .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:999px;background:var(--chip);margin-left:6px;vertical-align:1px}
+  .tag.primary{background:#16a34a22;color:var(--ok);font-weight:700}
+  .tag.unassigned{background:#f59e0b22;color:var(--warn);font-weight:700}
+  label.f{display:block;font-size:12.5px;color:var(--muted);margin:8px 0 3px}
+  input.f,select.f{width:100%;font:inherit;padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .steps{display:grid;gap:10px}
+  .step{border:1px dashed var(--line);border-radius:10px;padding:10px 12px}
+  .step.active{border:2px solid var(--red)}
+  .step.done{border-style:solid;border-color:var(--ok)}
+  .step b{display:block;margin-bottom:4px}
+  .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 16px;border-radius:10px;font-weight:600;z-index:50;max-width:92vw;box-shadow:0 6px 20px #0005;display:none}
+  .toast.err{background:var(--red)}
+  .toast.on{display:block}
+  .empty{text-align:center;color:var(--muted);padding:24px 8px}
+  .qtybox{display:flex;align-items:center;gap:6px}
+  .qtybox input{width:80px;text-align:center;font-size:18px;padding:8px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)}
+  .login{max-width:380px;margin:40px auto}
+  @media (max-width:560px){ .grid3{grid-template-columns:1fr 1fr} th.hide-sm,td.hide-sm{display:none} }
+
+  /* ---- printing ---------------------------------------------------------- */
+  #printArea{display:none}
+  @media print{
+    body > *:not(#printArea){display:none !important}
+    #printArea{display:block}
+    html,body{background:#fff;color:#000}
+  }
+  .lbl{overflow:hidden;color:#000;background:#fff;font-family:Arial,Helvetica,sans-serif;page-break-inside:avoid;break-inside:avoid}
+  .lbl .nm{font-weight:700;line-height:1.1;overflow:hidden}
+  .lbl svg{display:block;max-width:100%}
+  /* thermal 2" x 1" */
+  .t21 .lbl{width:2in;height:1in;padding:.04in .07in;page-break-after:always;break-after:page;display:flex;flex-direction:column;justify-content:space-between}
+  .t21 .lbl .nm{font-size:7.5pt;max-height:2.3em}
+  .t21 .lbl .meta{display:flex;justify-content:space-between;font-size:7pt}
+  .t21 .lbl.bin{align-items:center;justify-content:center;gap:.02in}
+  .t21 .lbl.bin .code{font-size:18pt;font-weight:800;line-height:1}
+  /* A4 / Letter sheet: 3 x 10 (Avery 5160 / L7160-style) */
+  .sheet{display:grid;grid-template-columns:repeat(3,2.625in);grid-auto-rows:1in;column-gap:.125in;padding:.5in .19in 0}
+  .sheet .lbl{padding:.06in .1in;display:flex;flex-direction:column;justify-content:space-between}
+  .sheet .lbl .nm{font-size:8pt;max-height:2.3em}
+  .sheet .lbl .meta{display:flex;justify-content:space-between;font-size:7.5pt}
+  .sheet .lbl.bin{flex-direction:row;align-items:center;gap:.08in}
+  .sheet .lbl.bin .code{font-size:20pt;font-weight:800}
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header>
+  <h1>Warehouse</h1>
+  <span class="who" id="who"></span>
+  <a href="/admin.html">Admin</a>
+</header>
+
+<div id="app" style="display:none">
+  <div class="scanbar">
+    <div class="scanrow">
+      <input id="scan" autocomplete="off" autocapitalize="characters" spellcheck="false"
+             placeholder="Scan or type a part number or bin…" enterkeyhint="go" aria-label="Scan">
+      <button id="camBtn" class="ghost" title="Scan with camera" aria-label="Scan with camera">📷</button>
+      <button id="goBtn" class="primary">Go</button>
+    </div>
+    <div class="hint" id="scanHint">USB or Bluetooth scanners type straight into this box. On a phone, tap 📷.</div>
+    <div id="camWrap"><div id="cam"></div></div>
+  </div>
+  <div class="chips" id="chips"></div>
+  <nav class="tabs" id="tabs">
+    <button data-tab="scan" class="on">Scan</button>
+    <button data-tab="orders">Orders</button>
+    <button data-tab="move">Move / Put away</button>
+    <button data-tab="receive">Receive</button>
+    <button data-tab="count">Count</button>
+    <button data-tab="bins">Bins</button>
+    <button data-tab="labels">Labels <span id="qCount"></span></button>
+    <button data-tab="activity">Activity</button>
+    <button data-tab="office">Office</button>
+  </nav>
+  <main id="main"></main>
+</div>
+
+<div class="login" id="login" style="display:none">
+  <div class="card">
+    <h2>Sign in to the warehouse</h2>
+    <p class="muted small">Use your staff PIN, or your email and password.</p>
+    <label class="f" for="pin">Staff PIN</label>
+    <input class="f" id="pin" type="password" inputmode="numeric" autocomplete="off">
+    <div class="row" style="margin-top:10px"><button class="primary" id="pinGo">Sign in with PIN</button></div>
+    <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+    <label class="f" for="em">Email</label>
+    <input class="f" id="em" type="email" autocomplete="username">
+    <label class="f" for="pw">Password</label>
+    <input class="f" id="pw" type="password" autocomplete="current-password">
+    <div class="row" style="margin-top:10px"><button id="pwGo">Sign in</button></div>
+    <p class="small" id="loginErr" style="color:var(--red)"></p>
+  </div>
+</div>
+
+<div id="printArea"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="/assets/vendor/jsbarcode.min.js"></script>
+<script src="/assets/vendor/qrcode-generator.js"></script>
+<script src="/assets/vendor/html5-qrcode.min.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var WH = window.WH = window.WH || { tabs: {}, scan: {}, onTab: {}, click: {} };
+  var TERMINAL = (function () { try { var t = localStorage.getItem('wh.terminal'); if (!t) { t = 'wh-' + Math.random().toString(36).slice(2, 8); localStorage.setItem('wh.terminal', t); } return t; } catch (_) { return 'wh'; } })();
+
+  // ---------------------------------------------------------------- api --
+  function api(url, opts) {
+    opts = opts || {};
+    var init = { method: opts.method || 'GET', credentials: 'same-origin', headers: { 'Accept': 'application/json', 'X-Terminal': TERMINAL } };
+    if (opts.body !== undefined) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(opts.body); }
+    return fetch(url, init).then(function (r) {
+      return r.text().then(function (t) {
+        var d = null; try { d = t ? JSON.parse(t) : {}; } catch (_) { d = { error: 'Unexpected reply from the server' }; }
+        if (r.status === 401) { showLogin(); }
+        if (!r.ok) { var e = new Error((d && d.error) || ('HTTP ' + r.status)); e.status = r.status; e.data = d; throw e; }
+        return d;
+      });
+    });
+  }
+
+  var toastT;
+  function toast(msg, isErr) {
+    var t = $('#toast'); t.textContent = msg; t.className = 'toast on' + (isErr ? ' err' : '');
+    clearTimeout(toastT); toastT = setTimeout(function () { t.className = 'toast'; }, isErr ? 4500 : 2200);
+    if (navigator.vibrate) try { navigator.vibrate(isErr ? [60, 40, 60] : 30); } catch (_) {}
+  }
+
+  // -------------------------------------------------------------- state --
+  var state = {
+    tab: 'scan',
+    me: null,
+    scanResult: null,            // last lookup on the Scan tab
+    move: { step: 1, product: null, locations: [], fromBin: null, qty: 1, toCode: '', setPrimary: false, putaway: false },
+    bins: { q: '', kind: '', list: [], selected: {} },
+    queue: loadQueue(),          // label print queue
+    layout: (function () { try { return localStorage.getItem('wh.layout') || 't21'; } catch (_) { return 't21'; } })(),
+    showPrice: (function () { try { return localStorage.getItem('wh.price') === '1'; } catch (_) { return false; } })(),
+  };
+  function loadQueue() { try { return JSON.parse(localStorage.getItem('wh.queue') || '[]'); } catch (_) { return []; } }
+  function saveQueue() { try { localStorage.setItem('wh.queue', JSON.stringify(state.queue)); } catch (_) {} renderQCount(); }
+  function renderQCount() { var n = state.queue.reduce(function (s, x) { return s + (x.copies || 1); }, 0); $('#qCount').textContent = n ? '(' + n + ')' : ''; }
+
+  // -------------------------------------------------------------- login --
+  function showLogin() { $('#app').style.display = 'none'; $('#login').style.display = 'block'; setTimeout(function () { $('#pin').focus(); }, 50); }
+  function doLogin(url, body) {
+    $('#loginErr').textContent = '';
+    // 2-step sign-in: after the password, the code from the authenticator app.
+    var step = function (r) {
+      if (!r || !r.need_2fa) return location.reload();
+      var code = prompt('Enter the 6-digit code from your authenticator app (or a recovery code)');
+      if (code === null) return;
+      return api('/api/auth/2fa', { method: 'POST', body: { code: code.trim() } }).then(step)
+        .catch(function (e) { if (/Sign in again|Too many/.test(e.message)) throw e; alert(e.message); return step({ need_2fa: true }); });
+    };
+    api(url, { method: 'POST', body: body }).then(step)
+      .catch(function (e) { $('#loginErr').textContent = e.message; });
+  }
+  // PIN, then the person taps their name (assets/pin-staff.js).
+  $('#pinGo').onclick = function () {
+    var p = $('#pin').value; if (!p) return;
+    pickPinStaff().then(function (who) { if (who) doLogin('/api/auth/pin-signin', who.id ? { pin: p, user_id: who.id } : { pin: p }); });
+  };
+  $('#pin').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('#pinGo').click(); });
+  $('#pwGo').onclick = function () { doLogin('/api/auth/signin', { email: $('#em').value, password: $('#pw').value }); };
+  $('#pw').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('#pwGo').click(); });
+
+  // --------------------------------------------------------------- scan --
+  var scanInput = $('#scan');
+  function focusScan() { if (document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) && document.activeElement !== scanInput) return; scanInput.focus(); }
+  scanInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); submitScan(); } });
+  $('#goBtn').onclick = submitScan;
+  function submitScan() {
+    var v = scanInput.value.trim(); scanInput.value = '';
+    if (v) handleScan(v);
+  }
+
+  // Every scan goes to whatever the current screen is waiting for.
+  function handleScan(code) {
+    if (WH.scan[state.tab]) return WH.scan[state.tab](code);
+    if (state.tab === 'move') return moveScan(code);
+    if (state.tab === 'labels') return labelScan(code);
+    if (state.tab === 'bins') { state.bins.q = code; return loadBins(); }
+    setTab('scan'); lookup(code);
+  }
+
+  function lookup(code) {
+    return api('/api/wh/lookup?code=' + encodeURIComponent(code)).then(function (d) {
+      state.scanResult = d; render();
+      return d;
+    }).catch(function (e) { state.scanResult = { type: null, error: e.message }; render(); toast(e.message, true); });
+  }
+
+  // ------------------------------------------------------------- camera --
+  var cam = null, camOn = false, lastCam = { text: '', at: 0 };
+  $('#camBtn').onclick = function () { camOn ? stopCam() : startCam(); };
+  function startCam() {
+    if (!window.isSecureContext) {
+      toast('The camera needs the secure address. Open https://' + location.hostname + ':' + (Number(location.port || 80) + 1) + '/warehouse', true);
+      return;
+    }
+    if (!window.Html5Qrcode) { toast('Camera scanner did not load', true); return; }
+    $('#camWrap').classList.add('on');
+    cam = cam || new Html5Qrcode('cam', { verbose: false });
+    cam.start({ facingMode: 'environment' }, { fps: 10, qrbox: function (w, h) { return { width: Math.floor(w * 0.85), height: Math.floor(Math.min(h, w) * 0.45) }; } },
+      function (text) {
+        var now = Date.now();
+        if (text === lastCam.text && now - lastCam.at < 2000) return;   // same label still in view
+        lastCam = { text: text, at: now };
+        handleScan(text);
+      }, function () {})
+      .then(function () { camOn = true; $('#camBtn').textContent = '✖'; })
+      .catch(function (e) { $('#camWrap').classList.remove('on'); toast('Camera: ' + (e && e.message ? e.message : e), true); });
+  }
+  function stopCam() {
+    if (!cam) return;
+    cam.stop().catch(function () {}).then(function () { camOn = false; $('#camBtn').textContent = '📷'; $('#camWrap').classList.remove('on'); });
+  }
+
+  // --------------------------------------------------------------- tabs --
+  $('#tabs').addEventListener('click', function (e) { var b = e.target.closest('button[data-tab]'); if (b) setTab(b.getAttribute('data-tab')); });
+  function setTab(t) {
+    state.tab = t;
+    [].forEach.call(document.querySelectorAll('#tabs button'), function (b) { b.classList.toggle('on', b.getAttribute('data-tab') === t); });
+    var hints = {
+      scan: 'Scan a part to see where it is, or a bin to see what is in it.',
+      move: 'Scan the part, then scan the bin it is going to.',
+      bins: 'Scan or type to find a bin.',
+      labels: 'Scan parts to add them to the print list.',
+      activity: 'Recent moves, put-aways and receipts.',
+      receive: 'Scan each part as you unpack it to count it.',
+      orders: 'Scan an order slip to open it; while picking, scan the shelf then each part.',
+      count: 'Scan a bin label, then every part on that shelf.',
+      office: 'Purchasing office: reorder, bills, backorders, prices and exchange rate.',
+    };
+    $('#scanHint').textContent = hints[t] + ' USB or Bluetooth scanners type straight into this box.';
+    if (t === 'bins' && !state.bins.list.length) loadBins();
+    if (t === 'activity') loadActivity();
+    if (WH.onTab[t]) WH.onTab[t]();
+    render(); focusScan();
+  }
+
+  function render() {
+    var m = $('#main');
+    if (state.tab === 'scan') m.innerHTML = renderScan();
+    else if (state.tab === 'move') m.innerHTML = renderMove();
+    else if (state.tab === 'bins') m.innerHTML = renderBins();
+    else if (state.tab === 'labels') m.innerHTML = renderLabels();
+    else if (state.tab === 'activity') m.innerHTML = state.activityHtml || '<div class="empty">Loading…</div>';
+    else if (WH.tabs[state.tab]) m.innerHTML = WH.tabs[state.tab]();
+  }
+
+  function locTable(locs) {
+    if (!locs || !locs.length) return '<p class="muted small">Not in any bin.</p>';
+    return '<table><thead><tr><th>Bin</th><th class="num">Qty</th></tr></thead><tbody>' + locs.map(function (l) {
+      return '<tr><td>' + esc(l.code) + (l.is_primary ? '<span class="tag primary">main</span>' : '') +
+        (l.kind === 'unassigned' ? '<span class="tag unassigned">put away</span>' : (l.kind !== 'storage' ? '<span class="tag">' + esc(l.kind) + '</span>' : '')) +
+        '</td><td class="num">' + esc(l.qty) + '</td></tr>';
+    }).join('') + '</tbody></table>';
+  }
+
+  function productHeader(p) {
+    return '<h2>' + esc(p.name || p.sku) + '</h2><div class="small muted">' + esc(p.sku) +
+      (p.make_model ? ' · ' + esc(p.make_model) : '') + (p.category ? ' · ' + esc(p.category) : '') + '</div>' +
+      '<div class="row small" style="margin:8px 0"><span class="chip">In stock: <b>' + esc(p.stock_count) + '</b></span>' +
+      (p.primary_bin ? '<span class="chip">Main bin: <b>' + esc(p.primary_bin) + '</b></span>' : '<span class="chip warn">No main bin</span>') + '</div>';
+  }
+
+  // ---------------------------------------------------------- scan tab --
+  function renderScan() {
+    var d = state.scanResult;
+    if (!d) return '<div class="empty">Scan a part or a bin label to start.</div>';
+    if (!d.type) return '<div class="card"><b>Not found.</b> <span class="muted">' + esc(d.error || '') + '</span></div>';
+    if (d.type === 'batch') {
+      var bt = d.batch;
+      return '<div class="card"><div class="small muted">Batch ' + esc(bt.batch_code) + ' · ' + esc(bt.receipt_number) + '</div>' + productHeader(d.product) +
+        '<div class="row small" style="margin-bottom:8px"><span class="chip">Received: <b>' + bt.qty_received + '</b></span><span class="chip">Put away: <b>' + bt.qty_putaway + '</b></span>' +
+        (bt.remaining ? '<span class="chip warn">' + bt.remaining + ' waiting in ' + esc(bt.receiving_bin) + '</span>' : '<span class="chip">All shelved</span>') + '</div>' +
+        locTable(d.locations) + '<div class="row" style="margin-top:12px">' + (bt.remaining ? '<button class="primary" data-act="putawayBatch">Put away</button>' : '') + '</div></div>';
+    }
+    if (d.type === 'product') {
+      var p = d.product;
+      return '<div class="card">' + productHeader(p) + locTable(d.locations) +
+        '<div class="row" style="margin-top:12px">' +
+        '<button class="primary" data-act="moveThis">Move / put away</button>' +
+        '<button data-act="labelThis">Add label</button>' +
+        '<button class="ghost" data-act="historyThis">History</button></div></div>';
+    }
+    var b = d.bin, c = d.contents || [];
+    return '<div class="card"><h2>Bin ' + esc(b.code) + (b.kind !== 'storage' ? '<span class="tag">' + esc(b.kind) + '</span>' : '') + '</h2>' +
+      '<div class="small muted">' + c.length + ' part(s), ' + c.reduce(function (s, x) { return s + x.qty; }, 0) + ' unit(s)' + (b.is_active ? '' : ' · <b>closed</b>') + '</div>' +
+      (c.length ? '<table style="margin-top:8px"><thead><tr><th>Part</th><th class="hide-sm">Part no.</th><th class="num">Qty</th></tr></thead><tbody>' +
+        c.map(function (x) { return '<tr class="click" data-sku="' + esc(x.sku) + '"><td>' + esc(x.name) + (x.is_primary ? '' : '<span class="tag">overflow</span>') + '</td><td class="hide-sm">' + esc(x.sku) + '</td><td class="num">' + esc(x.qty) + '</td></tr>'; }).join('') +
+        '</tbody></table>' : '<p class="muted">Empty.</p>') +
+      '<div class="row" style="margin-top:12px"><button data-act="binLabel" data-code="' + esc(b.code) + '">Add bin label</button></div></div>';
+  }
+
+  // ------------------------------------------------------------ move tab --
+  function resetMove() { state.move = { step: 1, product: null, locations: [], fromBin: null, qty: 1, toCode: '', setPrimary: false, putaway: false, batch: null }; }
+  // A batch label: take from the receiving bin, the quantity still waiting, and record it against the batch.
+  function moveLoadBatch(d) {
+    moveLoadProduct(d.product, d.locations);
+    var mv = state.move, bt = d.batch;
+    var rb = mv.locations.find(function (l) { return l.bin_id === bt.receiving_bin_id; });
+    if (rb) { mv.fromBin = rb.bin_id; mv.qty = Math.max(1, Math.min(bt.remaining, rb.qty)); mv.putaway = true; }
+    mv.batch = bt;
+    mv.setPrimary = !d.product.primary_bin;
+    render();
+  }
+  function moveLoadProduct(p, locations) {
+    var mv = state.move;
+    mv.product = p; mv.locations = locations || [];
+    var stocked = mv.locations.filter(function (l) { return l.qty > 0; });
+    // Putaway first: stock waiting in UNASSIGNED / receiving is what usually needs moving.
+    var pick = stocked.find(function (l) { return l.kind === 'unassigned' || l.kind === 'receiving'; }) || (stocked.length === 1 ? stocked[0] : null);
+    mv.fromBin = pick ? pick.bin_id : null;
+    mv.qty = pick ? pick.qty : 1;
+    mv.putaway = !!(pick && (pick.kind === 'unassigned' || pick.kind === 'receiving'));
+    mv.setPrimary = mv.putaway && !p.primary_bin;
+    mv.step = stocked.length ? 2 : 1;
+    if (!stocked.length) toast('No stock of this part is in any bin', true);
+    render();
+  }
+  function moveScan(code) {
+    var mv = state.move;
+    if (mv.step === 1 || !mv.product) {
+      api('/api/wh/lookup?code=' + encodeURIComponent(code)).then(function (d) {
+        if (d.type === 'batch') return moveLoadBatch(d);
+        if (d.type !== 'product') { toast('That is a bin. Scan the part first.', true); return; }
+        moveLoadProduct(d.product, d.locations);
+      }).catch(function (e) { toast(e.message, true); });
+      return;
+    }
+    // Part already chosen: a scan now is the destination bin (or a different part).
+    api('/api/wh/lookup?code=' + encodeURIComponent(code)).then(function (d) {
+      if (d.type === 'bin') { mv.toCode = d.bin.code; mv.step = 3; render(); var q = $('#mvQty'); if (q) q.focus(); }
+      else if (d.type === 'batch') moveLoadBatch(d);
+      else if (d.type === 'product') moveLoadProduct(d.product, d.locations);
+    }).catch(function () { mv.toCode = code.replace(/^BIN:/i, ''); mv.step = 3; render(); });
+  }
+  function renderMove() {
+    var mv = state.move;
+    if (!mv.product) return '<div class="card"><div class="steps"><div class="step active"><b>1. Scan the part</b><span class="muted small">Scan its label, or type the part number above.</span></div></div></div>';
+    var p = mv.product;
+    var opts = mv.locations.filter(function (l) { return l.qty > 0; }).map(function (l) {
+      return '<option value="' + l.bin_id + '"' + (String(l.bin_id) === String(mv.fromBin) ? ' selected' : '') + '>' + esc(l.code) + ' (' + l.qty + ')' + (l.kind === 'unassigned' ? ' · to put away' : '') + '</option>';
+    }).join('');
+    var from = mv.locations.find(function (l) { return String(l.bin_id) === String(mv.fromBin); });
+    return '<div class="card">' + productHeader(p) +
+      '<div class="steps">' +
+      '<div class="step done"><b>1. Part</b>' + esc(p.sku) + (mv.batch ? ' <span class="tag">batch ' + esc(mv.batch.batch_code) + '</span>' : '') + ' <button class="ghost small" data-act="mvReset">Change</button></div>' +
+      '<div class="step ' + (mv.step === 2 ? 'active' : 'done') + '"><b>2. Take from</b>' +
+        '<select class="f" id="mvFrom">' + opts + '</select>' +
+        '<label class="f" for="mvQty">How many</label><div class="qtybox"><button data-act="qtyDn">−</button><input id="mvQty" type="number" min="1" inputmode="numeric" value="' + esc(mv.qty) + '"><button data-act="qtyUp">+</button>' +
+        (from ? '<span class="muted small">of ' + from.qty + '</span>' : '') + '</div></div>' +
+      '<div class="step ' + (mv.step === 3 ? 'active done' : (mv.step === 2 ? 'active' : '')) + '"><b>3. Put into bin</b>' +
+        '<input class="f" id="mvTo" placeholder="Scan the shelf label" value="' + esc(mv.toCode) + '" autocapitalize="characters">' +
+        '<label class="small" style="display:flex;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" id="mvPrimary"' + (mv.setPrimary ? ' checked' : '') + '> Make this the part\'s main bin</label></div>' +
+      '</div>' +
+      '<div class="row" style="margin-top:12px"><button class="primary" data-act="mvConfirm"' + (mv.fromBin ? '' : ' disabled') + '>Confirm move</button>' +
+      '<button class="ghost" data-act="mvReset">Cancel</button></div></div>';
+  }
+  function confirmMove() {
+    var mv = state.move;
+    mv.fromBin = ($('#mvFrom') || {}).value || mv.fromBin;
+    mv.qty = parseInt(($('#mvQty') || {}).value, 10) || 0;
+    mv.toCode = (($('#mvTo') || {}).value || mv.toCode).trim();
+    mv.setPrimary = !!($('#mvPrimary') || {}).checked;
+    if (!mv.toCode) { toast('Scan or type the bin it is going to', true); return; }
+    if (mv.qty < 1) { toast('Quantity must be at least 1', true); return; }
+    var from = mv.locations.find(function (l) { return String(l.bin_id) === String(mv.fromBin); });
+    api('/api/wh/move', { method: 'POST', body: {
+      img: mv.product.img, from_bin_id: mv.fromBin, to_code: mv.toCode, qty: mv.qty, set_primary: mv.setPrimary,
+      batch_line_id: mv.batch && String(mv.batch.receiving_bin_id) === String(mv.fromBin) ? mv.batch.id : undefined,
+      kind: from && (from.kind === 'unassigned' || from.kind === 'receiving') ? 'putaway' : 'move',
+    } }).then(function (d) {
+      toast('Moved ' + mv.qty + ' × ' + mv.product.sku + ' to ' + mv.toCode.toUpperCase());
+      resetMove(); render(); refreshSummary();
+    }).catch(function (e) { toast(e.message, true); });
+  }
+
+  // ------------------------------------------------------------ bins tab --
+  function loadBins() {
+    var b = state.bins;
+    return api('/api/wh/bins?limit=500&q=' + encodeURIComponent(b.q || '') + (b.kind ? '&kind=' + b.kind : ''))
+      .then(function (d) { b.list = d.bins; if (state.tab === 'bins') render(); })
+      .catch(function (e) { toast(e.message, true); });
+  }
+  function renderBins() {
+    var b = state.bins, nSel = Object.keys(b.selected).length;
+    var kinds = ['', 'storage', 'display', 'receiving', 'staging', 'damaged', 'returns', 'unassigned'];
+    return '<div class="card"><div class="grid3">' +
+      '<div><label class="f">Find</label><input class="f" id="binQ" value="' + esc(b.q) + '" placeholder="e.g. J14"></div>' +
+      '<div><label class="f">Type</label><select class="f" id="binKind">' + kinds.map(function (k) { return '<option value="' + k + '"' + (k === b.kind ? ' selected' : '') + '>' + (k || 'All') + '</option>'; }).join('') + '</select></div>' +
+      '<div style="display:flex;align-items:flex-end"><button style="width:100%" data-act="binLabelsSel"' + (nSel ? '' : ' disabled') + '>Label ' + (nSel || '') + ' selected</button></div></div></div>' +
+      '<div class="card"><table><thead><tr><th style="width:28px"><input type="checkbox" id="binAll" aria-label="Select all"></th><th>Bin</th><th class="hide-sm">Type</th><th class="num">Parts</th><th class="num">Units</th></tr></thead><tbody>' +
+      (b.list.length ? b.list.map(function (x) {
+        return '<tr class="click" data-bin="' + esc(x.code) + '"><td><input type="checkbox" data-sel="' + esc(x.code) + '"' + (b.selected[x.code] ? ' checked' : '') + ' aria-label="Select ' + esc(x.code) + '"></td>' +
+          '<td><b>' + esc(x.code) + '</b>' + (x.is_active ? '' : '<span class="tag">closed</span>') + '</td><td class="hide-sm">' + esc(x.kind) + '</td><td class="num">' + x.items + '</td><td class="num">' + x.units + '</td></tr>';
+      }).join('') : '<tr><td colspan="5" class="empty">No bins match.</td></tr>') +
+      '</tbody></table><p class="small muted">' + b.list.length + ' shown (max 500). Tap a bin to see what is in it.</p></div>' +
+      (state.me && state.me.canManageBins !== false ?
+      '<div class="card"><h2>Add bins</h2><p class="small muted">One code, or a numbered run. Example: prefix <b>A1-</b>, 1 to 12, 2 digits → A1-01 … A1-12.</p>' +
+      '<div class="grid3"><div><label class="f">Single code</label><input class="f" id="newCode" placeholder="e.g. RACK-B3"></div>' +
+      '<div><label class="f">Type</label><select class="f" id="newKind">' + kinds.slice(1, 7).map(function (k) { return '<option>' + k + '</option>'; }).join('') + '</select></div>' +
+      '<div style="display:flex;align-items:flex-end"><button style="width:100%" data-act="binAdd">Add</button></div></div>' +
+      '<div class="grid3" style="margin-top:6px"><div><label class="f">Prefix</label><input class="f" id="rgPrefix" placeholder="A1-"></div>' +
+      '<div class="grid2"><div><label class="f">From</label><input class="f" id="rgFrom" type="number" value="1"></div><div><label class="f">To</label><input class="f" id="rgTo" type="number" value="10"></div></div>' +
+      '<div class="grid2"><div><label class="f">Digits</label><input class="f" id="rgPad" type="number" value="2"></div><div style="display:flex;align-items:flex-end"><button style="width:100%" data-act="binRange">Add run</button></div></div></div></div>' : '');
+  }
+  function createBins(body) {
+    api('/api/wh/bins', { method: 'POST', body: body }).then(function (d) {
+      toast('Added ' + d.created.length + ' bin(s)' + (d.skipped_existing ? ', ' + d.skipped_existing + ' already existed' : ''));
+      d.created.forEach(function (x) { state.bins.selected[x.code] = true; });
+      loadBins(); refreshSummary();
+    }).catch(function (e) { toast(e.message, true); });
+  }
+
+  // ---------------------------------------------------------- labels tab --
+  function addItemLabel(p, copies) {
+    var ex = state.queue.find(function (q) { return q.type === 'item' && q.sku === p.sku; });
+    if (ex) ex.copies += copies || 1;
+    else state.queue.push({ type: 'item', sku: p.sku, name: p.name, bin: p.primary_bin || '', price: p.price_usd, copies: copies || 1 });
+    saveQueue();
+  }
+  function addBinLabel(code) {
+    if (!state.queue.find(function (q) { return q.type === 'bin' && q.code === code; })) state.queue.push({ type: 'bin', code: code, copies: 1 });
+    saveQueue();
+  }
+  function labelScan(code) {
+    api('/api/wh/lookup?code=' + encodeURIComponent(code)).then(function (d) {
+      if (d.type === 'product') { addItemLabel(d.product, 1); toast('Label added: ' + d.product.sku); }
+      else if (d.type === 'bin') { addBinLabel(d.bin.code); toast('Bin label added: ' + d.bin.code); }
+      render();
+    }).catch(function (e) { toast(e.message, true); });
+  }
+  function renderLabels() {
+    var q = state.queue;
+    return '<div class="card"><h2>Print list</h2>' +
+      (q.length ? '<table><thead><tr><th>Label</th><th class="num">Copies</th><th></th></tr></thead><tbody>' + q.map(function (x, i) {
+        return '<tr><td>' + (x.type === 'bin' ? 'Bin <b>' + esc(x.code) + '</b>' : x.type === 'batch' ? 'Batch <b>' + esc(x.code) + '</b> <span class="muted small">' + esc(x.sku) + ' × ' + esc(x.qty) + '</span>' : '<b>' + esc(x.sku) + '</b> <span class="muted small">' + esc(x.name) + '</span>') + '</td>' +
+          '<td class="num"><input type="number" min="1" max="500" value="' + x.copies + '" data-copies="' + i + '" style="width:64px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);text-align:center"></td>' +
+          '<td class="num"><button class="ghost" data-del="' + i + '" aria-label="Remove">✕</button></td></tr>';
+      }).join('') + '</tbody></table>' : '<div class="empty">Scan parts or bins to add labels. You can also add them from the Scan and Bins tabs.</div>') +
+      '</div><div class="card"><h2>Layout</h2><div class="grid2">' +
+      '<div><label class="f">Printer</label><select class="f" id="layout"><option value="t21"' + (state.layout === 't21' ? ' selected' : '') + '>Thermal label printer: 2" × 1"</option><option value="sheet"' + (state.layout === 'sheet' ? ' selected' : '') + '>Sheet labels: 3 × 10 (Avery 5160 / L7160)</option></select></div>' +
+      '<div style="display:flex;align-items:flex-end;gap:8px"><label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="showPrice"' + (state.showPrice ? ' checked' : '') + '> Show price on part labels</label></div></div>' +
+      '<p class="small muted">Thermal: set the printer to 2"×1" labels. Sheets: print at 100% scale (no "fit to page").</p>' +
+      '<div class="row"><button class="primary" data-act="print"' + (q.length ? '' : ' disabled') + '>Print ' + q.reduce(function (s, x) { return s + x.copies; }, 0) + ' label(s)</button>' +
+      '<button class="ghost" data-act="clearQ"' + (q.length ? '' : ' disabled') + '>Clear list</button></div></div>';
+  }
+  function barcodeSvg(value, height, width) {
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    try { JsBarcode(svg, value, { format: 'CODE128', displayValue: false, margin: 0, height: height, width: width || 1.4 }); }
+    catch (_) { return '<div style="font-size:7pt">' + esc(value) + '</div>'; }
+    return svg.outerHTML;
+  }
+  function qrSvg(value, cell) {
+    var qr = qrcode(0, 'M'); qr.addData(value); qr.make();
+    return qr.createSvgTag({ cellSize: cell || 2, margin: 0 });
+  }
+  function money(v) { return v == null ? '' : '$' + Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function buildLabels() {
+    var html = [];
+    state.queue.forEach(function (x) {
+      for (var i = 0; i < Math.min(x.copies, 500); i++) {
+        if (x.type === 'bin') {
+          html.push('<div class="lbl bin">' + qrSvg('BIN:' + x.code, state.layout === 'sheet' ? 2 : 2) +
+            '<div><div class="code">' + esc(x.code) + '</div>' + barcodeSvg('BIN:' + x.code, 22, 1.1) + '</div></div>');
+        } else if (x.type === 'batch') {
+          // Goes on the carton / bundle as it leaves receiving; scanning it starts the put-away.
+          html.push('<div class="lbl bin">' + qrSvg('BATCH:' + x.code, 2) +
+            '<div><div class="code" style="font-size:' + (state.layout === 'sheet' ? '14pt' : '12pt') + '">' + esc(x.code) + ' · ' + esc(x.qty) + ' pcs</div>' +
+            '<div style="font-size:7pt;font-weight:700">' + esc(x.sku) + '</div><div style="font-size:6.5pt">' + esc(x.receipt) + '</div></div></div>');
+        } else {
+          html.push('<div class="lbl"><div class="nm">' + esc(x.name || x.sku) + '</div>' + barcodeSvg(x.sku, state.layout === 'sheet' ? 30 : 28, 1.3) +
+            '<div class="meta"><b>' + esc(x.sku) + '</b><span>' + (x.bin ? esc(x.bin) : '') + (state.showPrice && x.price != null ? ' ' + money(x.price) : '') + '</span></div></div>');
+        }
+      }
+    });
+    return '<div class="' + (state.layout === 'sheet' ? 'sheet' : 't21') + '">' + html.join('') + '</div>';
+  }
+  function printLabels() {
+    var pa = $('#printArea');
+    pa.innerHTML = '<style>@page{' + (state.layout === 'sheet' ? 'size:letter;margin:0' : 'size:2in 1in;margin:0') + '}</style>' + buildLabels();
+    setTimeout(function () { window.print(); }, 50);
+  }
+
+  // --------------------------------------------------------- activity tab --
+  function loadActivity() {
+    state.activityHtml = '<div class="empty">Loading…</div>';
+    return api('/api/wh/activity?limit=150').then(function (d) {
+      var names = { move: 'Moved', putaway: 'Put away', set_primary: 'Main bin set' };
+      state.activityHtml = '<div class="card"><table><thead><tr><th>When</th><th>What</th><th class="num">Qty</th><th class="hide-sm">Who</th></tr></thead><tbody>' +
+        (d.activity.length ? d.activity.map(function (a) {
+          return '<tr><td class="small">' + esc(new Date(a.created_at).toLocaleString()) + '</td><td><b>' + esc(names[a.kind] || a.kind) + '</b> ' + esc(a.sku || '') +
+            '<div class="small muted">' + esc(a.notes || a.bin_location || '') + '</div></td><td class="num">' + esc(a.qty_delta == null ? '' : a.qty_delta) + '</td><td class="hide-sm small">' + esc(a.by_name || '') + '</td></tr>';
+        }).join('') : '<tr><td colspan="4" class="empty">Nothing yet.</td></tr>') + '</tbody></table></div>';
+      if (state.tab === 'activity') render();
+    }).catch(function (e) { state.activityHtml = '<div class="card">' + esc(e.message) + '</div>'; render(); });
+  }
+
+  // ------------------------------------------------------ click handling --
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest('[data-act],[data-sku],[data-bin],[data-del]');
+    if (!t) return;
+    if (t.hasAttribute('data-sel')) return;
+    var act = t.getAttribute('data-act');
+    var sr = state.scanResult;
+    if (t.hasAttribute('data-del')) { state.queue.splice(+t.getAttribute('data-del'), 1); saveQueue(); render(); return; }
+    if (!act && t.hasAttribute('data-sku')) { lookup(t.getAttribute('data-sku')); return; }
+    if (!act && t.hasAttribute('data-bin')) { if (e.target.tagName === 'INPUT') return; setTab('scan'); lookup('BIN:' + t.getAttribute('data-bin')); return; }
+    switch (act) {
+      case 'moveThis': setTab('move'); moveLoadProduct(sr.product, sr.locations); break;
+      case 'putawayBatch': setTab('move'); moveLoadBatch(sr); break;
+      case 'labelThis': addItemLabel(sr.product, 1); toast('Label added: ' + sr.product.sku); break;
+      case 'historyThis':
+        api('/api/wh/activity?img=' + encodeURIComponent(sr.product.img)).then(function (d) {
+          toast(d.activity.length ? d.activity.length + ' recent movement(s); see Activity' : 'No warehouse movements yet');
+        });
+        break;
+      case 'binLabel': addBinLabel(t.getAttribute('data-code')); toast('Bin label added'); break;
+      case 'mvReset': resetMove(); render(); focusScan(); break;
+      case 'qtyUp': $('#mvQty').value = (parseInt($('#mvQty').value, 10) || 0) + 1; break;
+      case 'qtyDn': $('#mvQty').value = Math.max(1, (parseInt($('#mvQty').value, 10) || 1) - 1); break;
+      case 'mvConfirm': confirmMove(); break;
+      case 'binAdd': var c = $('#newCode').value.trim(); if (c) createBins({ code: c, kind: $('#newKind').value }); break;
+      case 'binRange': createBins({ prefix: $('#rgPrefix').value.trim().toUpperCase(), from: +$('#rgFrom').value, to: +$('#rgTo').value, pad: +$('#rgPad').value, kind: $('#newKind').value }); break;
+      case 'binLabelsSel': Object.keys(state.bins.selected).forEach(addBinLabel); state.bins.selected = {}; toast('Bin labels added'); setTab('labels'); break;
+      case 'print': printLabels(); break;
+      case 'clearQ': if (confirm('Clear the print list?')) { state.queue = []; saveQueue(); render(); } break;
+    }
+  });
+  document.addEventListener('change', function (e) {
+    var t = e.target;
+    if (t.id === 'binKind') { state.bins.kind = t.value; loadBins(); }
+    else if (t.id === 'binAll') { state.bins.list.forEach(function (x) { if (t.checked) state.bins.selected[x.code] = true; else delete state.bins.selected[x.code]; }); render(); }
+    else if (t.hasAttribute('data-sel')) { var k = t.getAttribute('data-sel'); if (t.checked) state.bins.selected[k] = true; else delete state.bins.selected[k]; render(); }
+    else if (t.hasAttribute('data-copies')) { state.queue[+t.getAttribute('data-copies')].copies = Math.max(1, Math.min(500, parseInt(t.value, 10) || 1)); saveQueue(); render(); }
+    else if (t.id === 'layout') { state.layout = t.value; try { localStorage.setItem('wh.layout', t.value); } catch (_) {} }
+    else if (t.id === 'showPrice') { state.showPrice = t.checked; try { localStorage.setItem('wh.price', t.checked ? '1' : '0'); } catch (_) {} }
+    else if (t.id === 'mvFrom') { state.move.fromBin = t.value; var l = state.move.locations.find(function (x) { return String(x.bin_id) === t.value; }); if (l) state.move.qty = l.qty; render(); }
+  });
+  var binQT;
+  document.addEventListener('input', function (e) {
+    if (e.target.id === 'binQ') { clearTimeout(binQT); var v = e.target.value; binQT = setTimeout(function () { state.bins.q = v; loadBins(); }, 250); }
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.target.id === 'mvTo' && e.key === 'Enter') { e.preventDefault(); confirmMove(); }
+  });
+
+  // ---------------------------------------------------- extension hook --
+  // Extra tabs (Receive, Office) live in /assets/wh-inbound.js and plug in here.
+  function addBatchLabel(b) {
+    if (!state.queue.find(function (q) { return q.type === 'batch' && q.code === b.code; }))
+      state.queue.push({ type: 'batch', code: b.code, sku: b.sku, qty: b.qty, receipt: b.receipt || '', copies: 1 });
+    saveQueue();
+  }
+  Object.assign(WH, {
+    api: api, esc: esc, toast: toast, state: state, render: render, setTab: setTab, focusScan: focusScan,
+    addItemLabel: addItemLabel, addBatchLabel: addBatchLabel, money: money,
+  });
+
+  // ---------------------------------------------------------------- boot --
+  function refreshSummary() {
+    api('/api/wh/summary').then(function (s) {
+      $('#chips').innerHTML = '<span class="chip">' + s.bins.toLocaleString() + ' bins</span>' +
+        (s.unassigned_units ? '<span class="chip warn">' + s.unassigned_units.toLocaleString() + ' units (' + s.unassigned_items.toLocaleString() + ' parts) waiting to be put away</span>' : '<span class="chip">Everything has a bin</span>') +
+        (s.mismatched_items ? '<span class="chip warn">' + s.mismatched_items + ' parts where bins and stock disagree</span>' : '');
+    }).catch(function () {});
+  }
+  api('/api/me').then(function (d) {
+    var u = d && (d.user || d);
+    if (!u || !u.id) return showLogin();
+    if (!u.is_admin) { showLogin(); $('#loginErr').textContent = 'This account cannot open the warehouse.'; return; }
+    var can = function (k) { return !!u.perms_full || !(u.perms && u.perms[k] === false); };
+    if (!can('warehouse.access')) { showLogin(); $('#loginErr').textContent = 'Your account is not allowed to open the warehouse scanner. Ask a manager.'; return; }
+    u.canManageBins = can('warehouse.manage_bins');
+    u.can = can;
+    state.me = u;
+    $('#who').textContent = u.name || u.email || '';
+    $('#app').style.display = 'block';
+    renderQCount(); render(); refreshSummary(); focusScan();
+    // Opened from the mobile app on a tab: warehouse.html#count, #orders, #move, #receive.
+    var wantTab = function () { var h = (location.hash || '').slice(1); if (h && document.querySelector('#tabs button[data-tab="' + h + '"]')) setTab(h); };
+    wantTab(); window.addEventListener('hashchange', wantTab);
+  }).catch(showLogin);
+})();
+</script>
+<script src="/assets/wh-inbound.js"></script>
+<script src="/assets/wh-outbound.js"></script>
+<script src="/assets/wh-count.js"></script>
+<script src="/assets/pin-staff.js"></script>
+<script src="/assets/pw-change.js"></script>
+<script src="/assets/clock-banner.js" defer></script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+</body>
+</html>

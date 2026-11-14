@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Commission · Morty's Auto Parts</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0} header nav{margin-left:auto;display:flex;gap:14px;font-size:13px} header a{color:#fff;opacity:.85}
+  main{max-width:1200px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  input,select,button,textarea{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  button{cursor:pointer;background:var(--card)} button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600} button.sm{padding:3px 9px;font-size:12.5px}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 12px} .tabs button{border-radius:999px;padding:6px 13px;font-size:13px} .tabs button.on{background:var(--navy);border-color:var(--navy);color:#fff}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px} .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  table{width:100%;border-collapse:collapse} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  tr.total td{font-weight:700;border-top:2px solid var(--ink)}
+  .scroll{overflow-x:auto}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip);white-space:nowrap}
+  .pill.ok{background:#16a34a22;color:var(--ok)} .pill.bad{background:#d6282822;color:var(--red)} .pill.warn{background:#f59e0b22;color:var(--warn)}
+  .note{padding:8px 10px;border-radius:8px;font-size:13px;margin-bottom:8px} .note.warn{background:#f59e0b18;border-left:3px solid var(--warn)} .note.info{background:var(--chip)}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px} .kpi{background:var(--chip);border-radius:10px;padding:10px 12px} .kpi span{display:block;font-size:12px;color:var(--muted)} .kpi b{font-size:18px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px} @media (max-width:860px){ .grid{grid-template-columns:1fr} }
+  .modal{position:fixed;inset:0;background:rgba(10,15,25,.55);display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow:auto;z-index:40} .modal .card{max-width:860px;width:100%}
+  .empty{color:var(--muted);text-align:center;padding:20px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60;max-width:90vw}
+  @media print{ header,.tabs,.controls,.noprint{display:none!important} .modal{position:static;padding:0;background:none} body{background:#fff} }
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Commission</h1><nav><a href="/accounting.html">Accounting</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"><button data-t="sum" class="on">Overview</button><button data-t="rules">Rules</button><button data-t="entries">Entries</button>
+    <button data-t="split">Split a sale</button><button data-t="stmt">Statements</button><button data-t="me">My commission</button><button data-t="reps">Freelance reps</button><button data-t="links">Links</button></div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var J = function (v) { if (v == null) return '–'; var x = Number(v); return (x < 0 ? '-' : '') + 'J$' + Math.abs(x).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+  var day = function (t) { return t ? new Date(t).toLocaleDateString('en-JM') : ''; };
+  var ymd = function (d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  var STATUS = { pending: ['waiting for payment', 'warn'], earned: ['earned', 'ok'], void: ['void', ''], on_statement: ['on statement', ''], approved: ['approved', 'ok'], paid: ['paid', 'ok'], draft: ['draft', 'warn'], cancelled: ['cancelled', ''] };
+  var KIND = { earned: 'Sale', clawback_return: 'Return', clawback_void: 'Void', adjust: 'Adjustment' };
+  var tab = 'sum', st = null, t = new Date(), p = { from: ymd(new Date(t.getFullYear(), t.getMonth(), 1)), to: ymd(t), rep: '', status: '' };
+  try { tab = localStorage.getItem('vision.commTab') || 'sum'; } catch (_) {}
+  function toast(x) { var el = $('#toast'); el.textContent = x; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 3200); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); }
+        return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; });
+      });
+  }
+  var pill = function (s) { var x = STATUS[s] || [s, '']; return '<span class="pill ' + x[1] + '">' + esc(x[0]) + '</span>'; };
+  function repOptions(sel, blank) { return (blank ? '<option value="">' + blank + '</option>' : '') + (st ? st.reps : []).map(function (r) { return '<option value="' + r.id + '"' + (String(sel) === String(r.id) ? ' selected' : '') + '>' + esc(r.name) + '</option>'; }).join(''); }
+  function period(extra) { return '<div class="controls"><div><label>From</label><input type="date" id="pf" value="' + p.from + '"></div><div><label>To</label><input type="date" id="pt" value="' + p.to + '"></div>' + (extra || '') + '<button class="primary" id="pgo">Show</button></div>'; }
+  function modal(h) { $('#modal').innerHTML = '<div class="modal"><div class="card">' + h + '</div></div>'; $('.modal').addEventListener('mousedown', function (e) { if (e.target.classList.contains('modal')) $('#modal').innerHTML = ''; }); }
+  function entryTable(list, withRep) {
+    return '<div class="scroll"><table><thead><tr><th>Date</th>' + (withRep ? '<th>Rep</th>' : '') + '<th>What</th><th>Sale</th><th>Item</th><th>Rule</th><th class="n">Basis</th><th class="n">Rate</th><th class="n">Share</th><th class="n">Commission</th><th>Status</th></tr></thead><tbody>' +
+      (list.length ? list.map(function (e) {
+        return '<tr><td>' + esc(day(e.earned_at)) + '</td>' + (withRep ? '<td>' + esc(e.rep) + '</td>' : '') + '<td>' + esc(KIND[e.kind] || e.kind) + (e.note ? '<br><small>' + esc(e.note) + '</small>' : '') + '</td><td>' + esc(e.receipt_number || '') + '</td><td>' + esc(e.item || '') + '</td><td><small>' + esc(e.rule_name || '') + '</small></td>' +
+          '<td class="n">' + (e.basis === 'flat' ? Number(e.basis_amount) + ' units' : e.basis_amount != null ? J(e.basis_amount) + (e.basis === 'margin' ? ' margin' : '') : '') + '</td><td class="n">' + (e.rate != null ? (e.basis === 'flat' ? J(e.rate) + '/unit' : Number(e.rate) + '%') : '') + '</td>' +
+          '<td class="n">' + (Number(e.share_pct) !== 100 ? Number(e.share_pct) + '%' : '') + '</td><td class="n"><b>' + J(e.amount) + '</b></td><td>' + pill(e.status) + (e.statement ? '<br><small>' + esc(e.statement) + '</small>' : '') + '</td></tr>';
+      }).join('') : '<tr><td colspan="11" class="empty">Nothing in these dates.</td></tr>') + '</tbody></table></div>';
+  }
+
+  function sum() {
+    return api('/api/comm/status').then(function (s) {
+      st = s;
+      if (!s.started) {
+        $('#out').innerHTML = '<div class="card"><h2>Switch on commission tracking</h2><p class="sub">From the moment you switch it on, commission on every sale with a rep is worked out once and kept, so later rate changes never rewrite what someone was owed. Sales before then are not included (the old commission report still covers them).</p>' +
+          '<div class="note info">Set up the rules first (Rules tab), or give each rep a default % on the Mechanics screen. Reps are staff marked as sales reps.</div><button class="primary" id="startC">Switch on now</button></div>';
+        $('#startC').onclick = function () { if (!confirm('Start tracking commission from now?')) return; api('/api/comm/start', 'POST').then(function () { toast('Started'); sum(); }).catch(function (e) { toast(e.message); }); };
+        return;
+      }
+      return api('/api/comm/summary?from=' + p.from + '&to=' + p.to).then(function (d) {
+        var tot = d.reps.reduce(function (a, r) { a.e += r.earned; a.p += r.pending; a.c += r.clawbacks; a.o += r.owed; return a; }, { e: 0, p: 0, c: 0, o: 0 });
+        $('#out').innerHTML = '<div class="card">' + period('<button id="runNow">Work out new sales now</button>') +
+          '<div class="kpis"><div class="kpi"><span>Earned in period</span><b>' + J(tot.e) + '</b></div><div class="kpi"><span>Waiting for payment</span><b>' + J(tot.p) + '</b></div><div class="kpi"><span>Clawed back</span><b>' + J(tot.c) + '</b></div><div class="kpi"><span>Owed now (not paid)</span><b>' + J(tot.o) + '</b></div></div>' +
+          '<p class="sub" style="margin-top:8px">Tracking since ' + esc(new Date(s.start_at).toLocaleString('en-JM')) + '. ' + (s.last_run ? 'Last worked out ' + esc(new Date(s.last_run.at).toLocaleTimeString('en-JM')) + '.' : '') + '</p></div>' +
+          '<div class="card"><h2>By rep</h2><div class="scroll"><table><thead><tr><th>Rep</th><th class="n">Sales</th><th class="n">Earned</th><th class="n">Waiting</th><th class="n">Clawbacks</th><th class="n">Adjustments</th><th class="n">Paid in period</th><th class="n">Owed now</th><th class="n">Not on a statement</th></tr></thead><tbody>' +
+          (d.reps.length ? d.reps.map(function (r) { return '<tr><td>' + esc(r.rep) + '</td><td class="n">' + J(r.sales) + '</td><td class="n">' + J(r.earned) + '</td><td class="n">' + J(r.pending) + '</td><td class="n">' + J(r.clawbacks) + '</td><td class="n">' + J(r.adjustments) + '</td><td class="n">' + J(r.paid_in_period) + '</td><td class="n"><b>' + J(r.owed) + '</b></td><td class="n">' + J(r.not_on_statement) + '</td></tr>'; }).join('') : '<tr><td colspan="9" class="empty">No commission yet.</td></tr>') + '</tbody></table></div></div>' +
+          '<div class="grid"><div class="card"><h2>Settings</h2><div class="controls"><div><label>Commission is earned</label><select id="po"><option value="sale"' + (s.paid_on === 'sale' ? ' selected' : '') + '>when the sale is made</option><option value="collected"' + (s.paid_on === 'collected' ? ' selected' : '') + '>only once the sale is fully paid</option></select></div>' +
+          '<div><label>Unpaid account sales earn nothing after (days)</label><input id="ud" type="number" min="7" max="730" value="' + s.unpaid_days + '" style="width:110px"></div><button id="saveS">Save</button></div></div>' +
+          '<div class="card"><h2>Adjustment</h2><p class="sub">Add or take off commission by hand (a correction, a bonus). It goes on the next statement.</p><div class="controls"><div><label>Rep</label><select id="aRep">' + repOptions('', 'Choose…') + '</select></div><div><label>Amount J$ (minus to take off)</label><input id="aAmt" type="number" step="0.01" style="width:140px"></div><div style="flex:1"><label>Why</label><input id="aNote" style="width:100%"></div><button id="aGo">Add</button></div></div></div>';
+        $('#pgo').onclick = function () { p.from = $('#pf').value; p.to = $('#pt').value; sum(); };
+        $('#runNow').onclick = function () { api('/api/comm/run', 'POST').then(function (r) { toast((r.sales || 0) + ' sales worked out, ' + (r.entries || 0) + ' lines'); sum(); }).catch(function (e) { toast(e.message); }); };
+        $('#saveS').onclick = function () { api('/api/comm/settings', 'PUT', { paid_on: $('#po').value, unpaid_days: $('#ud').value }).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); }); };
+        $('#aGo').onclick = function () { api('/api/comm/adjust', 'POST', { rep_id: $('#aRep').value, amount: $('#aAmt').value, note: $('#aNote').value }).then(function () { toast('Added'); sum(); }).catch(function (e) { toast(e.message); }); };
+      });
+    });
+  }
+
+  function rules() {
+    return Promise.all([st ? null : api('/api/comm/status'), api('/api/comm/rules')]).then(function (r) {
+      if (r[0]) st = r[0];
+      var d = r[1];
+      var scopeVal = function (x) { return x.scope === 'all' ? 'every part' : x.scope === 'supplier' ? 'supplier: ' + ((d.suppliers.find(function (s) { return String(s.id) === String(x.scope_value); }) || {}).name || x.scope_value) : x.scope + ': ' + x.scope_value; };
+      var rate = function (x) { return x.basis === 'flat' ? J(x.rate) + ' per unit' : Number(x.rate) + '% of ' + (x.basis === 'margin' ? 'margin' : 'sale'); };
+      $('#out').innerHTML = '<div class="card"><h2>Rules <button class="sm primary" id="newR">+ Rule</button></h2><p class="sub">Most specific wins: a part rule, then the part\'s own override, then supplier, category, every part; a rule for one rep beats one for all; higher priority first. With no rule, the rep\'s default % applies. Changes affect sales from now on.</p>' +
+        '<div class="scroll"><table><thead><tr><th>Rule</th><th>Applies to</th><th>Rep</th><th>Rate</th><th>Tiers</th><th class="n">Priority</th><th>Dates</th><th></th></tr></thead><tbody>' +
+        (d.rules.length ? d.rules.map(function (x, i) {
+          return '<tr><td><b>' + esc(x.name) + '</b>' + (x.is_active ? '' : ' <span class="pill">off</span>') + '</td><td>' + esc(scopeVal(x)) + '</td><td>' + esc(x.rep_name || 'every rep') + '</td><td>' + rate(x) + '</td>' +
+            '<td><small>' + (Array.isArray(x.tiers) ? x.tiers.map(function (t) { return 'from ' + J(t.from) + ': ' + t.rate + (x.basis === 'flat' ? '' : '%'); }).join('<br>') : '') + '</small></td><td class="n">' + x.priority + '</td>' +
+            '<td><small>' + esc((x.starts_on || '').slice(0, 10)) + (x.ends_on ? ' to ' + esc(x.ends_on.slice(0, 10)) : '') + '</small></td><td><button class="sm" data-edit="' + i + '">Edit</button></td></tr>';
+        }).join('') : '<tr><td colspan="8" class="empty">No rules yet: reps earn their default % only.</td></tr>') + '</tbody></table></div></div>';
+      var form = function (x) {
+        x = x || { scope: 'all', basis: 'sale', rate: 0, priority: 0, is_active: true, tiers: [] };
+        modal('<h2>' + (x.id ? 'Edit rule' : 'New rule') + '</h2>' +
+          '<div class="controls"><div style="flex:1"><label>Name</label><input id="rN" value="' + esc(x.name || '') + '" style="width:100%"></div><div><label>Rep</label><select id="rRep">' + repOptions(x.rep_id, 'Every rep') + '</select></div></div>' +
+          '<div class="controls"><div><label>Applies to</label><select id="rS"><option value="all">Every part</option><option value="category">A category</option><option value="supplier">A supplier</option><option value="product">One part</option></select></div>' +
+          '<div id="rVbox" style="flex:1"><label>Which</label><span id="rV"></span></div></div>' +
+          '<div class="controls"><div><label>Basis</label><select id="rB"><option value="sale">% of the sale (ex GCT)</option><option value="margin">% of the margin</option><option value="flat">J$ per unit</option></select></div><div><label>Rate</label><input id="rR" type="number" step="0.01" value="' + esc(x.rate) + '" style="width:110px"></div>' +
+          '<div><label>Priority</label><input id="rP" type="number" value="' + esc(x.priority) + '" style="width:90px"></div><div><label>From</label><input id="rF" type="date" value="' + esc((x.starts_on || '').slice(0, 10)) + '"></div><div><label>To</label><input id="rT" type="date" value="' + esc((x.ends_on || '').slice(0, 10)) + '"></div>' +
+          '<label style="display:flex;gap:6px;align-items:center;margin:0 0 8px;color:inherit"><input type="checkbox" id="rA"' + (x.is_active !== false ? ' checked' : '') + '> active</label></div>' +
+          '<p class="sub">Tiers (optional): the rate rises once the rep\'s net sales this month reach an amount. One per line: <code>500000 4</code> means from J$500,000 the rate is 4.</p><textarea id="rTi" rows="3" style="width:100%">' + esc((Array.isArray(x.tiers) ? x.tiers : []).map(function (t) { return t.from + ' ' + t.rate; }).join('\n')) + '</textarea>' +
+          '<div class="controls" style="margin-top:10px"><button class="primary" id="rSave">Save</button><button id="rCancel">Cancel</button></div>');
+        $('#rS').value = x.scope; $('#rB').value = x.basis;
+        var drawV = function () {
+          var sc = $('#rS').value, v = x.scope === sc ? x.scope_value || '' : '';
+          $('#rVbox').style.display = sc === 'all' ? 'none' : '';
+          $('#rV').innerHTML = sc === 'category' ? '<select id="rVal">' + d.categories.map(function (c) { return '<option' + (c === v ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('') + '</select>'
+            : sc === 'supplier' ? '<select id="rVal">' + d.suppliers.map(function (s) { return '<option value="' + s.id + '"' + (String(s.id) === String(v) ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join('') + '</select>'
+            : sc === 'product' ? '<input id="rVal" value="' + esc(v) + '" placeholder="Part number (as in the catalogue)">' : '';
+        };
+        $('#rS').onchange = drawV; drawV();
+        $('#rCancel').onclick = function () { $('#modal').innerHTML = ''; };
+        $('#rSave').onclick = function () {
+          var tiers = $('#rTi').value.split('\n').map(function (l) { var a = l.trim().split(/[\s,]+/); return a.length >= 2 ? { from: Number(a[0]), rate: Number(a[1]) } : null; }).filter(Boolean);
+          var body = { name: $('#rN').value, rep_id: $('#rRep').value, scope: $('#rS').value, scope_value: $('#rVal') ? $('#rVal').value : '', basis: $('#rB').value, rate: $('#rR').value, priority: $('#rP').value, starts_on: $('#rF').value, ends_on: $('#rT').value, is_active: $('#rA').checked, tiers: tiers };
+          api('/api/comm/rules' + (x.id ? '/' + x.id : ''), x.id ? 'PUT' : 'POST', body).then(function () { $('#modal').innerHTML = ''; toast('Saved'); rules(); }).catch(function (e) { toast(e.message); });
+        };
+      };
+      $('#newR').onclick = function () { form(null); };
+      all('[data-edit]').forEach(function (b) { b.onclick = function () { form(d.rules[+b.getAttribute('data-edit')]); }; });
+    });
+  }
+
+  function entries() {
+    return Promise.all([st ? null : api('/api/comm/status'), api('/api/comm/entries?from=' + p.from + '&to=' + p.to + (p.rep ? '&rep=' + p.rep : '') + (p.status ? '&status=' + p.status : ''))]).then(function (r) {
+      if (r[0]) st = r[0];
+      $('#out').innerHTML = '<div class="card">' + period('<div><label>Rep</label><select id="pr">' + repOptions(p.rep, 'All reps') + '</select></div><div><label>Status</label><select id="ps"><option value="">Any</option>' + Object.keys(STATUS).filter(function (k) { return k !== 'draft' && k !== 'cancelled'; }).map(function (k) { return '<option value="' + k + '"' + (p.status === k ? ' selected' : '') + '>' + STATUS[k][0] + '</option>'; }).join('') + '</select></div>') + entryTable(r[1].entries, true) + '</div>';
+      $('#pgo').onclick = function () { p.from = $('#pf').value; p.to = $('#pt').value; p.rep = $('#pr').value; p.status = $('#ps').value; entries(); };
+    });
+  }
+
+  function split() {
+    return (st ? Promise.resolve(st) : api('/api/comm/status').then(function (s) { st = s; return s; })).then(function () {
+      $('#out').innerHTML = '<div class="card"><h2>Split a sale between reps</h2><p class="sub">When two reps share a sale, give each a share. The sale\'s commission is worked out again with the split. Not possible once it is on a statement (use an adjustment then).</p>' +
+        '<div class="controls"><div><label>Receipt number</label><input id="rc" placeholder="R-2026-00012"></div><button class="primary" id="find">Find</button></div><div id="sp"></div></div>';
+      var load = function () {
+        api('/api/comm/sale?receipt=' + encodeURIComponent($('#rc').value.trim())).then(function (d) {
+          var s = d.sale, rows = d.split.length ? d.split : (s.sales_rep_id ? [{ rep_id: s.sales_rep_id, share_pct: 100 }] : []);
+          var row = function (x) { return '<div class="controls" data-row><select data-r>' + repOptions(x ? x.rep_id : '', 'Rep…') + '</select><input data-s type="number" min="1" max="100" step="0.01" value="' + (x ? Number(x.share_pct) : '') + '" style="width:100px"> %</div>'; };
+          $('#sp').innerHTML = '<p><b>' + esc(s.receipt_number) + '</b> · ' + esc(day(s.created_at)) + ' · ' + esc(s.customer_name || '') + ' · ' + J(s.total_usd) + (s.voided ? ' <span class="pill bad">void</span>' : '') + '</p>' +
+            '<div id="rows">' + (rows.length ? rows.map(row).join('') : row(null)) + '</div><div class="controls"><button class="sm" id="addRow">+ rep</button><button class="primary" id="saveSp">Save split</button></div>' +
+            '<h2 style="margin-top:12px">Commission on this sale</h2>' + entryTable(d.entries, true);
+          $('#addRow').onclick = function () { $('#rows').insertAdjacentHTML('beforeend', row(null)); };
+          $('#saveSp').onclick = function () {
+            var reps = all('[data-row]').map(function (r) { return { rep_id: $('[data-r]', r).value, share_pct: $('[data-s]', r).value }; }).filter(function (x) { return x.rep_id; });
+            api('/api/comm/sale/' + s.id + '/split', 'PUT', { reps: reps }).then(function (r2) { toast('Saved: ' + r2.entries + ' lines worked out'); load(); }).catch(function (e) { toast(e.message); });
+          };
+        }).catch(function (e) { $('#sp').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+      };
+      $('#find').onclick = load;
+      $('#rc').addEventListener('keydown', function (e) { if (e.key === 'Enter') load(); });
+    });
+  }
+
+  function stmt() {
+    return Promise.all([st ? null : api('/api/comm/status'), api('/api/comm/statements')]).then(function (r) {
+      if (r[0]) st = r[0];
+      var d = r[1];
+      $('#out').innerHTML = '<div class="card"><h2>New statement</h2><p class="sub">Gathers everything a rep earned (less clawbacks and adjustments) up to a date that is not on a statement yet. A manager other than the rep approves it, which puts it in the books as owed; paying it records the payout.</p>' +
+        '<div class="controls"><div><label>Rep</label><select id="sRep">' + repOptions('', 'Choose…') + '</select></div><div><label>Up to</label><input type="date" id="sTo" value="' + ymd(new Date()) + '"></div><button class="primary" id="sMake">Make statement</button></div></div>' +
+        '<div class="card"><h2>Statements</h2><div class="scroll"><table><thead><tr><th>Statement</th><th>Rep</th><th>Up to</th><th class="n">Lines</th><th class="n">Total</th><th>Status</th><th></th></tr></thead><tbody>' +
+        (d.statements.length ? d.statements.map(function (x) {
+          return '<tr><td><b>' + esc(x.number) + '</b></td><td>' + esc(x.rep) + '</td><td>' + esc(String(x.period_to).slice(0, 10)) + '</td><td class="n">' + x.lines + '</td><td class="n">' + J(x.total) + '</td><td>' + pill(x.status) +
+            (x.approved_by_name ? '<br><small>approved by ' + esc(x.approved_by_name) + '</small>' : '') + (x.paid_by_name ? '<br><small>paid by ' + esc(x.paid_by_name) + '</small>' : '') + '</td>' +
+            '<td style="white-space:nowrap"><button class="sm" data-view="' + x.id + '">Open</button> ' + (x.status === 'draft' ? '<button class="sm primary" data-appr="' + x.id + '">Approve</button> <button class="sm" data-canc="' + x.id + '">Cancel</button>' : '') + (x.status === 'approved' ? '<button class="sm primary" data-pay="' + x.id + '">Pay</button>' : '') + '</td></tr>';
+        }).join('') : '<tr><td colspan="7" class="empty">No statements yet.</td></tr>') + '</tbody></table></div></div>';
+      $('#sMake').onclick = function () { api('/api/comm/statements', 'POST', { rep_id: $('#sRep').value, period_to: $('#sTo').value }).then(function () { toast('Statement made'); stmt(); }).catch(function (e) { toast(e.message); }); };
+      var act = function (sel, path, q) { all(sel).forEach(function (b) { b.onclick = function () { if (q && !confirm(q)) return; api('/api/comm/statements/' + b.getAttribute(sel.slice(1, -1)) + path, 'POST', {}).then(function () { toast('Done'); stmt(); }).catch(function (e) { toast(e.message); }); }; }); };
+      act('[data-appr]', '/approve', 'Approve this statement? It goes in the books as commission owed.');
+      act('[data-canc]', '/cancel', 'Cancel this draft? Its lines go back to earned.');
+      act('[data-pay]', '/pay', 'Record this statement as paid in cash from the safe?');
+      all('[data-view]').forEach(function (b) {
+        b.onclick = function () {
+          api('/api/comm/statements/' + b.getAttribute('data-view')).then(function (r2) {
+            var x = r2.statement;
+            modal('<h2>Commission statement ' + esc(x.number) + ' ' + pill(x.status) + '</h2><p class="sub">' + esc(x.rep) + ' · everything up to ' + esc(String(x.period_to).slice(0, 10)) + ' · total <b>' + J(x.total) + '</b></p>' + entryTable(r2.entries, false) +
+              '<div class="controls noprint" style="margin-top:10px"><button id="prt">Print</button><button id="cls">Close</button></div>');
+            $('#prt').onclick = function () { window.print(); }; $('#cls').onclick = function () { $('#modal').innerHTML = ''; };
+          }).catch(function (e) { toast(e.message); });
+        };
+      });
+    });
+  }
+
+  // Freelance reps: add, invite link, commission %, switch off.
+  function repsTab() {
+    return api('/api/reps').then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>Add a freelance rep</h2><p class="sub">They get an invite link (valid 7 days) to set a password and 2-step sign-in, then use the rep portal at ' + esc(location.origin) + '/rep.html. They see prices and stock, never cost, and only their own customers.</p>' +
+        '<div class="controls"><div><label>Name</label><input id="rn"></div><div><label>Email (they sign in with it)</label><input id="re" type="email"></div><div><label>Phone</label><input id="rp"></div><div><label>Default commission %</label><input id="rc" type="number" step="0.1" style="width:100px"></div><button class="primary" id="radd">Add and get invite</button></div><div id="rinv"></div></div>' +
+        '<div class="card"><h2>Reps</h2><div class="scroll"><table><thead><tr><th>Rep</th><th>Referral</th><th class="n">Customers</th><th class="n">Sales 30 days</th><th class="n">Orders waiting</th><th>Sign-in</th><th>Commission %</th><th></th></tr></thead><tbody>' +
+        (d.reps.length ? d.reps.map(function (r) {
+          return '<tr><td><b>' + esc(r.name) + '</b>' + (r.is_active ? '' : ' <span class="pill">off</span>') + '<br><small>' + esc(r.email || '') + ' ' + esc(r.phone || '') + '</small></td><td>' + esc(r.referral_code || '') + '</td><td class="n">' + r.customers + '</td><td class="n">' + J(r.sales_30d) + '</td><td class="n">' + r.waiting_orders + '</td>' +
+            '<td>' + (r.two_step ? '<span class="pill ok">set up</span>' : r.invite_open_until ? '<span class="pill warn">invited</span>' : '<span class="pill bad">not set up</span>') + '<br><small>' + (r.last_login_at ? 'last ' + esc(day(r.last_login_at)) : '') + '</small></td>' +
+            '<td><input type="number" step="0.1" value="' + (r.commission_pct == null ? '' : Number(r.commission_pct)) + '" data-pct="' + r.id + '" style="width:80px"></td>' +
+            '<td style="white-space:nowrap"><button class="sm" data-inv="' + r.id + '">New invite</button> <button class="sm" data-act="' + r.id + '" data-on="' + (r.is_active ? '0' : '1') + '">' + (r.is_active ? 'Switch off' : 'Switch on') + '</button></td></tr>';
+        }).join('') : '<tr><td colspan="8" class="empty">No freelance reps yet.</td></tr>') + '</tbody></table></div></div>';
+      var showInvite = function (url) { $('#rinv').innerHTML = '<div class="note warn">Send this link to the rep (WhatsApp or email). It works once, for 7 days:<br><input readonly id="invUrl" style="width:100%;margin-top:6px"></div>'; $('#invUrl').value = url; $('#invUrl').onclick = function () { this.select(); }; window.scrollTo(0, 0); };
+      $('#radd').onclick = function () { api('/api/reps', 'POST', { name: $('#rn').value, email: $('#re').value, phone: $('#rp').value, commission_pct: $('#rc').value }).then(function (r) { repsTab().then(function () { showInvite(r.invite_url); }); }).catch(function (e) { toast(e.message); }); };
+      all('[data-inv]').forEach(function (b) { b.onclick = function () { if (!confirm('Make a new invite link? Their current 2-step sign-in stops working until they use it.')) return; api('/api/reps/' + b.getAttribute('data-inv') + '/invite', 'POST').then(function (r) { showInvite(r.invite_url); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-act]').forEach(function (b) { b.onclick = function () { api('/api/reps/' + b.getAttribute('data-act'), 'PATCH', { is_active: b.getAttribute('data-on') === '1' }).then(function () { toast('Saved'); repsTab(); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-pct]').forEach(function (i) { i.onchange = function () { api('/api/reps/' + i.getAttribute('data-pct'), 'PATCH', { commission_pct: i.value }).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); }); }; });
+    });
+  }
+
+  // Tracked links: send one, and see opens and acceptances for all.
+  function linksTab() {
+    return api('/api/links').then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>Send a customer a link</h2><p class="sub">The link counts when it is opened and expires after 14 days. A quote link lets the customer accept the quote, which sends the order to the cashier.</p>' +
+        '<div class="controls"><div><label>What</label><select id="lk"><option value="search">Parts search</option><option value="product">One part (catalogue number)</option><option value="quote">A quote (its id)</option><option value="page">A page of this site (/...)</option><option value="video">A video (YouTube, Facebook...)</option></select></div>' +
+        '<div style="flex:1"><label>Which</label><input id="lt" placeholder="e.g. brake pads corolla" style="width:100%"></div></div>' +
+        '<div class="controls"><div style="flex:1"><label>Message</label><input id="lm" style="width:100%"></div><div><label>Phone or email</label><input id="ld"></div><div><label>How</label><select id="lc"><option value="whatsapp">WhatsApp</option><option value="sms">Text</option><option value="email">Email</option><option value="copy">Just the link</option></select></div><button class="primary" id="lgo">Send</button></div><div id="lout"></div></div>' +
+        '<div class="card"><h2>Links sent</h2><div class="scroll"><table><thead><tr><th>Sent</th><th>What</th><th>By</th><th>To</th><th class="n">Opens</th><th>Result</th></tr></thead><tbody>' +
+        (d.links.length ? d.links.map(function (l) {
+          return '<tr><td>' + esc(day(l.created_at)) + '</td><td>' + esc(l.title || l.target) + '<br><small>' + esc(l.kind) + '</small></td><td>' + esc(l.rep || l.created_by_name || '') + '</td><td>' + esc(l.customer || l.sent_to || '') + '<br><small>' + esc(l.channel || '') + '</small></td>' +
+            '<td class="n">' + l.opens + '</td><td>' + (l.converted_at ? '<span class="pill ok">' + esc(l.conversion_ref || 'accepted') + '</span>' : l.expired ? '<span class="pill">expired</span>' : l.opens ? '<span class="pill">opened</span>' : '<span class="pill warn">not opened</span>') + '</td></tr>';
+        }).join('') : '<tr><td colspan="6" class="empty">No links yet.</td></tr>') + '</tbody></table></div></div>';
+      $('#lgo').onclick = function () {
+        var dest = $('#ld').value.trim();
+        var body = { kind: $('#lk').value, target: $('#lt').value, message: $('#lm').value, channel: $('#lc').value };
+        if (/@/.test(dest)) body.email = dest; else body.phone = dest;
+        api('/api/links', 'POST', body).then(function (r) {
+          var wa = (r.sent || []).find(function (x) { return x.wa_link; });
+          $('#lout').innerHTML = '<div class="note info">Link: <input readonly id="lUrl" style="width:100%">' + ((r.sent || []).map(function (x) { return '<br>' + esc(x.channel) + ': ' + esc(x.status) + (x.reason ? ' (' + esc(x.reason) + ')' : ''); }).join('')) + '</div>';
+          $('#lUrl').value = r.url;
+          if (wa) window.open(wa.wa_link, '_blank', 'noopener');
+        }).catch(function (e) { toast(e.message); });
+      };
+    });
+  }
+
+  function me() {
+    return api('/api/comm/me?from=' + p.from + '&to=' + p.to).then(function (d) {
+      if (!d.rep) { $('#out').innerHTML = '<div class="card empty">You are not set up as a sales rep.</div>'; return; }
+      var s = d.summary || {};
+      $('#out').innerHTML = '<div class="card"><h2>' + esc(d.rep.name) + '</h2>' + period('') + '<div class="kpis"><div class="kpi"><span>Your sales</span><b>' + J(s.sales) + '</b></div><div class="kpi"><span>Earned</span><b>' + J(s.earned) + '</b></div><div class="kpi"><span>Waiting for customer payment</span><b>' + J(s.pending) + '</b></div><div class="kpi"><span>Owed to you now</span><b>' + J(s.owed) + '</b></div></div></div>' +
+        '<div class="card"><h2>Statements</h2><table><tbody>' + (d.statements.length ? d.statements.map(function (x) { return '<tr><td>' + esc(x.number) + '</td><td>up to ' + esc(String(x.period_to).slice(0, 10)) + '</td><td class="n">' + J(x.total) + '</td><td>' + pill(x.status) + '</td></tr>'; }).join('') : '<tr><td class="empty">None yet.</td></tr>') + '</tbody></table></div>' +
+        '<div class="card"><h2>Lines</h2>' + entryTable(d.entries, false) + '</div>';
+      $('#pgo').onclick = function () { p.from = $('#pf').value; p.to = $('#pt').value; me(); };
+    });
+  }
+
+  function show() {
+    all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); });
+    try { localStorage.setItem('vision.commTab', tab); } catch (_) {}
+    ({ sum: sum, rules: rules, entries: entries, split: split, stmt: stmt, me: me, reps: repsTab, links: linksTab }[tab] || sum)().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
+  show();
+})();
+</script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+<script src="/assets/module-look.js?v=20261101" defer></script>
+</body>
+</html>

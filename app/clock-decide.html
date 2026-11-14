@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Staff request · Morty's Auto Parts</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:14px 16px} header h1{font-size:17px;margin:0}
+  main{max-width:560px;margin:0 auto;padding:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}
+  .sub{color:var(--muted);font-size:14px}
+  textarea{font:inherit;width:100%;padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)}
+  .row{display:flex;gap:10px;margin-top:10px} .row button{flex:1;padding:13px;border:0;border-radius:10px;font:inherit;font-weight:700;color:#fff;cursor:pointer}
+  .ok{background:var(--ok)} .no{background:var(--red)}
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Staff request</h1></header>
+<main id="m"><div class="card sub">Loading…</div></main>
+<script>
+(function () {
+  'use strict';
+  var m = document.getElementById('m');
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var t = new URLSearchParams(location.search).get('t') || '';
+  var when = function (x) { return x ? new Date(x).toLocaleString('en-JM', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Jamaica' }) : ''; };
+  fetch('/api/clock/decide/' + encodeURIComponent(t)).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error); return j; }); }).then(function (r) {
+    var detail = r.kind === 'extension' ? 'Wants <b>' + r.minutes + ' more minutes</b> today' + (r.shift_end ? ' (shift ended ' + esc(when(r.shift_end)) + ')' : '') + '.'
+      : r.kind === 'overtime' ? 'Clocked in <b>outside their shift</b> at ' + esc(when(r.clock_in_at)) + '.'
+      : 'Asks to change the time' + (r.original ? ' from in ' + esc(when(r.original.clock_in_at)) + ', out ' + esc(when(r.original.clock_out_at)) : ' (a missed day)') + ' to in <b>' + esc(when(r.wanted && r.wanted.clock_in_at)) + '</b>, out <b>' + esc(when(r.wanted && r.wanted.clock_out_at)) + '</b>.';
+    m.innerHTML = '<div class="card"><h2 style="margin-top:0">' + esc(r.name) + ': ' + esc(r.what) + '</h2><p>' + detail + '</p><p><b>Reason:</b> ' + esc(r.reason) + '</p><p class="sub">Asked ' + esc(when(r.created_at)) + '. This link is ' + esc(r.approver) + '\'s; your decision is recorded in your name. It works once, until ' + esc(when(r.expires_at)) + '.</p>' +
+      (r.status !== 'pending' ? '<p><b>Already ' + esc(r.status) + '.</b></p>' : '<textarea id="note" rows="2" placeholder="Note to them (optional)"></textarea><div class="row"><button class="ok" id="ap">Approve</button><button class="no" id="rj">Reject</button></div>') + '</div>';
+    var go = function (d) {
+      fetch('/api/clock/decide/' + encodeURIComponent(t), { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision: d, note: document.getElementById('note').value }) })
+        .then(function (x) { return x.json().then(function (j) { if (!x.ok) throw new Error(j.error); return j; }); })
+        .then(function (j) { m.innerHTML = '<div class="card"><h2 style="margin-top:0">' + (j.status === 'approved' ? 'Approved' : 'Rejected') + '</h2><p>' + esc(r.name) + ' has been told by email.</p></div>'; })
+        .catch(function (e) { alert(e.message); });
+    };
+    if (document.getElementById('ap')) { document.getElementById('ap').onclick = function () { go('approve'); }; document.getElementById('rj').onclick = function () { go('reject'); }; }
+  }).catch(function (e) { m.innerHTML = '<div class="card">' + esc(e.message) + '</div>'; });
+})();
+</script>
+</body>
+</html>

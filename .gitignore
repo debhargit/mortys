@@ -53,3 +53,25 @@ Desktop.ini
 .claude/
 .wrangler/
 /dist/
+app/*.bak-*
+
+# ---- legacy DOS/FoxPro exports consumed by app/tools/seed-legacy.mjs
+# Business data, not source: INVDETAI.csv is 161 MB and INVOICE.csv 115 MB, both
+# over GitHub's 100 MB hard limit, and together the five are ~390 MB that would
+# sit in history forever. Drop them in the repo root (or point the seeder at
+# them with --dir) and run the seeder; nothing reads them at runtime.
+/INVDETAI.csv
+/INVOICE.csv
+/INVPAY.csv
+/INVREC.csv
+
+# ---- legacy system's scratch directory (8 GB of .TMP spool files)
+/WORK/
+config-backups/
+
+# ---- old homepage copies that must not sit in the served directory
+app/public/*.bak-*
+/.bak-public-homepages/
+
+# ---- deploy scratch (a dated copy of functions/ and tools/ before a port)
+app/deploy-backup-*/

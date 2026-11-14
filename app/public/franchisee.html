@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="referrer" content="no-referrer" />
+<title>Own a Morty's Auto Parts franchise</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+  :root { --red:#d62828; --navy:#0b1b2b; --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --ok:#16a34a; --bg:#f6f7f9; --card:#fff; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:15px}
+  header.top{background:var(--navy);color:#fff;padding:14px 16px}
+  header.top h1{margin:0;font-size:18px;font-weight:800} header.top small{color:#cbd5e1}
+  main{max-width:820px;margin:0 auto;padding:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+  h2{margin:0 0 6px;font-size:17px} h3{font-size:14px;margin:16px 0 6px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+  table{width:100%;border-collapse:collapse} td,th{padding:7px 4px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top} td.n,th.n{text-align:right;white-space:nowrap}
+  label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+  input[type=text],input[type=email],input[type=tel],input[type=month],input[type=number],textarea,select{width:100%;font:inherit;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:0 12px} @media (max-width:560px){ .two{grid-template-columns:1fr} }
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+  button{font:inherit;padding:11px 18px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+  button.go{background:var(--red);border-color:var(--red);color:#fff;font-weight:700;flex:1}
+  button:disabled{opacity:.5}
+  .msg{padding:12px;border-radius:8px;background:#fee2e2;color:#991b1b}
+  .ok{padding:14px;border-radius:8px;background:#dcfce7;color:#14532d;font-weight:600}
+  .muted{color:var(--muted);font-size:13px}
+  iframe.doc{width:100%;height:65vh;border:1px solid var(--line);border-radius:8px;background:#fff}
+  #pad canvas{width:100%;height:170px;border:1px dashed var(--muted);border-radius:8px;background:#fff;touch-action:none}
+  .hp{position:absolute;left:-9999px}
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px} .tabs button{padding:7px 14px;border-radius:999px} .tabs button.on{background:var(--red);border-color:var(--red);color:#fff}
+</style>
+</head>
+<body>
+<header class="top"><h1 id="shop">Morty's Auto Parts</h1><small id="sub">Franchise</small></header>
+<main id="out"><div class="card muted">Loading…</div></main>
+<script src="/assets/invoice-scan.js?v=20261028"></script>
+<script>
+(function () {
+  'use strict';
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var J = function (v) { return 'J$' + Number(v || 0).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+  var day = function (t) { return t ? new Date(String(t).length === 10 ? t + 'T12:00:00' : t).toLocaleDateString('en-JM') : ''; };
+  var monthName = function (p) { return p ? new Date(p.slice(0, 7) + '-15T12:00:00').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) : ''; };
+  var q = new URLSearchParams(location.search);
+  var out = document.getElementById('out');
+  var $ = function (id) { return document.getElementById(id); };
+  var stop = function (m) { out.innerHTML = '<div class="card"><div class="msg">' + esc(m) + '</div></div>'; };
+  function call(url, body) {
+    return fetch(url, body ? { method: 'POST', credentials: 'omit', referrerPolicy: 'no-referrer', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : { credentials: 'omit', referrerPolicy: 'no-referrer' })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || 'Something went wrong'); return j; }); });
+  }
+
+  // ---------------------------------------------------------- signing --
+  if (q.get('s')) {
+    var token = q.get('s');
+    var url = '/api/public/franchise-sign/' + encodeURIComponent(token);
+    $('sub').textContent = 'Read and sign';
+    call(url).then(function (d) {
+      if (d.company && d.company.company) $('shop').textContent = d.company.company;
+      out.innerHTML = '<div class="card"><h2>' + esc(d.title) + ' <small class="muted">' + esc(d.number) + '</small></h2><p class="muted">Read the whole document. You may take advice from your own attorney before you sign.</p>' +
+        '<iframe class="doc" id="doc" sandbox="allow-same-origin"></iframe></div>' +
+        (d.not_yet ? '<div class="card"><div class="msg">' + esc(d.not_yet) + '</div></div>' :
+        '<div class="card"><label for="nm">Your full name</label><input type="text" id="nm" autocomplete="name">' +
+        '<label>Sign below with your finger or mouse</label><div id="pad"></div>' +
+        '<label style="display:flex;gap:8px;align-items:flex-start;color:var(--ink);font-size:14px;margin-top:12px"><input type="checkbox" id="ag" style="margin-top:3px"> I have read this document and I sign it as my own.</label>' +
+        '<div class="row"><button id="clr">Clear</button><button class="go" id="go">Sign</button></div><div id="m" style="margin-top:10px"></div>' +
+        '<p class="muted">Your signature, the time and your internet address are kept with a fingerprint of the document, so neither can be changed later.' + (d.company && d.company.company_phone ? ' Questions? Call ' + esc(d.company.company_phone) + '.' : '') + '</p>' +
+        '<details><summary class="muted">I do not want to sign</summary><label for="why">Tell us why (optional)</label><textarea id="why" rows="2"></textarea><div class="row"><button id="no">Decline to sign</button></div></details></div>');
+      $('doc').srcdoc = d.html;
+      if (d.not_yet) return;
+      var pad = window.VAScan.pad($('pad'));
+      $('clr').onclick = pad.clear;
+      $('go').onclick = function () {
+        var m = $('m'), name = $('nm').value.trim();
+        if (name.length < 2) { m.innerHTML = '<div class="msg">Type your name.</div>'; return; }
+        if (pad.empty()) { m.innerHTML = '<div class="msg">Sign in the box.</div>'; return; }
+        if (!$('ag').checked) { m.innerHTML = '<div class="msg">Tick the box to confirm.</div>'; return; }
+        this.disabled = true;
+        call(url, { name: name, image: pad.png(), agree: true }).then(function () { out.innerHTML = '<div class="card"><div class="ok">Thank you, ' + esc(name) + '. ' + esc(d.title) + ' is signed.</div><p class="muted">We will send you a copy. You can close this page.</p></div>'; })
+          .catch(function (e) { $('go').disabled = false; m.innerHTML = '<div class="msg">' + esc(e.message) + '</div>'; });
+      };
+      $('no').onclick = function () { if (!confirm('Decline to sign this document?')) return; call(url, { decline: true, reason: $('why').value }).then(function () { out.innerHTML = '<div class="card"><div class="ok">We have noted that you declined. We will be in touch.</div></div>'; }).catch(function (e) { stop(e.message); }); };
+    }).catch(function (e) { stop(e.message); });
+    try { history.replaceState(null, '', location.pathname + '?s=' + encodeURIComponent(token)); } catch (_) {}
+    return;
+  }
+
+  // ---------------------------------------------- the franchisee's page --
+  if (q.get('p')) {
+    var purl = '/api/public/franchisee/' + encodeURIComponent(q.get('p'));
+    var tab = 'report';
+    var draw = function () {
+      call(purl).then(function (d) {
+        var f = d.franchisee, t = d.terms;
+        $('shop').textContent = f.trading_name || f.legal_name; $('sub').textContent = (d.store && d.store.store_type && d.store.store_type !== 'franchise' ? 'Store ' : 'Franchisee ') + f.number + (f.territory ? ' · ' + f.territory : '');
+        var nw = d.network, st = d.store || {};
+        if (st.store_type_label) $('sub').textContent += ' · ' + st.store_type_label + (st.format ? ', ' + st.format : '') + (st.role === 'hub' ? ', hub' : st.role === 'spoke' && st.hub ? ', served by ' + st.hub : '');
+        var tabs = [['report', 'Monthly sales report']].concat(nw && nw.can_order ? [['parts', 'Parts & orders']] : []).concat([['statement', 'Statement']]).concat(nw && nw.coop ? [['coop', 'Co-op & money owed to you']] : [])
+          .concat(nw ? [['score', 'Scorecard & certificates']] : []).concat([['audits', 'Audits'], ['manual', 'Operations manual']]).concat(d.tasks.length ? [['open', 'Opening checklist']] : []);
+        var h = '<div class="tabs">' + tabs.map(function (x) { return '<button data-t="' + x[0] + '"' + (x[0] === tab ? ' class="on"' : '') + '>' + x[1] + '</button>'; }).join('') + '</div><div class="card">';
+        var inp2 = function (id, label, num) { return '<div><label>' + esc(label) + '</label><input type="' + (num ? 'number' : 'text') + '"' + (num ? '' : ' inputmode="decimal"') + ' id="' + id + '"></div>'; };
+        if (tab === 'report') {
+          var lm = new Date(); lm.setDate(1); lm.setMonth(lm.getMonth() - 1);
+          var fees = st.store_type === 'company' ? 'Company-owned stores pay no fees; the report feeds the scorecard.' : st.store_type === 'affiliate' ? 'The membership fee ' + J(t.member_fee) + ', network marketing and the technology fee ' + J(t.tech_fee) + ', plus GCT, are invoiced from it and due by day ' + t.royalty_due_day + '.'
+            : 'Royalty ' + t.royalty_pct + '%, brand fund ' + t.marketing_pct + '% of net sales, and the technology fee ' + J(t.tech_fee) + ', plus GCT, are invoiced from it and due by day ' + t.royalty_due_day + '.';
+          h += '<h2>Send the month\'s sales</h2><p class="muted">Due by day ' + t.report_day + ' of the next month, from the till\'s sales summary. ' + esc(fees) + '</p>' +
+            '<div class="two"><div><label>Month</label><input type="month" id="rP" value="' + lm.getFullYear() + '-' + String(lm.getMonth() + 1).padStart(2, '0') + '"></div><div><label>Gross sales, including GCT (J$)</label><input type="text" inputmode="decimal" id="rG"></div>' +
+            '<div><label>Refunds (J$)</label><input type="text" inputmode="decimal" id="rR"></div><div><label>GCT collected (J$)</label><input type="text" inputmode="decimal" id="rT"></div>' +
+            '<div><label>Number of sales</label><input type="number" id="rN"></div><div><label>Local marketing spent (J$)</label><input type="text" inputmode="decimal" id="rL"></div></div>' +
+            (nw ? '<h3>For your scorecard</h3><p class="muted">DIY plus commercial should equal net sales (gross less refunds and GCT). All at cost unless it says sales.</p><div class="two">' + inp2('rDiy', 'Walk-in (DIY) net sales (J$)') + inp2('rCom', 'Commercial (garage and fleet) net sales (J$)') + inp2('rCogs', 'Cost of goods sold (J$)') + inp2('rInv', 'Stock at cost at month end (J$)') +
+              inp2('rSh', 'Shrink: stock lost, at cost (J$)') + inp2('rPur', 'All stock bought this month, from anyone (J$)') + inp2('rLi', 'Loyalty points given', true) + inp2('rLr', 'Loyalty points redeemed', true) + inp2('rLm', 'New loyalty members', true) + inp2('rDel', 'Commercial deliveries made', true) + inp2('rDm', 'Average delivery time (minutes)', true) + '</div>' : '') +
+            '<label>Notes</label><textarea id="rNo" rows="2"></textarea>' +
+            '<div class="row"><button class="go" id="rGo">Send report</button></div><div id="rM" style="margin-top:10px"></div>' +
+            '<h3>Sent</h3><table><tbody>' + (d.reports.map(function (r) { return '<tr><td>' + esc(monthName(r.period)) + '</td><td class="n">' + J(r.net_sales) + ' net</td><td>' + (r.billed ? 'invoiced' : 'received') + '</td></tr>'; }).join('') || '<tr><td class="muted">None yet.</td></tr>') + '</tbody></table>';
+        } else if (tab === 'statement') {
+          var s = d.statement;
+          h += '<h2>Your account</h2><p>Billed ' + J(s.billed) + ' · paid ' + J(s.paid) + ' · <b>owed ' + J(s.balance) + '</b>' + (s.overdue ? ' · <b style="color:var(--red)">overdue ' + J(s.overdue) + '</b>' : '') + '</p><table><thead><tr><th>Invoice</th><th>Due</th><th>For</th><th class="n">Total</th><th class="n">Owed</th></tr></thead><tbody>' +
+            (s.invoices.map(function (i) { return '<tr><td>' + esc(i.number) + '<br><small class="muted">' + esc(day(i.invoice_date)) + '</small></td><td>' + esc(day(i.due_date)) + '</td><td>' + esc(i.memo || '') + '</td><td class="n">' + J(i.total) + '</td><td class="n">' + J(i.balance) + '</td></tr>'; }).join('') || '<tr><td colspan="5" class="muted">No invoices yet.</td></tr>') + '</tbody></table>' +
+            '<p class="muted">To pay or ask about an invoice, call ' + esc(d.company.company_phone) + '.</p>';
+        } else if (tab === 'parts') {
+          h += '<h2>Find a part</h2><p class="muted">Search by words or part number, or by vehicle. "Here", "Hub" and "DC" are how many are in your store, at your hub and at your distribution centre. Your cost is the dealer cost.</p>' +
+            '<div class="two"><div><label>Words or part number</label><input type="text" id="pQ"></div><div><label>Make</label><input type="text" id="pMk"></div><div><label>Model</label><input type="text" id="pMo"></div><div><label>Year</label><input type="number" id="pY"></div></div>' +
+            '<div class="row"><button id="pGo">Find</button></div><div id="pOut"></div>' +
+            '<h3>Your order</h3><div id="pCart" class="muted">Add parts from the search.</div><label>Kind of order</label><select id="pK"><option value="stock">Stock order from the DC</option><option value="special">Special order from the DC</option>' + (nw.has_hub ? '<option value="hot">Hot shot from the hub (same day)</option>' : '') + '</select>' +
+            '<label>Notes</label><input type="text" id="pN"><div class="row"><button class="go" id="pSend">Send the order</button></div><div id="pM" style="margin-top:10px"></div>' +
+            '<h3>Recent orders</h3>' + (nw.orders.length ? nw.orders.map(function (o) {
+              return '<div style="border-bottom:1px solid var(--line);padding:8px 0"><b>' + esc(o.number) + '</b> · ' + esc({ stock: 'Stock', special: 'Special', hot: 'Hot shot' }[o.kind]) + ' · ' + J(o.total_cost) + ' · <b>' + esc({ submitted: 'waiting to ship', shipped: 'on its way', received: 'received', cancelled: 'cancelled' }[o.status]) + '</b>' + (o.invoice_number ? ' · invoice ' + esc(o.invoice_number) : '') +
+                '<div class="muted">' + (o.lines || []).map(function (l) { return esc(l.sku) + ' × ' + l.qty + (l.qty_shipped != null && l.qty_shipped !== l.qty ? ' (shipped ' + l.qty_shipped + ')' : ''); }).join(', ') + '</div>' +
+                (o.status === 'shipped' ? '<button data-recv="' + o.id + '" style="margin-top:6px">Received in full</button>' : '') + '</div>'; }).join('') : '<p class="muted">No orders yet.</p>');
+        } else if (tab === 'coop') {
+          var c = nw.coop;
+          h += '<h2>Co-op advertising</h2><p>Earned in the last 12 months ' + J(c.earned) + ' (' + c.coop_pct + '% of DC purchases ' + J(c.dc_purchases_12m) + ') · used ' + J(c.used) + ' · <b>left ' + J(c.balance) + '</b></p><p class="muted">Claim ' + c.claim_pct + '% of approved local advertising, up to what is left. Keep the supplier\'s invoice and proof the advert ran.</p>' +
+            '<div class="two"><div><label>What the advertising was</label><input type="text" id="cW"></div><div><label>Media</label><input type="text" id="cMd" placeholder="radio, print, social…"></div><div><label>Date it ran</label><input type="text" id="cD" placeholder="YYYY-MM-DD"></div><div><label>Amount spent, before GCT (J$)</label><input type="text" inputmode="decimal" id="cA"></div></div>' +
+            '<label>Proof (invoice number, link)</label><input type="text" id="cP"><div class="row"><button class="go" id="cGo">Send the claim</button></div><div id="cM" style="margin-top:10px"></div>' +
+            '<h3>Your claims</h3><table><tbody>' + (c.claims.map(function (x) { return '<tr><td>' + esc(day(x.spend_date)) + '</td><td>' + esc(x.description) + (x.decision_note ? '<br><small class="muted">' + esc(x.decision_note) + '</small>' : '') + '</td><td class="n">' + J(x.claimed) + '</td><td>' + esc(x.status) + (x.approved != null ? ' ' + J(x.approved) : '') + '</td></tr>'; }).join('') || '<tr><td class="muted">None yet.</td></tr>') + '</tbody></table>' +
+            '<h3>Money owed to you</h3><table><tbody>' + (nw.credits.map(function (x) { return '<tr><td>' + esc(x.description) + '</td><td class="n">' + J(x.amount) + '</td><td>' + esc(x.status === 'owed' ? 'to be paid' : 'paid' + (x.settled_at ? ' ' + day(x.settled_at) : '')) + '</td></tr>'; }).join('') || '<tr><td class="muted">Nothing yet. Rebates, approved co-op claims and loyalty points redeemed at your store show here.</td></tr>') + '</tbody></table>';
+        } else if (tab === 'score') {
+          var sc = nw.scorecard, tg = nw.targets || {};
+          var row = function (label, v, target, suffix, g) { return '<tr><td>' + esc(label) + '</td><td class="n"' + (g ? ' style="font-weight:700;color:' + (g === 'ok' ? 'var(--ok)' : g === 'warn' ? '#b45309' : 'var(--red)') + '"' : '') + '>' + (v == null ? '-' : esc(v) + (suffix || '')) + '</td><td class="n muted">' + (target != null ? esc(target) + (suffix || '') : '') + '</td></tr>'; };
+          h += '<h2>Your scorecard (last 3 months)</h2>' + (sc ? '<table><thead><tr><th></th><th class="n">You</th><th class="n">Target</th></tr></thead><tbody>' +
+            row('Net sales', J(sc.net_sales)) + row('Commercial share', sc.commercial_pct, tg.commercial_pct, '%', sc.grades.commercial_pct) + row('Gross margin', sc.margin_pct, tg.margin_pct, '%', sc.grades.margin_pct) + row('Inventory turns a year', sc.turns, tg.turns, '', sc.grades.turns) +
+            row('Shrink of sales', sc.shrink_pct, tg.shrink_pct, '%', sc.grades.shrink_pct) + row('DC fill rate', sc.fill_pct, tg.fill_pct, '%', sc.grades.fill_pct) + row('Bought through the DC', sc.dc_share_pct, tg.dc_share_pct, '%', sc.grades.dc_share_pct) +
+            row('Delivery time', sc.delivery_minutes, tg.delivery_minutes, ' min', sc.grades.delivery_minutes) + row('Certified staff', sc.cert_pct, tg.cert_pct, '%', sc.grades.cert_pct) + row('Last audit', sc.last_audit, tg.last_audit, '%', sc.grades.last_audit) + '</tbody></table><p>Score: <b>' + (sc.score == null ? '-' : sc.score) + '</b> of 100.</p>' : '<p class="muted">No figures yet.</p>') +
+            '<h3>Certificates</h3>' + (nw.compliance.short.length ? '<div class="msg">Still needed: ' + esc(nw.compliance.short.join(', ')) + '</div>' : '<p>Every required certificate is held.</p>') +
+            '<table><tbody>' + (nw.certs.map(function (x) { return '<tr><td>' + esc(x.person) + '</td><td>' + esc(x.program_name) + '</td><td>to ' + esc(day(x.expires_on)) + '</td></tr>'; }).join('') || '<tr><td class="muted">None recorded yet. Finish the lessons on the Training screen, then ask the franchise office to record the certificate.</td></tr>') + '</tbody></table>';
+        } else if (tab === 'audits') {
+          h += '<h2>Audits</h2>' + (d.audits.map(function (a) { return '<p><b>' + esc(day(a.audit_date)) + '</b>: ' + a.score_pct + '% (' + esc(a.result) + ')' + (a.findings ? '<br>' + esc(a.findings) : '') + (a.actions ? '<br><i>To do:</i> ' + esc(a.actions) : '') + (a.follow_up_on ? '<br>Follow-up visit ' + esc(day(a.follow_up_on)) : '') + '</p>'; }).join('') || '<p class="muted">No audits yet.</p>');
+        } else if (tab === 'manual') {
+          h += d.manual ? '<iframe class="doc" id="man" sandbox="allow-same-origin"></iframe><p class="muted">Confidential. Do not copy or share it outside the shop.</p>' : '<p class="muted">Your copy of the operations manual has not been issued yet.</p>';
+        } else {
+          h += '<h2>Opening checklist</h2>' + d.tasks.map(function (k) { return '<div>' + (k.done_at ? '✅' : '⬜') + ' ' + esc(k.title) + (k.due_on && !k.done_at ? ' <small class="muted">due ' + esc(day(k.due_on)) + '</small>' : '') + '</div>'; }).join('');
+        }
+        out.innerHTML = h + '</div>';
+        Array.prototype.forEach.call(document.querySelectorAll('[data-t]'), function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); draw(); }; });
+        if ($('man')) $('man').srcdoc = d.manual;
+        if ($('rGo')) $('rGo').onclick = function () {
+          var b = this; b.disabled = true;
+          var v = function (id) { return $(id) ? $(id).value : ''; };
+          call(purl + '/report', { period: $('rP').value, gross_sales: $('rG').value, refunds: $('rR').value, gct_collected: $('rT').value, transactions: $('rN').value, local_marketing: $('rL').value, notes: $('rNo').value,
+            diy_sales: v('rDiy'), commercial_sales: v('rCom'), cogs: v('rCogs'), inventory_value: v('rInv'), shrink: v('rSh'), purchases_total: v('rPur'), loyalty_issued: v('rLi'), loyalty_redeemed: v('rLr'), loyalty_members: v('rLm'), deliveries: v('rDel'), delivery_minutes: v('rDm') })
+            .then(function (r) { $('rM').innerHTML = '<div class="ok">Thank you. ' + esc(monthName(r.period)) + ' received: net sales ' + J(r.net_sales) + '.</div>'; setTimeout(draw, 1500); })
+            .catch(function (e) { b.disabled = false; $('rM').innerHTML = '<div class="msg">' + esc(e.message) + '</div>'; });
+        };
+        // Parts lookup and ordering from the DC or the hub.
+        if ($('pGo')) {
+          var cart = [];
+          var drawCart = function () { $('pCart').innerHTML = cart.length ? '<table><tbody>' + cart.map(function (c, i) { return '<tr><td>' + esc(c.sku) + ' ' + esc(c.description) + '</td><td class="n"><input type="number" min="1" data-cq="' + i + '" value="' + c.qty + '" style="width:80px"></td><td class="n">' + J(c.dealer_cost * c.qty) + '</td><td><button data-cx="' + i + '">✕</button></td></tr>'; }).join('') + '</tbody></table>' : 'Add parts from the search.';
+            Array.prototype.forEach.call(document.querySelectorAll('[data-cq]'), function (x) { x.onchange = function () { cart[+x.getAttribute('data-cq')].qty = Math.max(1, parseInt(x.value, 10) || 1); drawCart(); }; });
+            Array.prototype.forEach.call(document.querySelectorAll('[data-cx]'), function (x) { x.onclick = function () { cart.splice(+x.getAttribute('data-cx'), 1); drawCart(); }; }); };
+          $('pGo').onclick = function () {
+            var qs = 'q=' + encodeURIComponent($('pQ').value) + '&make=' + encodeURIComponent($('pMk').value) + '&model=' + encodeURIComponent($('pMo').value) + '&year=' + encodeURIComponent($('pY').value);
+            call(purl + '/parts?' + qs).then(function (r) {
+              $('pOut').innerHTML = r.items.length ? '<table><thead><tr><th>Part</th><th class="n">Your cost</th><th class="n">List</th><th class="n">Here / Hub / DC</th><th></th></tr></thead><tbody>' + r.items.map(function (i) {
+                var n = function (x) { return x == null ? '-' : x; };
+                return '<tr><td><b>' + esc(i.description) + '</b><br><small class="muted">' + esc(i.sku) + (i.brand ? ' · ' + esc(i.brand) : '') + (i.fits ? ' · fits ' + esc(i.fits) : '') + (i.interchange ? ' · also ' + esc(i.interchange) : '') + (i.core_charge ? ' · core ' + J(i.core_charge) : '') + '</small></td><td class="n">' + J(i.dealer_cost) + '</td><td class="n">' + J(i.list_price) + '</td><td class="n">' + n(i.in_store) + ' / ' + n(i.at_hub) + ' / ' + n(i.at_dc) + '</td><td><button data-add="' + i.id + '">Add</button></td></tr>'; }).join('') + '</tbody></table>' : '<p class="muted">Nothing found.</p>';
+              Array.prototype.forEach.call(document.querySelectorAll('[data-add]'), function (x) { x.onclick = function () { var it = r.items.find(function (i) { return String(i.id) === x.getAttribute('data-add'); }); var have = cart.find(function (c) { return c.id === it.id; }); if (have) have.qty++; else cart.push({ id: it.id, sku: it.sku, description: it.description, dealer_cost: it.dealer_cost, qty: 1 }); drawCart(); }; });
+            }).catch(function (e) { $('pOut').innerHTML = '<div class="msg">' + esc(e.message) + '</div>'; });
+          };
+          $('pSend').onclick = function () {
+            var b = this; if (!cart.length) { $('pM').innerHTML = '<div class="msg">Add at least one part.</div>'; return; }
+            b.disabled = true;
+            call(purl + '/orders', { kind: $('pK').value, notes: $('pN').value, lines: cart.map(function (c) { return { catalogue_id: c.id, qty: c.qty }; }) })
+              .then(function (r) { $('pM').innerHTML = '<div class="ok">Order ' + esc(r.number) + ' sent: ' + J(r.total_cost) + ' at dealer cost.</div>'; cart = []; setTimeout(draw, 1500); })
+              .catch(function (e) { b.disabled = false; $('pM').innerHTML = '<div class="msg">' + esc(e.message) + '</div>'; });
+          };
+        }
+        Array.prototype.forEach.call(document.querySelectorAll('[data-recv]'), function (x) { x.onclick = function () { x.disabled = true; call(purl + '/orders/' + x.getAttribute('data-recv') + '/receive', {}).then(draw).catch(function (e) { x.disabled = false; alert(e.message); }); }; });
+        if ($('cGo')) $('cGo').onclick = function () {
+          var b = this; b.disabled = true;
+          call(purl + '/coop', { description: $('cW').value, media: $('cMd').value, spend_date: $('cD').value, spend: $('cA').value, proof: $('cP').value })
+            .then(function (r) { $('cM').innerHTML = '<div class="ok">Claim for ' + J(r.claimed) + ' sent. The franchise office will approve it.</div>'; setTimeout(draw, 1500); })
+            .catch(function (e) { b.disabled = false; $('cM').innerHTML = '<div class="msg">' + esc(e.message) + '</div>'; });
+        };
+      }).catch(function (e) { stop(e.message); });
+    };
+    draw();
+    return;
+  }
+
+  // ---------------------------------------------------- the enquiry form --
+  $('sub').textContent = 'Own a Morty\'s Auto Parts franchise';
+  out.innerHTML = '<div class="card"><h2>Bring Morty\'s Auto Parts to your area</h2><p>We are looking for people who want to run their own auto-parts shop with our name, our till and online ordering system, our suppliers and our training. Tell us about yourself and we will call you.</p>' +
+    '<p class="muted">Nothing here commits you. Before you decide, you will sign a confidentiality agreement, receive our franchise disclosure document, and have time to take advice from your own attorney and accountant.</p></div>' +
+    '<div class="card"><label>What are you interested in?</label><select id="ePr"><option value="franchise">Opening a Morty\'s Auto Parts franchise</option><option value="affiliate">I already run a parts store and want to join the network as an affiliate store</option></select>' +
+    '<div id="eCurW" style="display:none"><label>Your store today (name and town)</label><input type="text" id="eCur"><p class="muted">Affiliate stores keep their own name and ownership, show the network banner, and buy through our distribution centre for better prices, rebates and the parts catalogue.</p></div>' +
+    '<div class="two"><div><label>Your name *</label><input type="text" id="eN" autocomplete="name"></div><div><label>Company (if any)</label><input type="text" id="eC"></div>' +
+    '<div><label>Phone *</label><input type="tel" id="eP" autocomplete="tel"></div><div><label>Email</label><input type="email" id="eE" autocomplete="email"></div>' +
+    '<div><label>Parish</label><select id="ePa"><option value=""></option>' + ['Kingston', 'St Andrew', 'St Catherine', 'Clarendon', 'Manchester', 'St Elizabeth', 'Westmoreland', 'Hanover', 'St James', 'Trelawny', 'St Ann', 'St Mary', 'Portland', 'St Thomas'].map(function (p) { return '<option>' + p + '</option>'; }).join('') + '</select></div>' +
+    '<div><label>Town or area you want</label><input type="text" id="eA"></div>' +
+    '<div><label>Cash you could invest (J$)</label><input type="text" inputmode="decimal" id="eCap"></div><div><label>When you would like to open</label><select id="eT"><option></option><option>Within 6 months</option><option>6 to 12 months</option><option>More than a year</option><option>Just looking</option></select></div></div>' +
+    '<label>Your business or motor-trade experience</label><textarea id="eX" rows="2"></textarea><label>Anything else</label><textarea id="eM" rows="2"></textarea>' +
+    '<input class="hp" type="text" id="eW" tabindex="-1" autocomplete="off" aria-hidden="true">' +
+    '<label style="display:flex;gap:8px;align-items:flex-start;color:var(--ink);font-size:14px;margin-top:12px"><input type="checkbox" id="eOk" style="margin-top:3px"> Morty\'s Auto Parts may contact me about this enquiry and keep these details for it, as the Data Protection Act, 2020 allows.</label>' +
+    '<div class="row"><button class="go" id="eGo">Send my enquiry</button></div><div id="eMsg" style="margin-top:10px"></div></div>';
+  $('ePr').onchange = function () { $('eCurW').style.display = this.value === 'affiliate' ? '' : 'none'; };
+  $('eGo').onclick = function () {
+    var b = this, m = $('eMsg');
+    if ($('eN').value.trim().length < 2 || $('eP').value.trim().length < 7) { m.innerHTML = '<div class="msg">Your name and phone number, please.</div>'; return; }
+    if (!$('eOk').checked) { m.innerHTML = '<div class="msg">Tick the box so we may contact you.</div>'; return; }
+    b.disabled = true;
+    call('/api/public/franchise-enquiry', { name: $('eN').value, company: $('eC').value, phone: $('eP').value, email: $('eE').value, parish: $('ePa').value, area_wanted: $('eA').value, capital: $('eCap').value, timeline: $('eT').value,
+      experience: $('eX').value, message: $('eM').value, website: $('eW').value, consent: true, programme: $('ePr').value, current_store: $('eCur').value })
+      .then(function () { out.innerHTML = '<div class="card"><div class="ok">Thank you. We have your enquiry and will be in touch within two working days.</div></div>'; })
+      .catch(function (e) { b.disabled = false; m.innerHTML = '<div class="msg">' + esc(e.message) + '</div>'; });
+  };
+})();
+</script>
+</body>
+</html>

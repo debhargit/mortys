@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI assistant · Morty's Auto Parts</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0} header nav{margin-left:auto;display:flex;gap:14px;font-size:13px} header a{color:#fff;opacity:.85}
+  main{max-width:1200px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  input,select,button,textarea{font:inherit;padding:6px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  button{cursor:pointer;background:var(--card)} button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600} button.sm{padding:3px 9px;font-size:12.5px}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 12px} .tabs button{border-radius:999px;padding:6px 13px;font-size:13px} .tabs button.on{background:var(--navy);border-color:var(--navy);color:#fff}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px} .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  table{width:100%;border-collapse:collapse} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600} td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .scroll{overflow-x:auto}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip);white-space:nowrap}
+  .pill.ok{background:#16a34a22;color:var(--ok)} .pill.bad{background:#d6282822;color:var(--red)} .pill.warn{background:#f59e0b22;color:var(--warn)}
+  .note{padding:8px 10px;border-radius:8px;font-size:13px;margin-bottom:8px} .note.warn{background:#f59e0b18;border-left:3px solid var(--warn)} .note.info{background:var(--chip)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:12px}
+  .tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px} .tile b{font-size:20px;display:block} .tile .k{font-size:12px;color:var(--muted);text-transform:uppercase}
+  .modal{position:fixed;inset:0;background:rgba(10,15,25,.55);display:flex;align-items:flex-start;justify-content:center;padding:4vh 12px;overflow:auto;z-index:40} .modal .card{max-width:820px;width:100%}
+  .tl{display:flex;flex-direction:column;gap:6px;max-height:58vh;overflow-y:auto;background:var(--bg);padding:10px;border-radius:10px}
+  .tl div{padding:6px 9px;border-radius:9px;white-space:pre-wrap;word-wrap:break-word;font-size:13.5px}
+  .tl .customer{align-self:flex-end;background:#d6282818} .tl .assistant{background:var(--card);border:1px solid var(--line)} .tl .staff{background:#0ea5e922}
+  .tl .note{align-self:center;color:var(--muted);font-size:12.5px;background:transparent}
+  .tl .tool,.tl .result{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--muted);background:transparent;padding:2px 9px}
+  .empty{color:var(--muted);text-align:center;padding:20px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60}
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>AI parts assistant</h1><nav><a href="/ai-counter.html" target="_blank" rel="noopener">Counter kiosk ↗</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"><button data-t="chats" class="on">Conversations</button><button data-t="usage">Usage and cost</button><button data-t="set">Settings</button></div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var dt = function (t) { return t ? new Date(t).toLocaleString('en-JM', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Jamaica' }) : ''; };
+  var tab = 'chats', filter = '', chan = '', q = '', timer = null;
+  var CH = { web: 'website', kiosk: 'counter', phone: '📞 phone', whatsapp: 'WhatsApp / text' };
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 3200); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) { if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); } return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; }); });
+  }
+  function close() { $('#modal').innerHTML = ''; clearInterval(timer); }
+  var cost = function (p, i, o, c) { return (i * p.input + o * p.output + c * p.cached) / 1e6; };
+
+  function chats() {
+    return Promise.all([api('/api/ai/admin/conversations?status=' + filter + '&channel=' + chan + '&q=' + encodeURIComponent(q)), api('/api/ai/admin/status')]).then(function (r) {
+      var d = r[0], st = r[1];
+      $('#out').innerHTML = (!st.settings.enabled ? '<div class="note warn">The assistant is switched off. Customers see "not available, please call". Switch it on under Settings.</div>' : '') +
+        (st.key !== 'ready' && st.key.indexOf('test') !== 0 ? '<div class="note warn">Claude API: ' + esc(st.key) + '. The assistant stays offline until the API key is set on the shop server.</div>' : '') +
+        '<div class="card"><h2>Conversations <select id="f"><option value="">All</option><option value="handoff">Waiting for a person</option><option value="open">With the assistant</option><option value="closed">Closed</option></select><select id="fc"><option value="">Every channel</option><option value="web">Website</option><option value="kiosk">Counter</option><option value="phone">Phone</option><option value="whatsapp">WhatsApp / text</option></select><input id="fq" placeholder="name or phone" style="width:150px"></h2>' +
+        '<p class="sub">Chats handed to a person come first. Open one to read it and reply in the customer\'s chat.</p><div class="scroll"><table><thead><tr><th>Last</th><th>Where</th><th>Customer</th><th>First message</th><th>Orders</th><th>Status</th></tr></thead><tbody>' +
+        (d.conversations.length ? d.conversations.map(function (c) {
+          return '<tr data-id="' + c.id + '" style="cursor:pointer"><td>' + esc(dt(c.last_at)) + '</td><td>' + esc(CH[c.channel] || c.channel) + '</td><td>' + esc(c.customer_name || (c.caller_id ? 'caller ' + c.caller_id : '–')) + (c.vehicle ? '<br><small>' + esc(c.vehicle) + '</small>' : '') + '</td><td>' + (c.summary ? '<b>Summary:</b> ' + esc(c.summary.slice(0, 160)) : esc((c.first_message || '').slice(0, 90))) + '</td>' +
+            '<td>' + (c.order_ids.length ? c.order_ids.map(function (o) { return '#' + o; }).join(', ') : '') + '</td><td><span class="pill ' + (c.status === 'handoff' ? 'warn' : c.status === 'open' ? 'ok' : '') + '">' + esc(c.status === 'handoff' ? 'needs a person' : c.status) + '</span>' + (c.handoff_reason ? '<br><small>' + esc(c.handoff_reason) + '</small>' : '') + '</td></tr>';
+        }).join('') : '<tr><td colspan="6" class="empty">No conversations yet.</td></tr>') + '</tbody></table></div></div>';
+      $('#f').value = filter; $('#f').onchange = function () { filter = this.value; chats(); };
+      $('#fc').value = chan; $('#fc').onchange = function () { chan = this.value; chats(); };
+      $('#fq').value = q; $('#fq').onkeydown = function (e) { if (e.key === 'Enter') { q = this.value.trim(); chats(); } };
+      all('[data-id]').forEach(function (tr) { tr.onclick = function () { view(tr.getAttribute('data-id')); }; });
+    });
+  }
+  function view(id) {
+    var draw = function () {
+      return api('/api/ai/admin/conversations/' + id).then(function (d) {
+        var c = d.conversation, keep = $('#rp') ? $('#rp').value : '';
+        $('#modal').innerHTML = '<div class="modal"><div class="card"><h2>Chat #' + c.id + ' · ' + esc(c.channel) + ' <span class="pill">' + esc(c.status) + '</span></h2>' +
+          (c.summary ? '<div class="note info"><b>Summary:</b> ' + esc(c.summary) + '</div>' : '') + '<p class="sub">' + esc(c.customer_name || 'No name given') + (c.customer_phone ? ' · ' + esc(c.customer_phone) : '') + (c.caller_id ? ' · from ' + esc(c.caller_id) : '') + (c.vehicle ? ' · ' + esc(c.vehicle) : '') + (c.order_ids.length ? ' · orders ' + c.order_ids.map(function (o) { return '#' + o; }).join(', ') : '') + '</p>' +
+          '<div class="tl" id="tl">' + d.lines.map(function (l) { return '<div class="' + l.who + '">' + (l.who === 'tool' ? '→ ' : l.who === 'result' ? '← ' : '') + esc(l.text) + '</div>'; }).join('') + '</div>' +
+          (c.status !== 'closed' ? '<div class="controls" style="margin-top:10px"><input id="rp" style="flex:1" placeholder="Reply to the customer (they see your first name)"><button class="primary" id="rs">Send</button></div>' : '') +
+          '<div class="controls"><button id="sm">' + (c.summary ? 'Summarise again' : 'Summarise') + '</button>' + (c.status === 'handoff' && c.channel !== 'phone' ? '<button id="back">Give back to the assistant</button>' : '') + (c.status !== 'closed' ? '<button id="cl">Close chat</button>' : '') + '<button id="cx">Done</button></div></div></div>';
+        if ($('#rp')) { $('#rp').value = keep; $('#rs').onclick = function () { var t = $('#rp').value.trim(); if (!t) return; api('/api/ai/admin/conversations/' + id + '/reply', 'POST', { text: t }).then(function (r) { if (r.note) toast(r.note); $('#rp').value = ''; draw(); }).catch(function (e) { toast(e.message); }); }; }
+        if ($('#back')) $('#back').onclick = function () { api('/api/ai/admin/conversations/' + id + '/status', 'POST', { status: 'open' }).then(function () { toast('The assistant answers again'); draw(); }); };
+        if ($('#cl')) $('#cl').onclick = function () { api('/api/ai/admin/conversations/' + id + '/status', 'POST', { status: 'closed' }).then(function () { close(); chats(); }); };
+        $('#cx').onclick = function () { close(); chats(); };
+        $('#sm').onclick = function () { $('#sm').disabled = true; api('/api/ai/admin/conversations/' + id + '/summary', 'POST').then(function () { draw(); }).catch(function (e) { toast(e.message); $('#sm').disabled = false; }); };
+        var tl = $('#tl'); tl.scrollTop = tl.scrollHeight;
+      }).catch(function (e) { toast(e.message); });
+    };
+    draw();
+    clearInterval(timer); timer = setInterval(function () { if (document.activeElement !== $('#rp')) draw(); }, 8000);
+  }
+
+  function usage() {
+    return api('/api/ai/admin/status').then(function (d) {
+      var p = d.price, t = d.days.reduce(function (a, x) { a.req += x.requests; a.i += x.input; a.o += x.output; a.c += x.cached; return a; }, { req: 0, i: 0, o: 0, c: 0 });
+      var cnt = {}; d.counts.forEach(function (x) { cnt[x.status] = x.n; });
+      $('#out').innerHTML = '<div class="grid"><div class="tile"><span class="k">Chats, 30 days</span><b>' + ((cnt.open || 0) + (cnt.handoff || 0) + (cnt.closed || 0)) + '</b>' + (cnt.handoff || 0) + ' waiting for a person</div>' +
+        '<div class="tile"><span class="k">Orders from chats</span><b>' + d.orders.n + '</b>J$' + Math.round(d.orders.value).toLocaleString() + ', ' + d.orders.paid + ' paid</div>' +
+        '<div class="tile"><span class="k">Model calls, 30 days</span><b>' + t.req + '</b>' + Math.round((t.i + t.o) / 1000).toLocaleString() + 'k tokens</div>' +
+        '<div class="tile"><span class="k">Estimated cost, 30 days</span><b>US$' + cost(p, t.i, t.o, t.c).toFixed(2) + '</b>at list prices</div></div>' +
+        '<div class="card"><h2>By day</h2><p class="sub">Estimate at Claude Opus 5.5 list prices (US$4 / million input tokens, US$20 output, US$0.20 cached). The Anthropic console shows the real bill.</p><div class="scroll"><table><thead><tr><th>Day</th><th class="n">Calls</th><th class="n">Input</th><th class="n">Cached</th><th class="n">Output</th><th class="n">Est. US$</th></tr></thead><tbody>' +
+        (d.days.length ? d.days.map(function (x) { return '<tr><td>' + esc(x.day) + '</td><td class="n">' + x.requests + '</td><td class="n">' + x.input.toLocaleString() + '</td><td class="n">' + x.cached.toLocaleString() + '</td><td class="n">' + x.output.toLocaleString() + '</td><td class="n">' + cost(p, x.input, x.output, x.cached).toFixed(2) + '</td></tr>'; }).join('') : '<tr><td colspan="6" class="empty">No use yet.</td></tr>') +
+        '</tbody></table></div></div>';
+    });
+  }
+
+  function setTab() {
+    return api('/api/ai/admin/status').then(function (d) {
+      var s = d.settings;
+      $('#out').innerHTML = '<div class="card"><h2>Assistant</h2><p class="sub">Claude API: <b>' + esc(d.key) + '</b>. Model ' + esc(s.model) + '.</p>' +
+        '<label style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><input type="checkbox" id="on"' + (s.enabled ? ' checked' : '') + '> Assistant switched on</label>' +
+        '<div class="controls"><label style="display:flex;gap:6px;align-items:center;color:inherit"><input type="checkbox" id="cw"' + (s.channels.indexOf('web') >= 0 ? ' checked' : '') + '> Website chat</label><label style="display:flex;gap:6px;align-items:center;color:inherit"><input type="checkbox" id="ck"' + (s.channels.indexOf('kiosk') >= 0 ? ' checked' : '') + '> Counter kiosk</label>' +
+          '<label style="display:flex;gap:6px;align-items:center;color:inherit"><input type="checkbox" id="cp"' + (s.channels.indexOf('phone') >= 0 ? ' checked' : '') + '> Phone (answers calls)</label><label style="display:flex;gap:6px;align-items:center;color:inherit"><input type="checkbox" id="cwa"' + (s.channels.indexOf('whatsapp') >= 0 ? ' checked' : '') + '> WhatsApp / text</label></div>' +
+        '<label style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><input type="checkbox" id="sa"' + (s.staffAssist ? ' checked' : '') + '> Staff assistant answers "how do I" questions with AI (lesson search works either way)</label>' +
+        '<div class="controls"><div><label>Put callers through to (for "talk to a person")</label><input id="pn" value="' + esc(s.phoneHandoff || '') + '" placeholder="+18765551234" style="width:170px"></div></div>' +
+        '<div class="controls"><div><label>Thinking effort</label><select id="ef"><option value="low">Low (cheapest, fastest)</option><option value="medium">Medium</option><option value="high">High</option></select></div>' +
+        '<div><label>Orders above (J$) go to a person</label><input id="hv" type="number" value="' + s.handoffValue + '" style="width:130px"></div><div><label>Max lines per order</label><input id="ml" type="number" value="' + s.maxLines + '" style="width:80px"></div></div>' +
+        '<div class="controls"><div><label>Daily token limit (all chats)</label><input id="dc" type="number" value="' + s.dailyCap + '" style="width:140px"></div><div><label>Max customer messages per chat</label><input id="mt" type="number" value="' + s.maxTurns + '" style="width:80px"></div></div>' +
+        '<div class="note info">What the assistant can do: find parts and alternates, quote catalogue prices, suggest what goes with a part, save a customer and vehicle when they say yes, put an order in the cashier queue, record lost sales and hand the chat to a person. It cannot give discounts, take payments or accept card numbers, and it says it is automated. Every action is in the till journal.</div>' +
+        '<button class="primary" id="sv">Save</button></div>' +
+        '<div class="card"><h2>Phone and WhatsApp set-up (Twilio)</h2><p class="sub">In the Twilio console, on the shop\'s number, set these addresses (method POST). The server needs TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN; every request from Twilio is checked against the token, so nobody else can use these addresses.</p>' +
+        '<table><tbody><tr><td>A call comes in</td><td><code>' + esc(location.origin) + '/api/ai/voice/incoming</code></td></tr><tr><td>Call status changes</td><td><code>' + esc(location.origin) + '/api/ai/voice/status</code></td></tr><tr><td>A message comes in (SMS / WhatsApp)</td><td><code>' + esc(location.origin) + '/api/ai/message</code></td></tr></tbody></table>' +
+        '<p class="sub">Use the shop\'s public website address (the one customers use), not a local one. Callers hear that they are talking to an automated assistant and that the call is transcribed; saying "staff" puts them through to the number above, or, with no number set, books a call-back.</p></div>';
+      $('#ef').value = s.effort;
+      $('#sv').onclick = function () {
+        var ch = []; if ($('#cw').checked) ch.push('web'); if ($('#ck').checked) ch.push('kiosk'); if ($('#cp').checked) ch.push('phone'); if ($('#cwa').checked) ch.push('whatsapp');
+        api('/api/ai/admin/settings', 'PUT', { enabled: $('#on').checked, channels: ch, effort: $('#ef').value, handoff_value: $('#hv').value, max_lines: $('#ml').value, daily_cap: $('#dc').value, max_turns: $('#mt').value, phone_handoff_number: $('#pn').value.trim(), staff_assist: $('#sa').checked })
+          .then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); });
+      };
+    });
+  }
+
+  function show() {
+    all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); });
+    ({ chats: chats, usage: usage, set: setTab }[tab])().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
+  show();
+})();
+</script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+<script src="/assets/module-look.js?v=20261101" defer></script>
+</body>
+</html>

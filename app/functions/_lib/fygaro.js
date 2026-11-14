@@ -7,7 +7,9 @@
 //   4. Fygaro POSTs a signed webhook -> verifyWebhook() -> order marked paid
 //
 // Config: shop_settings.fygaro_enabled + fygaro_button_id + fygaro_currency
-//         (Admin -> Settings); FYGARO_JWT_SECRET is a wrangler secret.
+//         (Admin -> Settings); FYGARO_JWT_SECRET (signs the checkout URL) and
+//         FYGARO_WEBHOOK_SECRET (verifies Fygaro's callback) are wrangler
+//         secrets, and must differ (audit H1).
 //
 // The JWT claim names and the webhook's Authorization: Bearer <jwt> shape
 // follow Fygaro's Payment Button docs; verify against a Fygaro sandbox button
@@ -86,20 +88,32 @@ export async function buildCheckoutUrl({ env, settings, orderId, amount, redirec
 
 // Verify an inbound Fygaro webhook. Accepts the signing JWT from the
 // Authorization: Bearer header (preferred) or a `jwt` field in the JSON body.
-// Returns { reference, txnId, status, paid } or null when the signature fails.
+// Returns { reference, txnId, status, paid, amount, currency } or null when the
+// signature fails.
+//
+// Audit H1: the checkout JWT is handed to the customer in the payment URL, so
+// the webhook verifies with its own secret (FYGARO_WEBHOOK_SECRET) and refuses
+// to run if that is unset or equal to FYGARO_JWT_SECRET. Everything returned
+// comes from the signed claims only; the unsigned body is never merged in, and
+// a token with no status claim is not a payment callback. The caller still has
+// to check the amount against the order.
 export async function verifyWebhook({ env, settings, request }) {
   const cfg = fygaroConfig(env, settings);
   if (!cfg) return null;
+  const webhookSecret = env && env.FYGARO_WEBHOOK_SECRET;
+  if (!webhookSecret || webhookSecret === cfg.secret) return null;
   let body = {};
   try { body = await request.clone().json(); } catch { /* maybe form / empty */ }
   const auth = request.headers.get('authorization') || '';
   const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : (body.jwt || body.token || '');
-  const claims = await verifyJwt(cfg.secret, token);
+  const claims = await verifyJwt(webhookSecret, token);
   if (!claims) return null;
-  const src = { ...body, ...claims };
-  const reference = src.custom_reference || src.reference || src.order_reference || null;
-  const txnId = src.transaction_id || src.txn_id || src.id || src.reference_id || null;
-  const rawStatus = String(src.status || src.transaction_status || src.result || '').toLowerCase();
+  const rawStatus = String(claims.status ?? claims.transaction_status ?? claims.result ?? '').toLowerCase();
+  if (!rawStatus) return null;
+  const reference = claims.custom_reference ?? claims.reference ?? claims.order_reference ?? null;
+  const txnId = claims.transaction_id ?? claims.txn_id ?? claims.id ?? claims.reference_id ?? null;
   const paid = ['approved', 'success', 'successful', 'paid', 'completed', 'captured'].includes(rawStatus);
-  return { reference, txnId, status: rawStatus || 'unknown', paid, amount: src.amount != null ? Number(src.amount) : null };
+  const amount = claims.amount != null && claims.amount !== '' && Number.isFinite(Number(claims.amount)) ? Number(claims.amount) : null;
+  const currency = claims.currency ? String(claims.currency).toUpperCase() : null;
+  return { reference, txnId, status: rawStatus, paid, amount, currency, expectedCurrency: cfg.currency };
 }

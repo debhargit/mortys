@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My time · Morty's Auto Parts</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0} header nav{margin-left:auto;display:flex;gap:14px;font-size:13px} header a{color:#fff;opacity:.85}
+  main{max-width:980px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  input,select,button,textarea{font:inherit;padding:6px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  button{cursor:pointer;background:var(--card)} button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600} button.sm{padding:3px 9px;font-size:12.5px}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px} .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  table{width:100%;border-collapse:collapse} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600}
+  .scroll{overflow-x:auto}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip);white-space:nowrap}
+  .pill.ok{background:#16a34a22;color:var(--ok)} .pill.bad{background:#d6282822;color:var(--red)} .pill.warn{background:#f59e0b22;color:var(--warn)}
+  .big{font-size:20px;font-weight:700}
+  .modal{position:fixed;inset:0;background:rgba(10,15,25,.55);display:flex;align-items:flex-start;justify-content:center;padding:4vh 12px;overflow:auto;z-index:40} .modal .card{max-width:820px;width:100%}
+  .letter{width:100%;height:60vh;border:1px solid var(--line);border-radius:8px;background:#fff}
+  .empty{color:var(--muted);text-align:center;padding:16px}
+  @media (max-width:600px){ #letters tr{display:block;border-bottom:1px solid var(--line);padding:6px 0} #letters td{display:block;border:0;padding:2px 0} }
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60;max-width:90vw}
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>My time</h1><nav><a href="/clock.html">Time clock</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="card" id="now"><div class="empty">Loading…</div></div>
+  <div class="card" id="letters" style="display:none"></div>
+  <div class="card" id="extra"></div>
+  <div class="card" id="hist"></div>
+  <div class="card" id="corr"></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<script src="/assets/clock-ctx.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var tm = function (t) { return t ? new Date(t).toLocaleTimeString('en-JM', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Jamaica' }) : ''; };
+  var dt = function (t) { return t ? new Date(t).toLocaleString('en-JM', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Jamaica' }) : ''; };
+  var day = function (d) { return d ? new Date(d + 'T12:00:00Z').toLocaleDateString('en-JM', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }) : ''; };
+  var local = function (t) { var d = new Date(t); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
+  var KIND = { extension: 'More time', overtime: 'Overtime', correction: 'Time correction', extra: 'Extra time after the shift' };
+  var me = null, hist = null;
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 4000); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        if (r.status === 401) { location.href = '/admin.html?next=' + encodeURIComponent('/my-time.html' + location.hash); throw new Error('Sign in first'); }
+        return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) { var e = new Error(j.error || ('Error ' + r.status)); e.j = j; throw e; } return j; });
+      });
+  }
+  function punch(body) { return VisionClockCtx.get().then(function (ctx) { return api('/api/clock/me/punch', 'POST', Object.assign({ ctx: ctx }, body)); }); }
+  function modal(h) { $('#modal').innerHTML = '<div class="modal"><div class="card">' + h + '</div></div>'; $('.modal').addEventListener('mousedown', function (e) { if (e.target.classList.contains('modal')) close(); }); }
+  function close() { $('#modal').innerHTML = ''; if (/^#letter=/.test(location.hash)) history.replaceState(null, '', location.pathname); }
+
+  function nowCard() {
+    var d = me, h;
+    if (!d.clocked_in) h = '<h2>Not clocked in</h2>' + (d.last_auto ? '<p class="sub">You were clocked out automatically at ' + esc(tm(d.last_auto.clock_out_at)) + '. Worked later? Log the extra time below.</p>' : '') +
+      '<div class="controls"><button class="primary" data-p="in">Clock in</button></div>';
+    else h = '<h2>Clocked in since ' + esc(tm(d.entry.since)) + (d.entry.mode === 'remote' ? ' <span class="pill warn">remote</span>' : '') + (d.on_break ? ' <span class="pill">on ' + esc(d.on_break.kind) + '</span>' : '') + '</h2>' +
+      (d.ends_at ? '<p class="sub">' + (d.minutes_left < 0 ? 'Your shift ended at ' + esc(tm(d.ends_at)) + '. ' : 'Your shift ends at ' + esc(tm(d.ends_at)) + '. ') + 'Unless you clock out first, you are clocked out automatically at ' + esc(tm(d.auto_out_at)) + ' (' + d.leave_minutes + ' minutes after the end, to finish up and leave).</p>' : '') +
+      '<div class="controls"><button class="primary" data-p="out">Clock out</button>' + (d.on_break ? '<button data-p="break_end">Back from break</button>' : '<button data-p="break_start">Break</button><button data-p="lunch_start">Lunch</button>') + '</div>';
+    $('#now').innerHTML = h + '<p class="sub">Each clock in and out records this device (' + esc(VisionClockCtx.deviceName() || 'not named') + '), its address and, if you allow it, its location.</p>';
+    all('[data-p]').forEach(function (b) {
+      b.onclick = function () {
+        var a = b.getAttribute('data-p');
+        b.disabled = true;
+        punch({ action: a }).then(function (r) { toast(r.message); load(); }).catch(function (e) {
+          b.disabled = false;
+          if (e.j && e.j.need_overtime) { var why = prompt(e.message + '\n\nReason:'); if (why) punch({ action: a, confirm_overtime: true, ot_reason: why }).then(function (r) { toast(r.message); load(); }).catch(function (e2) { toast(e2.message); }); return; }
+          if (e.j && e.j.drawer_open) return toast(e.message);
+          toast(e.message);
+        });
+      };
+    });
+  }
+
+  function lettersCard(list) {
+    var el = $('#letters');
+    if (!list.length) { el.style.display = 'none'; return; }
+    el.style.display = '';
+    el.innerHTML = '<h2>Lateness letters</h2><p class="sub">Read each letter and confirm you have received it. You can add a reply; your manager sees it.</p><table><tbody>' + list.map(function (w) {
+      return '<tr><td><b>' + esc(w.title) + '</b><br><small>' + esc(new Date(w.month + 'T12:00:00Z').toLocaleDateString('en-JM', { month: 'long', year: 'numeric', timeZone: 'UTC' })) + ' · late ' + w.late_count + ' times · ' + esc(dt(w.issued_at)) + '</small></td>' +
+        '<td>' + (w.status === 'acknowledged' ? '<span class="pill ok">acknowledged ' + esc(dt(w.acknowledged_at)) + '</span>' : '<span class="pill bad">to acknowledge</span>') + '</td>' +
+        '<td><button class="sm' + (w.status === 'issued' ? ' primary' : '') + '" data-w="' + w.id + '">' + (w.status === 'issued' ? 'Read and acknowledge' : 'Read') + '</button></td></tr>';
+    }).join('') + '</tbody></table>';
+    all('[data-w]', el).forEach(function (b) { b.onclick = function () { openLetter(+b.getAttribute('data-w')); }; });
+  }
+  function openLetter(id) {
+    api('/api/clock/me/warnings/' + id).then(function (r) {
+      var w = r.warning;
+      modal('<h2>' + esc(w.title) + '</h2>' + (r.html ? '<iframe class="letter" sandbox="allow-modals allow-same-origin" id="lf"></iframe>' : '<p>You were late ' + w.late_count + ' times this month. Please be on time.</p>') +
+        (w.status === 'issued' ? '<div style="margin-top:10px"><label class="sub">Your reply (optional)</label><textarea id="ackNote" rows="2" style="width:100%"></textarea></div>' : (w.ack_note ? '<p class="sub">Your reply: ' + esc(w.ack_note) + '</p>' : '')) +
+        '<div class="controls" style="margin-top:10px">' + (w.status === 'issued' ? '<button class="primary" id="ack">I have received and read this letter</button>' : '') + (r.html ? '<button id="prt">Print</button>' : '') + '<button id="cx">Close</button></div>');
+      if (r.html) $('#lf').srcdoc = r.html;
+      $('#cx').onclick = close;
+      if ($('#prt')) $('#prt').onclick = function () { try { $('#lf').contentWindow.print(); } catch (_) { toast('Could not print here'); } };
+      if ($('#ack')) $('#ack').onclick = function () { api('/api/clock/me/warnings/' + id + '/ack', 'POST', { note: $('#ackNote').value }).then(function () { toast('Thank you. Your manager has been told.'); close(); load(); }).catch(function (e) { toast(e.message); }); };
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  function extraCard() {
+    var done = (hist.entries || []).filter(function (e) { return e.clock_out_at && Date.now() - new Date(e.clock_out_at).getTime() < 7 * 86400000; }).slice(0, 10);
+    var waiting = {}; (hist.requests || []).forEach(function (r) { if (r.kind === 'extra' && r.status === 'pending') waiting[r.attendance_id] = true; });
+    $('#extra').innerHTML = '<h2>Log extra time</h2><p class="sub">Kept working after you were clocked out (or forgot to clock out at the right time on a long day)? Say when you finished and what you were doing. Your manager approves it like overtime.</p>' +
+      (done.length ? '<div class="controls"><div><label>Shift</label><select id="exA">' + done.map(function (e) { return '<option value="' + e.id + '"' + (waiting[e.id] ? ' disabled' : '') + '>' + esc(day(e.work_day)) + ': ' + esc(tm(e.clock_in_at)) + '–' + esc(tm(e.clock_out_at)) + (e.auto_closed ? ' (clocked out automatically)' : '') + (waiting[e.id] ? ' · waiting' : '') + '</option>'; }).join('') + '</select></div>' +
+        '<div><label>I finished at</label><input id="exU" type="datetime-local"></div><div style="flex:1;min-width:200px"><label>What I was working on</label><input id="exR" style="width:100%"></div><button class="primary" id="exGo">Send</button></div>'
+        : '<div class="empty">No finished shifts in the last week.</div>');
+    if (!done.length) return;
+    var setU = function () { var e = done.find(function (x) { return String(x.id) === $('#exA').value; }); if (e) $('#exU').value = local(new Date(new Date(e.clock_out_at).getTime() + 30 * 60000) > new Date() ? new Date() : new Date(new Date(e.clock_out_at).getTime() + 30 * 60000)); };
+    $('#exA').onchange = setU; setU();
+    $('#exGo').onclick = function () {
+      if (!$('#exU').value) return toast('Give the time you finished');
+      punch({ action: 'extra', attendance_id: $('#exA').value, until: new Date($('#exU').value).toISOString(), reason: $('#exR').value }).then(function (r) { toast(r.message); $('#exR').value = ''; load(); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  function histCard() {
+    var e = hist.entries || [], r = hist.requests || [];
+    $('#hist').innerHTML = '<h2>My clock-ins</h2><div class="scroll"><table><thead><tr><th>Day</th><th>Shift</th><th>In</th><th>Out</th><th>Notes</th></tr></thead><tbody>' +
+      (e.length ? e.map(function (x) {
+        var notes = [];
+        if (x.late_minutes) notes.push(x.late_excused ? '<span class="pill">late ' + x.late_minutes + ' min, excused</span>' : '<span class="pill bad">late ' + x.late_minutes + ' min</span>');
+        if (x.mode === 'remote') notes.push('<span class="pill warn">remote</span>');
+        if (x.outside_shift) notes.push('<span class="pill ' + (x.ot_status === 'approved' ? 'ok' : 'warn') + '">overtime ' + esc(x.ot_status) + '</span>');
+        if (x.auto_closed) notes.push('<small>clocked out automatically</small>');
+        if (x.edited) notes.push('<small>corrected</small>');
+        return '<tr><td>' + esc(day(x.work_day)) + '</td><td>' + (x.shift_start ? esc(tm(x.shift_start)) + '–' + esc(tm(x.shift_end)) : '<small>none</small>') + '</td><td>' + esc(tm(x.clock_in_at)) + '</td><td>' + (x.clock_out_at ? esc(tm(x.clock_out_at)) : '<span class="pill ok">now</span>') + '</td><td>' + notes.join(' ') + '</td></tr>';
+      }).join('') : '<tr><td colspan="5" class="empty">No clock-ins yet.</td></tr>') + '</tbody></table></div>' +
+      (r.length ? '<h2 style="margin-top:14px">My requests</h2><table><tbody>' + r.map(function (q) {
+        return '<tr><td>' + esc(dt(q.created_at)) + '</td><td><b>' + esc(KIND[q.kind] || q.kind) + '</b>' + (q.minutes ? ' · ' + q.minutes + ' min' : '') + '<br><small>' + esc(q.reason) + '</small></td><td><span class="pill ' + (q.status === 'approved' ? 'ok' : q.status === 'pending' ? 'warn' : 'bad') + '">' + esc(q.status) + '</span>' + (q.decision_note ? '<br><small>' + esc(q.decision_note) + '</small>' : '') + '</td></tr>';
+      }).join('') + '</tbody></table>' : '');
+  }
+
+  function corrCard() {
+    var e = (hist.entries || []).slice(0, 20);
+    $('#corr').innerHTML = '<h2>Ask for a time correction</h2><p class="sub">Forgot to clock in or out, or a time is wrong? Give the right times; a manager approves it and the original is kept.</p>' +
+      '<div class="controls"><div><label>Which</label><select id="coA"><option value="">A missed day (no clock-in at all)</option>' + e.map(function (x) { return '<option value="' + x.id + '">' + esc(day(x.work_day)) + ': ' + esc(tm(x.clock_in_at)) + '–' + esc(x.clock_out_at ? tm(x.clock_out_at) : 'now') + '</option>'; }).join('') + '</select></div>' +
+      '<div><label>Right time in</label><input id="coI" type="datetime-local"></div><div><label>Right time out</label><input id="coO" type="datetime-local"></div><div style="flex:1;min-width:200px"><label>What happened</label><input id="coR" style="width:100%"></div><button class="primary" id="coGo">Send</button></div>';
+    $('#coGo').onclick = function () {
+      var iso = function (v) { return v ? new Date(v).toISOString() : null; };
+      api('/api/clock/me/correction', 'POST', { attendance_id: $('#coA').value || null, clock_in_at: iso($('#coI').value), clock_out_at: iso($('#coO').value), reason: $('#coR').value })
+        .then(function () { toast('Sent to your manager'); load(); }).catch(function (er) { toast(er.message); });
+    };
+  }
+
+  function load() {
+    return Promise.all([api('/api/clock/me'), api('/api/clock/me/history'), api('/api/clock/me/warnings')]).then(function (r) {
+      me = r[0]; hist = r[1];
+      nowCard(); lettersCard(r[2].warnings); extraCard(); histCard(); corrCard();
+    }).catch(function (e) { $('#now').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+  load().then(function () {
+    var m = /^#letter=(\d+)/.exec(location.hash);
+    if (m) openLetter(+m[1]);
+    else if (location.hash === '#letters' || location.hash === '#extra') { var t = $(location.hash); if (t) t.scrollIntoView({ behavior: 'smooth' }); }
+  });
+})();
+</script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+<script src="/assets/module-look.js?v=20261101" defer></script>
+</body>
+</html>

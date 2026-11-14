@@ -16,9 +16,9 @@ export async function loadImagesByImg(db, imgs) {
   if (!list.length) return map;
   const rows = await db.many(
     `SELECT product_img, id, url, caption, sort_order FROM product_images
-      WHERE product_img IN (${list.map(() => '?').join(',')})
+      WHERE product_img IN (SELECT value FROM json_each(?))
       ORDER BY product_img, sort_order, id`,
-    ...list
+    JSON.stringify(list)
   );
   for (const r of rows) {
     if (!map.has(r.product_img)) map.set(r.product_img, []);

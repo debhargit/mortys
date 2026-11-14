@@ -70,8 +70,8 @@ INSERT INTO work_order_parts (work_order_id,product_img,description,qty,unit_pri
 INSERT INTO work_order_payments (work_order_id,method,amount_cents,received_by,received_at) VALUES (1,'cash',11500,7,datetime('now'));
 INSERT INTO purchase_orders (id,po_number,status,total_cents,created_at) VALUES (1,'PO-2026-0001','received',20000,datetime('now'));
 INSERT INTO pos_returns (return_number,sale_id,reason,refund_method,refund_cents,refund_tax_cents,created_at) VALUES ('RET-1',1,'defective','cash',1150,150,datetime('now'));
-INSERT INTO time_entries (mechanic_id,clocked_in_at,clocked_out_at,hours) VALUES (7,datetime('now','-2 hours'),datetime('now','-1 hours'),1);
-INSERT INTO cash_drawer_sessions (id,opened_by,opening_float_cents,opened_at) VALUES (1,7,20000,datetime('now','-3 hours'));
+INSERT INTO time_entries (mechanic_id,clocked_in_at,clocked_out_at,hours) VALUES (7,datetime('now','-40 minutes'),datetime('now','-20 minutes'),1);
+INSERT INTO cash_drawer_sessions (id,opened_by,opening_float_cents,opened_at) VALUES (1,7,20000,datetime('now','-30 minutes'));
 INSERT INTO newsletter_subscribers (email,subscribed_at) VALUES ('n@x.com',datetime('now'));
 INSERT INTO points_transactions (user_id,delta,reason,created_at) VALUES (810,100,'signup_bonus',datetime('now'));
 `);
@@ -95,11 +95,11 @@ r = await call('get', '/api/admin/reports/purchasing');
 A('reports/purchasing', r.totals.n >= 1 && r.totals.total >= 200 && typeof r.received.n === 'number');
 r = await call('get', '/api/admin/reports/inventory');
 A('reports/inventory: valuation + margin + out_of_stock', r.valuation.margin_value === r.valuation.retail_value - r.valuation.cost_value && r.out_of_stock >= 1 && r.by_category.length >= 1);
-r = await call('get', '/api/admin/reports/labour');
+r = await call('get', '/api/admin/reports/labour?from=2000-01-01&to=2999-12-31');
 A('reports/labour: hours', r.totals.hours === 1 && r.by_mechanic[0].mechanic === 'Mech Seven');
 r = await call('get', '/api/admin/reports/customers');
 A('reports/customers: new + loyalty + newsletter', typeof r.new_customers === 'number' && r.loyalty.earned === 100 && r.newsletter_signups === 1);
-r = await call('get', '/api/admin/reports/drawer-sessions');
+r = await call('get', '/api/admin/reports/drawer-sessions?from=2000-01-01&to=2999-12-31');
 A('reports/drawer-sessions', Array.isArray(r.sessions) && r.sessions.length === 1 && r.sessions[0].opening_float === 200);
 
 // ---- new reports (supplier / customer-detail / order-ledger / users-staff /
@@ -161,7 +161,7 @@ A('installer: short password -> 400', st === 400);
 r = await call('post', '/api/admin/local-server/installer', {
   body: { shop_name: "O'Brien Auto", install_dir: 'C:\\Shop', port: 3055, admin_email: 'boss@shop.com', admin_password: 'strong-pw-1', open_firewall: true, install_service: false },
 });
-A('installer: 200 + .cmd attachment', st === 200 && /attachment; filename="Install Morty's Auto Parts Offline\.cmd"/.test(r.headers.get('content-disposition') || ''));
+A('installer: 200 + .cmd attachment', st === 200 && /attachment; filename="Install Morty\'s Auto Parts Offline\.cmd"/.test(r.headers.get('content-disposition') || ''));
 const cmdText = await r.text();
 const b64 = (cmdText.match(/set "MHPS=([A-Za-z0-9+/=]+)"/) || [])[1];
 const psText = b64 ? Buffer.from(b64, 'base64').toString('utf8') : '';
@@ -171,7 +171,7 @@ A('installer: presets baked into the PS (port, dir, hash, escaped quote)',
   /O''Brien Auto/.test(psText) && /\$Sha256\s+=\s+'ABC123'/.test(psText) && /\$DoService\s+=\s+\$false/.test(psText));
 A('installer: PS writes machine/server/offline-setup config + firewall + first-run',
   /machine-config\.json/.test(psText) && /offline-setup\.json/.test(psText) &&
-  /netsh advfirewall/.test(psText) && /Morty''s Auto Parts Admin\.vbs/.test(psText) && /admin\.html/.test(psText));
+  /netsh advfirewall/.test(psText) && /Morty's Auto Parts Admin\.vbs/.test(psText) && /admin\.html/.test(psText));
 delete ENV.LOCAL_SERVER_URL; delete ENV.LOCAL_SERVER_SHA256;
 
 // ---- marketing ----

@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Accounting · Morty's Auto Parts</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0}
+  header nav{margin-left:auto;display:flex;gap:14px;font-size:13px}
+  header a{color:#fff;opacity:.85}
+  main{max-width:1200px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  input,select,button,textarea{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  button{cursor:pointer;background:var(--card)}
+  button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600}
+  button.sm{padding:3px 9px;font-size:12.5px}
+  button:disabled{opacity:.5;cursor:default}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 12px}
+  .tabs button{border-radius:999px;padding:6px 13px;font-size:13px}
+  .tabs button.on{background:var(--navy);border-color:var(--navy);color:#fff}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px}
+  .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  tr.total td{font-weight:700;border-top:2px solid var(--ink)}
+  tr.click{cursor:pointer} tr.click:hover td{background:var(--chip)}
+  .scroll{overflow-x:auto}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip);white-space:nowrap}
+  .pill.ok{background:#16a34a22;color:var(--ok)} .pill.bad{background:#d6282822;color:var(--red)} .pill.warn{background:#f59e0b22;color:var(--warn)}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+  .kpi{background:var(--chip);border-radius:10px;padding:10px 12px}
+  .kpi span{display:block;font-size:12px;color:var(--muted)} .kpi b{font-size:18px;font-variant-numeric:tabular-nums}
+  .note{padding:8px 10px;border-radius:8px;font-size:13px;margin-bottom:8px}
+  .note.warn{background:#f59e0b18;border-left:3px solid var(--warn)} .note.bad{background:#d6282812;border-left:3px solid var(--red)} .note.info{background:var(--chip)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media (max-width:860px){ .grid{grid-template-columns:1fr} }
+  .modal{position:fixed;inset:0;background:rgba(10,15,25,.55);display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow:auto;z-index:40}
+  .modal .card{max-width:900px;width:100%}
+  .empty{color:var(--muted);text-align:center;padding:24px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60;max-width:90vw}
+  input.amt{width:120px;text-align:right}
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Accounting</h1><nav><a href="/report-balancing.html">Balancing report</a><a href="/report-planning.html">Planning</a><a href="/budget.html">Budget &amp; forecast</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs">
+    <button data-t="home" class="on">Overview</button><button data-t="journal">Journal</button><button data-t="tb">Trial balance</button>
+    <button data-t="accounts">Accounts</button><button data-t="rules">Posting rules</button><button data-t="classes">Classes</button><button data-t="reports">Reports</button><button data-t="close">Close &amp; export</button>
+  </div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var J = function (v) { if (v == null) return '–'; var x = Number(v); var s = Math.abs(x).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); return x < 0 ? '(' + s + ')' : s; };
+  var DC = function (v) { var x = Number(v) || 0; return x >= 0 ? J(x) + ' Dr' : J(-x) + ' Cr'; };
+  var day = function (d) { return String(d || '').slice(0, 10); };
+  var SRC = { sale: 'Sale', sale_payment: 'Payment', sale_void: 'Void', return: 'Return', account_payment: 'Account payment', receipt: 'Goods received', bill: 'Supplier bill',
+    po_invoice: 'Purchase invoice', po_payment: 'Supplier payment', till_open: 'Drawer opened', till_movement: 'Drawer movement', till_close: 'Drawer closed',
+    stock_day: 'Stock adjustments', gift_card: 'Gift card', commission: 'Commission paid', commission_accrual: 'Commission approved', opening: 'Opening balances', manual: 'Manual', reversal: 'Reversal',
+    ar_invoice: 'Invoice', ar_invoice_void: 'Invoice voided', ap_bill: 'Bill', ap_bill_void: 'Bill voided', ap_payment: 'Bill payment', ap_payment_void: 'Bill payment voided', bank_txn: 'Banking', bank_txn_void: 'Banking voided' };
+  var tab = 'home', accounts = null, period = null;
+  try { tab = localStorage.getItem('vision.glTab') || 'home'; } catch (_) {}
+
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 3500); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); }
+        return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; });
+      });
+  }
+  function ymd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  (function () { var t = new Date(); period = { from: ymd(new Date(t.getFullYear(), t.getMonth(), 1)), to: ymd(t) }; })();
+  function periodControls(extra) {
+    return '<div class="controls"><div><label>From</label><input type="date" id="pf" value="' + period.from + '"></div><div><label>To</label><input type="date" id="pt" value="' + period.to + '"></div>' + (extra || '') + '<button class="primary" id="pgo">Show</button></div>';
+  }
+  function wirePeriod(fn) { $('#pgo').onclick = function () { period = { from: $('#pf').value, to: $('#pt').value }; fn(); }; }
+  function loadAccounts() { return api('/api/gl/accounts').then(function (d) { accounts = d; return d; }); }
+  function acctOptions(sel, blank) {
+    return (blank ? '<option value="">' + esc(blank) + '</option>' : '') + accounts.accounts.filter(function (a) { return a.is_active; })
+      .map(function (a) { return '<option value="' + a.id + '"' + (String(sel) === String(a.id) ? ' selected' : '') + '>' + esc(a.code + ' ' + a.name) + '</option>'; }).join('');
+  }
+  function modal(html) { $('#modal').innerHTML = '<div class="modal"><div class="card">' + html + '</div></div>'; $('.modal').addEventListener('mousedown', function (e) { if (e.target.classList.contains('modal')) closeModal(); }); }
+  function closeModal() { $('#modal').innerHTML = ''; }
+  function csvDownload(name, rows) {
+    var q = function (v) { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([rows.map(function (r) { return r.map(q).join(','); }).join('\n')], { type: 'text/csv' })); a.download = name; a.click();
+  }
+
+  // ------------------------------------------------------------ overview --
+  function home() {
+    return api('/api/gl/status').then(function (s) {
+      if (!s.started) {
+        $('#out').innerHTML = '<div class="card"><h2>Start the ledger</h2><p class="sub">From the moment you start it, every sale, payment, return, receipt, supplier bill and payment, drawer shift and stock adjustment is posted to the ledger automatically. History before the start stays in QuickBooks.</p>' +
+          '<div class="note info">Starting writes one <b>opening entry</b> from the system as it stands right now: stock at cost, what customers owe, what is owed to suppliers, goods received but not billed, and gift-card balances, balanced to Opening Balance Equity. Cash in the safe and the bank are not in the system: add them afterwards as a manual journal.</div>' +
+          '<div class="note warn">Do this when the shop is closed (before opening or after the last sale), and check the account names on the Accounts tab match QuickBooks before the first export. It cannot be back-dated.</div>' +
+          '<button class="primary" id="start">Start the ledger now</button></div>';
+        $('#start').onclick = function () {
+          if (!confirm('Start the ledger now? This writes the opening entry from today\'s balances.')) return;
+          api('/api/gl/setup', 'POST', {}).then(function () { toast('Ledger started'); show(); }).catch(function (e) { toast(e.message); });
+        };
+        return;
+      }
+      var pend = Object.keys(s.pending);
+      var h = '<div class="card"><h2>Ledger</h2><div class="kpis">' +
+        '<div class="kpi"><span>Started</span><b>' + esc(s.start_date) + '</b></div>' +
+        '<div class="kpi"><span>Journal entries</span><b>' + s.entries.toLocaleString() + '</b></div>' +
+        '<div class="kpi"><span>Waiting to post</span><b>' + pend.reduce(function (t, k) { return t + s.pending[k]; }, 0) + '</b></div>' +
+        '<div class="kpi"><span>Suspense</span><b style="color:' + (s.suspense ? 'var(--red)' : 'inherit') + '">' + J(s.suspense) + '</b></div></div>' +
+        '<div class="controls" style="margin-top:10px"><button class="primary" id="postNow">Post now</button>' +
+        '<label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="auto"' + (s.auto_post ? ' checked' : '') + '> Post automatically every minute</label></div>' +
+        (s.last_run ? '<p class="sub">Last run ' + esc(new Date(s.last_run.at).toLocaleTimeString('en-JM')) + ': ' + (s.last_run.posted || 0) + ' posted' + (s.last_run.failed ? ', <b style="color:var(--red)">' + s.last_run.failed + ' failed</b>' : '') + '.</p>' : '') +
+        (pend.length ? '<p class="sub">Waiting: ' + pend.map(function (k) { return esc(SRC[k] || k) + ' ' + s.pending[k]; }).join(' · ') + '</p>' : '') +
+        (s.errors.length ? '<div class="note bad"><b>Could not post:</b><br>' + s.errors.map(function (e) { return esc(e.source) + ': ' + esc(e.error); }).join('<br>') + '</div>' : '') +
+        (s.accounts_without_qb_name ? '<div class="note warn">' + s.accounts_without_qb_name + ' accounts have no QuickBooks name yet (Accounts tab).</div>' : '') + '</div>';
+      $('#out').innerHTML = h + '<div id="tie"><div class="card empty">Checking the control accounts…</div></div>';
+      $('#postNow').onclick = function () { this.disabled = true; api('/api/gl/post-now', 'POST').then(function (r) { toast(r.busy ? 'Already posting, try again in a moment' : (r.posted || 0) + ' posted' + (r.failed ? ', ' + r.failed + ' failed' : '')); show(); }).catch(function (e) { toast(e.message); }); };
+      $('#auto').onchange = function () { api('/api/gl/settings', 'PUT', { auto_post: this.checked }).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); }); };
+      return api('/api/gl/tieout').then(function (t) {
+        $('#tie').innerHTML = '<div class="card"><h2>Tie-out</h2><p class="sub">Each control account in the ledger against the system\'s own record. A difference means something moved outside the posting rules: open the account\'s ledger from the trial balance.</p><div class="scroll"><table><thead><tr><th>Account</th><th class="n">Ledger</th><th class="n">System</th><th class="n">Difference</th><th></th></tr></thead><tbody>' +
+          t.checks.map(function (c) {
+            var ok = c.difference == null ? null : Math.abs(c.difference) < 0.01;
+            return '<tr><td><b>' + esc(c.label) + '</b><br><small style="color:var(--muted)">' + esc(c.note) + '</small></td><td class="n">' + J(c.gl) + '</td><td class="n">' + (c.system == null ? '–' : J(c.system)) + '</td><td class="n">' + (c.difference == null ? '–' : J(c.difference)) + '</td><td>' + (ok == null ? '' : ok ? '<span class="pill ok">ties</span>' : '<span class="pill bad">check</span>') + '</td></tr>';
+          }).join('') + '</tbody></table></div></div>';
+      });
+    });
+  }
+
+  // ------------------------------------------------------------- journal --
+  var jq = { q: '', source: '' };
+  function journal() {
+    return loadAccounts().then(function () {
+      var qs = 'from=' + period.from + '&to=' + period.to + (jq.q ? '&q=' + encodeURIComponent(jq.q) : '') + (jq.source ? '&source=' + jq.source : '');
+      return api('/api/gl/entries?' + qs).then(function (d) {
+        $('#out').innerHTML = '<div class="card">' + periodControls('<div><label>Type</label><select id="jsrc"><option value="">All</option>' + Object.keys(SRC).map(function (k) { return '<option value="' + k + '"' + (jq.source === k ? ' selected' : '') + '>' + SRC[k] + '</option>'; }).join('') + '</select></div><div><label>Search</label><input id="jq" value="' + esc(jq.q) + '" placeholder="JE, receipt or memo"></div>') +
+          '<div style="margin-bottom:10px"><button id="newJe">+ Manual journal entry</button></div>' +
+          '<div class="scroll"><table><thead><tr><th>Entry</th><th>Date</th><th>Type</th><th>Reference</th><th>Memo</th><th class="n">Amount</th><th></th></tr></thead><tbody>' +
+          (d.entries.length ? d.entries.map(function (e) {
+            return '<tr class="click" data-e="' + e.id + '"><td><b>' + esc(e.number) + '</b></td><td>' + esc(day(e.entry_date)) + '</td><td>' + esc(SRC[e.source_kind] || e.source_kind) + '</td><td>' + esc(e.source_ref || '') + '</td><td>' + esc(e.memo || '') + '</td><td class="n">' + J(e.total) + '</td><td>' +
+              (e.reversed_by ? '<span class="pill warn">reversed</span>' : '') + (e.export_id ? ' <span class="pill">exported</span>' : '') + '</td></tr>';
+          }).join('') : '<tr><td colspan="7" class="empty">No entries.</td></tr>') + '</tbody></table></div>' + (d.entries.length === 500 ? '<p class="sub">Showing the latest 500; narrow the dates.</p>' : '') + '</div>';
+        wirePeriod(function () { jq.q = $('#jq').value.trim(); jq.source = $('#jsrc').value; journal(); });
+        all('[data-e]').forEach(function (tr) { tr.onclick = function () { openEntry(tr.getAttribute('data-e')); }; });
+        $('#newJe').onclick = newJournal;
+      });
+    });
+  }
+  function openEntry(id) {
+    api('/api/gl/entries/' + id).then(function (d) {
+      var e = d.entry, dr = 0, cr = 0;
+      modal('<h2>' + esc(e.number) + ' <span class="pill">' + esc(SRC[e.source_kind] || e.source_kind) + '</span>' + (e.reversed_by ? ' <span class="pill warn">reversed</span>' : '') + '</h2>' +
+        '<p class="sub">' + esc(day(e.entry_date)) + ' · ' + esc(e.memo || '') + (e.source_ref ? ' · ref ' + esc(e.source_ref) : '') + ' · posted ' + esc(new Date(e.posted_at).toLocaleString('en-JM')) + (e.posted_by_name ? ' by ' + esc(e.posted_by_name) : ' automatically') + '</p>' +
+        '<div class="scroll"><table><thead><tr><th>Account</th><th>Customer / supplier</th><th>Memo</th><th class="n">Debit</th><th class="n">Credit</th></tr></thead><tbody>' +
+        d.lines.map(function (l) { var a = Number(l.amount); if (a > 0) dr += a; else cr -= a; return '<tr><td>' + esc(l.code + ' ' + l.name) + '</td><td>' + esc(l.party || '') + '</td><td>' + esc(l.memo || '') + '</td><td class="n">' + (a > 0 ? J(a) : '') + '</td><td class="n">' + (a < 0 ? J(-a) : '') + '</td></tr>'; }).join('') +
+        '<tr class="total"><td colspan="3">Total</td><td class="n">' + J(dr) + '</td><td class="n">' + J(cr) + '</td></tr></tbody></table></div>' +
+        '<div class="controls" style="margin-top:10px">' + (!e.reversed_by && !e.reverses_id ? '<button id="rev">Reverse this entry</button>' : '') + '<button id="cls">Close</button></div>');
+      $('#cls').onclick = closeModal;
+      if ($('#rev')) $('#rev').onclick = function () {
+        var why = prompt('Why is it being reversed? (A mirror entry is posted today; the original stays.)'); if (!why) return;
+        api('/api/gl/entries/' + e.id + '/reverse', 'POST', { memo: why }).then(function () { toast('Reversed'); closeModal(); journal(); }).catch(function (er) { toast(er.message); });
+      };
+    }).catch(function (er) { toast(er.message); });
+  }
+  function newJournal() {
+    var row = function () { return '<tr><td><select data-a><option value="">Account…</option>' + acctOptions() + '</select></td><td><input data-p placeholder="Customer / supplier"></td><td><input data-m placeholder="Line memo"></td><td><input class="amt" data-d type="number" step="0.01" min="0"></td><td><input class="amt" data-c type="number" step="0.01" min="0"></td></tr>'; };
+    modal('<h2>Manual journal entry</h2><p class="sub">For things the till does not know: bank charges, cash and bank opening balances, deposits, corrections. A/R and A/P lines need a customer or supplier name.</p>' +
+      '<div class="controls"><div><label>Date</label><input type="date" id="jd" value="' + ymd(new Date()) + '"></div><div style="flex:1"><label>What is it for?</label><input id="jm" style="width:100%"></div><div><label>Reference</label><input id="jr"></div></div>' +
+      '<div class="scroll"><table><thead><tr><th>Account</th><th>Customer / supplier</th><th>Memo</th><th class="n">Debit</th><th class="n">Credit</th></tr></thead><tbody id="jl">' + row() + row() + '</tbody>' +
+      '<tfoot><tr class="total"><td colspan="3"><button class="sm" id="addRow">+ line</button></td><td class="n" id="tdr">0.00</td><td class="n" id="tcr">0.00</td></tr></tfoot></table></div>' +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="jsave">Post entry</button><button id="jcancel">Cancel</button><span id="jdiff" class="sub"></span></div>');
+    var sum = function () {
+      var d = 0, c = 0; all('#jl tr').forEach(function (tr) { d += Number($('[data-d]', tr).value) || 0; c += Number($('[data-c]', tr).value) || 0; });
+      $('#tdr').textContent = J(d); $('#tcr').textContent = J(c);
+      var off = Math.round((d - c) * 100) / 100; $('#jdiff').textContent = off ? 'Out of balance by ' + J(Math.abs(off)) : 'Balanced'; return off;
+    };
+    $('#jl').addEventListener('input', sum);
+    $('#addRow').onclick = function () { $('#jl').insertAdjacentHTML('beforeend', row()); };
+    $('#jcancel').onclick = closeModal;
+    $('#jsave').onclick = function () {
+      if (sum()) { toast('Debits and credits must be equal'); return; }
+      var lines = all('#jl tr').map(function (tr) { return { account_id: $('[data-a]', tr).value, party: $('[data-p]', tr).value, memo: $('[data-m]', tr).value, debit: $('[data-d]', tr).value, credit: $('[data-c]', tr).value }; })
+        .filter(function (l) { return l.account_id && (Number(l.debit) || Number(l.credit)); });
+      api('/api/gl/journal', 'POST', { date: $('#jd').value, memo: $('#jm').value, ref: $('#jr').value, lines: lines }).then(function () { toast('Posted'); closeModal(); tab = 'journal'; show(); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  // ------------------------------------------------------- trial balance --
+  var TYPE = { asset: 'Assets', liability: 'Liabilities', equity: 'Equity', income: 'Income', cogs: 'Cost of sales', expense: 'Expenses', other_income: 'Other income', other_expense: 'Other expenses' };
+  function tb() {
+    return api('/api/gl/trial-balance?from=' + period.from + '&to=' + period.to).then(function (d) {
+      var is = d.income_statement, bs = d.balance_sheet;
+      var h = '<div class="card">' + periodControls('<button id="tbcsv">CSV</button>') + '</div>';
+      h += '<div class="grid"><div class="card"><h2>Profit and loss · ' + esc(d.from) + ' to ' + esc(d.to) + '</h2><table><tbody>' +
+        '<tr><td>Income (sales less returns and discounts)</td><td class="n">' + J(is.income) + '</td></tr><tr><td>Cost of sales</td><td class="n">' + J(-is.cogs) + '</td></tr>' +
+        '<tr class="total"><td>Gross profit' + (is.income ? ' (' + (Math.round(is.gross_profit / is.income * 1000) / 10) + '%)' : '') + '</td><td class="n">' + J(is.gross_profit) + '</td></tr>' +
+        '<tr><td>Expenses</td><td class="n">' + J(-is.expenses) + '</td></tr>' + (is.other ? '<tr><td>Other income / expense</td><td class="n">' + J(is.other) + '</td></tr>' : '') +
+        '<tr class="total"><td>Net profit</td><td class="n">' + J(is.net) + '</td></tr></tbody></table><p class="sub" style="margin-top:8px">Only what the till posts: wages, rent and other bills entered in QuickBooks are not here.</p></div>' +
+        '<div class="card"><h2>Balance sheet at ' + esc(d.to) + '</h2><table><tbody><tr><td>Assets</td><td class="n">' + J(bs.assets) + '</td></tr><tr><td>Liabilities</td><td class="n">' + J(bs.liabilities) + '</td></tr>' +
+        '<tr><td>Equity</td><td class="n">' + J(bs.equity) + '</td></tr><tr><td>Profit since the ledger started</td><td class="n">' + J(bs.earnings_to_date) + '</td></tr>' +
+        '<tr class="total"><td>Check (should be 0)</td><td class="n">' + J(bs.check) + ' ' + (Math.abs(bs.check) < 0.01 ? '<span class="pill ok">balances</span>' : '<span class="pill bad">does not balance</span>') + '</td></tr></tbody></table></div></div>';
+      h += '<div class="card"><h2>Trial balance ' + (d.totals.balanced ? '<span class="pill ok">debits = credits</span>' : '<span class="pill bad">out of balance</span>') + '</h2><p class="sub">Click an account for its ledger.</p><div class="scroll"><table><thead><tr><th>Account</th><th>QuickBooks</th><th class="n">Opening</th><th class="n">Debits</th><th class="n">Credits</th><th class="n">Closing</th></tr></thead><tbody>';
+      var last = null;
+      d.accounts.forEach(function (a) {
+        if (!a.opening && !a.debits && !a.credits && !a.closing) return;
+        if (a.type !== last) { h += '<tr><td colspan="6" style="font-weight:700;background:var(--chip)">' + esc(TYPE[a.type] || a.type) + '</td></tr>'; last = a.type; }
+        h += '<tr class="click" data-acc="' + a.id + '"><td>' + esc(a.code + ' ' + a.name) + '</td><td><small>' + esc(a.qb_name || '') + '</small></td><td class="n">' + DC(a.opening) + '</td><td class="n">' + J(a.debits) + '</td><td class="n">' + J(a.credits) + '</td><td class="n">' + DC(a.closing) + '</td></tr>';
+      });
+      h += '<tr class="total"><td colspan="3">Total</td><td class="n">' + J(d.totals.debits) + '</td><td class="n">' + J(d.totals.credits) + '</td><td></td></tr></tbody></table></div></div>';
+      $('#out').innerHTML = h;
+      wirePeriod(tb);
+      all('[data-acc]').forEach(function (tr) { tr.onclick = function () { ledger(tr.getAttribute('data-acc')); }; });
+      $('#tbcsv').onclick = function () {
+        csvDownload('trial-balance-' + d.from + '-' + d.to + '.csv', [['code', 'account', 'type', 'quickbooks', 'opening', 'debits', 'credits', 'closing']]
+          .concat(d.accounts.map(function (a) { return [a.code, a.name, a.type, a.qb_name, a.opening, a.debits, a.credits, a.closing]; })));
+      };
+    });
+  }
+  function ledger(id) {
+    api('/api/gl/accounts/' + id + '/ledger?from=' + period.from + '&to=' + period.to).then(function (d) {
+      modal('<h2>' + esc(d.account.code + ' ' + d.account.name) + '</h2><p class="sub">' + esc(period.from) + ' to ' + esc(period.to) + ' · opening ' + DC(d.opening) + ' · closing ' + DC(d.closing) + '</p>' +
+        '<div class="scroll" style="max-height:60vh;overflow:auto"><table><thead><tr><th>Date</th><th>Entry</th><th>Memo</th><th>Customer / supplier</th><th class="n">Debit</th><th class="n">Credit</th><th class="n">Balance</th></tr></thead><tbody>' +
+        (d.lines.length ? d.lines.map(function (l) { var a = Number(l.amount); return '<tr class="click" data-e="' + l.entry_id + '"><td>' + esc(day(l.entry_date)) + '</td><td>' + esc(l.number) + '</td><td>' + esc(l.memo || l.entry_memo || '') + '</td><td>' + esc(l.party || '') + '</td><td class="n">' + (a > 0 ? J(a) : '') + '</td><td class="n">' + (a < 0 ? J(-a) : '') + '</td><td class="n">' + DC(l.balance) + '</td></tr>'; }).join('') : '<tr><td colspan="7" class="empty">Nothing in these dates.</td></tr>') +
+        '</tbody></table></div><div class="controls" style="margin-top:10px"><button id="cls">Close</button></div>');
+      $('#cls').onclick = closeModal;
+      all('#modal [data-e]').forEach(function (tr) { tr.onclick = function () { openEntry(tr.getAttribute('data-e')); }; });
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // ------------------------------------------------------------ accounts --
+  function accountsTab() {
+    return loadAccounts().then(function (d) {
+      var typeOpts = function (sel) { return d.qb_types.map(function (t) { return '<option' + (t === sel ? ' selected' : '') + '>' + t + '</option>'; }).join(''); };
+      var parentOpts = '<option value="">— top level —</option>' + d.accounts.map(function (a) {
+        return '<option value="' + a.id + '">' + new Array((a.depth || 0) + 1).join('  ') + esc(a.code + ' ' + a.name) + '</option>';
+      }).join('');
+      $('#out').innerHTML = '<div class="card"><h2>Chart of accounts</h2><p class="sub">The QuickBooks name must match the account in QuickBooks exactly (Parent:Child for sub-accounts). Accounts marked “rule” are used by the posting rules. ' +
+        'A <b>sub-account</b> takes its parent’s code plus a number of up to 4 digits (6400-1, 6400-0012) and its parent’s type; a parent shows its total including its sub-accounts (Σ).</p>' +
+        '<div class="controls"><label style="display:flex;gap:6px;align-items:center;margin:0;color:inherit;font-size:13px">Import your QuickBooks chart (Lists → Chart of Accounts → File → Export → Lists to IIF): <input type="file" id="iif" accept=".iif,.txt"></label></div>' +
+        '<div class="scroll"><table><thead><tr><th>Code</th><th>Name</th><th>QuickBooks name</th><th>QB type</th><th class="n">Balance</th><th>Active</th><th></th></tr></thead><tbody>' +
+        d.accounts.map(function (a) {
+          var sub = !!a.parent_id, ind = (a.depth || 0) * 18;
+          return '<tr data-id="' + a.id + '">' +
+            '<td style="white-space:nowrap;padding-left:' + (6 + ind) + 'px">' + (sub ? '<span style="color:var(--muted)">↳ </span>' : '') +
+              '<input data-f="code" value="' + esc(a.code) + '" style="width:' + (sub ? 96 : 80) + 'px' + (sub ? ';opacity:.75' : '') + '"' + (sub ? ' readonly title="Built from the parent account’s code"' : (a.sub_count ? ' title="Has sub-accounts: their codes are built from this one"' : '')) + '></td>' +
+            '<td><input data-f="name" value="' + esc(a.name) + '"></td><td><input data-f="qb_name" value="' + esc(a.qb_name || '') + '" style="min-width:200px"></td>' +
+            '<td><select data-f="qb_type"' + (sub ? ' disabled title="Same as the parent account"' : '') + '>' + typeOpts(a.qb_type) + '</select></td>' +
+            '<td class="n">' + DC(a.balance) + (a.sub_count ? '<div class="sub" style="margin:0" title="Including ' + a.sub_count + ' sub-account' + (a.sub_count === 1 ? '' : 's') + '">Σ ' + DC(a.rollup) + '</div>' : '') + '</td>' +
+            '<td><input type="checkbox" data-f="is_active"' + (a.is_active ? ' checked' : '') + '></td>' +
+            '<td style="white-space:nowrap">' + (a.system_key ? '<span class="pill" title="' + esc(a.system_key) + '">rule</span> ' : '') +
+              '<button class="sm" data-save>Save</button> <button class="sm" data-sub="' + a.id + '" title="Add a sub-account under ' + esc(a.code) + '">+ Sub</button></td></tr>';
+        }).join('') +
+        '<tr><td colspan="7" style="padding-top:12px"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+          '<label style="margin:0;font-size:12px">Sub-account of <select id="nParent" style="max-width:280px">' + parentOpts + '</select></label>' +
+          '<input id="nSub" placeholder="No. (1–4 digits)" maxlength="4" inputmode="numeric" style="width:120px;display:none">' +
+          '<span id="nCodePrev" style="font-family:ui-monospace,monospace;color:var(--muted);display:none"></span>' +
+          '<input id="nCode" placeholder="Code" style="width:80px">' +
+          '<input id="nName" placeholder="New account">' +
+          '<input id="nQb" placeholder="QuickBooks name (blank = automatic)">' +
+          '<select id="nType">' + typeOpts('EXP') + '</select>' +
+          '<button class="sm primary" id="nAdd">Add</button>' +
+        '</div></td></tr>' +
+        '</tbody></table></div></div>';
+
+      var byId = {}; d.accounts.forEach(function (a) { byId[a.id] = a; });
+      function paintAddRow() {
+        var p = byId[$('#nParent').value];
+        $('#nSub').style.display = p ? '' : 'none';
+        $('#nCodePrev').style.display = p ? '' : 'none';
+        $('#nCode').style.display = p ? 'none' : '';
+        $('#nType').disabled = !!p;
+        if (p) { $('#nType').value = p.qb_type; $('#nCodePrev').textContent = p.code + '-' + ($('#nSub').value || '____'); }
+      }
+      $('#nParent').onchange = paintAddRow;
+      $('#nSub').oninput = function () { this.value = this.value.replace(/\D/g, '').slice(0, 4); paintAddRow(); };
+      all('[data-sub]').forEach(function (b) {
+        b.onclick = function () { $('#nParent').value = b.getAttribute('data-sub'); paintAddRow(); $('#nSub').focus(); $('#nSub').scrollIntoView({ block: 'center' }); };
+      });
+
+      all('[data-save]').forEach(function (b) {
+        b.onclick = function () {
+          var tr = b.closest('tr'), body = {};
+          all('[data-f]', tr).forEach(function (el) { if (el.disabled || el.readOnly) return; body[el.getAttribute('data-f')] = el.type === 'checkbox' ? el.checked : el.value; });
+          api('/api/gl/accounts/' + tr.getAttribute('data-id'), 'PATCH', body).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); });
+        };
+      });
+      $('#nAdd').onclick = function () {
+        var pid = $('#nParent').value;
+        var body = pid
+          ? { parent_id: Number(pid), sub_no: $('#nSub').value, name: $('#nName').value, qb_name: $('#nQb').value }
+          : { code: $('#nCode').value, name: $('#nName').value, qb_name: $('#nQb').value, qb_type: $('#nType').value };
+        if (pid && !/^\d{1,4}$/.test(body.sub_no)) return toast('Give the sub-account a number of 1 to 4 digits');
+        api('/api/gl/accounts', 'POST', body).then(function (r) { toast('Added ' + (r.account ? r.account.code : '')); accountsTab(); }).catch(function (e) { toast(e.message); });
+      };
+      $('#iif').onchange = function () {
+        var f = this.files[0]; if (!f) return;
+        f.text().then(function (text) { return api('/api/gl/accounts/import-iif', 'POST', { text: text }); })
+          .then(function (r) { toast(r.found + ' accounts read: ' + r.matched + ' matched, ' + r.added + ' added'); accountsTab(); }).catch(function (e) { toast(e.message); });
+      };
+    });
+  }
+
+  // --------------------------------------------------------------- rules --
+  var KIND = { pay_method: ['Payments received', 'Where money taken in goes'], pay_out_method: ['Payments made', 'Where money paid out comes from'],
+    revenue_category: ['Sales by category', 'Income account per product category'], cogs_category: ['Cost of sales by category', 'Cost account per product category'],
+    stock_reason: ['Stock adjustments', 'Where each kind of stock change is charged'], till_payout: ['Payouts and petty cash', 'Expense account per drawer payout reason or petty cash category'] };
+  function rules() {
+    return Promise.all([loadAccounts(), api('/api/gl/map')]).then(function (r) {
+      var d = r[1], cur = {};
+      d.map.forEach(function (m) { cur[m.kind + '|' + m.key] = m.account_id; });
+      var byKey = {}; accounts.accounts.forEach(function (a) { if (a.system_key) byKey[a.system_key] = a; });
+      var h = '<div class="card"><h2>Posting rules</h2><p class="sub">Which account each kind of transaction posts to. “Default” uses the standard account shown. Changes apply to entries posted from now on.</p></div><div class="grid">';
+      Object.keys(KIND).forEach(function (k) {
+        var keys = d.keys[k] || [], fb = byKey[d.fallback[k]];
+        h += '<div class="card"><h2>' + KIND[k][0] + '</h2><p class="sub">' + KIND[k][1] + '. Default: ' + esc(fb ? fb.code + ' ' + fb.name : d.fallback[k]) + '</p><table><tbody>' +
+          (keys.length ? keys.map(function (key) { return '<tr><td>' + esc(key.replace(/_/g, ' ')) + '</td><td><select data-kind="' + k + '" data-key="' + esc(key) + '">' + acctOptions(cur[k + '|' + key], 'default') + '</select></td></tr>'; }).join('') : '<tr><td class="empty">Nothing to map yet.</td></tr>') +
+          '</tbody></table></div>';
+      });
+      $('#out').innerHTML = h + '</div>' +
+        '<div class="card"><h2>Products with their own accounts</h2><p class="sub">A product\'s own income or cost account comes before its category\'s rule above (for example a "Shop rent" product posting to Rental Income). Blank: the category rule.</p>' +
+        '<div class="controls"><div style="flex:1"><label>Find a product (name, SKU)</label><input id="ppq" style="width:100%"></div><button id="ppgo">Find</button></div><div id="pplist"></div></div>';
+      var prodList = function () {
+        api('/api/gl/products?q=' + encodeURIComponent($('#ppq').value.trim())).then(function (p) {
+          var inc = accounts.accounts.filter(function (a) { return a.is_active && ['income', 'other_income'].indexOf(a.type) >= 0; }), cst = accounts.accounts.filter(function (a) { return a.is_active && ['cogs', 'expense'].indexOf(a.type) >= 0; });
+          var opts = function (list, sel) { return '<option value="">Category rule</option>' + list.map(function (a) { return '<option value="' + a.id + '"' + (String(sel) === String(a.id) ? ' selected' : '') + '>' + esc(a.code + ' ' + a.name) + '</option>'; }).join(''); };
+          $('#pplist').innerHTML = p.products.length ? '<table><thead><tr><th>Product</th><th>Category</th><th>Income account</th><th>Cost account</th></tr></thead><tbody>' + p.products.map(function (x) {
+            return '<tr><td>' + esc(x.name) + '<br><small>' + esc(x.sku || x.img) + '</small></td><td>' + esc(x.category || '') + '</td><td><select data-pi="' + x.id + '">' + opts(inc, x.income_account_id) + '</select></td><td><select data-pc="' + x.id + '">' + opts(cst, x.cogs_account_id) + '</select></td></tr>';
+          }).join('') + '</tbody></table>' : '<p class="sub">' + ($('#ppq').value ? 'No product matches.' : 'No product has its own account yet: find one to set it.') + '</p>';
+          all('[data-pi]').forEach(function (sel) {
+            sel.onchange = function () { var id = sel.getAttribute('data-pi'); api('/api/gl/products/' + id, 'PUT', { income_account_id: sel.value, cogs_account_id: $('[data-pc="' + id + '"]').value }).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); }); };
+          });
+          all('[data-pc]').forEach(function (sel) {
+            sel.onchange = function () { var id = sel.getAttribute('data-pc'); api('/api/gl/products/' + id, 'PUT', { income_account_id: $('[data-pi="' + id + '"]').value, cogs_account_id: sel.value }).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); }); };
+          });
+        }).catch(function (e) { toast(e.message); });
+      };
+      $('#ppgo').onclick = prodList;
+      $('#ppq').onkeydown = function (e) { if (e.key === 'Enter') prodList(); };
+      prodList();
+      all('select[data-kind]').forEach(function (s) {
+        s.onchange = function () { api('/api/gl/map', 'PUT', { kind: s.getAttribute('data-kind'), key: s.getAttribute('data-key'), account_id: s.value || null }).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); }); };
+      });
+    });
+  }
+
+  // ------------------------------------------------------------- classes --
+  // QuickBooks classes: one per store location (automatic) plus custom ones.
+  function classesTab() {
+    return api('/api/gl/classes').then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>Classes</h2><p class="sub">Like QuickBooks classes: every ledger line can carry one, so profit can be split by store location, department or activity. Each store location has its class automatically; till sales take their till\'s. Add your own (e.g. Rentals, Workshop) and pick them on bill, invoice and cheque lines. A class in use can be retired but not deleted. Classes go to QuickBooks in the IIF export.</p>' +
+        '<div class="controls"><div><label>New class</label><input id="cn" placeholder="Rentals"></div><button class="primary" id="cadd">Add</button></div>' +
+        '<table><thead><tr><th>Class</th><th>Store location</th><th class="n">Ledger lines</th><th>Status</th><th></th></tr></thead><tbody>' +
+        d.classes.map(function (c) { return '<tr><td><b>' + esc(c.name) + '</b></td><td>' + esc(c.location || 'custom') + '</td><td class="n">' + c.lines + '</td><td>' + (c.is_active ? 'active' : 'retired') + '</td><td><button class="sm" data-cr="' + c.id + '">Rename</button> <button class="sm" data-ca="' + c.id + '" data-on="' + (c.is_active ? 0 : 1) + '">' + (c.is_active ? 'Retire' : 'Use again') + '</button></td></tr>'; }).join('') +
+        '</tbody></table></div>';
+      $('#cadd').onclick = function () { api('/api/gl/classes', 'POST', { name: $('#cn').value }).then(function () { toast('Added'); classesTab(); }).catch(function (e) { toast(e.message); }); };
+      all('[data-cr]').forEach(function (b) { b.onclick = function () { var n = prompt('New name'); if (!n) return; api('/api/gl/classes/' + b.getAttribute('data-cr'), 'PUT', { name: n }).then(function () { classesTab(); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-ca]').forEach(function (b) { b.onclick = function () { api('/api/gl/classes/' + b.getAttribute('data-ca'), 'PUT', { is_active: b.getAttribute('data-on') === '1' }).then(function () { classesTab(); }).catch(function (e) { toast(e.message); }); }; });
+    });
+  }
+
+  // ------------------------------------------------------------- reports --
+  // Profit & loss by category (columns by class, drill-down), expenses by
+  // supplier and category, sales by customer and income category; print and CSV.
+  var rq = { kind: 'pl', cls: '', byClass: false }, TYPE_HEAD = { income: 'Income', cogs: 'Cost of sales', expense: 'Expenses', other_income: 'Other income', other_expense: 'Other expenses' };
+  function reportsTab() {
+    return api('/api/gl/classes').then(function (cd) {
+      var classOpts = '<option value="">All classes</option>' + cd.classes.map(function (c) { return '<option value="' + c.id + '"' + (String(rq.cls) === String(c.id) ? ' selected' : '') + '>' + esc(c.name) + '</option>'; }).join('') + '<option value="none"' + (rq.cls === 'none' ? ' selected' : '') + '>Unclassified</option>';
+      var ctl = periodControls('<div><label>Report</label><select id="rk"><option value="pl">Profit &amp; loss by category</option><option value="expenses">Expenses by supplier and category</option><option value="sales">Sales by customer and income category</option></select></div>' +
+        '<div><label>Class</label><select id="rc">' + classOpts + '</select></div><label id="rbw"><input type="checkbox" id="rb"' + (rq.byClass ? ' checked' : '') + '> A column per class</label><span style="margin-left:auto"></span><button id="rpr">Print / PDF</button><button id="rcsv">Excel / CSV</button>');
+      var qs = 'from=' + period.from + '&to=' + period.to + (rq.cls ? '&class_id=' + rq.cls : '');
+      var url = rq.kind === 'pl' ? '/api/gl/reports/pl?' + qs + (rq.byClass && !rq.cls ? '&by_class=1' : '') : '/api/gl/reports/by-party?kind=' + rq.kind + '&' + qs;
+      return api(url).then(function (d) {
+        var head, rows = [], html;
+        var clsName = rq.cls === 'none' ? 'Unclassified' : rq.cls ? (cd.classes.find(function (c) { return String(c.id) === String(rq.cls); }) || {}).name : '';
+        var title = { pl: 'Profit and loss by category', expenses: 'Expenses by supplier and category', sales: 'Sales by customer and income category' }[rq.kind] + ' · ' + period.from + ' to ' + period.to + (clsName ? ' · ' + clsName : '');
+        if (rq.kind === 'pl') {
+          var cols = d.columns.length ? d.columns : null;
+          head = ['Account'].concat(cols ? cols.map(function (c) { return c.name; }) : []).concat(['Total']);
+          var cell = function (a, k, v) { return '<td class="n"><a href="#" data-dr="' + a.id + '" data-cl="' + (k === undefined ? (rq.cls || '') : k) + '">' + J(v) + '</a></td>'; };
+          var body = '', last = '';
+          var sub = function (k) { return cols ? cols.map(function (c) { return '<td class="n"><b>' + J(d.by_class[c.id || 'none'][k]) + '</b></td>'; }).join('') + '<td class="n"><b>' + J(d.totals[k]) + '</b></td>' : '<td class="n"><b>' + J(d.totals[k]) + '</b></td>'; };
+          var totalRow = function (label, k) { rows.push([label].concat(cols ? cols.map(function (c) { return d.by_class[c.id || 'none'][k]; }) : []).concat([d.totals[k]])); return '<tr class="total"><td>' + label + '</td>' + sub(k) + '</tr>'; };
+          d.accounts.forEach(function (a, i) {
+            if (a.type !== last) {
+              if (last === 'cogs' || (last === 'income' && a.type !== 'cogs')) body += totalRow('Gross profit', 'gross_profit');
+              body += '<tr><td colspan="' + head.length + '"><b>' + esc(TYPE_HEAD[a.type]) + '</b></td></tr>'; last = a.type;
+            }
+            rows.push([a.code + ' ' + a.name].concat(cols ? cols.map(function (c) { return a.by[c.id || 'none'] || 0; }) : []).concat([a.total]));
+            body += '<tr><td style="padding-left:' + (a.parent_id ? 28 : 12) + 'px">' + esc(a.code + ' ' + a.name) + '</td>' + (cols ? cols.map(function (c) { return cell(a, c.id || 'none', a.by[c.id || 'none'] || 0); }).join('') : '') + cell(a, undefined, a.total) + '</tr>';
+          });
+          if (last === 'income' || last === 'cogs') body += totalRow('Gross profit', 'gross_profit');
+          body += totalRow('Net profit', 'net');
+          html = '<table><thead><tr>' + head.map(function (h, i) { return '<th' + (i ? ' class="n"' : '') + '>' + esc(h) + '</th>'; }).join('') + '</tr></thead><tbody>' + (d.accounts.length ? body : '<tr><td colspan="' + head.length + '" class="empty">Nothing posted in these dates.</td></tr>') + '</tbody></table>' +
+            '<p class="sub">Income and costs shown as positive. Click an amount to see the lines behind it. Classes are on entries posted from 19 Oct 2026; earlier lines are Unclassified.</p>';
+        } else {
+          head = [rq.kind === 'sales' ? 'Customer' : 'Supplier'].concat(d.accounts.map(function (a) { return a.code + ' ' + a.name; })).concat(['Total']);
+          d.rows.forEach(function (r) { rows.push([r.party].concat(d.accounts.map(function (a) { return r.by[a.id] || 0; })).concat([r.total])); });
+          var tot = d.accounts.map(function (a) { return d.rows.reduce(function (t, r) { return t + (r.by[a.id] || 0); }, 0); });
+          rows.push(['Total'].concat(tot).concat([tot.reduce(function (t, v) { return t + v; }, 0)]));
+          html = '<div class="scroll"><table><thead><tr>' + head.map(function (h, i) { return '<th' + (i ? ' class="n"' : '') + '>' + esc(h) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+            rows.map(function (r, i) { return '<tr' + (i === rows.length - 1 ? ' class="total"' : '') + '><td>' + esc(r[0]) + '</td>' + r.slice(1).map(function (v) { return '<td class="n">' + (v ? J(v) : '') + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>' +
+            '<p class="sub">From the ' + (rq.kind === 'sales' ? 'customer' : 'supplier') + ' name on each ledger line (bills, cheques, invoices and till sales carry it from 19 Oct 2026). "(no name)" is everything else, e.g. stock adjustments or older entries.</p>';
+        }
+        $('#out').innerHTML = '<div class="card">' + ctl + '<h2>' + esc(title) + '</h2>' + html + '</div>';
+        $('#rk').value = rq.kind; $('#rbw').style.display = rq.kind === 'pl' ? '' : 'none';
+        wirePeriod(function () { rq.kind = $('#rk').value; rq.cls = $('#rc').value; rq.byClass = $('#rb').checked; reportsTab(); });
+        $('#rk').onchange = $('#rc').onchange = $('#rb').onchange = function () { $('#pgo').click(); };
+        $('#rcsv').onclick = function () { csvDownload(rq.kind + '-' + period.from + '-to-' + period.to + '.csv', [head].concat(rows.map(function (r) { return r.map(function (v) { return typeof v === 'number' ? (Math.round(v * 100) / 100).toFixed(2) : v; }); }))); };
+        $('#rpr').onclick = function () {
+          var w = window.open('', '_blank'); if (!w) return toast('Allow pop-ups to print');
+          w.document.write('<!doctype html><title>' + esc(title) + '</title><style>body{font:13px system-ui,Arial;margin:28px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:4px 6px;text-align:left}.n{text-align:right}.total td{font-weight:bold}a{color:inherit;text-decoration:none}</style><h2>Morty\'s Auto Parts</h2><h3>' + esc(title) + '</h3>' + html + '<script>print()<\/script>');
+          w.document.close();
+        };
+        all('[data-dr]').forEach(function (a) { a.onclick = function (e) { e.preventDefault(); drill(a.getAttribute('data-dr'), a.getAttribute('data-cl')); }; });
+      });
+    });
+  }
+  function drill(accountId, cls) {
+    api('/api/gl/reports/lines?account_id=' + accountId + '&from=' + period.from + '&to=' + period.to + (cls ? '&class_id=' + cls : '')).then(function (d) {
+      var sign = d.account && ['income', 'other_income'].indexOf(d.account.type) >= 0 ? -1 : 1;
+      modal('<h2>' + esc(d.account ? d.account.code + ' ' + d.account.name : '') + ' · ' + esc(period.from) + ' to ' + esc(period.to) + '</h2><div class="scroll" style="max-height:60vh"><table><thead><tr><th>Date</th><th>Entry</th><th>What</th><th>Name</th><th>Class</th><th class="n">Amount</th></tr></thead><tbody>' +
+        d.lines.map(function (l) { return '<tr><td>' + esc(l.day) + '</td><td>' + esc(l.number) + '<br><small>' + esc(SRC[l.source_kind] || l.source_kind) + '</small></td><td>' + esc(l.memo || '') + (l.line_memo ? '<br><small>' + esc(l.line_memo) + '</small>' : '') + '</td><td>' + esc(l.party || '') + '</td><td>' + esc(l.class || '') + '</td><td class="n">' + J(sign * l.amount) + '</td></tr>'; }).join('') +
+        '</tbody></table></div><div class="controls"><button id="dx">Close</button></div>');
+      $('#dx').onclick = closeModal;
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // ------------------------------------------------------ close & export --
+  function closeTab() {
+    return Promise.all([api('/api/gl/status'), api('/api/gl/exports')]).then(function (r) {
+      var s = r[0], ex = r[1].exports;
+      var months = [], t = new Date();
+      for (var i = 1; i <= 12; i++) { var m = new Date(t.getFullYear(), t.getMonth() - i, 1); months.push(m.getFullYear() + '-' + String(m.getMonth() + 1).padStart(2, '0')); }
+      var closed = {}; s.closed.forEach(function (c) { closed[c.month] = c; });
+      $('#out').innerHTML = '<div class="grid"><div class="card"><h2>Export to QuickBooks</h2><p class="sub">IIF file for QuickBooks Desktop: one general journal per day and book (sales, purchases, cash, stock), summed by account, with customers and suppliers on A/R and A/P lines. Back up QuickBooks, then File → Utilities → Import → IIF Files.</p>' +
+        periodControls('') + '<div class="controls"><button class="primary" id="xIif">Download IIF</button><button id="xCsv">Full detail CSV</button></div>' +
+        '<div class="note warn">Send each day once. Exporting the same dates again would double them in QuickBooks, so the system asks before it does.</div></div>' +
+        '<div class="card"><h2>Close a month</h2><p class="sub">Once a month is closed nothing more can be posted into it; late items are dated the first day of the next open month. Close after the month is checked and sent to QuickBooks.</p><table><tbody>' +
+        months.map(function (m) { var c = closed[m]; return '<tr><td>' + m + '</td><td>' + (c ? '<span class="pill ok">closed ' + esc(new Date(c.closed_at).toLocaleDateString('en-JM')) + '</span>' : '<span class="pill">open</span>') + '</td><td>' + (c ? '<button class="sm" data-reopen="' + m + '">Reopen</button>' : '<button class="sm" data-close="' + m + '">Close</button>') + '</td></tr>'; }).join('') +
+        '</tbody></table></div></div>' +
+        '<div class="card"><h2>Exports</h2><table><thead><tr><th>When</th><th>Kind</th><th>Dates</th><th class="n">Entries</th><th>By</th></tr></thead><tbody>' +
+        (ex.length ? ex.map(function (x) { return '<tr><td>' + esc(new Date(x.created_at).toLocaleString('en-JM')) + '</td><td>' + esc(x.kind.toUpperCase()) + '</td><td>' + esc(day(x.from_date)) + ' to ' + esc(day(x.to_date)) + '</td><td class="n">' + x.entries + '</td><td>' + esc(x.by_name || '') + '</td></tr>'; }).join('') : '<tr><td colspan="5" class="empty">Nothing exported yet.</td></tr>') + '</tbody></table></div>';
+      $('#pgo').style.display = 'none';
+      var dl = function (kind, again) {
+        var f = $('#pf').value, to = $('#pt').value;
+        return fetch('/api/gl/export/' + kind + '?from=' + f + '&to=' + to + (again ? '&again=1' : ''), { credentials: 'same-origin' }).then(function (res) {
+          if (!res.ok) return res.json().then(function (j) {
+            if (res.status === 409 && /already exported/.test(j.error || '') && confirm(j.error + '\n\nExport again anyway?')) return dl(kind, true);
+            throw new Error(j.error || 'Export failed');
+          });
+          return res.blob().then(function (b) { var a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'mortys-' + (kind === 'iif' ? 'quickbooks' : 'journal') + '-' + f + '-to-' + to + '.' + kind; a.click(); toast('Downloaded'); closeTab(); });
+        }).catch(function (e) { toast(e.message); });
+      };
+      $('#xIif').onclick = function () { dl('iif'); };
+      $('#xCsv').onclick = function () { dl('csv'); };
+      all('[data-close]').forEach(function (b) { b.onclick = function () { var m = b.getAttribute('data-close'); if (!confirm('Close ' + m + '? Nothing more can be posted into it.')) return; api('/api/gl/periods', 'POST', { month: m }).then(function () { toast(m + ' closed'); closeTab(); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-reopen]').forEach(function (b) {
+        b.onclick = function () {
+          var m = b.getAttribute('data-reopen');
+          if (!confirm('Reopen ' + m + '? Only do this to fix something, and fix QuickBooks the same way.')) return;
+          var go = function (force) { return api('/api/gl/periods/' + m, 'DELETE', force ? { confirm_exported: true } : {}); };
+          go(false).catch(function (e) { if (/already sent/.test(e.message) && confirm(e.message + '\n\nReopen anyway?')) return go(true); throw e; })
+            .then(function () { toast(m + ' reopened'); closeTab(); }).catch(function (e) { toast(e.message); });
+        };
+      });
+    });
+  }
+
+  function show() {
+    all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); });
+    try { localStorage.setItem('vision.glTab', tab); } catch (_) {}
+    var f = { home: home, journal: journal, tb: tb, accounts: accountsTab, rules: rules, classes: classesTab, reports: reportsTab, close: closeTab }[tab] || home;
+    f().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
+  show();
+})();
+</script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+<script src="/assets/module-look.js?v=20261101" defer></script>
+</body>
+</html>

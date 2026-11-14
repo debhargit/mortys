@@ -30,12 +30,27 @@ require('dotenv').config();
 const path = require('path');
 const fs = require('fs');
 const express = require('express');
+const compression = require('compression');
 const { execFile } = require('child_process');
 const os = require('os');
 const dgram = require('dgram');
+const { lanAddress } = require('./lan-address');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const cookieSession = require('cookie-session');
+// VISION_DEV=1 runs a development copy against a copy of the shop database.
+// That database carries the live settings, so without this a dev server would
+// email/SMS real customers, run the off-site backup on top of the real one,
+// and announce itself on the shop LAN where tills could join it. Credentials
+// are cleared BEFORE mailer/sms/payments read them, so they fall back to their
+// log-to-console mode.
+const DEV_MODE = process.env.VISION_DEV === '1';
+if (DEV_MODE) {
+  for (const k of Object.keys(process.env)) {
+    if (/^(SMTP_|TWILIO_|FYGARO_|DHL_|FEDEX_|MH_BACKUP_)/.test(k)) delete process.env[k];
+  }
+  console.log('[dev] VISION_DEV=1: email, SMS, payments, carriers, LAN discovery and off-site backup are OFF');
+}
 const mailer = require('./mailer');
 const payments = require('./payments');
 const sms = require('./sms');
@@ -228,6 +243,22 @@ function upstreamPost(up, urlPath, body) {
   });
 }
 
+// Staff PINs are sealed with a key only the main PC holds (pins.js). A till
+// without it asks the main PC to check or seal one, as it does for passwords.
+const pins = require('./pins');
+pins.configure({
+  query: (...a) => query(...a),
+  isMain: () => ownsSchema(),
+  remote: {
+    enabled: () => !isLoopbackDbHost() && !!loadUpstream(),
+    post: async (body) => {
+      const r = await upstreamPost(loadUpstream(), '/api/terminal/pin', body);
+      if (r._status >= 400 && r._status !== 401) throw new Error(r.error || 'The main PC refused the PIN check');
+      return r;
+    },
+  },
+});
+
 // This server's own PostgreSQL certificate, to hand to a till at enrolment so
 // it can pin it. Looks where the portable layout puts it, then at an explicit
 // override for an operator-managed Postgres.
@@ -332,14 +363,17 @@ let MACHINE_CFG = loadMachineConfig();
 function machineName() {
   return (MACHINE_CFG.name && MACHINE_CFG.name.trim()) || os.hostname();
 }
+// The address other machines in the shop are told to connect to -- it goes
+// into the discovery announce and the `terminals` table, so a wrong answer
+// reads as "the till cannot reach the server" even though the server is up.
+//
+// This used to return the first non-internal IPv4 os.networkInterfaces()
+// happened to list, with no filtering: on the shop's own machine that was the
+// VPN adapter (10.110.8.189) rather than the Wi-Fi LAN (192.168.12.240).
+// lan-address.js does the ranking, and honours an operator's pinned answer in
+// machine-config.json.
 function primaryLocalIPv4() {
-  const ifaces = os.networkInterfaces();
-  for (const name of Object.keys(ifaces)) {
-    for (const iface of ifaces[name] || []) {
-      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
-    }
-  }
-  return '127.0.0.1';
+  return lanAddress(__dirname);
 }
 
 // Re-detected on boot and every 30s so Setup and the POS bar can show "local
@@ -452,9 +486,21 @@ function ownsSchema() {
 // a database hiccup must not brick every till in the shop, and an instance that
 // cannot reach the database is already useless without any help from us.
 let TERMINAL = { id: null, status: 'unknown', is_db_host: isLoopbackDbHost(), checked_at: null, error: null };
-// Bumped when the server terminates this instance; sessions carry the epoch
-// they were signed in under, so bumping it signs everyone here out at once.
-let SESSION_EPOCH = Date.now();
+// Sessions carry the epoch they were signed in under, and the epoch middleware
+// drops any session whose stamp no longer matches -- that is how "terminate
+// this terminal" signs everyone here out, cookie-session having no server-side
+// store to delete from.
+//
+// It is the timestamp of the last terminate recorded for THIS terminal, in ms,
+// and 0 when there has never been one. Deliberately NOT Date.now(): seeded from
+// the clock it changed on every boot, so an ordinary restart -- a crash, an
+// update, the shop PC waking up -- invalidated every live cookie and the next
+// click in the admin panel answered "Sign in required" and cleared the cookie.
+// Read from `terminals.terminate_requested_at` instead, so a restart recomputes
+// the same value and only a real terminate moves it. registerTerminal() loads
+// it, and terminalHeartbeat() awaits that before app.listen(), so it is always
+// settled before the first request is served.
+let SESSION_EPOCH = 0;
 let LAST_TERMINATE_HANDLED = null;
 
 async function getAccessMode() {
@@ -516,12 +562,22 @@ async function registerTerminal() {
 
   TERMINAL = { id: row.id, status: row.status, is_db_host: !!row.is_db_host, checked_at: new Date().toISOString(), error: null };
 
-  // A terminate raised since we last acted on one signs this instance out.
+  // The epoch IS the recorded terminate time, so this both loads it at boot and
+  // moves it when a new terminate lands. No `t > BOOT_AT` test: that is what
+  // made the value depend on when this process happened to start, and it is also
+  // wrong on its own terms -- a terminate means "sign everyone out here", and a
+  // restart should not quietly hand those sessions back. Sessions opened after
+  // the terminate carry the new epoch and survive restarts normally.
   const t = row.terminate_requested_at ? new Date(row.terminate_requested_at) : null;
-  if (t && t > BOOT_AT && (!LAST_TERMINATE_HANDLED || t > LAST_TERMINATE_HANDLED)) {
-    LAST_TERMINATE_HANDLED = t;
-    SESSION_EPOCH = Date.now();
-    console.warn('[terminal] terminate requested by the server -- all sessions on this machine signed out');
+  const epoch = t ? t.getTime() : 0;
+  if (epoch !== SESSION_EPOCH) {
+    SESSION_EPOCH = epoch;
+    // Only announce a terminate we have not already acted on, so a restart that
+    // merely re-reads the same row stays quiet.
+    if (t && (!LAST_TERMINATE_HANDLED || t > LAST_TERMINATE_HANDLED)) {
+      LAST_TERMINATE_HANDLED = t;
+      if (t > BOOT_AT) console.warn('[terminal] terminate requested by the server -- all sessions on this machine signed out');
+    }
   }
   return row;
 }
@@ -556,7 +612,29 @@ function announcePayload() {
   };
 }
 
+// HTTPS on PORT+1 for phones. Browsers only allow the camera (barcode scanning
+// in warehouse.html) on a secure page, and phones reach the till by its LAN
+// address, which plain http is not. Self-signed with this PC's LAN addresses in
+// the certificate (tls-cert.js); each phone accepts it once. Kept outside app/
+// so the key is never inside the static web root.
+async function startHttpsListener() {
+  const httpsPort = Number(process.env.HTTPS_PORT) || (Number(PORT) + 1);
+  try {
+    const dir = path.join(__dirname, '..', 'data', 'web-tls');
+    fs.mkdirSync(dir, { recursive: true });
+    const { ensureServerCert, CERT_NAME, KEY_NAME } = require('./tls-cert');
+    await ensureServerCert(dir);
+    require('https')
+      .createServer({ cert: fs.readFileSync(path.join(dir, CERT_NAME)), key: fs.readFileSync(path.join(dir, KEY_NAME)) }, app)
+      .on('error', (e) => console.warn('[https] not started:', e.message))
+      .listen(httpsPort, () => console.log('[https] phones and scanners: https://<this-pc>:' + httpsPort + '/warehouse'));
+  } catch (e) {
+    console.warn('[https] not started:', e.message);
+  }
+}
+
 function startDiscoveryService() {
+  if (DEV_MODE) return;
   try {
     const sock = dgram.createSocket({ type: 'udp4', reuseAddr: true });
     sock.on('error', (err) => {
@@ -685,6 +763,58 @@ app.post(
   }
 );
 
+// ---- Response compression --------------------------------------------------
+// admin.html is a megabyte in one file and is deliberately served no-cache
+// (see the setHeaders comment on the static mount), so every admin page load
+// pulls the whole thing down again. Internet visitors come through the
+// Cloudflare tunnel, which compresses at the edge -- but a till talking
+// straight to http://<shop-pc>:3040 was getting the full uncompressed
+// megabyte on every load. gzip takes admin.html to ~242 KB and shop.html to
+// ~64 KB. Mounted here, before the session and every route, so it covers both
+// static files and JSON API responses. compression() already skips responses
+// that are too small to be worth it, anything already encoded, and any
+// response carrying `Cache-Control: no-transform`.
+app.use(compression());
+
+// ---- Security response headers ---------------------------------------------
+// There were none at all: the admin panel could be framed by any site on the
+// internet, nothing stopped a browser from MIME-sniffing an upload into
+// script, and HTTPS was never pinned even though the public site is only ever
+// reached over it. One middleware, mounted before the static mounts and every
+// route so it covers page shells, uploads and JSON alike.
+//
+// The CSP here is deliberately partial. admin.html is 16,000 lines with inline
+// script and inline event handlers throughout, and the pages legitimately load
+// Google Fonts, the Google Sign-In client, Leaflet from unpkg and Google Maps
+// in an iframe -- a script-src/img-src/connect-src policy tight enough to be
+// worth having would break the panel, and a loose one with 'unsafe-inline'
+// buys nothing. So only the three directives that cannot break a resource load
+// are set: frame-ancestors (clickjacking, the real exposure here), object-src
+// (no plugin content is used anywhere) and base-uri (stops injected markup
+// from repointing every relative URL on the page). A full script-src needs
+// admin.html's inline script extracted first and is a separate job.
+//
+// Referrer-Policy is strict-origin-when-cross-origin rather than the
+// same-origin the audit suggested: it is already every current browser's
+// default, so it provably changes nothing staff-facing, while still keeping
+// work-order numbers and invoice query strings out of the Referer sent to
+// wa.me, maps.google.com and the other outbound links on the storefront.
+//
+// HSTS is only sent on requests that actually arrived over TLS (req.secure is
+// accurate here because trust proxy is set, so the tunnel's
+// X-Forwarded-Proto is honoured). Tills talking plain HTTP to this box on the
+// LAN never receive it and so are never forced onto https. No
+// includeSubDomains and no preload on purpose -- till. and app. are separate
+// hostnames on this domain and must not be dragged along by this server.
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'self'; object-src 'none'; base-uri 'self'");
+  if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+  next();
+});
+
 app.use(express.json({ limit: '1mb' }));
 app.use(
   cookieSession({
@@ -695,9 +825,97 @@ app.use(
     maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     httpOnly: true,
     sameSite: 'lax',
+    // Baseline only. COOKIE_SECURE=true forces the flag on for every request;
+    // the middleware below turns it on per-request for anything that actually
+    // arrived over TLS, which is what closes the hole without stranding the
+    // tills. Left as the env read so an operator who wants it unconditionally
+    // on still has that switch.
     secure: process.env.COOKIE_SECURE === 'true',
   })
 );
+
+// ---- Secure flag on the session cookie, decided per request -----------------
+// mh_session is a 30-day admin session and it was going out with no Secure
+// flag, because the only thing that could set one was COOKIE_SECURE, and
+// app/.env has it false. Meanwhile the same server is published over HTTPS at
+// mortsautoparts.com through the tunnel -- so the session cookie would
+// ride along on any plain-HTTP request to that hostname, where anyone on the
+// path could read it.
+//
+// Setting it true globally is not an option: the tills reach this box as
+// http://<shop-pc>:3040 on the shop LAN, and a browser will not send a Secure
+// cookie over plain HTTP, so staff would simply stop being able to sign in at
+// the counter. So the flag is decided per request instead. cookie-session
+// exposes req.sessionOptions as Object.create(opts) specifically so a later
+// middleware can override, and the cookie is only written at header-flush
+// time, so this takes effect for this request's Set-Cookie.
+//
+// req.secure is trustworthy here because trust proxy is set above, so it
+// reflects the tunnel's X-Forwarded-Proto. Net effect: requests over HTTPS
+// (the public site, or a till using the local TLS cert) get Secure; plain-HTTP
+// LAN tills behave exactly as they do today.
+app.use((req, _res, next) => {
+  if (req.secure) req.sessionOptions.secure = true;
+  next();
+});
+
+// -----------------------------------------------------------------------------
+//  Cloudflare gateway: history reads on behalf of a website admin.
+//
+//  mortsautoparts.com runs on Cloudflare with its own D1 database, and D1
+//  only holds 2026 -- the free plan's 500 MB and 100,000-writes-a-day limits
+//  rule out 17 years of sales. For report and sales-history screens it asks
+//  this server instead, over the till.mortsautoparts.com tunnel, and
+//  vouches for the admin signed in there with an HMAC over the request
+//  (functions/_lib/till_gateway.js signs; this checks).
+//
+//  This is a second way into a public server, accepted on purpose by the
+//  owner on 19 Oct 2026. It is kept narrow so a leaked secret can read history
+//  and nothing else:
+//    - GET only, and only paths matching GATEWAY_PATHS;
+//    - signed over timestamp, method, path+query and email; 60 s window;
+//    - the account is looked up HERE by email, so this server's own admin,
+//      capability and disabled checks still decide what comes back.
+//  The session built below lives for this one request: Cloudflare strips the
+//  Set-Cookie that cookie-session adds, so no browser ever holds a till cookie
+//  this way. Off unless server-config.json has gateway.secret (read at start).
+//  To revoke: delete gateway.secret here and restart, or change it on both sides.
+// -----------------------------------------------------------------------------
+const GATEWAY_SECRET = String((SERVER_CFG.gateway && SERVER_CFG.gateway.secret) || '');
+const GATEWAY_PATHS = /^\/api\/admin\/(reports\/[a-z0-9-]+|analytics|dashboard|pos\/sales(\/\d+)?)$/;
+app.use(async (req, res, next) => {
+  const sig = String(req.get('x-vision-gateway-sig') || '');
+  if (!sig) return next();
+  const refuse = (why) => {
+    console.log('[gateway] refused ' + req.method + ' ' + req.path + ': ' + why);
+    return res.status(401).json({ error: 'Gateway request refused' });
+  };
+  if (GATEWAY_SECRET.length < 32) return refuse('no gateway.secret (32+ chars) in server-config.json');
+  if (req.method !== 'GET' || !GATEWAY_PATHS.test(req.path)) return refuse('not a gateway path');
+  const email = String(req.get('x-vision-gateway-user') || '').trim().toLowerCase();
+  const ts = Number(req.get('x-vision-gateway-ts'));
+  if (!email || !ts || Math.abs(Date.now() - ts) > 60000) return refuse('missing or stale');
+  const want = nodeCrypto.createHmac('sha256', GATEWAY_SECRET)
+    .update(ts + '\n' + req.method + '\n' + req.originalUrl + '\n' + email).digest('hex');
+  if (want.length !== sig.length || !nodeCrypto.timingSafeEqual(Buffer.from(want), Buffer.from(sig))) {
+    return refuse('bad signature');
+  }
+  try {
+    const { rows } = await query(
+      'SELECT id FROM users WHERE lower(email) = $1 AND is_admin AND NOT COALESCE(disabled, false) ORDER BY id LIMIT 1',
+      [email]
+    );
+    if (!rows.length) return refuse('no active admin ' + email + ' on this server');
+    // The shape every sign-in path writes (userId/epoch/at -- see signInSession
+    // in auth-extra.js), plus `seen` so security.js's idle sign-out counts it active.
+    const now = Date.now();
+    req.session = { userId: rows[0].id, epoch: SESSION_EPOCH, at: now, seen: now };
+    console.log('[gateway] ' + req.method + ' ' + req.originalUrl + ' for ' + email);
+  } catch (e) {
+    return next(e);
+  }
+  next();
+});
 
 // Sessions carry the epoch they were signed in under. "Terminate this
 // terminal" bumps SESSION_EPOCH, which invalidates every session on this
@@ -706,6 +924,26 @@ app.use(
 app.use((req, res, next) => {
   if (req.session && req.session.userId && req.session.epoch !== SESSION_EPOCH) req.session = null;
   next();
+});
+// Sign-in security (lockout, idle sign-out, 2-step) and the audit log of every
+// change staff make (security.js). Mounted before any route on purpose.
+const security = require('./security').register(app, { query, requireAdmin, requireCap, bcrypt, publicUser, getEpoch: () => SESSION_EPOCH });
+// System management: audit, security and IT support (sysops.js). Early: its
+// middleware ends sessions signed out by the administrator before other routes run.
+const sysops = require('./sysops').register(app, { query, requireAdmin, requireCap, userCan, bcrypt, mailer, devMode: DEV_MODE,
+  permState: (id) => userPermState(id), getCapabilities: () => CAPABILITIES, getRestricted: () => RESTRICTED_CAPS });
+// Cyber security (threat detection, blocking, risks) and network management (cyber.js).
+require('./cyber').register(app, { query, requireAdmin, requireCap, mailer, devMode: DEV_MODE, sysops });
+// Document and communication centre (docs.js): the filed-document library, templates and
+// forms, and the journal of every email / SMS the system sends (it wraps mailer and sms).
+const docsCentre = require('./docs').register(app, { query, requireCap, userCan, mailer, sms, devMode: DEV_MODE, sysops });
+// Dispatch, the driver app and vehicle tracking (fleet.js), plus the mobile app shell.
+require('./fleet').register(app, { query, requireCap, userCan, permState: (id) => userPermState(id), mailer, devMode: DEV_MODE });
+// Time clock: attendance, the clocked-in-on-site rule for taking money, shifts,
+// overtime and extensions, timesheets (timeclock.js). Before every money route.
+const timeclock = require('./timeclock').register(app, {
+  query, getPool: () => pool, requireAdmin, requireCap, bcrypt, mailer, publicUser, isLocal: security.isLocal, docs: docsCentre,
+  getShopName: async () => { try { const s = shopSettingsToShop(await getShopSettings()); return s && (s.name || s.shop_name); } catch (_) { return null; } },
 });
 
 // -----------------------------------------------------------------------------
@@ -775,9 +1013,14 @@ app.use((req, _res, next) => {
 // dotfiles:'ignore', but they're listed here too so the whole rule reads in
 // one place. /api/* is exempt: those routes have their own auth guards and
 // some of them legitimately end in .json-looking paths.
+// Not anchored on the extension alone: a protected name followed by ANY suffix
+// (db-config.json.bak-melthahonda, server.js.copy, index.html.bak-hero) is
+// still private -- the old `$`-anchored form let those straight through (audit
+// C2). Backup/temp suffixes and config formats are denied outright; no page
+// fetches a static .json/.yml/.toml, so blocking them costs nothing.
 const PRIVATE_FILE_RE =
-  /(^|\/)(\.env.*|db-config\.json|server-config\.json|machine-config\.json|terminal-id\.json|portable\.json|package(-lock)?\.json|[^\/]*\.(js|mjs|cjs|sql|csv|bat|cmd|ps1|vbs|log|md))$/i;
-const PRIVATE_DIR_RE = /^\/(node_modules|migrations|logs|runtime|pgdata|scripts|functions)(\/|$)/i;
+  /(^|\/)(\.env[^\/]*|[^\/]*\.(js|mjs|cjs|sql|csv|bat|cmd|ps1|vbs|log|md|json|ya?ml|toml|pem|key|crt|pfx|exe|dbf|qbw|qbb|zip|rar)([.\-_~][^\/]*)?|[^\/]*\.(bak|old|orig|tmp|copy|swp|save|retired)([.\-_~][^\/]*)?|[^\/]*\.(html?)[.\-_~][^\/]*|[^\/]*~)$/i;
+const PRIVATE_DIR_RE = /^\/(node_modules|migrations|logs|runtime|pgdata|scripts|functions|dist|tools|test|cron-worker)(\/|$)|(^|\/)\.[^\/]+|\.(sqlite[^\/]*|sh|db)$/i;
 
 // Front-end asset bundle. app/assets/ holds only browser-side JS/CSS that the
 // storefront pages load with <script src>/<link href> -- it must be reachable
@@ -837,6 +1080,25 @@ async function requireAdmin(req, res, next) {
   if (!rows.length || !rows[0].is_admin)
     return res.status(403).json({ error: 'Admin access required' });
   next();
+}
+
+// Is this signed-in account one of the shop's own people, as opposed to a
+// storefront customer who registered on the website? Used where a route wants
+// to widen what a session can see rather than refuse it outright, so "any
+// session at all" is not a strong enough test (audit M6).
+//
+// is_admin is accepted alongside is_staff on purpose, matching the user-list
+// query further down: accounts that predate the is_staff column -- the seeded
+// owner among them -- have a panel login and no staff flag, so testing
+// is_staff alone would lock the owner out of staff-only behaviour.
+async function isStaffUser(userId) {
+  if (!userId) return false;
+  const { rows } = await query(
+    'SELECT is_staff, is_admin, disabled FROM users WHERE id = $1',
+    [userId]
+  );
+  if (!rows.length || rows[0].disabled) return false;
+  return !!(rows[0].is_staff || rows[0].is_admin);
 }
 
 // Stricter than requireAdmin: owner/manager only, not cashier. Use this on
@@ -912,12 +1174,103 @@ const CAPABILITIES = [
   { key: 'pos.hold_recall',       group: 'POS',        label: 'Hold and recall tickets' },
   { key: 'pos.open_close_shift',  group: 'POS',        label: 'Open / close a cash-drawer shift' },
   { key: 'pos.reprint_receipt',   group: 'POS',        label: 'Reprint a receipt' },
+  { key: 'pos.redeemable_mint',   group: 'POS',        label: 'Sell a redeemable item with no code loaded (a code is generated)' },
   { key: 'inventory.edit_price',  group: 'Inventory',  label: 'Edit a product price' },
   { key: 'inventory.adjust_stock',group: 'Inventory',  label: 'Adjust stock counts' },
   { key: 'customers.view_balances',group: 'Customers', label: 'See customer account balances' },
   { key: 'reports.view',          group: 'Reports',    label: 'View reports' },
+  { key: 'warehouse.access',      group: 'Warehouse',  label: 'Open the warehouse scanner' },
+  { key: 'warehouse.move_stock',  group: 'Warehouse',  label: 'Move stock between bins / put away' },
+  { key: 'warehouse.manage_bins', group: 'Warehouse',  label: 'Create and edit bins' },
+  { key: 'purchasing.receive',        group: 'Purchasing', label: 'Receive goods against purchase orders' },
+  { key: 'purchasing.create_po',      group: 'Purchasing', label: 'See reorder suggestions and draft / cancel purchase orders' },
+  { key: 'purchasing.approve_bills',  group: 'Purchasing', label: 'Confirm or dispute supplier bills' },
+  { key: 'purchasing.settings',       group: 'Purchasing', label: 'Change exchange rates, pricing rules and reorder settings' },
+  { key: 'fulfil.pick',     group: 'Orders', label: 'See the order queue and pick orders' },
+  { key: 'fulfil.pack',     group: 'Orders', label: 'Pack orders and mark them ready' },
+  { key: 'fulfil.dispatch', group: 'Orders', label: 'Make manifests, dispatch and confirm deliveries' },
+  { key: 'fulfil.collect',  group: 'Orders', label: 'Hand over pickup orders at the counter' },
+  { key: 'fulfil.hold',     group: 'Orders', label: 'Put orders on hold and release them' },
+  { key: 'fulfil.manage',   group: 'Orders', label: 'Send sales to the warehouse, cancel orders, change order settings' },
+  { key: 'pos.finalise_invoice', group: 'POS',     label: 'Take payment at the POS (off: checkout sends the order to a cashier)' },
+  { key: 'cashier.access',       group: 'Cashier', label: 'Take payment on orders at a cashier station' },
+  { key: 'cashier.manage',       group: 'Cashier', label: 'Set up stations, see drawer variances, approve drawer counts' },
+  { key: 'count.do',      group: 'Stock counts', label: 'Count bins (blind)' },
+  { key: 'count.create',  group: 'Stock counts', label: 'Start stock counts and see what is due' },
+  { key: 'count.approve', group: 'Stock counts', label: 'See count differences, send bins for recount, post adjustments' },
+  { key: 'sales.lost_record', group: 'Planning', label: 'Record lost sales (parts asked for that we could not sell) and call customers back' },
+  { key: 'planning.view',     group: 'Planning', label: 'See the planning dashboard and lost-sales report' },
+  { key: 'planning.targets',  group: 'Planning', label: 'Change planning targets (fill rate, stock days, profit, dead stock)' },
+  { key: 'notify.view',   group: 'Customer messages', label: 'See the customer message log and templates' },
+  { key: 'notify.send',   group: 'Customer messages', label: 'Resend messages and send WhatsApp messages by hand' },
+  { key: 'notify.manage', group: 'Customer messages', label: 'Edit message templates, quiet hours, switch messages on or off' },
+  { key: 'acct.view',   group: 'Accounting', label: 'See the journal, trial balance and tie-out' },
+  { key: 'acct.post',   group: 'Accounting', label: 'Post manual journal entries and reverse entries' },
+  { key: 'acct.setup',  group: 'Accounting', label: 'Start the ledger, edit accounts and posting rules' },
+  { key: 'acct.close',  group: 'Accounting', label: 'Close and reopen months' },
+  { key: 'acct.export', group: 'Accounting', label: 'Export to QuickBooks' },
+  { key: 'acct.budget', group: 'Accounting', label: 'Edit budgets, the cash forecast and investments' },
+  { key: 'sec.manage', group: 'Security', label: 'Set sign-in rules, unlock accounts, reset 2-step sign-in' },
+  { key: 'audit.view', group: 'Security', label: 'See the audit log of who changed what' },
+  { key: 'dept.manage', group: 'Departments', label: 'Set up departments, who works in them, and till exception rules' },
+  { key: 'tj.view',     group: 'Departments', label: 'See the terminal journal and till exceptions' },
+  { key: 'comm.view',    group: 'Commission', label: 'See commission for every rep' },
+  { key: 'comm.rules',   group: 'Commission', label: 'Set commission rules and switch tracking on' },
+  { key: 'comm.approve', group: 'Commission', label: 'Split sales, adjust, approve and pay commission statements' },
+  { key: 'reps.manage',  group: 'Freelance reps', label: 'Add freelance reps, send their invite links, switch them off' },
+  { key: 'links.send',   group: 'Freelance reps', label: 'Send customers tracked links (parts, quotes, pages, videos)' },
+  { key: 'hr.manage',    group: 'Careers', label: 'Post jobs, read applications and CVs, hire' },
+  { key: 'hr.approve',   group: 'Careers', label: 'Approve job requisitions and job offers' },
+  { key: 'hr.people',    group: 'People & HR', label: 'Staff HR files: personal details, job and pay history, probation, warnings, reviews, leave allowance, exits, HR reports' },
+  { key: 'franchise.manage', group: 'Franchise', label: 'Franchise: enquiries and leads, NDAs, disclosure documents and agreements, franchisees, royalty invoices, audits, renewals, transfers and terminations' },
+  { key: 'clock.manage',  group: 'Time clock', label: 'Set shifts, overtime rules, badges, fingerprints; timesheets and payroll' },
+  { key: 'clock.approve', group: 'Time clock', label: 'See who is in; approve overtime, extensions and time corrections' },
+  { key: 'mkt.manage',          group: 'Stock to cash', label: 'Clearance prices, stock classes, lots, supplier claims and offer campaigns' },
+  { key: 'stock.grade_returns', group: 'Stock to cash', label: 'Grade returned parts (A back to stock, B open box, C write-off or claim)' },
+  { key: 'ai.manage',           group: 'AI assistant',  label: 'Switch the AI sales assistant on or off, read its chats and answer handed-over customers' },
+  { key: 'ai.assist',           group: 'AI assistant',  label: 'Use the staff assistant (how-do-I answers and sale tips)' },
+  { key: 'training.manage',     group: 'Training',      label: 'See everyone\'s training, edit lessons and quiz questions' },
+  { key: 'ar.manage',           group: 'Accounting',    label: 'Customer accounts: receive and apply payments, credit holds, collections' },
+  { key: 'ap.manage',           group: 'Accounting',    label: 'Supplier bills: enter bills and credits, pay bills, void payments' },
+  { key: 'bank.manage',         group: 'Accounting',    label: 'Banking: registers, cheques, deposits, transfers, reconciliation, statement import' },
+  { key: 'payroll.view',        group: 'Payroll',       label: 'See pay runs, everyone\'s payslips and the payroll returns' },
+  { key: 'payroll.run',         group: 'Payroll',       label: 'Set up employees and pay, prepare pay runs, pay wages and statutory deductions, change rates' },
+  { key: 'payroll.approve',     group: 'Payroll',       label: 'Approve and void pay runs' },
+  { key: 'sys.audit',           group: 'System management', label: 'Audit trail and tamper check, audit exceptions and reviews, access reviews' },
+  { key: 'sys.security',        group: 'System management', label: 'Security posture, who is online, sign people out, disable accounts, incidents' },
+  { key: 'sys.support',         group: 'System management', label: 'IT help desk (all tickets), equipment register, change log, system health' },
+  { key: 'support.raise',       group: 'System management', label: 'Ask IT for help (raise and follow own tickets)' },
+  { key: 'sys.network',         group: 'System management', label: 'Network management: monitoring, devices on the network, open ports, firewall, Wi-Fi register' },
+  { key: 'docs.view',           group: 'Documents',     label: 'Open the document centre: public and internal documents, templates' },
+  { key: 'docs.upload',         group: 'Documents',     label: 'File documents, fill in forms (leave and others), log calls and letters' },
+  { key: 'docs.manage',         group: 'Documents',     label: 'Manage the library: edit or delete any document, folders, templates, legal hold, recycle bin, access log' },
+  { key: 'docs.confidential',   group: 'Documents',     label: 'See confidential documents (tax, contracts, completed forms, resumes)' },
+  { key: 'docs.restricted',     group: 'Documents',     label: 'See restricted documents (IDs, staff files, security clearances, legal)' },
+  { key: 'docs.approve',        group: 'Documents',     label: 'Approve or reject submitted forms (leave, warnings, SOPs)' },
+  { key: 'comms.journal',       group: 'Documents',     label: 'Read the communications journal (every email, SMS, chat and inquiry)' },
+  { key: 'suppliers.manage',    group: 'Suppliers',     label: 'Run the supplier portal: logins, credit, consignment, orders, training' },
+  { key: 'team.announce',       group: 'Team chat & calendar', label: 'Send memos and announcements to all staff, post in All staff, put events on everyone’s calendar' },
+  { key: 'team.oversee',        group: 'Team chat & calendar', label: 'Management view: read every staff chat (including one-to-one), deleted messages, memo sign-off, call log, export' },
+  { key: 'fleet.drive',         group: 'Deliveries & drivers', label: 'Driver app: take assigned jobs, share location while on shift' },
+  { key: 'fleet.view',          group: 'Deliveries & drivers', label: 'See the dispatch board, live driver map and history' },
+  { key: 'fleet.dispatch',      group: 'Deliveries & drivers', label: 'Create and assign driver jobs, set routes, clear alerts, make security-screen links' },
+  { key: 'menu.manage',         group: 'Staff menus',   label: 'Set up other staff members’ All modules menu (which modules they see, and in which groups)' },
 ];
 const CAPABILITY_KEYS = new Set(CAPABILITIES.map((c) => c.key));
+// Supervisory functions: off for staff by default (owners and managers have
+// everything; anyone else needs them granted by name in their permissions).
+// Without this, a new capability is open to every staff member until someone
+// remembers to deny it -- the wrong default for payroll, the ledger, prices,
+// approvals and the audit log.
+const RESTRICTED_CAPS = new Set([
+  'purchasing.approve_bills', 'purchasing.settings', 'fulfil.manage', 'cashier.manage', 'count.approve', 'planning.targets', 'notify.manage',
+  'acct.view', 'acct.post', 'acct.setup', 'acct.close', 'acct.export', 'acct.budget', 'sec.manage', 'audit.view', 'dept.manage', 'tj.view',
+  'comm.view', 'comm.rules', 'comm.approve', 'reps.manage', 'hr.manage', 'hr.approve', 'hr.people', 'franchise.manage', 'clock.manage', 'clock.approve', 'mkt.manage', 'ai.manage', 'training.manage',
+  'ar.manage', 'ap.manage', 'bank.manage', 'payroll.view', 'payroll.run', 'payroll.approve', 'sys.audit', 'sys.security', 'sys.support', 'sys.network',
+  'docs.manage', 'docs.confidential', 'docs.restricted', 'docs.approve', 'comms.journal',
+  'fleet.drive', 'fleet.view', 'fleet.dispatch', 'suppliers.manage', 'team.announce', 'team.oversee',
+  'menu.manage',
+]);
 
 // Resolve a user's effective capability map across all three layers:
 //   role.can_manage -> full access (nothing below applies)
@@ -945,7 +1298,7 @@ async function userPermState(userId) {
   const perms = {};
   for (const c of CAPABILITIES) {
     if (full) { perms[c.key] = true; continue; }
-    let allowed = !catDeny[c.key];
+    let allowed = !catDeny[c.key] && !RESTRICTED_CAPS.has(c.key);
     if (userOv[c.key] === true) allowed = true;
     if (userOv[c.key] === false) allowed = false;
     perms[c.key] = allowed;
@@ -1022,6 +1375,58 @@ async function nextAccountNumber() {
   return `C-${String(Number(rows[0].n) + 1).padStart(6, '0')}`;
 }
 
+// A charge sale's unpaid remainder, per sale, as a reusable fragment: account
+// debits on the sale minus everything the customer has since paid against it.
+// account_payments.reference carries the receipt number it settled.
+// Every invoice with money still outstanding, however it came to be owed.
+//
+// This used to require an 'account' tender row on the sale -- a charge sale
+// posted through the POS. That is one way an invoice ends up unpaid and not the
+// only one, and on this installation it is none of them: the imported history
+// has zero 'account' rows (charge sales came across as 'charge', because the
+// source marks all 3,087 of them TOTAL_PAID = TOTAL), so A/R Aging reported
+// nothing owed by nobody while 1,390 invoices carried J$9,870,437.41 of unpaid
+// balance on pos_sales.balance_due_usd.
+//
+// So the open-item test is the invoice's own arithmetic: billed, less what has
+// been settled against it. `charged` is the invoice total rather than the
+// account-tendered portion, and `settled` counts both the tenders taken at the
+// till and any later account payment referencing the receipt. A fully cash
+// invoice nets to zero and drops out on the HAVING, which is why this can be
+// based on all sales without flooding the report with paid ones.
+//
+// Invoices raised on the books rather than at the till (rent, recharges, late
+// fees -- billing.js, table ar_invoices) are open items too, so they are
+// unioned in with `doc` = 'invoice'. `id` is then only unique together with
+// `doc`: Receive Payment applies to (doc, id). An invoice is settled only by
+// payments applied to it -- nothing is paid at issue, and an unapplied payment
+// referencing its number stays a credit on the account (CREDIT_SQL in books.js
+// treats only POS receipt numbers that way). Dated at noon Jamaica time so
+// `created_at::date` is the invoice date; `payment_status` carries the
+// invoice's kind ('invoice' or 'late_fee').
+const AR_OPEN_SQL = `
+  SELECT 'sale'::text AS doc, s.id, s.receipt_number, s.created_at, s.customer_id,
+         COALESCE(NULLIF(s.customer_name,''),'Walk-in') AS customer_name,
+         s.due_date, s.payment_status,
+         s.total_usd::float AS charged,
+         (COALESCE(s.amount_paid_usd, 0)
+          + COALESCE((SELECT SUM(x.amount) FROM ar_applications x JOIN account_payments ap ON ap.id = x.payment_id
+                       WHERE x.sale_id = s.id), 0)
+          + COALESCE((SELECT SUM(ap.amount_usd) FROM account_payments ap
+                       WHERE ap.reference = s.receipt_number
+                         AND NOT EXISTS (SELECT 1 FROM ar_applications x WHERE x.payment_id = ap.id)), 0))::float AS settled
+    FROM pos_sales s
+   WHERE s.voided = false
+     AND s.total_usd - COALESCE(s.amount_paid_usd, 0) > 0.005
+  UNION ALL
+  SELECT 'invoice'::text AS doc, i.id, i.number, (i.invoice_date + TIME '12:00') AT TIME ZONE 'America/Jamaica', i.customer_id,
+         COALESCE(NULLIF(u.name,''), u.email, 'Customer'), i.due_date, i.kind,
+         i.total::float,
+         COALESCE((SELECT SUM(x.amount) FROM ar_applications x JOIN account_payments ap ON ap.id = x.payment_id
+                    WHERE x.invoice_id = i.id), 0)::float
+    FROM ar_invoices i LEFT JOIN users u ON u.id = i.customer_id
+   WHERE i.voided_at IS NULL`;
+
 // Cached after the first lookup -- this row's id never changes once seeded,
 // so there's no reason to hit the DB for it on every single sale.
 let walkinCustomerIdCache = null;
@@ -1039,12 +1444,16 @@ async function getWalkinCustomerId() {
 // endpoints below so none of them can disagree about what's owed.
 // `exec` lets a caller inside a transaction pass its client instead of the
 // module-level pool (same (sql, params) => {rows} shape either way).
+// Invoices raised on the books (rent, late fees -- ar_invoices) count as
+// charges too: their payments are in account_payments, so leaving them out
+// would let a tenant's rent payment free up credit at the till.
 async function getAccountBalance(customerId, exec) {
   const run = exec || query;
   const { rows } = await run(
     `SELECT
         COALESCE((SELECT SUM(sp.amount_usd) FROM sale_payments sp JOIN pos_sales s ON s.id = sp.sale_id
                    WHERE sp.method = 'account' AND s.customer_id = $1 AND s.voided = false), 0)
+      + COALESCE((SELECT SUM(total) FROM ar_invoices WHERE customer_id = $1 AND voided_at IS NULL), 0)
       - COALESCE((SELECT SUM(amount_usd) FROM account_payments WHERE customer_id = $1), 0) AS balance`,
     [customerId]
   );
@@ -1420,8 +1829,16 @@ app.post('/api/admin/terminals/:id/terminate', requireManager, async (req, res) 
   try {
     const cur = await query('SELECT * FROM terminals WHERE id = $1', [id]);
     if (!cur.rows.length) return res.status(404).json({ ok: false, error: 'No such terminal.' });
-    await query('UPDATE terminals SET terminate_requested_at = NOW() WHERE id = $1', [id]);
-    if (cur.rows[0].id === TERMINAL.id) { SESSION_EPOCH = Date.now(); LAST_TERMINATE_HANDLED = new Date(); }
+    // Take the stamp back from the UPDATE rather than reading the clock again:
+    // SESSION_EPOCH has to equal what is stored, or the next restart would
+    // recompute a different epoch and sign out the sessions opened in between.
+    const upd = await query(
+      'UPDATE terminals SET terminate_requested_at = NOW() WHERE id = $1 RETURNING terminate_requested_at', [id]);
+    if (cur.rows[0].id === TERMINAL.id) {
+      const t = new Date(upd.rows[0].terminate_requested_at);
+      SESSION_EPOCH = t.getTime();
+      LAST_TERMINATE_HANDLED = t;
+    }
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -1579,14 +1996,43 @@ async function dropTerminalRole(role) {
 // Brute force against 100 bits is not a threat; this exists so a broken script
 // pointed at the endpoint cannot fill the logs or hammer the database.
 const ENROL_ATTEMPTS = new Map();
+const ENROL_LIMIT = 20;          // attempts allowed per key per 60s window
+const ENROL_MAX_KEYS = 500;      // distinct keys held before eviction kicks in
 function enrolRateLimited(ip) {
   const now = Date.now();
   const rec = ENROL_ATTEMPTS.get(ip) || { n: 0, reset: now + 60000 };
   if (now > rec.reset) { rec.n = 0; rec.reset = now + 60000; }
   rec.n += 1;
   ENROL_ATTEMPTS.set(ip, rec);
-  if (ENROL_ATTEMPTS.size > 500) ENROL_ATTEMPTS.clear();   // crude, bounded
-  return rec.n > 20;
+  // Keep the map bounded, but never at the cost of a counter that is doing its
+  // job. The old form called ENROL_ATTEMPTS.clear() once it passed 500
+  // entries, which reset every caller's counter at once -- so anything able to
+  // add entries could also flush the throttle it was sitting behind (audit
+  // H2). Expiring windows are dropped first, which costs nothing. If that is
+  // not enough, entries are evicted lowest-attempt-count first and anything
+  // already at the limit is kept, so a flood of fresh keys cannot push a
+  // caller that is being throttled back out of the map. Oldest-first eviction
+  // was tried and rejected: it discards exactly the long-lived counter an
+  // attacker wants gone.
+  if (ENROL_ATTEMPTS.size > ENROL_MAX_KEYS) {
+    for (const [key, r] of ENROL_ATTEMPTS) if (now > r.reset) ENROL_ATTEMPTS.delete(key);
+    if (ENROL_ATTEMPTS.size > ENROL_MAX_KEYS) {
+      const spare = [];
+      for (const [key, r] of ENROL_ATTEMPTS) if (r.n <= ENROL_LIMIT && key !== ip) spare.push([key, r.n]);
+      spare.sort((a, b) => a[1] - b[1]);
+      for (const [key] of spare) {
+        if (ENROL_ATTEMPTS.size <= ENROL_MAX_KEYS) break;
+        ENROL_ATTEMPTS.delete(key);
+      }
+      // Everything left is at the limit. Let the map carry them rather than
+      // forgive them; the size is bounded by real distinct clients now that
+      // the key is req.ip, and this is worth knowing about.
+      if (ENROL_ATTEMPTS.size > ENROL_MAX_KEYS) {
+        console.warn('[enrol] ' + ENROL_ATTEMPTS.size + ' throttled clients in one window');
+      }
+    }
+  }
+  return rec.n > ENROL_LIMIT;
 }
 
 app.post('/api/admin/terminals/enrol-link', requireManager, async (req, res) => {
@@ -1651,7 +2097,13 @@ app.delete('/api/admin/terminals/enrol-links/:id', requireManager, async (req, r
 // that safe is below: single use, short expiry, hashed at rest, rate limited,
 // and it only ever discloses this server's own database settings.
 app.post('/api/enrol/redeem', async (req, res) => {
-  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').toString().split(',')[0].trim();
+  // req.ip, not a raw x-forwarded-for read: Express resolves it against the
+  // configured trust proxy, so the value is the one hop we actually trust
+  // rather than whatever the caller chose to put at the front of the header.
+  // The old form let a caller mint a fresh key per request and walk straight
+  // through the limit below (audit H2). Same value feeds used_from_ip, so the
+  // enrolment audit trail records the real client too.
+  const ip = req.ip || '';
   if (enrolRateLimited(ip)) return res.status(429).json({ ok: false, error: 'Too many attempts. Wait a minute and try again.' });
   if (!TERMINAL.is_db_host) return res.status(400).json({ ok: false, error: 'This machine does not hold the database.' });
 
@@ -2190,7 +2642,9 @@ app.post('/api/auth/signup', async (req, res) => {
       [email, name || null, hash, phone || null, isFirst, acctNo]
     );
     req.session.userId = rows[0].id;
-    req.session.epoch = SESSION_EPOCH;   // see the epoch middleware -- terminate signs these out
+    req.session.epoch = SESSION_EPOCH; req.session.at = Date.now();   // see the epoch middleware -- terminate signs these out
+    // Came through a rep's referral or link: they become that rep's customer.
+    if (typeof reps !== 'undefined' && reps) await reps.attributeReferral(req, rows[0].id);
     if (isFirst) console.log('[ok] first user "' + rows[0].email + '" auto-promoted to admin');
     res.json({ user: publicUser(rows[0]), first_admin: isFirst });
     // 100-point welcome bonus
@@ -2208,12 +2662,23 @@ app.post('/api/auth/signup', async (req, res) => {
   }
 });
 
-// Emergency reset for admin@mortysautoparts.com → password123. Always works.
-// Restricted to JUST this one well-known email so it can never be used to
-// hijack a real customer/staff account.
-app.post('/api/auth/reset-default-admin', async (_req, res) => {
+// Emergency reset for admin@mortysautoparts.com. Only answers someone
+// sitting at the till itself: the socket must be loopback AND the request must
+// carry no proxy headers. The Cloudflare tunnel also connects from 127.0.0.1,
+// so loopback alone would still let the whole internet in (audit C1); the
+// tunnel always adds cf-connecting-ip / x-forwarded-for, and a direct local
+// browser never does. The new password is random, never a known default.
+function isTillLocalRequest(req) {
+  const addr = req.socket && req.socket.remoteAddress;
+  const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(addr);
+  const proxied = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.headers['cf-ray'];
+  return loopback && !proxied;
+}
+app.post('/api/auth/reset-default-admin', async (req, res) => {
+  if (!isTillLocalRequest(req)) return res.status(404).json({ error: 'Not found' });
   try {
-    const hash = await bcrypt.hash('password123', 10);
+    const newPassword = nodeCrypto.randomBytes(9).toString('base64url');
+    const hash = await bcrypt.hash(newPassword, 10);
     const { rows } = await query(
       `INSERT INTO users (email, name, password_hash, via, is_admin)
          VALUES ('admin@mortysautoparts.com', 'Morty''s Auto Parts Admin', $1, 'local', true)
@@ -2222,8 +2687,8 @@ app.post('/api/auth/reset-default-admin', async (_req, res) => {
          RETURNING id`,
       [hash]
     );
-    console.log('[ok] admin@mortysautoparts.com password reset to default (via /api/auth/reset-default-admin)');
-    res.json({ ok: true, email: 'admin@mortysautoparts.com', password: 'password123' });
+    console.log('[ok] admin@mortysautoparts.com password reset from the till (via /api/auth/reset-default-admin)');
+    res.json({ ok: true, email: 'admin@mortysautoparts.com', password: newPassword });
   } catch (e) {
     // Same distinction sign-in makes. This is the recovery link someone clicks
     // *because* they cannot get in, so it is the second thing they try on a
@@ -2254,7 +2719,12 @@ app.post('/api/auth/reset-default-admin', async (_req, res) => {
 //  never says whether it was the address or the password that was wrong.
 // =============================================================================
 app.post('/api/terminal/auth/verify', async (req, res) => {
-  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').toString().split(',')[0].trim();
+  // This route is a password oracle by design, so the throttle in front of it
+  // has to be keyed on something the caller cannot choose. req.ip is resolved
+  // through trust proxy; the raw x-forwarded-for read this replaces could be
+  // set to a new random value per request, which made the limit decorative
+  // against exactly the brute force it exists to stop (audit H2).
+  const ip = req.ip || '';
   if (enrolRateLimited('verify:' + ip)) return res.status(429).json({ error: 'Too many attempts.' });
   const token = String(req.headers['x-terminal-token'] || '').trim();
   const { email, password } = req.body || {};
@@ -2270,13 +2740,40 @@ app.post('/api/terminal/auth/verify', async (req, res) => {
     const { rows } = await query(
       `SELECT id, email, name, password_hash, is_admin, admin_role, disabled FROM users WHERE lower(email) = lower($1) LIMIT 1`,
       [email]);
-    if (!rows.length) return res.status(401).json({ error: 'Invalid credentials' });
+    const locked = await security.checkLocked(req, rows[0]);
+    if (locked) return res.status(423).json({ error: locked });
+    if (!rows.length) { await security.failed(req, null, email); return res.status(401).json({ error: 'Invalid credentials' }); }
     const ok = await bcrypt.compare(password, rows[0].password_hash || '');
-    if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+    if (!ok) { const msg = await security.failed(req, rows[0]); return res.status(401).json({ error: msg || 'Invalid credentials' }); }
     if (rows[0].disabled) return res.status(403).json({ error: 'This account has been disabled.' });
     res.json({ ok: true, user: publicUser(rows[0]) });
   } catch (e) {
     console.error('[terminal-verify]', e.message);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// A till without the PIN key asks here (see pins.js). Same terminal token and
+// throttle as the password check above; it answers yes or no for one person,
+// or seals a PIN that is being set.
+app.post('/api/terminal/pin', async (req, res) => {
+  const ip = req.ip || '';
+  if (enrolRateLimited('pin:' + ip)) return res.status(429).json({ error: 'Too many attempts.' });
+  const token = String(req.headers['x-terminal-token'] || '').trim();
+  if (!token) return res.status(401).json({ error: 'Terminal token required' });
+  const b = req.body || {};
+  const pin = String(b.pin || '').trim();
+  if (!/^\d{4,8}$/.test(pin)) return res.status(400).json({ error: 'PIN must be 4 to 8 digits' });
+  try {
+    const t = await query("SELECT status FROM terminals WHERE api_token_hash = $1", [hashEnrolToken(token)]);
+    if (!t.rows.length) return res.status(401).json({ error: 'Unknown terminal' });
+    if (t.rows[0].status !== 'approved') return res.status(403).json({ error: 'This terminal is not allowed to connect.' });
+    if (b.op === 'hash') return res.json({ ok: true, hash: await pins.hash(pin) });
+    const { rows } = await query('SELECT id, pin_hash FROM users WHERE id = $1 AND NOT disabled', [parseInt(b.user_id, 10) || 0]);
+    const ok = await pins.matches(rows[0], pin);
+    res.status(ok ? 200 : 401).json({ ok });
+  } catch (e) {
+    console.error('[terminal-pin]', e.message);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -2302,7 +2799,7 @@ app.post('/api/auth/signin', async (req, res) => {
       }
       if (!r.ok || !r.user) return res.status(401).json({ error: 'Invalid credentials' });
       req.session.userId = r.user.id;
-      req.session.epoch = SESSION_EPOCH;
+      req.session.epoch = SESSION_EPOCH; req.session.at = Date.now();
       return res.json({ user: r.user });
     }
 
@@ -2310,13 +2807,21 @@ app.post('/api/auth/signin', async (req, res) => {
       `SELECT id, email, name, password_hash, is_admin, admin_role, disabled FROM users WHERE lower(email) = lower($1) LIMIT 1`,
       [email]
     );
-    if (!rows.length)
+    const locked = await security.checkLocked(req, rows[0]);
+    if (locked) return res.status(423).json({ error: locked });
+    if (!rows.length) {
+      await security.failed(req, null, email);
       return res.status(401).json({ error: 'Invalid credentials' });
+    }
     const ok = await bcrypt.compare(password, rows[0].password_hash || '');
-    if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+    if (!ok) { const msg = await security.failed(req, rows[0]); return res.status(401).json({ error: msg || 'Invalid credentials' }); }
     if (rows[0].disabled) return res.status(403).json({ error: 'This account has been disabled. Ask a manager.' });
+    // Lockout counters reset, 2-step asked for when the account or policy needs it.
+    const step = await security.passed(req, rows[0]);
+    if (step.need2fa) return res.json({ need_2fa: true });
+    if (step.error) return res.status(403).json({ error: step.error });
     req.session.userId = rows[0].id;
-    req.session.epoch = SESSION_EPOCH;   // see the epoch middleware -- terminate signs these out
+    req.session.epoch = SESSION_EPOCH; req.session.at = Date.now();   // see the epoch middleware -- terminate signs these out
     res.json({ user: publicUser(rows[0]) });
   } catch (e) {
     // A database that is not running is the single most common reason sign-in
@@ -2365,8 +2870,10 @@ function isDbUnreachable(e) {
 //      script walks the whole space in minutes.
 //    * Only staff with a PIN are considered. A customer account cannot be
 //      reached this way however the PIN is guessed.
-//    * PINs are unique across staff (enforced when set), so a match identifies
-//      exactly one person -- there is no "first bcrypt hit wins".
+//    * The keypad asks who you are after the PIN (the staff list below), and
+//      the PIN is checked against that one account. A request without a
+//      picked person (an older page) still works: PINs are unique across staff
+//      (enforced when set), so a match identifies exactly one person.
 //    * The terminal gate above applies to /api/auth/*, so a till that has not
 //      been approved cannot PIN its way in either.
 //
@@ -2382,20 +2889,19 @@ app.post('/api/auth/pin-signin', async (req, res) => {
   }
   const pin = String((req.body && req.body.pin) || '').trim();
   if (!pin) return res.status(400).json({ error: 'PIN required' });
+  const picked = pins.pickedId(req.body);
 
   try {
     const { rows } = await query(
       `SELECT id, email, name, is_admin, admin_role, pin_hash
          FROM users
-        WHERE pin_hash IS NOT NULL AND is_staff = true AND NOT disabled`
+        WHERE pin_hash IS NOT NULL AND is_staff = true AND NOT disabled` + (picked ? ' AND id = $1' : ''),
+      picked ? [picked] : []
     );
-    let hit = null;
-    for (const r of rows) {
-      if (await bcrypt.compare(pin, r.pin_hash)) { hit = r; break; }
-    }
+    const hit = await pins.pick(rows, pin);
     if (!hit) {
       pinFail(key, gate.rec);
-      return res.status(401).json({ error: 'PIN not recognised' });
+      return res.status(401).json({ error: picked ? 'That PIN is not right for the name picked' : 'PIN not recognised' });
     }
     if (!hit.is_admin) {
       // Staff who are not admins hold PINs for the till keypad and the time
@@ -2404,7 +2910,7 @@ app.post('/api/auth/pin-signin', async (req, res) => {
     }
     PIN_ATTEMPTS.delete(key);
     req.session.userId = hit.id;
-    req.session.epoch = SESSION_EPOCH;
+    req.session.epoch = SESSION_EPOCH; req.session.at = Date.now();
     console.log('[signin] PIN sign-in:', hit.email);
     res.json({ user: publicUser(hit) });
   } catch (e) {
@@ -2415,6 +2921,23 @@ app.post('/api/auth/pin-signin', async (req, res) => {
       });
     }
     console.error('[pin-signin]', e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// The staff list the PIN keypad shows once a PIN is typed: the person picks
+// their own name and the PIN is checked against that one account. Names and
+// roles only, of staff who have a PIN; behind the same terminal gate as the
+// rest of /api/auth.
+app.get('/api/auth/pin-staff', async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT id, name, admin_role FROM users
+        WHERE pin_hash IS NOT NULL AND is_staff = true AND NOT disabled AND NOT COALESCE(is_archived, false)
+        ORDER BY lower(name)`);
+    res.json({ staff: rows.map((r) => ({ id: r.id, name: r.name || ('Staff #' + r.id), role: r.admin_role || '' })) });
+  } catch (e) {
+    console.error('[pin-staff]', e.message);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -2616,7 +3139,10 @@ app.patch('/api/admin/users/:id', requireAdmin, requireCap('pos.edit_customer'),
   // (payment_terms_days). account_number is here so a customer created at the
   // counter can be given the shop's own number rather than only the generated
   // one.
-  const fields = ['name','phone','company_name','customer_type','tax_id','credit_limit_usd','discount_pct','price_tier','sales_rep_id','how_heard','rating','internal_notes','email_opt_in','sms_opt_in','preferred_contact','payment_terms_days','discount_limit_pct','tax_exempt','credit_type','credit_length_months','account_number',
+  // markup_pct is the mirror of discount_pct -- what this account is charged
+  // ABOVE list. See the POS sale route, which applies it to each line's unit
+  // price so the invoice prints the increased price.
+  const fields = ['name','phone','company_name','customer_type','tax_id','credit_limit_usd','discount_pct','markup_pct','price_tier','sales_rep_id','how_heard','rating','internal_notes','email_opt_in','sms_opt_in','preferred_contact','payment_terms_days','discount_limit_pct','tax_exempt','credit_type','credit_length_months','account_number',
     // Restoring an archived customer goes through here. Without it the Restore
     // button would report success and change nothing.
     'is_archived'];
@@ -2625,7 +3151,214 @@ app.patch('/api/admin/users/:id', requireAdmin, requireCap('pos.edit_customer'),
   if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
   vals.push(req.params.id);
   await query(`UPDATE users SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
-  res.json({ ok: true });
+  // Renaming a customer has to reach the records that carry their name, or the
+  // correction only shows on the profile while every invoice, quote and work
+  // order still reads the old spelling. See syncCustomerName().
+  const synced = req.body && req.body.name !== undefined
+    ? await syncCustomerName(parseInt(req.params.id, 10), String(req.body.name))
+    : null;
+  res.json({ ok: true, synced });
+});
+
+// Push a customer's current name out to the tables that store a copy of it.
+//
+// Those copies are deliberate: a sale has to keep reading the way it was
+// printed even if the customer record is later deleted, so pos_sales carries
+// customer_name alongside customer_id. The cost is that correcting a spelling
+// on the profile left every historic document showing the old one -- 18 rows
+// across 5 customers on this database were already out of step before this
+// existed.
+//
+// Walk-in sales are deliberately NOT touched. 900,714 of them read "CASH"
+// against a walk-in account named "Cash Customer - Walk-in"; that is the label
+// the counter printed, not drift, and rewriting it would relabel seventeen
+// years of cash receipts with an account name no customer ever saw.
+async function syncCustomerName(userId, name) {
+  if (!Number.isFinite(userId)) return null;
+  const nm = String(name == null ? '' : name).trim();
+  if (!nm) return null;
+  const walkin = await getWalkinCustomerId();
+  if (userId === walkin) return { skipped: 'walk-in account; its sales keep the label they were printed with' };
+
+  // Only tables that exist on this installation: the schema differs between
+  // the Postgres and D1 builds, and a missing table should not fail a rename.
+  const TARGETS = [
+    ['pos_sales', 'customer_name', 'customer_id'],
+    ['pos_quotes', 'customer_name', 'customer_id'],
+    ['pos_holds', 'customer_name', 'customer_id'],
+    ['work_orders', 'customer_name', 'customer_id'],
+    ['service_requisitions', 'customer_name', 'customer_id'],
+    ['inspections', 'customer_name', 'customer_id'],
+  ];
+  const out = {};
+  for (const [table, col, fk] of TARGETS) {
+    try {
+      const r = await query(
+        `UPDATE ${table} SET ${col} = $1 WHERE ${fk} = $2 AND COALESCE(${col}, '') <> $1`, [nm, userId]);
+      if (r.rowCount) out[table] = r.rowCount;
+    } catch (e) {
+      // A table this build does not have, or one without the column: nothing to
+      // sync there, and a rename should not fail because of it.
+      if (e.code !== '42P01' && e.code !== '42703') throw e;
+    }
+  }
+  return { name: nm, updated: out,
+    rows: Object.values(out).reduce((a, n) => a + n, 0) };
+}
+
+// ---- find and merge duplicate customers -------------------------------------
+//
+// The same person gets entered more than once at a counter: "D & H GARAGE" and
+// "D&H GARAGE", "ANDRE's" and "ANDRE'S", a second record because the phone was
+// typed instead of the name. Each copy then carries part of the history, so no
+// screen shows what the customer actually owes or has spent.
+//
+// GET  /api/admin/users/:id/similar   who looks like this customer
+// POST /api/admin/users/:id/merge     fold another record into this one
+//
+// Matching is the same normal form used for suppliers: upper-cased, '&' spelt
+// out, punctuation and spacing dropped. Exact normalised equality, plus a
+// shared phone number, plus a shared account number -- all three are evidence
+// two records are one person. Deliberately NOT fuzzy: merging is destructive
+// and a near-miss between two real businesses is worse than a duplicate left
+// standing.
+const CUST_NORM = `upper(regexp_replace(regexp_replace(COALESCE($COL$, ''), '&', ' AND ', 'g'),
+                                         '[^A-Za-z0-9]', '', 'g'))`;
+
+app.get('/api/admin/users/:id/similar', requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { rows: me } = await query(
+    'SELECT id, name, phone, account_number, email FROM users WHERE id = $1', [id]);
+  if (!me.length) return res.status(404).json({ error: 'No such customer.' });
+  const u = me[0];
+  const norm = (s) => String(s || '').toUpperCase().replace(/&/g, ' AND ').replace(/[^A-Z0-9]/g, '');
+  const key = norm(u.name);
+  const phone = String(u.phone || '').replace(/[^0-9]/g, '');
+
+  const { rows } = await query(
+    `SELECT u.id, u.name, u.email, u.phone, u.account_number, u.customer_type, u.created_at,
+            COALESCE(s.n, 0)::int AS sales,
+            COALESCE(s.spend, 0)::float AS spend,
+            COALESCE(o.bal, 0)::float AS owed,
+            CASE
+              WHEN $2 <> '' AND ${CUST_NORM.replace(/\$COL\$/g, 'u.name')} = $2 THEN 'same name'
+              WHEN $3 <> '' AND regexp_replace(COALESCE(u.phone,''), '[^0-9]', '', 'g') = $3 THEN 'same phone'
+              ELSE 'same account number' END AS why
+       FROM users u
+       LEFT JOIN (SELECT customer_id AS id, COUNT(*) AS n, SUM(total_usd) AS spend
+                    FROM pos_sales WHERE voided = false GROUP BY customer_id) s ON s.id = u.id
+       LEFT JOIN (SELECT customer_id AS id, SUM(GREATEST(charged - settled, 0)) AS bal
+                    FROM (${AR_OPEN_SQL}) x GROUP BY customer_id) o ON o.id = u.id
+      WHERE u.id <> $1 AND u.is_staff = false AND u.is_admin = false
+        AND (($2 <> '' AND ${CUST_NORM.replace(/\$COL\$/g, 'u.name')} = $2)
+          OR ($3 <> '' AND regexp_replace(COALESCE(u.phone,''), '[^0-9]', '', 'g') = $3)
+          OR ($4 <> '' AND COALESCE(u.account_number,'') = $4))
+      ORDER BY sales DESC, u.id ASC LIMIT 50`,
+    [id, key, phone, u.account_number || '']);
+
+  res.json({ customer: u, matches: rows });
+});
+
+// Customer-side references only. A merge moves the duplicate's history onto the
+// surviving record; it must not touch staff-side columns -- cashier_id,
+// voided_by, created_by and the like record who DID something, and a customer
+// record being merged says nothing about that.
+const CUSTOMER_REFS = [
+  ['pos_sales', 'customer_id'],
+  ['pos_quotes', 'customer_id'],
+  ['pos_holds', 'customer_id'],
+  ['account_payments', 'customer_id'],
+  ['orders', 'user_id'],
+  ['customer_addresses', 'user_id'],
+  ['customer_contacts', 'user_id'],
+  ['customer_messages', 'user_id'],
+  ['customer_notifications', 'user_id'],
+  ['customer_reminders', 'user_id'],
+  ['points_transactions', 'user_id'],
+  ['saved_vehicles', 'user_id'],
+  ['service_appointments', 'user_id'],
+  ['wishlist', 'user_id'],
+  ['cart_items', 'user_id'],
+  ['reviews', 'user_id'],
+  ['parts_inquiries', 'user_id'],
+  ['trade_in_offers', 'user_id'],
+  ['coupon_redemptions', 'user_id'],
+  ['work_orders', 'customer_user_id'],
+  ['service_requisitions', 'customer_id'],
+  ['service_requisitions', 'customer_user_id'],
+];
+
+app.post('/api/admin/users/:id/merge', requireManager, async (req, res) => {
+  const keepId = parseInt(req.params.id, 10);
+  const dropId = parseInt((req.body && req.body.merge_id), 10);
+  if (!Number.isFinite(keepId) || !Number.isFinite(dropId)) {
+    return res.status(400).json({ error: 'Need the customer to keep and the one to merge in.' });
+  }
+  if (keepId === dropId) return res.status(400).json({ error: 'That is the same customer.' });
+
+  const walkin = await getWalkinCustomerId();
+  if (keepId === walkin || dropId === walkin) {
+    return res.status(400).json({ error: 'The walk-in account cannot be merged -- every cash sale points at it.' });
+  }
+  const { rows: both } = await query(
+    'SELECT id, name, is_staff, is_admin FROM users WHERE id = ANY($1::int[])', [[keepId, dropId]]);
+  if (both.length !== 2) return res.status(404).json({ error: 'One of those customers no longer exists.' });
+  if (both.some((r) => r.is_staff || r.is_admin)) {
+    return res.status(400).json({ error: 'Staff and admin accounts are not merged here -- use the Staff screen.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const moved = {};
+    for (const [table, col] of CUSTOMER_REFS) {
+      try {
+        const r = await client.query(`UPDATE ${table} SET ${col} = $1 WHERE ${col} = $2`, [keepId, dropId]);
+        if (r.rowCount) moved[`${table}.${col}`] = r.rowCount;
+      } catch (e) {
+        // user_category_members has a composite key that would collide; it and
+        // any table this build lacks are simply skipped.
+        if (e.code !== '42P01' && e.code !== '42703' && e.code !== '23505') throw e;
+      }
+    }
+    // Anything the surviving record has no value for, take from the duplicate:
+    // a merge should not lose the one copy that had the phone number.
+    await client.query(
+      `UPDATE users k SET
+         phone               = COALESCE(k.phone, d.phone),
+         company_name        = COALESCE(k.company_name, d.company_name),
+         customer_type       = COALESCE(k.customer_type, d.customer_type),
+         tax_id              = COALESCE(k.tax_id, d.tax_id),
+         price_tier          = COALESCE(k.price_tier, d.price_tier),
+         credit_limit_usd    = COALESCE(k.credit_limit_usd, d.credit_limit_usd),
+         discount_pct        = COALESCE(k.discount_pct, d.discount_pct),
+         payment_terms_days  = COALESCE(k.payment_terms_days, d.payment_terms_days),
+         how_heard           = COALESCE(k.how_heard, d.how_heard),
+         internal_notes      = NULLIF(concat_ws(E'\\n', NULLIF(k.internal_notes,''), NULLIF(d.internal_notes,'')), '')
+       FROM users d WHERE k.id = $1 AND d.id = $2`, [keepId, dropId]);
+
+    // The duplicate is archived, not deleted. users.email is UNIQUE, so the
+    // address is retired to free the original for re-use, and the row stays as
+    // a record that the merge happened.
+    const drop = both.find((r) => r.id === dropId);
+    await client.query(
+      `UPDATE users SET is_archived = true, disabled = true,
+              email = 'merged-' || id || '-' || email,
+              internal_notes = NULLIF(concat_ws(E'\\n', NULLIF(internal_notes,''),
+                'Merged into customer #' || $2 || ' on ' || CURRENT_DATE), '')
+        WHERE id = $1`, [dropId, keepId]);
+
+    await client.query('COMMIT');
+    // The surviving name is now on records that arrived from the duplicate.
+    const keep = both.find((r) => r.id === keepId);
+    const synced = await syncCustomerName(keepId, keep.name);
+    res.json({ ok: true, kept: keepId, merged: dropId, merged_name: drop.name,
+      moved, rows: Object.values(moved).reduce((a, n) => a + n, 0), synced });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('[customer merge]', e);
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
 });
 
 // Addresses
@@ -3343,6 +4076,8 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
     // Deliberately reachable: an archive nobody can look in is a delete with
     // extra steps, and restoring is the whole reason for archiving.
     clauses.push(`u.is_archived = true`);
+    // Past employees are archived too; they are listed under Manage users.
+    clauses.push(`u.archived_at IS NULL`);
   } else if (origin === 'staff') {
     clauses.push(`(u.is_staff = true OR u.is_admin = true)`);
   } else {
@@ -3377,7 +4112,7 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
        COUNT(*) FILTER (WHERE is_staff = false AND is_admin = false AND is_archived = false AND (via IS NULL OR via NOT IN ('pos','local')))::int AS online,
        COUNT(*) FILTER (WHERE is_staff = false AND is_admin = false AND is_archived = false AND via = 'pos')::int AS counter,
        COUNT(*) FILTER (WHERE is_staff = true OR is_admin = true)::int AS staff,
-       COUNT(*) FILTER (WHERE is_archived = true)::int AS archived
+       COUNT(*) FILTER (WHERE is_archived = true AND archived_at IS NULL)::int AS archived
      FROM users`
   );
   res.json({ users: rows, counts: tallies[0] });
@@ -3687,19 +4422,36 @@ app.delete('/api/admin/user-categories/:id', requireManager, async (req, res) =>
 });
 
 // ---- staff -------------------------------------------------------------------
+// Extra roles a person holds on top of their main one (users.extra_roles).
+// Only limited roles qualify: an extra role adds the screens it opens, and
+// manager rights still come from the main role alone, so every manager check
+// in the app -- requireManager, userPermState, the till overrides -- keeps
+// reading admin_role and nothing else. Unknown codes and the main role itself
+// are dropped rather than refused.
+async function cleanExtraRoles(list, primary) {
+  if (!Array.isArray(list)) return [];
+  const wanted = [...new Set(list.filter((c) => typeof c === 'string' && c && c !== primary))].slice(0, 10);
+  if (!wanted.length) return [];
+  const { rows } = await query(
+    `SELECT code FROM roles WHERE code = ANY($1::text[]) AND NOT can_manage AND code <> 'owner'`, [wanted]);
+  const ok = new Set(rows.map((r) => r.code));
+  return wanted.filter((c) => ok.has(c));
+}
+
 app.get('/api/admin/staff', requireAdmin, async (req, res) => {
   const showNid = await canSeeNationalId(req);
   const { rows } = await query(
     `SELECT u.id, u.name, u.email, u.phone, u.is_admin, u.admin_role, u.employee_no,
             u.is_staff, u.disabled, u.created_at, u.perms, u.forced_favs, u.favs_locked,
             (u.pin_hash IS NOT NULL) AS has_pin, u.pin_set_at,
+            u.is_archived, u.archived_at, to_char(u.left_on, 'YYYY-MM-DD') AS left_on, u.archive_reason, u.extra_roles,
             ${showNid ? 'u.national_id' : 'NULL::text AS national_id'},
             COALESCE(JSON_AGG(JSON_BUILD_OBJECT('id', c.id, 'code', c.code, 'label', c.label)
                      ORDER BY c.sort_order) FILTER (WHERE c.id IS NOT NULL), '[]') AS categories
        FROM users u
        LEFT JOIN user_category_members m ON m.user_id = u.id
        LEFT JOIN user_categories c ON c.id = m.category_id
-      WHERE u.is_staff = true OR u.is_admin = true
+      WHERE u.is_staff = true OR u.is_admin = true OR u.archived_at IS NOT NULL
       GROUP BY u.id
       ORDER BY u.name NULLS LAST, u.email`
   );
@@ -3728,6 +4480,7 @@ app.post('/api/admin/staff', requireManager, async (req, res) => {
     // malformed one fails with nothing created.
     const hash = await bcrypt.hash(password, 10);
     const pinHash = b.pin ? await validateAndHashPin(b.pin, null) : null;
+    const extras = await cleanExtraRoles(b.extra_roles, role);
 
     // One transaction: a staff member half-created -- a login with no
     // categories, or an account whose PIN never landed -- is worse than a
@@ -3738,12 +4491,12 @@ app.post('/api/admin/staff', requireManager, async (req, res) => {
       await client.query('BEGIN');
       const { rows } = await client.query(
         `INSERT INTO users (email, name, password_hash, phone, via, is_admin, admin_role,
-                            is_staff, employee_no, national_id, pin_hash, pin_set_at)
+                            is_staff, employee_no, national_id, pin_hash, pin_set_at, extra_roles)
            VALUES (lower($1), $2, $3, $4, 'local', $5, $6, true, $7, $8, $9,
-                   CASE WHEN $9::text IS NULL THEN NULL ELSE NOW() END)
+                   CASE WHEN $9::text IS NULL THEN NULL ELSE NOW() END, $10::jsonb)
            RETURNING id, email, name, is_admin, admin_role, employee_no`,
         [email, name || null, hash, phone || null, isAdmin, role,
-         b.employee_no || null, b.national_id || null, pinHash]
+         b.employee_no || null, b.national_id || null, pinHash, JSON.stringify(extras)]
       );
       created = rows[0];
       const wanted = (Array.isArray(b.categories) ? b.categories : [])
@@ -3786,17 +4539,28 @@ app.patch('/api/admin/staff/:id', requireManager, async (req, res) => {
 
   // Disabling an account is a hard lockout, so it carries the same two guards
   // as a password reset: not yourself, and not an owner unless you are one.
-  if (b.disabled === true) {
+  // Archiving disables too, so it gets the same guards.
+  if (b.disabled === true || b.archived === true) {
+    const verb = b.archived === true ? 'archive' : 'disable';
     if (id === req.session.userId) {
-      return res.status(400).json({ error: 'You cannot disable your own account.' });
+      return res.status(400).json({ error: 'You cannot ' + verb + ' your own account.' });
     }
     const { rows: tgt } = await query('SELECT admin_role FROM users WHERE id = $1', [id]);
     if (tgt.length && tgt[0].admin_role === 'owner' && await actingRole(req) !== 'owner') {
-      return res.status(403).json({ error: 'Only an owner can disable an owner account.' });
+      return res.status(403).json({ error: 'Only an owner can ' + verb + ' an owner account.' });
     }
   }
 
-  const fields = ['name', 'phone', 'employee_no', 'national_id', 'is_staff', 'is_admin', 'disabled', 'favs_locked'];
+  // Archive: someone who has left. Signed out and unable to sign in, the till
+  // PIN removed, off the staff lists (is_staff false takes them off the sales
+  // rep and mechanic pickers through syncStaffProfile), and the day they left
+  // kept with the reason. Their history is untouched. Restore brings the
+  // record back but leaves sign-in disabled, so turning access back on is a
+  // separate, deliberate step.
+  const archiving = b.archived === true, restoring = b.archived === false;
+  const fields = ['name', 'phone', 'employee_no', 'national_id', 'is_admin', 'favs_locked']
+    .concat(archiving || restoring ? [] : ['is_staff'])
+    .concat(archiving ? [] : ['disabled']);
   const sets = []; const vals = [];
   for (const f of fields) if (b[f] !== undefined) { sets.push(`${f} = $${sets.length + 1}`); vals.push(b[f]); }
 
@@ -3810,12 +4574,34 @@ app.patch('/api/admin/staff/:id', requireManager, async (req, res) => {
     vals.push(JSON.stringify(arr));
   }
 
+  let newRole = null;
   if (b.admin_role !== undefined && await roleExists(b.admin_role)) {
     // Only an owner may mint another owner, and nobody may demote themselves
     // out of the last owner seat by accident.
     let role = b.admin_role;
     if (role === 'owner' && await actingRole(req) !== 'owner') role = 'manager';
-    sets.push(`admin_role = $${sets.length + 1}`); vals.push(role);
+    sets.push(`admin_role = $${sets.length + 1}`); vals.push(role); newRole = role;
+    // A role cannot be both someone's main role and an extra one.
+    if (b.extra_roles === undefined) { sets.push(`extra_roles = extra_roles - $${sets.length + 1}::text`); vals.push(role); }
+  }
+
+  // Placeholders below count vals, not sets: these add assignments with no value.
+  if (b.extra_roles !== undefined) {
+    let primary = newRole;
+    if (!primary) {
+      const { rows: cur } = await query('SELECT admin_role FROM users WHERE id = $1', [id]);
+      primary = cur.length ? cur[0].admin_role : null;
+    }
+    sets.push(`extra_roles = $${vals.length + 1}::jsonb`); vals.push(JSON.stringify(await cleanExtraRoles(b.extra_roles, primary)));
+  }
+  if (archiving) {
+    const left = /^\d{4}-\d{2}-\d{2}$/.test(String(b.left_on || '')) ? b.left_on : null;
+    sets.push('is_archived = true', 'disabled = true', 'is_staff = false', 'archived_at = NOW()',
+              'pin_hash = NULL', 'pin_set_at = NULL');
+    sets.push(`left_on = COALESCE($${vals.length + 1}::date, CURRENT_DATE)`); vals.push(left);
+    sets.push(`archive_reason = $${vals.length + 1}`); vals.push(String(b.archive_reason || '').trim().slice(0, 300) || null);
+  } else if (restoring) {
+    sets.push('is_archived = false', 'is_staff = true', 'archived_at = NULL', 'left_on = NULL', 'archive_reason = NULL');
   }
 
   try {
@@ -3869,7 +4655,8 @@ app.post('/api/admin/staff/:id/password', requireManager, async (req, res) => {
 app.get('/api/admin/roles', requireAdmin, async (_req, res) => {
   const { rows } = await query(
     `SELECT r.code, r.label, r.rank, r.can_manage, r.hidden_tabs, r.is_system,
-            (SELECT COUNT(*)::int FROM users u WHERE u.admin_role = r.code) AS member_count
+            (SELECT COUNT(*)::int FROM users u WHERE u.admin_role = r.code) AS member_count,
+            (SELECT COUNT(*)::int FROM users u WHERE u.extra_roles ? r.code) AS extra_count
        FROM roles r ORDER BY r.rank, r.label`
   );
   res.json({ roles: rows });
@@ -3879,7 +4666,7 @@ app.get('/api/admin/roles', requireAdmin, async (_req, res) => {
 // of carrying its own copy of the rules, which is how the server and the UI
 // used to disagree about who could see what.
 app.get('/api/admin/roles/mine', requireAdmin, async (req, res) => {
-  const { rows: u } = await query('SELECT admin_role FROM users WHERE id = $1', [req.session.userId]);
+  const { rows: u } = await query('SELECT admin_role, extra_roles FROM users WHERE id = $1', [req.session.userId]);
   const code = u.length ? u[0].admin_role : null;
   const { rows } = await query('SELECT code, label, can_manage, hidden_tabs, rank FROM roles WHERE code = $1', [code]);
   if (!rows.length) {
@@ -3888,6 +4675,19 @@ app.get('/api/admin/roles/mine', requireAdmin, async (req, res) => {
   }
   const r = rows[0];
   if (code === 'owner') r.can_manage = true;   // matches roleCanManage()
+  // Extra roles (users.extra_roles) each open their own screens: a screen stays
+  // hidden only when the main role and every extra role all hide it.
+  const extras = Array.isArray(u[0].extra_roles) ? u[0].extra_roles : [];
+  if (extras.length) {
+    const { rows: ex } = await query('SELECT code, label, hidden_tabs FROM roles WHERE code = ANY($1::text[])', [extras]);
+    let hidden = Array.isArray(r.hidden_tabs) ? r.hidden_tabs : [];
+    for (const x of ex) {
+      const h = new Set(Array.isArray(x.hidden_tabs) ? x.hidden_tabs : []);
+      hidden = hidden.filter((t) => h.has(t));
+    }
+    r.hidden_tabs = hidden;
+    r.extra_roles = ex.map((x) => ({ code: x.code, label: x.label }));
+  }
   res.json({ role: r });
 });
 
@@ -3956,9 +4756,10 @@ app.delete('/api/admin/roles/:code', requireManager, async (req, res) => {
   if (rows[0].is_system) return res.status(400).json({ error: '"' + rows[0].label + '" is a built-in role and cannot be deleted.' });
   // No foreign key from users.admin_role, so deleting a role in use would
   // silently leave those staff holding a code that grants nothing.
-  const { rows: held } = await query('SELECT COUNT(*)::int AS n FROM users WHERE admin_role = $1', [req.params.code]);
+  const { rows: held } = await query(
+    'SELECT COUNT(*)::int AS n FROM users WHERE admin_role = $1 OR extra_roles ? $1', [req.params.code]);
   if (held[0].n > 0) {
-    return res.status(400).json({ error: held[0].n + ' staff still have this role. Move them to another role first.' });
+    return res.status(400).json({ error: held[0].n + ' staff still have this role (as their main role or an extra one). Move them to another role first.' });
   }
   await query('DELETE FROM roles WHERE code = $1', [req.params.code]);
   res.json({ ok: true });
@@ -3992,10 +4793,7 @@ async function pinCollides(pin, exceptUserId) {
     `SELECT id, pin_hash FROM users WHERE pin_hash IS NOT NULL AND id <> $1`,
     [exceptUserId || 0]
   );
-  for (const r of rows) {
-    if (await bcrypt.compare(pin, r.pin_hash)) return true;
-  }
-  return false;
+  return !!(await pins.pick(rows, pin));
 }
 
 // Split from setStaffPin so a create can check the PIN before writing anything.
@@ -4012,7 +4810,7 @@ async function validateAndHashPin(pin, exceptUserId) {
     const e = new Error('Another staff member already uses that PIN. PINs identify the person on their own, so each has to be different.');
     e.userFacing = true; throw e;
   }
-  return bcrypt.hash(clean, 10);
+  return pins.hash(clean);
 }
 
 async function setStaffPin(userId, pin) {
@@ -4088,6 +4886,7 @@ app.post('/api/admin/staff/pin-verify', requireAdmin, async (req, res) => {
   }
   const pin = String((req.body && req.body.pin) || '').trim();
   if (!pin) return res.status(400).json({ error: 'PIN required' });
+  const picked = pins.pickedId(req.body);
 
   const { rows } = await query(
     `SELECT u.id, u.name, u.email, u.admin_role, u.pin_hash, u.is_staff,
@@ -4095,16 +4894,14 @@ app.post('/api/admin/staff/pin-verify', requireAdmin, async (req, res) => {
        FROM users u
        LEFT JOIN user_category_members m ON m.user_id = u.id
        LEFT JOIN user_categories c ON c.id = m.category_id AND c.is_active = true
-      WHERE u.pin_hash IS NOT NULL AND u.is_staff = true
-      GROUP BY u.id`
+      WHERE u.pin_hash IS NOT NULL AND u.is_staff = true` + (picked ? ' AND u.id = $1' : '') + `
+      GROUP BY u.id`,
+    picked ? [picked] : []
   );
-  let hit = null;
-  for (const r of rows) {
-    if (await bcrypt.compare(pin, r.pin_hash)) { hit = r; break; }
-  }
+  const hit = await pins.pick(rows, pin);
   if (!hit) {
     pinFail(key, gate.rec);
-    return res.status(401).json({ error: 'PIN not recognised' });
+    return res.status(401).json({ error: picked ? 'That PIN is not right for the name picked' : 'PIN not recognised' });
   }
   PIN_ATTEMPTS.delete(key);
 
@@ -4272,7 +5069,10 @@ app.get('/api/admin/products/:img', requireAdmin, async (req, res) => {
     `SELECT p.img, p.name, p.make_model, p.category, p.condition,
             p.price_usd::float AS price_usd, p.cost_usd::float AS cost_usd,
             p.stock_count, p.low_threshold, p.is_active, p.sku, p.barcode,
-            p.location, p.bin_location, p.supplier_id, s.name AS supplier_name
+            p.location, p.bin_location, p.supplier_id, s.name AS supplier_name,
+            -- So the editor's Commission fields open showing what is stored
+            -- rather than blank, which reads as "no override" on every part.
+            p.commission_type, p.commission_value::float AS commission_value
        FROM products p LEFT JOIN suppliers s ON s.id = p.supplier_id
       WHERE p.img = $1`, [req.params.img]);
   if (!rows.length) return res.status(404).json({ error: 'Not found' });
@@ -4300,6 +5100,22 @@ app.patch('/api/admin/products/:img', requireAdmin, async (req, res) => {
   if (b.condition != null){ params.push(String(b.condition)); sets.push(`condition = $${params.length}`); }
   if (b.location != null){ params.push(String(b.location)); sets.push(`location = $${params.length}`); }
   if (b.bin_location != null){ params.push(String(b.bin_location)); sets.push(`bin_location = $${params.length}`); }
+  // The product editor's serial / warranty / redeemable fields (the POS reads
+  // them off /api/products to ask for serials, date warranties and assign codes).
+  if (b.serial_required != null){ params.push(!!b.serial_required); sets.push(`serial_required = $${params.length}`); }
+  if (b.is_redeemable != null){ params.push(!!b.is_redeemable); sets.push(`is_redeemable = $${params.length}`); }
+  if (b.warranty_days !== undefined){ const w = parseInt(b.warranty_days, 10); params.push(w > 0 ? w : null); sets.push(`warranty_days = $${params.length}`); }
+  // Per-part commission override. `!== undefined`, not `!= null`, because the
+  // editor sends null to mean "no override, use the rep's rate" -- with the
+  // usual != null test an override could be set but never cleared.
+  if (b.commission_type !== undefined) {
+    const t = ['percent', 'amount', 'none'].includes(b.commission_type) ? b.commission_type : null;
+    params.push(t); sets.push(`commission_type = $${params.length}`);
+  }
+  if (b.commission_value !== undefined) {
+    const v = (b.commission_value === '' || b.commission_value == null) ? null : Number(b.commission_value);
+    params.push(Number.isFinite(v) ? v : null); sets.push(`commission_value = $${params.length}`);
+  }
   if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
   params.push(req.params.img);
   try {
@@ -4553,7 +5369,9 @@ app.get('/api/products', async (req, res) => {
       const [{ rows }, { rows: estRows }] = await Promise.all([
         q(
           `SELECT img, name, make_model, category, condition, price_usd, stock_count, low_threshold,
-                  sku, barcode, bin_location, location,
+                  sku, barcode, bin_location, location, warranty_days, serial_required, is_redeemable,
+                  CASE WHEN is_redeemable THEN (SELECT COUNT(*)::int FROM redemption_instruments ri
+                                                 WHERE ri.product_img = products.img AND ri.status = 'in_stock') END AS redeemables_available,
                   CASE WHEN stock_count <= 0 THEN 'out'
                        WHEN stock_count <= low_threshold THEN 'low'
                        ELSE 'in' END AS stock_level
@@ -4604,7 +5422,9 @@ app.get('/api/products', async (req, res) => {
     const [pageRes, cntRes] = await Promise.all([
       q(
         `SELECT img, name, make_model, category, condition, price_usd, stock_count, low_threshold,
-                sku, barcode, bin_location, location,
+                sku, barcode, bin_location, location, warranty_days, serial_required, is_redeemable,
+                CASE WHEN is_redeemable THEN (SELECT COUNT(*)::int FROM redemption_instruments ri
+                                               WHERE ri.product_img = products.img AND ri.status = 'in_stock') END AS redeemables_available,
                 CASE WHEN stock_count <= 0 THEN 'out'
                      WHEN stock_count <= low_threshold THEN 'low'
                      ELSE 'in' END AS stock_level
@@ -4707,7 +5527,7 @@ async function loadCoupon(rawCode) {
   if (!code) return { ok: false, error: 'Coupon code required' };
   const { rows } = await query(
     `SELECT code, kind, amount::float AS amount, min_subtotal::float AS min_subtotal,
-            max_redemptions, redeemed_count, expires_at, is_active, description
+            max_redemptions, redeemed_count, expires_at, is_active, description, scope
        FROM coupons WHERE code = $1`,
     [code]
   );
@@ -4718,6 +5538,13 @@ async function loadCoupon(rawCode) {
   if (c.max_redemptions != null && c.redeemed_count >= c.max_redemptions)
     return { ok: false, error: 'This coupon has reached its redemption limit' };
   return { ok: true, coupon: c };
+}
+
+// What a coupon applies to: the whole cart, or (scope 'clearance') only the
+// lines on clearance. items: [{qty, price_usd, clearance_step}].
+function couponBase(coupon, items, subtotal) {
+  if (coupon.scope !== 'clearance') return subtotal;
+  return Math.round(items.filter((it) => Number(it.clearance_step) > 0).reduce((s, it) => s + Number(it.price_usd || 0) * it.qty, 0) * 100) / 100;
 }
 
 function computeCouponDiscount(coupon, subtotal) {
@@ -4737,11 +5564,13 @@ app.post('/api/coupon/validate', requireAuth, async (req, res) => {
   const r = await loadCoupon(req.body && req.body.code);
   if (!r.ok) return res.status(400).json({ error: r.error });
   const { rows: items } = await query(
-    `SELECT c.qty, p.price_usd FROM cart_items c JOIN products p ON p.id = c.product_id WHERE c.user_id = $1`,
+    `SELECT c.qty, p.price_usd, p.clearance_step FROM cart_items c JOIN products p ON p.id = c.product_id WHERE c.user_id = $1`,
     [req.session.userId]
   );
   const subtotal = items.reduce((s, it) => s + Number(it.price_usd || 0) * it.qty, 0);
-  const { discount, reason } = computeCouponDiscount(r.coupon, subtotal);
+  const base = couponBase(r.coupon, items, subtotal);
+  if (r.coupon.scope === 'clearance' && !(base > 0)) return res.status(400).json({ error: 'This code is for clearance items only: add one from the Clearance page' });
+  const { discount, reason } = computeCouponDiscount(r.coupon, base);
   if (discount === 0 && reason) return res.status(400).json({ error: reason });
   res.json({
     code: r.coupon.code,
@@ -4772,10 +5601,10 @@ app.post('/api/admin/coupons', requireManager, async (req, res) => {
   if (kind === 'percent' && amount > 100) return res.status(400).json({ error: 'percent cannot exceed 100' });
   try {
     await query(
-      `INSERT INTO coupons (code, kind, amount, min_subtotal, max_redemptions, expires_at, description, is_active)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      `INSERT INTO coupons (code, kind, amount, min_subtotal, max_redemptions, expires_at, description, is_active, scope)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       [code, kind, amount, Number(b.min_subtotal || 0), b.max_redemptions || null,
-       b.expires_at || null, b.description || null, b.is_active !== false]
+       b.expires_at || null, b.description || null, b.is_active !== false, b.scope === 'clearance' ? 'clearance' : null]
     );
     res.json({ ok: true, code });
   } catch (e) {
@@ -4957,7 +5786,7 @@ app.post('/api/checkout', requireAuth, async (req, res) => {
   try {
     await client.query('BEGIN');
     const { rows: items } = await client.query(
-      `SELECT c.product_img, c.qty, p.price_usd, p.name, p.make_model
+      `SELECT c.product_img, c.qty, p.price_usd, p.name, p.make_model, p.clearance_step
          FROM cart_items c JOIN products p ON p.id = c.product_id
          WHERE c.user_id = $1`,
       [req.session.userId]
@@ -4972,7 +5801,7 @@ app.post('/api/checkout', requireAuth, async (req, res) => {
     if (req.body && req.body.coupon_code) {
       const cr = await loadCoupon(req.body.coupon_code);
       if (cr.ok) {
-        const cd = computeCouponDiscount(cr.coupon, total);
+        const cd = computeCouponDiscount(cr.coupon, Math.min(total, couponBase(cr.coupon, items, total)));
         if (cd.discount > 0) { couponCode = cr.coupon.code; couponDiscount = cd.discount; total -= couponDiscount; }
       }
     }
@@ -5222,7 +6051,11 @@ app.get('/api/admin/mechanics', requireAdmin, async (req, res) => {
   const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
   const { rows } = await query(
     `SELECT id, user_id, name, phone, email, specialty, certifications,
-            hourly_rate_usd::float AS hourly_rate_usd, hire_date, is_active, notes, role, created_at
+            hourly_rate_usd::float AS hourly_rate_usd, hire_date, is_active, notes, role, created_at,
+            -- The sales-rep default rate. Without it the Mechanics screen's
+            -- Commission % box renders empty on every row regardless of what is
+            -- stored, and saving one silently wipes the others' context.
+            commission_pct::float AS commission_pct
        FROM mechanics ${where} ORDER BY is_active DESC, name ASC`
   );
   res.json({ mechanics: rows });
@@ -5234,13 +6067,16 @@ app.post('/api/admin/mechanics', requireManager, async (req, res) => {
   const role = ['mechanic','advisor','both'].includes(b.role) ? b.role : 'mechanic';
   try {
     const { rows } = await query(
-      `INSERT INTO mechanics (user_id, name, phone, email, specialty, certifications, hourly_rate_usd, hire_date, is_active, notes, role)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+      `INSERT INTO mechanics (user_id, name, phone, email, specialty, certifications, hourly_rate_usd, hire_date, is_active, notes, role, commission_pct)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
       [
         b.user_id || null, b.name, b.phone || null, b.email || null,
         b.specialty || null, b.certifications || null,
         b.hourly_rate_usd != null ? Number(b.hourly_rate_usd) : 25.00,
         b.hire_date || null, b.is_active !== false, b.notes || null, role,
+        // Left NULL rather than defaulted to 0 -- "no rate set" is a state the
+        // commission report calls out, where 0% would read as a decision.
+        b.commission_pct != null && b.commission_pct !== '' ? Number(b.commission_pct) : null,
       ]
     );
     res.json({ ok: true, id: rows[0].id });
@@ -5248,7 +6084,9 @@ app.post('/api/admin/mechanics', requireManager, async (req, res) => {
 });
 
 app.patch('/api/admin/mechanics/:id', requireManager, async (req, res) => {
-  const fields = ['name','phone','email','specialty','certifications','hourly_rate_usd','hire_date','is_active','notes','user_id','role'];
+  // commission_pct is the rep's default rate on a sale line, used by the
+  // commission report for any part with no override of its own.
+  const fields = ['name','phone','email','specialty','certifications','hourly_rate_usd','hire_date','is_active','notes','user_id','role','commission_pct'];
   const sets = []; const vals = [];
   for (const f of fields) if (req.body && req.body[f] !== undefined) {
     sets.push(`${f} = $${sets.length + 1}`); vals.push(req.body[f]);
@@ -5969,15 +6807,31 @@ app.post('/api/admin/stock-counts', requireAdmin, async (req, res) => {
     const params = [];
     if (scope === 'bin') { params.push(b.scope_value || ''); where += ` AND bin_location = $${params.length}`; }
     else if (scope === 'category') { params.push(b.scope_value || ''); where += ` AND category = $${params.length}`; }
-    const { rows: prods } = await query(`SELECT id, img, bin_location, stock_count FROM products WHERE ${where} ORDER BY bin_location NULLS LAST, name`, params);
-    for (const p of prods) {
-      await query(
-        `INSERT INTO stock_count_items (count_id, product_img, product_id, bin_location, system_qty) VALUES ($1,$2,$3,$4,$5)`,
-        [countId, p.img, p.id, p.bin_location, p.stock_count]
-      );
-    }
-    await query(`UPDATE stock_counts SET total_items = $1 WHERE id = $2`, [prods.length, countId]);
-    res.json({ ok: true, id: countId, count_number: num, total_items: prods.length });
+    // Seed every matching product in one statement. This used to SELECT the
+    // products and then fire one INSERT per row: on a full-scope count that is
+    // one round trip per product -- at the ~23,000 this shop carries, tens of
+    // thousands of sequential queries, minutes of wall time with a pool
+    // connection held throughout, and the HTTP request timing out long before
+    // the count was ready (audit M4). INSERT ... SELECT does the same work
+    // inside the server with one round trip.
+    //
+    // The ORDER BY is kept so the generated ids still run in bin/name order.
+    // Nothing depends on that -- the route that reads these items sorts them
+    // itself -- but it costs nothing and keeps the rows laid out the way they
+    // are read.
+    //
+    // $1 is the count id; the scope parameters keep the placeholder numbers
+    // they were built with, so `where` is interpolated unchanged.
+    const seeded = await query(
+      `INSERT INTO stock_count_items (count_id, product_img, product_id, bin_location, system_qty)
+         SELECT $${params.length + 1}, img, id, bin_location, stock_count
+           FROM products WHERE ${where}
+          ORDER BY bin_location NULLS LAST, name`,
+      [...params, countId]
+    );
+    const totalItems = seeded.rowCount;
+    await query(`UPDATE stock_counts SET total_items = $1 WHERE id = $2`, [totalItems, countId]);
+    res.json({ ok: true, id: countId, count_number: num, total_items: totalItems });
   } catch (e) { console.error('[stock count create]', e); res.status(500).json({ error: e.message }); }
 });
 
@@ -6057,6 +6911,98 @@ app.get('/api/admin/bin/:bin', requireAdmin, async (req, res) => {
   res.json({ bin: req.params.bin, products: rows });
 });
 
+// Inbound: reorder, receiving batches, landed/average cost, bills, BOJ rate (inbound.js).
+const inbound = require('./inbound').register(app, {
+  query, getPool: () => pool, requireAdmin, requireCap, recalcPoDueDate, recalcPoPaid, DEV_MODE,
+});
+// Customer notifications: templates, log, quiet hours, retries (notify.js).
+const notify = require('./notify').register(app, {
+  query, getPool: () => pool, requireAdmin, requireCap, sms, mailer,
+  getShopName: async () => { try { const s = shopSettingsToShop(await getShopSettings()); return s && (s.name || s.shop_name); } catch (_) { return null; } },
+});
+// Outbound: pick, pack, dispatch, counter pickup, holds, boards (outbound.js).
+require('./outbound').register(app, { query, getPool: () => pool, requireAdmin, requireCap, notify });
+// Balancing report: inventory roll-forward, sales, collections, earnings (balancing.js).
+require('./balancing').register(app, { query, requireAdmin, requireCap });
+// Departments (who may sell which categories) and the terminal journal
+// (terminal.js). Above cashier.js and the POS sale route: it guards both.
+require('./terminal').register(app, { query, requireAdmin, requireCap, bcrypt, roleCanManage });
+// Cashier: stations, POS orders paid at a cashier, drawer shifts (cashier.js).
+// Must stay above app.post('/api/admin/pos/sale'): it guards that route.
+require('./cashier').register(app, { query, requireAdmin, requireCap, userCan, bcrypt, posSaleHandler });
+// Stock counts: bin counts, blind, recount, photos, approval, ABC cycle (counts.js).
+// upload is assigned at boot, so it is looked up per request.
+require('./counts').register(app, {
+  query, getPool: () => pool, requireAdmin, requireCap, userCan,
+  upload: { single: (field) => (req, res, next) => upload.single(field)(req, res, next) },
+});
+// Warehouse: scanning, bins, stock per bin, moves/putaway (warehouse.js).
+require('./warehouse').register(app, { query, getPool: () => pool, requireAdmin, requireCap, batchInfo: inbound.batchInfo });
+// Sales and planning: lost sales, planning dashboard, targets (planning.js).
+require('./planning').register(app, { query, requireAdmin, requireCap, userCan, notify });
+// General ledger: posting, journal, trial balance, tie-out, QuickBooks export (gl.js).
+const gl = require('./gl').register(app, { query, getPool: () => pool, requireAdmin, requireCap, userCan });
+// Receivables, payables and banking (books.js): QuickBooks-style customer and supplier centres, bank registers.
+const books = require('./books').register(app, { query, getPool: () => pool, requireAdmin, requireCap, userCan, mailer, glPost: () => gl.postAll(null),
+  getShop: async () => shopSettingsToShop(await getShopSettings()), arOpenSql: AR_OPEN_SQL });
+// Loans, invoices raised on the books, recurring invoices and bills, scheduled reminders and late fees (billing.js).
+require('./billing').register(app, { query, getPool: () => pool, requireAdmin, requireCap, userCan, mailer, books, notify,
+  getShop: async () => shopSettingsToShop(await getShopSettings()) });
+// Reading supplier invoices (photo / PDF) for bills and receiving, and signatures on customer invoices (invoice-docs.js).
+require('./invoice-docs').register(app, { query, requireAdmin, requireManager, requireCap, userCan, mailer, docs: docsCentre, devMode: DEV_MODE,
+  getShop: async () => shopSettingsToShop(await getShopSettings()) });
+// Budgets, the 13-week cash forecast, break-even and ROI (budget.js).
+require('./budget').register(app, { query, requireAdmin, requireCap, books });
+// POS add-ons: petty cash and payouts, warranty register and claims, redeemable instruments, terminal presence (posaddons.js).
+const posAddons = require('./posaddons');
+posAddons.register(app, { query, getPool: () => pool, requireAdmin, requireManager, userCan, upload });
+// Payroll for Jamaica (payroll.js): an optional module, off until switched on.
+require('./payroll').register(app, { query, getPool: () => pool, requireAdmin, requireCap, userCan, mailer, glPost: () => gl.postAll(null),
+  getShop: async () => shopSettingsToShop(await getShopSettings()), weekFor: timeclock.weekFor });
+// Commission v2: stored per sale line, rules, splits, clawbacks, statements (commission.js).
+require('./commission').register(app, { query, getPool: () => pool, requireAdmin, requireCap });
+// Freelance reps (portal, invites, quotes, orders), tracked links, referrals (reps.js).
+// People & HR: the staff file (hr.js), and the careers page and applicant
+// tracking (careers.js), which opens the staff file on hire. Team notices are
+// looked up when sent: team.js is registered just below.
+const hrApi = require('./hr').register(app, { query, requireAdmin, requireCap, userCan, docs: docsCentre, notice: (...a) => teamApi.notice(...a) });
+require('./careers').register(app, { query, requireAdmin, requireCap, bcrypt, userCan, getPool: () => pool, hr: hrApi, docs: docsCentre, notice: (...a) => teamApi.notice(...a) });
+// Franchise: leads, NDA, disclosure, agreement and signing, franchisees, royalties, audits, renewals and exits (franchise.js).
+require('./franchise').register(app, { query, getPool: () => pool, requireAdmin, requireCap, userCan, mailer, docs: docsCentre, devMode: DEV_MODE, nextAccountNumber,
+  notice: (...a) => teamApi.notice(...a) });
+// Team chat, voice and video calls, notices and the staff calendar (team.js).
+// Team notices also carry the time clock's lateness letters and requests, and assigned training.
+const teamApi = require('./team').register(app, { query, requireAdmin, requireCap, userCan });
+// Per-person All modules menu: a manager's layout plus each person's own favourites.
+require('./menus').register(app, { query, requireAdmin, requireCap, permState: (id) => userPermState(id) });
+timeclock.useNotices(teamApi.notice);
+const reps = require('./reps').register(app, {
+  query, getPool: () => pool, requireAdmin, requireCap, bcrypt, posSaleHandler, nextQuoteNumber, notify,
+  getEpoch: () => SESSION_EPOCH, totp: require('./security')._totp,
+  getShopName: async () => { try { const s = shopSettingsToShop(await getShopSettings()); return s && (s.name || s.shop_name); } catch (_) { return null; } },
+});
+// Extra sign-in: password reset by email, customer passkeys, Google sign-in (auth-extra.js).
+require('./auth-extra').register(app, { query, bcrypt, mailer, publicUser, getEpoch: () => SESSION_EPOCH, nextAccountNumber, reps, devMode: DEV_MODE, security });
+// Supplier portal: supplier logins, items, consignment, orders, reports (supplierportal.js).
+require('./supplierportal').register(app, { query, requireCap, userCan, bcrypt, mailer, devMode: DEV_MODE });
+// Department store: store locations, inventory & sales by department, stock
+// transfers between branches (deptstore.js). Departments themselves (categories,
+// staff, tills) are managed on the terminal journal page via /api/dept.
+require('./deptstore').register(app, { query, getPool: () => pool, requireCap, userCan });
+// Stock to cash: stock classes, clearance ladder, open box / damaged, return
+// grading, supplier claims, liquidation lots, offer campaigns (stockcash.js).
+// Staff training: lessons, quizzes, practice till, team progress (training.js).
+require('./training').register(app, { query, requireAdmin, requireCap, userCan, posSaleHandler }).useNotices(teamApi.notice);
+// AI counter sales agent: website chat and counter kiosk on the Claude API (ai.js).
+require('./ai').register(app, {
+  query, getPool: () => pool, requireAdmin, requireCap, posSaleHandler, mailer, isLocal: security.isLocal, nextAccountNumber, devMode: DEV_MODE, urlencoded: express.urlencoded({ extended: false, limit: "64kb" }),
+  getShop: async () => shopSettingsToShop(await getShopSettings()),
+});
+const stockcash = require('./stockcash').register(app, {
+  query, getPool: () => pool, requireAdmin, requireCap, userCan, posSaleHandler, mailer, sms,
+  getShopName: async () => { try { const s = shopSettingsToShop(await getShopSettings()); return s && (s.name || s.shop_name); } catch (_) { return null; } },
+});
+
 // POS barcode-gun scan: the counter's #posScan input calls this on every
 // Enter. A scanner always sends the complete code, so this is a plain exact
 // match (case-insensitive) on sku/barcode/img -- no ILIKE, no ranking, just
@@ -6075,7 +7021,9 @@ app.get('/api/admin/pos/scan', requireAdmin, async (req, res) => {
   if (!code) return res.status(400).json({ error: 'code required' });
   const { rows } = await query(
     `SELECT img, name, make_model, category, condition, price_usd, stock_count, low_threshold,
-            sku, barcode, bin_location, location,
+            sku, barcode, bin_location, location, warranty_days, serial_required, is_redeemable,
+            CASE WHEN is_redeemable THEN (SELECT COUNT(*)::int FROM redemption_instruments ri
+                                           WHERE ri.product_img = products.img AND ri.status = 'in_stock') END AS redeemables_available,
             CASE WHEN stock_count <= 0 THEN 'out'
                  WHEN stock_count <= low_threshold THEN 'low'
                  ELSE 'in' END AS stock_level
@@ -6200,8 +7148,10 @@ app.post('/api/admin/products-photo', requireAdmin, upload.single('photo'), asyn
 // =============================================================================
 //  MARKETING — campaigns, segmentation
 // =============================================================================
-async function recipientsForSegment(seg) {
-  let where = "email IS NOT NULL AND email <> '' AND email_opt_in = true";
+async function recipientsForSegment(seg, kind) {
+  let where = kind === 'sms' || kind === 'whatsapp'
+    ? "NOT is_staff AND NOT COALESCE(is_admin, false) AND NOT disabled AND sms_opt_in = true AND length(regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g')) >= 7"
+    : "NOT is_staff AND NOT COALESCE(is_admin, false) AND NOT disabled AND email IS NOT NULL AND email <> '' AND email NOT ILIKE '%.local' AND email_opt_in = true";
   if (seg === 'retail') where += " AND (price_tier IS NULL OR price_tier = 'retail')";
   else if (seg === 'trade') where += " AND price_tier = 'trade'";
   else if (seg === 'fleet') where += " AND price_tier = 'fleet'";
@@ -6243,16 +7193,19 @@ app.post('/api/admin/marketing/campaigns/:id/send', requireManager, async (req, 
   const { rows: c } = await query('SELECT * FROM marketing_campaigns WHERE id = $1', [req.params.id]);
   if (!c.length) return res.status(404).json({ error: 'Campaign not found' });
   if (c[0].status === 'sent') return res.status(400).json({ error: 'Already sent' });
-  const recipients = await recipientsForSegment(c[0].segment === 'all' ? '' : c[0].segment);
+  const recipients = await recipientsForSegment(c[0].segment === 'all' ? '' : c[0].segment, c[0].kind);
   let sent = 0, failed = 0;
   // Best-effort send via existing mailer / sms; if unavailable, just log
   for (const r of recipients) {
     try {
       if (c[0].kind === 'email' && r.email) {
-        await mailer.sendEmail({ to: r.email, subject: c[0].subject || c[0].name, text: c[0].body, html: '<p>' + c[0].body.replace(/\n/g, '<br/>') + '</p>' });
+        const un = await stockcash.unsubLink(req, r.id, 'email');
+        const escB = String(c[0].body).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+        await mailer.sendEmail({ to: r.email, subject: c[0].subject || c[0].name, text: c[0].body + '\n\nUnsubscribe: ' + un,
+          html: '<p>' + escB.replace(/\n/g, '<br/>') + '</p><p style="color:#888;font-size:12px"><a href="' + un + '">Unsubscribe</a></p>' });
         sent++;
       } else if (c[0].kind === 'sms' && r.phone) {
-        await sms.sendSMS({ to: r.phone, body: c[0].body });
+        await sms.sendSMS({ to: r.phone, body: c[0].body + ' Stop: ' + (await stockcash.unsubLink(req, r.id, 'sms')) });
         sent++;
       } else {
         // 'whatsapp' and 'social' are manual share — just count as attempt
@@ -6535,24 +7488,60 @@ app.post('/api/admin/import/services', requireManager, uploadData.single('csv'),
     const text = fs.readFileSync(req.file.path, 'utf8');
     fs.unlink(req.file.path, () => {});
     const rows = csvToObjects(text);
-    let inserted = 0, skipped = 0;
+    // Build the row set first, then write it in chunks. This was one INSERT
+    // per CSV line, each its own implicit transaction and so its own disk
+    // flush (audit M4). The inventory importer above already does it this
+    // way; this is the same shape at lower volume.
+    const items = [];
+    let skipped = 0;
     for (const r of rows) {
       const name = (r.name || r.service || r.description || '').trim();
       if (!name) { skipped++; continue; }
-      await query(
-        `INSERT INTO services (code, name, category, description, default_hours, default_price_usd, default_labor_usd, default_parts_usd)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (code) DO NOTHING`,
-        [
-          r.code || null, name, r.category || null, r.description || null,
-          parseFloat(r.default_hours || r.hours) || 1.0,
-          parseFloat(r.default_price_usd || r.price) || null,
-          parseFloat(r.default_labor_usd || r.labor) || null,
-          parseFloat(r.default_parts_usd || r.parts) || null,
-        ]
-      );
-      inserted++;
+      items.push([
+        r.code || null, name, r.category || null, r.description || null,
+        parseFloat(r.default_hours || r.hours) || 1.0,
+        parseFloat(r.default_price_usd || r.price) || null,
+        parseFloat(r.default_labor_usd || r.labor) || null,
+        parseFloat(r.default_parts_usd || r.parts) || null,
+      ]);
     }
-    res.json({ ok: true, total: rows.length, inserted, skipped });
+
+    // One transaction, so a bad row leaves the services table as it was rather
+    // than half-imported. That is a deliberate change from the old per-row
+    // behaviour and matches what the inventory importer promises.
+    //
+    // ON CONFLICT (code) DO NOTHING is carried over unchanged, and is safe
+    // against duplicate codes inside one VALUES list -- DO NOTHING tolerates
+    // that, where DO UPDATE would raise "cannot affect row a second time".
+    const CHUNK = 400;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (let start = 0; start < items.length; start += CHUNK) {
+        const slice = items.slice(start, start + CHUNK);
+        const params = [];
+        const tuples = slice.map((vals) => {
+          const ph = vals.map((v) => { params.push(v); return '$' + params.length; });
+          return '(' + ph.join(',') + ')';
+        });
+        await client.query(
+          `INSERT INTO services (code, name, category, description, default_hours, default_price_usd, default_labor_usd, default_parts_usd)
+             VALUES ` + tuples.join(',') + ' ON CONFLICT (code) DO NOTHING',
+          params
+        );
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    // Reported exactly as before: every row that carried a usable name. Rows
+    // dropped by ON CONFLICT were counted here previously too, so the numbers
+    // staff see on an import do not move.
+    res.json({ ok: true, total: rows.length, inserted: items.length, skipped });
   } catch (e) { console.error('[import services]', e); res.status(500).json({ error: e.message }); }
 });
 
@@ -6563,7 +7552,9 @@ app.get('/api/admin/suppliers', requireAdmin, async (req, res) => {
   const where = req.query.active === 'true' ? 'WHERE is_active = true' : '';
   const { rows } = await query(
     `SELECT id, code, name, contact_name, phone, email, address, website,
-            payment_terms, account_number, lead_time_days, notes, is_active, created_at
+            payment_terms, account_number, lead_time_days, notes, is_active, created_at,
+            portal_enabled, web_retail_enabled, credit_limit, credit_set_by,
+            tax_id, remit_address, payment_terms_days
        FROM suppliers ${where} ORDER BY is_active DESC, name ASC`
   );
   res.json({ suppliers: rows });
@@ -6574,11 +7565,14 @@ app.post('/api/admin/suppliers', requireManager, async (req, res) => {
   if (!b.name) return res.status(400).json({ error: 'name required' });
   try {
     const { rows } = await query(
-      `INSERT INTO suppliers (code, name, contact_name, phone, email, address, website, payment_terms, account_number, lead_time_days, notes, is_active)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+      `INSERT INTO suppliers (code, name, contact_name, phone, email, address, website, payment_terms, account_number, lead_time_days, notes, is_active,
+                              tax_id, remit_address, payment_terms_days)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
       [b.code || null, b.name, b.contact_name || null, b.phone || null, b.email || null,
        b.address || null, b.website || null, b.payment_terms || null, b.account_number || null,
-       b.lead_time_days ? parseInt(b.lead_time_days, 10) : 7, b.notes || null, b.is_active !== false]
+       b.lead_time_days ? parseInt(b.lead_time_days, 10) : 7, b.notes || null, b.is_active !== false,
+       b.tax_id || null, b.remit_address || null,
+       b.payment_terms_days === '' || b.payment_terms_days == null ? null : parseInt(b.payment_terms_days, 10)]
     );
     res.json({ ok: true, id: rows[0].id });
   } catch (e) {
@@ -6588,9 +7582,16 @@ app.post('/api/admin/suppliers', requireManager, async (req, res) => {
 });
 
 app.patch('/api/admin/suppliers/:id', requireManager, async (req, res) => {
-  const fields = ['code','name','contact_name','phone','email','address','website','payment_terms','account_number','lead_time_days','notes','is_active'];
+  const fields = ['code','name','contact_name','phone','email','address','website','payment_terms','account_number','lead_time_days','notes','is_active',
+    'tax_id','remit_address','payment_terms_days'];
+  const ints = ['lead_time_days', 'payment_terms_days'];
   const sets = []; const vals = [];
-  for (const f of fields) if (req.body && req.body[f] !== undefined) { sets.push(`${f} = $${sets.length+1}`); vals.push(req.body[f]); }
+  for (const f of fields) if (req.body && req.body[f] !== undefined) {
+    let v = req.body[f];
+    // A cleared number box sends '', which an INTEGER column refuses.
+    if (ints.includes(f)) v = v === '' || v == null ? null : parseInt(v, 10);
+    sets.push(`${f} = $${sets.length+1}`); vals.push(v);
+  }
   if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
   vals.push(req.params.id);
   await query(`UPDATE suppliers SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
@@ -6602,13 +7603,61 @@ app.delete('/api/admin/suppliers/:id', requireManager, async (req, res) => {
   res.json({ ok: true });
 });
 
+// Items purchased from one supplier, for the supplier record's "Items
+// purchased" tab: every line on a purchase order that was actually placed (not
+// a draft, not cancelled), with ordered and received quantities, plus lines
+// on stock receipts taken in without a PO -- a receipt against a PO is already
+// its PO's lines, so counting it again would double the quantity.
+// The bills tab is /api/admin/suppliers/:id/bills in books.js, beside apDocs.
+app.get('/api/admin/suppliers/:id/items', requireManager, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: 'Bad supplier id' });
+  try {
+    const { rows: po } = await query(
+      `SELECT 'po' AS source, po.id AS po_id, po.po_number AS ref, po.status, po.currency,
+              to_char(COALESCE(po.received_date, po.ordered_at, po.created_at), 'YYYY-MM-DD') AS day,
+              poi.product_img, poi.sku, COALESCE(p.name, poi.description) AS item,
+              COALESCE(poi.qty_ordered, poi.qty)::int AS qty, COALESCE(poi.qty_received, 0)::int AS qty_received,
+              poi.unit_cost_usd::float AS unit_cost,
+              (COALESCE(poi.qty_ordered, poi.qty) * COALESCE(poi.unit_cost_usd, 0))::float AS total
+         FROM purchase_order_items poi
+         JOIN purchase_orders po ON po.id = poi.po_id
+         LEFT JOIN products p ON p.img = poi.product_img
+        WHERE po.supplier_id = $1 AND po.status NOT IN ('cancelled', 'draft')`, [id]);
+    const { rows: rc } = await query(
+      `SELECT 'receipt' AS source, NULL::int AS po_id, r.receipt_number AS ref, r.status, r.currency,
+              to_char(r.received_at, 'YYYY-MM-DD') AS day,
+              rl.product_img, p.sku, COALESCE(p.name, rl.product_img) AS item,
+              (rl.qty_received + rl.qty_damaged)::int AS qty, rl.qty_received::int AS qty_received,
+              rl.unit_cost::float AS unit_cost,
+              ((rl.qty_received + rl.qty_damaged) * COALESCE(rl.unit_cost, 0))::float AS total
+         FROM receipt_lines rl
+         JOIN receipts r ON r.id = rl.receipt_id
+         LEFT JOIN products p ON p.img = rl.product_img
+        WHERE r.supplier_id = $1 AND r.po_id IS NULL AND r.status = 'posted'`, [id]);
+    const items = po.concat(rc).sort((a, b) => String(b.day || '').localeCompare(String(a.day || '')));
+    res.json({ items: items.slice(0, 500) });
+  } catch (e) { console.error('[supplier items]', e); res.status(500).json({ error: e.message }); }
+});
+
 // Extended product PATCH (the existing endpoint only handles a few fields)
 app.patch('/api/admin/products-ext/:img', requireAdmin, async (req, res) => {
   const fields = ['name','make_model','category','condition','price_usd','stock_count','low_threshold','is_active',
     'sku','barcode','supplier_id','cost_usd','core_charge_usd','env_fee_usd','warranty_days','serial_required',
-    'weight_kg','dim_cm','bin_location','min_stock','markup_pct'];
+    'weight_kg','dim_cm','bin_location','min_stock','markup_pct',
+    // Per-part commission override; NULL type falls through to the rep's rate.
+    'commission_type','commission_value'];
   const sets = []; const vals = [];
-  for (const f of fields) if (req.body && req.body[f] !== undefined) { sets.push(`${f} = $${sets.length+1}`); vals.push(req.body[f]); }
+  for (const f of fields) if (req.body && req.body[f] !== undefined) {
+    let v = req.body[f];
+    if (f === 'commission_type') {
+      // '' from a cleared <select> means "no override", which is NULL, not a
+      // value the CHECK constraint would reject.
+      v = ['percent', 'amount', 'none'].includes(v) ? v : null;
+    }
+    if (f === 'commission_value') v = (v === '' || v == null) ? null : Number(v);
+    sets.push(`${f} = $${sets.length + 1}`); vals.push(v);
+  }
   if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
   vals.push(req.params.img);
   await query(`UPDATE products SET ${sets.join(', ')} WHERE img = $${vals.length}`, vals);
@@ -6636,6 +7685,7 @@ app.get('/api/admin/products-ext', requireAdmin, async (req, res) => {
             p.sku, p.barcode, p.core_charge_usd::float AS core_charge_usd,
             p.env_fee_usd::float AS env_fee_usd, p.warranty_days, p.serial_required,
             p.weight_kg::float AS weight_kg, p.dim_cm, p.bin_location, p.markup_pct::float AS markup_pct,
+            p.commission_type, p.commission_value::float AS commission_value,
             p.supplier_id, s.name AS supplier_name
        FROM products p LEFT JOIN suppliers s ON s.id = p.supplier_id
        ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
@@ -6672,7 +7722,12 @@ app.get('/api/admin/purchase-orders/:id', requireAdmin, async (req, res) => {
             COALESCE(u.name, u.email) AS received_by_name
        FROM purchase_order_payments pop LEFT JOIN users u ON u.id = pop.received_by
       WHERE pop.po_id = $1 ORDER BY pop.created_at DESC`, [req.params.id]);
-  res.json({ purchase_order: po[0], items, payments });
+  // Supplier bills entered on Receive Stock for this PO (they, not the PO's own invoice total, are what Payables owes).
+  const { rows: bills } = await query(
+    `SELECT id, number, to_char(bill_date, 'YYYY-MM-DD') AS bill_date, to_char(due_date, 'YYYY-MM-DD') AS due_date, total::float AS total,
+            variance_kind, variance_amount::float AS variance_amount, voided_at
+       FROM ap_bills WHERE po_id = $1 ORDER BY bill_date, id`, [req.params.id]).catch(() => ({ rows: [] }));
+  res.json({ purchase_order: po[0], items, payments, bills });
 });
 
 app.post('/api/admin/purchase-orders', requireManager, async (req, res) => {
@@ -6713,14 +7768,122 @@ app.post('/api/admin/purchase-orders', requireManager, async (req, res) => {
   } finally { client.release(); }
 });
 
+// due_date is derived, not typed: terms are "net N days from the invoice date",
+// so it is recomputed whenever either of those two moves. Stored rather than
+// computed per query so ageing can sort and filter on it.
+async function recalcPoDueDate(poId, exec) {
+  const run = exec || query;
+  await run(
+    `UPDATE purchase_orders
+        SET due_date = CASE
+              WHEN invoice_date IS NOT NULL AND payment_terms_days IS NOT NULL
+                THEN invoice_date + payment_terms_days
+              -- No invoice date yet but terms are known: fall back to the date
+              -- the stock was entered, which is the only other date we have.
+              WHEN payment_terms_days IS NOT NULL AND received_date IS NOT NULL
+                THEN received_date::date + payment_terms_days
+              ELSE NULL END
+      WHERE id = $1`, [poId]);
+}
+
+// What is still owed on a PO, from the payments actually recorded against it.
+// amount_paid_usd/balance_due_usd are a cached roll-up of
+// purchase_order_payments, refreshed on every write to that table so the
+// payables report and the PO screen can read one column instead of summing.
+async function recalcPoPaid(poId, exec) {
+  const run = exec || query;
+  await run(
+    `UPDATE purchase_orders po
+        SET amount_paid_usd = pd.paid,
+            -- Owed is measured against what the supplier billed when we know
+            -- it, and against our own computed total when we do not.
+            balance_due_usd = GREATEST(COALESCE(po.invoice_total_usd, po.total_usd, 0) - pd.paid, 0)
+       FROM (SELECT COALESCE(SUM(amount_usd), 0) AS paid
+               FROM purchase_order_payments WHERE po_id = $1) pd
+      WHERE po.id = $1`, [poId]);
+}
+
 app.patch('/api/admin/purchase-orders/:id', requireManager, async (req, res) => {
-  const fields = ['status','expected_date','received_date','shipping_usd','tax_usd','invoice_number','notes'];
+  const fields = ['status','expected_date','received_date','shipping_usd','tax_usd','invoice_number','notes',
+    // Supplier invoice detail: the paperwork's own date, its own total, and the
+    // terms that date starts the clock on.
+    'invoice_date','invoice_total_usd','payment_terms_days'];
   const sets = []; const vals = [];
-  for (const f of fields) if (req.body && req.body[f] !== undefined) { sets.push(`${f} = $${sets.length+1}`); vals.push(req.body[f]); }
+  for (const f of fields) if (req.body && req.body[f] !== undefined) {
+    let v = req.body[f];
+    // Blank from a cleared date or number input means "not recorded", which is
+    // NULL -- '' would fail the date/numeric cast.
+    if (v === '') v = null;
+    sets.push(`${f} = $${sets.length + 1}`); vals.push(v);
+  }
   if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
   vals.push(req.params.id);
   await query(`UPDATE purchase_orders SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
+  await recalcPoDueDate(req.params.id);
+  // invoice_total_usd is what "owed" is measured against, so a change to it
+  // moves the balance even when no payment was touched.
+  await recalcPoPaid(req.params.id);
   res.json({ ok: true });
+});
+
+// ---- supplier payments against a purchase order ----------------------------
+app.get('/api/admin/purchase-orders/:id/payments', requireAdmin, async (req, res) => {
+  const { rows } = await query(
+    `SELECT pp.*, COALESCE(u.name, u.email) AS received_by_name
+       FROM purchase_order_payments pp LEFT JOIN users u ON u.id = pp.received_by
+      WHERE pp.po_id = $1 ORDER BY COALESCE(pp.paid_on, pp.created_at::date) DESC, pp.id DESC`,
+    [req.params.id]);
+  const { rows: po } = await query(
+    `SELECT COALESCE(invoice_total_usd, total_usd, 0)::float AS billed,
+            amount_paid_usd::float AS paid, balance_due_usd::float AS owed,
+            invoice_number, invoice_date, due_date, payment_terms_days
+       FROM purchase_orders WHERE id = $1`, [req.params.id]);
+  if (!po.length) return res.status(404).json({ error: 'PO not found' });
+  res.json({ payments: rows, summary: po[0] });
+});
+
+app.post('/api/admin/purchase-orders/:id/payments', requireManager, async (req, res) => {
+  const b = req.body || {};
+  const amount = Number(b.amount_usd);
+  if (!(amount > 0)) return res.status(400).json({ error: 'Enter an amount greater than zero.' });
+  const { rows: po } = await query('SELECT id FROM purchase_orders WHERE id = $1', [req.params.id]);
+  if (!po.length) return res.status(404).json({ error: 'PO not found' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `INSERT INTO purchase_order_payments (po_id, amount_usd, method, reference, notes, received_by, paid_on)
+         VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7::date, CURRENT_DATE)) RETURNING id`,
+      [req.params.id, Math.round(amount * 100) / 100,
+       b.method || null, b.reference || null, b.notes || null, req.session.userId,
+       b.paid_on || null]);
+    await recalcPoPaid(req.params.id, client.query.bind(client));
+    await client.query('COMMIT');
+    const { rows: after } = await query(
+      'SELECT amount_paid_usd::float AS paid, balance_due_usd::float AS owed FROM purchase_orders WHERE id = $1',
+      [req.params.id]);
+    res.json({ ok: true, id: rows[0].id, paid: after[0].paid, owed: after[0].owed });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('[po payment]', e);
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+app.delete('/api/admin/purchase-orders/:poId/payments/:id', requireManager, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rowCount } = await client.query(
+      'DELETE FROM purchase_order_payments WHERE id = $1 AND po_id = $2', [req.params.id, req.params.poId]);
+    if (!rowCount) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Payment not found' }); }
+    await recalcPoPaid(req.params.poId, client.query.bind(client));
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
 });
 
 async function recalcPoTotals(poId) {
@@ -6749,11 +7912,12 @@ app.delete('/api/admin/purchase-orders/:poId/items/:id', requireManager, async (
 
 // Receive a PO (full or partial): bumps inventory + updates last cost.
 // Body: { items: [{ id: <po_item_id>, qty_now: <number> }, ...] }
-app.post('/api/admin/purchase-orders/:id/receive', requireManager, async (req, res) => {
-  const items = (req.body && req.body.items) || [];
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+// Receive PO lines inside the caller's transaction: stock up (weighted-average
+// cost), optional sell price / bin, qty_received, and the PO's status. Returns
+// what came in at the PO's unit cost -- the value the supplier's bill is tallied
+// against on Receive Stock.
+async function receivePoItems(client, poId, items) {
+    const received = [];
     let anyOutstanding = false;
     for (const r of items) {
       const qty = parseInt(r.qty_now, 10);
@@ -6764,23 +7928,97 @@ app.post('/api/admin/purchase-orders/:id/receive', requireManager, async (req, r
       const max = it.qty_ordered - it.qty_received;
       const got = Math.min(qty, max);
       if (got <= 0) continue;
-      // Bump inventory if linked to a product. Cost tracks the PO line's unit
-      // cost; a sell price and/or bin can be set on the same action.
+      // Bump inventory if linked to a product. Cost becomes the weighted
+      // average of the stock on hand and this delivery -- it used to be
+      // overwritten with the latest PO cost, which mis-stated the margin on
+      // every unit already on the shelf. (The Receive screen in
+      // warehouse.html also adds freight/duty; this quick path does not.)
+      // A sell price and/or bin can be set on the same action.
+      await client.query("SELECT set_config('vision.stock_reason', 'po_quick_receive', true)");   // stock ledger: why it moved (GL)
       if (it.product_img) {
-        await client.query('UPDATE products SET stock_count = stock_count + $1, cost_usd = $2 WHERE img = $3', [got, it.unit_cost_usd, it.product_img]);
+        await client.query(
+          `UPDATE products
+              SET cost_usd = CASE WHEN COALESCE(cost_usd, 0) <= 0 OR stock_count <= 0 OR $2::numeric IS NULL
+                                  THEN COALESCE($2::numeric, cost_usd)
+                                  ELSE ROUND((cost_usd * stock_count + $2::numeric * $1) / (stock_count + $1), 2) END,
+                  stock_count = stock_count + $1,
+                  costing_method = 'average'
+            WHERE img = $3`, [got, it.unit_cost_usd, it.product_img]);
         const pn = (r.price_now != null && r.price_now !== '' && Number.isFinite(Number(r.price_now))) ? Number(r.price_now) : null;
         if (pn != null) await client.query('UPDATE products SET price_usd = $1 WHERE img = $2', [pn, it.product_img]);
         if (r.bin_now != null && String(r.bin_now).trim()) await client.query('UPDATE products SET bin_location = $1 WHERE img = $2', [String(r.bin_now).trim(), it.product_img]);
       }
       await client.query('UPDATE purchase_order_items SET qty_received = qty_received + $1 WHERE id = $2', [got, it.id]);
       if (got < max) anyOutstanding = true;
+      received.push({ po_item_id: it.id, product_img: it.product_img, description: it.description, qty: got, unit_cost: Number(it.unit_cost_usd) || 0 });
     }
     // Also check items not in this batch but still outstanding
-    const { rows: rem } = await client.query('SELECT SUM(qty_ordered - qty_received)::int AS r FROM purchase_order_items WHERE po_id = $1', [req.params.id]);
-    const newStatus = (rem[0].r || 0) > 0 ? (anyOutstanding ? 'partial' : 'partial') : 'received';
-    await client.query(`UPDATE purchase_orders SET status = $1, received_date = COALESCE(received_date, NOW()) WHERE id = $2`, [newStatus, req.params.id]);
+    const { rows: rem } = await client.query('SELECT SUM(qty_ordered - qty_received)::int AS r FROM purchase_order_items WHERE po_id = $1', [poId]);
+    return { received, status: (rem[0].r || 0) > 0 ? 'partial' : 'received', outstanding: rem[0].r || 0 };
+}
+
+app.post('/api/admin/purchase-orders/:id/receive', requireManager, async (req, res) => {
+  const items = (req.body && req.body.items) || [];
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { status: newStatus } = await receivePoItems(client, req.params.id, items);
+
+    // The supplier's paperwork, captured in the same action as the goods -- it
+    // arrives in the same box, and asking the clerk to go back and edit the PO
+    // afterwards is how it ends up never recorded.
+    //
+    // entry_date is the inventory entry date and defaults to now, but is
+    // settable: stock received on Friday and keyed in on Monday should read
+    // Friday. It only fills a blank received_date, so re-receiving the rest of
+    // a partial delivery does not rewrite when the first half arrived.
+    const b = req.body || {};
+    const inv = [];
+    const ivals = [];
+    const put = (col, val) => { ivals.push(val === '' ? null : val); inv.push(`${col} = $${ivals.length}`); };
+    if (b.invoice_number !== undefined) put('invoice_number', b.invoice_number);
+    if (b.invoice_date !== undefined) put('invoice_date', b.invoice_date);
+    if (b.invoice_total_usd !== undefined) put('invoice_total_usd', b.invoice_total_usd);
+    if (b.tax_usd !== undefined) put('tax_usd', b.tax_usd);
+    if (b.shipping_usd !== undefined) put('shipping_usd', b.shipping_usd);
+    if (b.payment_terms_days !== undefined) put('payment_terms_days', b.payment_terms_days);
+
+    ivals.push(newStatus); const statusPos = ivals.length;
+    ivals.push(b.entry_date || null); const entryPos = ivals.length;
+    ivals.push(req.params.id);
+    await client.query(
+      `UPDATE purchase_orders
+          SET ${inv.length ? inv.join(', ') + ',' : ''}
+              status = $${statusPos},
+              received_date = COALESCE(received_date, $${entryPos}::timestamptz, NOW())
+        WHERE id = $${ivals.length}`, ivals);
+
+    // tax/shipping feed the computed total, and the invoice total and terms feed
+    // what is owed and when, so both roll-ups are refreshed before replying.
+    if (b.tax_usd !== undefined || b.shipping_usd !== undefined) {
+      const { rows: it } = await client.query(
+        'SELECT COALESCE(SUM(total_usd),0)::float AS s FROM purchase_order_items WHERE po_id = $1', [req.params.id]);
+      const { rows: p2 } = await client.query(
+        'SELECT shipping_usd::float AS sh, tax_usd::float AS tx FROM purchase_orders WHERE id = $1', [req.params.id]);
+      await client.query('UPDATE purchase_orders SET subtotal_usd = $1, total_usd = $2 WHERE id = $3',
+        [it[0].s, it[0].s + (p2[0].sh || 0) + (p2[0].tx || 0), req.params.id]);
+    }
+    await recalcPoDueDate(req.params.id, client.query.bind(client));
+    await recalcPoPaid(req.params.id, client.query.bind(client));
+
     await client.query('COMMIT');
-    res.json({ ok: true, status: newStatus });
+    const { rows: fin } = await query(
+      `SELECT invoice_number, invoice_date, invoice_total_usd::float AS invoice_total_usd,
+              total_usd::float AS total_usd, tax_usd::float AS tax_usd,
+              payment_terms_days, due_date, received_date,
+              balance_due_usd::float AS balance_due_usd
+         FROM purchase_orders WHERE id = $1`, [req.params.id]);
+    // A supplier total that disagrees with the lines is worth saying out loud
+    // rather than leaving two numbers to be noticed side by side.
+    const f = fin[0] || {};
+    const variance = (f.invoice_total_usd != null && f.total_usd != null)
+      ? Math.round((f.invoice_total_usd - f.total_usd) * 100) / 100 : null;
+    res.json({ ok: true, status: newStatus, purchase_order: f, invoice_variance_usd: variance });
   } catch (e) {
     await client.query('ROLLBACK');
     console.error('[po receive]', e);
@@ -7072,43 +8310,6 @@ app.post('/api/admin/purchase-orders/bulk', requireManager, async (req, res) => 
 // stock_count goes up, cost_usd is refreshed when a unit cost is given, and it
 // lands in warehouse_activity so the movement is auditable. Each item must
 // match an existing product by img (exact) or sku.
-// Shared by the manual endpoint below and the CSV import commit further down:
-// match each row to a product by img (exact) or sku, apply the stock/cost/
-// price/bin updates and log the warehouse_activity row, inside the caller's
-// transaction. Kept as one function so both entry points move stock the same
-// way.
-async function receiveRowsIntoStock(client, rows, activityNote, supplierId) {
-  const results = [];
-  for (const r of rows) {
-    const qty = parseInt(r.qty, 10);
-    if (!qty || qty < 1) { results.push({ ok: false, error: 'qty must be a positive whole number', item: r }); continue; }
-    const key = String(r.product_img || r.sku || '').trim();
-    if (!key) { results.push({ ok: false, error: 'product_img or sku required', item: r }); continue; }
-    const { rows: pr } = await client.query(
-      'SELECT img, name, stock_count FROM products WHERE img = $1 OR (sku IS NOT NULL AND sku = $1) LIMIT 1', [key]);
-    if (!pr.length) { results.push({ ok: false, error: 'no product matches "' + key + '"', item: r }); continue; }
-    const p = pr[0];
-    await client.query('UPDATE products SET stock_count = stock_count + $1 WHERE img = $2', [qty, p.img]);
-    const num = function (v) { return (v != null && v !== '') && Number.isFinite(Number(v)) ? Number(v) : null; };
-    const cost = num(r.unit_cost_usd);
-    const price = num(r.price_usd);
-    if (cost != null)  await client.query('UPDATE products SET cost_usd  = $1 WHERE img = $2', [cost, p.img]);
-    if (price != null) await client.query('UPDATE products SET price_usd = $1 WHERE img = $2', [price, p.img]);
-    if (r.name != null && String(r.name).trim()) await client.query('UPDATE products SET name = $1 WHERE img = $2', [String(r.name).trim(), p.img]);
-    if (r.location != null) await client.query('UPDATE products SET location = $1 WHERE img = $2', [String(r.location), p.img]);
-    if (r.bin_location != null) await client.query('UPDATE products SET bin_location = $1 WHERE img = $2', [String(r.bin_location), p.img]);
-    if (supplierId) await client.query('UPDATE products SET supplier_id = COALESCE(supplier_id, $1) WHERE img = $2', [supplierId, p.img]);
-    await logActivity('receive', {
-      product_img: p.img, qty_before: p.stock_count, qty_after: p.stock_count + qty, qty_delta: qty,
-      bin_location: r.bin_location != null ? String(r.bin_location) : null,
-      ref_kind: 'no_po', ref_id: supplierId, notes: activityNote,
-      created_at: r.date_received ? String(r.date_received).trim() + ' 12:00:00' : null,
-    });
-    results.push({ ok: true, product_img: p.img, name: p.name, qty_added: qty, stock_after: p.stock_count + qty });
-  }
-  return results;
-}
-
 function receiveActivityNote(supplierName, invoice, note) {
   return [
     supplierName ? 'supplier: ' + supplierName : '',
@@ -7136,16 +8337,195 @@ app.post('/api/admin/receive', requireManager, requireCap('inventory.adjust_stoc
   const activityNote = receiveActivityNote(supplierName, invoice, note);
 
   const client = await pool.connect();
-  let results;
   try {
     await client.query('BEGIN');
-    results = await receiveRowsIntoStock(client, rows, activityNote, supplierId);
+    const results = await receiveLooseItems(client, supplierId, rows, activityNote);
     await client.query('COMMIT');
     res.json({ ok: results.every((x) => x.ok), received: results });
   } catch (e) {
     await client.query('ROLLBACK');
     console.error('[receive no-po]', e);
     res.status(500).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+// Receive parts without a PO inside the caller's transaction. Each result says
+// the unit cost it came in at (the cost given, else the part's cost before), so
+// Receive Stock can tally the value against the supplier's bill.
+// The CSV receival import (further down) commits through it too, so every
+// path that receives without a PO moves stock the same way.
+async function receiveLooseItems(client, supplierId, rows, activityNote) {
+    const results = [];
+    for (const r of rows) {
+      const qty = parseInt(r.qty, 10);
+      if (!qty || qty < 1) { results.push({ ok: false, error: 'qty must be a positive whole number', item: r }); continue; }
+      const key = String(r.product_img || r.sku || '').trim();
+      if (!key) { results.push({ ok: false, error: 'product_img or sku required', item: r }); continue; }
+      const { rows: pr } = await client.query(
+        'SELECT img, name, stock_count, cost_usd FROM products WHERE img = $1 OR (sku IS NOT NULL AND sku = $1) LIMIT 1', [key]);
+      if (!pr.length) { results.push({ ok: false, error: 'no product matches "' + key + '"', item: r }); continue; }
+      const p = pr[0];
+      await client.query("SELECT set_config('vision.stock_reason', 'po_quick_receive', true)");   // stock ledger: why it moved (GL)
+      await client.query('UPDATE products SET stock_count = stock_count + $1 WHERE img = $2', [qty, p.img]);
+      const num = function (v) { return (v != null && v !== '') && Number.isFinite(Number(v)) ? Number(v) : null; };
+      const cost = num(r.unit_cost_usd);
+      const price = num(r.price_usd);
+      if (cost != null)  await client.query('UPDATE products SET cost_usd  = $1 WHERE img = $2', [cost, p.img]);
+      if (price != null) await client.query('UPDATE products SET price_usd = $1 WHERE img = $2', [price, p.img]);
+      if (r.name != null && String(r.name).trim()) await client.query('UPDATE products SET name = $1 WHERE img = $2', [String(r.name).trim(), p.img]);
+      if (r.location != null) await client.query('UPDATE products SET location = $1 WHERE img = $2', [String(r.location), p.img]);
+      if (r.bin_location != null) await client.query('UPDATE products SET bin_location = $1 WHERE img = $2', [String(r.bin_location), p.img]);
+      if (supplierId) await client.query('UPDATE products SET supplier_id = COALESCE(supplier_id, $1) WHERE img = $2', [supplierId, p.img]);
+      await logActivity('receive', {
+        product_img: p.img, qty_before: p.stock_count, qty_after: p.stock_count + qty, qty_delta: qty,
+        bin_location: r.bin_location != null ? String(r.bin_location) : null,
+        ref_kind: 'no_po', ref_id: supplierId, notes: activityNote,
+        created_at: r.date_received ? String(r.date_received).trim() + ' 12:00:00' : null,
+      });
+      results.push({ ok: true, product_img: p.img, name: p.name, qty_added: qty, stock_after: p.stock_count + qty, unit_cost: cost != null ? cost : Number(p.cost_usd) || 0 });
+    }
+    return results;
+}
+
+// =============================================================================
+//  RECEIVE STOCK (2026-10): one screen for a delivery, against a PO or without
+//  one, with the supplier's bill entered in the same step.
+//
+//  Body: { po_id | supplier_id, items, entry_date, notes,
+//          bill: null | { number, bill_date, due_date, subtotal, tax, freight, total },
+//          variance: { kind, account_id, reason } }
+//    items with a PO: [{ id: po_item_id, qty_now, price_now, bin_now }]
+//    items without:   [{ product_img | sku, qty, unit_cost_usd, price_usd, name, bin_location }]
+//
+//  Stock comes in exactly as the two older receive routes do it (same helpers,
+//  same 'po_quick_receive' stock reason, so the ledger's daily stock entry
+//  credits Goods Received Not Invoiced). The bill, when given, is an A/P bill
+//  (Payables, Pay Bills, gl.js ap_bill poster):
+//    Dr 2050 Goods Received Not Invoiced   the value received (qty x unit cost)
+//    Dr 1160 GCT Recoverable               the bill's GCT (gct_amount)
+//    Dr 5060 Freight and Duty In           freight
+//    Dr / Cr the variance                  bill subtotal less the value received:
+//        within J$1          rounding     -> 5050 Purchase Price Variance
+//        back_order (> 0)    the rest is still to come -> stays in 2050; with no
+//                            PO, a back-order PO is opened for that amount
+//        adjustment          the supplier's price differs -> 5050 Purchase Price Variance
+//        credit (> 0)        they owe us a credit -> 1150 Supplier Claims Receivable
+//        other               the account chosen, with a reason
+//    Cr 2000 Accounts Payable              the bill total
+//  The PO keeps the bill's number and date for reference but not its total:
+//  a PO with an invoice total is billed through the PO itself, and this bill
+//  would count it twice. Everything is one transaction: stock, bill and any
+//  back-order PO all go in, or none of it does.
+// =============================================================================
+app.post('/api/admin/receive-stock', requireManager, async (req, res) => {
+  const b = req.body || {};
+  const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
+  const money = (v) => 'J$' + r2(v).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const isDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+  const items = Array.isArray(b.items) ? b.items : [];
+  const poId = parseInt(b.po_id, 10) || null;
+  if (!items.length) return res.status(400).json({ error: 'Nothing to receive: add at least one line' });
+  if (!poId && !(await userCan(req, 'inventory.adjust_stock'))) return res.status(403).json({ error: 'Your account is not allowed to receive stock without a purchase order.' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    let po = null, supplierId = parseInt(b.supplier_id, 10) || null;
+    if (poId) {
+      const { rows } = await client.query(`SELECT * FROM purchase_orders WHERE id = $1 FOR UPDATE`, [poId]);
+      if (!rows.length) throw Object.assign(new Error('Purchase order not found'), { status: 404 });
+      po = rows[0];
+      if (['received', 'cancelled'].includes(po.status)) throw Object.assign(new Error('This purchase order is ' + po.status + ': nothing is left to receive'), { status: 409 });
+      supplierId = po.supplier_id;
+    }
+    const { rows: sup } = supplierId ? await client.query(`SELECT id, name, payment_terms_days FROM suppliers WHERE id = $1`, [supplierId]) : { rows: [] };
+    const supplier = sup[0] || null;
+
+    // 1. The stock.
+    let lines, status = null, outstanding = 0;
+    if (po) {
+      const out = await receivePoItems(client, poId, items);
+      lines = out.received; status = out.status; outstanding = out.outstanding;
+      if (!lines.length) throw Object.assign(new Error('Enter a quantity on at least one line'), { status: 400 });
+      await client.query(`UPDATE purchase_orders SET status = $2, received_date = COALESCE(received_date, $3::timestamptz, NOW()) WHERE id = $1`, [poId, status, isDate(b.entry_date) ? b.entry_date : null]);
+    } else {
+      const note = [supplier ? 'supplier: ' + supplier.name : '', b.bill && b.bill.number ? 'bill ' + b.bill.number : '', String(b.notes || '').trim()].filter(Boolean).join(' · ') || 'Received without a PO';
+      const res2 = await receiveLooseItems(client, supplierId, items, note);
+      const bad = res2.filter((x) => !x.ok);
+      if (bad.length) throw Object.assign(new Error(bad.map((x) => x.error).join('; ')), { status: 400 });
+      lines = res2.map((x) => ({ product_img: x.product_img, description: x.name, qty: x.qty_added, unit_cost: x.unit_cost }));
+    }
+    const value = r2(lines.reduce((t, l) => t + l.qty * l.unit_cost, 0));
+
+    // 2. The bill.
+    let bill = null, backOrderPo = null, variance = null;
+    if (b.bill) {
+      const bl = b.bill;
+      if (!supplier) throw Object.assign(new Error('Choose the supplier the bill is from'), { status: 400 });
+      if (!isDate(bl.bill_date)) throw Object.assign(new Error('Bill date'), { status: 400 });
+      const sub = r2(bl.subtotal), tax = r2(bl.tax), frt = r2(bl.freight), tot = r2(bl.total);
+      if (sub < 0 || tax < 0 || frt < 0) throw Object.assign(new Error('Bill amounts cannot be negative'), { status: 400 });
+      if (!(tot > 0)) throw Object.assign(new Error('Bill total'), { status: 400 });
+      if (Math.abs(r2(sub + tax + frt) - tot) > 0.01) throw Object.assign(new Error('Subtotal + GCT + freight is ' + money(sub + tax + frt) + ', not the bill total ' + money(tot)), { status: 400 });
+      const number = String(bl.number || '').trim().slice(0, 60) || null;
+      if (number) {
+        const { rows: dup } = await client.query(`SELECT 1 FROM ap_bills WHERE supplier_id = $1 AND lower(number) = lower($2) AND kind = 'bill' AND voided_at IS NULL`, [supplierId, number]);
+        if (dup.length) throw Object.assign(new Error(supplier.name + ' already has a bill numbered ' + number), { status: 409 });
+      }
+      const terms = po && po.payment_terms_days != null ? po.payment_terms_days : supplier.payment_terms_days || 0;
+      const due = isDate(bl.due_date) ? bl.due_date : new Date(Date.parse(bl.bill_date) + terms * 86400000).toISOString().slice(0, 10);
+      if (due < bl.bill_date) throw Object.assign(new Error('The due date is before the bill date'), { status: 400 });
+      const v = r2(sub - value), vb = b.variance || {};
+      const acct = async (key) => { const { rows } = await client.query(`SELECT id FROM gl_accounts WHERE system_key = $1`, [key]); if (!rows.length) throw new Error('No account set up for ' + key); return rows[0].id; };
+      let kind = null, vAcct = null, reason = String(vb.reason || '').trim().slice(0, 300) || null;
+      if (Math.abs(v) <= 1) { kind = v ? 'rounding' : null; vAcct = v ? await acct('ppv') : null; }
+      else {
+        kind = ['back_order', 'adjustment', 'credit', 'other'].includes(vb.kind) ? vb.kind : null;
+        if (!kind) throw Object.assign(new Error('The bill subtotal is ' + money(sub) + ' but ' + money(value) + ' was received: say why (back order, bill adjustment, supplier credit or other)'), { status: 400, variance: v });
+        if ((kind === 'back_order' || kind === 'credit') && v < 0) throw Object.assign(new Error('The bill is less than what was received, so it cannot be a ' + (kind === 'back_order' ? 'back order' : 'credit due') + ': use bill adjustment or other'), { status: 400 });
+        if (kind === 'back_order') vAcct = await acct('grni');
+        if (kind === 'adjustment') vAcct = await acct('ppv');
+        if (kind === 'credit') vAcct = await acct('supplier_claims');
+        if (kind === 'other') {
+          if (!reason || reason.length < 3) throw Object.assign(new Error('Say what the difference is for'), { status: 400 });
+          const { rows: oa } = await client.query(`SELECT id, system_key, qb_type FROM gl_accounts WHERE id = $1 AND is_active`, [parseInt(vb.account_id, 10) || 0]);
+          if (!oa.length || ['ar', 'ap'].includes(oa[0].system_key) || ['AR', 'AP'].includes(oa[0].qb_type)) throw Object.assign(new Error('Choose the account the difference goes to'), { status: 400 });
+          vAcct = oa[0].id;
+        }
+      }
+      variance = { amount: v, kind };
+      const grni = await acct('grni');
+      const bl2 = [];
+      const goods = r2(value + (kind === 'back_order' ? v : 0));
+      if (goods) bl2.push([grni, 'Goods received' + (kind === 'back_order' ? ' and billed ahead (back order)' : ''), goods]);
+      if (vAcct && kind !== 'back_order' && v) bl2.push([vAcct, ({ rounding: 'Rounding', adjustment: 'Bill adjustment', credit: 'Supplier credit due', other: 'Other' })[kind] + (reason ? ': ' + reason : ''), v]);
+      if (frt) bl2.push([await acct('freight_in'), 'Freight and duty', frt]);
+      const memo = 'Receive Stock' + (po ? ' · ' + po.po_number : '') + (number ? ' · bill ' + number : '');
+      const { rows: ab } = await client.query(
+        `INSERT INTO ap_bills (kind, supplier_id, number, bill_date, due_date, memo, gct_amount, total, created_by, po_id, variance_kind, variance_amount, variance_reason)
+         VALUES ('bill',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+        [supplierId, number, bl.bill_date, due, memo, tax, tot, req.session.userId, poId, kind, kind ? v : null, reason]);
+      for (const [a, d, amt] of bl2) await client.query(`INSERT INTO ap_bill_lines (bill_id, account_id, description, amount) VALUES ($1,$2,$3,$4)`, [ab[0].id, a, d, amt]);
+      bill = { id: ab[0].id, number, total: tot, due_date: due };
+      // The PO keeps the paperwork for reference; its total stays off so Payables does not count it twice.
+      if (po) await client.query(`UPDATE purchase_orders SET invoice_number = COALESCE($2, invoice_number), invoice_date = COALESCE($3::date, invoice_date) WHERE id = $1`, [poId, number, bl.bill_date]);
+      // Back order with no PO: open one for the missing amount, to receive when it arrives.
+      if (kind === 'back_order' && !po) {
+        const poNum = await nextPoNumber();
+        const { rows: np } = await client.query(`INSERT INTO purchase_orders (po_number, supplier_id, notes, created_by) VALUES ($1,$2,$3,$4) RETURNING id`,
+          [poNum, supplierId, 'Back order: billed on ' + (number || 'bill ' + bill.id) + ' but not yet received' + (reason ? ' · ' + reason : ''), req.session.userId]);
+        await client.query(`INSERT INTO purchase_order_items (po_id, description, qty_ordered, unit_cost_usd, total_usd, condition) VALUES ($1,$2,1,$3,$3,'NEW')`,
+          [np[0].id, 'Back order on ' + (number || 'bill ' + bill.id) + (reason ? ': ' + reason : ''), v]);
+        await client.query(`UPDATE purchase_orders SET subtotal_usd = $2, total_usd = $2 WHERE id = $1`, [np[0].id, v]);   // recalcPoTotals() reads outside this transaction
+        backOrderPo = { id: np[0].id, po_number: poNum };
+      }
+    }
+    await client.query('COMMIT');
+    if (bill) { try { await gl.postAll(null); } catch (_) {} }
+    res.json({ ok: true, value_received: value, lines, po_status: status, po_outstanding: outstanding, bill, variance, back_order_po: backOrderPo });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    if (!e.status) console.error('[receive-stock]', e);
+    res.status(e.status || 500).json({ error: e.message, variance: e.variance });
   } finally { client.release(); }
 });
 
@@ -7280,7 +8660,7 @@ app.post('/api/admin/receive/import', requireManager, requireCap('inventory.adju
   let results;
   try {
     await client.query('BEGIN');
-    results = await receiveRowsIntoStock(client, receiveRows, activityNote, supplierId);
+    results = await receiveLooseItems(client, supplierId, receiveRows, activityNote);
     await client.query('COMMIT');
   } catch (e) {
     await client.query('ROLLBACK');
@@ -7754,8 +9134,25 @@ app.get('/api/admin/pos/quotes/:id', requireAdmin, async (req, res) => {
 //     discount_usd,
 //     customer_id?, customer_name, customer_phone, vehicle_info, notes,
 //     loyalty_points_redeemed?  // integer points to burn for discount
+//     dry_run?                  // true: work out the totals, save nothing (cashier.js)
 //   }
-app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
+//
+// A named function so cashier.js can run a POS order through exactly this
+// path when a cashier takes payment on it (req.cashierOrder set), instead of
+// a second copy of the pricing / tax / stock / payment rules.
+// Which store a till belongs to: its X-Station-Key -> pos_stations.location_id.
+// null means the main (default) store. Used to tag sales, voids and returns so
+// the products_location_delta trigger moves that branch's stock (deptstore).
+async function stationLocationId(req, q) {
+  const key = req.get('x-station-key');
+  if (!key) return null;
+  try {
+    const { rows } = await q('SELECT location_id FROM pos_stations WHERE device_key_hash = $1 AND is_active', [nodeCrypto.createHash('sha256').update(String(key)).digest('hex')]);
+    return rows[0] ? rows[0].location_id : null;
+  } catch (_) { return null; }
+}
+
+async function posSaleHandler(req, res) {
   const b = req.body || {};
   const items = Array.isArray(b.items) ? b.items : [];
   if (!items.length) return res.status(400).json({ error: 'At least one item required' });
@@ -7782,7 +9179,16 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
   // ----- Per-user permission gate ------------------------------------------
   // Re-checked here, not just hidden in the POS: a denied cashier posting the
   // sale straight to the API is exactly what UI-only enforcement would miss.
-  {
+  //
+  // A POS order being paid at a cashier station (req.cashierOrder, set only by
+  // cashier.js, never from the request) had its discounts, price overrides and
+  // GCT switch checked against the person who built the cart when it was
+  // saved; the cashier is only taking the money. The account-charge check is a
+  // tender, so it always applies to whoever takes payment.
+  if (req.cashierOrder) {
+    if (payments.some((p) => p.method === 'account') && !(await userCan(req, 'pos.charge_to_account')))
+      return res.status(403).json({ error: 'Your account is not allowed to take a charge / account sale.' });
+  } else {
     const lineDisc = items.reduce((s, it) => s + Math.max(0, Number(it.discount_usd || 0)), 0);
     if (lineDisc > 0 && !(await userCan(req, 'pos.line_discount')))
       return res.status(403).json({ error: 'Your account is not allowed to give a per-line discount.' });
@@ -7792,11 +9198,65 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
       return res.status(403).json({ error: 'Your account is not allowed to take a charge / account sale.' });
     if (b.no_tax === true && !(await userCan(req, 'pos.no_tax')))
       return res.status(403).json({ error: 'Your account is not allowed to switch GCT off.' });
+    // pos.price_override was declared in the capability list and enforced only
+    // by making the POS price box readonly, so a cashier without it could still
+    // post any unit price straight to this endpoint -- the gap this very block
+    // exists to close for the discount permissions beside it.
+    //
+    // This trusts the client's price_manual flag to say which lines were
+    // re-priced by hand, because the server cannot otherwise tell a typed price
+    // from a legitimate one: the ladder behind a line is a sale price, a tier
+    // price, quantity breaks and now the account markup. That makes it a check
+    // on stated intent, not on the number itself -- a caller that simply omits
+    // the flag is not caught. Deriving the expected price server-side would
+    // close that too, and wants the price-break helper the D1 side already has
+    // (functions/_lib/price_breaks.js) ported over first.
+    if (items.some((it) => it.price_manual) && !(await userCan(req, 'pos.price_override')))
+      return res.status(403).json({ error: 'Your account is not allowed to change a line’s unit price.' });
   }
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // ----- 0. The attached account, and its standing markup -----------------
+    // walkinId / isWalkinCustomer are resolved here rather than further down
+    // in step 2 (loyalty) because the markup has to reach the unit prices
+    // before any total is computed from them.
+    const walkinId = await getWalkinCustomerId();
+    const isWalkinCustomer = b.customer_id && Number(b.customer_id) === walkinId;
+
+    // users.markup_pct -- what this account pays ABOVE list. Applied to each
+    // line's unit price here, ahead of the totals, so the stored line, the
+    // receipt and the invoice all read the increased figure as THE unit price
+    // instead of showing list with a surcharge bolted on at the bottom. It
+    // never touches discount_usd: a markup is not a negative discount, and
+    // that column feeds commission and the discount totals on the reports.
+    //
+    // Skipped for the shared walk-in account, like the discount rate in step
+    // 2b -- that is one row sitting behind every counter sale, so a rate on it
+    // would quietly re-price all of them.
+    //
+    // The POS applies this client-side as well, so the cashier sees the real
+    // price while ringing up, and says so with markup_applied_pct. Re-applying
+    // only when that is missing or stale (an older till, or a sale posted
+    // straight at the API) keeps this idempotent rather than compounding the
+    // rate on every ordinary sale.
+    //
+    // A manually-priced line is left alone: the cashier typed the figure they
+    // mean to charge, and marking it up again would overrule them.
+    let markupRate = 0;
+    if (b.customer_id && !isWalkinCustomer) {
+      const { rows: mk } = await client.query(
+        'SELECT markup_pct::float AS markup_pct FROM users WHERE id = $1', [b.customer_id]);
+      markupRate = Math.max(0, Number(mk[0] && mk[0].markup_pct) || 0);
+    }
+    if (markupRate > 0 && Math.abs((Number(b.markup_applied_pct) || 0) - markupRate) > 0.001) {
+      for (const it of items) {
+        if (it.price_manual) continue;
+        it.unit_price_usd = Math.round(Number(it.unit_price_usd) * (1 + markupRate / 100) * 100) / 100;
+      }
+    }
 
     // ----- 1. Compute totals -----------------------------------------------
     // Per line: gross, then a per-line discount (0010) capped at the line
@@ -7812,7 +9272,9 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
       return { gross, disc, net: Math.round((gross - disc) * 100) / 100 };
     });
     let subtotal = Math.round(lineCalc.reduce((s, l) => s + l.net, 0) * 100) / 100;
-    const manualDiscount = Math.max(0, Number(b.discount_usd || 0));
+    // `let`, not const: when the ticket carries no operator discount and the
+    // attached account has a standing rate, the rate fills this in below.
+    let manualDiscount = Math.max(0, Number(b.discount_usd || 0));
 
     // ----- 2. Loyalty redemption (server-validated) --------------------------
     // The POS ticket bar defaults every new ticket to the shared "Cash
@@ -7821,8 +9283,8 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
     // never earn or redeem points -- it's one row shared by every walk-in
     // sale, so points on it would be meaningless (and redemption would let
     // one walk-in spend points a different walk-in "earned").
-    const walkinId = await getWalkinCustomerId();
-    const isWalkinCustomer = b.customer_id && Number(b.customer_id) === walkinId;
+    // walkinId / isWalkinCustomer are resolved in step 0 above -- the markup
+    // needs them before the totals, and they are the same two values here.
     const redeemPts = isWalkinCustomer ? 0 : Math.max(0, parseInt(b.loyalty_points_redeemed || 0, 10) || 0);
     let loyaltyDiscount = 0;
     if (redeemPts > 0) {
@@ -7845,18 +9307,43 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
     // not just enforced in the UI, so a sale can't slip past these by going
     // straight to the API.
     let customerLimits = null;
+    let customerDiscount = 0;          // the account's standing rate, applied below
     if (b.customer_id && !isWalkinCustomer) {
       const { rows: cl } = await client.query(
-        `SELECT credit_limit_usd, discount_limit_pct, payment_terms_days, tax_exempt FROM users WHERE id = $1`,
+        `SELECT credit_limit_usd, discount_limit_pct, payment_terms_days, tax_exempt,
+                discount_pct::float AS discount_pct, name, credit_hold, credit_hold_reason
+           FROM users WHERE id = $1`,
         [b.customer_id]
       );
       customerLimits = cl[0] || null;
+
+      // The account's own discount rate, finally applied. users.discount_pct
+      // has been editable in the CRM and returned to the POS for a long time,
+      // but nothing ever used it: only discount_limit_pct was read, and that is
+      // a CAP on what an operator may give, not a rate to give. A trade account
+      // set to 10% was quoted full retail unless the cashier remembered to type
+      // the discount in by hand.
+      //
+      // It fills in rather than overrides: an operator who has already entered a
+      // whole-ticket discount has made a decision for this ticket, and silently
+      // replacing it would be worse than not applying the rate at all.
+      const rate = Number(customerLimits && customerLimits.discount_pct) || 0;
+      if (rate > 0 && subtotal > 0 && manualDiscount === 0) {
+        customerDiscount = Math.round(subtotal * (rate / 100) * 100) / 100;
+        manualDiscount = customerDiscount;
+      }
+
       if (customerLimits && customerLimits.discount_limit_pct != null && subtotal > 0) {
         const discountPct = (manualDiscount / subtotal) * 100;
         if (discountPct > Number(customerLimits.discount_limit_pct) + 0.01) {
           await client.query('ROLLBACK');
+          // An account whose standing rate exceeds its own cap is a data
+          // problem, not an operator mistake, so say which it is.
           return res.status(400).json({
-            error: `Discount of ${discountPct.toFixed(1)}% exceeds this customer's limit of ${Number(customerLimits.discount_limit_pct)}%`,
+            error: customerDiscount > 0
+              ? `This account's discount rate of ${rate}% exceeds its own discount limit of `
+                + `${Number(customerLimits.discount_limit_pct)}%. Fix one of the two on the customer record.`
+              : `Discount of ${discountPct.toFixed(1)}% exceeds this customer's limit of ${Number(customerLimits.discount_limit_pct)}%`,
           });
         }
       }
@@ -7880,6 +9367,19 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
     const taxable = Math.round((goods + shipFee) * 100) / 100;
     const tax = taxExempt ? 0 : Math.round(taxable * TAX_RATE * 100) / 100;
     const total = Math.round((taxable + tax) * 100) / 100;
+
+    // Dry run: the exact figures this sale would carry (account markup and
+    // rate, loyalty, GCT, delivery fee), with nothing written. Used when an
+    // order is sent to a cashier, so the amount shown at the till is the
+    // amount that will be charged.
+    if (b.dry_run === true) {
+      await client.query('ROLLBACK');
+      return res.json({
+        ok: true, dry_run: true, subtotal_usd: subtotal, discount_usd: totalDiscount,
+        customer_discount_usd: customerDiscount, loyalty_discount_usd: loyaltyDiscount,
+        tax_usd: tax, tax_exempt: taxExempt, ship_fee_usd: shipFee, fulfilment, total_usd: total,
+      });
+    }
 
     // ----- 3. Distribute payment amounts -------------------------------------
     // For any row with amount_usd == null/blank, treat it as "the rest".
@@ -7951,6 +9451,10 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'This customer has no payment terms set up -- cannot sell on account' });
       }
+      if (customerLimits.credit_hold) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'This account is on credit hold' + (customerLimits.credit_hold_reason ? ' (' + customerLimits.credit_hold_reason + ')' : '') + ': take payment instead, or ask a manager.' });
+      }
       if (customerLimits.credit_limit_usd != null) {
         const currentBalance = await getAccountBalance(b.customer_id, client.query.bind(client));
         const projected = currentBalance + accountAmount;
@@ -7984,6 +9488,17 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
       }
     }
 
+    // ----- 3e. Redeemable items (scratch cards): a pre-loaded code for every
+    // unit, or a generated one when this cashier may (posaddons.js). Checked
+    // before anything is written, so a ticket short of codes writes nothing.
+    let redeemPlan;
+    try { redeemPlan = await posAddons.planRedeemables(client, items, await userCan(req, 'pos.redeemable_mint')); }
+    catch (e) {
+      if (e.status !== 400) throw e;
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: e.message });
+    }
+
     // ----- 4. Insert the sale ------------------------------------------------
     const headerMethod = filledPayments.length === 1 ? filledPayments[0].method : 'split';
     const headerRef = filledPayments.length === 1 ? (filledPayments[0].reference || null)
@@ -8002,9 +9517,10 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
                               sales_rep_id, sales_rep_name,
                               fulfilment, ship_method, ship_fee_usd, ship_name, ship_phone,
                               ship_line1, ship_line2, ship_city, ship_parish, ship_instructions,
-                              payment_status, amount_paid_usd, balance_due_usd, due_date, po_number, quote_id)
+                              payment_status, amount_paid_usd, balance_due_usd, due_date, po_number, quote_id,
+                              markup_pct)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,
-                 $23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38) RETURNING id`,
+                 $23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39) RETURNING id`,
       [receipt, invoiceNumber, b.cashier_id || req.session.userId, b.customer_id || null,
        b.customer_name || null, b.customer_phone || null, b.vehicle_info || null,
        subtotal, tax, taxExempt, totalDiscount, total, headerTendered, changeDue,
@@ -8027,7 +9543,10 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
        fulfilment === 'pickup' ? null : (b.ship_instructions || null),
        paymentStatus, amountPaid, balanceDue, dueDate,
        b.po_number ? String(b.po_number).slice(0, 60) : null,
-       Number.isInteger(b.quote_id) ? b.quote_id : null]
+       Number.isInteger(b.quote_id) ? b.quote_id : null,
+       // The rate this sale was actually priced at, so a reprint stays right
+       // after the account's markup is changed later. NULL when there was none.
+       markupRate > 0 ? markupRate : null]
     );
     const saleId = sale[0].id;
 
@@ -8055,20 +9574,35 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
       }
     }
 
+    // ----- 5b. Store: tag the sale with the till's store; the stock trigger then
+    // takes the sold units off that branch as well as off the total.
+    const saleLoc = await stationLocationId(req, (t, p) => client.query(t, p));
+    if (saleLoc) {
+      await client.query('UPDATE pos_sales SET location_id = $1 WHERE id = $2', [saleLoc, saleId]);
+      await client.query("SELECT set_config('vision.location_id', $1, true)", [String(saleLoc)]);
+    }
+
     // ----- 6. Line items + inventory deduction -------------------------------
+    const redeemCodes = [];
     for (let li = 0; li < items.length; li++) {
       const it = items[li];
       const lc = lineCalc[li];   // { gross, disc, net } computed once in step 1
       let warrantyUntil = null;
       if (it.warranty_days) warrantyUntil = new Date(Date.now() + Number(it.warranty_days) * 86400000).toISOString().slice(0,10);
-      await client.query(
+      const { rows: lineRow } = await client.query(
         `INSERT INTO pos_sale_items (sale_id, product_img, product_id, description, qty, unit_price_usd, core_charge_usd, env_fee_usd, discount_usd, discount_note, serial_number, warranty_until, total_usd)
-           VALUES ($1,$2,(SELECT id FROM products WHERE img = $2),$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+           VALUES ($1,$2,(SELECT id FROM products WHERE img = $2),$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
         [saleId, it.product_img || null, it.description, Number(it.qty), Number(it.unit_price_usd),
          Number(it.core_charge_usd || 0), Number(it.env_fee_usd || 0),
          lc.disc, lc.disc > 0 && it.discount_note ? String(it.discount_note).slice(0, 300) : null,
          it.serial_number || null, warrantyUntil, lc.net]
       );
+      if (redeemPlan[li]) {
+        const codes = await posAddons.sellRedeemables(client, redeemPlan[li], { saleId, saleItemId: lineRow[0].id,
+          productImg: it.product_img, unitPriceUsd: it.unit_price_usd, userId: req.session.userId });
+        redeemCodes.push(...codes.map((code) => ({ code, description: it.description })));
+      }
+      await client.query("SELECT set_config('vision.stock_reason', 'sale', true)");   // stock ledger: why it moved (GL)
       if (it.product_img) {
         await client.query('UPDATE products SET stock_count = GREATEST(0, stock_count - $1) WHERE img = $2', [Number(it.qty), it.product_img]);
       }
@@ -8119,6 +9653,12 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
       invoice_number: invoiceNumber,
       subtotal_usd: subtotal,
       discount_usd: totalDiscount,
+      // Non-zero only when the account's own rate filled the discount in, so
+      // the POS can say where it came from instead of the operator wondering
+      // who applied it.
+      customer_discount_usd: customerDiscount,
+      customer_discount_pct: customerDiscount > 0 && customerLimits
+        ? Number(customerLimits.discount_pct) : 0,
       loyalty_discount_usd: loyaltyDiscount,
       tax_usd: tax,
       tax_exempt: taxExempt,
@@ -8133,13 +9673,15 @@ app.post('/api/admin/pos/sale', requireAdmin, async (req, res) => {
       due_date: dueDate,
       payments: filledPayments,
       loyalty: b.customer_id ? { points_redeemed: redeemPts, points_earned: earnedPoints, balance: newBalance } : null,
+      redemptions: redeemCodes,
     });
   } catch (e) {
     await client.query('ROLLBACK');
     console.error('[pos sale]', e);
     res.status(500).json({ error: e.message });
   } finally { client.release(); }
-});
+}
+app.post('/api/admin/pos/sale', requireAdmin, posSaleHandler);
 
 // -----------------------------------------------------------------------------
 // Customer lookup for the POS tender modal.
@@ -8165,7 +9707,7 @@ app.get('/api/admin/pos/customer-lookup', requireAdmin, async (req, res) => {
       ' OR LOWER(COALESCE(account_number,\'\')) LIKE $' + params.length + ')';
   }
   const sql =
-    'SELECT u.id, u.name, u.email, u.phone, u.price_tier, u.discount_pct, u.account_number, ' +
+    'SELECT u.id, u.name, u.email, u.phone, u.price_tier, u.discount_pct, u.markup_pct, u.account_number, ' +
     '       u.credit_limit_usd, u.payment_terms_days, u.discount_limit_pct, u.tax_exempt, ' +
     '       COALESCE(p.balance, 0) AS points_balance, ' +
     // Real balance owed (charged to 'account' minus payments recorded
@@ -8205,11 +9747,17 @@ app.post('/api/admin/pos/customer', requireAdmin, requireCap('pos.add_customer')
     const email = (b.email || '').trim().toLowerCase() || `${acctNo.toLowerCase()}@walkin.mortysautoparts.local`;
     const randomPassword = require('crypto').randomBytes(24).toString('hex');
     const hash = await bcrypt.hash(randomPassword, 10);
+    // Company, category, tax status and notes come from the till's tabbed
+    // "New customer" form. Credit and terms are not taken here: they are set
+    // on the customer record, under its own permission.
     const { rows } = await query(
-      `INSERT INTO users (email, name, password_hash, phone, via, is_admin, price_tier, account_number)
-         VALUES ($1, $2, $3, $4, 'pos', false, $5, $6)
+      `INSERT INTO users (email, name, password_hash, phone, via, is_admin, price_tier, account_number,
+                          company_name, customer_type, tax_exempt, tax_id, internal_notes)
+         VALUES ($1, $2, $3, $4, 'pos', false, $5, $6, $7, $8, $9, $10, $11)
          RETURNING id, email, name, phone, account_number`,
-      [email, name, hash, phone, priceTier, acctNo]
+      [email, name, hash, phone, priceTier, acctNo,
+       (b.company_name || '').trim() || null, b.customer_type || null, !!b.tax_exempt,
+       (b.tax_id || '').trim() || null, (b.internal_notes || '').trim() || null]
     );
     res.json({ ok: true, id: rows[0].id, email: rows[0].email, account_number: rows[0].account_number });
   } catch (e) {
@@ -8240,6 +9788,103 @@ app.post('/api/admin/pos/customer', requireAdmin, requireCap('pos.add_customer')
 // share -- their email -- and then to an unambiguous name match, so this works
 // on the roster the shop actually has rather than one it would have to go back
 // and re-link by hand.
+// ---- sales reps (Settings → Sales reps) -------------------------------------
+//
+// A "sales rep" is a `mechanics` row. Not a new table: pos_sales.sales_rep_id
+// and twenty sibling foreign keys already point there, and syncStaffProfile()
+// mirrors any staff user in the 'sales_rep' category into it. Adding a second
+// roster would mean two answers to "who sold this".
+//
+// ?include_inactive=1 returns retired reps too; by default they are hidden,
+// which is what the Settings screen's "Hide inactive" box asks for.
+app.get('/api/admin/sales-reps', requireAdmin, async (req, res) => {
+  const all = req.query.include_inactive === '1' || req.query.include_inactive === 'true';
+  const { rows } = await query(
+    `SELECT m.id, m.user_id, m.name, m.email, m.phone, m.role, m.is_active,
+            m.commission_pct::float AS commission_pct, m.notes,
+            COALESCE(u.name, u.email) AS linked_user,
+            -- What points at this rep, so the UI can say whether removing them
+            -- would blank history rather than finding out afterwards.
+            (SELECT COUNT(*) FROM pos_sales s WHERE s.sales_rep_id = m.id)::int        AS sales,
+            (SELECT COUNT(*) FROM pos_quotes q WHERE q.sales_rep_id = m.id)::int       AS quotes,
+            (SELECT COUNT(*) FROM commission_payouts c WHERE c.mechanic_id = m.id)::int AS payouts,
+            (SELECT COUNT(*) FROM work_orders w
+              WHERE w.assigned_mechanic_id = m.id OR w.service_advisor_id = m.id)::int AS work_orders
+       FROM mechanics m LEFT JOIN users u ON u.id = m.user_id
+      ${all ? '' : 'WHERE m.is_active = true'}
+      ORDER BY m.is_active DESC, m.name ASC`);
+  res.json({ reps: rows, include_inactive: all,
+    hidden: all ? 0 : Number((await query('SELECT COUNT(*)::int AS n FROM mechanics WHERE is_active = false')).rows[0].n) });
+});
+
+app.post('/api/admin/sales-reps', requireManager, async (req, res) => {
+  const b = req.body || {};
+  const name = String(b.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'A name is required.' });
+  // 'advisor' is the counter role -- what mechanicsRoleFor() assigns to a staff
+  // member in the sales_rep category, and what the POS rep picker looks for.
+  const role = ['mechanic', 'advisor', 'both'].includes(b.role) ? b.role : 'advisor';
+  const { rows } = await query(
+    `INSERT INTO mechanics (user_id, name, email, phone, role, hourly_rate_usd, is_active, commission_pct, notes)
+       VALUES ($1,$2,$3,$4,$5,0,true,$6,$7) RETURNING id`,
+    [b.user_id ? parseInt(b.user_id, 10) : null, name,
+     b.email || null, b.phone || null, role,
+     b.commission_pct != null && b.commission_pct !== '' ? Number(b.commission_pct) : null,
+     b.notes || null]);
+  res.json({ ok: true, id: rows[0].id });
+});
+
+app.patch('/api/admin/sales-reps/:id', requireManager, async (req, res) => {
+  const fields = ['name', 'email', 'phone', 'role', 'is_active', 'commission_pct', 'notes', 'user_id'];
+  const sets = []; const vals = [];
+  for (const f of fields) if (req.body && req.body[f] !== undefined) {
+    let v = req.body[f];
+    if (v === '') v = null;
+    if (f === 'role' && !['mechanic', 'advisor', 'both'].includes(v)) continue;
+    sets.push(`${f} = $${sets.length + 1}`); vals.push(v);
+  }
+  if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
+  vals.push(parseInt(req.params.id, 10));
+  const r = await query(`UPDATE mechanics SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
+  if (!r.rowCount) return res.status(404).json({ error: 'No such sales rep.' });
+  res.json({ ok: true });
+});
+
+// Removing a rep. Retiring (is_active = false) is the normal path and is what
+// the UI offers: the rep leaves the till's picker while every sale, quote and
+// commission payout they are named on keeps pointing at them.
+//
+// A hard delete is only allowed when NOTHING references them -- a mis-typed
+// row added minutes ago. Otherwise it would silently blank sales_rep_id on
+// historic sales (ON DELETE SET NULL) and cascade-delete their commission
+// payouts, losing both who sold it and what they were paid.
+app.delete('/api/admin/sales-reps/:id', requireManager, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Bad id.' });
+  const { rows } = await query(
+    `SELECT m.name,
+            (SELECT COUNT(*) FROM pos_sales s WHERE s.sales_rep_id = m.id)::int        AS sales,
+            (SELECT COUNT(*) FROM pos_quotes q WHERE q.sales_rep_id = m.id)::int       AS quotes,
+            (SELECT COUNT(*) FROM commission_payouts c WHERE c.mechanic_id = m.id)::int AS payouts,
+            (SELECT COUNT(*) FROM work_orders w
+              WHERE w.assigned_mechanic_id = m.id OR w.service_advisor_id = m.id)::int AS work_orders,
+            (SELECT COUNT(*) FROM time_entries t WHERE t.mechanic_id = m.id)::int      AS time_entries
+       FROM mechanics m WHERE m.id = $1`, [id]);
+  if (!rows.length) return res.status(404).json({ error: 'No such sales rep.' });
+  const r = rows[0];
+  const refs = r.sales + r.quotes + r.payouts + r.work_orders + r.time_entries;
+  if (refs > 0 && req.query.force !== '1') {
+    await query('UPDATE mechanics SET is_active = false WHERE id = $1', [id]);
+    return res.json({ ok: true, retired: true, name: r.name,
+      references: { sales: r.sales, quotes: r.quotes, payouts: r.payouts,
+        work_orders: r.work_orders, time_entries: r.time_entries },
+      message: `${r.name} has ${refs.toLocaleString('en-US')} record(s) attached, so they were retired `
+        + 'rather than deleted -- their name stays on everything they sold.' });
+  }
+  await query('DELETE FROM mechanics WHERE id = $1', [id]);
+  res.json({ ok: true, deleted: true, name: r.name });
+});
+
 app.get('/api/admin/pos/reps', requireAdmin, async (req, res) => {
   // Categories decide who is a sales rep now. The row returned is still the
   // mechanics one, because pos_sales.sales_rep_id and its seventeen sibling
@@ -8321,18 +9966,66 @@ app.get('/api/admin/pos/walkin-customer', requireAdmin, async (req, res) => {
   res.json({ customer: rows[0] });
 });
 
+// Invoice recall. Two modes:
+//
+//   no ?q      the day's sales, as before -- the till's own list
+//   ?q=...     look an invoice up across ALL time, because recalling one is
+//              never "which of today's did I mean". Matches the receipt or
+//              invoice number, the customer name or phone, the cashier or rep,
+//              or an exact total, so any of the things actually written on a
+//              piece of paper in a customer's hand will find it.
+//
+// Used by the Cashier screen's recall box, which previously could only list
+// orders still awaiting payment and so could not bring back a finished sale at
+// all.
 app.get('/api/admin/pos/sales', requireAdmin, async (req, res) => {
-  const from = req.query.from || new Date().toISOString().slice(0,10);
-  const to = req.query.to || from;
+  const q = String(req.query.q || '').trim();
   const includeVoided = req.query.include_voided === '1' || req.query.include_voided === 'true';
+  const voidClause = includeVoided ? '' : 'AND s.voided = false';
+  const limit = Math.min(parseInt(req.query.limit, 10) || 200, 500);
+
+  if (q) {
+    const lower = q.toLowerCase();
+    const like = '%' + lower + '%';
+    const exact = Number(q.replace(/[$,]/g, ''));
+    const params = [like, Number.isFinite(exact) ? exact : null, limit, lower];
+    const { rows } = await query(
+      `SELECT s.*, COALESCE(u.name, u.email) AS cashier_name,
+              (SELECT COALESCE(SUM(qty), 0)::int FROM pos_sale_items i WHERE i.sale_id = s.id) AS unit_count
+         FROM pos_sales s LEFT JOIN users u ON u.id = s.cashier_id
+        WHERE (LOWER(COALESCE(s.receipt_number, '')) LIKE $1
+            OR LOWER(COALESCE(s.invoice_number, '')) LIKE $1
+            OR LOWER(COALESCE(s.customer_name, ''))  LIKE $1
+            OR LOWER(COALESCE(s.customer_phone, '')) LIKE $1
+            OR LOWER(COALESCE(s.cashier_name, ''))   LIKE $1
+            OR LOWER(COALESCE(s.sales_rep_name, '')) LIKE $1
+            OR LOWER(COALESCE(s.reference, ''))      LIKE $1
+            OR ($2::numeric IS NOT NULL AND s.total_usd = $2::numeric))
+          ${voidClause}
+        -- Exact number first, then newest. Without this, typing a short
+        -- receipt number like "0807" buried the invoice it names: the LIKE
+        -- also matches A0080712 and a thousand others, and ordering purely by
+        -- date pushed the 2012 original past the 200-row limit. The invoice
+        -- someone typed the number of has to be the first row.
+        ORDER BY (LOWER(COALESCE(s.receipt_number, '')) = $4
+               OR LOWER(COALESCE(s.invoice_number, '')) = $4) DESC,
+                 s.created_at DESC
+        LIMIT $3`, params);
+    return res.json({ sales: rows, mode: 'search', q, shown: rows.length });
+  }
+
+  const from = req.query.from || new Date().toISOString().slice(0, 10);
+  const to = req.query.to || from;
   const { rows } = await query(
-    `SELECT s.*, COALESCE(u.name, u.email) AS cashier_name FROM pos_sales s
+    `SELECT s.*, COALESCE(u.name, u.email) AS cashier_name,
+            (SELECT COALESCE(SUM(qty), 0)::int FROM pos_sale_items i WHERE i.sale_id = s.id) AS unit_count
+       FROM pos_sales s
        LEFT JOIN users u ON u.id = s.cashier_id
-       WHERE s.created_at::date BETWEEN $1::date AND $2::date ${includeVoided ? '' : 'AND s.voided = false'}
-       ORDER BY s.created_at DESC LIMIT 200`,
-    [from, to]
+       WHERE s.created_at::date BETWEEN $1::date AND $2::date ${voidClause}
+       ORDER BY s.created_at DESC LIMIT $3`,
+    [from, to, limit]
   );
-  res.json({ sales: rows });
+  res.json({ sales: rows, mode: 'range', from, to, shown: rows.length });
 });
 
 app.get('/api/admin/pos/sales/:id', requireAdmin, async (req, res) => {
@@ -8376,6 +10069,7 @@ app.post('/api/admin/pos/sales/:id/void', requireAdmin, requireCap('pos.void_sal
   try {
     await client.query('BEGIN');
     const { rows: s } = await client.query('SELECT * FROM pos_sales WHERE id = $1', [req.params.id]);
+    if (s[0] && s[0].location_id) await client.query("SELECT set_config('vision.location_id', $1, true)", [String(s[0].location_id)]);   // restock to the sale's store
     if (!s.length || s[0].voided) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Not voidable' }); }
     const { rows: items } = await client.query('SELECT * FROM pos_sale_items WHERE sale_id = $1', [req.params.id]);
     // Only restock what hasn't already come back through an itemized return
@@ -8390,9 +10084,12 @@ app.post('/api/admin/pos/sales/:id/void', requireAdmin, requireCap('pos.void_sal
     returnedRows.forEach((r) => { returnedById[r.sale_item_id] = r.qty; });
     for (const it of items) {
       const restockQty = it.qty - (returnedById[it.id] || 0);
+      await client.query("SELECT set_config('vision.stock_reason', 'return', true)");   // stock ledger: why it moved (GL)
       if (it.product_img && restockQty > 0) await client.query('UPDATE products SET stock_count = stock_count + $1 WHERE img = $2', [restockQty, it.product_img]);
     }
     await client.query(`UPDATE pos_sales SET voided = true, voided_at = NOW(), voided_by = $1 WHERE id = $2`, [req.session.userId, req.params.id]);
+    // Redeemable codes sold on it: pre-loaded ones back on the shelf, generated ones void.
+    await posAddons.voidSaleRedeemables((t, p) => client.query(t, p), s[0].id);
     await client.query('COMMIT');
     res.json({ ok: true });
   } catch (e) { await client.query('ROLLBACK'); console.error(e); res.status(500).json({ error: e.message }); }
@@ -8423,6 +10120,7 @@ app.post('/api/admin/pos/sales/:id/return', requireAdmin, requireCap('pos.refund
   try {
     await client.query('BEGIN');
     const { rows: saleRows } = await client.query('SELECT * FROM pos_sales WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (saleRows[0] && saleRows[0].location_id) await client.query("SELECT set_config('vision.location_id', $1, true)", [String(saleRows[0].location_id)]);   // returned stock goes back to the sale's store
     if (!saleRows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Sale not found' }); }
     const sale = saleRows[0];
     if (sale.voided) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Cannot return items from a voided sale' }); }
@@ -8508,6 +10206,7 @@ app.post('/api/admin/pos/sales/:id/return', requireAdmin, requireCap('pos.refund
         `INSERT INTO pos_sale_return_items (return_id, sale_item_id, qty, refund_usd) VALUES ($1,$2,$3,$4)`,
         [returnId, lw.item.id, lw.qty, lw.refundLine]
       );
+      await client.query("SELECT set_config('vision.stock_reason', 'return', true)");   // stock ledger: why it moved (GL)
       if (lw.item.product_img) {
         await client.query('UPDATE products SET stock_count = stock_count + $1 WHERE img = $2', [lw.qty, lw.item.product_img]);
       }
@@ -8566,561 +10265,18 @@ app.post('/api/admin/cash-drawer/:id/close', requireAdmin, requireCap('pos.open_
     `SELECT COALESCE(SUM(total_usd),0)::float AS s FROM pos_sales WHERE payment_method = 'cash' AND voided = false AND created_at >= $1`,
     [sess[0].opened_at]
   );
+  // Cash paid straight out of this drawer (Cash Report payouts, a petty cash
+  // top-up) never made it into the count -- without this every payout would
+  // read as an unexplained shortage.
   const { rows: po } = await query(
-    `SELECT COALESCE(SUM(amount_cents),0)::float / 100 AS s FROM cash_payouts
-      WHERE drawer_session_id = $1 AND source_type = 'drawer' AND voided = false`,
-    [req.params.id]
-  );
+    `SELECT COALESCE(SUM(amount_cents),0)::float / 100 AS s FROM cash_payouts WHERE source_type = 'drawer' AND NOT voided AND drawer_session_id = $1`,
+    [sess[0].id]);
   const expected = Math.round((Number(sess[0].opening_float) + cs[0].s - po[0].s) * 100) / 100;
   const closing = Number(b.closing_amount || 0);
   const variance = Math.round((closing - expected) * 100) / 100;
   await query(`UPDATE cash_drawer_sessions SET closed_by = $1, closing_amount = $2, expected_cash = $3, variance = $4, notes = $5, closed_at = NOW() WHERE id = $6`,
     [b.closed_by || null, closing, expected, variance, b.notes || sess[0].notes, req.params.id]);
   res.json({ ok: true, expected_cash: expected, closing_amount: closing, variance, payouts: po[0].s || 0 });
-});
-
-// =============================================================================
-//  CASH PAYOUTS + PETTY CASH
-//
-//  Ported from the D1 backend (functions/_routes/ops.js + functions/_lib/
-//  petty_cash.js). Money is held in integer cents in the petty-cash tables,
-//  exactly as D1 does, so the ledger / balance cross-check arithmetic matches;
-//  every response divides by 100 for the *_usd float contract the admin UI
-//  speaks. requireAdmin gates reads, requireManager gates writes (mirrors the
-//  D1 adminMw / managerMw split). No receipt-file upload here: the admin UI
-//  only ever sends a text receipt_ref, so receipt_url stays null.
-// =============================================================================
-const pcU2c = (u) => (u == null || u === '' ? null : Math.round(Number(u) * 100));
-const pcC2u = (c) => (c == null ? 0 : Number(c) / 100);
-
-// Run fn inside a single transaction; commit on success, roll back on throw.
-async function pcTx(fn) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const r = await fn(client);
-    await client.query('COMMIT');
-    return r;
-  } catch (e) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
-    throw e;
-  } finally {
-    client.release();
-  }
-}
-
-const PC_MOVEMENT_LABEL = {
-  opening: 'Opening balance',
-  replenishment: 'Replenishment',
-  reconcile_adjust: 'Reconciliation adjustment',
-  transfer_in: 'Transfer in',
-  transfer_out: 'Transfer out',
-  void_reversal: 'Payout voided',
-  advance_repay: 'Advance repaid',
-};
-
-// A merged, oldest-first ledger with a running balance. `payouts` are the
-// disbursements for this fund (cash out, negative). Voided payouts stay
-// visible but don't move the running total.
-async function pcFundLedger(fundId, { from, to } = {}) {
-  const ranged = !!(from && to);
-  const params = ranged ? [fundId, from, to] : [fundId];
-  const mRange = ranged ? ' AND m.created_at::date BETWEEN $2 AND $3' : '';
-  const pRange = ranged ? ' AND cp.created_at::date BETWEEN $2 AND $3' : '';
-
-  const { rows: movements } = await query(
-    `SELECT m.id, m.kind, m.delta_cents, m.source, m.ref, m.notes, m.created_at,
-            m.related_payout_id, u.name AS by_name
-       FROM petty_cash_movements m LEFT JOIN users u ON u.id = m.created_by
-      WHERE m.fund_id = $1${mRange} ORDER BY m.created_at, m.id`, params);
-
-  const { rows: payouts } = await query(
-    `SELECT cp.id, cp.amount_cents, cp.reason, cp.paid_to, cp.notes, cp.created_at,
-            cp.receipt_ref, cp.receipt_url, cp.is_advance, cp.advance_to, cp.advance_status,
-            cp.voided, cat.name AS category, u.name AS by_name
-       FROM cash_payouts cp
-       LEFT JOIN petty_cash_categories cat ON cat.id = cp.category_id
-       LEFT JOIN users u ON u.id = cp.authorized_by
-      WHERE cp.fund_id = $1${pRange} ORDER BY cp.created_at, cp.id`, params);
-
-  const entries = [];
-  for (const m of movements) {
-    entries.push({
-      at: m.created_at, kind: m.kind, label: PC_MOVEMENT_LABEL[m.kind] || m.kind,
-      delta_usd: pcC2u(m.delta_cents), source: m.source || null, ref: m.ref || null,
-      notes: m.notes || null, by_name: m.by_name || null, voided: false,
-    });
-  }
-  for (const p of payouts) {
-    entries.push({
-      at: p.created_at,
-      kind: p.is_advance ? 'advance' : 'payout',
-      label: p.is_advance
-        ? ('Staff advance' + (p.advance_to ? ' — ' + p.advance_to : '')
-           + (p.advance_status && p.advance_status !== 'open' ? ' (' + p.advance_status + ')' : ''))
-        : (p.category ? p.category : 'Payout'),
-      delta_usd: -pcC2u(p.amount_cents),
-      reason: p.reason || null, paid_to: p.paid_to || null, category: p.category || null,
-      receipt_ref: p.receipt_ref || null, receipt_url: p.receipt_url || null,
-      notes: p.notes || null, by_name: p.by_name || null,
-      payout_id: p.id, voided: !!p.voided, advance_status: p.advance_status || null,
-    });
-  }
-  entries.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
-
-  let bal = 0;
-  for (const e of entries) {
-    if (!e.voided) bal += e.delta_usd;
-    e.balance_usd = Math.round(bal * 100) / 100;
-  }
-  return entries;
-}
-
-// opening + Σ movement deltas − Σ non-voided payouts. A cross-check against the
-// denormalised petty_cash_funds.balance_cents; never the mid-request value.
-//
-// 'void_reversal' movements are excluded on purpose: voiding a payout already
-// drops it out of the non-voided payout sum below (which restores its amount),
-// so counting the matching void_reversal movement as well would double it and
-// leave this cross-check permanently disagreeing with the real balance after
-// any void. (The D1 _lib/petty_cash.js has this same double-count bug; the
-// void_reversal row still exists for the human-readable ledger, which nets it
-// against the struck-through payout correctly.)
-async function pcRecomputeBalanceCents(fundId) {
-  const { rows: mv } = await query(
-    `SELECT COALESCE(SUM(delta_cents),0) AS s FROM petty_cash_movements
-      WHERE fund_id = $1 AND kind <> 'void_reversal'`, [fundId]);
-  const { rows: po } = await query(
-    'SELECT COALESCE(SUM(amount_cents),0) AS s FROM cash_payouts WHERE fund_id = $1 AND voided = false', [fundId]);
-  return Number(mv[0].s || 0) - Number(po[0].s || 0);
-}
-
-// ---- expense categories ----
-app.get('/api/admin/petty-cash-categories', requireAdmin, async (req, res) => {
-  const all = req.query.all === '1';
-  const { rows } = await query(
-    `SELECT id, name, is_active, sort_order FROM petty_cash_categories
-      ${all ? '' : 'WHERE is_active = true'} ORDER BY sort_order, name`);
-  res.json({ categories: rows });
-});
-
-app.post('/api/admin/petty-cash-categories', requireManager, async (req, res) => {
-  const b = req.body || {};
-  const name = String(b.name || '').trim().slice(0, 80);
-  if (!name) return res.status(400).json({ error: 'A name is required' });
-  try {
-    const { rows } = await query(
-      'INSERT INTO petty_cash_categories (name, sort_order) VALUES ($1, $2) RETURNING id',
-      [name, b.sort_order != null ? parseInt(b.sort_order, 10) : 99]);
-    res.json({ ok: true, id: rows[0].id });
-  } catch (e) {
-    if (e.code === '23505') return res.status(400).json({ error: 'That category already exists' });
-    throw e;
-  }
-});
-
-app.patch('/api/admin/petty-cash-categories/:id', requireManager, async (req, res) => {
-  const b = req.body || {};
-  const sets = []; const vals = [];
-  const put = (frag, val) => { vals.push(val); sets.push(frag.replace('?', '$' + vals.length)); };
-  if (b.name !== undefined) put('name = ?', String(b.name).trim().slice(0, 80));
-  if (b.is_active !== undefined) put('is_active = ?', !!b.is_active);
-  if (b.sort_order !== undefined) put('sort_order = ?', parseInt(b.sort_order, 10) || 0);
-  if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
-  vals.push(req.params.id);
-  await query(`UPDATE petty_cash_categories SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
-  res.json({ ok: true });
-});
-
-// ---- payouts ----
-app.get('/api/admin/cash-payouts', requireAdmin, async (req, res) => {
-  const q = req.query;
-  const where = []; const binds = [];
-  const add = (frag, val) => { binds.push(val); where.push(frag.replace('?', '$' + binds.length)); };
-  if (q.drawer_session_id) add('cp.drawer_session_id = ?', parseInt(q.drawer_session_id, 10));
-  if (q.fund_id) add('cp.fund_id = ?', parseInt(q.fund_id, 10));
-  if (q.advance_status) add('cp.advance_status = ?', q.advance_status);
-  if (q.is_advance === '1') where.push('cp.is_advance = true');
-  if (q.include_voided !== '1') where.push('cp.voided = false');
-  const { rows } = await query(
-    `SELECT cp.id, (cp.amount_cents / 100.0)::float AS amount_usd, cp.reason, cp.paid_to, cp.notes,
-            cp.source_type, cp.drawer_session_id, cp.fund_id, cp.created_at, cp.voided,
-            cp.category_id, cp.receipt_ref, cp.receipt_url, cp.is_advance, cp.advance_to, cp.advance_status,
-            cat.name AS category, u.name AS authorized_by_name
-       FROM cash_payouts cp
-       LEFT JOIN users u ON u.id = cp.authorized_by
-       LEFT JOIN petty_cash_categories cat ON cat.id = cp.category_id
-       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-      ORDER BY cp.created_at DESC LIMIT 500`, binds);
-  res.json({ payouts: rows });
-});
-
-app.post('/api/admin/cash-payouts', requireManager, async (req, res) => {
-  const me = req.session.userId;
-  const b = req.body || {};
-  const amount = Number(b.amount_usd || 0);
-  if (!(amount > 0)) return res.status(400).json({ error: 'A positive amount is required' });
-  if (!String(b.reason || '').trim()) return res.status(400).json({ error: 'A reason is required' });
-  const sourceType = b.source_type === 'fund' ? 'fund' : 'drawer';
-  const amountCents = pcU2c(amount);
-  const truthy = (v) => v === true || v === 'true' || v === '1' || v === 1;
-  const isAdvance = sourceType === 'fund' && truthy(b.is_advance);
-
-  let categoryId = null;
-  if (!isAdvance) {
-    categoryId = b.category_id ? parseInt(b.category_id, 10) : null;
-    if (sourceType === 'fund' && !categoryId)
-      return res.status(400).json({ error: 'Pick an expense category, or mark it a staff advance.' });
-    if (categoryId) {
-      const { rows } = await query('SELECT id FROM petty_cash_categories WHERE id = $1 AND is_active = true', [categoryId]);
-      if (!rows.length) return res.status(400).json({ error: 'Unknown category' });
-    }
-  }
-
-  let threshold = 0;
-  let fundId = null;
-  const drawerSessionId = sourceType === 'drawer' ? parseInt(b.drawer_session_id, 10) : null;
-  if (sourceType === 'drawer') {
-    const { rows } = await query('SELECT id FROM cash_drawer_sessions WHERE id = $1 AND closed_at IS NULL', [drawerSessionId]);
-    if (!rows.length) return res.status(400).json({ error: 'That cash drawer session is not open' });
-  } else {
-    fundId = parseInt(b.fund_id, 10);
-    const { rows } = await query('SELECT id, balance_cents, receipt_threshold_cents FROM petty_cash_funds WHERE id = $1 AND is_active = true', [fundId]);
-    if (!rows.length) return res.status(404).json({ error: 'Petty cash fund not found' });
-    const fund = rows[0];
-    if (Number(fund.balance_cents) < amountCents)
-      return res.status(400).json({ error: 'That would take the fund below zero (balance is ' + (Number(fund.balance_cents) / 100).toFixed(2) + ')' });
-    threshold = Number(fund.receipt_threshold_cents) || 0;
-  }
-
-  const receiptRef = b.receipt_ref ? String(b.receipt_ref).trim().slice(0, 120) : null;
-
-  await pcTx(async (cx) => {
-    if (sourceType === 'fund')
-      await cx.query('UPDATE petty_cash_funds SET balance_cents = balance_cents - $1 WHERE id = $2', [amountCents, fundId]);
-    await cx.query(
-      `INSERT INTO cash_payouts
-         (amount_cents, reason, paid_to, notes, source_type, drawer_session_id, fund_id, authorized_by,
-          category_id, receipt_ref, receipt_url, is_advance, advance_to, advance_status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-      [amountCents, String(b.reason).trim().slice(0, 200), b.paid_to ? String(b.paid_to).trim().slice(0, 200) : null,
-        b.notes ? String(b.notes).trim().slice(0, 500) : null, sourceType,
-        drawerSessionId, fundId, me,
-        categoryId, receiptRef, null, isAdvance,
-        isAdvance ? (b.advance_to ? String(b.advance_to).trim().slice(0, 120) : null) : null,
-        isAdvance ? 'open' : null]);
-  });
-
-  const warning = (threshold > 0 && amountCents >= threshold && !receiptRef)
-    ? 'A receipt is recommended for this amount.' : null;
-  res.json({ ok: true, warning });
-});
-
-app.post('/api/admin/cash-payouts/:id/void', requireManager, async (req, res) => {
-  const me = req.session.userId;
-  const { rows } = await query('SELECT * FROM cash_payouts WHERE id = $1', [req.params.id]);
-  const p = rows[0];
-  if (!p) return res.status(404).json({ error: 'Not found' });
-  if (p.voided) return res.status(400).json({ error: 'Already voided' });
-  await pcTx(async (cx) => {
-    await cx.query('UPDATE cash_payouts SET voided = true, voided_by = $1, voided_at = NOW() WHERE id = $2', [me, p.id]);
-    if (p.source_type === 'fund' && p.fund_id) {
-      await cx.query('UPDATE petty_cash_funds SET balance_cents = balance_cents + $1 WHERE id = $2', [Number(p.amount_cents), p.fund_id]);
-      await cx.query(
-        `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, ref, related_payout_id, created_by)
-         VALUES ($1, 'void_reversal', $2, $3, $4, $5)`,
-        [p.fund_id, Number(p.amount_cents), 'void of payout #' + p.id, p.id, me]);
-    }
-  });
-  res.json({ ok: true });
-});
-
-app.post('/api/admin/cash-payouts/:id/settle-advance', requireManager, async (req, res) => {
-  const me = req.session.userId;
-  const b = req.body || {};
-  const { rows } = await query('SELECT * FROM cash_payouts WHERE id = $1', [req.params.id]);
-  const p = rows[0];
-  if (!p || !p.is_advance) return res.status(404).json({ error: 'Not a staff advance' });
-  if (p.advance_status !== 'open') return res.status(400).json({ error: 'This advance is already ' + p.advance_status });
-  const how = b.how === 'expense' ? 'expense' : 'repay';
-  if (how === 'repay') {
-    await pcTx(async (cx) => {
-      await cx.query(`UPDATE cash_payouts SET advance_status = 'repaid', advance_settled_at = NOW() WHERE id = $1`, [p.id]);
-      if (p.fund_id) {
-        await cx.query('UPDATE petty_cash_funds SET balance_cents = balance_cents + $1 WHERE id = $2', [Number(p.amount_cents), p.fund_id]);
-        await cx.query(
-          `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, ref, related_payout_id, created_by)
-           VALUES ($1, 'advance_repay', $2, $3, $4, $5)`,
-          [p.fund_id, Number(p.amount_cents), 'advance #' + p.id + ' repaid', p.id, me]);
-      }
-    });
-  } else {
-    const catId = b.category_id ? parseInt(b.category_id, 10) : null;
-    if (!catId) return res.status(400).json({ error: 'Pick a category to expense the advance to' });
-    await query(
-      `UPDATE cash_payouts SET advance_status = 'expensed', advance_settled_at = NOW(),
-              category_id = $1, receipt_ref = COALESCE($2, receipt_ref) WHERE id = $3`,
-      [catId, b.receipt_ref ? String(b.receipt_ref).trim().slice(0, 120) : null, p.id]);
-  }
-  res.json({ ok: true });
-});
-
-// ---- funds ----
-app.get('/api/admin/petty-cash-funds', requireAdmin, async (_req, res) => {
-  const { rows } = await query(
-    `SELECT f.id, f.name, (f.balance_cents / 100.0)::float AS balance_usd, (f.float_cents / 100.0)::float AS float_usd,
-            (f.receipt_threshold_cents / 100.0)::float AS receipt_threshold_usd, f.location, f.notes,
-            f.custodian_id, f.is_active, f.created_at, f.last_reconciled_at,
-            (f.float_cents > 0 AND f.balance_cents < f.float_cents) AS needs_topup,
-            u.name AS custodian_name
-       FROM petty_cash_funds f LEFT JOIN users u ON u.id = f.custodian_id
-      ORDER BY f.is_active DESC, f.name`);
-  res.json({ funds: rows });
-});
-
-app.post('/api/admin/petty-cash-funds', requireManager, async (req, res) => {
-  const me = req.session.userId;
-  const b = req.body || {};
-  if (!String(b.name || '').trim()) return res.status(400).json({ error: 'A name is required' });
-  const opening = pcU2c(b.opening_balance_usd || 0) || 0;
-  const id = await pcTx(async (cx) => {
-    const { rows } = await cx.query(
-      'INSERT INTO petty_cash_funds (name, balance_cents, float_cents, receipt_threshold_cents, location, custodian_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
-      [String(b.name).trim().slice(0, 120), opening, pcU2c(b.float_usd || 0) || 0, pcU2c(b.receipt_threshold_usd || 0) || 0,
-        b.location ? String(b.location).trim().slice(0, 120) : null,
-        b.custodian_id ? parseInt(b.custodian_id, 10) : null]);
-    const newId = rows[0].id;
-    if (opening !== 0) {
-      await cx.query(
-        `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, source, notes, created_by)
-         VALUES ($1, 'opening', $2, 'bank', 'Opening balance', $3)`, [newId, opening, me]);
-    }
-    return newId;
-  });
-  res.json({ ok: true, id });
-});
-
-app.patch('/api/admin/petty-cash-funds/:id', requireManager, async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const b = req.body || {};
-  const me = req.session.userId;
-  const { rows } = await query('SELECT id, balance_cents FROM petty_cash_funds WHERE id = $1', [id]);
-  const fund = rows[0];
-  if (!fund) return res.status(404).json({ error: 'Not found' });
-  const sets = []; const vals = [];
-  const put = (frag, val) => { vals.push(val); sets.push(frag.replace('?', '$' + vals.length)); };
-  if (b.name !== undefined) put('name = ?', String(b.name).trim().slice(0, 120));
-  if (b.custodian_id !== undefined) put('custodian_id = ?', b.custodian_id ? parseInt(b.custodian_id, 10) : null);
-  if (b.float_usd !== undefined) put('float_cents = ?', pcU2c(b.float_usd) || 0);
-  if (b.receipt_threshold_usd !== undefined) put('receipt_threshold_cents = ?', pcU2c(b.receipt_threshold_usd) || 0);
-  if (b.location !== undefined) put('location = ?', b.location ? String(b.location).trim().slice(0, 120) : null);
-  if (b.notes !== undefined) put('notes = ?', b.notes ? String(b.notes).trim().slice(0, 500) : null);
-  let writeOff = false;
-  const bal = Number(fund.balance_cents);
-  if (b.is_active !== undefined) {
-    const active = !!b.is_active;
-    if (!active && bal !== 0 && !b.force)
-      return res.status(400).json({ error: 'Fund balance is ' + (bal / 100).toFixed(2) + ' — reconcile it to zero, or pass force to write it off.' });
-    if (!active && bal !== 0 && b.force) { writeOff = true; sets.push('balance_cents = 0'); }
-    put('is_active = ?', active);
-    sets.push('closed_at = ' + (active ? 'NULL' : 'NOW()'));
-  }
-  if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
-  await pcTx(async (cx) => {
-    if (writeOff) {
-      await cx.query(
-        `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, notes, created_by)
-         VALUES ($1, 'reconcile_adjust', $2, 'Written off on close', $3)`, [id, -bal, me]);
-    }
-    vals.push(id);
-    await cx.query(`UPDATE petty_cash_funds SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
-  });
-  res.json({ ok: true });
-});
-
-app.get('/api/admin/petty-cash-funds/:id', requireAdmin, async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const { rows } = await query(
-    `SELECT f.*, (f.balance_cents / 100.0)::float AS balance_usd, (f.float_cents / 100.0)::float AS float_usd,
-            (f.receipt_threshold_cents / 100.0)::float AS receipt_threshold_usd, u.name AS custodian_name
-       FROM petty_cash_funds f LEFT JOIN users u ON u.id = f.custodian_id WHERE f.id = $1`, [id]);
-  const fund = rows[0];
-  if (!fund) return res.status(404).json({ error: 'Not found' });
-  const { from, to } = req.query;
-  const [ledger, advances, counts] = await Promise.all([
-    pcFundLedger(id, from && to ? { from, to } : {}),
-    query(
-      `SELECT cp.id, (cp.amount_cents / 100.0)::float AS amount_usd, cp.advance_to, cp.reason, cp.created_at,
-              cp.advance_status, u.name AS authorized_by_name
-         FROM cash_payouts cp LEFT JOIN users u ON u.id = cp.authorized_by
-        WHERE cp.fund_id = $1 AND cp.is_advance = true AND cp.advance_status = 'open' ORDER BY cp.created_at`, [id]).then((r) => r.rows),
-    query(
-      `SELECT id, (counted_cents / 100.0)::float AS counted_usd, (expected_cents / 100.0)::float AS expected_usd,
-              (variance_cents / 100.0)::float AS variance_usd, notes, created_at
-         FROM petty_cash_counts WHERE fund_id = $1 ORDER BY created_at DESC LIMIT 30`, [id]).then((r) => r.rows),
-  ]);
-  fund.needs_topup = Number(fund.float_cents) > 0 && Number(fund.balance_cents) < Number(fund.float_cents);
-  res.json({ fund, ledger, open_advances: advances, counts, computed_balance_usd: (await pcRecomputeBalanceCents(id)) / 100 });
-});
-
-app.post('/api/admin/petty-cash-funds/:id/replenish', requireManager, async (req, res) => {
-  const me = req.session.userId;
-  const id = parseInt(req.params.id, 10);
-  const b = req.body || {};
-  const { rows } = await query('SELECT id, balance_cents, float_cents FROM petty_cash_funds WHERE id = $1 AND is_active = true', [id]);
-  const fund = rows[0];
-  if (!fund) return res.status(404).json({ error: 'Petty cash fund not found' });
-  let amountCents;
-  if (b.to_float) {
-    amountCents = (Number(fund.float_cents) || 0) - Number(fund.balance_cents);
-    if (amountCents <= 0) return res.status(400).json({ error: 'The fund is already at (or above) its float.' });
-  } else {
-    amountCents = pcU2c(Number(b.amount_usd || 0));
-    if (!(amountCents > 0)) return res.status(400).json({ error: 'A positive amount is required' });
-  }
-  const source = b.source === 'drawer' ? 'drawer' : 'bank';
-  let drawerSessionId = null;
-  if (source === 'drawer') {
-    const { rows: sr } = await query('SELECT id FROM cash_drawer_sessions WHERE id = $1 AND closed_at IS NULL', [parseInt(b.drawer_session_id, 10)]);
-    if (!sr.length) return res.status(400).json({ error: 'That cash drawer session is not open' });
-    drawerSessionId = sr[0].id;
-  }
-  await pcTx(async (cx) => {
-    await cx.query('UPDATE petty_cash_funds SET balance_cents = balance_cents + $1 WHERE id = $2', [amountCents, id]);
-    await cx.query(
-      `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, source, drawer_session_id, notes, created_by)
-       VALUES ($1, 'replenishment', $2, $3, $4, $5, $6)`,
-      [id, amountCents, source, drawerSessionId, b.notes ? String(b.notes).slice(0, 300) : null, me]);
-    if (source === 'drawer') {
-      await cx.query(
-        `INSERT INTO cash_payouts (amount_cents, reason, source_type, drawer_session_id, fund_id, authorized_by)
-         VALUES ($1, 'Petty cash replenishment', 'drawer', $2, $3, $4)`,
-        [amountCents, drawerSessionId, id, me]);
-    }
-  });
-  res.json({ ok: true, amount_usd: amountCents / 100 });
-});
-
-app.post('/api/admin/petty-cash-funds/:id/reconcile', requireManager, async (req, res) => {
-  const me = req.session.userId;
-  const id = parseInt(req.params.id, 10);
-  const b = req.body || {};
-  const { rows } = await query('SELECT id, balance_cents FROM petty_cash_funds WHERE id = $1 AND is_active = true', [id]);
-  const fund = rows[0];
-  if (!fund) return res.status(404).json({ error: 'Petty cash fund not found' });
-  const countedCents = pcU2c(Number(b.counted_usd));
-  if (countedCents == null || !Number.isFinite(countedCents) || countedCents < 0)
-    return res.status(400).json({ error: 'Enter the counted amount' });
-  const expectedCents = Number(fund.balance_cents);
-  const varianceCents = countedCents - expectedCents;
-  await pcTx(async (cx) => {
-    await cx.query(
-      `INSERT INTO petty_cash_counts (fund_id, counted_cents, expected_cents, variance_cents, notes, counted_by)
-       VALUES ($1,$2,$3,$4,$5,$6)`,
-      [id, countedCents, expectedCents, varianceCents, b.notes ? String(b.notes).slice(0, 300) : null, me]);
-    await cx.query('UPDATE petty_cash_funds SET balance_cents = $1, last_reconciled_at = NOW() WHERE id = $2', [countedCents, id]);
-    if (varianceCents !== 0) {
-      await cx.query(
-        `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, notes, created_by)
-         VALUES ($1, 'reconcile_adjust', $2, $3, $4)`,
-        [id, varianceCents, 'Count ' + (varianceCents < 0 ? 'short' : 'over') + ' by ' + Math.abs(varianceCents / 100).toFixed(2), me]);
-    }
-  });
-  res.json({ ok: true, expected_usd: expectedCents / 100, counted_usd: countedCents / 100, variance_usd: varianceCents / 100 });
-});
-
-app.post('/api/admin/petty-cash-funds/:id/transfer', requireManager, async (req, res) => {
-  const me = req.session.userId;
-  const id = parseInt(req.params.id, 10);
-  const b = req.body || {};
-  const toId = parseInt(b.to_fund_id, 10);
-  const amountCents = pcU2c(Number(b.amount_usd || 0));
-  if (!(amountCents > 0)) return res.status(400).json({ error: 'A positive amount is required' });
-  if (!toId || toId === id) return res.status(400).json({ error: 'Pick a different destination fund' });
-  const [srcR, dstR] = await Promise.all([
-    query('SELECT id, balance_cents FROM petty_cash_funds WHERE id = $1 AND is_active = true', [id]),
-    query('SELECT id FROM petty_cash_funds WHERE id = $1 AND is_active = true', [toId]),
-  ]);
-  const src = srcR.rows[0];
-  if (!src || !dstR.rows[0]) return res.status(404).json({ error: 'Fund not found' });
-  if (Number(src.balance_cents) < amountCents)
-    return res.status(400).json({ error: 'The source fund only has ' + (Number(src.balance_cents) / 100).toFixed(2) });
-  const note = b.notes ? String(b.notes).slice(0, 300) : null;
-  await pcTx(async (cx) => {
-    await cx.query('UPDATE petty_cash_funds SET balance_cents = balance_cents - $1 WHERE id = $2', [amountCents, id]);
-    await cx.query('UPDATE petty_cash_funds SET balance_cents = balance_cents + $1 WHERE id = $2', [amountCents, toId]);
-    await cx.query(
-      `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, source, related_fund_id, notes, created_by)
-       VALUES ($1, 'transfer_out', $2, 'fund', $3, $4, $5)`, [id, -amountCents, toId, note, me]);
-    await cx.query(
-      `INSERT INTO petty_cash_movements (fund_id, kind, delta_cents, source, related_fund_id, notes, created_by)
-       VALUES ($1, 'transfer_in', $2, 'fund', $3, $4, $5)`, [toId, amountCents, id, note, me]);
-  });
-  res.json({ ok: true });
-});
-
-// ---- petty cash report (for accounting) ----
-app.get('/api/admin/petty-cash-report', requireAdmin, async (req, res) => {
-  const from = req.query.from || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
-  const to = req.query.to || new Date().toISOString().slice(0, 10);
-  const fundId = req.query.fund_id ? parseInt(req.query.fund_id, 10) : null;
-  const dateFund = (p) => { let f = ''; if (fundId) { p.push(fundId); f = ` AND cp.fund_id = $${p.length}`; } return f; };
-  const mvFund = (p) => { let f = ''; if (fundId) { p.push(fundId); f = ` AND fund_id = $${p.length}`; } return f; };
-
-  const pCat = [from, to]; const fwCat = dateFund(pCat);
-  const pFund = [from, to]; const fwFund = dateFund(pFund);
-  const pRepl = [from, to]; const fwRepl = mvFund(pRepl);
-  const pVar = [from, to]; const fwVar = mvFund(pVar);
-  const pAdv = []; let fwAdv = ''; if (fundId) { pAdv.push(fundId); fwAdv = ` AND cp.fund_id = $${pAdv.length}`; }
-  const pLines = [from, to]; const fwLines = dateFund(pLines);
-
-  const [byCat, byFund, repl, variance, openAdv, lines] = await Promise.all([
-    query(
-      `SELECT COALESCE(cat.name, 'Uncategorised') AS category, COUNT(*)::int AS n,
-              (COALESCE(SUM(cp.amount_cents),0) / 100.0)::float AS spend_usd
-         FROM cash_payouts cp LEFT JOIN petty_cash_categories cat ON cat.id = cp.category_id
-        WHERE cp.source_type = 'fund' AND cp.voided = false AND (cp.is_advance = false OR cp.advance_status = 'expensed')
-          AND cp.created_at::date BETWEEN $1 AND $2${fwCat}
-        GROUP BY category ORDER BY spend_usd DESC`, pCat).then((r) => r.rows),
-    query(
-      `SELECT f.name AS fund, COUNT(*)::int AS n, (COALESCE(SUM(cp.amount_cents),0) / 100.0)::float AS spend_usd
-         FROM cash_payouts cp JOIN petty_cash_funds f ON f.id = cp.fund_id
-        WHERE cp.source_type = 'fund' AND cp.voided = false AND cp.created_at::date BETWEEN $1 AND $2${fwFund}
-        GROUP BY f.name ORDER BY spend_usd DESC`, pFund).then((r) => r.rows),
-    query(
-      `SELECT (COALESCE(SUM(delta_cents),0) / 100.0)::float AS s FROM petty_cash_movements
-        WHERE kind = 'replenishment' AND created_at::date BETWEEN $1 AND $2${fwRepl}`, pRepl).then((r) => r.rows[0]),
-    query(
-      `SELECT (COALESCE(SUM(delta_cents),0) / 100.0)::float AS s FROM petty_cash_movements
-        WHERE kind = 'reconcile_adjust' AND created_at::date BETWEEN $1 AND $2${fwVar}`, pVar).then((r) => r.rows[0]),
-    query(
-      `SELECT COALESCE(cp.advance_to, 'unnamed') AS advance_to, COUNT(*)::int AS count,
-              (COALESCE(SUM(cp.amount_cents),0) / 100.0)::float AS amount_usd
-         FROM cash_payouts cp
-        WHERE cp.is_advance = true AND cp.advance_status = 'open'${fwAdv}
-        GROUP BY advance_to ORDER BY amount_usd DESC`, pAdv).then((r) => r.rows),
-    query(
-      `SELECT cp.created_at, f.name AS fund,
-              COALESCE(cat.name, CASE WHEN cp.is_advance THEN 'Staff advance' ELSE 'Uncategorised' END) AS category,
-              cp.paid_to, cp.reason, cp.receipt_ref, (cp.amount_cents / 100.0)::float AS amount_usd,
-              cp.is_advance::int AS is_advance, cp.advance_status, cp.voided::int AS voided, u.name AS authorized_by
-         FROM cash_payouts cp
-         JOIN petty_cash_funds f ON f.id = cp.fund_id
-         LEFT JOIN petty_cash_categories cat ON cat.id = cp.category_id
-         LEFT JOIN users u ON u.id = cp.authorized_by
-        WHERE cp.source_type = 'fund' AND cp.created_at::date BETWEEN $1 AND $2${fwLines}
-        ORDER BY cp.created_at DESC LIMIT 1000`, pLines).then((r) => r.rows),
-  ]);
-  const totalSpend = byCat.reduce((s, x) => s + Number(x.spend_usd), 0);
-  res.json({
-    from, to,
-    totals: {
-      spend_usd: Math.round(totalSpend * 100) / 100,
-      replenishments_usd: (repl && repl.s) || 0,
-      reconcile_variance_usd: (variance && variance.s) || 0,
-    },
-    by_category: byCat, by_fund: byFund, open_advances: openAdv, lines,
-  });
 });
 
 // =============================================================================
@@ -9199,6 +10355,29 @@ app.get('/api/pickslip', requireAdmin, async (req, res) => {
   }
 });
 
+// How the public routes match a customer's phone against a work order.
+//
+// Both callers pass the last 7 digits of whatever the customer typed. The old
+// form, repeated in both places, was
+//   regexp_replace(customer_phone, '[^0-9]', '', 'g') LIKE '%' || $n
+// which ran a regexp per row and could not use an index either way, so every
+// call sequentially scanned work_orders (audit M7).
+//
+// customer_phone_digits is now a stored generated column (schema.sql), and
+// there is an index on right(customer_phone_digits, 7). The usual case -- a
+// customer typing a full number, so 7 digits survive the slice -- becomes an
+// equality that index answers. Anything shorter keeps the suffix LIKE so a
+// partial number still matches what it always matched; that path is rare,
+// reads a stored column instead of recomputing a regexp, and both callers put
+// a throttle in front of it.
+//
+// `idx` is the 1-based placeholder number the caller has bound the phone to.
+function woPhoneClause(phone, idx) {
+  return String(phone || '').length >= 7
+    ? `right(customer_phone_digits, 7) = $${idx}`
+    : `customer_phone_digits LIKE '%' || $${idx}`;
+}
+
 // =============================================================================
 //  INVOICE — generate a printable, branded invoice for any work order
 //  (Public if the customer has the WO number + matching phone — uses the same
@@ -9207,12 +10386,29 @@ app.get('/api/pickslip', requireAdmin, async (req, res) => {
 app.get('/api/invoice/:wo_number', async (req, res) => {
   const woNumber = (req.params.wo_number || '').toUpperCase();
   const phone = ((req.query.phone || '').replace(/[^\d]/g, '')).slice(-7);
-  const adminBypass = req.session && req.session.userId;
-  let allowed = !!adminBypass;
+  // The bypass that drops the phone check is for the shop's own people only.
+  // It used to be `req.session && req.session.userId`, i.e. ANY signed-in
+  // session -- including a storefront customer who registered thirty seconds
+  // earlier. With the phone clause dropped, and work-order numbers running
+  // WO-<year>-0001 upwards, that account could walk the sequence and read
+  // every other customer's name, vehicle, complaint, work performed, parts,
+  // labour and payments (audit M6). Customers now fall through to the phone
+  // check like any other member of the public.
+  const allowed = await isStaffUser(req.session && req.session.userId);
+  // Same throttle shape as the public lookup below, and for the same reason:
+  // without the staff bypass this is a guess-the-last-7-digits oracle against
+  // a known WO number. Counted only on a miss, and cleared on a hit, so a
+  // customer reloading their own invoice is never locked out.
+  const gateKey = 'invoice:' + (req.ip || '');
+  let gate = null;
   if (!allowed) {
     if (!phone) return res.status(401).json({ error: 'Phone required for customer access' });
+    gate = pinGate(gateKey);
+    if (gate.blocked) {
+      return res.status(429).json({ error: 'Too many attempts. Try again in ' + gate.waitS + 's.' });
+    }
   }
-  const phoneClause = !allowed ? ` AND regexp_replace(customer_phone, '[^0-9]', '', 'g') LIKE '%' || $2` : '';
+  const phoneClause = !allowed ? ' AND ' + woPhoneClause(phone, 2) : '';
   const params = [woNumber];
   if (!allowed) params.push(phone);
   const { rows: ws } = await query(
@@ -9222,7 +10418,11 @@ app.get('/api/invoice/:wo_number', async (req, res) => {
        LEFT JOIN mechanics sa ON sa.id = w.service_advisor_id
        WHERE wo_number = $1 ${phoneClause}`, params
   );
-  if (!ws.length) return res.status(404).json({ error: 'Invoice not found' });
+  if (!ws.length) {
+    if (gate) pinFail(gateKey, gate.rec);
+    return res.status(404).json({ error: 'Invoice not found' });
+  }
+  if (gate) PIN_ATTEMPTS.delete(gateKey);
   const w = ws[0];
   const [labor, parts, payments] = await Promise.all([
     query('SELECT description, hours::float AS hours, rate_usd::float AS rate, total_usd::float AS total FROM work_order_labor WHERE work_order_id = $1 ORDER BY id', [w.id]),
@@ -9679,6 +10879,7 @@ app.post('/api/admin/parts-requisitions/:id/fulfill', requireAdmin, async (req, 
       const got = Math.max(0, Math.min(want, avail));
       if (got < want) anyBack = true;
       if (got > 0) {
+        await client.query("SELECT set_config('vision.stock_reason', 'requisition', true)");   // stock ledger: why it moved (GL)
         if (it.product_img) await client.query('UPDATE products SET stock_count = GREATEST(0, stock_count - $1) WHERE img = $2', [got, it.product_img]);
         const unit = Number(it.unit_price_usd || 0);
         const total = Math.round(got * unit * 100) / 100;
@@ -9756,12 +10957,42 @@ app.post('/api/admin/time-entries/:id/clock-out', requireAdmin, async (req, res)
   finally { client.release(); }
 });
 
+// Unauthenticated on purpose -- this is the "track my repair" box on
+// track.html, and a customer has no account. What it needed was a throttle and
+// an index, not a login (audit M7).
+//
+// Before: no rate limiting of any kind in front of a query that sequentially
+// scanned work_orders, recomputing a regexp per row. That made it a cheap way
+// for anyone on the internet to load the shop's database, and a workable
+// oracle for guessing the last 7 digits of a customer's phone against a
+// sequential WO number. Now it is keyed on req.ip through the same pinGate
+// used by PIN sign-in, counted only on a miss and cleared on a hit, so a
+// customer checking their own repair is never locked out while a guesser gets
+// 10 tries a minute. The match itself goes through woPhoneClause, which uses
+// the indexed last-7-digits comparison.
 app.post('/api/work-order-lookup', async (req, res) => {
   const wo_number = ((req.body && req.body.wo_number) || '').trim().toUpperCase();
   const phone = ((req.body && req.body.phone) || '').replace(/[^\d]/g, '').slice(-7);
   if (!wo_number || !phone) return res.status(400).json({ error: 'WO number and phone required' });
-  const { rows } = await query(`SELECT id, wo_number, customer_name, vehicle_year, vehicle_make, vehicle_model, status, priority, intake_date, promised_date, completed_at, paid_at, labor_total_usd::float AS labor_total_usd, parts_total_usd::float AS parts_total_usd, tax_usd::float AS tax_usd, total_usd::float AS total_usd, complaint, work_performed FROM work_orders WHERE wo_number = $1 AND regexp_replace(customer_phone, '[^0-9]', '', 'g') LIKE $2`, [wo_number, '%' + phone]);
-  if (!rows.length) return res.status(404).json({ error: 'No work order found.' });
+  const gateKey = 'wolookup:' + (req.ip || '');
+  const gate = pinGate(gateKey);
+  if (gate.blocked) {
+    return res.status(429).json({ error: 'Too many lookups. Try again in ' + gate.waitS + 's.' });
+  }
+  const { rows } = await query(
+    `SELECT id, wo_number, customer_name, vehicle_year, vehicle_make, vehicle_model, status, priority,
+            intake_date, promised_date, completed_at, paid_at,
+            labor_total_usd::float AS labor_total_usd, parts_total_usd::float AS parts_total_usd,
+            tax_usd::float AS tax_usd, total_usd::float AS total_usd, complaint, work_performed
+       FROM work_orders
+      WHERE wo_number = $1 AND ${woPhoneClause(phone, 2)}`,
+    [wo_number, phone]
+  );
+  if (!rows.length) {
+    pinFail(gateKey, gate.rec);
+    return res.status(404).json({ error: 'No work order found.' });
+  }
+  PIN_ATTEMPTS.delete(gateKey);
   res.json({ work_order: rows[0] });
 });
 
@@ -9972,17 +11203,18 @@ async function initDb() {
     console.error('[initDb] schema apply failed:', e.message);
   }
 
-  // 2) Seed default admin (admin@mortysautoparts.com / password123) — always reset password
+  // 2) Seed the default admin ONLY when it does not exist yet (fresh install).
+  //    It used to reset the password to password123 on every boot, so a
+  //    changed admin password never survived a restart.
   try {
     const hash = await bcrypt.hash('password123', 10);
     await query(
       `INSERT INTO users (email, name, phone, password_hash, is_admin)
          VALUES ($1, $2, $3, $4, true)
-       ON CONFLICT (email) DO UPDATE
-         SET is_admin = true, password_hash = EXCLUDED.password_hash`,
+       ON CONFLICT (email) DO NOTHING`,
       ['admin@mortysautoparts.com', 'Admin', '(876) 905-4111', hash]
     );
-    console.log('[initDb] default admin seeded (admin@mortysautoparts.com / password123)');
+    console.log('[initDb] default admin ensured (created only if missing)');
 
     // A default till PIN for that same account, so PIN sign-in works out of
     // the box on a new machine.
@@ -10003,7 +11235,7 @@ async function initDb() {
       if (taken) {
         console.warn('[initDb] default PIN ' + DEFAULT_ADMIN_PIN + ' is already used by another staff member — admin left without one');
       } else {
-        const pinHash = await bcrypt.hash(DEFAULT_ADMIN_PIN, 10);
+        const pinHash = await pins.hash(DEFAULT_ADMIN_PIN);
         await query(
           `UPDATE users SET pin_hash = $1, pin_set_at = NOW(), is_staff = true WHERE id = $2`,
           [pinHash, pinRow[0].id]
@@ -10630,19 +11862,6 @@ app.get('/api/admin/reports/customers', requireAdmin, async (req, res) => {
 // "receivables" is built from it. Getting that backwards double-counts every
 // credit sale, once as income and again as a debt.
 
-// A charge sale's unpaid remainder, per sale, as a reusable fragment: account
-// debits on the sale minus everything the customer has since paid against it.
-// account_payments.reference carries the receipt number it settled.
-const AR_OPEN_SQL = `
-  SELECT s.id, s.receipt_number, s.created_at, s.customer_id,
-         COALESCE(NULLIF(s.customer_name,''),'Walk-in') AS customer_name,
-         SUM(sp.amount_usd)::float AS charged,
-         COALESCE((SELECT SUM(ap.amount_usd) FROM account_payments ap
-                    WHERE ap.reference = s.receipt_number), 0)::float AS settled
-    FROM pos_sales s
-    JOIN sale_payments sp ON sp.sale_id = s.id AND sp.method = 'account'
-   WHERE s.voided = false
-   GROUP BY s.id, s.receipt_number, s.created_at, s.customer_id, s.customer_name`;
 
 // ---- payments received -----------------------------------------------------
 app.get('/api/admin/reports/payments', requireAdmin, async (req, res) => {
@@ -10720,17 +11939,24 @@ app.get('/api/admin/reports/ar-aging', requireAdmin, async (_req, res) => {
   // position. net_owed nets within each customer and floors at zero, which is the
   // figure the Management Summary and Customer List report. Reporting only one of
   // them is how two pages end up disagreeing about what the shop is owed.
+  // Netted per customer off the same open-item basis as the buckets above, so
+  // the two readings describe one ledger. The previous version measured
+  // 'account' tenders instead and so reported zero on an installation whose
+  // unpaid invoices do not carry that tender.
   const net = (await query(
     `SELECT COALESCE(SUM(GREATEST(bal, 0)),0)::float AS owed FROM (
-       SELECT COALESCE((SELECT SUM(sp.amount_usd) FROM sale_payments sp
-                         JOIN pos_sales s ON s.id = sp.sale_id
-                        WHERE sp.method = 'account' AND s.customer_id = u.id AND s.voided = false),0)
-            - COALESCE((SELECT SUM(amount_usd) FROM account_payments ap WHERE ap.customer_id = u.id),0) AS bal
-         FROM users u WHERE u.is_staff = false AND u.is_admin = false) t`)).rows[0];
+       SELECT o.customer_id, SUM(o.charged - o.settled) AS bal
+         FROM (${AR_OPEN_SQL}) o
+        GROUP BY o.customer_id) t`)).rows[0];
   const netOwed = Math.round(net.owed * 100) / 100;
   res.json({
+    // `invoices` counted from the buckets, which cover every open item, not
+    // from `oldest` -- that list is LIMIT 200 and reported its own cap (200
+    // against a true 905).
     totals: { customers: byCustomer.rows.length, owed: Math.round(owed * 100) / 100,
-      net_owed: netOwed, invoices: oldest.rows.length },
+      net_owed: netOwed,
+      invoices: buckets.rows.reduce((a, b) => a + b.invoices, 0),
+      oldest_shown: oldest.rows.length },
     advice: [{ kind: 'data', text: 'Two figures, both correct. The aged total (J$' +
       Math.round(owed).toLocaleString() + ') adds up every invoice still short, which is what you chase. ' +
       'The net position (J$' + Math.round(netOwed).toLocaleString() + ') nets each customer’s ' +
@@ -10743,11 +11969,17 @@ app.get('/api/admin/reports/ar-aging', requireAdmin, async (_req, res) => {
 app.get('/api/admin/reports/payables', requireAdmin, async (req, res) => {
   const { from, to } = reportRange(req);
   const p = [from, to];
+  // Payments are dated by when the money moved (paid_on), not by when the row
+  // was keyed in (created_at) -- the same distinction as a supplier's invoice
+  // date versus the inventory entry date. A cheque written on the 20th and
+  // entered on the 2nd of the next month belongs in the month it was written,
+  // or a month-end payables figure is wrong by whatever was keyed in late.
+  // created_at is the fallback for rows that predate the paid_on column.
   const [paid, byMethod, bySupplier, open] = await Promise.all([
     query(`SELECT COUNT(*)::int AS n, COALESCE(SUM(amount_usd),0)::float AS total
-             FROM purchase_order_payments WHERE created_at::date BETWEEN $1::date AND $2::date`, p),
+             FROM purchase_order_payments WHERE COALESCE(paid_on, created_at::date) BETWEEN $1::date AND $2::date`, p),
     query(`SELECT method, COUNT(*)::int AS n, COALESCE(SUM(amount_usd),0)::float AS total
-             FROM purchase_order_payments WHERE created_at::date BETWEEN $1::date AND $2::date
+             FROM purchase_order_payments WHERE COALESCE(paid_on, created_at::date) BETWEEN $1::date AND $2::date
             GROUP BY method ORDER BY total DESC`, p),
     query(`SELECT COALESCE(s.name,'(no supplier)') AS supplier, COUNT(DISTINCT po.id)::int AS pos,
                   COALESCE(SUM(po.total_usd),0)::float AS ordered,
@@ -10764,9 +11996,42 @@ app.get('/api/admin/reports/payables', requireAdmin, async (req, res) => {
   for (const r of bySupplier.rows) r.outstanding = Math.round((r.ordered - r.paid) * 100) / 100;
   for (const r of open.rows) r.outstanding = Math.round((r.total - r.paid) * 100) / 100;
   const outstanding = bySupplier.rows.reduce((a, r) => a + r.outstanding, 0);
+
+  // "Outstanding" here is ordered minus recorded payments, and almost all of
+  // the purchase history was imported from INVREC, which carries no accounts-
+  // payable data at all -- SUB_TOTAL, TOTAL, TOTAL_PAID and PAY_DATE are empty
+  // on every one of its 206,956 rows. So those POs show their whole value as
+  // unpaid, not because the supplier is owed but because nothing was ever
+  // recorded against them. Quantify it rather than let the tile imply a debt:
+  // the legacy share is called out separately and the real A/P figure is what
+  // remains once it is set aside.
+  const legacy = await query(`
+    SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns
+                              WHERE table_name = 'purchase_orders' AND column_name = 'legacy_key')
+                THEN (SELECT COUNT(*) FROM purchase_orders WHERE legacy_key IS NOT NULL) ELSE 0 END::int AS n,
+           CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns
+                              WHERE table_name = 'purchase_orders' AND column_name = 'legacy_key')
+                THEN (SELECT COALESCE(SUM(total_usd), 0) FROM purchase_orders WHERE legacy_key IS NOT NULL) ELSE 0 END::float AS value`);
+  const lg = legacy.rows[0];
+  // Guard the sign: when the legacy share accounts for the whole figure, float
+  // subtraction lands on -0 and renders as "J$-0.00".
+  const trackedRaw = Math.round((outstanding - lg.value) * 100) / 100;
+  const tracked = Math.abs(trackedRaw) < 0.005 ? 0 : trackedRaw;
+
+  const advice = [];
+  if (lg.n) {
+    advice.push({ kind: 'data', text:
+      `${lg.n.toLocaleString('en-US')} of these purchase orders were imported from the legacy INVREC export, `
+      + `which records no payments at all. Their J$${lg.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} `
+      + 'shows as outstanding because nothing was ever logged against them, not because it is owed. '
+      + `Accounts payable actually tracked by this system: J$${tracked.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.` });
+  }
+
   res.json({ from, to,
     totals: { paid: paid.rows[0].total, paid_n: paid.rows[0].n,
-      outstanding: Math.round(outstanding * 100) / 100 },
+      outstanding: Math.round(outstanding * 100) / 100,
+      legacy_untracked: lg.value, legacy_pos: lg.n, outstanding_tracked: tracked },
+    advice,
     by_method: byMethod.rows, by_supplier: bySupplier.rows, purchase_orders: open.rows });
 });
 
@@ -10861,13 +12126,189 @@ app.get('/api/admin/reports/receivals', requireAdmin, async (req, res) => {
               AND po.received_date::date BETWEEN $1::date AND $2::date
             ORDER BY po.received_date DESC LIMIT 200`, p),
   ]);
-  const costValue = topParts.rows.reduce((a, r) => a + r.cost_value, 0);
+  // The money, and the real counts, for the WHOLE range.
+  //
+  // Two things were wrong here. There was no value at all: the only money on the
+  // report was top_parts_cost_value, summed in JS over a LIMIT 50 array, so it
+  // described the fifty busiest parts rather than the period. And po_receipts
+  // was `poReceipts.rows.length` -- the LIMIT 200, not the count. For 2021 it
+  // reported 200 against an actual 924.
+  //
+  // Both now come from SQL over every row in range. purchase_order_items is the
+  // source for the value because the imported receipt history lives there (one
+  // order line per part received, with its unit cost), and summing the lines
+  // also gives the unit count, which purchase_orders alone cannot.
+  const [poTotals, waTotals] = await Promise.all([
+    query(`SELECT COUNT(DISTINCT po.id)::int                                   AS po_receipts,
+                  COUNT(i.id)::int                                             AS lines,
+                  COALESCE(SUM(i.qty_received), 0)::int                        AS units,
+                  COALESCE(SUM(i.qty_received * COALESCE(i.unit_cost_usd, 0)), 0)::float AS value,
+                  COUNT(DISTINCT po.supplier_id)::int                          AS suppliers
+             FROM purchase_orders po
+             LEFT JOIN purchase_order_items i ON i.po_id = po.id
+            WHERE po.received_date IS NOT NULL
+              AND po.received_date::date BETWEEN $1::date AND $2::date`, p),
+    // Is the app's own movement log in play at all? On an installation seeded
+    // from the legacy export it is empty, and saying so is better than showing
+    // a row of zeros as though nothing was received.
+    query(`SELECT COUNT(*)::int AS rows FROM warehouse_activity WHERE kind = 'receive'`),
+  ]);
+  const pt = poTotals.rows[0];
+  const waUsed = waTotals.rows[0].rows > 0;
+
+  const advice = [];
+  if (!waUsed) {
+    advice.push({ kind: 'data', text:
+      'Receipts here are counted from purchase orders, not from the stock-movement log: '
+      + 'warehouse_activity has no "receive" rows, because this history was imported from the '
+      + 'legacy INVREC export rather than received through the counter. The by-day, by-supplier, '
+      + 'most-received and every-receipt tables below read that log and will stay empty until '
+      + 'stock is received in the app.' });
+  }
+  if (pt.po_receipts > poReceipts.rows.length) {
+    advice.push({ kind: 'data', text:
+      `Showing the ${poReceipts.rows.length} most recent of ${pt.po_receipts.toLocaleString('en-US')} `
+      + 'receipts in this range. The tiles count all of them.' });
+  }
+
   res.json({ from, to,
     totals: Object.assign({}, totals.rows[0], {
-      po_receipts: poReceipts.rows.length,
-      top_parts_cost_value: Math.round(costValue * 100) / 100 }),
+      po_receipts: pt.po_receipts,
+      po_lines: pt.lines,
+      po_units: pt.units,
+      received_value: Math.round(pt.value * 100) / 100,
+      suppliers: pt.suppliers,
+      movement_log_used: waUsed,
+      // Kept for anything still reading it, but it is the top-50 figure, not
+      // the period's -- received_value is the period's.
+      top_parts_cost_value: Math.round(topParts.rows.reduce((a, r) => a + r.cost_value, 0) * 100) / 100 }),
+    advice,
+    shown_po_receipts: poReceipts.rows.length,
     by_day: byDay.rows, top_parts: topParts.rows, by_supplier: bySupplier.rows,
     detail: detail.rows, po_receipts: poReceipts.rows });
+});
+
+// ---- sales commission ------------------------------------------------------
+// Computed at report time, never stored per sale: a line's commission comes
+// from the part's own override if it has one, else the crediting rep's default
+// percent. Changing a rate recalculates every past sale, the same way the
+// margin report recalculates off products.cost_usd.
+//
+// Only sales with a rep attached count. pos_sales.sales_rep_id is a mechanics
+// row, and syncStaffProfile() mirrors any staff user in the 'sales_rep'
+// category into mechanics, so "make this user a sales rep" on the Staff screen
+// is what puts someone in here.
+//
+// A credit note (CN invoice) carries negative qty and negative line totals, so
+// commission on a return comes out negative and nets off what the rep earned on
+// the original sale without this query knowing what a return is.
+const COMMISSION_SQL = `CASE
+    WHEN pr.commission_type = 'none'    THEN 0
+    WHEN pr.commission_type = 'amount'  THEN COALESCE(pr.commission_value, 0) * i.qty
+    WHEN pr.commission_type = 'percent' THEN COALESCE(i.total_usd, 0) * (COALESCE(pr.commission_value, 0) / 100.0)
+    ELSE COALESCE(i.total_usd, 0) * (COALESCE(m.commission_pct, 0) / 100.0)
+  END`;
+const COMMISSION_FROM = `FROM pos_sale_items i
+       JOIN pos_sales ps ON ps.id = i.sale_id
+       LEFT JOIN mechanics m ON m.id = ps.sales_rep_id
+       LEFT JOIN products pr ON pr.img = i.product_img`;
+
+app.get('/api/admin/reports/commission', requireAdmin, async (req, res) => {
+  const { from, to } = reportRange(req);
+  const p = [from, to];
+  const C = COMMISSION_SQL;
+  const [byRep, totals, detail, allTime, paid, reps] = await Promise.all([
+    query(`SELECT ps.sales_rep_id AS mechanic_id,
+                  COALESCE(m.name, ps.sales_rep_name, '(no rep)') AS rep,
+                  COUNT(*)::int AS lines,
+                  COALESCE(SUM(i.total_usd), 0)::float AS revenue,
+                  COALESCE(SUM(${C}), 0)::float AS commission,
+                  COUNT(*) FILTER (WHERE (${C}) = 0)::int AS skipped_lines
+             ${COMMISSION_FROM}
+            WHERE ps.voided = false AND ps.sales_rep_id IS NOT NULL
+              AND ps.created_at::date BETWEEN $1::date AND $2::date
+            GROUP BY ps.sales_rep_id, COALESCE(m.name, ps.sales_rep_name, '(no rep)')
+            ORDER BY commission DESC`, p),
+    query(`SELECT COUNT(*)::int AS lines,
+                  COALESCE(SUM(i.total_usd), 0)::float AS revenue,
+                  COALESCE(SUM(${C}), 0)::float AS commission
+             ${COMMISSION_FROM}
+            WHERE ps.voided = false AND ps.sales_rep_id IS NOT NULL
+              AND ps.created_at::date BETWEEN $1::date AND $2::date`, p),
+    query(`SELECT ps.receipt_number, ps.created_at,
+                  COALESCE(m.name, ps.sales_rep_name, '(no rep)') AS rep,
+                  i.description, i.qty, COALESCE(i.total_usd, 0)::float AS line_total,
+                  -- What the figure was worked out from, so a zero is explainable
+                  CASE WHEN pr.commission_type IS NOT NULL THEN pr.commission_type
+                       WHEN COALESCE(m.commission_pct, 0) > 0 THEN 'rep default ' || m.commission_pct || '%'
+                       ELSE 'no rate set' END AS commission_type,
+                  (${C})::float AS commission
+             ${COMMISSION_FROM}
+            WHERE ps.voided = false AND ps.sales_rep_id IS NOT NULL
+              AND ps.created_at::date BETWEEN $1::date AND $2::date
+            ORDER BY ps.created_at DESC LIMIT 300`, p),
+    // All-time earned and paid, so "owed now" is a real balance rather than
+    // whatever happens to fall inside the chosen range.
+    query(`SELECT ps.sales_rep_id AS mechanic_id, COALESCE(SUM(${C}), 0)::float AS earned
+             ${COMMISSION_FROM}
+            WHERE ps.voided = false AND ps.sales_rep_id IS NOT NULL
+            GROUP BY ps.sales_rep_id`),
+    query(`SELECT mechanic_id, COALESCE(SUM(amount_usd), 0)::float AS paid
+             FROM commission_payouts GROUP BY mechanic_id`),
+    query(`SELECT id, name, commission_pct::float AS commission_pct
+             FROM mechanics WHERE is_active = true ORDER BY name`),
+  ]);
+
+  const earned = new Map(allTime.rows.map((r) => [r.mechanic_id, r.earned]));
+  const paidBy = new Map(paid.rows.map((r) => [r.mechanic_id, r.paid]));
+  const round2 = (n) => Math.round(n * 100) / 100;
+  for (const r of byRep.rows) {
+    r.earned_all_time = round2(earned.get(r.mechanic_id) || 0);
+    r.paid_all_time = round2(paidBy.get(r.mechanic_id) || 0);
+    r.owed = round2(r.earned_all_time - r.paid_all_time);
+  }
+
+  const noRate = reps.rows.filter((m) => !(Number(m.commission_pct) > 0)).length;
+  const advice = [];
+  if (noRate) {
+    advice.push({ kind: 'data', text:
+      `${noRate} of ${reps.rows.length} active reps have no commission rate set, so their lines earn `
+      + 'nothing unless the part itself carries an override. Set a rate on the Mechanics screen '
+      + '(or per part under a product\'s Commission field).' });
+  }
+  if (totals.rows[0].lines === 0) {
+    advice.push({ kind: 'data', text:
+      'No sale in this range has a sales rep attached. Commission is credited from '
+      + 'pos_sales.sales_rep_id -- tick "Sales rep" on a staff member, then pick them on the ticket.' });
+  }
+
+  res.json({ from, to,
+    totals: totals.rows[0],
+    by_rep: byRep.rows,
+    detail: detail.rows,
+    advice,
+    reps: reps.rows.map((m) => ({
+      id: m.id, name: m.name, commission_pct: m.commission_pct,
+      owed: round2((earned.get(m.id) || 0) - (paidBy.get(m.id) || 0)),
+    })) });
+});
+
+// Record money actually handed to a rep. requireManager, not requireAdmin: this
+// is a payout, which a counter cashier should not be able to book.
+app.post('/api/admin/mechanics/:id/commission-payouts', requireManager, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Bad rep id.' });
+  const amount = Number((req.body && req.body.amount_usd) || 0);
+  if (!(amount > 0)) return res.status(400).json({ error: 'Enter an amount greater than zero.' });
+  const { rows: m } = await query('SELECT id, name FROM mechanics WHERE id = $1', [id]);
+  if (!m.length) return res.status(404).json({ error: 'No such sales rep.' });
+  const { rows } = await query(
+    `INSERT INTO commission_payouts (mechanic_id, amount_usd, notes, paid_by)
+     VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
+    [id, Math.round(amount * 100) / 100,
+     (req.body && req.body.notes) ? String(req.body.notes).slice(0, 500) : null,
+     req.session.userId]);
+  res.json({ ok: true, id: rows[0].id, rep: m[0].name, amount_usd: Math.round(amount * 100) / 100 });
 });
 
 // ---- reorder / purchasing planner -----------------------------------------
@@ -10882,7 +12323,7 @@ app.get('/api/admin/reports/receivals', requireAdmin, async (req, res) => {
 // stock AND actually sold in the range. Everything else is a dormant SKU, not
 // a thing to buy.
 const REORDER_WHERE = `
-  pr.is_active = true AND (
+  pr.is_active = true AND NOT pr.discontinued AND pr.superseded_by IS NULL AND pr.variant_of IS NULL AND (
     (COALESCE(pr.reorder_point,0) > 0 AND pr.stock_count <= pr.reorder_point)
     OR (pr.low_threshold > 0 AND pr.stock_count <= pr.low_threshold)
     OR (pr.stock_count <= 0 AND EXISTS (
@@ -10924,41 +12365,81 @@ app.get('/api/admin/reports/reorder', requireAdmin, async (req, res) => {
 });
 
 // ---- customer list ---------------------------------------------------------
+// Pre-aggregated, not correlated. The original asked five per-row subqueries
+// per customer and then the whole balance calculation again for the totals --
+// around 17,000 index scans over 8,600 customers. Most of them are cheap, but
+// the shared walk-in account carries 899,386 of the 931,078 sales, so every
+// pass that touches it re-aggregates nine hundred thousand rows: the report
+// took 12,422ms. Aggregating pos_sales / sale_payments / account_payments by
+// customer once and joining is a single pass over each table, and the list and
+// the totals are both derived from the same joined set in one round trip, which
+// also means they cannot disagree. 12,422ms -> see the comment on the route's
+// test in the port notes.
 app.get('/api/admin/reports/customer-list', requireAdmin, async (_req, res) => {
-  const [rows, byType, totals] = await Promise.all([
-    query(`SELECT u.id, u.name, u.email, u.phone, u.account_number,
-                  COALESCE(u.customer_type,'retail') AS customer_type,
-                  COALESCE(u.price_tier,'retail') AS price_tier,
-                  u.credit_type, u.payment_terms_days, u.credit_limit_usd::float AS credit_limit_usd,
-                  u.created_at::date::text AS joined,
-                  (SELECT COUNT(*)::int FROM pos_sales ps WHERE ps.customer_id = u.id AND ps.voided = false) AS sales,
-                  COALESCE((SELECT SUM(ps.total_usd) FROM pos_sales ps WHERE ps.customer_id = u.id AND ps.voided = false),0)::float AS spend,
-                  (SELECT MAX(ps.created_at)::date::text FROM pos_sales ps WHERE ps.customer_id = u.id AND ps.voided = false) AS last_sale,
-                  COALESCE((SELECT SUM(sp.amount_usd) FROM sale_payments sp JOIN pos_sales ps ON ps.id = sp.sale_id
-                             WHERE sp.method = 'account' AND ps.customer_id = u.id AND ps.voided = false),0)::float
-                  - COALESCE((SELECT SUM(ap.amount_usd) FROM account_payments ap WHERE ap.customer_id = u.id),0)::float AS balance
-             FROM users u
-            WHERE u.is_staff = false AND u.is_admin = false
-            ORDER BY spend DESC, u.name ASC LIMIT 2000`),
-    query(`SELECT COALESCE(customer_type,'retail') AS customer_type, COUNT(*)::int AS n
-             FROM users WHERE is_staff = false AND is_admin = false GROUP BY 1 ORDER BY n DESC`),
-    // Counted in SQL over every customer, not summed from the 2,000 rows the
-    // list shows. Doing it in JS over the limited array reported J$38,037,734
-    // against a true J$38,401,336 and put this page J$363,602 out of step with
-    // the Management Summary and A/R Aging.
-    query(`SELECT COUNT(*)::int AS customers,
-                  COUNT(*) FILTER (WHERE account_number IS NOT NULL)::int AS with_account,
-                  COUNT(*) FILTER (WHERE customer_type = 'trade')::int AS trade,
-                  (SELECT COALESCE(SUM(GREATEST(bal, 0)),0)::float FROM (
-                     SELECT COALESCE((SELECT SUM(sp.amount_usd) FROM sale_payments sp
-                                       JOIN pos_sales s ON s.id = sp.sale_id
-                                      WHERE sp.method = 'account' AND s.customer_id = u2.id AND s.voided = false),0)
-                          - COALESCE((SELECT SUM(amount_usd) FROM account_payments ap WHERE ap.customer_id = u2.id),0) AS bal
-                       FROM users u2 WHERE u2.is_staff = false AND u2.is_admin = false) t) AS owed
-             FROM users WHERE is_staff = false AND is_admin = false`),
-  ]);
-  res.json({ totals: totals.rows[0], by_type: byType.rows, customers: rows.rows,
-    shown: rows.rows.length });
+  const LIMIT = 2000;
+  const { rows } = await query(`
+    WITH cust AS (
+      SELECT u.id, u.name, u.email, u.phone, u.account_number,
+             COALESCE(u.customer_type,'retail') AS customer_type,
+             COALESCE(u.price_tier,'retail')    AS price_tier,
+             u.credit_type, u.payment_terms_days,
+             u.credit_limit_usd::float          AS credit_limit_usd,
+             u.created_at::date::text           AS joined
+        FROM users u WHERE u.is_staff = false AND u.is_admin = false
+    ),
+    sale_agg AS (
+      SELECT customer_id AS id, COUNT(*)::int AS sales,
+             SUM(total_usd) AS spend, MAX(created_at)::date::text AS last_sale
+        FROM pos_sales
+       WHERE voided = false AND customer_id IS NOT NULL
+       GROUP BY customer_id
+    ),
+    -- What each customer still owes: the same open-item test as A/R Aging and
+    -- the customer statement (AR_OPEN_SQL), floored per invoice.
+    --
+    -- This measured 'account' tenders minus account_payments before, which read
+    -- zero on this installation -- the imported charge sales carry no 'account'
+    -- tender -- so this page reported nothing owed by anyone while A/R Aging
+    -- reported J$7m. The three pages have to answer the question the same way.
+    owing AS (
+      SELECT customer_id AS id, SUM(GREATEST(charged - settled, 0)) AS bal
+        FROM (${AR_OPEN_SQL}) o WHERE customer_id IS NOT NULL GROUP BY customer_id
+    ),
+    j AS (
+      SELECT c.*, COALESCE(s.sales, 0) AS sales,
+             COALESCE(s.spend, 0)::float AS spend,
+             s.last_sale,
+             COALESCE(o.bal, 0)::float AS balance
+        FROM cust c
+        LEFT JOIN sale_agg s USING (id)
+        LEFT JOIN owing    o USING (id)
+    )
+    SELECT json_build_object(
+      'customers', (SELECT COALESCE(json_agg(x), '[]'::json) FROM
+                     (SELECT * FROM j ORDER BY spend DESC, name ASC LIMIT ${LIMIT}) x),
+      'by_type',   (SELECT COALESCE(json_agg(x), '[]'::json) FROM
+                     (SELECT customer_type, COUNT(*)::int AS n FROM j
+                       GROUP BY customer_type ORDER BY n DESC) x),
+      -- Counted over every customer, never summed from the limited list. Doing
+      -- it in JS over the trimmed array reported J$38,037,734 against a true
+      -- J$38,401,336 and put this page J$363,602 out of step with the
+      -- Management Summary and A/R Aging.
+      --
+      -- GREATEST(balance, 0) per customer, then summed: receivables net within
+      -- one account (an overpayment cancels that customer's own arrears) but
+      -- never across accounts (one customer's credit cannot pay another's
+      -- debt). Flooring globally instead gives a different, smaller number.
+      'totals',    (SELECT row_to_json(x) FROM (
+                     SELECT COUNT(*)::int                                         AS customers,
+                            COUNT(*) FILTER (WHERE account_number IS NOT NULL)::int AS with_account,
+                            COUNT(*) FILTER (WHERE customer_type = 'trade')::int    AS trade,
+                            COALESCE(SUM(GREATEST(balance, 0)), 0)::float           AS owed
+                       FROM j) x)
+    ) AS payload`);
+
+  const d = rows[0].payload;
+  res.json({ totals: d.totals, by_type: d.by_type, customers: d.customers,
+    shown: d.customers.length, total: d.totals.customers });
 });
 
 // ---- vendor list -----------------------------------------------------------
@@ -10981,15 +12462,16 @@ app.get('/api/admin/reports/vendor-list', requireAdmin, async (_req, res) => {
 });
 
 // ---- users & staff ---------------------------------------------------------
-// The Cloudflare build fills a "last seen" column from admin_presence; this
-// schema has no such table, so that column comes back null rather than faked.
+// "Last seen" is the newest admin_presence heartbeat for the user (posaddons.js);
+// rows are pruned after a day, so anyone older reads blank.
 app.get('/api/admin/reports/users-staff', requireAdmin, async (_req, res) => {
   const [rows, byRole, tiles, roleDefs] = await Promise.all([
     query(`SELECT u.id, u.name, u.email, u.employee_no, u.admin_role,
                   CASE WHEN u.pin_hash IS NOT NULL THEN 'yes' ELSE 'no' END AS pin_set,
                   CASE WHEN u.disabled THEN 'disabled'
                        WHEN u.is_archived THEN 'archived' ELSE 'active' END AS state,
-                  u.created_at::date::text AS joined, NULL::text AS last_seen,
+                  u.created_at::date::text AS joined,
+                  (SELECT to_char(MAX(ap.last_seen), 'YYYY-MM-DD HH24:MI') FROM admin_presence ap WHERE ap.user_id = u.id) AS last_seen,
                   m.specialty, m.role AS staff_role
              FROM users u LEFT JOIN mechanics m ON m.user_id = u.id
             WHERE u.is_staff = true OR u.is_admin = true
@@ -11475,7 +12957,8 @@ app.get('/api/admin/reports/setup-config', requireAdmin, async (_req, res) => {
         flat_fee: Number(s.ship_local_flat_usd) || 0 },
     },
     card_payment: { fygaro_enabled: !!s.fygaro_enabled, button_configured: has(s.fygaro_button_id),
-      secret: has(process.env.FYGARO_JWT_SECRET), currency: s.fygaro_currency || 'JMD' },
+      secret: has(process.env.FYGARO_JWT_SECRET), webhook_secret: has(process.env.FYGARO_WEBHOOK_SECRET),
+      currency: s.fygaro_currency || 'JMD' },
     counts: counts.rows[0], roles: roles.rows,
   });
 });
@@ -11946,8 +13429,10 @@ function rankingSql(dimSql, metric, perGroup) {
     scored AS (
       SELECT *, (revenue - cogs) AS profit,
              CASE WHEN revenue > 0 THEN round(((revenue - cogs) / revenue * 100)::numeric, 1) END AS margin_pct,
-             -- 15,717 active parts carry no cost price, which computes as 100%
-             -- margin. Say so per line instead of reporting a fiction.
+             -- 1,719 of this catalogue's 36,519 active parts carry no cost
+             -- price, which computes as 100% margin. Say so per line instead of
+             -- reporting a fiction. (The figure the reports show is counted
+             -- live by the exceptions report, not taken from this comment.)
              (cogs > 0) AS cost_known,
              ROW_NUMBER() OVER (PARTITION BY dim ORDER BY ${rankBy} DESC) AS rn,
              -- Group totals, so the breakdown leads with the biggest groups
@@ -12446,7 +13931,7 @@ app.get('/api/admin/reports/cash-flow', requireAdmin, async (req, res) => {
     query(`SELECT COALESCE(SUM(amount_usd),0)::float AS total, COUNT(*)::int AS n
              FROM work_order_payments WHERE received_at::date BETWEEN $1::date AND $2::date`, p),
     query(`SELECT COALESCE(SUM(amount_usd),0)::float AS total, COUNT(*)::int AS n
-             FROM purchase_order_payments WHERE created_at::date BETWEEN $1::date AND $2::date`, p),
+             FROM purchase_order_payments WHERE COALESCE(paid_on, created_at::date) BETWEEN $1::date AND $2::date`, p),
     query(`SELECT COALESCE(SUM(amount_cents),0)/100.0 AS total, COUNT(*)::int AS n
              FROM cash_payouts WHERE COALESCE(voided,false) = false
               AND created_at::date BETWEEN $1::date AND $2::date`, p),
@@ -12706,73 +14191,203 @@ app.get('/api/admin/reports/sales-detail', requireAdmin, async (req, res) => {
 app.get('/api/admin/reports/customer-statement', requireAdmin, async (req, res) => {
   const { from, to } = reportRange(req);
   const id = parseInt(req.query.customer_id, 10);
+
+  // The picker lists customers by what they owe, measured the same way as the
+  // statement and A/R Aging -- open invoices, not 'account' tenders.
   const { rows: list } = await query(
-    `SELECT u.id, COALESCE(NULLIF(u.name,''), u.email) AS name,
-            COALESCE((SELECT SUM(sp.amount_usd) FROM sale_payments sp JOIN pos_sales s ON s.id = sp.sale_id
-                       WHERE sp.method = 'account' AND s.customer_id = u.id AND s.voided = false),0)::float
-          - COALESCE((SELECT SUM(amount_usd) FROM account_payments WHERE customer_id = u.id),0)::float AS balance
-       FROM users u WHERE u.is_staff = false AND u.is_admin = false
-      ORDER BY balance DESC LIMIT 400`);
+    `SELECT u.id, COALESCE(NULLIF(u.name,''), u.email) AS name, u.account_number,
+            COALESCE(o.bal, 0)::float AS balance
+       FROM users u
+       LEFT JOIN (SELECT customer_id, SUM(charged - settled) AS bal
+                    FROM (${AR_OPEN_SQL}) x GROUP BY customer_id) o ON o.customer_id = u.id
+      WHERE u.is_staff = false AND u.is_admin = false
+      ORDER BY balance DESC, name ASC LIMIT 400`);
   if (!id) return res.json({ from, to, customers: list, customer: null });
+
   const cust = (await query('SELECT * FROM users WHERE id = $1', [id])).rows[0];
   if (!cust) return res.status(404).json({ error: 'That customer no longer exists.' });
 
-  const [opening, lines, closing] = await Promise.all([
-    // Everything before the window, netted, is the opening balance.
-    query(`SELECT COALESCE((SELECT SUM(sp.amount_usd) FROM sale_payments sp JOIN pos_sales s ON s.id = sp.sale_id
-                             WHERE sp.method = 'account' AND s.customer_id = $1 AND s.voided = false
-                               AND s.created_at::date < $2::date),0)::float
-                - COALESCE((SELECT SUM(amount_usd) FROM account_payments
-                             WHERE customer_id = $1 AND created_at::date < $2::date),0)::float AS opening`,
-      [id, from]),
+  const [opening, lines, open, movement] = await Promise.all([
+    // Opening balance: every invoice raised before the window, less everything
+    // settled against it. Not "charges minus payments in a date range" -- a
+    // payment made inside the window against an older invoice has to reduce
+    // that invoice, not the opening figure.
+    query(`SELECT COALESCE(SUM(GREATEST(o.charged - o.settled, 0)), 0)::float AS opening
+             FROM (${AR_OPEN_SQL}) o
+            WHERE o.customer_id = $1 AND o.created_at::date < $2::date`, [id, from]),
+
+    // Every movement in the window: invoices raised, tenders taken at the till,
+    // and account settlements posted later.
     query(`SELECT * FROM (
              SELECT s.created_at AS at, s.created_at::date::text AS day, 'Invoice' AS kind,
                     s.receipt_number AS reference, s.total_usd::float AS charge, 0::float AS credit,
-                    COALESCE(s.payment_method,'') AS detail
+                    COALESCE(NULLIF(s.payment_method,''), s.payment_status) AS detail,
+                    s.due_date, s.payment_status,
+                    (s.total_usd - COALESCE(s.amount_paid_usd,0))::float AS still_due
                FROM pos_sales s
               WHERE s.customer_id = $1 AND s.voided = false
                 AND s.created_at::date BETWEEN $2::date AND $3::date
              UNION ALL
+             -- Invoices raised on the books (rent, late fees): nothing is paid at
+             -- issue, so the whole total is still due; payments come in below.
+             SELECT (i.invoice_date + TIME '12:00') AT TIME ZONE 'America/Jamaica' AS at, i.invoice_date::text AS day,
+                    CASE WHEN i.kind = 'late_fee' THEN 'Late fee' ELSE 'Invoice' END AS kind,
+                    i.number AS reference, i.total::float AS charge, 0::float AS credit,
+                    COALESCE(i.memo, '') AS detail, i.due_date, NULL::text AS payment_status, i.total::float AS still_due
+               FROM ar_invoices i
+              WHERE i.customer_id = $1 AND i.voided_at IS NULL
+                AND i.invoice_date BETWEEN $2::date AND $3::date
+             UNION ALL
              SELECT ap.created_at AS at, ap.created_at::date::text AS day, 'Payment' AS kind,
                     COALESCE(ap.reference,'') AS reference, 0::float AS charge, ap.amount_usd::float AS credit,
-                    COALESCE(ap.method,'') AS detail
+                    COALESCE(ap.method,'') AS detail,
+                    NULL::date AS due_date, NULL::text AS payment_status, 0::float AS still_due
                FROM account_payments ap
               WHERE ap.customer_id = $1 AND ap.created_at::date BETWEEN $2::date AND $3::date
            ) t ORDER BY at ASC LIMIT 1000`, [id, from, to]),
-    query(`SELECT COALESCE((SELECT SUM(sp.amount_usd) FROM sale_payments sp JOIN pos_sales s ON s.id = sp.sale_id
-                             WHERE sp.method = 'account' AND s.customer_id = $1 AND s.voided = false
-                               AND s.created_at::date <= $2::date),0)::float
-                - COALESCE((SELECT SUM(amount_usd) FROM account_payments
-                             WHERE customer_id = $1 AND created_at::date <= $2::date),0)::float AS closing`,
-      [id, to]),
+
+    // The open items themselves, aged. This is what a statement is for: not
+    // "what happened this month" but "what is still outstanding, and how late".
+    // Aged from the due date when the invoice has terms, and from the invoice
+    // date when it does not -- an invoice with no agreed terms is due on issue.
+    query(`SELECT o.receipt_number, o.created_at::date::text AS day, o.due_date,
+                  (o.charged - o.settled)::float AS balance,
+                  o.charged, o.settled,
+                  GREATEST(CURRENT_DATE - COALESCE(o.due_date, o.created_at::date), 0)::int AS days_overdue,
+                  (CURRENT_DATE - o.created_at::date)::int AS age_days,
+                  CASE
+                    WHEN CURRENT_DATE - COALESCE(o.due_date, o.created_at::date) <= 0  THEN 'current'
+                    WHEN CURRENT_DATE - COALESCE(o.due_date, o.created_at::date) <= 30 THEN '1-30 days'
+                    WHEN CURRENT_DATE - COALESCE(o.due_date, o.created_at::date) <= 60 THEN '31-60 days'
+                    WHEN CURRENT_DATE - COALESCE(o.due_date, o.created_at::date) <= 90 THEN '61-90 days'
+                    ELSE 'over 90 days' END AS bucket
+             FROM (${AR_OPEN_SQL}) o
+            WHERE o.customer_id = $1
+            ORDER BY o.created_at ASC`, [id]),
+
+    // The window's movement, and the count of it, in SQL over EVERY row.
+    // The activity list below is LIMIT 1000 for display; deriving the closing
+    // balance by walking that array made a busy account close short by
+    // whatever fell past the cap -- 1,507 invoices on one trade account
+    // reported J$446,134.63 against a true J$1,003,409.62.
+    // Invoices raised on the books are added to each figure (the whole total is
+    // left owing at issue).
+    query(`WITH bi AS (SELECT COUNT(*)::int AS n, COALESCE(SUM(total), 0) AS t FROM ar_invoices
+                        WHERE customer_id = $1 AND voided_at IS NULL AND invoice_date BETWEEN $2::date AND $3::date)
+           SELECT
+             ((SELECT COUNT(*) FROM pos_sales s
+               WHERE s.customer_id = $1 AND s.voided = false
+                 AND s.created_at::date BETWEEN $2::date AND $3::date) + (SELECT n FROM bi))::int AS invoices,
+             ((SELECT COALESCE(SUM(GREATEST(s.total_usd - COALESCE(s.amount_paid_usd,0), 0)), 0)
+                FROM pos_sales s
+               WHERE s.customer_id = $1 AND s.voided = false
+                 AND s.created_at::date BETWEEN $2::date AND $3::date) + (SELECT t FROM bi))::float AS left_owing,
+             ((SELECT COALESCE(SUM(s.total_usd), 0) FROM pos_sales s
+               WHERE s.customer_id = $1 AND s.voided = false
+                 AND s.created_at::date BETWEEN $2::date AND $3::date) + (SELECT t FROM bi))::float AS billed,
+             (SELECT COUNT(*) FROM account_payments ap
+               WHERE ap.customer_id = $1
+                 AND ap.created_at::date BETWEEN $2::date AND $3::date)::int AS payments,
+             (SELECT COALESCE(SUM(ap.amount_usd), 0) FROM account_payments ap
+               WHERE ap.customer_id = $1
+                 AND ap.created_at::date BETWEEN $2::date AND $3::date)::float AS settled`,
+      [id, from, to]),
   ]);
-  // A running balance only makes sense on the account side, so the charge column
-  // shows the invoice total while the balance moves by what went on account.
-  let bal = Number(opening.rows[0].opening) || 0;
-  const charged = (await query(
-    `SELECT s.receipt_number, COALESCE(SUM(sp.amount_usd),0)::float AS on_account
-       FROM pos_sales s JOIN sale_payments sp ON sp.sale_id = s.id AND sp.method = 'account'
-      WHERE s.customer_id = $1 AND s.voided = false
-        AND s.created_at::date BETWEEN $2::date AND $3::date
-      GROUP BY 1`, [id, from, to])).rows;
-  const onAcct = new Map(charged.map((r) => [r.receipt_number, r.on_account]));
+
+  // Running balance across the window, opening forward. The displayed figures
+  // walk the (capped) activity list; the authoritative opening and closing come
+  // from SQL over every row, below.
+  const mv = movement.rows[0];
+  const openingBal = Math.round((Number(opening.rows[0].opening) || 0) * 100) / 100;
+  let bal = openingBal;
   for (const l of lines.rows) {
-    l.on_account = l.kind === 'Invoice' ? (onAcct.get(l.reference) || 0) : 0;
-    bal = Math.round((bal + l.on_account - l.credit) * 100) / 100;
+    // An invoice moves the balance by what is still owed on it, not by its
+    // total: a cash sale is an event on the statement but settles immediately
+    // and leaves nothing behind.
+    //
+    // Floored at zero per invoice. amount_paid_usd exceeds the total on a
+    // number of imported invoices (the legacy export records a cash sale and
+    // its refund both as money in), which made still_due negative -- summed
+    // across this account that was -J$374,215.15, so the running balance
+    // credited the customer for overpayments on unrelated settled invoices and
+    // closed J$713,391.93 below the J$1,003,409.62 actually outstanding. An
+    // over-settled invoice owes nothing; it does not pay off another one.
+    l.outstanding = l.kind === 'Invoice' || l.kind === 'Late fee' ? Math.max(0, Number(l.still_due) || 0) : 0;
+    bal = Math.round((bal + l.outstanding - Number(l.credit || 0)) * 100) / 100;
     l.balance = bal;
   }
-  const t = { opening: Math.round((Number(opening.rows[0].opening) || 0) * 100) / 100,
-    closing: Math.round((Number(closing.rows[0].closing) || 0) * 100) / 100,
-    invoices: lines.rows.filter((l) => l.kind === 'Invoice').length,
-    payments: lines.rows.filter((l) => l.kind === 'Payment').length,
-    charged: Math.round(lines.rows.reduce((a, l) => a + l.on_account, 0) * 100) / 100,
-    paid: Math.round(lines.rows.reduce((a, l) => a + l.credit, 0) * 100) / 100 };
+
+  // Ageing buckets, in a fixed order so the statement always reads the same way
+  // rather than reordering as invoices move between buckets.
+  const ORDER = ['current', '1-30 days', '31-60 days', '61-90 days', 'over 90 days'];
+  const byBucket = new Map(ORDER.map((b) => [b, { bucket: b, invoices: 0, balance: 0 }]));
+  for (const o of open.rows) {
+    const b = byBucket.get(o.bucket);
+    b.invoices++;
+    b.balance = Math.round((b.balance + o.balance) * 100) / 100;
+  }
+  const ageing = ORDER.map((b) => byBucket.get(b)).filter((b) => b.invoices > 0);
+  const owed = Math.round(open.rows.reduce((a, o) => a + o.balance, 0) * 100) / 100;
+  const overdue = Math.round(open.rows.filter((o) => o.days_overdue > 0)
+    .reduce((a, o) => a + o.balance, 0) * 100) / 100;
+  const oldest = open.rows.reduce((m, o) => Math.max(m, o.days_overdue), 0);
+
+  const terms = cust.payment_terms_days;
+  const limit = cust.credit_limit_usd != null ? Number(cust.credit_limit_usd) : null;
+
+  const advice = [];
+  if (!open.rows.length) {
+    advice.push({ kind: 'data', text: 'Nothing outstanding -- every invoice on this account is settled.' });
+  } else {
+    if (terms == null) {
+      advice.push({ kind: 'risk', text:
+        'This account has no payment terms set, so every open invoice is aged from its invoice date '
+        + '(due on issue). Set terms on the customer record to age it against an agreed due date instead.' });
+    }
+    if (overdue > 0.005) {
+      advice.push({ kind: 'money', text:
+        `J$${overdue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} `
+        + `is past due, the oldest by ${oldest} day${oldest === 1 ? '' : 's'}.` });
+    }
+    if (limit != null && limit > 0 && owed > limit) {
+      advice.push({ kind: 'risk', text:
+        `Outstanding balance exceeds this account's credit limit of `
+        + `J$${limit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.` });
+    }
+  }
+  advice.push({ kind: 'data', text:
+    'The balance column tracks what is still owed: a fully paid invoice appears as an activity line but '
+    + `does not move it. Opening is everything unsettled before ${from}; the ageing below is as at today, `
+    + 'not as at the end of the range.' });
+
   res.json({ from, to, customers: list,
     customer: { id: cust.id, name: cust.name || cust.email, email: cust.email, phone: cust.phone,
       account_number: cust.account_number, customer_type: cust.customer_type,
-      payment_terms_days: cust.payment_terms_days, credit_limit_usd: cust.credit_limit_usd },
-    totals: t, lines: lines.rows,
-    advice: [{ kind: 'data', text: 'The balance column tracks the account only: a cash sale appears as an invoice but does not move it. Opening is everything on account before ' + from + ', netted against payments; closing is the same test at ' + to + '.' }] });
+      payment_terms_days: terms, credit_limit_usd: limit,
+      discount_pct: cust.discount_pct != null ? Number(cust.discount_pct) : null,
+      price_tier: cust.price_tier, credit_type: cust.credit_type },
+    totals: {
+      opening: openingBal,
+      // Opening, plus what the window left owing, less what was settled in it.
+      // Counted in SQL over every row, not walked from the capped list.
+      closing: Math.round((openingBal + mv.left_owing - mv.settled) * 100) / 100,
+      owed: owed,
+      overdue: overdue,
+      current: Math.round((owed - overdue) * 100) / 100,
+      oldest_days: oldest,
+      open_invoices: open.rows.length,
+      invoices: mv.invoices,
+      payments: mv.payments,
+      charged: Math.round(mv.billed * 100) / 100,
+      paid: Math.round(mv.settled * 100) / 100,
+      credit_limit_usd: limit,
+      credit_available: limit != null ? Math.round((limit - owed) * 100) / 100 : null,
+      // So the UI can say "showing the newest 1,000 of 1,507" rather than
+      // quietly presenting a partial list as the whole account.
+      activity_shown: lines.rows.length,
+      activity_total: mv.invoices + mv.payments,
+    },
+    ageing, open_items: open.rows, lines: lines.rows, advice });
 });
 
 // =============================================================================
@@ -12795,6 +14410,7 @@ app.use((err, req, res, _next) => {
   if (res.headersSent) return;
   res.status(500).json({ error: 'Internal server error' });
 });
+
 
 // =============================================================================
 //  BOOT
@@ -12833,11 +14449,12 @@ async function start() {
   app.listen(PORT, () => {
     console.log('[boot] Morty\'s Auto Parts server listening on http://localhost:' + PORT);
   });
+  startHttpsListener();
 
   // Off-site backup: only the database-owning machine runs the schedule.
   // First check shortly after boot (catch-up for an overnight outage), then
   // every 10 minutes -- backupTick() itself decides whether anything is due.
-  if (ownsSchema()) {
+  if (ownsSchema() && !DEV_MODE) {
     setTimeout(() => { backupTick(); }, 45000);
     setInterval(() => { backupTick(); }, 10 * 60 * 1000);
   }

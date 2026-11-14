@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>Sign your invoice · Morty's Auto Parts</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+  :root {
+    --red:#d62828; --navy:#0b1b2b; --ink:#1f2937; --muted:#6b7280;
+    --line:#e5e7eb; --ok:#16a34a; --bg:#f6f7f9;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:15px}
+  header.top{background:var(--navy);color:#fff;padding:14px 16px}
+  header.top h1{margin:0;font-size:18px;font-weight:800}
+  header.top small{color:#cbd5e1}
+  main{max-width:680px;margin:0 auto;padding:16px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+  table{width:100%;border-collapse:collapse}
+  td{padding:7px 4px;border-bottom:1px solid var(--line)}
+  td.n{text-align:right;white-space:nowrap}
+  label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+  input[type=text]{width:100%;font:inherit;padding:10px;border:1px solid var(--line);border-radius:8px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+  button{font:inherit;padding:11px 18px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer}
+  button.go{background:var(--red);border-color:var(--red);color:#fff;font-weight:700;flex:1}
+  button:disabled{opacity:.5}
+  .msg{padding:12px;border-radius:8px;background:#fee2e2;color:#991b1b}
+  .ok{padding:14px;border-radius:8px;background:#dcfce7;color:#14532d;font-weight:600}
+  .muted{color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<header class="top"><h1 id="shop">Morty's Auto Parts</h1><small>Sign your invoice</small></header>
+<main id="out"><div class="card muted">Loading…</div></main>
+<script src="/assets/invoice-scan.js?v=20261028"></script>
+<script>
+(function () {
+  'use strict';
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var J = function (v) { return 'J$' + Number(v || 0).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+  var token = new URLSearchParams(location.search).get('t') || '';
+  var out = document.getElementById('out');
+  var url = '/api/public/invoice-sign/' + encodeURIComponent(token);
+  // The token is in the address; keep it out of the history and of any Referer.
+  try { history.replaceState(null, '', location.pathname + '?t=' + encodeURIComponent(token)); } catch (_) {}
+  var stop = function (m) { out.innerHTML = '<div class="card"><div class="msg">' + esc(m) + '</div></div>'; };
+  fetch(url, { credentials: 'omit', referrerPolicy: 'no-referrer' }).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'This link is not valid'); return j; }); }).then(function (d) {
+    var i = d.invoice;
+    if (d.shop && d.shop.name) document.getElementById('shop').textContent = d.shop.name;
+    out.innerHTML = '<div class="card"><h2 style="margin:0 0 4px">Invoice ' + esc(i.number) + '</h2><div class="muted">For ' + esc(i.customer) + ' · ' + esc(i.day) + (i.due ? ' · due ' + esc(i.due) : '') + '</div>' +
+      (i.memo ? '<p>' + esc(i.memo) + '</p>' : '') +
+      '<table style="margin-top:10px"><tbody>' + d.lines.map(function (l) { return '<tr><td>' + esc(l.description || '') + '</td><td class="n">' + J(l.amount) + '</td></tr>'; }).join('') +
+      (i.gct ? '<tr><td>GCT</td><td class="n">' + J(i.gct) + '</td></tr>' : '') + '<tr><td><b>Total</b></td><td class="n"><b>' + J(i.total) + '</b></td></tr></tbody></table></div>' +
+      '<div class="card"><label for="nm">Your name</label><input type="text" id="nm" autocomplete="name">' +
+      '<label>Sign below with your finger</label><div id="pad"></div>' +
+      '<label style="display:flex;gap:8px;align-items:flex-start;color:var(--ink);font-size:14px;margin-top:12px"><input type="checkbox" id="ag" style="margin-top:3px"> I confirm I received the goods or services on this invoice and agree to pay ' + J(i.total) + (i.due ? ' by ' + esc(i.due) : '') + '.</label>' +
+      '<div class="row"><button id="clr">Clear</button><button class="go" id="go">Sign invoice</button></div><div id="m" style="margin-top:10px"></div>' +
+      '<p class="muted">Your signature, the time and your internet address are kept with a fingerprint of this invoice, so neither can be changed later.' + (d.shop && d.shop.phone ? ' Questions? Call ' + esc(d.shop.phone) + '.' : '') + '</p></div>';
+    var pad = window.VAScan.pad(document.getElementById('pad'));
+    document.getElementById('clr').onclick = pad.clear;
+    document.getElementById('go').onclick = function () {
+      var m = document.getElementById('m'), name = document.getElementById('nm').value.trim();
+      if (name.length < 2) { m.innerHTML = '<div class="msg">Type your name.</div>'; return; }
+      if (pad.empty()) { m.innerHTML = '<div class="msg">Sign in the box.</div>'; return; }
+      if (!document.getElementById('ag').checked) { m.innerHTML = '<div class="msg">Tick the box to confirm.</div>'; return; }
+      this.disabled = true;
+      fetch(url, { method: 'POST', credentials: 'omit', referrerPolicy: 'no-referrer', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name, image: pad.png(), agree: true }) })
+        .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'Could not sign'); return j; }); })
+        .then(function () { out.innerHTML = '<div class="card"><div class="ok">Thank you, ' + esc(name) + '. Invoice ' + esc(i.number) + ' is signed.</div><p class="muted">You can close this page.</p></div>'; })
+        .catch(function (e) { document.getElementById('go').disabled = false; m.innerHTML = '<div class="msg">' + esc(e.message) + '</div>'; });
+    };
+  }).catch(function (e) { stop(e.message); });
+})();
+</script>
+</body>
+</html>

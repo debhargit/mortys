@@ -20,6 +20,7 @@ import { getShopSettings } from '../_lib/shop.js';
 import { bestUnitPriceCents, loadBreaksByImg, ACTIVE_SALE_PRICE_SQL, effectiveBaseCents, loadTierPricesByImg, tierCentsFor } from '../_lib/price_breaks.js';
 import { loadKitComponentsByImg, kitRollupCents, kitBuildableQty } from '../_lib/kits.js';
 import { loadAltNumbersByImg, loadSubstitutesByImg, loadSubstitutesForImg } from '../_lib/alt_numbers.js';
+import { assembleGuestCatalogue, GUEST_BASE_WHERE } from '../_lib/catalogue.js';
 import { loadSerialStockByImg, loadRedeemableStockByImg } from '../_lib/serials.js';
 import { loadImagesForImg, galleryFor, primaryUrl } from '../_lib/product_images.js';
 import { centsToUsd } from '../_lib/money.js';
@@ -89,6 +90,7 @@ function productWhere(q) {
   if (stock === 'out') where.push('stock_count <= 0');
   else if (stock === 'low') where.push('stock_count > 0 AND stock_count <= low_threshold');
   else if (stock === 'in') where.push('stock_count > 0');
+  if (q.priced_only) where.push('price_cents > 0');
   if (q.make_model) { where.push('make_model = ?'); binds.push(q.make_model); }
   if (q.location)   { where.push('location = ?');   binds.push(q.location); }
   const pMin = Number(q.price_min);
@@ -136,6 +138,51 @@ const LIST_COLS = `
 
 const COUNT_CAP = 5000;
 
+// ---- edge cache for the guest catalogue ------------------------------------
+// 24h: the guest catalogue changes rarely and shows guests no prices, so the
+// old 1-hour, per-colo rebuild (each a full ~36k-row scan) just burned D1 reads.
+// The catalogue-cache cron precomputes this into KV; this edge cache + the live
+// build below are the fallback when KV is empty.
+const EDGE_TTL = 86400;
+const edgeCache = () => (typeof caches !== 'undefined' && caches.default) || null;
+const edgeKey = (url) => new Request(url.toString(), { method: 'GET' });
+async function edgeGet(c) {
+  const cache = edgeCache();
+  if (!cache) return null;
+  try { return (await cache.match(edgeKey(new URL(c.req.url)))) || null; } catch { return null; }
+}
+function edgeResponse(body) {
+  return new Response(JSON.stringify(body), {
+    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=300, s-maxage=${EDGE_TTL}` },
+  });
+}
+function edgePut(c, url, res) {
+  const cache = edgeCache();
+  if (!cache) return;
+  const p = cache.put(edgeKey(url), res).catch(() => {});
+  try { c.executionCtx.waitUntil(p); } catch { /* no execution context (tests) */ }
+}
+// One query for the whole listing, packed into the storefront's positional
+// rows; every page of it is cached (for the big pages the shop pulls), so the
+// rest of a shopper's paging -- and every other shopper this hour -- reads no rows.
+// Same orders as SORTS, done in JS so the table is read in cheap rowid ranges
+// (each range reads only its own rows; ORDER BY + OFFSET re-sorted all of it).
+async function buildGuestCatalogue(c, db, where, binds, sortKey, limit, offset) {
+  const { cats, rows: packed, total } = await assembleGuestCatalogue(db, where, binds, sortKey);
+  const page = (off) => ({ cats, rows: packed.slice(off, off + limit), total, limit, offset: off, prices_visible: false });
+  const url = new URL(c.req.url);
+  if (limit >= 1000) {
+    for (let off = 0; off < Math.max(total, 1); off += limit) {
+      if (off === offset) continue;
+      const u = new URL(url); u.searchParams.set('offset', String(off));
+      edgePut(c, u, edgeResponse(page(off)));
+    }
+  }
+  const res = edgeResponse(page(offset));
+  edgePut(c, url, res.clone());
+  return res;
+}
+
 export default function mount(app) {
   app.get('/api/products', async (c) => {
     try {
@@ -167,7 +214,9 @@ export default function mount(app) {
       // With prices hidden, a price filter or price sort would leak the very
       // numbers we're withholding (binary-search the catalogue by price_max).
       // Drop them for un-approved callers.
-      const qEff = showPrices ? q : { ...q, price_min: undefined, price_max: undefined };
+      // Still honour 'only parts with a price' (price_min > 0) as a yes/no filter:
+      // it lists what the counter can sell without revealing any amount.
+      const qEff = showPrices ? q : { ...q, price_min: undefined, price_max: undefined, priced_only: Number(q.price_min) > 0 ? '1' : undefined };
       const { where, binds } = productWhere(qEff);
       let sortKey = q.sort;
       if (!showPrices && (sortKey === 'price_asc' || sortKey === 'price_desc')) sortKey = 'name';
@@ -184,6 +233,33 @@ export default function mount(app) {
       // in wasted D1 row-reads per visit. Skip it for compact unless a caller
       // explicitly asks with &count=1.
       const wantCount = !isCompact || q.count === '1';
+      // Guests all get the same catalogue (prices hidden). The bare, default-sorted
+      // catalogue is precomputed into KV by the catalogue-cache cron, so serving it
+      // reads NO D1 rows -- the fix for the free-tier 5M-reads/day limit. Filtered
+      // or non-default-sort variants, and the case where KV is empty, fall back to a
+      // live build kept in Cloudflare's per-colo edge cache.
+      if (isCompact && !showPrices && !q.q) {
+        const kv = c.env && c.env.CATALOG_KV;
+        const bareDefault = where === GUEST_BASE_WHERE && (!q.sort || q.sort === 'name');
+        if (kv && bareDefault) {
+          try {
+            const blob = await kv.get('guest-catalogue:v1', 'json');
+            if (blob && Array.isArray(blob.rows)) {
+              return edgeResponse({ cats: blob.cats, rows: blob.rows.slice(offset, offset + limit), total: blob.total, limit, offset, prices_visible: false });
+            }
+          } catch { /* fall through to a live build */ }
+          // KV empty (first run, or after a deploy): build once and store it so every
+          // later guest reads KV. Self-priming -- no cron secret needed.
+          const built = await assembleGuestCatalogue(db, where, binds, 'name');
+          const put = kv.put('guest-catalogue:v1', JSON.stringify({ ...built, at: Date.now() })).catch(() => {});
+          try { c.executionCtx.waitUntil(put); } catch { /* tests */ }
+          return edgeResponse({ cats: built.cats, rows: built.rows.slice(offset, offset + limit), total: built.total, limit, offset, prices_visible: false });
+        }
+        const hit = await edgeGet(c);
+        if (hit) return hit;
+        return await buildGuestCatalogue(c, db, where, binds, SORTS[sortKey] ? sortKey : 'name', limit, offset);
+      }
+
       const [rows, cnt] = await Promise.all([
         db.many(`SELECT ${LIST_COLS} FROM products WHERE ${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
           ...binds, limit, offset),
@@ -285,6 +361,7 @@ export default function mount(app) {
       }
       return c.json({ products: list, total, limit, offset, prices_visible: showPrices, approximate: capped, count_mode: capped ? 'capped' : 'exact' });
     } catch (e) {
+      if (/row read limit|7500/i.test(String(e && e.message))) throw e;   // D1 daily limit: let the app-wide handler explain it
       return c.json({ error: 'Server error' }, 500);
     }
   });
@@ -295,6 +372,7 @@ export default function mount(app) {
       const row = await d1(c.env).one(`SELECT COUNT(*) AS count FROM products WHERE ${where}`, ...binds);
       return c.json({ count: (row && row.count) || 0 });
     } catch (e) {
+      if (/row read limit|7500/i.test(String(e && e.message))) throw e;   // D1 daily limit: let the app-wide handler explain it
       return c.json({ error: 'Server error' }, 500);
     }
   });

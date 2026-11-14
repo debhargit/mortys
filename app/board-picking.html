@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pick board · Morty's Auto Parts</title>
+<style>
+  :root{ --bg:#0b1b2b; --card:#12263b; --line:#24405e; --ink:#eef3f8; --muted:#9db0c4; --ok:#22c55e; --warn:#f59e0b; --red:#ef4444; }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:16px;padding:14px 22px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  header h1{margin:0;font-size:22px}
+  .stats{display:flex;gap:10px;margin-left:auto;flex-wrap:wrap}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px 12px;text-align:center;min-width:90px}
+  .stat b{display:block;font-size:24px}
+  .stat span{font-size:12px;color:var(--muted)}
+  main{display:grid;grid-template-columns:3fr 1fr;gap:16px;padding:16px 22px}
+  @media (max-width:900px){ main{grid-template-columns:1fr} }
+  .cols{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  @media (max-width:1200px){ .cols{grid-template-columns:repeat(2,1fr)} }
+  .col h2{font-size:14px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:0 0 8px}
+  .o{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px}
+  .o.late{border-color:var(--red);box-shadow:0 0 0 1px var(--red) inset}
+  .o.hold{border-color:var(--warn);opacity:.85}
+  .o .top{display:flex;justify-content:space-between;gap:8px}
+  .o .num{font-weight:800;font-size:18px}
+  .o .age{font-variant-numeric:tabular-nums;color:var(--muted)}
+  .o.late .age{color:var(--red);font-weight:800}
+  .o .who{font-size:13px;color:var(--muted);margin-top:2px}
+  .bar{height:8px;background:var(--line);border-radius:5px;overflow:hidden;margin-top:6px}
+  .bar i{display:block;height:100%;background:var(--ok)}
+  .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:999px;background:var(--line);margin-left:4px}
+  .tag.hold{background:var(--warn);color:#000;font-weight:700}
+  .side .o{display:flex;justify-content:space-between;gap:8px}
+  .msg{padding:40px;text-align:center;color:var(--muted)}
+  a{color:#7cc4ff}
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Picking</h1><span id="clock" style="color:var(--muted)"></span><div class="stats" id="stats"></div></header>
+<main id="main"><div class="msg">Loading…</div></main>
+<script>
+(function () {
+  'use strict';
+  // Management TV: live pick progress. Needs a signed-in staff session on this screen.
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var COLS = [['new', 'Waiting'], ['picking', 'Picking'], ['picked', 'To pack'], ['ready', 'Ready / to dispatch']];
+  function card(o, sla) {
+    var pct = o.units ? Math.round(o.units_done / o.units * 100) : 0;
+    var late = o.method === 'pickup' && o.status !== 'ready' && o.age_min >= sla;
+    return '<div class="o' + (late ? ' late' : '') + (o.on_hold ? ' hold' : '') + '"><div class="top"><span class="num">' + esc(o.number) + '</span><span class="age">' + o.age_min + 'm</span></div>' +
+      '<div class="who">' + esc(o.method) + (o.picker_name ? ' · ' + esc(o.picker_name) : '') + (o.on_hold ? '<span class="tag hold">HOLD</span>' : '') + (o.units_short ? '<span class="tag">' + o.units_short + ' short</span>' : '') + '</div>' +
+      '<div class="bar"><i style="width:' + pct + '%"></i></div><div class="who">' + o.units_done + ' / ' + o.units + ' units</div></div>';
+  }
+  function load() {
+    fetch('/api/out/board', { credentials: 'same-origin', headers: { Accept: 'application/json' } }).then(function (r) {
+      if (r.status === 401 || r.status === 403) throw new Error('auth');
+      return r.json();
+    }).then(function (d) {
+      var by = {}; COLS.forEach(function (c) { by[c[0]] = []; });
+      d.orders.forEach(function (o) { var k = o.status === 'packed' ? 'picked' : o.status === 'dispatched' ? null : o.status; if (k && by[k]) by[k].push(o); });
+      var late = d.orders.filter(function (o) { return o.method === 'pickup' && o.status !== 'ready' && o.age_min >= d.sla_minutes; }).length;
+      document.getElementById('stats').innerHTML =
+        '<div class="stat"><b>' + d.orders.filter(function (o) { return o.status !== 'ready' && o.status !== 'dispatched'; }).length + '</b><span>in progress</span></div>' +
+        '<div class="stat"><b style="color:' + (late ? 'var(--red)' : 'inherit') + '">' + late + '</b><span>over ' + d.sla_minutes + ' min</span></div>' +
+        '<div class="stat"><b>' + d.orders.filter(function (o) { return o.on_hold; }).length + '</b><span>on hold</span></div>' +
+        '<div class="stat"><b>' + (d.today.completed || 0) + '</b><span>done today</span></div>' +
+        '<div class="stat"><b>' + (d.today.avg_min_to_ready == null ? '–' : d.today.avg_min_to_ready + 'm') + '</b><span>avg to ready</span></div>';
+      document.getElementById('main').innerHTML = '<div class="cols">' + COLS.map(function (c) {
+        return '<div class="col"><h2>' + c[1] + ' (' + by[c[0]].length + ')</h2>' + by[c[0]].map(function (o) { return card(o, d.sla_minutes); }).join('') + '</div>';
+      }).join('') + '</div><div class="side"><div class="col"><h2>Pickers today</h2>' +
+        (d.pickers.length ? d.pickers.map(function (p) { return '<div class="o"><span>' + esc(p.name) + '</span><span>' + p.units + ' units · ' + p.lines + ' lines' + (p.short_lines ? ' · ' + p.short_lines + ' short' : '') + '</span></div>'; }).join('') : '<div class="msg">No picks yet today.</div>') + '</div></div>';
+    }).catch(function (e) {
+      document.getElementById('main').innerHTML = e.message === 'auth'
+        ? '<div class="msg">Sign in first: open <a href="/warehouse">the warehouse page</a> on this screen with a manager account, then come back.</div>'
+        : '<div class="msg">Can\'t reach the till. Retrying…</div>';
+    });
+  }
+  function tick() { document.getElementById('clock').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+  load(); tick(); setInterval(load, 5000); setInterval(tick, 10000);
+})();
+</script>
+</body>
+</html>

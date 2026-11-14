@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>System management · Morty's Auto Parts</title>
+<link rel="stylesheet" href="/assets/books.css">
+<style>
+  header{background:#111827}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px 12px}
+  .grid label{display:block;font-size:12px;color:var(--muted);margin-bottom:2px} .grid input,.grid select,.grid textarea{width:100%}
+  .check{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--line)}
+  .dot{width:12px;height:12px;border-radius:50%;margin-top:4px;flex:0 0 12px}
+  .dot.pass{background:var(--ok)} .dot.warn{background:#f59e0b} .dot.fail{background:var(--red)}
+  .score{font-size:46px;font-weight:800;line-height:1}
+  .note{white-space:pre-wrap}
+  .mono{font-family:ui-monospace,Consolas,monospace;font-size:12px}
+  details summary{cursor:pointer}
+  /* network map */
+  #nmSvg{width:100%;height:auto;display:block;background:radial-gradient(circle at 50% 52%,rgba(37,99,235,.07),transparent 60%);border-radius:12px}
+  .nml{fill:none;stroke-width:2.2} .nml.up{stroke:#16a34a;opacity:.55} .nml.down{stroke:#dc2626;stroke-dasharray:7 6} .nml.unknown{stroke:#f59e0b;opacity:.7} .nml.idle{stroke:#94a3b8;stroke-dasharray:3 6;opacity:.7}
+  .nmp{fill:#16a34a}
+  .nmn{cursor:pointer;outline:none} .nmn .nmc{stroke-width:3;fill:var(--card)} .nmn.up .nmc{stroke:#16a34a} .nmn.down .nmc{stroke:#dc2626;fill:#fee2e2} .nmn.unknown .nmc{stroke:#f59e0b;fill:#fef3c7} .nmn.idle .nmc{stroke:#94a3b8;stroke-dasharray:4 3}
+  .nmn:hover .nmc,.nmn:focus .nmc{stroke-width:5} .nmn.sel .nmc{stroke-width:6;filter:drop-shadow(0 0 6px rgba(37,99,235,.6))}
+  .nmpulse{fill:none;stroke:#dc2626;stroke-width:3}
+  .nmi{text-anchor:middle;pointer-events:none} .nmt{text-anchor:middle;font-size:12.5px;font-weight:600;fill:var(--ink)} .nms{text-anchor:middle;font-size:11px;fill:var(--muted);font-family:ui-monospace,Consolas,monospace}
+  .nmt,.nms{paint-order:stroke;stroke:var(--card);stroke-width:4px;stroke-linejoin:round}
+  .nmwrap{overflow-x:auto} @media (max-width:760px){ #nmSvg{min-width:720px} }
+  .nmfoot{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12.5px;color:var(--muted);margin-top:6px} .nmd{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+  .nmd.up{background:#16a34a} .nmd.down{background:#dc2626} .nmd.unknown{background:#f59e0b} .nmd.idle{background:#94a3b8}
+  @media (prefers-color-scheme: dark){ .nmn.down .nmc{fill:#450a0a} .nmn.unknown .nmc{fill:#422006} }
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>🛡 System management</h1><nav><a href="/security.html">Sign-in security</a><a href="/terminal.html">Terminals</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"></div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<script src="/assets/books-common.js?v=20261019"></script>
+<script src="/assets/doc-attach.js"></script>
+<script>
+(function () {
+  'use strict';
+  var B = window.Books, $ = B.$, all = B.all, esc = B.esc, J = B.J, api = B.api, toast = B.toast, modal = B.modal, close = B.close, dt = B.dt;
+  var me = {}, tab = '', staff = [];
+  var val = function (id) { var el = $('#' + id); return el ? (el.type === 'checkbox' ? el.checked : el.value) : undefined; };
+  var PILL = { pass: 'ok', warn: 'warn', fail: 'bad', low: '', normal: '', medium: 'warn', high: 'bad', urgent: 'bad', critical: 'bad', new: 'warn', assigned: '', in_progress: '', waiting: '', resolved: 'ok', closed: 'ok', open: 'warn', investigating: 'warn', contained: '', planned: '', approved: 'warn', done: 'ok', rolled_back: 'bad', cancelled: '', in_use: 'ok', spare: '', repair: 'warn', retired: '', lost: 'bad', keep: 'ok', change: 'warn', disable: 'bad' };
+  var pill = function (v) { return '<span class="pill ' + (PILL[v] || '') + '">' + esc(String(v || '').replace(/_/g, ' ')) + '</span>'; };
+  function fail(e) { toast(e.message || String(e)); }
+  function field(id, label, value, type, extra) { return '<div><label for="' + id + '">' + label + '</label><input id="' + id + '" type="' + (type || 'text') + '" value="' + esc(value == null ? '' : value) + '"' + (extra || '') + '></div>'; }
+  function sel(id, label, opts, value) { return '<div><label for="' + id + '">' + label + '</label><select id="' + id + '">' + opts.map(function (o) { o = Array.isArray(o) ? o : [o, o.replace(/_/g, ' ')]; return '<option value="' + esc(o[0]) + '"' + (String(o[0]) === String(value == null ? '' : value) ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select></div>'; }
+  function area(id, label, value, rows) { return '<div style="grid-column:1/-1"><label for="' + id + '">' + label + '</label><textarea id="' + id + '" rows="' + (rows || 3) + '">' + esc(value || '') + '</textarea></div>'; }
+  function confirmBox(text, yes) { modal('<h2>Please confirm</h2><p>' + esc(text) + '</p><div class="controls"><button class="primary" id="y">Yes</button><button id="x">Cancel</button></div>'); $('#x').onclick = close; $('#y').onclick = function () { close(); yes(); }; }
+  function reasonBox(title, text, done) {
+    modal('<h2>' + esc(title) + '</h2><p>' + esc(text) + '</p><input id="why" style="width:100%"><div class="controls" style="margin-top:10px"><button class="primary" id="y">Go ahead</button><button id="x">Cancel</button></div>');
+    $('#x').onclick = close; $('#why').focus();
+    $('#y').onclick = function () { var w = val('why').trim(); if (!w) return toast('Give a reason'); close(); done(w); };
+  }
+  var staffOpts = function (sel1) { return '<option value="">—</option>' + staff.map(function (s) { return '<option value="' + s.id + '"' + (String(s.id) === String(sel1) ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join(''); };
+  var nameOf = function (id) { var s = staff.find(function (x) { return x.id === id; }); return s ? s.name : ''; };
+
+  function start() {
+    api('/api/sys/me').then(function (m) {
+      me = m;
+      var t = [];
+      if (m.audit || m.security || m.support) t.push(['home', 'Overview']);
+      if (m.raise || m.support) t.push(['help', m.support ? 'Help desk' : 'IT help']);
+      if (m.support) t.push(['assets', 'Equipment'], ['changes', 'Change log'], ['health', 'System health']);
+      if (m.security) t.push(['threats', 'Threats'], ['security', 'Security'], ['incidents', 'Incidents'], ['risks', 'Risks']);
+      if (m.network) t.push(['network', 'Network']);
+      if (m.audit) t.push(['audit', 'Audit trail'], ['exceptions', 'Audit exceptions'], ['access', 'Access reviews']);
+      if (!t.length) { $('#out').innerHTML = '<div class="card empty">Your account has no system-management or IT-help access.</div>'; return; }
+      $('#tabs').innerHTML = t.map(function (x) { return '<button data-t="' + x[0] + '">' + x[1] + '</button>'; }).join('');
+      all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
+      tab = (location.hash || '').slice(1); if (!t.some(function (x) { return x[0] === tab; })) tab = t[0][0];
+      (m.security ? api('/api/sys/staff').then(function (d) { staff = d.staff.filter(function (s) { return !s.disabled; }); }).catch(function () {}) : Promise.resolve()).then(show);
+    }).catch(fail);
+  }
+  function mark() { all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); }); history.replaceState(null, '', '#' + tab); }
+  function show() {
+    mark(); $('#out').innerHTML = '<div class="empty">Loading…</div>';
+    ({ home: home, help: help, assets: assets, changes: changes, health: health, security: security, incidents: incidents, audit: auditTrail, exceptions: exceptionsTab, access: access, threats: threats, risks: risks, network: network }[tab] || home)();
+  }
+
+  // ------------------------------------------------------------ overview --
+  function home() {
+    api('/api/sys/overview').then(function (d) {
+      var tiles = [];
+      if (d.security && d.threats) tiles.push('<div class="tile click' + (d.threats.serious ? ' bad' : '') + '" data-go="threats"><span class="k">New threats (serious)</span><b>' + d.threats.new + ' (' + d.threats.serious + ')</b></div>', '<div class="tile click" data-go="threats"><span class="k">Addresses blocked</span><b>' + d.blocked + '</b></div>');
+      if (d.security) tiles.push('<div class="tile click' + (d.score < 70 ? ' bad' : '') + '" data-go="security"><span class="k">Security score</span><b>' + d.score + '%</b></div>',
+        '<div class="tile click' + (d.incidents_open ? ' bad' : '') + '" data-go="incidents"><span class="k">Open incidents</span><b>' + d.incidents_open + '</b></div>',
+        '<div class="tile click" data-go="security"><span class="k">Signed in now</span><b>' + d.online + '</b></div>');
+      if (d.support) tiles.push('<div class="tile click' + (d.tickets.overdue ? ' bad' : '') + '" data-go="help"><span class="k">Open tickets (overdue)</span><b>' + d.tickets.open + ' (' + d.tickets.overdue + ')</b></div>',
+        '<div class="tile click" data-go="help"><span class="k">Waiting for a technician</span><b>' + d.tickets.unassigned + '</b></div>',
+        '<div class="tile"><span class="k">Average fix time (30 d)</span><b>' + (d.tickets.avg_fix_h == null ? '—' : d.tickets.avg_fix_h + ' h') + '</b></div>',
+        '<div class="tile click' + (d.warranty_soon ? ' bad' : '') + '" data-go="assets"><span class="k">Warranties ending in 60 d</span><b>' + d.warranty_soon + '</b></div>');
+      if (d.audit) tiles.push('<div class="tile click' + (d.chain_ok ? '' : ' bad') + '" data-go="audit"><span class="k">Audit log</span><b>' + (d.chain_ok ? 'Intact' : 'TAMPERED') + '</b></div>',
+        '<div class="tile click" data-go="exceptions"><span class="k">Last audit review</span><b>' + esc(d.last_audit_review || 'never') + '</b></div>',
+        '<div class="tile click" data-go="access"><span class="k">Last access review</span><b>' + esc(d.last_access_review || 'never') + '</b></div>');
+      $('#out').innerHTML = '<div class="tiles">' + tiles.join('') + '</div>' +
+        (d.security && d.failing.length ? '<div class="card"><h2>Security problems to fix</h2>' + d.failing.map(function (f) { return '<div class="note bad">' + esc(f) + '</div>'; }).join('') + '</div>' : '') +
+        (d.audit ? '<div class="card"><h2>Audit exceptions, last 7 days</h2>' + (d.exceptions_7d.length ? '<table><tbody>' + d.exceptions_7d.map(function (x) { return '<tr><td>' + esc(x.label) + '</td><td>' + pill(x.severity) + '</td><td class="n"><b>' + x.count + '</b></td></tr>'; }).join('') + '</tbody></table>' : '<div class="empty">None.</div>') + '</div>' : '');
+      all('[data-go]').forEach(function (t) { t.onclick = function () { tab = t.getAttribute('data-go'); show(); }; });
+    }).catch(fail);
+  }
+
+  // ------------------------------------------------------------- help desk --
+  var CATS = ['hardware', 'software', 'till', 'printer', 'network', 'account', 'website', 'email', 'other'];
+  function help() {
+    var st = help.status || 'open';
+    Promise.all([api('/api/sys/tickets?status=' + st + (help.mine ? '&mine=1' : '')), api('/api/sys/assets').catch(function () { return { assets: [] }; })]).then(function (r) {
+      var d = r[0], assetsList = r[1].assets;
+      help.assets = assetsList;
+      $('#out').innerHTML = '<div class="card"><h2>Ask IT for help</h2><p class="sub">Say what is wrong, where, and what you were doing. Urgent means a till or the whole shop cannot work.</p><div class="grid">' +
+          field('tt', 'What is the problem? (short)', '') + sel('tc', 'Kind', CATS, 'other') + sel('tp', 'How urgent', [['low', 'Low — when there is time'], ['normal', 'Normal'], ['high', 'High — slowing work down'], ['urgent', 'Urgent — cannot work']], 'normal') +
+          '<div><label for="ta">Which device (if known)</label><select id="ta"><option value="">—</option>' + assetsList.filter(function (a) { return a.status !== 'retired'; }).map(function (a) { return '<option value="' + a.id + '">' + esc(a.tag + ' ' + a.name) + '</option>'; }).join('') + '</select></div>' +
+          field('tl', 'Where', '') + area('td', 'Details', '', 3) + '</div><div class="controls" style="margin-top:8px"><button class="primary" id="traise">Send to IT</button></div></div>' +
+        '<div class="card"><h2>' + (d.support && !help.mine ? 'All tickets' : 'My tickets') + '</h2><div class="controls">' + sel('tst', 'Show', [['open', 'Open'], ['done', 'Fixed / closed'], ['all', 'All']], st) + (d.support ? '<label class="chk"><input type="checkbox" id="tmine"' + (help.mine ? ' checked' : '') + '> Only mine</label>' : '') + '</div>' +
+        '<div class="scroll"><table><thead><tr><th>Ticket</th><th>Problem</th><th>Kind</th><th>Priority</th><th>Status</th><th>Raised by</th><th>Technician</th><th>Due</th></tr></thead><tbody>' +
+        (d.tickets.length ? d.tickets.map(function (t) { return '<tr class="click" data-tk="' + t.id + '"><td><b>' + esc(t.number) + '</b></td><td>' + esc(t.title) + (t.asset_tag ? ' <small>' + esc(t.asset_tag) + '</small>' : '') + '</td><td>' + esc(t.category) + '</td><td>' + pill(t.priority) + '</td><td>' + pill(t.status) + '</td><td>' + esc(t.requester_name || '') + '</td><td>' + esc(t.assignee_name || '') + '</td><td>' + (t.overdue ? '<span class="pill bad">overdue</span> ' : '') + '<small>' + dt(t.due_at) + '</small></td></tr>'; }).join('') : '<tr><td colspan="8" class="empty">No tickets.</td></tr>') + '</tbody></table></div></div>';
+      $('#traise').onclick = function () {
+        api('/api/sys/tickets', 'POST', { title: val('tt'), category: val('tc'), priority: val('tp'), asset_id: val('ta'), location: val('tl'), description: val('td') }).then(function (x) { toast(x.number + ' sent to IT'); help(); }).catch(fail);
+      };
+      $('#tst').onchange = function () { help.status = this.value; help(); };
+      if ($('#tmine')) $('#tmine').onchange = function () { help.mine = this.checked; help(); };
+      all('[data-tk]').forEach(function (r) { r.onclick = function () { ticket(+r.getAttribute('data-tk')); }; });
+    }).catch(fail);
+  }
+  function ticket(id) {
+    api('/api/sys/tickets/' + id).then(function (d) {
+      var t = d.ticket, mine = !d.support;
+      $('#out').innerHTML = '<div class="controls"><button id="bk">◀ Tickets</button></div><div class="card"><h2>' + esc(t.number) + ' · ' + esc(t.title) + ' ' + pill(t.status) + ' ' + pill(t.priority) + '</h2>' +
+        '<p class="sub">' + esc(t.category) + ' · raised by ' + esc(t.requester_name || '') + ' ' + dt(t.created_at) + (t.location ? ' · ' + esc(t.location) : '') + (t.asset_name ? ' · device ' + esc(t.asset_tag + ' ' + t.asset_name) : '') + ' · due ' + dt(t.due_at) + (t.overdue ? ' <span class="pill bad">overdue</span>' : '') + '</p>' +
+        (t.description ? '<p class="note">' + esc(t.description) + '</p>' : '') + (t.resolution ? '<div class="note info"><b>Fix:</b> ' + esc(t.resolution) + '</div>' : '') +
+        (d.support ? '<div class="grid" style="margin-top:8px">' + sel('us', 'Status', ['new', 'assigned', 'in_progress', 'waiting', 'resolved', 'closed'], t.status) + sel('up', 'Priority', ['low', 'normal', 'high', 'urgent'], t.priority) +
+            '<div><label for="ua">Technician</label><select id="ua">' + staffOpts(t.assignee_id) + '</select></div>' + sel('uc', 'Kind', CATS, t.category) +
+            '<div><label for="uas">Device</label><select id="uas"><option value="">—</option>' + (help.assets || []).map(function (a) { return '<option value="' + a.id + '"' + (a.id === t.asset_id ? ' selected' : '') + '>' + esc(a.tag + ' ' + a.name) + '</option>'; }).join('') + '</select></div>' +
+            area('ur', 'How it was fixed (needed to resolve)', t.resolution, 2) + '</div><div class="controls" style="margin-top:8px"><button class="primary" id="usv">Save</button>' + (t.asset_id ? '<button id="umt">Log a repair on the device</button>' : '') + '</div>' : '') +
+        (mine && t.status === 'resolved' ? '<div class="note warn" style="margin-top:8px">IT says this is fixed. Is it? <select id="rate"><option value="">Rate the help…</option><option>5</option><option>4</option><option>3</option><option>2</option><option>1</option></select> <button class="sm primary" id="yes">Yes, fixed</button> <button class="sm" id="no">No, still broken</button></div>' : '') + '</div>' +
+        '<div class="card"><h2>Conversation</h2>' + (d.notes.length ? d.notes.map(function (x) { return '<div class="note ' + (x.internal ? 'warn' : 'info') + '"><b>' + esc(x.user_name || '') + '</b> <small>' + dt(x.created_at) + (x.internal ? ' · IT only' : '') + '</small><br>' + esc(x.body) + '</div>'; }).join('') : '<div class="empty">No messages yet.</div>') +
+        '<textarea id="nb" rows="3" style="width:100%" placeholder="Write a message"></textarea><div class="controls" style="margin-top:6px"><button id="nadd">Send</button>' + (d.support ? '<label class="chk"><input type="checkbox" id="nint"> IT-only note</label>' : '') + '</div></div>';
+      $('#bk').onclick = help;
+      $('#nadd').onclick = function () { api('/api/sys/tickets/' + id + '/notes', 'POST', { body: val('nb'), internal: val('nint') }).then(function () { ticket(id); }).catch(fail); };
+      if ($('#usv')) $('#usv').onclick = function () { api('/api/sys/tickets/' + id, 'PUT', { status: val('us'), priority: val('up'), assignee_id: val('ua'), category: val('uc'), asset_id: val('uas'), resolution: val('ur') }).then(function () { toast('Saved'); ticket(id); }).catch(fail); };
+      if ($('#umt')) $('#umt').onclick = function () { maintenanceBox(t.asset_id, id, function () { ticket(id); }); };
+      if ($('#yes')) $('#yes').onclick = function () { api('/api/sys/tickets/' + id + '/confirm', 'POST', { fixed: true, rating: val('rate') }).then(function () { toast('Thanks — closed'); ticket(id); }).catch(fail); };
+      if ($('#no')) $('#no').onclick = function () { reasonBox('Still broken', 'What is still wrong?', function (w) { api('/api/sys/tickets/' + id + '/confirm', 'POST', { fixed: false, note: w }).then(function () { ticket(id); }).catch(fail); }); };
+    }).catch(fail);
+  }
+
+  // ------------------------------------------------------------- equipment --
+  var KINDS = ['pc', 'till', 'server', 'printer', 'receipt_printer', 'label_printer', 'scanner', 'cash_drawer', 'phone', 'tablet', 'router', 'switch', 'ups', 'camera', 'other'];
+  function assets() {
+    api('/api/sys/assets').then(function (d) {
+      var soon = new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10), now = B.today();
+      $('#out').innerHTML = '<div class="card"><h2>Equipment</h2><div class="controls"><button class="primary" id="anew">Add a device</button><button id="aimp">Add the registered computers</button></div>' +
+        '<div class="scroll"><table><thead><tr><th>Tag</th><th>Device</th><th>Kind</th><th>Where / who</th><th>Serial</th><th>Warranty</th><th>Status</th><th class="n">Open tickets</th></tr></thead><tbody>' +
+        (d.assets.length ? d.assets.map(function (a) { var w = a.warranty_until; return '<tr class="click" data-a="' + a.id + '"><td><b>' + esc(a.tag) + '</b></td><td>' + esc(a.name) + (a.make ? '<br><small>' + esc((a.make || '') + ' ' + (a.model || '')) + '</small>' : '') + '</td><td>' + esc(String(a.kind).replace(/_/g, ' ')) + '</td><td>' + esc(a.location || '') + (a.assigned_name ? '<br><small>' + esc(a.assigned_name) + '</small>' : '') + (a.terminal_name ? '<br><small>terminal ' + esc(a.terminal_name) + '</small>' : '') + '</td><td class="mono">' + esc(a.serial || '') + '</td><td>' + (w ? (w < now ? '<span class="pill">ended ' + esc(w) + '</span>' : w <= soon ? '<span class="pill warn">ends ' + esc(w) + '</span>' : esc(w)) : '') + '</td><td>' + pill(a.status) + '</td><td class="n">' + (a.open_tickets || '') + '</td></tr>'; }).join('') : '<tr><td colspan="8" class="empty">Nothing registered yet.</td></tr>') + '</tbody></table></div></div>';
+      $('#anew').onclick = function () { assetForm(null); };
+      $('#aimp').onclick = function () { api('/api/sys/assets/import-terminals', 'POST', {}).then(function (x) { toast(x.added + ' computer(s) added'); assets(); }).catch(fail); };
+      all('[data-a]').forEach(function (r) { r.onclick = function () { assetForm(+r.getAttribute('data-a')); }; });
+    }).catch(fail);
+  }
+  function assetForm(id) {
+    (id ? api('/api/sys/assets/' + id) : Promise.resolve({ asset: { kind: 'pc', status: 'in_use' }, maintenance: [], tickets: [] })).then(function (d) {
+      var a = d.asset;
+      $('#out').innerHTML = '<div class="controls"><button id="bk">◀ Equipment</button></div><div class="card"><h2>' + (id ? esc(a.tag + ' · ' + a.name) : 'New device') + '</h2><div class="grid">' +
+        field('f_tag', 'Asset tag (blank: next number)', a.tag) + field('f_name', 'Name', a.name) + sel('f_kind', 'Kind', KINDS, a.kind) + sel('f_status', 'Status', ['in_use', 'spare', 'repair', 'retired', 'lost'], a.status) +
+        field('f_make', 'Make', a.make) + field('f_model', 'Model', a.model) + field('f_serial', 'Serial no.', a.serial) + field('f_location', 'Location', a.location) +
+        (staff.length ? '<div><label for="f_assigned_to">Used by</label><select id="f_assigned_to">' + staffOpts(a.assigned_to) + '</select></div>' : '') +
+        field('f_ip', 'IP address', a.ip) + field('f_mac', 'MAC address', a.mac) + field('f_purchase_date', 'Bought', a.purchase_date, 'date') + field('f_cost', 'Cost (J$)', a.cost, 'number', ' step="0.01"') +
+        field('f_supplier', 'Supplier', a.supplier) + field('f_warranty_until', 'Warranty until', a.warranty_until, 'date') + area('f_notes', 'Notes', a.notes, 2) + '</div>' +
+        '<div class="controls" style="margin-top:8px"><button class="primary" id="asv">Save</button>' + (id ? '<button id="amt">Log repair / service</button>' : '') + '</div></div>' +
+        (id ? '<div class="card" id="assetdocs"></div>' : '') +
+        (id ? '<div class="card"><h2>Repairs and services</h2><table><tbody>' + (d.maintenance.length ? d.maintenance.map(function (m) { return '<tr><td>' + esc(m.done_at) + '</td><td>' + esc(m.kind) + '</td><td>' + esc(m.notes) + (m.ticket ? ' <small>' + esc(m.ticket) + '</small>' : '') + '</td><td>' + esc(m.done_by || '') + '</td><td class="n">' + (m.cost ? J(m.cost) : '') + '</td></tr>'; }).join('') : '<tr><td class="empty">None.</td></tr>') + '</tbody></table></div>' +
+          '<div class="card"><h2>Tickets about it</h2><table><tbody>' + (d.tickets.length ? d.tickets.map(function (t) { return '<tr><td>' + esc(t.number) + '</td><td>' + esc(t.title) + '</td><td>' + pill(t.status) + '</td><td>' + dt(t.created_at) + '</td></tr>'; }).join('') : '<tr><td class="empty">None.</td></tr>') + '</tbody></table></div>' : '');
+      $('#bk').onclick = assets;
+      // Receipt, warranty, manual and the rest, filed in the document centre.
+      if (id && window.VADocs) window.VADocs.mount($('#assetdocs'), 'asset', id, { category: 'asset' });
+      $('#asv').onclick = function () {
+        var b = {}; ['tag', 'name', 'kind', 'status', 'make', 'model', 'serial', 'location', 'assigned_to', 'ip', 'mac', 'purchase_date', 'cost', 'supplier', 'warranty_until', 'notes'].forEach(function (k) { var v = val('f_' + k); if (v !== undefined) b[k] = v; });
+        (id ? api('/api/sys/assets/' + id, 'PUT', b) : api('/api/sys/assets', 'POST', b)).then(function (x) { toast('Saved'); assetForm(id || x.id); }).catch(fail);
+      };
+      if ($('#amt')) $('#amt').onclick = function () { maintenanceBox(id, null, function () { assetForm(id); }); };
+    }).catch(fail);
+  }
+  function maintenanceBox(assetId, ticketId, after) {
+    modal('<h2>Repair / service</h2><div class="grid">' + sel('m_kind', 'Kind', ['repair', 'service', 'upgrade', 'replacement', 'check'], 'repair') + field('m_date', 'Date', B.today(), 'date') + field('m_by', 'Done by', '') + field('m_cost', 'Cost (J$)', '', 'number', ' step="0.01"') + area('m_notes', 'What was done', '', 3) + '</div>' +
+      '<div class="controls" style="margin-top:8px"><button class="primary" id="msv">Save</button><button id="x">Cancel</button></div>');
+    $('#x').onclick = close;
+    $('#msv').onclick = function () { api('/api/sys/assets/' + assetId + '/maintenance', 'POST', { kind: val('m_kind'), done_at: val('m_date'), done_by: val('m_by'), cost: val('m_cost'), notes: val('m_notes'), ticket_id: ticketId }).then(function () { close(); toast('Logged'); after(); }).catch(fail); };
+  }
+
+  // ------------------------------------------------------------ change log --
+  function changes() {
+    api('/api/sys/changes').then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>Plan a change</h2><p class="sub">Software updates, new settings, new hardware, giving or removing access, data fixes. A medium or high-risk change needs a way back and a second person to approve it.</p><div class="grid">' +
+          field('c_title', 'Change', '') + sel('c_kind', 'Kind', ['software', 'config', 'hardware', 'access', 'data', 'network'], 'software') + sel('c_risk', 'Risk', ['low', 'medium', 'high'], 'low') + field('c_when', 'Planned for', '', 'datetime-local') +
+          area('c_desc', 'What and why', '', 2) + area('c_rb', 'How to undo it if it goes wrong', '', 2) + '</div><div class="controls" style="margin-top:8px"><button class="primary" id="cadd">Add</button></div></div>' +
+        '<div class="card"><h2>Changes</h2><div class="scroll"><table><thead><tr><th>Change</th><th>Kind</th><th>Risk</th><th>Status</th><th>Planned / done</th><th>By</th><th></th></tr></thead><tbody>' +
+        (d.changes.length ? d.changes.map(function (c) { return '<tr><td><b>' + esc(c.number) + '</b> ' + esc(c.title) + (c.result ? '<br><small>' + esc(c.result) + '</small>' : '') + '</td><td>' + esc(c.kind) + '</td><td>' + pill(c.risk) + '</td><td>' + pill(c.status) + '</td><td><small>' + dt(c.done_at || c.planned_at) + '</small></td><td><small>' + esc(c.requested_by_name || '') + (c.approved_by_name ? ' / approved ' + esc(c.approved_by_name) : '') + '</small></td><td style="white-space:nowrap">' +
+          (c.status === 'planned' ? '<button class="sm" data-cs="' + c.id + '" data-to="approved">Approve</button> ' : '') + (['planned', 'approved'].indexOf(c.status) >= 0 ? '<button class="sm" data-cs="' + c.id + '" data-to="done">Done</button> <button class="sm" data-cs="' + c.id + '" data-to="cancelled">Cancel</button>' : '') + (c.status === 'done' ? '<button class="sm" data-cs="' + c.id + '" data-to="rolled_back">Rolled back</button>' : '') + '</td></tr>'; }).join('') : '<tr><td colspan="7" class="empty">None yet.</td></tr>') + '</tbody></table></div></div>';
+      $('#cadd').onclick = function () { api('/api/sys/changes', 'POST', { title: val('c_title'), kind: val('c_kind'), risk: val('c_risk'), planned_at: val('c_when'), description: val('c_desc'), rollback_plan: val('c_rb') }).then(function (x) { toast(x.number + ' added'); changes(); }).catch(fail); };
+      all('[data-cs]').forEach(function (b) { b.onclick = function () {
+        var to = b.getAttribute('data-to'), go = function (result) { api('/api/sys/changes/' + b.getAttribute('data-cs') + '/status', 'POST', { status: to, result: result }).then(function () { toast('Updated'); changes(); }).catch(fail); };
+        if (to === 'done' || to === 'rolled_back') reasonBox(to === 'done' ? 'Change done' : 'Rolled back', 'What happened?', go); else go();
+      }; });
+    }).catch(fail);
+  }
+
+  // ---------------------------------------------------------------- health --
+  function health() {
+    api('/api/sys/health?website=1').then(function (d) {
+      var s = d.server, db = d.database;
+      $('#out').innerHTML = '<div class="tiles"><div class="tile"><span class="k">Server up</span><b>' + s.uptime_h + ' h</b></div><div class="tile' + (d.disk && d.disk.free_gb < 10 ? ' bad' : '') + '"><span class="k">Disk free</span><b>' + (d.disk ? d.disk.free_gb + ' / ' + d.disk.total_gb + ' GB' : '—') + '</b></div>' +
+          '<div class="tile"><span class="k">Memory free</span><b>' + s.mem_free_gb + ' / ' + s.mem_total_gb + ' GB</b></div><div class="tile"><span class="k">Database</span><b>' + db.size_mb + ' MB</b></div><div class="tile"><span class="k">DB connections</span><b>' + db.connections + '</b></div>' +
+          '<div class="tile' + (d.website && d.website.status !== 200 ? ' bad' : '') + '"><span class="k">Website</span><b>' + (d.website ? (d.website.error ? 'down' : d.website.status + ' · ' + d.website.ms + ' ms') : (s.dev_mode ? 'not checked (dev)' : '—')) + '</b></div></div>' +
+        '<div class="card"><h2>Server</h2><p>' + esc(s.hostname) + ' · ' + esc(s.platform) + ' · Node ' + esc(s.node) + ' · ' + s.cpus + ' CPUs · app memory ' + s.app_mem_mb + ' MB · computer up ' + s.os_uptime_h + ' h · ' + esc(db.version) + (s.dev_mode ? ' · <span class="pill warn">dev mode</span>' : '') + '</p></div>' +
+        '<div class="card"><h2>Recent errors in the server log</h2>' + (d.errors.length ? '<pre class="mono" style="white-space:pre-wrap;max-height:280px;overflow:auto">' + esc(d.errors.join('\n')) + '</pre>' : '<div class="empty">None in the recent log.</div>') + '</div>' +
+        '<div class="card"><h2>Backups</h2><table><tbody>' + (d.backups.length ? d.backups.map(function (b) { return '<tr><td>' + dt(b.created_at) + '</td><td>' + esc(b.direction) + '</td><td>' + (b.ok ? '<span class="pill ok">ok</span>' : '<span class="pill bad">failed</span>') + '</td><td>' + esc(b.filename || '') + '</td><td>' + esc(b.note || '') + '</td></tr>'; }).join('') : '<tr><td class="empty">No backups recorded. Set them up under Admin &gt; Backups.</td></tr>') + '</tbody></table></div>' +
+        '<div class="card"><h2>Computers running the system</h2><table><thead><tr><th>Name</th><th>Status</th><th>Version</th><th>Last seen</th></tr></thead><tbody>' + d.terminals.map(function (t) { return '<tr><td>' + esc(t.name || t.hostname || '') + '</td><td>' + esc(t.status) + '</td><td>' + esc(t.app_version || '') + '</td><td>' + dt(t.last_seen) + '</td></tr>'; }).join('') + '</tbody></table></div>' +
+        '<div class="card"><h2>Biggest tables</h2><table><tbody>' + db.biggest.map(function (x) { return '<tr><td>' + esc(x.name) + '</td><td class="n">' + x.mb + ' MB</td><td class="n">' + Number(x.rows).toLocaleString() + ' rows</td></tr>'; }).join('') + '</tbody></table></div>';
+    }).catch(fail);
+  }
+
+  // -------------------------------------------------------------- security --
+  function security() {
+    Promise.all([api('/api/sys/security'), api('/api/sys/online'), api('/api/sys/staff')]).then(function (r) {
+      var p = r[0], on = r[1].online, st = r[2].staff;
+      staff = st.filter(function (s) { return !s.disabled; });
+      $('#out').innerHTML = '<div class="card" style="display:flex;gap:20px;align-items:center;flex-wrap:wrap"><div><div class="score" style="color:' + (p.score >= 80 ? 'var(--ok)' : p.score >= 60 ? '#b45309' : 'var(--red)') + '">' + p.score + '%</div><small class="sub">security score</small></div>' +
+          '<div style="flex:1;min-width:240px"><p class="sub">Each check passes, needs attention or fails. Fix the red ones first.</p><button id="sall">Sign everyone out now</button>' + (p.signout_at ? ' <small class="sub">last done ' + dt(p.signout_at) + '</small>' : '') + '</div></div>' +
+        '<div class="card"><h2>Checks</h2>' + p.checks.map(function (c) { return '<div class="check"><span class="dot ' + c.state + '"></span><div style="flex:1"><b>' + esc(c.label) + '</b><br><small>' + esc(c.detail || '') + '</small>' + (c.state !== 'pass' ? '<br><small class="sub">What to do: ' + esc(c.fix) + '</small>' : '') + '</div></div>'; }).join('') + '</div>' +
+        '<div class="card"><h2>Signed in now (last 30 minutes)</h2><table><tbody>' + (on.length ? on.map(function (u) { return '<tr><td><b>' + esc(u.name) + '</b> <small>' + esc(u.admin_role || '') + '</small></td><td>' + dt(u.last_seen_at) + '</td><td class="mono">' + esc(u.last_seen_ip || '') + '</td><td>' + (u.two_step ? '<span class="pill ok">2-step</span>' : '<span class="pill warn">no 2-step</span>') + '</td><td><button class="sm" data-so="' + u.id + '">Sign out</button></td></tr>'; }).join('') : '<tr><td class="empty">Nobody.</td></tr>') + '</tbody></table></div>' +
+        '<div class="card"><h2>Back-office accounts</h2><div class="scroll"><table><thead><tr><th>Name</th><th>Role</th><th>2-step</th><th>Last sign-in</th><th>Last seen</th><th></th></tr></thead><tbody>' +
+        st.map(function (u) { return '<tr style="' + (u.disabled ? 'opacity:.5' : '') + '"><td><b>' + esc(u.name) + '</b><br><small>' + esc(u.email) + '</small></td><td>' + esc(u.admin_role || '') + '</td><td>' + (u.two_step ? '<span class="pill ok">yes</span>' : '<span class="pill warn">no</span>') + '</td><td><small>' + dt(u.last_login_at) + '</small></td><td><small>' + dt(u.last_seen_at) + '</small></td><td style="white-space:nowrap">' +
+          (u.disabled ? '<span class="pill">disabled</span>' : (u.locked ? '<span class="pill bad">locked</span> ' : '') + '<button class="sm" data-so="' + u.id + '">Sign out</button> <button class="sm" data-dis="' + u.id + '">Disable</button>') + '</td></tr>'; }).join('') + '</tbody></table></div><p class="sub">Change roles, permissions and passwords on the Admin users screen; unlock and reset 2-step on the Sign-in security page.</p></div>';
+      $('#sall').onclick = function () { reasonBox('Sign everyone out', 'Everyone signed in (except you) has to sign in again. Why? (e.g. a password may have leaked)', function (w) { api('/api/sys/signout-all', 'POST', { reason: w }).then(function () { toast('Everyone else is signed out'); security(); }).catch(fail); }); };
+      all('[data-so]').forEach(function (b) { b.onclick = function () { api('/api/sys/users/' + b.getAttribute('data-so') + '/signout', 'POST', {}).then(function () { toast('Signed out'); security(); }).catch(fail); }; });
+      all('[data-dis]').forEach(function (b) { b.onclick = function () { reasonBox('Disable account', 'They are signed out and cannot sign in again until re-enabled on the Admin users screen. Why?', function (w) { api('/api/sys/users/' + b.getAttribute('data-dis') + '/disable', 'POST', { reason: w }).then(function () { toast('Disabled'); security(); }).catch(fail); }); }; });
+    }).catch(fail);
+  }
+
+  // ------------------------------------------------------------- incidents --
+  function incidents() {
+    var st = incidents.status || 'open';
+    api('/api/sys/incidents?status=' + st).then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>Report an incident</h2><p class="sub">Anything that put money, data, people or the system at risk: a lost phone or laptop, a suspicious email someone clicked, a password shared, cash or stock that does not add up, the system down.</p><div class="grid">' +
+          field('i_title', 'What happened (short)', '') + sel('i_kind', 'Kind', ['security', 'fraud', 'privacy', 'outage', 'data', 'physical', 'other'], 'security') + sel('i_sev', 'Severity', ['low', 'medium', 'high', 'critical'], 'medium') + field('i_when', 'When it happened', '', 'datetime-local') +
+          '<div><label for="i_who">Handled by</label><select id="i_who">' + staffOpts('') + '</select></div>' + area('i_desc', 'Details', '', 3) + area('i_imp', 'Impact (what was affected)', '', 2) + '</div><div class="controls" style="margin-top:8px"><button class="primary" id="iadd">Open incident</button></div></div>' +
+        '<div class="card"><h2>Incidents</h2><div class="controls">' + sel('ist', 'Show', [['open', 'Open'], ['closed', 'Resolved / closed'], ['all', 'All']], st) + '</div>' +
+        (d.incidents.length ? d.incidents.map(function (i) { return '<details class="card" style="margin:8px 0"><summary><b>' + esc(i.number) + '</b> ' + esc(i.title) + ' ' + pill(i.severity) + ' ' + pill(i.status) + ' <small>' + esc(i.kind) + ' · ' + dt(i.created_at) + (i.assigned_to_name ? ' · ' + esc(i.assigned_to_name) : '') + '</small></summary>' +
+            (i.description ? '<p class="note">' + esc(i.description) + '</p>' : '') + (i.impact ? '<p><b>Impact:</b> ' + esc(i.impact) + '</p>' : '') + (i.root_cause ? '<p><b>Root cause:</b> ' + esc(i.root_cause) + '</p>' : '') +
+            '<table><tbody>' + (i.timeline || []).map(function (t) { return '<tr><td><small>' + dt(t.at) + '</small></td><td>' + (t.status ? pill(t.status) : '') + '</td><td>' + esc(t.note || '') + '</td><td><small>' + esc(nameOf(t.by)) + '</small></td></tr>'; }).join('') + '</tbody></table>' +
+            '<div class="grid" style="margin-top:8px">' + sel('is_' + i.id, 'Status', ['open', 'investigating', 'contained', 'resolved', 'closed'], i.status) + area('in_' + i.id, 'Update / action taken', '', 2) + area('ir_' + i.id, 'Root cause (needed to close)', i.root_cause, 2) + '</div>' +
+            '<div class="controls" style="margin-top:6px"><button class="sm primary" data-iu="' + i.id + '">Add update</button></div></details>'; }).join('') : '<div class="empty">No incidents.</div>') + '</div>';
+      $('#iadd').onclick = function () { api('/api/sys/incidents', 'POST', { title: val('i_title'), kind: val('i_kind'), severity: val('i_sev'), occurred_at: val('i_when'), assigned_to: val('i_who'), description: val('i_desc'), impact: val('i_imp') }).then(function (x) { toast(x.number + ' opened'); incidents(); }).catch(fail); };
+      $('#ist').onchange = function () { incidents.status = this.value; incidents(); };
+      all('[data-iu]').forEach(function (b) { b.onclick = function () { var id = b.getAttribute('data-iu'); api('/api/sys/incidents/' + id + '/update', 'POST', { status: val('is_' + id), note: val('in_' + id), root_cause: val('ir_' + id) }).then(function () { toast('Updated'); incidents(); }).catch(fail); }; });
+    }).catch(fail);
+  }
+
+  // ----------------------------------------------------------- audit trail --
+  function auditTrail() {
+    var f = auditTrail.f || { from: '', to: '', q: '', kind: '', remote: '' }, off = auditTrail.off || 0;
+    var qs = 'from=' + encodeURIComponent(f.from) + '&to=' + encodeURIComponent(f.to) + '&q=' + encodeURIComponent(f.q) + '&kind=' + f.kind + '&remote=' + f.remote;
+    api('/api/sys/audit?' + qs + '&limit=100&offset=' + off).then(function (d) {
+      var v = auditTrail.verify;
+      $('#out').innerHTML = '<div class="card"><h2>Audit trail</h2><p class="sub">Every change staff make, every sign-in and lockout, with who, when and from where. Each new entry is sealed with a fingerprint of the one before, so a removed or edited entry is detected.</p>' +
+        '<div class="controls"><div><label>From</label><input type="date" id="af" value="' + esc(f.from) + '"></div><div><label>To</label><input type="date" id="at" value="' + esc(f.to) + '"></div><div style="flex:1;min-width:160px"><label>Search (person, action, record, address, details)</label><input id="aq" value="' + esc(f.q) + '" style="width:100%"></div>' +
+          sel('ak', 'Show', [['', 'Everything'], ['change', 'Changes only'], ['signin', 'Sign-ins']], f.kind) + '<label class="chk"><input type="checkbox" id="ar"' + (f.remote === '1' ? ' checked' : '') + '> From outside the shop</label><button class="primary" id="ago">Search</button><a href="/api/sys/audit.csv?' + qs + '"><button>CSV</button></a><button id="aver">Run tamper check</button></div>' +
+        (v ? '<div class="note ' + (v.ok ? 'info' : 'bad') + '">' + (v.ok ? '✔ Intact: ' + v.checked + ' sealed entries checked (' + (v.first_id || '—') + ' to ' + (v.last_id || '—') + ').' : '✖ BROKEN at entry ' + v.broken.id + ': ' + esc(v.broken.problem) + '. Open an incident.') + (v.before_chain.rows ? ' ' + v.before_chain.rows + ' older entries were written before sealing started.' : '') + '</div>' : '') +
+        '<p class="sub">' + d.total.toLocaleString() + (d.total > 100000 ? '+' : '') + ' entries · showing ' + (d.rows.length ? (off + 1) + '–' + (off + d.rows.length) : 'none') + '</p>' +
+        '<div class="scroll"><table><thead><tr><th>When</th><th>Who</th><th>What</th><th>Record</th><th>Result</th><th>From</th><th></th></tr></thead><tbody>' +
+        d.rows.map(function (a, i) { return '<tr><td><small>' + dt(a.at) + '</small></td><td>' + esc(a.user_name || '') + '</td><td class="mono">' + esc(a.action) + '</td><td>' + esc(a.target || '') + '</td><td>' + (a.status ? (a.status >= 400 ? '<span class="pill bad">' + a.status + '</span>' : a.status) : '') + '</td><td class="mono">' + esc(a.ip || '') + (a.remote ? ' <span class="pill warn">outside</span>' : '') + '</td><td>' + (a.detail ? '<button class="sm" data-ad="' + i + '">Details</button>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div>' +
+        '<div class="controls" style="margin-top:8px">' + (off ? '<button id="aprev">◀ Newer</button>' : '') + (off + d.rows.length < d.total ? '<button id="anext">Older ▶</button>' : '') + '</div></div>';
+      $('#ago').onclick = function () { auditTrail.f = { from: val('af'), to: val('at'), q: val('aq'), kind: val('ak'), remote: val('ar') ? '1' : '' }; auditTrail.off = 0; auditTrail(); };
+      $('#aver').onclick = function () { api('/api/sys/audit/verify').then(function (x) { auditTrail.verify = x; auditTrail(); }).catch(fail); };
+      if ($('#aprev')) $('#aprev').onclick = function () { auditTrail.off = Math.max(0, off - 100); auditTrail(); };
+      if ($('#anext')) $('#anext').onclick = function () { auditTrail.off = off + 100; auditTrail(); };
+      all('[data-ad]').forEach(function (b) { b.onclick = function () { var a = d.rows[+b.getAttribute('data-ad')]; modal('<h2>' + esc(a.action) + '</h2><pre class="mono" style="white-space:pre-wrap">' + esc(JSON.stringify(a.detail, null, 2)) + '</pre><div class="controls"><button id="x">Close</button></div>'); $('#x').onclick = close; }; });
+    }).catch(fail);
+  }
+
+  // ------------------------------------------------------ audit exceptions --
+  function exceptionsTab() {
+    var to = exceptionsTab.to || B.today(), from = exceptionsTab.from || new Date(new Date(to + 'T12:00:00Z').getTime() - 6 * 86400000).toISOString().slice(0, 10);
+    Promise.all([api('/api/sys/exceptions?from=' + from + '&to=' + to), api('/api/sys/audit-reviews')]).then(function (r) {
+      var d = r[0], rv = r[1].reviews;
+      $('#out').innerHTML = '<div class="card"><h2>Audit exceptions</h2><p class="sub">What an auditor looks at first. Look through each list, follow up anything you cannot explain, then sign the review off below.</p>' +
+        '<div class="controls"><div><label>From</label><input type="date" id="xf" value="' + from + '"></div><div><label>To</label><input type="date" id="xt" value="' + to + '"></div><button class="primary" id="xgo">Show</button></div>' +
+        d.sections.map(function (s) { return '<details class="card" style="margin:8px 0"' + (s.count && s.severity === 'high' ? ' open' : '') + '><summary><b>' + esc(s.label) + '</b> ' + pill(s.severity) + ' <b>' + (s.count == null ? '—' : s.count) + '</b>' + (s.error ? ' <small>' + esc(s.error) + '</small>' : '') + '</summary>' +
+          (s.sample && s.sample.length ? '<div class="scroll"><table><tbody>' + s.sample.map(function (x) { return '<tr>' + Object.keys(x).map(function (k) { var v = x[k]; if (k === 'at' || /_at$/.test(k)) v = dt(v); else if (typeof v === 'boolean') v = v ? 'yes' : ''; return '<td><small>' + esc(v == null ? '' : v) + '</small></td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>' + (s.count > s.sample.length ? '<p class="sub">Showing ' + s.sample.length + ' of ' + s.count + '. Use the audit trail search for the rest.</p>' : '') : '') + '</details>'; }).join('') + '</div>' +
+        '<div class="card"><h2>Sign off this review</h2><p class="sub">Records that ' + esc(from) + ' to ' + esc(to) + ' was reviewed, with these counts and a tamper check frozen at the time.</p><textarea id="xn" rows="3" style="width:100%" placeholder="What you checked, what you followed up, anything unexplained"></textarea><div class="controls" style="margin-top:6px"><button class="primary" id="xsign">Sign off</button></div>' +
+        '<h2 style="margin-top:12px">Past reviews</h2><table><tbody>' + (rv.length ? rv.map(function (x) { return '<tr><td>' + esc(x.from_date) + ' – ' + esc(x.to_date) + '</td><td class="n">' + (x.exceptions || 0) + ' exceptions</td><td>' + (x.chain_ok === 'true' ? '<span class="pill ok">log intact</span>' : '<span class="pill bad">log broken</span>') + '</td><td><small>' + esc(x.reviewed_by || '') + ' · ' + dt(x.reviewed_at) + '</small></td><td><small>' + esc(x.notes || '') + '</small></td></tr>'; }).join('') : '<tr><td class="empty">None yet.</td></tr>') + '</tbody></table></div>';
+      $('#xgo').onclick = function () { exceptionsTab.from = val('xf'); exceptionsTab.to = val('xt'); exceptionsTab(); };
+      $('#xsign').onclick = function () { api('/api/sys/audit-reviews', 'POST', { from: from, to: to, notes: val('xn') }).then(function () { toast('Review signed off'); exceptionsTab(); }).catch(fail); };
+    }).catch(fail);
+  }
+
+  // --------------------------------------------------------- access reviews --
+  function access() {
+    api('/api/sys/access-reviews').then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>Access reviews</h2><p class="sub">Every few months, go through everyone who can sign in to the back office and what they can do: keep it, change it, or disable the login. Disable decisions are carried out when the review is finished.</p>' +
+        '<div class="controls"><input id="rt" placeholder="Title, e.g. Q4 2026 access review" style="min-width:260px"><button class="primary" id="rnew">Start a review</button></div>' +
+        '<table><tbody>' + (d.reviews.length ? d.reviews.map(function (r) { return '<tr class="click" data-rv="' + r.id + '"><td><b>' + esc(r.title) + '</b></td><td>' + pill(r.status === 'open' ? 'open' : 'done') + '</td><td class="n">' + r.decided + ' / ' + r.people + ' decided</td><td><small>started ' + dt(r.started_at) + ' by ' + esc(r.started_by_name || '') + (r.finished_at ? ' · finished ' + dt(r.finished_at) : '') + '</small></td></tr>'; }).join('') : '<tr><td class="empty">No reviews yet.</td></tr>') + '</tbody></table></div>';
+      $('#rnew').onclick = function () { api('/api/sys/access-reviews', 'POST', { title: val('rt') }).then(function (x) { review(x.id); }).catch(fail); };
+      all('[data-rv]').forEach(function (r) { r.onclick = function () { review(+r.getAttribute('data-rv')); }; });
+    }).catch(fail);
+  }
+  function review(id) {
+    api('/api/sys/access-reviews/' + id).then(function (d) {
+      var open = d.review.status === 'open';
+      $('#out').innerHTML = '<div class="controls"><button id="bk">◀ Access reviews</button></div><div class="card"><h2>' + esc(d.review.title) + ' ' + pill(open ? 'open' : 'done') + '</h2>' +
+        '<div class="scroll"><table><thead><tr><th>Person</th><th>Role</th><th>Supervisory powers</th><th>2-step</th><th>Last sign-in</th><th>Decision</th></tr></thead><tbody>' +
+        d.items.map(function (i) { var s = i.snapshot; return '<tr style="' + (s.disabled ? 'opacity:.5' : '') + '"><td><b>' + esc(s.name) + '</b><br><small>' + esc(s.email || '') + '</small>' + (s.disabled ? ' <span class="pill">disabled</span>' : '') + '</td><td>' + esc(s.role || '') + '</td><td><small>' + (s.powers.length ? esc(s.powers.join('; ')) : 'none') + '</small></td><td>' + (s.two_step ? 'yes' : '<span class="pill warn">no</span>') + '</td><td><small>' + dt(s.last_login_at) + '</small></td>' +
+          '<td>' + (i.decision ? pill(i.decision) + (i.note ? '<br><small>' + esc(i.note) + '</small>' : '') + '<br><small>' + esc(i.decided_by_name || '') + '</small>' : '') +
+          (open ? '<div style="white-space:nowrap;margin-top:4px"><button class="sm" data-dk="' + i.id + '" data-d="keep">Keep</button> <button class="sm" data-dk="' + i.id + '" data-d="change">Change</button> <button class="sm" data-dk="' + i.id + '" data-d="disable">Disable</button></div>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div>' +
+        (open ? '<div class="controls" style="margin-top:8px"><button class="primary" id="rfin">Finish the review</button></div>' : '') + '</div>';
+      $('#bk').onclick = access;
+      all('[data-dk]').forEach(function (b) { b.onclick = function () {
+        var dec = b.getAttribute('data-d'), go = function (note) { api('/api/sys/access-reviews/' + id + '/items/' + b.getAttribute('data-dk'), 'POST', { decision: dec, note: note }).then(function () { review(id); }).catch(fail); };
+        if (dec === 'keep') go(''); else reasonBox(dec === 'disable' ? 'Disable this login' : 'Change their access', dec === 'disable' ? 'Why should this login be disabled?' : 'What should change? (do it on the Admin users screen)', go);
+      }; });
+      if ($('#rfin')) $('#rfin').onclick = function () { confirmBox('Finish the review? Logins marked "disable" are disabled now.', function () { api('/api/sys/access-reviews/' + id + '/finish', 'POST', {}).then(function (x) { toast('Finished' + (x.disabled.length ? '; disabled: ' + x.disabled.join(', ') : '')); review(id); }).catch(fail); }); };
+    }).catch(fail);
+  }
+
+  // --------------------------------------------------------------- threats --
+  var KIND_LABEL = { web_attack: 'Attack on the website', scanning: 'Scanning for weaknesses', brute_force: 'Password guessing', credential_stuffing: 'Many accounts tried', new_location: 'Sign-in from a new address', mass_delete: 'Mass deletion', privilege_change: 'Permission change', data_export: 'Large data export', fraud_pattern: 'Possible fraud', audit_tamper: 'Audit log tampering', network_down: 'Device / service down', unknown_device: 'Unknown device on the network', after_hours: 'After-hours activity' };
+  function threats() {
+    var st = threats.status || 'open';
+    Promise.all([api('/api/sys/threats?status=' + st), api('/api/sys/blocks'), api('/api/sys/cyber-settings'), api('/api/sys/software')]).then(function (r) {
+      var d = r[0], bl = r[1].blocks, cs = r[2].settings, sw = r[3], sev = d.open_by_severity || {};
+      $('#out').innerHTML = '<div class="tiles"><div class="tile' + (sev.critical ? ' bad' : '') + '"><span class="k">Critical</span><b>' + (sev.critical || 0) + '</b></div><div class="tile' + (sev.high ? ' bad' : '') + '"><span class="k">High</span><b>' + (sev.high || 0) + '</b></div><div class="tile"><span class="k">Medium</span><b>' + (sev.medium || 0) + '</b></div><div class="tile"><span class="k">Low</span><b>' + (sev.low || 0) + '</b></div><div class="tile"><span class="k">Addresses blocked now</span><b>' + bl.filter(function (b) { return b.active; }).length + '</b></div></div>' +
+        '<div class="card"><h2>Threats</h2><p class="sub">Found at the door (every request is checked for attack patterns and scanners) and in the audit log (every 5 minutes): password guessing, logins from new places, mass deletions, permission changes, big exports, voids, tampering; and on the network: devices down, unknown devices. Each comes with what to do.</p>' +
+        '<div class="controls">' + sel('thst', 'Show', [['open', 'Open'], ['closed', 'Dealt with'], ['all', 'All']], st) + '<button id="thscan">Check the audit log now</button></div>' +
+        (d.threats.length ? d.threats.map(function (t) { var open = t.status === 'new' || t.status === 'acknowledged'; return '<details class="card" style="margin:8px 0"' + (open && (t.severity === 'critical' || t.severity === 'high') ? ' open' : '') + '><summary>' + pill(t.severity) + ' <b>' + esc(t.title) + '</b> ' + pill(t.status) + ' <small>' + esc(KIND_LABEL[t.kind] || t.kind) + ' · ' + t.count + '× · last ' + dt(t.last_seen) + (t.incident_number ? ' · ' + esc(t.incident_number) : '') + '</small></summary>' +
+          '<p class="sub">First seen ' + dt(t.first_seen) + (t.source_ip ? ' · address <span class="mono">' + esc(t.source_ip) + '</span>' : '') + (t.user_name ? ' · account ' + esc(t.user_name) : '') + (t.auto_action ? ' · ' + esc(t.auto_action) : '') + '</p>' +
+          '<div class="note info"><b>What to do</b><ol style="margin:4px 0 0 18px;padding:0">' + t.playbook.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('') + '</ol></div>' +
+          (t.samples.length ? '<details><summary><small>Evidence (' + t.samples.length + ')</small></summary><pre class="mono" style="white-space:pre-wrap;max-height:200px;overflow:auto">' + esc(t.samples.map(function (x) { return JSON.stringify(x); }).join('\n')) + '</pre></details>' : '') +
+          (t.actions.length ? '<table><tbody>' + t.actions.map(function (a) { return '<tr><td><small>' + dt(a.at) + '</small></td><td>' + esc(a.action) + '</td><td><small>' + esc(a.note || '') + '</small></td></tr>'; }).join('') + '</tbody></table>' : '') +
+          (open ? '<div class="controls" style="margin-top:8px">' + (t.status === 'new' ? '<button class="sm" data-ta="acknowledge" data-t="' + t.id + '">Acknowledge</button>' : '') + (t.source_ip ? '<button class="sm" data-ta="block_ip" data-t="' + t.id + '">Block address</button>' : '') +
+            (t.user_id ? '<button class="sm" data-ta="signout_user" data-t="' + t.id + '">Sign them out</button><button class="sm" data-ta="lock_user" data-t="' + t.id + '">Lock the account</button>' : '') + (t.incident_number ? '' : '<button class="sm" data-ta="incident" data-t="' + t.id + '">Open an incident</button>') +
+            '<button class="sm primary" data-ta="mitigated" data-t="' + t.id + '">Dealt with</button><button class="sm" data-ta="false_positive" data-t="' + t.id + '">False alarm</button></div>' : '') + '</details>'; }).join('') : '<div class="empty">No threats.</div>') + '</div>' +
+        '<div class="card"><h2>Defences</h2><div class="grid"><label class="chk"><input type="checkbox" id="cs_ab"' + (cs.autoblock ? ' checked' : '') + '> Block attacking internet addresses automatically</label>' + field('cs_hits', 'Attack attempts before blocking', cs.hits, 'number') + field('cs_min', 'Block for (minutes)', cs.minutes, 'number') + field('cs_404', 'Missing pages in 10 min = scanning', cs.scan404, 'number') +
+          '<label class="chk"><input type="checkbox" id="cs_hd"' + (cs.headers ? ' checked' : '') + '> Safe browser headers (no sniffing, no framing by other sites)</label></div><p class="sub">Shop-network and local addresses are never blocked automatically.</p><div class="controls"><button class="primary" id="cssv">Save</button></div></div>' +
+        '<div class="card"><h2>Blocked addresses</h2><div class="controls"><div><label>Address or range</label><input id="bl_ip" placeholder="203.0.113.7 or 203.0.113.0/24"></div><div><label>Why</label><input id="bl_why"></div>' + sel('bl_min', 'For', [['60', '1 hour'], ['1440', '1 day'], ['10080', '1 week'], ['0', 'Until removed']], '1440') + '<button id="bladd">Block</button></div>' +
+          '<div class="scroll"><table><thead><tr><th>Address</th><th>Why</th><th>Until</th><th class="n">Refused</th><th></th></tr></thead><tbody>' + (bl.length ? bl.map(function (b) { return '<tr style="' + (b.active ? '' : 'opacity:.45') + '"><td class="mono">' + esc(b.cidr) + (b.auto ? ' <span class="pill">auto</span>' : '') + '</td><td><small>' + esc(b.reason) + '</small></td><td><small>' + (b.removed_at ? 'removed' : b.expires_at ? dt(b.expires_at) : 'removed by hand') + '</small></td><td class="n">' + b.hits + '</td><td>' + (b.active ? '<button class="sm" data-unb="' + b.id + '">Unblock</button>' : '') + '</td></tr>'; }).join('') : '<tr><td class="empty">None.</td></tr>') + '</tbody></table></div></div>' +
+        '<div class="card"><h2>Software &amp; patches</h2><p>' + (sw.node.supported ? '<span class="pill ok">supported</span>' : '<span class="pill bad">out of support</span>') + ' Node ' + esc(sw.node.version) + (sw.node.eol ? ' · security updates until ' + esc(sw.node.eol) : '') + ' · ' + esc(sw.database) + ' · ' + esc(sw.os) + '</p>' +
+          '<details><summary><small>Installed packages (' + sw.packages.length + ')</small></summary><table><tbody>' + sw.packages.map(function (p) { return '<tr><td class="mono">' + esc(p.name) + '</td><td class="mono">' + esc(p.installed || 'not installed') + '</td><td><small>wanted ' + esc(p.wanted) + '</small></td></tr>'; }).join('') + '</tbody></table></details></div>';
+      $('#thst').onchange = function () { threats.status = this.value; threats(); };
+      $('#thscan').onclick = function () { api('/api/sys/threats/scan', 'POST', {}).then(function (x) { toast(x.busy ? 'Already checking' : 'Checked ' + (x.checked || 0) + ' new audit entries'); threats(); }).catch(fail); };
+      all('[data-ta]').forEach(function (b) { b.onclick = function () {
+        var a = b.getAttribute('data-ta'), id = b.getAttribute('data-t'), go = function (extra) { api('/api/sys/threats/' + id + '/action', 'POST', Object.assign({ action: a }, extra || {})).then(function (x) { toast(x.done); threats(); }).catch(fail); };
+        if (a === 'mitigated') return reasonBox('Dealt with', 'What was done about it?', function (w) { go({ note: w }); });
+        if (a === 'false_positive') return reasonBox('False alarm', 'Why is it not a threat?', function (w) { go({ note: w }); });
+        if (a === 'block_ip') { modal('<h2>Block this address</h2><div class="controls">' + sel('bm', 'For', [['60', '1 hour'], ['1440', '1 day'], ['10080', '1 week'], ['0', 'Until removed']], '1440') + '</div><div class="controls"><button class="primary" id="y">Block</button><button id="x">Cancel</button></div>'); $('#x').onclick = close; $('#y').onclick = function () { var m = val('bm'); close(); go({ minutes: m }); }; return; }
+        if (a === 'lock_user') return confirmBox('Lock this account for 24 hours and sign the person out everywhere?', function () { go(); });
+        go();
+      }; });
+      $('#cssv').onclick = function () { api('/api/sys/cyber-settings', 'PUT', { autoblock: val('cs_ab'), hits: val('cs_hits'), minutes: val('cs_min'), scan404: val('cs_404'), headers: val('cs_hd') }).then(function () { toast('Saved'); threats(); }).catch(fail); };
+      $('#bladd').onclick = function () { api('/api/sys/blocks', 'POST', { cidr: val('bl_ip'), reason: val('bl_why'), minutes: val('bl_min') }).then(function () { toast('Blocked'); threats(); }).catch(fail); };
+      all('[data-unb]').forEach(function (b) { b.onclick = function () { api('/api/sys/blocks/' + b.getAttribute('data-unb') + '/remove', 'POST', {}).then(function () { toast('Unblocked'); threats(); }).catch(fail); }; });
+    }).catch(fail);
+  }
+
+  // ----------------------------------------------------------------- risks --
+  var RCATS = ['cyber', 'network', 'data', 'people', 'process', 'physical', 'third_party', 'compliance'];
+  var oneTo5 = [['1', '1 – rare / minor'], ['2', '2'], ['3', '3 – possible / moderate'], ['4', '4'], ['5', '5 – almost certain / severe']];
+  function riskColour(sc) { return sc >= 15 ? '#dc2626' : sc >= 8 ? '#f59e0b' : '#16a34a'; }
+  function risks() {
+    api('/api/sys/risks').then(function (d) {
+      var open = d.risks.filter(function (r) { return r.status !== 'closed'; });
+      var grid = '<table style="max-width:420px"><tbody>' + [5, 4, 3, 2, 1].map(function (l) { return '<tr><th style="text-align:right">' + l + '</th>' + [1, 2, 3, 4, 5].map(function (i) { var c = open.filter(function (r) { return r.likelihood === l && r.impact === i; }).length; return '<td style="text-align:center;background:' + riskColour(l * i) + (c ? '' : '33') + ';color:#fff;font-weight:700;width:44px;height:34px">' + (c || '') + '</td>'; }).join('') + '</tr>'; }).join('') + '<tr><th></th>' + [1, 2, 3, 4, 5].map(function (i) { return '<th style="text-align:center">' + i + '</th>'; }).join('') + '</tr></tbody></table><p class="sub">Up: likelihood · across: impact</p>';
+      $('#out').innerHTML = '<div class="card"><h2>Risk register</h2><p class="sub">The things that could hurt the business (ransomware, a leaked customer list, the internet line down on a Saturday, a till stolen…), how likely and how bad, who owns each, and what is being done. Score = likelihood × impact; 15+ is high.</p>' + grid + '</div>' +
+        '<div class="card"><h2>Add a risk</h2><div class="grid">' + field('rk_t', 'Risk', '') + sel('rk_c', 'Kind', RCATS, 'cyber') + sel('rk_l', 'Likelihood', oneTo5, '3') + sel('rk_i', 'Impact', oneTo5, '3') + '<div><label for="rk_o">Owner</label><select id="rk_o">' + staffOpts('') + '</select></div>' + field('rk_r', 'Review by', '', 'date') + area('rk_d', 'What could happen', '', 2) + area('rk_m', 'What we do about it (mitigation)', '', 2) + '</div><div class="controls" style="margin-top:8px"><button class="primary" id="rkadd">Add</button></div></div>' +
+        '<div class="card"><h2>Risks</h2>' + (d.risks.length ? d.risks.map(function (r) { return '<details class="card" style="margin:8px 0"><summary><span class="pill" style="background:' + riskColour(r.score) + ';color:#fff">' + r.score + '</span> <b>' + esc(r.number) + ' ' + esc(r.title) + '</b> ' + pill(r.status) + ' <small>' + esc(r.category) + (r.owner_name ? ' · ' + esc(r.owner_name) : '') + (r.residual_score !== r.score ? ' · after mitigation ' + r.residual_score : '') + (r.review_overdue ? ' · <span class="pill bad">review overdue</span>' : '') + '</small></summary>' +
+          '<div class="grid">' + sel('rs_' + r.id, 'Status', ['open', 'mitigating', 'accepted', 'closed'], r.status) + sel('rl_' + r.id, 'Likelihood', oneTo5, String(r.likelihood)) + sel('ri_' + r.id, 'Impact', oneTo5, String(r.impact)) + sel('rrl_' + r.id, 'Likelihood after mitigation', [['', '—']].concat(oneTo5), r.residual_likelihood ? String(r.residual_likelihood) : '') + sel('rri_' + r.id, 'Impact after mitigation', [['', '—']].concat(oneTo5), r.residual_impact ? String(r.residual_impact) : '') +
+          '<div><label>Owner</label><select id="ro_' + r.id + '">' + staffOpts(r.owner_id) + '</select></div>' + field('rr_' + r.id, 'Review by', r.review_date, 'date') + area('rd_' + r.id, 'What could happen', r.description, 2) + area('rm_' + r.id, 'Mitigation', r.mitigation, 2) + '</div><div class="controls" style="margin-top:6px"><button class="sm primary" data-rk="' + r.id + '">Save</button></div></details>'; }).join('') : '<div class="empty">No risks recorded yet.</div>') + '</div>';
+      $('#rkadd').onclick = function () { api('/api/sys/risks', 'POST', { title: val('rk_t'), category: val('rk_c'), likelihood: val('rk_l'), impact: val('rk_i'), owner_id: val('rk_o'), review_date: val('rk_r'), description: val('rk_d'), mitigation: val('rk_m') }).then(function (x) { toast(x.number + ' added'); risks(); }).catch(fail); };
+      all('[data-rk]').forEach(function (b) { b.onclick = function () { var id = b.getAttribute('data-rk'); api('/api/sys/risks/' + id, 'PUT', { status: val('rs_' + id), likelihood: val('rl_' + id), impact: val('ri_' + id), residual_likelihood: val('rrl_' + id), residual_impact: val('rri_' + id), owner_id: val('ro_' + id), review_date: val('rr_' + id), description: val('rd_' + id), mitigation: val('rm_' + id) }).then(function () { toast('Saved'); risks(); }).catch(fail); }; });
+    }).catch(fail);
+  }
+
+  // --------------------------------------------------------------- network --
+  function network() {
+    api('/api/sys/network').then(function (d) {
+      var down = d.targets.filter(function (t) { return t.enabled && t.last_ok === false; }).length, risky = d.ports.filter(function (p) { return p.risk; });
+      var fwOk = d.firewall ? Object.keys(d.firewall).every(function (k) { return d.firewall[k]; }) : null;
+      $('#out').innerHTML = '<div class="tiles"><div class="tile' + (down ? ' bad' : '') + '"><span class="k">Monitored: down</span><b>' + down + ' / ' + d.targets.length + '</b></div><div class="tile' + (fwOk === false ? ' bad' : '') + '"><span class="k">Windows Firewall</span><b>' + (fwOk == null ? '—' : fwOk ? 'On' : 'OFF') + '</b></div><div class="tile' + (risky.length ? ' bad' : '') + '"><span class="k">Risky open ports</span><b>' + risky.length + '</b></div><div class="tile click" id="lanTile"><span class="k">Devices on the network</span><b id="lanCount">scan</b></div></div>' +
+        '<div class="card" id="nmCard"><h2>Network map <span class="pill ok" id="nmLive">live</span></h2><p class="sub">The internet, the router, this server and every device on the shop network: green is answering, red has stopped, amber is a device nobody has registered, grey has not been heard from lately. Click a device for its details. It refreshes every 15 seconds.</p>' +
+          '<div id="nmap"><div class="empty">Drawing the map…</div></div></div>' +
+        '<div class="card"><h2>Monitoring</h2><p class="sub">The router, internet, website, tills and printers, checked every minute' + (d.monitoring ? '' : ' (<b>not running on the test copy</b>: use Check now)') + '. When one stops answering it becomes a threat; when it comes back the threat closes itself.</p>' +
+          '<div class="scroll"><table><thead><tr><th>Watching</th><th>How</th><th>Now</th><th class="n">Response</th><th class="n">Up 24 h</th><th class="n">Up 7 days</th><th></th></tr></thead><tbody>' +
+          (d.targets.length ? d.targets.map(function (t) { return '<tr style="' + (t.enabled ? '' : 'opacity:.5') + '"><td><b>' + esc(t.name) + '</b>' + (t.critical ? ' <span class="pill bad">critical</span>' : '') + (t.asset_tag ? ' <small>' + esc(t.asset_tag) + '</small>' : '') + '</td><td class="mono">' + esc(t.kind === 'http' ? t.url : t.kind === 'tcp' ? t.host + ':' + t.port : 'ping ' + t.host) + '</td><td>' + (t.last_ok == null ? '<span class="pill">not checked</span>' : t.last_ok ? '<span class="pill ok">up</span>' : '<span class="pill bad">DOWN</span> <small>' + esc(t.last_error || '') + (t.down_since ? ' since ' + dt(t.down_since) : '') + '</small>') + '</td><td class="n">' + (t.last_ms != null ? t.last_ms + ' ms' : '') + '</td><td class="n">' + (t.uptime_24h != null ? t.uptime_24h + '%' : '') + '</td><td class="n">' + (t.uptime_7d != null ? t.uptime_7d + '%' : '') + '</td><td style="white-space:nowrap"><button class="sm" data-chk="' + t.id + '">Check now</button> <button class="sm" data-tog="' + t.id + '" data-on="' + (t.enabled ? '0' : '1') + '">' + (t.enabled ? 'Pause' : 'Resume') + '</button> <button class="sm" data-del="' + t.id + '">Remove</button></td></tr>'; }).join('') : '<tr><td colspan="7" class="empty">Nothing watched yet. Start with the router and the internet.</td></tr>') + '</tbody></table></div>' +
+          '<div class="controls" style="margin-top:8px"><div><label>Name</label><input id="nt_n" placeholder="Router / Internet / Till 2"></div>' + sel('nt_k', 'Check by', [['ping', 'Ping'], ['tcp', 'Port open'], ['http', 'Web page']], 'ping') + '<div><label>Address / web page</label><input id="nt_h" placeholder="192.168.12.1 or https://…"></div><div><label>Port</label><input id="nt_p" type="number" style="width:80px"></div><label class="chk"><input type="checkbox" id="nt_c"> critical</label><button id="ntadd">Watch</button></div>' +
+          '<p class="sub">Suggestions: the router (' + esc((d.interfaces[0] || {}).address ? d.interfaces[0].address.replace(/\.\d+$/, '.1') : '192.168.x.1') + '), the internet (ping 1.1.1.1), the website (https://mortsautoparts.com/api/health), each till and printer.</p></div>' +
+        '<div class="card" id="lanCard"><h2>Devices on the shop network</h2><p class="sub">What this computer can see on the local network, matched to the equipment register. Anything unknown deserves a look.</p><button id="lanScan">Scan the network</button><div id="lanOut"></div></div>' +
+        '<div class="card"><h2>This server</h2><p>' + esc(d.hostname) + ' · ' + d.interfaces.map(function (i) { return '<span class="mono">' + esc(i.address) + '</span> <small>(' + esc(i.name) + ')</small>'; }).join(' · ') + '</p>' +
+          (d.firewall ? '<p>Windows Firewall: ' + Object.keys(d.firewall).map(function (k) { return k + ' ' + (d.firewall[k] ? '<span class="pill ok">on</span>' : '<span class="pill bad">OFF</span>'); }).join(' ') + '</p>' : '') +
+          '<h2 style="margin-top:10px">Listening ports</h2><div class="scroll"><table><thead><tr><th class="n">Port</th><th>What</th><th>Reachable from</th><th>Advice</th></tr></thead><tbody>' + d.ports.map(function (p) { return '<tr><td class="n mono">' + p.port + '</td><td>' + esc(p.name || 'unknown') + '</td><td>' + (p.exposed ? '<span class="pill warn">the network</span>' : '<span class="pill ok">this computer only</span>') + '</td><td><small>' + esc(p.risk || '') + '</small></td></tr>'; }).join('') + '</tbody></table></div></div>' +
+        '<div class="card"><h2>Networks and Wi-Fi</h2><p class="sub">Keep the tills on their own network, guests on a separate Wi-Fi, use WPA2/WPA3, and change Wi-Fi passwords every year and when someone leaves.</p>' +
+          '<table><thead><tr><th>Name</th><th>For</th><th>SSID / subnet / VLAN</th><th>Security</th><th>Apart from the tills</th><th>Password changed</th><th></th></tr></thead><tbody>' + (d.networks.length ? d.networks.map(function (w) { return '<tr><td><b>' + esc(w.name) + '</b></td><td>' + esc(w.purpose) + '</td><td><small>' + esc([w.ssid, w.subnet, w.vlan ? 'VLAN ' + w.vlan : ''].filter(Boolean).join(' · ')) + '</small></td><td>' + (['open', 'wep', 'wpa'].indexOf(w.security) >= 0 ? '<span class="pill bad">' + esc(w.security) + '</span>' : esc(w.security)) + '</td><td>' + (w.isolated_from_pos ? 'yes' : (w.purpose === 'guest' ? '<span class="pill bad">no</span>' : 'no')) + '</td><td>' + esc(w.password_changed_at || '') + '</td><td><button class="sm" data-nwe="' + w.id + '">Edit</button></td></tr>'; }).join('') : '<tr><td colspan="7" class="empty">None recorded.</td></tr>') + '</tbody></table>' +
+          '<div class="controls" style="margin-top:8px"><button id="nwadd">Add a network</button></div></div>';
+      $('#ntadd').onclick = function () { var k = val('nt_k'); api('/api/sys/net-targets', 'POST', { name: val('nt_n'), kind: k, host: k === 'http' ? '' : val('nt_h'), url: k === 'http' ? val('nt_h') : '', port: val('nt_p'), critical: val('nt_c') }).then(function () { toast('Watching'); network(); }).catch(fail); };
+      all('[data-chk]').forEach(function (b) { b.onclick = function () { b.disabled = true; api('/api/sys/net-targets/' + b.getAttribute('data-chk') + '/check', 'POST', {}).then(function (x) { toast(x.result.ok ? 'Up · ' + x.result.ms + ' ms' : 'DOWN · ' + (x.result.error || '')); network(); }).catch(fail); }; });
+      all('[data-tog]').forEach(function (b) { b.onclick = function () { api('/api/sys/net-targets/' + b.getAttribute('data-tog'), 'PUT', { enabled: b.getAttribute('data-on') === '1' }).then(network).catch(fail); }; });
+      all('[data-del]').forEach(function (b) { b.onclick = function () { confirmBox('Stop watching this and remove its history?', function () { api('/api/sys/net-targets/' + b.getAttribute('data-del'), 'DELETE').then(network).catch(fail); }); }; });
+      var scan = function () { $('#lanOut').innerHTML = '<div class="empty">Scanning…</div>'; api('/api/sys/lan-devices').then(function (x) {
+        $('#lanCount').textContent = x.devices.length + (x.unknown ? ' (' + x.unknown + ' unknown)' : '');
+        $('#lanOut').innerHTML = '<table style="margin-top:8px"><thead><tr><th>Address</th><th>Hardware (MAC)</th><th>Known as</th><th></th></tr></thead><tbody>' + x.devices.map(function (v, i) { return '<tr><td class="mono">' + esc(v.ip) + '</td><td class="mono">' + esc(v.mac) + '</td><td>' + (v.asset ? '<span class="pill ok">' + esc(v.asset.tag) + '</span> ' + esc(v.asset.name) : '<span class="pill warn">unknown</span>') + '</td><td>' + (v.asset ? '' : '<button class="sm" data-reg="' + i + '">Register</button>') + '</td></tr>'; }).join('') + '</tbody></table>';
+        all('[data-reg]').forEach(function (b) { b.onclick = function () { var v = x.devices[+b.getAttribute('data-reg')];
+          modal('<h2>Register ' + esc(v.ip) + '</h2><div class="grid">' + field('rg_n', 'What is it?', '') + sel('rg_k', 'Kind', ['pc', 'till', 'printer', 'receipt_printer', 'label_printer', 'scanner', 'phone', 'tablet', 'router', 'switch', 'camera', 'other'], 'other') + field('rg_l', 'Where', '') + '</div><div class="controls" style="margin-top:8px"><button class="primary" id="y">Register</button><button id="x">Cancel</button></div>');
+          $('#x').onclick = close; $('#y').onclick = function () { api('/api/sys/lan-devices/register', 'POST', { name: val('rg_n'), kind: val('rg_k'), location: val('rg_l'), ip: v.ip, mac: v.mac }).then(function (r2) { close(); toast('Registered as ' + r2.tag); scan(); }).catch(fail); }; }; });
+      }).catch(fail); };
+      $('#lanScan').onclick = scan; $('#lanTile').onclick = function () { $('#lanCard').scrollIntoView(); scan(); };
+      var nwForm = function (w) {
+        w = w || { purpose: 'staff', security: 'wpa2' };
+        modal('<h2>' + (w.id ? 'Edit network' : 'Add a network') + '</h2><div class="grid">' + field('nw_n', 'Name', w.name) + sel('nw_p', 'For', ['staff', 'pos', 'guest', 'cameras', 'management', 'other'], w.purpose) + field('nw_s', 'Wi-Fi name (SSID)', w.ssid) + field('nw_sub', 'Subnet', w.subnet) + field('nw_v', 'VLAN', w.vlan) + sel('nw_sec', 'Security', ['wpa3', 'wpa2', 'wpa', 'wep', 'open', 'wired'], w.security) + field('nw_pw', 'Password last changed', w.password_changed_at, 'date') + '<label class="chk"><input type="checkbox" id="nw_iso"' + (w.isolated_from_pos ? ' checked' : '') + '> Kept apart from the tills</label>' + area('nw_no', 'Notes', w.notes, 2) + '</div><div class="controls" style="margin-top:8px"><button class="primary" id="y">Save</button><button id="x">Cancel</button></div>');
+        $('#x').onclick = close;
+        $('#y').onclick = function () { var b = { name: val('nw_n'), purpose: val('nw_p'), ssid: val('nw_s'), subnet: val('nw_sub'), vlan: val('nw_v'), security: val('nw_sec'), password_changed_at: val('nw_pw'), isolated_from_pos: val('nw_iso'), notes: val('nw_no') };
+          (w.id ? api('/api/sys/networks/' + w.id, 'PUT', b) : api('/api/sys/networks', 'POST', b)).then(function () { close(); toast('Saved'); network(); }).catch(fail); };
+      };
+      $('#nwadd').onclick = function () { nwForm(null); };
+      all('[data-nwe]').forEach(function (b) { b.onclick = function () { nwForm(d.networks.find(function (w) { return String(w.id) === b.getAttribute('data-nwe'); })); }; });
+      netMap();
+    }).catch(fail);
+  }
+
+  // ------------------------------------------------------------ network map --
+  // Hub and spoke: the internet at the top, the router in the middle, every
+  // device on an oval around it. Redrawn every 15 s while the map is on screen.
+  var mapTimer = null, mapPaused = false, mapSel = null, mapData = null;
+  var NM_ICON = { router: '📶', server: '🖥️', pc: '💻', till: '🧾', printer: '🖨️', receipt_printer: '🖨️', label_printer: '🏷️', scanner: '📠', phone: '📱', tablet: '📱', switch: '🔀', ups: '🔋', camera: '📷', website: '🌐', internet: '☁️', other: '🔌' };
+  var NM_LABEL = { up: 'answering', down: 'NOT ANSWERING', unknown: 'unregistered device', idle: 'not heard from lately' };
+  function netMap() {
+    clearInterval(mapTimer);
+    var load = function () {
+      if (!$('#nmap')) { clearInterval(mapTimer); return; }
+      if (mapPaused || document.hidden) return;
+      api('/api/sys/network/map').then(function (d) { mapData = d; drawMap(); }).catch(function (e) { if ($('#nmap')) $('#nmap').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+    };
+    load(); mapTimer = setInterval(load, 15000);
+  }
+  function drawMap() {
+    var d = mapData, host = $('#nmap'); if (!host || !d) return;
+    var W = 1000, cx = 500, cy = 300, devs = d.devices.filter(function (n) { return !n.router; });
+    var router = d.devices.filter(function (n) { return n.router; })[0] || { id: 'router', kind: 'router', name: 'Router', ip: '', status: 'idle' };
+    var srv = { id: 'server', kind: 'server', name: d.server.name + ' (this server)', ip: d.server.ips.join(', '), status: 'up' };
+    var ring = [srv].concat(devs), n = ring.length, pos = {};
+    // Up to 18 on one oval; more go on a second, inner one, alternately.
+    var two = n > 18;
+    ring.forEach(function (x, i) {
+      var k = two ? Math.floor(i / 2) : i, m = two ? Math.ceil(n / 2) : n, inner = two && i % 2;
+      var a = (-15 + 210 * (m > 1 ? k / (m - 1) : 0.5)) * Math.PI / 180, rx = inner ? 250 : 410, ry = inner ? 130 : 215;
+      pos[x.id] = [cx - rx * Math.cos(a), cy + ry * Math.sin(a)];
+    });
+    pos[router.id] = [cx, cy]; pos.internet = [cx, 64];
+    d.cloud.forEach(function (c, i) { pos[c.id] = [cx + 190 + i * 150, 64]; });
+    var H = 600, still = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var link = function (a, b, st, key) {
+      var p = pos[a], q = pos[b], cls = 'nml ' + st, path = 'M' + p[0].toFixed(1) + ' ' + p[1].toFixed(1) + ' L' + q[0].toFixed(1) + ' ' + q[1].toFixed(1);
+      return '<path class="' + cls + '" d="' + path + '"/>' + (st === 'up' && !still ? '<circle r="3.2" class="nmp"><animateMotion dur="' + (2 + (key % 7) * 0.35).toFixed(2) + 's" repeatCount="indefinite" path="' + path + '"/></circle>' : '');
+    };
+    var nodeSvg = function (x, big) {
+      var p = pos[x.id], r = big ? 30 : 23, st = x.status;
+      return '<g class="nmn ' + st + (mapSel === x.id ? ' sel' : '') + '" data-nm="' + esc(x.id) + '" transform="translate(' + p[0].toFixed(1) + ' ' + p[1].toFixed(1) + ')" tabindex="0">' +
+        '<title>' + esc((x.name || x.ip) + ' · ' + (NM_LABEL[st] || st)) + '</title>' +
+        (st === 'down' && !still ? '<circle class="nmpulse" r="' + r + '"><animate attributeName="r" values="' + r + ';' + (r + 16) + '" dur="1.6s" repeatCount="indefinite"/><animate attributeName="opacity" values=".55;0" dur="1.6s" repeatCount="indefinite"/></circle>' : '') +
+        '<circle class="nmc" r="' + r + '"/><text class="nmi" y="' + (big ? 9 : 7) + '" font-size="' + (big ? 26 : 19) + '">' + (NM_ICON[x.kind] || NM_ICON.other) + '</text>' +
+        '<text class="nmt" y="' + (r + 15) + '">' + esc(String(x.name || (st === 'unknown' ? 'Unknown device' : x.ip)).slice(0, 26)) + '</text>' +
+        (x.ip && x.kind !== 'internet' ? '<text class="nms" y="' + (r + 28) + '">' + esc(String(x.ip).slice(0, 30)) + (x.target && x.target.ms != null && st === 'up' ? ' · ' + x.target.ms + ' ms' : '') + '</text>' : '') + '</g>';
+    };
+    var inet = { id: 'internet', kind: 'internet', name: 'Internet', ip: '', status: d.internet.status, target: d.internet.target };
+    var h = '<div class="nmwrap"><svg id="nmSvg" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Network map">' +
+      link('internet', router.id, d.internet.status === 'down' || router.status === 'down' ? 'down' : router.status === 'idle' && d.internet.status === 'idle' ? 'idle' : 'up', 1) +
+      d.cloud.map(function (c, i) { return link(c.id, 'internet', c.status, i + 2); }).join('') +
+      ring.map(function (x, i) { return link(x.id, router.id, x.status, i + 9); }).join('') +
+      nodeSvg(inet, true) + d.cloud.map(function (c) { return nodeSvg(c); }).join('') + nodeSvg(router, true) + ring.map(function (x) { return nodeSvg(x, x.id === 'server'); }).join('') + '</svg></div>';
+    var count = function (s) { return ring.filter(function (x) { return x.status === s; }).length; };
+    h += '<div class="nmfoot"><span><i class="nmd up"></i>Answering ' + count('up') + '</span><span><i class="nmd down"></i>Not answering ' + count('down') + '</span><span><i class="nmd unknown"></i>Unregistered ' + count('unknown') + '</span><span><i class="nmd idle"></i>Not heard lately ' + count('idle') + '</span>' +
+      '<span style="margin-left:auto">Updated ' + esc(new Date(d.at).toLocaleTimeString('en-JM', { timeZone: 'America/Jamaica' })) + (d.monitoring ? '' : ' · test copy: monitoring checks only run with Check now') + '</span><button class="sm" id="nmPause">' + (mapPaused ? '▶ Resume' : '⏸ Pause') + '</button><button class="sm" id="nmNow">↻ Refresh</button></div><div id="nmDet"></div>';
+    host.innerHTML = h;
+    $('#nmLive').textContent = mapPaused ? 'paused' : 'live'; $('#nmLive').className = 'pill ' + (mapPaused ? '' : 'ok');
+    $('#nmPause').onclick = function () { mapPaused = !mapPaused; if (mapPaused) drawMap(); else netMap(); };
+    $('#nmNow').onclick = function () { mapPaused = false; netMap(); };
+    var everything = [inet, router].concat(d.cloud, ring);
+    all('[data-nm]', host).forEach(function (g) {
+      var pick = function () { mapSel = mapSel === g.getAttribute('data-nm') ? null : g.getAttribute('data-nm'); drawMap(); };
+      g.onclick = pick; g.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } };
+    });
+    var x = everything.filter(function (y) { return y.id === mapSel; })[0];
+    if (x) mapDetails(x);
+  }
+  function mapDetails(x) {
+    var t = x.target, row = function (k, v) { return v == null || v === '' ? '' : '<tr><th style="width:170px">' + k + '</th><td>' + v + '</td></tr>'; };
+    $('#nmDet').innerHTML = '<div class="card" style="margin:10px 0 0"><h2>' + (NM_ICON[x.kind] || NM_ICON.other) + ' ' + esc(x.name || x.ip || 'Device') + ' <span class="pill ' + ({ up: 'ok', down: 'bad', unknown: 'warn' }[x.status] || '') + '">' + esc(NM_LABEL[x.status] || x.status) + '</span></h2><table>' +
+      row('Kind', esc(String(x.kind).replace(/_/g, ' '))) + row('Address', x.ip ? '<span class="mono">' + esc(x.ip) + '</span>' : '') + row('Hardware (MAC)', x.mac ? '<span class="mono">' + esc(x.mac) + '</span>' : '') +
+      row('Equipment register', x.asset ? '<span class="pill ok">' + esc(x.asset.tag) + '</span> ' + esc(x.asset.name) + (x.asset.location ? ' · ' + esc(x.asset.location) : '') : (x.mac ? '<span class="pill warn">not registered</span>' : '')) +
+      row('Till', x.till ? esc(x.till.name || '') + ' · ' + (x.till.online ? 'checked in within 3 minutes' : 'last checked in ' + esc(dt(x.till.last_seen))) : '') +
+      row('Seen on the network', x.seen ? 'yes, in this computer\'s address table' : (x.kind === 'internet' || x.kind === 'website' || x.id === 'server' ? '' : 'not lately')) +
+      (t ? row('Monitoring', esc(t.how) + (t.critical ? ' <span class="pill bad">critical</span>' : '') + (t.enabled ? '' : ' (paused)')) + row('Last check', t.checked ? esc(dt(t.checked)) + (t.ok ? ' · ' + t.ms + ' ms' : t.ok === false ? ' · <b style="color:var(--red)">' + esc(t.error || 'no answer') + '</b>' : '') : 'not checked yet') +
+        row('Down since', t.down_since ? esc(dt(t.down_since)) : '') + row('Up in the last 24 h', t.uptime_24h != null ? t.uptime_24h + '%' : '') : '') + '</table>' +
+      '<div class="controls" style="margin-top:8px">' + (t ? '<button class="sm" id="nmChk">Check now</button>' : '') + (x.mac && !x.asset ? '<button class="sm primary" id="nmReg">Register this device</button>' : '') + (!t && x.ip && x.id !== 'server' && x.kind !== 'internet' ? '<button class="sm" id="nmWatch">Watch it (ping every minute)</button>' : '') + '</div></div>';
+    if ($('#nmChk')) $('#nmChk').onclick = function () { this.disabled = true; api('/api/sys/net-targets/' + t.id + '/check', 'POST', {}).then(function (r) { toast(r.result.ok ? 'Up · ' + r.result.ms + ' ms' : 'DOWN · ' + (r.result.error || '')); netMap(); }).catch(fail); };
+    if ($('#nmWatch')) $('#nmWatch').onclick = function () { api('/api/sys/net-targets', 'POST', { name: x.name || x.ip, kind: 'ping', host: x.ip, critical: x.kind === 'router' }).then(function () { toast('Watching ' + (x.name || x.ip)); network(); }).catch(fail); };
+    if ($('#nmReg')) $('#nmReg').onclick = function () {
+      modal('<h2>Register ' + esc(x.ip) + '</h2><div class="grid">' + field('rg_n', 'What is it?', '') + sel('rg_k', 'Kind', ['pc', 'till', 'printer', 'receipt_printer', 'label_printer', 'scanner', 'phone', 'tablet', 'router', 'switch', 'camera', 'other'], 'other') + field('rg_l', 'Where', '') + '</div><div class="controls" style="margin-top:8px"><button class="primary" id="y">Register</button><button id="x">Cancel</button></div>');
+      $('#x').onclick = close; $('#y').onclick = function () { api('/api/sys/lan-devices/register', 'POST', { name: val('rg_n'), kind: val('rg_k'), location: val('rg_l'), ip: x.ip, mac: x.mac }).then(function (r2) { close(); toast('Registered as ' + r2.tag); netMap(); }).catch(fail); };
+    };
+  }
+
+  start();
+})();
+</script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+<script src="/assets/module-look.js?v=20261101" defer></script>
+</body>
+</html>

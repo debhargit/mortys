@@ -157,7 +157,7 @@ export default function mount(app) {
     const id = c.req.param('id');
     const u = await db.one(
       `SELECT id, email, name, phone, is_admin, created_at, account_number, company_name, customer_type, tax_id,
-              credit_limit_cents / 100.0 AS credit_limit_usd, discount_pct, price_tier, sales_rep_id, how_heard, rating,
+              credit_limit_cents / 100.0 AS credit_limit_usd, discount_pct, markup_pct, price_tier, sales_rep_id, how_heard, rating,
               internal_notes, email_opt_in, sms_opt_in, preferred_contact, payment_terms_days,
               discount_limit_pct, tax_exempt, credit_type, credit_length_months, is_staff, via, admin_role, perms,
               COALESCE(show_prices, 0) AS show_prices
@@ -409,7 +409,10 @@ export default function mount(app) {
   app.patch('/api/admin/users/:id', adminMw, async (c) => {
     const db = d1(c.env);
     const b = await c.req.json().catch(() => ({}));
-    const MAP = { name: 0, phone: 0, company_name: 0, customer_type: 0, tax_id: 0, discount_pct: 0, price_tier: 0,
+    // markup_pct is the mirror of discount_pct -- what this account is charged
+    // ABOVE list. The POS route applies it to each line's unit price so the
+    // invoice prints the increased price (see _routes/pos_txn.js).
+    const MAP = { name: 0, phone: 0, company_name: 0, customer_type: 0, tax_id: 0, discount_pct: 0, markup_pct: 0, price_tier: 0,
       sales_rep_id: 0, how_heard: 0, rating: 0, internal_notes: 0, email_opt_in: 1, sms_opt_in: 1, preferred_contact: 0,
       payment_terms_days: 0, discount_limit_pct: 0, tax_exempt: 1, credit_type: 0, credit_length_months: 0,
       account_number: 0, is_archived: 1, show_prices: 1 };

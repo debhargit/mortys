@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your order · Morty's Auto Parts</title>
+<style>
+  :root{ --bg:#0b1b2b; --card:#12263b; --line:#24405e; --ink:#eef3f8; --muted:#9db0c4; --ok:#22c55e; --red:#d62828; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:20px/1.3 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{display:flex;align-items:center;justify-content:space-between;padding:18px 28px;background:var(--red)}
+  header h1{margin:0;font-size:30px;letter-spacing:.3px}
+  header span{font-size:22px;opacity:.9}
+  main{display:grid;grid-template-columns:1fr 1fr;gap:20px;padding:22px 28px;height:calc(100% - 82px)}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 20px;overflow:hidden}
+  h2{margin:0 0 14px;font-size:24px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+  .ready h2{color:var(--ok)}
+  .list{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+  .o{border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .ready .o{border-color:var(--ok);background:#14532d55}
+  .o b{display:block;font-size:30px;letter-spacing:.5px}
+  .o span{color:var(--muted);font-size:20px}
+  .empty{color:var(--muted)}
+  @media (max-width:800px){ main{grid-template-columns:1fr;height:auto} }
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Morty's Auto Parts</h1><span id="clock"></span></header>
+<main>
+  <section><h2>Getting it ready</h2><div class="list" id="prep"></div></section>
+  <section class="ready"><h2>Ready: come to the counter</h2><div class="list" id="ready"></div></section>
+</main>
+<script>
+(function () {
+  'use strict';
+  // Public screen: shows order numbers and first name + initial only.
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var lastReady = {};
+  function render(id, list, empty) {
+    document.getElementById(id).innerHTML = list.length ? list.map(function (o) { return '<div class="o"><b>' + esc(o.number.replace(/^F-0*/, '#')) + '</b><span>' + esc(o.name) + '</span></div>'; }).join('') : '<div class="empty">' + empty + '</div>';
+  }
+  function load() {
+    fetch('/api/public/order-board', { headers: { Accept: 'application/json' } }).then(function (r) { return r.json(); }).then(function (d) {
+      render('prep', d.preparing, 'No orders being prepared.');
+      render('ready', d.ready, 'Nothing waiting.');
+      var now = {}; d.ready.forEach(function (o) { now[o.number] = true; });
+      var fresh = Object.keys(now).some(function (k) { return !lastReady[k]; });
+      if (fresh && Object.keys(lastReady).length) { try { new AudioContext().resume(); } catch (_) {} }
+      lastReady = now;
+    }).catch(function () {});
+  }
+  function tick() { document.getElementById('clock').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+  load(); tick(); setInterval(load, 5000); setInterval(tick, 10000);
+})();
+</script>
+</body>
+</html>

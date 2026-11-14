@@ -1,0 +1,23 @@
+-- Customer markup: selling an account ABOVE list price.
+--
+-- The mirror of users.discount_pct (migration 0017). That column only ever
+-- reduces, and every discount path clamps at zero, so there was no way to
+-- price an account up -- a customer who has to be charged over list had to
+-- have each line re-typed by hand.
+--
+-- markup_pct applies to the unit price the line has already resolved to (sale
+-- price, tier price and quantity breaks first), so the invoice shows the
+-- increased unit price rather than list plus a surcharge line. It does not
+-- travel through discount_cents, which feeds commission and the discount
+-- columns of the sales reports.
+--
+-- NULL or 0 = charge normally. Recorded on pos_sales too, so a reprint stays
+-- accurate after the account's rate is changed later (same reason tax_exempt
+-- is stored on the sale).
+--
+-- Note for the POS route: the tier price ceiling in _routes/pos_txn.js lowers
+-- any line priced above the customer's tier price. That ceiling has to be
+-- raised by the markup or it would silently undo it for every non-retail
+-- customer -- see the markup handling there.
+ALTER TABLE users     ADD COLUMN markup_pct REAL;
+ALTER TABLE pos_sales ADD COLUMN markup_pct REAL;

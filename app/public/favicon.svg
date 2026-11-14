@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Morty's Auto Parts">
+  <title>Morty's Auto Parts</title>
+  <clipPath id="mapBadge"><rect width="64" height="64" rx="14"/></clipPath>
+  <g clip-path="url(#mapBadge)">
+    <rect width="64" height="64" fill="#0b1b2b"/>
+    <!-- cog ring -->
+    <circle cx="32" cy="32" r="21" fill="none" stroke="#ffcb05" stroke-width="5"
+            stroke-dasharray="6 7" stroke-dashoffset="3"/>
+    <circle cx="32" cy="32" r="16" fill="#0b1b2b"/>
+    <!-- M monogram -->
+    <path d="M19 40 V24.5 L32 35 L45 24.5 V40" fill="none" stroke="#ffffff"
+          stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- red spark -->
+    <circle cx="32" cy="45.5" r="3" fill="#d61f2b"/>
+  </g>
+</svg>

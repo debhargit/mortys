@@ -10,9 +10,9 @@ export async function loadSerialStockByImg(db, imgs) {
   if (!list.length) return map;
   const rows = await db.many(
     `SELECT product_img, serial FROM product_serials
-      WHERE status = 'in_stock' AND product_img IN (${list.map(() => '?').join(',')})
+      WHERE status = 'in_stock' AND product_img IN (SELECT value FROM json_each(?))
       ORDER BY product_img, id`,
-    ...list
+    JSON.stringify(list)
   );
   for (const r of rows) {
     if (!map.has(r.product_img)) map.set(r.product_img, { in_stock: 0, available: [] });
@@ -29,9 +29,9 @@ export async function loadRedeemableStockByImg(db, imgs) {
   if (!list.length) return map;
   const rows = await db.many(
     `SELECT product_img, COUNT(*) AS n FROM redemption_instruments
-      WHERE status = 'in_stock' AND product_img IN (${list.map(() => '?').join(',')})
+      WHERE status = 'in_stock' AND product_img IN (SELECT value FROM json_each(?))
       GROUP BY product_img`,
-    ...list
+    JSON.stringify(list)
   );
   for (const r of rows) map.set(r.product_img, r.n);
   return map;

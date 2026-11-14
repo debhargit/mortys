@@ -93,6 +93,10 @@
     th,td{padding:8px 10px;font-size:12px}
   }
 </style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 </head>
 <body>
 
@@ -119,6 +123,7 @@
       <div class="lbl">loyalty pts</div>
     </div>
   </div>
+  <div id="securityRow" style="display:none;margin:0 0 12px;text-align:right"><button type="button" onclick="addPasskey()" style="background:#111827;color:#fff;border:0;border-radius:8px;padding:8px 12px;font-size:13px;cursor:pointer">🔑 Add a passkey for faster sign-in</button></div>
 
   <div class="tabs" id="tabs">
     <button data-tab="orders" class="active">Order history</button>
@@ -159,6 +164,13 @@
     </div>
     <button type="submit" id="authBtn">Sign In</button>
     <div class="hint" id="authToggle">No account yet? <a href="#" onclick="event.preventDefault();setAuthMode('signup')">Create one</a>.</div>
+    <div class="hint" id="forgotRow"><a href="#" onclick="event.preventDefault();forgotPassword()">Forgot your password?</a> · <a href="#" onclick="event.preventDefault();changePasswordFromSignin()">Change password</a></div>
+    <div id="altAuth" style="margin-top:14px">
+      <div style="display:flex;align-items:center;gap:10px;color:var(--muted);font-size:13px;margin:4px 0 12px"><span style="flex:1;height:1px;background:var(--line,#e5e7eb)"></span>or<span style="flex:1;height:1px;background:var(--line,#e5e7eb)"></span></div>
+      <button type="button" id="passkeyBtn" onclick="doPasskeySignin()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:#111827;color:#fff;border:0;border-radius:10px;padding:12px;font-size:15px;font-weight:600;cursor:pointer;margin-bottom:8px">🔑 Sign in with a passkey</button>
+      <div id="googleBtnWrap" style="display:none;justify-content:center;margin-bottom:8px"></div>
+    </div>
+    <p class="hint" style="margin-top:14px;font-size:12px;line-height:1.5;color:var(--muted)">By signing in or creating an account you agree to our <a href="/privacy.html" target="_blank" rel="noopener">Privacy Policy &amp; Disclaimer</a>. We use your details only to serve you (orders, loyalty, support) and never sell them. Prices and stock may change; a quote is not a contract until confirmed at the counter.</p>
   </form>
 </div>
 
@@ -280,6 +292,7 @@ function showProfile(user){
   document.getElementById('profileEmail').textContent = user.email;
   document.getElementById('avatarLetter').textContent = (user.name || user.email).charAt(0).toUpperCase();
   document.getElementById('profileCard').style.display = 'flex';
+  var sr=document.getElementById('securityRow'); if(sr && window.PublicKeyCredential) sr.style.display='block';
   loadPoints();
 }
 
@@ -636,6 +649,60 @@ async function init(){
   await Promise.all([show('orders')]);
 }
 
+// ---- extra sign-in: passkeys, Google, forgot password --------------------
+var AUTH_PROVIDERS = null;
+function b64uToBuf(s){ s=String(s).replace(/-/g,"+").replace(/_/g,"/"); while(s.length%4)s+="="; var bin=atob(s),b=new Uint8Array(bin.length); for(var i=0;i<bin.length;i++)b[i]=bin.charCodeAt(i); return b.buffer; }
+function bufToB64u(buf){ var b=new Uint8Array(buf),s=""; for(var i=0;i<b.length;i++)s+=String.fromCharCode(b[i]); return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
+function credForServer(c){ return { id:c.id, rawId:bufToB64u(c.rawId), type:c.type, response:{ clientDataJSON:bufToB64u(c.response.clientDataJSON), attestationObject:c.response.attestationObject?bufToB64u(c.response.attestationObject):undefined, authenticatorData:c.response.authenticatorData?bufToB64u(c.response.authenticatorData):undefined, signature:c.response.signature?bufToB64u(c.response.signature):undefined, userHandle:c.response.userHandle?bufToB64u(c.response.userHandle):undefined } }; }
+async function loadProviders(){
+  try { AUTH_PROVIDERS = await api("/api/auth/providers"); } catch(e){ var alt=document.getElementById("altAuth"); if(alt) alt.style.display="none"; return; }
+  if (!window.PublicKeyCredential) { var pk=document.getElementById("passkeyBtn"); if(pk) pk.style.display="none"; }
+  if (AUTH_PROVIDERS.google && AUTH_PROVIDERS.google.enabled && AUTH_PROVIDERS.google.client_id) loadGoogle(AUTH_PROVIDERS.google.client_id);
+}
+function loadGoogle(clientId){
+  var wrap=document.getElementById("googleBtnWrap"); if(!wrap) return; wrap.style.display="flex";
+  window.handleGoogleCredential = async function(resp){
+    var err=document.getElementById("signinErr"); err.classList.remove("show");
+    try { var r=await api("/api/auth/google",{method:"POST",body:{credential:resp.credential}}); document.getElementById("signinBg").classList.remove("show"); showProfile(r.user); show("orders"); }
+    catch(e){ err.textContent=e.message||"Google sign-in failed."; err.classList.add("show"); }
+  };
+  var sc=document.createElement("script"); sc.src="https://accounts.google.com/gsi/client"; sc.async=true;
+  sc.onload=function(){ try{ google.accounts.id.initialize({client_id:clientId,callback:window.handleGoogleCredential}); google.accounts.id.renderButton(wrap,{theme:"outline",size:"large",text:"continue_with",width:300}); }catch(e){} };
+  document.head.appendChild(sc);
+}
+// Change password before signing in (assets/pw-change.js): current password, or Google.
+function changePasswordFromSignin(){
+  if (!window.openPasswordChange) return;
+  window.openPasswordChange({ email: document.getElementById("acEmail").value.trim() }).then(function(em){
+    if (em) { document.getElementById("acEmail").value = em; var p = document.getElementById("acPass"); p.value = ""; p.focus(); }
+  });
+}
+async function doPasskeySignin(){
+  var err=document.getElementById("signinErr"); err.classList.remove("show");
+  if(!window.PublicKeyCredential){ err.textContent="This device does not support passkeys."; err.classList.add("show"); return; }
+  try {
+    var opt=await api("/api/auth/passkey/auth-options",{method:"POST",body:{}});
+    var cred=await navigator.credentials.get({ publicKey:{ challenge:b64uToBuf(opt.challenge), rpId:opt.rpId, userVerification:"required", timeout:opt.timeout, allowCredentials:[] } });
+    var r=await api("/api/auth/passkey/signin",{method:"POST",body:{credential:credForServer(cred)}});
+    document.getElementById("signinBg").classList.remove("show"); showProfile(r.user); show("orders");
+  } catch(e){ if(e.name==="NotAllowedError") return; err.textContent=e.message||"Passkey sign-in failed."; err.classList.add("show"); }
+}
+async function addPasskey(){
+  try {
+    var opt=await api("/api/auth/passkey/register-options",{method:"POST",body:{}});
+    var cred=await navigator.credentials.create({ publicKey:{ challenge:b64uToBuf(opt.challenge), rp:opt.rp, user:{id:b64uToBuf(opt.user.id),name:opt.user.name,displayName:opt.user.displayName}, pubKeyCredParams:opt.pubKeyCredParams, authenticatorSelection:opt.authenticatorSelection, timeout:opt.timeout, excludeCredentials:(opt.excludeCredentials||[]).map(function(c){return {type:c.type,id:b64uToBuf(c.id)};}) } });
+    await api("/api/auth/passkey/register",{method:"POST",body:{credential:credForServer(cred),label:(navigator.platform||"Passkey")}});
+    alert("Passkey added. Next time you can sign in with it, no password needed.");
+  } catch(e){ if(e.name==="NotAllowedError") return; alert(e.message||"Could not add the passkey."); }
+}
+async function forgotPassword(){
+  var email=(document.getElementById("acEmail").value||"").trim();
+  if(!email){ email=prompt("Enter your account email and we will send a reset link:")||""; email=email.trim(); if(!email) return; document.getElementById("acEmail").value=email; }
+  var err=document.getElementById("signinErr"); err.classList.remove("show");
+  try { var r=await api("/api/auth/request-reset",{method:"POST",body:{email:email}}); alert(r.message||"If that email has an account, a reset link is on its way."); if(r.dev_link) location.href=r.dev_link; }
+  catch(e){ err.textContent=e.message||"Could not send the reset link."; err.classList.add("show"); }
+}
+loadProviders();
 (async function bootstrap(){
   try {
     var r = await api('/api/me');
@@ -651,5 +718,6 @@ async function init(){
   }
 })();
 </script>
+<script src="/assets/pw-change.js"></script>
 </body>
 </html>

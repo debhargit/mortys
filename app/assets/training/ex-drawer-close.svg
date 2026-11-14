@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 430" font-family="Segoe UI, system-ui, -apple-system, sans-serif">
+  <rect width="860" height="430" rx="18" fill="#ffffff"/>
+  <text x="30" y="44" font-size="22" font-weight="700" fill="#0b1b2b">Example: closing count, J$500 short</text>
+  <text x="30" y="70" font-size="15" fill="#6b7280">Count by note and coin, enter the real total, and let the till record the difference.</text>
+
+  <rect x="30" y="90" width="390" height="314" rx="14" fill="#f6f7f9" stroke="#e5e7eb"/>
+  <text x="50" y="120" font-size="13" font-weight="700" fill="#6b7280" letter-spacing="1">WHAT IS IN THE DRAWER</text>
+  <g font-size="15" fill="#0f1720">
+    <text x="50" y="152">J$5,000 notes</text><text x="250" y="152" text-anchor="end">× 2</text><text x="400" y="152" text-anchor="end">10,000</text>
+    <text x="50" y="180">J$1,000 notes</text><text x="250" y="180" text-anchor="end">× 6</text><text x="400" y="180" text-anchor="end">6,000</text>
+    <text x="50" y="208">J$500 notes</text><text x="250" y="208" text-anchor="end">× 5</text><text x="400" y="208" text-anchor="end">2,500</text>
+    <text x="50" y="236">J$100 notes</text><text x="250" y="236" text-anchor="end">× 12</text><text x="400" y="236" text-anchor="end">1,200</text>
+    <text x="50" y="264">J$50 notes</text><text x="250" y="264" text-anchor="end">× 4</text><text x="400" y="264" text-anchor="end">200</text>
+    <text x="50" y="292">J$20 coins</text><text x="250" y="292" text-anchor="end">× 5</text><text x="400" y="292" text-anchor="end">100</text>
+  </g>
+  <line x1="50" y1="310" x2="400" y2="310" stroke="#94a3b8"/>
+  <text x="50" y="340" font-size="17" font-weight="700" fill="#0b1b2b">Counted</text><text x="400" y="340" font-size="17" font-weight="700" fill="#0b1b2b" text-anchor="end">J$20,000</text>
+  <text x="50" y="380" font-size="13" fill="#6b7280">Type J$20,000 as the closing count.</text>
+
+  <rect x="440" y="90" width="390" height="190" rx="14" fill="#f6f7f9" stroke="#e5e7eb"/>
+  <text x="460" y="120" font-size="13" font-weight="700" fill="#6b7280" letter-spacing="1">WHAT THE TILL EXPECTS</text>
+  <g font-size="15" fill="#0f1720">
+    <text x="460" y="152">Opening float</text><text x="810" y="152" text-anchor="end">5,000</text>
+    <text x="460" y="180">Cash sales</text><text x="810" y="180" text-anchor="end">+ 17,500</text>
+    <text x="460" y="208">Payout: courier (recorded)</text><text x="810" y="208" text-anchor="end">− 2,000</text>
+  </g>
+  <line x1="460" y1="224" x2="810" y2="224" stroke="#94a3b8"/>
+  <text x="460" y="254" font-size="17" font-weight="700" fill="#0b1b2b">Expected</text><text x="810" y="254" font-size="17" font-weight="700" fill="#0b1b2b" text-anchor="end">J$20,500</text>
+
+  <rect x="440" y="294" width="390" height="110" rx="14" fill="#d6282812" stroke="#d62828"/>
+  <text x="460" y="326" font-size="18" font-weight="700" fill="#d62828">Short J$500</text>
+  <text x="460" y="352" font-size="14" fill="#0f1720">Recorded against your drawer and reported.</text>
+  <text x="460" y="376" font-size="14" font-weight="700" fill="#0f1720">Never top it up with your own money,</text>
+  <text x="460" y="394" font-size="14" font-weight="700" fill="#0f1720">and never take an overage home.</text>
+</svg>

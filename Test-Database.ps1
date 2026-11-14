@@ -167,7 +167,13 @@ if (-not $dbRunning) {
   Info 'Fix the error above first; everything else follows from it.'
 } else {
   Head '6. Contents'
-  $env:PGPASSWORD = 'postgres'
+  # Read the password from the app's own config; it is no longer the default.
+  $dbPass = 'postgres'
+  try {
+    $cfg = Get-Content (Join-Path $PSScriptRoot 'app\db-config.json') -Raw | ConvertFrom-Json
+    if ($cfg.local.password) { $dbPass = [string]$cfg.local.password }
+  } catch {}
+  $env:PGPASSWORD = $dbPass
   $sql = "SELECT (SELECT COUNT(*) FROM products) || ' products, ' || " +
          "(SELECT COUNT(*) FROM users) || ' users, ' || " +
          "(SELECT COUNT(*) FROM roles) || ' roles'"

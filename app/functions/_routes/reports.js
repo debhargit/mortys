@@ -741,7 +741,7 @@ export default function mount(app) {
         knutsford: { enabled: !!s.carrier_knutsford_enabled },
         manual: { enabled: s.carrier_manual_enabled == null ? true : !!s.carrier_manual_enabled, flat_fee: Number(s.ship_local_flat_usd) || 0 },
       },
-      card_payment: { fygaro_enabled: !!s.fygaro_enabled, button_configured: has(s.fygaro_button_id), secret: has(c.env.FYGARO_JWT_SECRET), currency: s.fygaro_currency || 'JMD' },
+      card_payment: { fygaro_enabled: !!s.fygaro_enabled, button_configured: has(s.fygaro_button_id), secret: has(c.env.FYGARO_JWT_SECRET), webhook_secret: has(c.env.FYGARO_WEBHOOK_SECRET), currency: s.fygaro_currency || 'JMD' },
       counts,
       roles,
     });

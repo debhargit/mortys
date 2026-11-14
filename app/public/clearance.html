@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clearance · Morty's Auto Parts</title>
+<meta name="description" content="Auto parts on clearance, open box and damaged-box bargains at Morty's Auto Parts, Kingston, Jamaica. While stock lasts.">
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  header a{color:#fff;text-decoration:none} header .brand{font-weight:800;font-size:17px} header nav{margin-left:auto;display:flex;gap:16px;font-size:14px;flex-wrap:wrap}
+  .hero{background:linear-gradient(120deg,var(--red),#8d1414);color:#fff;padding:26px 16px}
+  .hero h1{margin:0 0 4px;font-size:26px} .hero p{margin:0;opacity:.92}
+  main{max-width:1200px;margin:0 auto;padding:16px}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+  input,select,button{font:inherit;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--card);color:var(--ink)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+  .item{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:6px}
+  .item .tag{align-self:flex-start;font-size:12px;font-weight:700;padding:2px 9px;border-radius:999px;background:var(--red);color:#fff}
+  .item .tag.ob{background:#b45309} .item h3{font-size:15px;margin:0} .item .fit{font-size:13px;color:var(--muted)}
+  .price{font-size:20px;font-weight:800} .was{color:var(--muted);text-decoration:line-through;font-size:14px;margin-left:6px}
+  .item button{margin-top:auto;background:var(--red);border-color:var(--red);color:#fff;font-weight:700;cursor:pointer}
+  .note{color:var(--muted);font-size:13px;margin-top:18px}
+  .empty{color:var(--muted);text-align:center;padding:40px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 16px;border-radius:9px;display:none;z-index:60;max-width:90vw}
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><a class="brand" href="index.html">Morty's Auto Parts</a><nav><a href="index.html">Home</a><a href="shop.html">Shop</a><a href="clearance.html"><b>Clearance</b></a><a href="/account.html">My account</a><a href="tel:+18769054111">📞 (876) 905-4111</a></nav></header>
+<section class="hero"><h1>Clearance</h1><p>Parts we are clearing out, plus open-box and damaged-box bargains. While stock lasts; tell us your car and year and we will check the fit.</p></section>
+<main>
+  <div class="controls"><input id="q" placeholder="Search part or vehicle" style="flex:1;min-width:200px"><select id="cat"><option value="">All categories</option></select></div>
+  <div class="grid" id="grid"><div class="empty">Loading…</div></div>
+  <p class="note">Open-box items were opened or returned and checked by our staff. Damaged-box items work but have marks or damaged packaging. Clearance prices are while stock lasts. Electrical parts are non-returnable.</p>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s) { return document.querySelector(s); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var J = function (v) { return 'J$' + Number(v).toLocaleString('en-JM', { maximumFractionDigits: 0 }); };
+  var c = new URLSearchParams(location.search).get('c') || '';
+  var items = [];
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 3500); }
+  function render() {
+    var q = $('#q').value.trim().toLowerCase(), cat = $('#cat').value;
+    var list = items.filter(function (i) { return (!cat || i.category === cat) && (!q || (i.name + ' ' + (i.make_model || '') + ' ' + i.img).toLowerCase().indexOf(q) >= 0); });
+    $('#grid').innerHTML = list.length ? list.map(function (i) {
+      var off = i.was ? Math.round((1 - i.price / i.was) * 100) : 0;
+      var tag = i.variant_kind === 'open_box' ? '<span class="tag ob">Open box</span>' : i.variant_kind === 'damaged' ? '<span class="tag ob">Damaged box</span>' : '<span class="tag">' + (off ? off + '% off' : 'Clearance') + '</span>';
+      return '<div class="item">' + tag + '<h3>' + esc(i.name) + '</h3><div class="fit">' + esc(i.make_model || '') + ' · ' + esc(i.category || '') + '<br>Part ' + esc(i.img) + '</div>' +
+        '<div><span class="price">' + J(i.price) + '</span>' + (i.was ? '<span class="was">' + J(i.was) + '</span>' : '') + '</div><div class="fit">' + (i.stock <= 3 ? 'Only ' + i.stock + ' left' : 'In stock') + '</div>' +
+        '<button data-img="' + esc(i.img) + '">Add to cart</button></div>';
+    }).join('') : '<div class="empty">Nothing on clearance matches. Try another search, or call us.</div>';
+    Array.prototype.forEach.call(document.querySelectorAll('[data-img]'), function (b) {
+      b.onclick = function () {
+        fetch('/api/cart', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ img: b.getAttribute('data-img'), qty: 1 }) }).then(function (r) {
+          if (r.status === 401) { location.href = '/account.html?next=' + encodeURIComponent(location.pathname + location.search); return; }
+          if (!r.ok) throw new Error();
+          toast('Added to your cart. Check out from the Shop page.');
+        }).catch(function () { toast('Could not add it. Please call us.'); });
+      };
+    });
+  }
+  fetch('/api/clearance' + (c ? '?c=' + encodeURIComponent(c) : ''), { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (d) {
+    items = d.items || [];
+    var cats = Array.from(new Set(items.map(function (i) { return i.category; }).filter(Boolean))).sort();
+    $('#cat').innerHTML += cats.map(function (k) { return '<option>' + esc(k) + '</option>'; }).join('');
+    render();
+  }).catch(function () { $('#grid').innerHTML = '<div class="empty">Could not load the clearance list. Please try again.</div>'; });
+  $('#q').oninput = render; $('#cat').onchange = render;
+})();
+</script>
+<script src="/assets/ai-chat.js" defer></script>
+</body>
+</html>

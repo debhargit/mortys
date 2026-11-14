@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Balancing report · Morty's Auto Parts</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px}
+  header h1{font-size:17px;margin:0}
+  header a{color:#fff;opacity:.85;margin-left:auto;font-size:13px}
+  main{max-width:1100px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 4px}
+  .card .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
+  .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  input,select,button{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  button{cursor:pointer;background:var(--card)}
+  button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600}
+  .presets button{padding:5px 9px;font-size:12.5px}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  tr.total td{font-weight:700;border-top:2px solid var(--ink)}
+  tr.sub td{color:var(--muted)}
+  tr.indent td:first-child{padding-left:22px}
+  .tie{display:inline-block;font-size:12px;font-weight:700;padding:2px 9px;border-radius:999px;margin-left:8px}
+  .tie.ok{background:#16a34a22;color:var(--ok)}
+  .tie.bad{background:#d6282822;color:var(--red)}
+  .tie.est{background:#f59e0b22;color:var(--warn)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media (max-width:820px){ .grid{grid-template-columns:1fr} }
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .kpi{background:var(--chip);border-radius:10px;padding:10px 12px}
+  .kpi span{display:block;font-size:12px;color:var(--muted)}
+  .kpi b{font-size:19px;font-variant-numeric:tabular-nums}
+  .note{padding:7px 10px;border-radius:8px;margin-bottom:6px;font-size:13px}
+  .note.estimate{background:#f59e0b18;border-left:3px solid var(--warn)}
+  .note.check{background:#d6282812;border-left:3px solid var(--red)}
+  .note.info{background:var(--chip)}
+  .scroll{overflow-x:auto}
+  .empty{color:var(--muted);text-align:center;padding:30px}
+  @media print{
+    header,.controls,.noprint{display:none !important}
+    body{background:#fff;color:#000;font-size:11px}
+    .card{border:1px solid #bbb;break-inside:avoid}
+    main{max-width:none;padding:0}
+  }
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>Balancing report</h1><a href="/admin.html">Admin</a></header>
+<main>
+  <div class="card">
+    <div class="controls">
+      <div><label for="from">From</label><input type="date" id="from"></div>
+      <div><label for="to">To</label><input type="date" id="to"></div>
+      <div><label for="by">Earnings by</label><select id="by"><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option><option value="hour">Hour of day</option><option value="weekday">Day of week</option></select></div>
+      <button class="primary" id="run">Run report</button>
+      <button id="print" class="noprint">Print</button>
+      <button id="csv" class="noprint">Earnings CSV</button>
+    </div>
+    <div class="presets noprint" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+      <button data-p="today">Today</button><button data-p="yesterday">Yesterday</button><button data-p="week">This week</button>
+      <button data-p="month">This month</button><button data-p="lastmonth">Last month</button><button data-p="year">This year</button>
+    </div>
+  </div>
+  <div id="out"><div class="empty">Choose a period and run the report.</div></div>
+</main>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s) { return document.querySelector(s); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var J = function (v) { if (v == null) return '–'; var x = Number(v); var s = Math.abs(x).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); return x < 0 ? '(' + s + ')' : s; };
+  var U = function (v) { return v == null ? '–' : Number(v).toLocaleString('en-JM'); };
+  var iso = function (d) { var z = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return z.toISOString().slice(0, 10); };
+  var last = null;
+
+  function preset(p) {
+    var t = new Date(), f = new Date(t), e = new Date(t);
+    if (p === 'yesterday') { f.setDate(t.getDate() - 1); e = new Date(f); }
+    if (p === 'week') { f.setDate(t.getDate() - ((t.getDay() + 6) % 7)); }
+    if (p === 'month') { f = new Date(t.getFullYear(), t.getMonth(), 1); }
+    if (p === 'lastmonth') { f = new Date(t.getFullYear(), t.getMonth() - 1, 1); e = new Date(t.getFullYear(), t.getMonth(), 0); }
+    if (p === 'year') { f = new Date(t.getFullYear(), 0, 1); }
+    $('#from').value = iso(f); $('#to').value = iso(e);
+    if (p === 'year') $('#by').value = 'month'; else if (p === 'today' || p === 'yesterday') $('#by').value = 'hour'; else if ($('#by').value === 'month' || $('#by').value === 'hour') $('#by').value = 'day';
+  }
+  document.querySelector('.presets').addEventListener('click', function (e) { var b = e.target.closest('[data-p]'); if (b) { preset(b.getAttribute('data-p')); run(); } });
+  $('#run').onclick = run;
+  $('#print').onclick = function () { window.print(); };
+  $('#csv').onclick = function () {
+    if (!last) return;
+    var rows = [['Period', 'Transactions', 'Net sales', 'Discounts', 'Returns', 'Tax', 'Cost of sales', 'Gross profit', 'Margin %', 'Average ticket']];
+    last.earnings.forEach(function (x) { rows.push([x.bucket, x.transactions, x.net_sales, x.discounts, x.returns, x.tax, x.cost, x.gross_profit, x.margin_pct, x.avg_ticket]); });
+    var csv = rows.map(function (r) { return r.map(function (c) { c = c == null ? '' : String(c); return /[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c; }).join(','); }).join('\n');
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = 'earnings_' + last.period.from + '_' + last.period.to + '.csv'; a.click();
+  };
+
+  function tie(diff, est) {
+    if (Math.abs(diff) < 0.995) return '<span class="tie ' + (est ? 'est' : 'ok') + '">' + (est ? 'balances (estimated)' : '✓ balances') + '</span>';
+    return '<span class="tie bad">✗ out by ' + J(diff) + '</span>';
+  }
+  function row(label, a, b, c, cls) { return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + label + '</td><td class="n">' + a + '</td><td class="n">' + b + '</td><td class="n">' + c + '</td></tr>'; }
+  function line(label, v, cls) { return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + label + '</td><td class="n">' + v + '</td></tr>'; }
+
+  function render(d) {
+    var i = d.inventory, s = d.sales, sv = d.sales_vs_inventory, c = d.collections, est = !d.period.ledger_covers_period;
+    var head = '<div class="card"><h2>Morty\'s Auto Parts · ' + esc(d.period.from) + ' to ' + esc(d.period.to) + '</h2><p class="sub">All amounts J$. Printed ' + esc(new Date().toLocaleString()) + '.</p>' +
+      '<div class="kpis"><div class="kpi"><span>Net sales after returns</span><b>' + J(s.net_after_returns) + '</b></div><div class="kpi"><span>Cost of sales</span><b>' + J(s.cost_after_returns) + '</b></div>' +
+      '<div class="kpi"><span>Gross profit</span><b>' + J(s.gross_profit) + '</b></div><div class="kpi"><span>Margin</span><b>' + (s.margin_pct == null ? '–' : s.margin_pct + '%') + '</b></div>' +
+      '<div class="kpi"><span>Money in</span><b>' + J(c.money_in) + '</b></div><div class="kpi"><span>Closing stock at cost</span><b>' + J(i.closing.cost) + '</b></div></div></div>';
+
+    var notes = d.notes.length ? '<div class="card"><h2>Read this first</h2><p class="sub">What the figures can and cannot prove for this period.</p>' + d.notes.map(function (n) { return '<div class="note ' + n.level + '">' + esc(n.text) + '</div>'; }).join('') + '</div>' : '';
+
+    var unitsTie = i.opening.units + i.receipts.units - i.sold.units + i.returned.units + i.adjustments.units - i.closing.units;
+    var inv = '<div class="card"><h2>1. Inventory balance' + tie(unitsTie, est) + '</h2><p class="sub">Opening + received − sold + returned ± adjustments = closing.' + (est ? ' Adjustments can only be seen once stock history is being recorded.' : '') + '</p>' +
+      '<div class="scroll"><table><thead><tr><th></th><th class="n">Units</th><th class="n">At cost</th><th class="n">At retail</th></tr></thead><tbody>' +
+      row('Opening inventory', U(i.opening.units), J(i.opening.cost), J(i.opening.retail)) +
+      row('+ Received (receivals)', U(i.receipts.units), J(i.receipts.cost), J(i.receipts.retail), 'indent') +
+      row('− Sold', U(-i.sold.units), J(-i.sold.cost), J(-i.sold.retail), 'indent') +
+      row('+ Returned to stock (RMA / credit notes)', U(i.returned.units), J(i.returned.cost), J(i.returned.retail), 'indent') +
+      row('± Adjustments (counts, write-offs, manual edits)', U(i.adjustments.units), J(i.adjustments.cost), J(i.adjustments.retail), 'indent') +
+      row('Closing inventory', U(i.closing.units), J(i.closing.cost), J(i.closing.retail), 'total') +
+      row('Variance', U(i.variance.units), J(i.variance.cost), J(i.variance.retail), 'sub') +
+      '</tbody></table></div><p class="sub" style="margin-top:6px">' + esc(i.variance.note) + (i.negative_parts ? ' ' + i.negative_parts + ' part(s) end below zero.' : '') + '</p></div>';
+
+    var linesDiff = sv.difference;
+    var sales = '<div class="card"><h2>2. Sales' + tie(linesDiff) + '</h2><p class="sub">' + U(s.transactions) + ' sales, average ' + J(s.transactions ? s.net_sales / s.transactions : 0) + '. Sale lines are checked against sale totals.</p>' +
+      '<table><tbody>' + line('Gross sales (list price × qty)', J(s.gross)) + line('− Line discounts', J(-s.line_discounts), 'indent') + line('− Whole-ticket discounts', J(-s.ticket_discounts), 'indent') +
+      (s.loyalty_discounts ? line('− Loyalty points used', J(-s.loyalty_discounts), 'indent') : '') +
+      line('Net sales', J(s.net_sales), 'total') + line('+ Tax (GCT)', J(s.tax), 'indent') + (s.shipping_fees ? line('+ Delivery fees', J(s.shipping_fees), 'indent') : '') +
+      line('Total billed', J(s.billed), 'total') +
+      line('Returns / RMA: ' + U(s.returns.count) + ' credit note(s), ' + U(s.returns.units) + ' unit(s)', J(s.returns.net)) + line('Tax on returns', J(s.returns.tax), 'indent') +
+      line('Net sales after returns', J(s.net_after_returns), 'total') +
+      line('Cost of sales', J(-s.cost_of_sales)) + line('+ Cost of returned parts', J(s.returns.cost), 'indent') +
+      line('Gross profit', J(s.gross_profit) + ' <span class="sub">(' + (s.margin_pct == null ? '–' : s.margin_pct + '%') + ')</span>', 'total') +
+      (s.voided.count ? line('Voided sales (not included)', U(s.voided.count) + ' · ' + J(s.voided.total), 'sub') : '') + '</tbody></table>' +
+      (sv.mismatched_receipts.length ? '<p class="sub" style="margin-top:8px">Receipts whose lines do not add up to the receipt total:</p><table><thead><tr><th>Receipt</th><th class="n">Receipt total</th><th class="n">Lines</th><th class="n">Difference</th></tr></thead><tbody>' +
+        sv.mismatched_receipts.map(function (m) { return '<tr><td>' + esc(m.receipt) + ' <span class="sub">' + esc(new Date(m.at).toLocaleDateString()) + '</span></td><td class="n">' + J(m.total) + '</td><td class="n">' + J(m.lines) + '</td><td class="n">' + J(m.difference) + '</td></tr>'; }).join('') + '</tbody></table>' : '') + '</div>';
+
+    var svi = '<div class="card"><h2>3. Sales against inventory' + tie(i.sold.units - sv.catalogue_parts.units) + '</h2><p class="sub">Every catalogue part sold must come out of stock; everything else on a sale is labour, a service or a fee.</p>' +
+      '<table><thead><tr><th></th><th class="n">Net sales</th><th class="n">Units</th><th class="n">Cost</th></tr></thead><tbody>' +
+      row('Catalogue parts (taken out of stock)', J(sv.catalogue_parts.net), U(sv.catalogue_parts.units), J(sv.catalogue_parts.cost)) +
+      row('Other lines (labour, services, fees, retired parts)', J(sv.other_lines.net), '', '') +
+      row('Sale lines total', J(sv.lines_total), '', '', 'total') +
+      row('Sale totals (receipts)', J(sv.header_total), '', '', 'sub') +
+      row('Units taken out of stock (section 1)', '', U(i.sold.units), J(i.sold.cost)) +
+      row('Gross profit on parts', J(sv.catalogue_parts.net - sv.catalogue_parts.cost), '', '', 'total') +
+      '</tbody></table></div>';
+
+    var col = '<div class="card"><h2>4. Collections against sales' + tie(c.difference) + '</h2><p class="sub">What was billed must be paid (and how) or still be owed.</p>' +
+      '<table><tbody>' + line('Total billed', J(c.billed), 'total') +
+      c.by_method.map(function (m) { return line('Paid: ' + esc(m.method) + ' (' + U(m.count) + ')', J(m.amount), 'indent'); }).join('') +
+      line('Paid, no method recorded', J(c.paid_without_method), 'indent' + (Math.abs(c.paid_without_method) >= 1 ? '' : ' sub')) +
+      line('Still owed on these sales (incl. ' + U(c.charged_to_account_count) + ' charged to account)', J(c.still_owed), 'indent') +
+      line('Accounted for', J(c.recorded_total + c.paid_without_method + c.still_owed), 'total') +
+      line('Difference', J(c.difference), 'sub') + '</tbody></table>' +
+      '<h2 style="margin-top:14px">Money in</h2><table><tbody>' +
+      line('Payments taken on sales (cash, card, cheque…)', J(c.money_in - c.account_payments.reduce(function (a, x) { return a + x.amount; }, 0) - c.refunds_by_method.reduce(function (a, x) { return a + x.amount; }, 0))) +
+      c.account_payments.map(function (m) { return line('Account payments received: ' + esc(m.method) + ' (' + U(m.count) + ')', J(m.amount), 'indent'); }).join('') +
+      c.refunds_by_method.map(function (m) { return line('Refunds paid: ' + esc(m.method) + ' (' + U(m.count) + ')', J(m.amount), 'indent'); }).join('') +
+      line('Money in', J(c.money_in), 'total') + line('Credit notes issued (refund method not recorded)', J(c.credit_notes_total), 'sub') + '</tbody></table></div>';
+
+    var e = d.earnings, tot = e.reduce(function (a, x) { ['transactions', 'net_sales', 'discounts', 'returns', 'tax', 'cost', 'gross_profit'].forEach(function (k) { a[k] = (a[k] || 0) + (x[k] || 0); }); return a; }, {});
+    var earn = '<div class="card"><h2>5. Earnings by ' + esc({ day: 'day', week: 'week', month: 'month', hour: 'hour of day', weekday: 'day of week' }[d.period.by]) + tie(tot.net_sales - s.net_after_returns) + '</h2><p class="sub">Columns add up to section 2.</p>' +
+      '<div class="scroll"><table><thead><tr><th>' + (d.period.by === 'week' ? 'Week of' : 'Period') + '</th><th class="n">Sales</th><th class="n">Net sales</th><th class="n">Discounts</th><th class="n">Returns</th><th class="n">Tax</th><th class="n">Cost</th><th class="n">Gross profit</th><th class="n">Margin</th><th class="n">Avg ticket</th></tr></thead><tbody>' +
+      (e.length ? e.map(function (x) {
+        return '<tr><td>' + esc(x.bucket) + '</td><td class="n">' + U(x.transactions) + '</td><td class="n">' + J(x.net_sales) + '</td><td class="n">' + J(x.discounts) + '</td><td class="n">' + J(x.returns) + '</td><td class="n">' + J(x.tax) + '</td><td class="n">' + J(x.cost) + '</td><td class="n">' + J(x.gross_profit) + '</td><td class="n">' + (x.margin_pct == null ? '–' : x.margin_pct + '%') + '</td><td class="n">' + J(x.avg_ticket) + '</td></tr>';
+      }).join('') + '<tr class="total"><td>Total</td><td class="n">' + U(tot.transactions) + '</td><td class="n">' + J(tot.net_sales) + '</td><td class="n">' + J(tot.discounts) + '</td><td class="n">' + J(tot.returns) + '</td><td class="n">' + J(tot.tax) + '</td><td class="n">' + J(tot.cost) + '</td><td class="n">' + J(tot.gross_profit) + '</td><td class="n">' + (tot.net_sales ? Math.round(tot.gross_profit / tot.net_sales * 1000) / 10 + '%' : '–') + '</td><td></td></tr>'
+        : '<tr><td colspan="10" class="empty">No sales in this period.</td></tr>') + '</tbody></table></div></div>';
+
+    $('#out').innerHTML = head + notes + inv + '<div class="grid">' + sales + col + '</div>' + svi + earn;
+  }
+
+  function run() {
+    var f = $('#from').value, t = $('#to').value;
+    if (!f || !t) return;
+    $('#out').innerHTML = '<div class="empty">Working…</div>';
+    fetch('/api/rep/balancing?from=' + f + '&to=' + t + '&by=' + $('#by').value, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+      .then(function (r) { return r.json().then(function (d) { if (r.status === 401) throw new Error('Sign in on the Admin page first, then come back.'); if (!r.ok) throw new Error(d.error || 'Report failed'); return d; }); })
+      .then(function (d) { last = d; render(d); })
+      .catch(function (e) { $('#out').innerHTML = '<div class="card">' + esc(e.message) + ' <a href="/admin.html">Admin</a></div>'; });
+  }
+  preset('month');
+})();
+</script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+<script src="/assets/module-look.js?v=20261101" defer></script>
+</body>
+</html>

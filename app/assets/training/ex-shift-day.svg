@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 330" font-family="Segoe UI, system-ui, -apple-system, sans-serif">
+  <rect width="860" height="330" rx="18" fill="#ffffff"/>
+  <text x="30" y="44" font-size="22" font-weight="700" fill="#0b1b2b">Example: a day on an 8:00 to 5:00 shift</text>
+  <text x="30" y="70" font-size="15" fill="#6b7280">Every press of the time clock, in order.</text>
+  <!-- axis: 8:00 at x=98, 76 px per hour -->
+  <rect x="98" y="140" width="684" height="34" rx="6" fill="#eef2f7"/>
+  <text x="98" y="132" font-size="12" fill="#6b7280">shift starts 8:00</text>
+  <text x="782" y="132" font-size="12" fill="#6b7280" text-anchor="end">shift ends 5:00</text>
+  <rect x="98" y="140" width="684" height="34" rx="6" fill="#16a34a" opacity=".85"/>
+  <rect x="288" y="140" width="19" height="34" fill="#f59e0b"/>
+  <rect x="440" y="140" width="57" height="34" fill="#f59e0b"/>
+  <rect x="782" y="140" width="19" height="34" fill="#16a34a" opacity=".45"/>
+  <rect x="782" y="140" width="19" height="34" fill="none" stroke="#16a34a" stroke-dasharray="3 3"/>
+  <g font-size="12" fill="#6b7280" text-anchor="middle">
+    <text x="98" y="198">8:00</text><text x="250" y="198">10:00</text><text x="402" y="198">12:00</text><text x="554" y="198">2:00</text><text x="706" y="198">4:00</text>
+  </g>
+  <g stroke="#0b1b2b" stroke-width="1.5">
+    <line x1="96" y1="204" x2="96" y2="226"/><line x1="297" y1="204" x2="297" y2="226"/><line x1="468" y1="204" x2="468" y2="226"/><line x1="763" y1="120" x2="763" y2="100"/><line x1="795" y1="204" x2="795" y2="226"/>
+  </g>
+  <g font-size="13" fill="#0f1720">
+    <rect x="28" y="228" width="144" height="58" rx="8" fill="#0b1b2b"/><text x="100" y="250" fill="#fff" font-weight="700" text-anchor="middle">7:58 Clock in</text><text x="100" y="270" fill="#cbd5e1" text-anchor="middle">PIN, then your name</text>
+    <rect x="224" y="228" width="146" height="58" rx="8" fill="#f59e0b"/><text x="297" y="250" fill="#3f2d0f" font-weight="700" text-anchor="middle">10:30 Break</text><text x="297" y="270" fill="#3f2d0f" text-anchor="middle">10:45 Back from break</text>
+    <rect x="392" y="228" width="152" height="58" rx="8" fill="#f59e0b"/><text x="468" y="250" fill="#3f2d0f" font-weight="700" text-anchor="middle">12:30 Lunch</text><text x="468" y="270" fill="#3f2d0f" text-anchor="middle">1:15 Back from lunch</text>
+    <rect x="700" y="228" width="140" height="58" rx="8" fill="#0b1b2b"/><text x="770" y="250" fill="#fff" font-weight="700" text-anchor="middle">5:06 Clock out</text><text x="770" y="270" fill="#cbd5e1" text-anchor="middle">inside leaving time</text>
+  </g>
+  <rect x="600" y="84" width="230" height="22" rx="11" fill="#d6282818"/>
+  <text x="715" y="100" font-size="12" font-weight="600" fill="#d62828" text-anchor="middle">4:45 and 4:55: the till warns you</text>
+  <text x="30" y="314" font-size="13" fill="#6b7280">Clock in after about 8:05 and the day is marked late. Clock in at 6:00 for a delivery and you confirm overtime with a reason.</text>
+</svg>

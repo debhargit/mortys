@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#d61f2b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Driver · Morty's Auto</title>
+<link rel="manifest" href="/mobile.webmanifest">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root{--red:#d61f2b;--ink:#111827;--muted:#6b7280;--line:#e5e7eb;--bg:#f3f4f6;--ok:#16a34a;--warn:#d97706}
+  *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink);font-size:16px}
+  header{position:sticky;top:0;z-index:1000;background:#0a0a0c;color:#fff;padding:10px 12px;padding-top:max(10px,env(safe-area-inset-top));display:flex;align-items:center;gap:10px}
+  header b{font-size:17px} header .who{font-size:12px;opacity:.75} header .sp{flex:1}
+  .sos{background:var(--red);color:#fff;border:0;border-radius:999px;padding:9px 14px;font-weight:800;font-size:14px;letter-spacing:.06em}
+  main{padding:10px 10px 90px;max-width:720px;margin:0 auto}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:10px}
+  h2{font-size:17px;margin:0 0 8px} .sub{color:var(--muted);font-size:13px;margin:0 0 8px}
+  label{display:block;font-size:13px;color:var(--muted);margin:8px 0 3px} input,select,textarea{width:100%;font-size:16px;padding:11px;border:1px solid #d1d5db;border-radius:10px;background:#fff}
+  button.big,.big{display:block;width:100%;padding:14px;border-radius:12px;border:0;font-size:17px;font-weight:700;margin-top:10px;text-align:center;text-decoration:none;cursor:pointer}
+  .primary{background:var(--red);color:#fff} .dark{background:#111827;color:#fff} .light{background:#fff;color:var(--ink);border:1px solid #d1d5db !important} .green{background:var(--ok);color:#fff} .blue{background:#2563eb;color:#fff}
+  .row{display:flex;gap:8px} .row>*{flex:1}
+  #map{height:260px;border-radius:14px;border:1px solid var(--line);margin-bottom:10px;z-index:1}
+  .gps{font-size:12px;color:var(--muted);margin:-4px 0 8px} .gps b.on{color:var(--ok)} .gps b.off{color:var(--red)}
+  .stats{display:flex;gap:8px;margin-bottom:8px} .stats div{flex:1;background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px;text-align:center;font-size:12px;color:var(--muted)} .stats b{display:block;font-size:20px;color:var(--ink)}
+  .job{border-left:6px solid #9ca3af} .job.p1{border-left-color:var(--red)} .job.cur{outline:3px solid #2563eb}
+  .job .top{display:flex;gap:8px;align-items:flex-start} .num{background:#111827;color:#fff;border-radius:999px;min-width:30px;height:30px;display:grid;place-items:center;font-weight:800}
+  .job h3{margin:0;font-size:16px} .job .addr{font-size:14px;margin-top:3px} .meta{font-size:13px;color:var(--muted);margin-top:4px}
+  .pill{display:inline-block;font-size:12px;border-radius:999px;padding:2px 8px;background:#e5e7eb;margin-right:4px}
+  .pill.red{background:#fee2e2;color:#b91c1c} .pill.blue{background:#dbeafe;color:#1d4ed8} .pill.green{background:#dcfce7;color:#166534} .pill.amber{background:#fef3c7;color:#92400e}
+  .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px} .acts a,.acts button{flex:1 1 30%;padding:11px 8px;border-radius:10px;border:1px solid #d1d5db;background:#fff;font-size:15px;font-weight:600;text-align:center;text-decoration:none;color:var(--ink)}
+  .acts .go{background:#2563eb;color:#fff;border-color:#2563eb} .acts .done{background:var(--ok);color:#fff;border-color:var(--ok)}
+  .sheet{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;display:flex;align-items:flex-end} .sheet>div{background:#fff;width:100%;max-height:92vh;overflow:auto;border-radius:18px 18px 0 0;padding:14px 14px max(14px,env(safe-area-inset-bottom))}
+  canvas.sig{width:100%;height:190px;border:2px dashed #9ca3af;border-radius:12px;touch-action:none;background:#fafafa;display:block}
+  .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#111827;color:#fff;padding:10px 16px;border-radius:999px;z-index:3000;display:none;max-width:90vw;text-align:center}
+  .err{color:var(--red);font-size:14px;margin-top:6px} .hidden{display:none !important}
+  .numicon{background:#111827;color:#fff;border:2px solid #fff;border-radius:50%;display:grid;place-items:center;font:700 13px system-ui;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+  .numicon.p1{background:var(--red)} .meicon{background:#2563eb;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 6px rgba(37,99,235,.25)}
+</style>
+</head>
+<body>
+<header><div><b>🚚 Driver</b><div class="who" id="who"></div></div><span class="sp"></span><button class="sos hidden" id="sosBtn">SOS</button></header>
+<main id="main"><div class="card">Loading…</div></main>
+<div class="toast" id="toast"></div>
+<div id="sheet"></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s) { return document.querySelector(s); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var toast = function (t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 3500); };
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) { var e = new Error(j.error || ('Error ' + r.status)); e.status = r.status; throw e; } return j; }); });
+  }
+  var ICON = { delivery: '📦', parts_pickup: '🔩', bank_drop: '🏦', document: '📄', cheque: '🧾', collection: '💵', errand: '🧭', other: '📍' };
+  var STATUS = { assigned: ['To do', ''], en_route: ['On the way', 'blue'], arrived: ['Arrived', 'amber'] };
+  var J = function (v) { return 'J$' + Number(v || 0).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+  var meta = null, route = null, here = null, watchId = null, lastSent = 0, lastAssign = null, map = null, wake = null, pollH = null, battery = null, meMarker = null;
+  if (navigator.getBattery) navigator.getBattery().then(function (b) { battery = b; }).catch(function () {});
+
+  // ------------------------------------------------------------- sign in --
+  function signIn(msg) {
+    stopTracking();
+    $('#sosBtn').classList.add('hidden'); $('#who').textContent = '';
+    $('#main').innerHTML = '<div class="card"><h2>Sign in</h2><p class="sub">Use your PIN, or your email and password.</p>' +
+      '<label>PIN</label><input id="pin" type="password" inputmode="numeric" autocomplete="one-time-code"><button class="big primary" id="pinGo">Sign in with PIN</button>' +
+      '<details style="margin-top:12px"><summary class="sub">Email and password instead</summary><label>Email</label><input id="em" type="email" autocomplete="username"><label>Password</label><input id="pw" type="password" autocomplete="current-password"><button class="big dark" id="pwGo">Sign in</button></details>' +
+      '<div class="err" id="lerr">' + esc(msg || '') + '</div><a href="#" id="pwChange" style="display:block;text-align:center;margin-top:10px;font-size:13px;color:inherit;opacity:.8">Change password</a></div><a class="big light" href="/mobile.html">◀ App menu</a>';
+    var done = function (r) {
+      if (r && r.need_2fa) { var code = prompt('6-digit code from your authenticator app'); if (!code) return; return api('/api/auth/2fa', 'POST', { code: code.trim() }).then(done).catch(function (e) { $('#lerr').textContent = e.message; }); }
+      start();
+    };
+    // PIN, then the person taps their name (assets/pin-staff.js).
+    $('#pinGo').onclick = function () {
+      var p = $('#pin').value; if (!p) return;
+      pickPinStaff().then(function (who) {
+        if (!who) return;
+        return api('/api/auth/pin-signin', 'POST', who.id ? { pin: p, user_id: who.id } : { pin: p }).then(done);
+      }).catch(function (e) { $('#lerr').textContent = e.message; });
+    };
+    $('#pwChange').onclick = function (e) { e.preventDefault(); openPasswordChange({ email: $('#em').value }).then(function (em) { if (em) { $('#em').value = em; $('#pw').value = ''; } }); };
+    $('#pin').onkeydown = function (e) { if (e.key === 'Enter') $('#pinGo').click(); };
+    $('#pwGo').onclick = function () { api('/api/auth/signin', 'POST', { email: $('#em').value, password: $('#pw').value }).then(done).catch(function (e) { $('#lerr').textContent = e.message; }); };
+  }
+  function start() {
+    api('/api/fleet/me').then(function (m) {
+      meta = m; $('#who').textContent = m.user.name + (m.shift ? ' · on shift' + (m.shift.vehicle ? ' · ' + m.shift.vehicle : '') : ' · off shift');
+      $('#sosBtn').classList.remove('hidden');
+      if (m.shift) { startTracking(); loadRoute(); } else offShift();
+    }).catch(function (e) {
+      if (e.status === 401) return signIn();
+      if (e.status === 403) return signIn('This account is not set up as a driver. Ask a manager to give you the "Driver app" permission.');
+      $('#main').innerHTML = '<div class="card err">' + esc(e.message) + '</div>';
+    });
+  }
+
+  // --------------------------------------------------------------- shift --
+  function offShift() {
+    stopTracking();
+    $('#main').innerHTML = '<div class="card"><h2>Start your shift</h2><p class="sub">While you are on shift the shop sees where you are, to plan your route and keep you safe. Your location stops being shared when you end the shift.</p>' +
+      '<label>Vehicle</label><input id="veh" placeholder="e.g. Van PC 1234"><label>Odometer (km)</label><input id="odo" type="number" inputmode="numeric">' +
+      '<button class="big primary" id="go">Start shift</button></div><a class="big light" href="/mobile.html">◀ App menu</a>';
+    try { $('#veh').value = localStorage.getItem('drv.vehicle') || ''; } catch (_) {}
+    $('#go').onclick = function () {
+      try { localStorage.setItem('drv.vehicle', $('#veh').value); } catch (_) {}
+      api('/api/fleet/shift/start', 'POST', { vehicle: $('#veh').value, odometer: $('#odo').value }).then(function () { toast('Shift started'); start(); }).catch(function (e) { toast(e.message); });
+    };
+  }
+  function endShift() {
+    sheet('<h2>End shift</h2><label>Odometer (km)</label><input id="eodo" type="number" inputmode="numeric"><button class="big primary" id="ego">End shift</button><button class="big light" id="ex">Cancel</button>');
+    $('#ex').onclick = closeSheet;
+    $('#ego').onclick = function () {
+      api('/api/fleet/shift/end', 'POST', { odometer: $('#eodo').value }).then(function (r) { closeSheet(); stopTracking(); toast('Shift ended' + (r.km != null ? ' · ' + r.km + ' km' : '') + (r.open_jobs ? ' · ' + r.open_jobs + ' jobs still open' : '')); start(); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  // ------------------------------------------------------------ tracking --
+  function startTracking() {
+    if (!navigator.geolocation) { toast('This phone cannot share its location'); return; }
+    if (watchId != null) return;
+    watchId = navigator.geolocation.watchPosition(function (p) {
+      here = { lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy, speed: p.coords.speed, heading: p.coords.heading };
+      gpsLine(true);
+      if (Date.now() - lastSent >= (meta.ping_seconds || 20) * 1000) send();
+      drawMe();
+    }, function (err) { gpsLine(false, err.code === 1 ? 'Location is blocked: allow it for this site in the browser settings' : err.message); }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
+    keepAwake();
+    // Keep reporting even while standing still (the phone may stop sending updates).
+    clearInterval(startTracking.h); startTracking.h = setInterval(function () { if (here && Date.now() - lastSent >= (meta.ping_seconds || 20) * 1000) send(); }, 5000);
+  }
+  function stopTracking() {
+    if (watchId != null && navigator.geolocation) navigator.geolocation.clearWatch(watchId);
+    watchId = null; clearInterval(startTracking.h); clearInterval(pollH);
+    if (wake) { try { wake.release(); } catch (_) {} wake = null; }
+  }
+  function send() {
+    if (!here) return; lastSent = Date.now();
+    api('/api/fleet/ping', 'POST', Object.assign({ battery: battery ? battery.level : null }, here)).then(function (r) {
+      if (r.off_shift) { stopTracking(); return start(); }
+      if (r.arrived && r.arrived.length) { toast('You have arrived'); loadRoute(); }
+      if (r.latest_assignment && lastAssign && r.latest_assignment !== lastAssign) { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); toast('New job assigned'); loadRoute(); }
+      if (r.latest_assignment) lastAssign = r.latest_assignment;
+    }).catch(function (e) { if (e.status === 401) signIn('Signed out. Sign in again to keep sharing your location.'); });
+  }
+  function gpsLine(ok, msg) {
+    var el = $('#gps'); if (!el) return;
+    el.innerHTML = ok && here ? '<b class="on">● Sharing location</b> · ±' + Math.round(here.accuracy || 0) + ' m' + (wake ? ' · screen kept on' : ' · keep the app open') : '<b class="off">● Location off</b> · ' + esc(msg || '');
+  }
+  function keepAwake() {
+    if (!('wakeLock' in navigator) || wake) return;
+    navigator.wakeLock.request('screen').then(function (w) { wake = w; w.addEventListener('release', function () { wake = null; }); }).catch(function () {});
+  }
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && meta && meta.shift && route) { keepAwake(); loadRoute(); if (here) send(); } });
+
+  // --------------------------------------------------------------- route --
+  function loadRoute() {
+    clearInterval(pollH); pollH = setInterval(loadRoute, 45000);
+    return api('/api/fleet/my-route').then(function (r) {
+      route = r;
+      if (!r.shift) { meta.shift = null; return offShift(); }
+      if (!lastAssign) { var a = r.jobs.map(function (j) { return j.assigned_at; }).filter(Boolean).sort().pop(); if (a) lastAssign = a; }
+      render();
+    }).catch(function (e) { if (e.status === 401) signIn(); else toast(e.message); });
+  }
+  function navUrl(stops) {
+    var pts = stops.filter(function (j) { return j.lat != null; });
+    if (!pts.length) return null;
+    var dest = pts[pts.length - 1], way = pts.slice(0, -1).slice(0, 9);
+    return 'https://www.google.com/maps/dir/?api=1&travelmode=driving' + (here ? '&origin=' + here.lat + ',' + here.lng : '') + '&destination=' + dest.lat + ',' + dest.lng +
+      (way.length ? '&waypoints=' + way.map(function (j) { return j.lat + ',' + j.lng; }).join('%7C') : '');
+  }
+  function navOne(j) { return j.lat != null ? 'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + j.lat + ',' + j.lng : 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent((j.address || '') + ', Jamaica'); }
+  function render() {
+    var r = route, s = r.stats, nav = navUrl(r.jobs);
+    var mins = s.minutes >= 60 ? Math.floor(s.minutes / 60) + 'h' + String(s.minutes % 60).padStart(2, '0') : s.minutes + 'm';
+    $('#main').innerHTML = '<div id="map"></div><div class="gps" id="gps"></div>' +
+      '<div class="stats"><div><b>' + r.jobs.length + '</b>jobs</div><div><b>' + s.km_with_return + '</b>km</div><div><b>' + mins + '</b>about</div><div><b>' + r.done_today.length + '</b>done today</div></div>' +
+      (r.jobs.length ? '<div class="row">' + (nav ? '<a class="big blue" href="' + nav + '" target="_blank" rel="noopener">🧭 Navigate route</a>' : '') + '<button class="big light" id="reorder">↻ Best order from here</button></div>' : '') +
+      (s.unplaced ? '<p class="sub" style="margin-top:8px">' + s.unplaced + ' job(s) have no map position yet; they are at the end. Use “📍 Pin here” when you get there.</p>' : '') +
+      '<div style="margin-top:10px">' + (r.jobs.length ? r.jobs.map(card).join('') : '<div class="card"><h2>No jobs right now</h2><p class="sub">New assignments appear here by themselves and the phone buzzes.</p></div>') + '</div>' +
+      (r.done_today.length ? '<div class="card"><h2>Done today</h2>' + r.done_today.map(function (d) { return '<div class="meta">' + (d.status === 'done' ? '✅' : '❌') + ' ' + esc(d.number) + ' · ' + esc(d.title) + '</div>'; }).join('') + '</div>' : '') +
+      '<div class="row"><button class="big light" id="refresh">Refresh</button><button class="big dark" id="end">End shift</button></div><a class="big light" href="/mobile.html">◀ App menu</a>';
+    gpsLine(!!here, here ? '' : 'Waiting for GPS…');
+    if ($('#reorder')) $('#reorder').onclick = function () { api('/api/fleet/my-route/optimise', 'POST', {}).then(function (x) { toast('Re-ordered: ' + x.km_with_return + ' km'); loadRoute(); }).catch(function (e) { toast(e.message); }); };
+    $('#refresh').onclick = loadRoute; $('#end').onclick = endShift;
+    document.querySelectorAll('[data-act]').forEach(function (b) { b.onclick = function () { act(b.dataset.act, Number(b.dataset.id)); }; });
+    drawMap();
+  }
+  function card(j, i) {
+    var st = STATUS[j.status] || [j.status, ''];
+    var win = j.window_from ? ' · ' + String(j.window_from).slice(0, 5) + (j.window_to ? '–' + String(j.window_to).slice(0, 5) : '') : '';
+    var tel = j.contact_phone ? String(j.contact_phone).replace(/[^\d+]/g, '') : '';
+    return '<div class="card job ' + (j.priority === 1 ? 'p1 ' : '') + (j.status !== 'assigned' ? 'cur' : '') + '"><div class="top"><span class="num">' + (i + 1) + '</span><div style="flex:1"><h3>' + (ICON[j.kind] || '📍') + ' ' + esc(j.title) + '</h3>' +
+      '<div class="addr">' + esc(j.address || 'No address') + '</div><div class="meta"><span class="pill ' + st[1] + '">' + st[0] + '</span>' + (j.priority === 1 ? '<span class="pill red">Urgent</span>' : '') +
+      '<span class="pill">' + esc(j.kind_label) + '</span>' + (j.amount ? '<span class="pill green">' + J(j.amount) + '</span>' : '') + esc(win) + '</div>' +
+      (j.contact_name || tel ? '<div class="meta">👤 ' + esc(j.contact_name || '') + (tel ? ' · <a href="tel:' + esc(tel) + '">' + esc(j.contact_phone) + '</a>' : '') + '</div>' : '') +
+      (j.details ? '<div class="meta">📝 ' + esc(j.details) + '</div>' : '') + '<div class="meta">' + esc(j.number) + (j.needs_photo ? ' · photo needed' : '') + (j.needs_signature ? ' · signature needed' : '') + '</div></div></div>' +
+      '<div class="acts"><a href="' + navOne(j) + '" target="_blank" rel="noopener">🧭 Go</a>' +
+      (j.status === 'assigned' ? '<button class="go" data-act="start" data-id="' + j.id + '">▶ Start</button>' : '') +
+      (j.status === 'en_route' ? '<button class="go" data-act="arrived" data-id="' + j.id + '">📍 Arrived</button>' : '') +
+      (j.status !== 'assigned' ? '<button class="done" data-act="complete" data-id="' + j.id + '">✔ Done</button>' : '') +
+      '<button data-act="fail" data-id="' + j.id + '">✖ Can\'t</button><button data-act="pin" data-id="' + j.id + '">📍 Pin here</button></div></div>';
+  }
+
+  // ----------------------------------------------------------------- map --
+  function drawMap() {
+    var el = $('#map'); if (!el) return;
+    if (!window.L) { el.innerHTML = '<p class="sub" style="padding:10px">The map needs internet.</p>'; return; }
+    map = L.map(el, { zoomControl: false, attributionControl: false });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+    var shop = route.shop, pts = [[shop.lat, shop.lng]];
+    L.marker([shop.lat, shop.lng], { icon: L.divIcon({ className: 'numicon', html: '🏪', iconSize: [26, 26] }) }).addTo(map).bindPopup('Shop');
+    var line = [here ? [here.lat, here.lng] : [shop.lat, shop.lng]];
+    route.jobs.forEach(function (j, i) {
+      if (j.lat == null) return;
+      L.marker([j.lat, j.lng], { icon: L.divIcon({ className: 'numicon' + (j.priority === 1 ? ' p1' : ''), html: String(i + 1), iconSize: [26, 26] }) }).addTo(map).bindPopup('<b>' + (i + 1) + '. ' + esc(j.title) + '</b><br>' + esc(j.address || ''));
+      line.push([j.lat, j.lng]); pts.push([j.lat, j.lng]);
+    });
+    if (line.length > 1) L.polyline(line, { color: '#2563eb', weight: 4, opacity: .75, dashArray: '6 6' }).addTo(map);
+    if (here) pts.push([here.lat, here.lng]);
+    if (pts.length > 1) map.fitBounds(pts, { padding: [26, 26] }); else map.setView([shop.lat, shop.lng], 13);
+    meMarker = null; drawMe();
+  }
+  function drawMe() {
+    if (!map || !here || !window.L) return;
+    if (!meMarker) meMarker = L.marker([here.lat, here.lng], { icon: L.divIcon({ className: 'meicon', iconSize: [18, 18] }), zIndexOffset: 1000 }).addTo(map);
+    else meMarker.setLatLng([here.lat, here.lng]);
+  }
+
+  // ------------------------------------------------------------- actions --
+  function sheet(h) { $('#sheet').innerHTML = '<div class="sheet"><div>' + h + '</div></div>'; }
+  function closeSheet() { $('#sheet').innerHTML = ''; }
+  function act(what, id) {
+    var j = route.jobs.find(function (x) { return x.id === id; });
+    if (what === 'start' || what === 'arrived') return api('/api/fleet/jobs/' + id + '/' + what, 'POST', {}).then(function () { loadRoute(); }).catch(function (e) { toast(e.message); });
+    if (what === 'pin') {
+      if (!here) return toast('Waiting for GPS');
+      return api('/api/fleet/jobs/' + id + '/pin', 'POST', { lat: here.lat, lng: here.lng }).then(function () { toast('Location saved for this address'); loadRoute(); }).catch(function (e) { toast(e.message); });
+    }
+    if (what === 'fail') {
+      sheet('<h2>Could not do it</h2><label>Why</label><select id="fr"><option>Nobody there</option><option>Wrong or unclear address</option><option>Customer refused</option><option>Customer asked for another day</option><option>Bank / office closed</option><option>Vehicle problem</option><option>Other</option></select><label>Details</label><textarea id="fd" rows="3"></textarea><button class="big primary" id="fgo">Save</button><button class="big light" id="fx">Cancel</button>');
+      $('#fx').onclick = closeSheet;
+      $('#fgo').onclick = function () { var why = $('#fr').value + ($('#fd').value.trim() ? ': ' + $('#fd').value.trim() : ''); api('/api/fleet/jobs/' + id + '/fail', 'POST', { reason: why, lat: here && here.lat, lng: here && here.lng }).then(function () { closeSheet(); toast('Saved'); loadRoute(); }).catch(function (e) { toast(e.message); }); };
+      return;
+    }
+    if (what === 'complete' && j) complete(j);
+  }
+  function complete(j) {
+    sheet('<h2>' + (ICON[j.kind] || '') + ' ' + esc(j.title) + '</h2>' + (j.amount ? '<p class="sub">Amount: <b>' + J(j.amount) + '</b></p>' : '') +
+      '<label>Received by' + (j.needs_signature ? ' *' : '') + '</label><input id="rn" value="' + esc(j.contact_name || '') + '">' +
+      '<label>Signature' + (j.needs_signature ? ' *' : '') + ' <a href="#" id="clr" style="float:right">clear</a></label><canvas class="sig" id="sig"></canvas>' +
+      '<label>Photo' + (j.needs_photo ? ' *' : '') + (j.kind === 'bank_drop' ? ' (stamped deposit slip)' : '') + '</label><input id="ph" type="file" accept="image/*" capture="environment"><img id="phv" alt="" style="max-width:100%;margin-top:6px;border-radius:10px" class="hidden">' +
+      '<label>Note</label><textarea id="nt" rows="2"></textarea><div class="err" id="cerr"></div><button class="big green" id="cgo">✔ Complete</button><button class="big light" id="cx">Cancel</button>');
+    var c = $('#sig'), ctx, drawn = false, photo = null, down = false, last = null;
+    var r0 = c.getBoundingClientRect(); c.width = r0.width * 2; c.height = r0.height * 2; ctx = c.getContext('2d'); ctx.scale(2, 2); ctx.lineWidth = 2.6; ctx.lineCap = 'round'; ctx.strokeStyle = '#111';
+    var pt = function (e) { var r = c.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+    c.onpointerdown = function (e) { down = true; last = pt(e); try { c.setPointerCapture(e.pointerId); } catch (_) {} };
+    c.onpointermove = function (e) { if (!down) return; var p = pt(e); ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last = p; drawn = true; };
+    c.onpointerup = c.onpointercancel = function () { down = false; };
+    $('#clr').onclick = function (e) { e.preventDefault(); ctx.clearRect(0, 0, c.width, c.height); drawn = false; };
+    $('#ph').onchange = function () {
+      var f = this.files[0]; if (!f) return;
+      var img = new Image(); img.onload = function () {
+        var scale = Math.min(1, 1280 / Math.max(img.width, img.height)), cv = document.createElement('canvas');
+        cv.width = Math.round(img.width * scale); cv.height = Math.round(img.height * scale); cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+        photo = cv.toDataURL('image/jpeg', 0.7); $('#phv').src = photo; $('#phv').classList.remove('hidden'); URL.revokeObjectURL(img.src);
+      };
+      img.src = URL.createObjectURL(f);
+    };
+    $('#cx').onclick = closeSheet;
+    $('#cgo').onclick = function () {
+      $('#cgo').disabled = true;
+      api('/api/fleet/jobs/' + j.id + '/complete', 'POST', { recipient_name: $('#rn').value, signature: drawn ? c.toDataURL('image/png') : null, photo: photo, note: $('#nt').value, lat: here && here.lat, lng: here && here.lng })
+        .then(function () { closeSheet(); toast('Done ✔'); loadRoute(); }).catch(function (e) { $('#cerr').textContent = e.message; $('#cgo').disabled = false; });
+    };
+  }
+
+  // ----------------------------------------------------------------- SOS --
+  $('#sosBtn').onclick = function () {
+    sheet('<h2 style="color:#d61f2b">Send SOS?</h2><p class="sub">The shop and the security screen are alerted at once with your location, and managers get an email.</p><label>What is happening (optional)</label><input id="sm"><button class="big primary" id="sgo">SEND SOS</button><button class="big light" id="sx">Cancel</button>');
+    $('#sx').onclick = closeSheet;
+    $('#sgo').onclick = function () { api('/api/fleet/sos', 'POST', { message: $('#sm').value, lat: here && here.lat, lng: here && here.lng }).then(function () { closeSheet(); if (navigator.vibrate) navigator.vibrate(400); toast('SOS sent. The shop has been alerted.'); }).catch(function (e) { toast(e.message); }); };
+  };
+
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/mobile-sw.js', { scope: '/' }).catch(function () {});
+  start();
+})();
+</script>
+<script src="/assets/pin-staff.js"></script>
+<script src="/assets/pw-change.js"></script>
+</body>
+</html>

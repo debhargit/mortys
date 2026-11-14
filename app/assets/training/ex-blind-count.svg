@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 330" font-family="Segoe UI, system-ui, -apple-system, sans-serif">
+  <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/></marker></defs>
+  <rect width="860" height="330" rx="18" fill="#ffffff"/>
+  <text x="30" y="44" font-size="22" font-weight="700" fill="#0b1b2b">Example: a blind count of bin A1</text>
+  <text x="30" y="70" font-size="15" fill="#6b7280">You count what is there. The system keeps its own number to itself.</text>
+  <!-- phone -->
+  <rect x="30" y="88" width="200" height="222" rx="22" fill="#0b1b2b"/>
+  <rect x="42" y="102" width="176" height="194" rx="12" fill="#f6f7f9"/>
+  <text x="56" y="128" font-size="12" font-weight="700" fill="#6b7280">BIN A1</text>
+  <text x="56" y="150" font-size="15" font-weight="700" fill="#0b1b2b">Brake pads, front</text>
+  <text x="56" y="172" font-size="12" fill="#6b7280">Expected: <tspan font-style="italic">hidden</tspan></text>
+  <rect x="56" y="186" width="148" height="44" rx="8" fill="#fff" stroke="#0891b2" stroke-width="2"/>
+  <text x="130" y="216" font-size="22" font-weight="700" fill="#0b1b2b" text-anchor="middle">7</text>
+  <rect x="56" y="242" width="148" height="36" rx="8" fill="#d62828"/><text x="130" y="266" font-size="14" font-weight="700" fill="#fff" text-anchor="middle">Save count</text>
+  <!-- steps -->
+  <g font-size="14" fill="#0f1720">
+    <rect x="262" y="104" width="170" height="92" rx="12" fill="#eef2f7"/>
+    <text x="276" y="128" font-weight="700">1. You count 7</text><text x="276" y="150" font-size="13">including the opened</text><text x="276" y="168" font-size="13">box at the back</text>
+    <line x1="436" y1="150" x2="466" y2="150" stroke="#94a3b8" stroke-width="2" marker-end="url(#ar)"/>
+    <rect x="470" y="104" width="170" height="92" rx="12" fill="#f59e0b1f"/>
+    <text x="484" y="128" font-weight="700">2. System had 10</text><text x="484" y="150" font-size="13">big difference, so it</text><text x="484" y="168" font-size="13">goes for a recount</text>
+    <line x1="644" y1="150" x2="674" y2="150" stroke="#94a3b8" stroke-width="2" marker-end="url(#ar)"/>
+    <rect x="678" y="104" width="152" height="92" rx="12" fill="#eef2f7"/>
+    <text x="692" y="128" font-weight="700">3. Recount</text><text x="692" y="150" font-size="13">by another person:</text><text x="692" y="168" font-size="13">also 7</text>
+    <rect x="262" y="214" width="568" height="82" rx="12" fill="#16a34a14" stroke="#16a34a"/>
+    <text x="280" y="244" font-weight="700">4. A manager approves the adjustment: 10 becomes 7.</text>
+    <text x="280" y="270" font-size="13">Nobody adjusts stock without a count, and nobody moves stock between bins mid-count.</text>
+  </g>
+</svg>

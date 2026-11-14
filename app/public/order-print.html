@@ -21,6 +21,10 @@
   .err{max-width:320px;margin:20px auto;color:#b91c1c;text-align:center}
   @media print { body{background:#fff;padding:0} .actions{display:none} .doc{border:0;page-break-after:always} }
 </style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 </head>
 <body>
 <div class="actions">
@@ -58,7 +62,7 @@ function render(d){
 
   var receipt =
     '<div class="doc">' +
-      '<div class="center"><h1>' + esc(shop.name || "Morty's Auto Parts") + '</h1>' +
+      '<div class="center"><h1>' + esc(shop.name || "Morty\'s Auto Parts") + '</h1>' +
         '<div class="sub">' + esc(shop.address || '51 Red Hills Road, Kingston') + '<br/>' + esc(shop.phone || '876-905-4111') + '</div></div>' +
       '<hr/>' +
       '<div class="row"><span>Order:</span><b>#' + esc(o.id) + '</b></div>' +

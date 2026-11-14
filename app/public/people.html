@@ -1,0 +1,1322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>People &amp; HR · Morty's Auto Parts</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0} header nav{margin-left:auto;display:flex;gap:14px;font-size:13px;align-items:center;flex-wrap:wrap} header a{color:#fff;opacity:.85}
+  main{max-width:1250px;margin:0 auto;padding:14px 16px 60px}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px} .tabs button{border-radius:999px} .tabs button.on{background:var(--red);border-color:var(--red);color:#fff}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  input,select,button,textarea{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  textarea{width:100%} button{cursor:pointer;background:var(--card)} button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600} button.sm{padding:3px 9px;font-size:12.5px}
+  button.link{border:0;background:none;color:var(--red);padding:0;font-weight:600}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px} .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px 12px;margin-bottom:10px} .grid label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px} .grid input,.grid select{width:100%}
+  .scroll{overflow-x:auto}
+  table{width:100%;border-collapse:collapse} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600}
+  tr.row{cursor:pointer} tr.row:hover td{background:var(--chip)}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip)} .pill.ok{background:#16a34a22;color:var(--ok)} .pill.warn{background:#f59e0b22;color:var(--warn)} .pill.bad{background:#d6282822;color:var(--red)}
+  .modal{position:fixed;inset:0;background:rgba(10,15,25,.55);display:flex;align-items:flex-start;justify-content:center;padding:4vh 12px;overflow:auto;z-index:9990} .modal .card{max-width:900px;width:100%}
+  .modal.top{z-index:9995} .modal.top .card{max-width:640px}
+  .empty{color:var(--muted);text-align:center;padding:20px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:9999}
+  .ftabs{display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:8px 0 12px} .ftabs button{border:0;border-bottom:2px solid transparent;border-radius:0;background:none;padding:6px 10px} .ftabs button.on{border-bottom-color:var(--red);font-weight:600}
+  .item{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:6px} .item small{color:var(--muted)}
+  .warn{background:#f59e0b18;border-left:3px solid var(--warn);padding:8px 10px;border-radius:8px;margin:8px 0}
+  h4{margin:14px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:12px} .kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px} .kpi b{display:block;font-size:22px} .kpi span{color:var(--muted);font-size:12px}
+  .bar{height:8px;background:var(--chip);border-radius:4px;overflow:hidden;min-width:60px} .bar i{display:block;height:100%;background:var(--red)}
+  .org ul{list-style:none;margin:0;padding-left:22px;border-left:1px dashed var(--line)} .org > ul{border-left:0;padding-left:0}
+  .org li{margin:6px 0} .org .node{display:inline-block;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer} .org .node:hover{border-color:var(--red)} .org .node small{color:var(--muted);display:block}
+  .task{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid var(--line)} .task span{flex:1} .task.done span{color:var(--muted);text-decoration:line-through}
+  .stars{display:flex;gap:4px} .stars button{padding:2px 9px;font-size:13px} .stars button.on{background:var(--red);border-color:var(--red);color:#fff}
+  .centre{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:12px;align-items:start} .side{border:1px solid var(--line);border-radius:10px;padding:12px;position:sticky;top:8px;max-height:92vh;overflow:auto}
+  @media (max-width:980px){ .centre{grid-template-columns:1fr} .side{position:static;max-height:none} }
+  tr.row.sel td{background:#d6282814} .who{display:flex;gap:12px;align-items:center} .ava{border-radius:50%;object-fit:cover;background:var(--chip);color:var(--muted);display:inline-flex;align-items:center;justify-content:center;font-weight:700;flex:none}
+  table.kv th{text-transform:none;letter-spacing:0;font-size:12.5px;width:40%;padding:3px 8px 3px 0} table.kv td{padding:3px 0}
+  .steps{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 12px} .steps span{font-size:12.5px;padding:3px 10px;border-radius:999px;background:var(--chip);color:var(--muted)} .steps span.on{background:var(--red);color:#fff} .steps span.done{color:var(--ok)}
+  @media print{ header,.tabs,.controls,button,.side{display:none!important} .card{border:0} .centre{display:block} }
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+</head>
+<body>
+<header><h1>People &amp; HR</h1><nav><a href="/attendance.html">Attendance</a><a href="/payroll.html">Payroll</a><a href="/training.html">Training</a><a href="/documents.html">Documents</a><a href="/hiring.html">Hiring</a><a href="/admin.html#tab=staff">Users &amp; Staff</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"></div>
+  <div id="view"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div><div id="modal2"></div>
+<div class="toast" id="toast"></div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var day = function (t) { return t ? new Date(String(t).length === 10 ? t + 'T12:00:00' : t).toLocaleDateString('en-JM') : ''; };
+  var when = function (t) { return t ? new Date(t).toLocaleString('en-JM', { dateStyle: 'short', timeStyle: 'short' }) : ''; };
+  var jmd = function (v) { return v == null ? '' : 'J$' + Number(v).toLocaleString('en-JM', { maximumFractionDigits: 2 }); };
+  var today = function () { var d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+  var CONTRACT = { permanent: 'Permanent', fixed_term: 'Fixed term', part_time: 'Part time', casual: 'Casual', contractor: 'Contractor', intern: 'Internship' };
+  var STATUS = { probation: 'On probation', active: 'Active', notice: 'Working notice', left: 'Left' };
+  var JOBK = { start: 'Started', promotion: 'Promotion', transfer: 'Transfer', pay_change: 'Pay change', title_change: 'New job title', confirmation: 'Confirmed in post', demotion: 'Demotion', rehire: 'Rehired', other: 'Other' };
+  var CASEK = { counselling: 'Counselling', verbal_warning: 'Verbal warning', written_warning: 'Written warning', final_warning: 'Final written warning', suspension: 'Suspension', dismissal: 'Dismissal', commendation: 'Commendation' };
+  var EXITK = { resignation: 'Resignation', termination: 'Termination', redundancy: 'Redundancy', end_of_contract: 'End of contract', retirement: 'Retirement', other: 'Other' };
+  var EMPTYPE = { regular: 'Regular', officer: 'Officer', owner: 'Owner', statutory: 'Statutory' };
+  var SIGNST = { sent: 'Waiting for signature', signed: 'Signed', declined: 'Declined', cancelled: 'Withdrawn' };
+  var REVK = { probation: 'End of probation', annual: 'Yearly', midyear: 'Mid-year', other: 'Other' };
+  var SALUT = ['Mr', 'Mrs', 'Ms', 'Miss', 'Dr'];
+  var GENDER = { female: 'Female', male: 'Male', other: 'Other' };
+  var MARITAL = { single: 'Single', married: 'Married', common_law: 'Common-law', divorced: 'Divorced', widowed: 'Widowed' };
+  var TODOT = { call: 'Call', meeting: 'Meeting', email: 'Email', task: 'Task', follow_up: 'Follow up' };
+  var PRIO = { low: 'Low', medium: 'Medium', high: 'High' };
+  var FKIND = { text: 'Text', number: 'Number', date: 'Date', list: 'Choose from a list', yesno: 'Yes / no' };
+  var LEAVEK = { vacation: 'Vacation', sick: 'Sick', unpaid: 'Unpaid', other: 'Other' };
+  var PARISHES = ['Kingston', 'St. Andrew', 'St. Thomas', 'Portland', 'St. Mary', 'St. Ann', 'Trelawny', 'St. James', 'Hanover', 'Westmoreland', 'St. Elizabeth', 'Manchester', 'Clarendon', 'St. Catherine'];
+  var META = { departments: [], people: [], criteria: [] };
+  var tab = 'staff', CAN = false, staff = [];
+
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 3500); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); }
+        return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; });
+      });
+  }
+  function modal(h, layer) {
+    var host = $(layer === 2 ? '#modal2' : '#modal');
+    host.innerHTML = '<div class="modal' + (layer === 2 ? ' top' : '') + '"><div class="card">' + h + '</div></div>';
+    host.firstChild.addEventListener('mousedown', function (e) { if (e.target.classList.contains('modal')) close(layer); });
+    return host.firstChild;
+  }
+  function close(layer) { $(layer === 2 ? '#modal2' : '#modal').innerHTML = ''; if (layer !== 2 && /^#staff=/.test(location.hash)) history.replaceState(null, '', '#' + tab); }
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { if ($('#modal2').innerHTML) close(2); else close(); } });
+  var opts = function (list, cur, blank) { return (blank != null ? '<option value="">' + esc(blank) + '</option>' : '') + list.map(function (p) { var id = p.id != null ? p.id : p[0], nm = p.name != null ? p.name : p[1]; return '<option value="' + esc(id) + '"' + (String(cur) === String(id) ? ' selected' : '') + '>' + esc(nm) + '</option>'; }).join(''); };
+  var pairs = function (o) { return Object.keys(o).map(function (k) { return [k, o[k]]; }); };
+  var field = function (label, html) { return '<div><label>' + esc(label) + '</label>' + html + '</div>'; };
+  var inp = function (id, v, type) { return '<input id="' + id + '" type="' + (type || 'text') + '" value="' + esc(v == null ? '' : v) + '">'; };
+  function statusPill(s) { return '<span class="pill' + (s === 'probation' || s === 'notice' ? ' warn' : s === 'left' ? ' bad' : ' ok') + '">' + esc(STATUS[s] || s) + '</span>'; }
+  function csv(name, rows) {
+    var text = rows.map(function (r) { return r.map(function (v) { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(','); }).join('\r\n');
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + text], { type: 'text/csv' })); a.download = name + '-' + today() + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  // ---------------------------------------------------------------- tabs --
+  var TABS = [['staff', '🗂 Staff files'], ['org', '🌳 Org chart'], ['leave', '🏖 Leave'], ['tasks', '✅ Checklists'], ['reports', '📊 Reports'], ['audit', '📜 HR log'], ['import', '⇪ QuickBooks'], ['me', '🙂 My HR file']];
+  function drawTabs() {
+    $('#tabs').innerHTML = TABS.filter(function (t) { return CAN || t[0] === 'me'; }).map(function (t) { return '<button data-t="' + t[0] + '"' + (t[0] === tab ? ' class="on"' : '') + '>' + t[1] + '</button>'; }).join('');
+    all('[data-t]').forEach(function (b) { b.onclick = function () { location.hash = b.getAttribute('data-t'); }; });
+  }
+  function show() {
+    drawTabs();
+    var v = $('#view'); v.innerHTML = '<div class="empty">Loading…</div>';
+    var f = { staff: staffList, org: orgChart, leave: leaveView, tasks: tasksView, reports: reportsView, audit: auditView, import: importView, me: myFile }[tab];
+    Promise.resolve(f(v)).catch(function (e) { v.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+
+  // ---------------------------------------------------------- staff list --
+  // As the QuickBooks Employee Center: Active / Inactive / Released / All, a
+  // quick search, the columns you choose, Excel, CSV and print, and a panel
+  // with the selected person's details and their pay.
+  var STATEL = { active: 'Active', inactive: 'Inactive', released: 'Released', all: 'All' };
+  var PAYT = { salary: 'Salary', hourly: 'Hourly', daily: 'Day rate', piece: 'Piece work', contract: 'Contract' };
+  var FREQ = { weekly: 'Weekly', fortnightly: 'Fortnightly', monthly: 'Monthly' };
+  var LIST = { state: 'active', staff: [], fields: [], counts: {}, access: {} }, sel = null;
+  function serviceYears(s) {
+    var from = s.adjusted_service_date || s.start_date; if (!from) return null;
+    var to = s.state === 'released' && s.release_date ? s.release_date : today();
+    var y = (Date.parse(to + 'T12:00:00') - Date.parse(from + 'T12:00:00')) / (365.25 * 86400000);
+    return y >= 0 ? Math.floor(y * 10) / 10 : null;
+  }
+  function attention(s) {
+    var f = [];
+    if (s.state === 'released') return f;
+    if (s.status === 'probation' && s.probation_end && s.probation_end <= new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)) f.push(['warn', 'probation ends ' + day(s.probation_end)]);
+    if (s.open_cases) f.push(['bad', s.open_cases + ' warning' + (s.open_cases > 1 ? 's' : '')]);
+    if (s.review_due) f.push([s.review_due < today() ? 'bad' : '', 'review ' + day(s.review_due)]);
+    if (s.open_tasks) f.push(['', s.open_tasks + ' to do']);
+    if (s.open_todos) f.push(['', s.open_todos + ' reminder' + (s.open_todos > 1 ? 's' : '')]);
+    if (!s.contacts) f.push(['warn', 'no emergency contact']);
+    if (!s.has_file) f.push(['', 'file not started']);
+    return f;
+  }
+  // [key, heading, text for Excel / CSV, html for the screen (optional), needs pay access]
+  function columns() {
+    var c = [
+      ['name', 'Name', function (s) { return s.name; }, function (s) { return '<b>' + esc(s.name) + '</b>' + (s.preferred_name ? ' <small class="sub">“' + esc(s.preferred_name) + '”</small>' : ''); }],
+      ['employee_no', 'Employee no.', function (s) { return s.employee_no; }],
+      ['salutation', 'Mr / Ms', function (s) { return s.salutation; }],
+      ['legal_name', 'Legal name', function (s) { return s.legal_name; }],
+      ['preferred_name', 'Preferred name', function (s) { return s.preferred_name; }],
+      ['job_title', 'Job', function (s) { return s.job_title; }],
+      ['department', 'Department', function (s) { return s.department; }],
+      ['manager', 'Supervisor', function (s) { return s.manager; }],
+      ['phone', 'Work phone', function (s) { return s.phone; }],
+      ['mobile', 'Mobile', function (s) { return s.mobile; }],
+      ['personal_phone', 'Home phone', function (s) { return s.personal_phone; }],
+      ['email', 'Work email', function (s) { return s.email; }],
+      ['personal_email', 'Personal email', function (s) { return s.personal_email; }],
+      ['address', 'Address', function (s) { return s.address; }],
+      ['town', 'Town', function (s) { return s.town; }],
+      ['parish', 'Parish', function (s) { return s.parish; }],
+      ['date_of_birth', 'Date of birth', function (s) { return s.date_of_birth; }, function (s) { return esc(day(s.date_of_birth)); }],
+      ['gender', 'Gender', function (s) { return GENDER[s.gender] || ''; }],
+      ['marital_status', 'Marital status', function (s) { return MARITAL[s.marital_status] || ''; }],
+      ['start_date', 'Hire date', function (s) { return s.start_date; }, function (s) { return esc(day(s.start_date)); }],
+      ['adjusted_service_date', 'Adjusted service date', function (s) { return s.adjusted_service_date; }, function (s) { return esc(day(s.adjusted_service_date)); }],
+      ['release_date', 'Release date', function (s) { return s.release_date; }, function (s) { return esc(day(s.release_date)); }],
+      ['service', 'Years of service', function (s) { return serviceYears(s); }],
+      ['contract_type', 'Contract', function (s) { return CONTRACT[s.contract_type] || ''; }],
+      ['employee_type', 'Employee type', function (s) { return EMPTYPE[s.employee_type] || ''; }],
+      ['work_location', 'Works at', function (s) { return s.work_location; }],
+      ['status', 'Status', function (s) { return STATUS[s.status] || s.status; }, function (s) { return statusPill(s.status) + (s.state === 'inactive' ? ' <span class="pill">inactive</span>' : ''); }],
+      ['rehire_eligible', 'Eligible for rehire', function (s) { return s.rehire_eligible == null ? '' : s.rehire_eligible ? 'Yes' : 'No'; }],
+      ['trn', 'TRN', function (s) { return s.trn; }, null, true],
+      ['nis_no', 'NIS no.', function (s) { return s.nis_no; }, null, true],
+      ['pay_type', 'Pay type', function (s) { return PAYT[s.pay_type] || ''; }, null, true],
+      ['frequency', 'Paid', function (s) { return FREQ[s.frequency] || ''; }, null, true],
+      ['rate', 'Rate (J$)', function (s) { return s.pay_type === 'hourly' ? s.hourly_rate : s.pay_type === 'daily' ? s.day_rate : s.salary_annual; }, function (s) { var r = s.pay_type === 'hourly' ? s.hourly_rate : s.pay_type === 'daily' ? s.day_rate : s.salary_annual; return r == null ? '' : esc(jmd(r)) + '<small class="sub">' + (s.pay_type === 'hourly' ? '/hr' : s.pay_type === 'daily' ? '/day' : '/yr') + '</small>'; }, true],
+      ['pay_active', 'Pay on', function (s) { return s.payroll_id ? (s.pay_active ? 'Yes' : 'No') : 'Not on Payroll'; }, null, true],
+      ['attention', 'Needs attention', function (s) { return attention(s).map(function (x) { return x[1]; }).join('; '); }, function (s) { return attention(s).map(function (x) { return '<span class="pill' + (x[0] ? ' ' + x[0] : '') + '">' + esc(x[1]) + '</span>'; }).join(' '); }],
+    ];
+    LIST.fields.forEach(function (f) { c.push(['cf' + f.id, f.label, function (s) { return s.custom && s.custom[f.id] != null ? s.custom[f.id] : ''; }]); });
+    return c.filter(function (x) { return !x[4] || LIST.access.view; });
+  }
+  var COLS_KEY = 'people.cols.v1', COLS_DEFAULT = ['name', 'job_title', 'department', 'phone', 'start_date', 'status', 'attention'];
+  function chosen() {
+    var keys = null;
+    try { keys = JSON.parse(localStorage.getItem(COLS_KEY) || 'null'); } catch (_) { keys = null; }
+    var have = columns();
+    var list = (Array.isArray(keys) && keys.length ? keys : COLS_DEFAULT).map(function (k) { return have.filter(function (c) { return c[0] === k; })[0]; }).filter(Boolean);
+    return list.length ? list : have.slice(0, 1);
+  }
+  function filtered() {
+    var q = ($('#q') ? $('#q').value : '').trim().toLowerCase(), df = $('#dF') ? $('#dF').value : '';
+    return LIST.staff.filter(function (s) {
+      return (!q || [s.name, s.preferred_name, s.legal_name, s.job_title, s.department, s.manager, s.employee_no, s.phone, s.mobile, s.email, s.town, s.parish].join(' ').toLowerCase().indexOf(q) >= 0) && (!df || String(s.department_id) === df);
+    });
+  }
+  function staffList(v) {
+    return api('/api/people/centre?state=' + LIST.state).then(function (d) {
+      LIST.staff = d.staff; LIST.fields = d.fields; LIST.counts = d.counts || {}; LIST.access = d.access || {}; staff = d.staff;
+      var cnt = function (k) { return k === 'all' ? (LIST.counts.active || 0) + (LIST.counts.inactive || 0) + (LIST.counts.released || 0) : (LIST.counts[k] || 0); };
+      v.innerHTML = '<div class="card"><h2>Staff files</h2><p class="sub">Everyone who works here, as in the QuickBooks Employee Center: pick someone to see their details and pay on the right; double-click (or Open file) for the whole file. Logins, roles and PINs are on <a href="/admin.html#tab=staff">Users &amp; Staff</a>; pay is kept in <a href="/payroll.html">Payroll</a>; leave days in <a href="/attendance.html#leave">Attendance › Leave</a>.</p>' +
+        '<div class="controls"><div><label>View</label><select id="stF">' + ['active', 'inactive', 'released', 'all'].map(function (k) { return '<option value="' + k + '"' + (k === LIST.state ? ' selected' : '') + '>' + STATEL[k] + ' (' + cnt(k) + ')</option>'; }).join('') + '</select></div>' +
+        '<div style="flex:1;min-width:180px"><label>Find</label><input id="q" type="search" placeholder="Name, job, phone, department, town…" style="width:100%"></div>' +
+        '<div><label>Department</label><select id="dF">' + opts(META.departments, '', 'All') + '</select></div>' +
+        '<button id="colB" title="Choose the columns">▦ Columns</button><button id="xlB">Excel</button><button id="csvB">CSV</button><button id="prB">Print</button>' +
+        '<button class="primary" id="addB">+ New employee</button><button id="dfB">⚙ Defaults &amp; fields</button>' +
+        (LIST.staff.some(function (s) { return !s.has_file && s.state !== 'released'; }) ? '<button id="startB">Start a file for everyone</button>' : '') + '</div>' +
+        '<div class="centre"><div id="list" class="scroll"></div><aside id="side" class="side"><div class="empty">Pick someone on the list.</div></aside></div></div>' +
+        '<div class="card" id="todoCard"></div>';
+      function draw() {
+        var rows = filtered(), cols = chosen();
+        $('#list').innerHTML = rows.length ? '<table><thead><tr>' + cols.map(function (c) { return '<th>' + esc(c[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' + rows.map(function (s) {
+          return '<tr class="row' + (String(s.id) === String(sel) ? ' sel' : '') + '" data-u="' + s.id + '">' + cols.map(function (c) { return '<td>' + (c[3] ? c[3](s) : esc(c[2](s) == null ? '' : c[2](s))) + '</td>'; }).join('') + '</tr>';
+        }).join('') + '</tbody></table><p class="sub">' + rows.length + ' of ' + LIST.staff.length + ' shown.</p>' : '<div class="empty">Nobody matches.</div>';
+        all('[data-u]', $('#list')).forEach(function (r) {
+          r.onclick = function () { pick(r.getAttribute('data-u')); };
+          r.ondblclick = function () { openFile(r.getAttribute('data-u')); };
+        });
+        if (!rows.some(function (s) { return String(s.id) === String(sel); })) { if (rows.length) pick(rows[0].id); else { sel = null; $('#side').innerHTML = '<div class="empty">Nobody to show.</div>'; } }
+      }
+      function table() { var rows = filtered(), cols = chosen(); return { header: cols.map(function (c) { return c[1]; }), rows: rows.map(function (s) { return cols.map(function (c) { var x = c[2](s); return x == null ? '' : x; }); }) }; }
+      $('#q').oninput = draw; $('#dF').onchange = draw;
+      $('#stF').onchange = function () { LIST.state = $('#stF').value; sel = null; staffList(v); };
+      $('#colB').onclick = function () { pickColumns(draw); };
+      $('#xlB').onclick = function () { var x = table(); xlsx('staff-' + LIST.state, [{ title: STATEL[LIST.state] + ' staff', header: x.header, rows: x.rows }]); };
+      $('#csvB').onclick = function () { var x = table(); csv('staff-' + LIST.state, [x.header].concat(x.rows)); };
+      $('#prB').onclick = function () { var x = table(); printTable(STATEL[LIST.state] + ' staff', x.header, x.rows); };
+      $('#addB').onclick = function () { newEmployee(); };
+      $('#dfB').onclick = function () { defaultsDialog(); };
+      if ($('#startB')) $('#startB').onclick = function () { api('/api/people/start-files', 'POST').then(function (r) { toast(r.started + ' file(s) started'); staffList(v); }).catch(function (e) { toast(e.message); }); };
+      draw();
+      myTodos();
+    });
+  }
+  function pick(id) {
+    sel = id;
+    all('#list [data-u]').forEach(function (r) { r.classList.toggle('sel', r.getAttribute('data-u') === String(id)); });
+    side(id);
+  }
+  function pickColumns(after) {
+    var have = columns(), on = chosen().map(function (c) { return c[0]; });
+    modal('<h2>Columns</h2><p class="sub">Tick what to show on the list (and in Excel, CSV and print). Kept on this computer.</p><div class="grid">' +
+      have.map(function (c) { return '<label style="display:flex;gap:6px;align-items:center;color:var(--ink)"><input type="checkbox" data-col="' + c[0] + '"' + (on.indexOf(c[0]) >= 0 ? ' checked' : '') + '> ' + esc(c[1]) + '</label>'; }).join('') + '</div>' +
+      '<div class="controls"><button class="primary" id="coOk">Show these</button><button id="coDef">Back to the usual</button><button id="coX">Cancel</button></div>', 2);
+    var save = function (keys) { try { localStorage.setItem(COLS_KEY, JSON.stringify(keys)); } catch (_) {} close(2); after(); };
+    $('#coOk').onclick = function () { var keys = have.map(function (c) { return c[0]; }).filter(function (k) { return $('[data-col="' + k + '"]').checked; }); if (!keys.length) return toast('Tick at least one column'); save(keys); };
+    $('#coDef').onclick = function () { save(COLS_DEFAULT); };
+    $('#coX').onclick = function () { close(2); };
+  }
+  // The panel: who they are, leave, what is due, and their transactions.
+  function avatar(id, has, name, big) {
+    var sz = big ? 84 : 52;
+    return has ? '<img class="ava" style="width:' + sz + 'px;height:' + sz + 'px" alt="" src="/api/people/staff/' + id + '/photo?t=' + Date.now() + '">' :
+      '<span class="ava" style="width:' + sz + 'px;height:' + sz + 'px;font-size:' + (big ? 28 : 18) + 'px">' + esc(String(name || '?').split(/\s+/).map(function (w) { return w.charAt(0); }).slice(0, 2).join('').toUpperCase()) + '</span>';
+  }
+  function side(id) {
+    var el = $('#side'); if (!el) return;
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    api('/api/people/centre/' + id).then(function (d) {
+      if (String(sel) !== String(id)) return;
+      var p = d.person, a = d.access, l = d.leave || {};
+      var kv = function (k, v) { return v == null || v === '' ? '' : '<tr><th>' + esc(k) + '</th><td>' + v + '</td></tr>'; };
+      var sv = serviceYears(p);
+      el.innerHTML = '<div class="who">' + avatar(p.id, p.has_photo, p.name) + '<div><b>' + esc(p.name) + '</b>' + (p.preferred_name ? ' <small class="sub">“' + esc(p.preferred_name) + '”</small>' : '') +
+          '<br><small class="sub">' + esc([p.job_title, p.department].filter(Boolean).join(' · ')) + '</small><br>' + statusPill(p.status) + ' <span class="pill' + (p.state === 'released' ? ' bad' : p.state === 'inactive' ? ' warn' : ' ok') + '">' + STATEL[p.state] + '</span></div></div>' +
+        '<div class="controls" style="margin:8px 0"><button class="primary sm" id="sdOpen">Open file</button><button class="sm" id="sdTodo">+ To do</button><button class="sm" id="sdNote">+ Note</button>' +
+          (p.state === 'released' ? '<button class="sm" id="sdRehire">Rehire</button>' : '<button class="sm" id="sdInact">' + (p.state === 'inactive' ? 'Make active' : 'Make inactive') + '</button><button class="sm" id="sdRel">Release</button>') + '</div>' +
+        '<table class="kv">' + kv('Employee no.', esc(p.employee_no)) + kv('Work phone', esc(p.phone)) + kv('Mobile', esc(p.mobile)) + kv('Email', esc(p.email || p.personal_email)) +
+          kv('Address', esc([p.address, p.town, p.parish].filter(Boolean).join(', '))) + kv('Supervisor', esc(p.manager)) + kv('Hire date', esc(day(p.start_date))) + kv('Adjusted service', esc(day(p.adjusted_service_date))) +
+          kv('Service', sv != null ? sv + ' years' : '') + kv('Release date', esc(day(p.release_date)) + (p.release_reason ? ' <small class="sub">' + esc(p.release_reason) + '</small>' : '')) + kv('Inactive because', esc(p.state === 'inactive' ? p.inactive_reason : '')) +
+          kv('Birthday', esc(p.date_of_birth ? new Date(p.date_of_birth + 'T12:00:00').toLocaleDateString('en-JM', { day: 'numeric', month: 'long' }) : '')) +
+          (a.view ? kv('TRN', esc(p.trn) || '<small class="sub">not recorded</small>') + kv('NIS no.', esc(p.nis_no) || '<small class="sub">not recorded</small>') : kv('TRN / NIS', p.has_trn ? '<small class="sub">recorded in Payroll</small>' : '<small class="sub">not recorded</small>')) + '</table>' +
+        '<h4>Leave ' + (l.year || '') + '</h4>' + (l.year ? '<p class="sub" style="margin:0">Vacation: <b>' + l.vacation_left + '</b> left of ' + (l.accrual === 'monthly' ? l.vacation_earned + ' earned so far (' + l.vacation_entitled + ' a year)' : l.vacation_entitled) + ' · Sick: <b>' + l.sick_left + '</b> left of ' + (l.accrual === 'monthly' ? l.sick_earned : l.sick_entitled) + '</p>' : '') +
+        '<h4>To do</h4>' + (d.todos.length ? d.todos.map(function (x) {
+          return '<div class="task"><input type="checkbox" data-sdt="' + x.id + '"><span>' + esc(x.body) + '<br><small class="sub">' + esc([TODOT[x.todo_type], x.priority === 'high' ? 'high priority' : '', x.due_on ? 'by ' + day(x.due_on) : '', x.assignee ? 'for ' + x.assignee : ''].filter(Boolean).join(' · ')) + '</small></span></div>';
+        }).join('') : '<p class="sub">Nothing to do.</p>') +
+        (d.notes.length ? '<h4>Notes</h4>' + d.notes.map(function (x) { return '<div class="item">' + (x.pinned ? '📌 ' : '') + esc(x.body.length > 160 ? x.body.slice(0, 160) + '…' : x.body) + '<br><small>' + esc(x.by_name || '') + ' · ' + esc(day(x.created_at)) + '</small></div>'; }).join('') : '') +
+        '<h4>Transactions</h4>' + (!a.view ? '<p class="sub">Pay is shown to people with the Payroll permission.</p>' : !p.payroll_id ? '<p class="sub">Not on Payroll.</p>' :
+          (d.ytd ? '<p class="sub" style="margin:0 0 4px">This year: ' + d.ytd.slips + ' payslip(s) · gross <b>' + jmd(d.ytd.gross) + '</b> · PAYE ' + jmd(d.ytd.paye) + ' · net ' + jmd(d.ytd.net) + '</p>' : '') +
+          (d.slips && d.slips.length ? '<table><thead><tr><th>Paid</th><th>Payslip</th><th>Gross</th><th>Net</th></tr></thead><tbody>' + d.slips.map(function (s) {
+            return '<tr' + (s.status === 'void' ? ' style="opacity:.55"' : '') + '><td>' + esc(day(s.pay_date)) + '</td><td>' + esc(s.number || '') + (s.status === 'void' ? ' <small>void</small>' : '') + '</td><td>' + jmd(s.gross) + '</td><td>' + jmd(s.net) + '</td></tr>';
+          }).join('') + '</tbody></table>' : '<p class="sub">No payslips yet.</p>')) +
+        (d.leave_taken.length ? '<h4>Leave taken</h4>' + d.leave_taken.map(function (x) { return '<div><small>' + esc(day(x.from_date)) + (x.to_date !== x.from_date ? ' – ' + esc(day(x.to_date)) : '') + ' · ' + esc(LEAVEK[x.kind] || x.kind) + ' · ' + x.days + ' day' + (x.days === 1 ? '' : 's') + '</small></div>'; }).join('') : '') +
+        '<div class="controls" style="margin-top:8px"><button class="sm" id="sdTrans">All transactions ›</button></div>';
+      $('#sdOpen').onclick = function () { openFile(p.id); };
+      $('#sdTrans').onclick = function () { fileTab = 'trans'; openFile(p.id, true); };
+      $('#sdTodo').onclick = function () { fileTab = 'notes'; openFile(p.id, true); };
+      $('#sdNote').onclick = function () { fileTab = 'notes'; openFile(p.id, true); };
+      var again = function (m) { toast(m); staffList($('#view')); };
+      if ($('#sdInact')) $('#sdInact').onclick = function () { inactiveDialog(p, again); };
+      if ($('#sdRel')) $('#sdRel').onclick = function () { releaseDialog(p, again); };
+      if ($('#sdRehire')) $('#sdRehire').onclick = function () { rehireDialog(p, again); };
+      all('[data-sdt]', el).forEach(function (c) { c.onchange = function () { api('/api/people/notes/' + c.getAttribute('data-sdt'), 'PATCH', { done: true }).then(function () { toast('Done'); side(id); myTodos(); }).catch(function (e) { toast(e.message); }); }; });
+    }).catch(function (e) { el.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+  // Reminders and to do's for me, across everyone.
+  function myTodos() {
+    var el = $('#todoCard'); if (!el) return;
+    api('/api/people/todos?mine=1').then(function (d) {
+      el.innerHTML = '<h2>My HR to do\'s <span class="pill' + (d.todos.length ? ' warn' : ' ok') + '">' + d.todos.length + '</span></h2>' + (d.todos.length ? '<table><tbody>' + d.todos.map(function (x) {
+        var late = x.due_on && x.due_on < today();
+        return '<tr><td style="width:24px"><input type="checkbox" data-mt="' + x.id + '"></td><td><b class="link" data-mu="' + x.user_id + '" style="cursor:pointer">' + esc(x.person) + '</b></td><td>' + esc(x.body) + '</td><td><small>' + esc(TODOT[x.todo_type] || '') + (x.priority === 'high' ? ' · <span class="pill bad">high</span>' : '') + '</small></td>' +
+          '<td>' + (x.due_on ? '<span class="pill' + (late ? ' bad' : '') + '">' + esc(day(x.due_on)) + '</span>' : '') + (x.remind_at ? ' <small class="sub">⏰ ' + esc(when(x.remind_at)) + '</small>' : '') + '</td></tr>';
+      }).join('') + '</tbody></table>' : '<p class="sub">Nothing waiting for you. Add a to do on someone’s file (Notes &amp; To Do’s); you are reminded when its time comes.</p>');
+      all('[data-mt]', el).forEach(function (c) { c.onchange = function () { api('/api/people/notes/' + c.getAttribute('data-mt'), 'PATCH', { done: true }).then(function () { toast('Done'); myTodos(); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-mu]', el).forEach(function (b) { b.onclick = function () { fileTab = 'notes'; openFile(b.getAttribute('data-mu'), true); }; });
+    }).catch(function () { el.innerHTML = ''; });
+  }
+  // Excel: the server writes the .xlsx from the rows shown.
+  function xlsx(name, sheets) {
+    fetch('/api/people/xlsx', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name, sheets: sheets }) })
+      .then(function (r) { if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || 'Could not make the Excel file'); }); return r.blob(); })
+      .then(function (b) { var a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = name + '-' + today() + '.xlsx'; document.body.appendChild(a); a.click(); a.remove(); })
+      .catch(function (e) { toast(e.message); });
+  }
+  function printTable(title, header, rows, note) {
+    var w = window.open('', '_blank'); if (!w) return toast('Allow pop-ups to print');
+    w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title><style>body{font:12px Arial,sans-serif;margin:18px}h1{font-size:16px;margin:0 0 4px}table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #ccc;padding:4px 6px;text-align:left;vertical-align:top}th{font-size:11px;text-transform:uppercase}p{color:#555;margin:0 0 10px}</style></head><body>' +
+      '<h1>' + esc(title) + '</h1><p>Morty\'s Auto Parts · ' + esc(new Date().toLocaleString('en-JM')) + (note ? ' · ' + esc(note) : '') + '</p><table><thead><tr>' + header.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+      rows.map(function (r) { return '<tr>' + r.map(function (c) { return '<td>' + esc(c) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table><script>window.onload=function(){window.print()}<\/script></body></html>');
+    w.document.close();
+  }
+
+  // ------------------------------------------------------------ the file --
+  var FT = [['personal', 'Personal'], ['address', 'Address & contact'], ['additional', 'Additional info'], ['payroll', 'Payroll info'], ['employment', 'Employment'], ['contacts', 'Emergency contacts'],
+    ['job', 'Job & pay history'], ['conduct', 'Probation & conduct'], ['leave', 'Leave'], ['reviews', 'Reviews & goals'], ['notes', 'Notes & To Do’s'], ['trans', 'Transactions'],
+    ['contracts', 'Contracts'], ['sign', 'To sign'], ['docs', 'Documents'], ['tasks', 'Checklists'], ['exit', 'Leaving'], ['log', 'History']];
+  var fileTab = 'personal';
+  function stateOf(u, p) { return u.is_archived || p.status === 'left' || (p.release_date && p.release_date < today()) ? 'released' : p.inactive ? 'inactive' : 'active'; }
+  function openFile(uid, keepTab) {
+    if (!keepTab) fileTab = 'personal';
+    history.replaceState(null, '', '#staff=' + uid);
+    return api('/api/people/staff/' + uid).then(function (f) {
+      var u = f.user, p = f.profile || {}, st = stateOf(u, p);
+      var mo = modal('<div class="who">' + avatar(u.id, p.has_photo, u.name || u.email) + '<div><h2 style="margin:0">' + esc(u.name || u.email) + (p.preferred_name ? ' <small class="sub">“' + esc(p.preferred_name) + '”</small>' : '') + ' ' + statusPill(u.is_archived ? 'left' : (p.status || 'active')) +
+          (st !== 'active' ? ' <span class="pill' + (st === 'released' ? ' bad' : ' warn') + '">' + STATEL[st] + '</span>' : '') + '</h2>' +
+        '<p class="sub" style="margin:2px 0 0">' + esc([p.job_title, p.department, p.manager ? 'reports to ' + p.manager : '', u.email && !/\.local$/i.test(u.email) ? u.email : '', u.phone].filter(Boolean).join(' · ')) + '</p></div></div>' +
+        (!f.profile ? '<div class="warn">This file has not been started. Fill in Personal or Employment and save to start it.</div>' : '') +
+        '<div class="ftabs">' + FT.map(function (t) { return '<button data-ft="' + t[0] + '"' + (t[0] === fileTab ? ' class="on"' : '') + '>' + t[1] + '</button>'; }).join('') + '</div><div id="fp"></div>' +
+        '<div class="controls" style="margin-top:12px"><button id="fPrint">Print</button><button id="fX">Close</button></div>');
+      $('#fX').onclick = function () { close(); };
+      $('#fPrint').onclick = function () { window.print(); };
+      all('[data-ft]', mo).forEach(function (b) { b.onclick = function () { fileTab = b.getAttribute('data-ft'); all('[data-ft]', mo).forEach(function (x) { x.classList.toggle('on', x === b); }); pane(f); }; });
+      pane(f);
+    }).catch(function (e) { toast(e.message); });
+  }
+  function reopen(f, msg) { if (msg) toast(msg); openFile(f.user.id, true); if (tab === 'staff') staffList($('#view')); }
+  function pane(f) {
+    var el = $('#fp'), u = f.user, p = f.profile || {}, uid = u.id;
+    var fail = function (e) { toast(e.message); };
+    var save = function (body, msg) { return api('/api/people/staff/' + uid + '/profile', 'PUT', body).then(function (r) { reopen(f, r.changed.length ? (msg || 'Saved') : 'Nothing changed'); }).catch(fail); };
+    var sel3 = function (id, v) { return '<select id="' + id + '"><option value="">–</option><option value="yes"' + (v === true ? ' selected' : '') + '>Yes</option><option value="no"' + (v === false ? ' selected' : '') + '>No</option></select>'; };
+    var H = {
+      personal: function () {
+        el.innerHTML = '<div class="who">' + avatar(uid, p.has_photo, u.name, true) + '<div><label class="sub">Photo</label><br><input type="file" id="phF" accept="image/*"> ' + (p.has_photo ? '<button class="sm" id="phDel">Remove photo</button>' : '') + '</div></div>' +
+          '<div class="grid">' + field('Mr / Ms', '<select id="pSal">' + opts(SALUT.map(function (s) { return [s, s]; }), p.salutation, '–') + '</select>') + field('Full name', inp('pNm', u.name)) +
+          field('Legal name (as on the TRN card)', inp('pLn', p.legal_name)) + field('Preferred name (what we call them)', inp('pPn', p.preferred_name)) +
+          field('Gender', '<select id="pG">' + opts(pairs(GENDER), p.gender, '–') + '</select>') + field('Date of birth', inp('pDob', p.date_of_birth, 'date')) +
+          field('Marital status', '<select id="pMs">' + opts(pairs(MARITAL), p.marital_status, '–') + '</select>') + field('Employee type', '<select id="pTy">' + opts(pairs(EMPTYPE), p.employee_type || 'regular') + '</select>') + '</div>' +
+          '<div class="controls"><button class="primary" id="pSave">Save</button></div>' +
+          '<h4>TRN and NIS number</h4><div id="ids"><p class="sub">Loading…</p></div>';
+        $('#pSave').onclick = function () { save({ salutation: $('#pSal').value, name: $('#pNm').value, legal_name: $('#pLn').value, preferred_name: $('#pPn').value, gender: $('#pG').value, date_of_birth: $('#pDob').value, marital_status: $('#pMs').value, employee_type: $('#pTy').value }); };
+        $('#phF').onchange = function () {
+          var file = $('#phF').files[0]; if (!file) return;
+          if (file.size > 8 * 1024 * 1024) return toast('That photo is too big (8 MB at most)');
+          var rd = new FileReader();
+          rd.onload = function () { api('/api/people/staff/' + uid + '/photo', 'POST', { data: rd.result }).then(function () { reopen(f, 'Photo saved'); }).catch(fail); };
+          rd.readAsDataURL(file);
+        };
+        if ($('#phDel')) $('#phDel').onclick = function () { api('/api/people/staff/' + uid + '/photo', 'DELETE').then(function () { reopen(f, 'Photo removed'); }).catch(fail); };
+        api('/api/people/centre/' + uid).then(function (d) {
+          var x = d.person, a = d.access, box = $('#ids'); if (!box) return;
+          if (a.run) {
+            box.innerHTML = '<p class="sub">Kept in <a href="/payroll.html">Payroll</a> for PAYE, NIS, NHT and Education Tax (the S01 and P24).' + (x.payroll_id ? '' : ' Saving them adds this person to Payroll with pay switched off.') + '</p>' +
+              '<div class="controls"><div><label>TRN</label><input id="iT" value="' + esc(x.trn || '') + '" placeholder="123-456-789"></div><div><label>NIS no.</label><input id="iN" value="' + esc(x.nis_no || '') + '" placeholder="A123456"></div><button id="iSave">Save TRN and NIS</button></div>';
+            $('#iSave').onclick = function () { api('/api/people/staff/' + uid + '/ids', 'PUT', { trn: $('#iT').value, nis_no: $('#iN').value }).then(function (r) { reopen(f, r.added_to_payroll ? 'Saved, and added to Payroll (pay off)' : 'Saved'); }).catch(fail); };
+          } else box.innerHTML = '<p class="sub">' + (a.view ? 'TRN ' + esc(x.trn || 'not recorded') + ' · NIS ' + esc(x.nis_no || 'not recorded') + '. ' : (x.has_trn ? 'Recorded in Payroll. ' : 'Not recorded yet. ') + '') + 'Only someone who may change pay sees them in full or changes them.</p>';
+        }).catch(function () {});
+      },
+      address: function () {
+        el.innerHTML = '<p class="sub">Work email and work phone are their staff record’s, changed on <a href="/admin.html#tab=staff">Users &amp; Staff</a>: ' + esc([u.email && !/\.local$/i.test(u.email) ? u.email : 'no work email', u.phone || 'no work phone'].join(' · ')) + '.</p>' +
+          '<div class="grid">' + field('Mobile', inp('aMo', p.mobile, 'tel')) + field('Home phone', inp('aPh', p.personal_phone, 'tel')) + field('Personal email', inp('aEm', p.personal_email, 'email')) +
+          field('Town / district', inp('aTw', p.town)) + field('Parish', '<input id="aPa" list="parishes" value="' + esc(p.parish || '') + '">') + '</div>' +
+          '<datalist id="parishes">' + PARISHES.map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>' +
+          '<label class="sub">Street address</label><textarea id="aA" rows="2">' + esc(p.address || '') + '</textarea>' +
+          '<div class="controls" style="margin-top:8px"><button class="primary" id="aSave">Save</button></div><p class="sub">Next of kin and who to call in an emergency: the Emergency contacts tab.</p>';
+        $('#aSave').onclick = function () { save({ mobile: $('#aMo').value, personal_phone: $('#aPh').value, personal_email: $('#aEm').value, town: $('#aTw').value, parish: $('#aPa').value, address: $('#aA').value }); };
+      },
+      additional: function () {
+        el.innerHTML = '<div class="empty">Loading…</div>';
+        api('/api/people/staff/' + uid + '/custom').then(function (d) {
+          el.innerHTML = '<p class="sub">Fields the shop keeps on everyone (uniform size, licence number, locker…). A manager adds them under <b>⚙ Defaults &amp; fields</b>.</p>' +
+            (d.fields.length ? '<div class="grid">' + d.fields.map(function (x) {
+              var id = 'cf' + x.id, v = x.value == null ? '' : x.value;
+              var h = x.kind === 'list' ? '<select id="' + id + '">' + opts(x.options.map(function (o) { return [o, o]; }), v, '–') + '</select>' :
+                x.kind === 'yesno' ? '<select id="' + id + '"><option value="">–</option><option value="yes"' + (v === 'yes' ? ' selected' : '') + '>Yes</option><option value="no"' + (v === 'no' ? ' selected' : '') + '>No</option></select>' :
+                inp(id, v, x.kind === 'date' ? 'date' : x.kind === 'number' ? 'number' : 'text');
+              return field(x.label, h);
+            }).join('') + '</div><div class="controls"><button class="primary" id="cfSave">Save</button><button id="cfDef">Define fields</button></div>' :
+            '<div class="empty">No fields defined yet.</div><div class="controls"><button id="cfDef">Define fields</button></div>');
+          if ($('#cfSave')) $('#cfSave').onclick = function () { var values = {}; d.fields.forEach(function (x) { if ($('#cf' + x.id)) values[x.id] = $('#cf' + x.id).value; }); api('/api/people/staff/' + uid + '/custom', 'PUT', { values: values }).then(function (r) { reopen(f, r.changed.length ? 'Saved' : 'Nothing changed'); }).catch(fail); };
+          $('#cfDef').onclick = function () { fieldsDialog(function () { pane(f); }); };
+        }).catch(function (e) { el.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+      },
+      payroll: function () { payrollPane(el, f); },
+      employment: function () {
+        var st = stateOf(u, p);
+        el.innerHTML = '<div class="grid">' + field('Original hire date', inp('eS', p.start_date || (f.payroll && f.payroll.hire_date), 'date')) + field('Adjusted service date', inp('eAs', p.adjusted_service_date, 'date')) +
+          field('Release date (last day worked)', inp('eRd', p.release_date, 'date')) + field('Eligible for rehire', sel3('eRh', p.rehire_eligible)) +
+          field('Job title', inp('eT', p.job_title)) + field('Department', '<select id="eD">' + opts(META.departments, p.department_id, '–') + '</select>') + field('Supervisor (reports to)', '<select id="eM">' + opts(META.people.filter(function (x) { return x.id !== uid; }), p.manager_user_id, '–') + '</select>') +
+          field('Works at', inp('eW', p.work_location)) + field('Contract', '<select id="eC">' + opts(pairs(CONTRACT), p.contract_type || 'permanent') + '</select>') + field('Contract ends (fixed term)', inp('eCe', p.contract_end, 'date')) +
+          field('Status', '<select id="eSt">' + opts(pairs(STATUS), p.status || 'active') + '</select>') + field('Probation (months)', inp('ePm', p.probation_months != null ? p.probation_months : 3, 'number')) + field('Probation ends', inp('ePe', p.probation_end, 'date')) + '</div>' +
+          (p.release_reason ? '<p class="sub">Released: ' + esc(p.release_reason) + '</p>' : '') + (p.inactive ? '<div class="warn">Inactive' + (p.inactive_reason ? ': ' + esc(p.inactive_reason) : '') + '. Not on the active list until made active again.</div>' : '') +
+          '<label class="sub">Job description</label><textarea id="eJd" rows="4">' + esc(p.job_description || '') + '</textarea>' +
+          '<label class="sub">HR notes (only HR sees these)</label><textarea id="eN" rows="2">' + esc(p.notes || '') + '</textarea>' +
+          (p.confirmed_on ? '<p class="sub">Confirmed in post on ' + esc(day(p.confirmed_on)) + '.</p>' : '') +
+          '<p class="sub">The adjusted service date counts their service after a break (or a rehire); left blank, service counts from the hire date. Training: <a href="/training.html#people">' + ((f.training && f.training.records) || 0) + ' records</a>' + (f.training && f.training.expiring ? ', ' + f.training.expiring + ' expiring soon' : '') + '.' +
+          (f.applications && f.applications.length ? ' Hired from application <a href="/hiring.html#app=' + f.applications[0].id + '">' + esc(f.applications[0].ref || '#' + f.applications[0].id) + '</a>.' : '') + '</p>' +
+          '<div class="controls"><button class="primary" id="eSave">Save</button>' + (st === 'released' ? '<button id="eRe">Rehire…</button>' : '<button id="eIn">' + (st === 'inactive' ? 'Make active' : 'Make inactive…') + '</button><button id="eRel">Release…</button>') + '</div>';
+        $('#eSave').onclick = function () {
+          var body = { start_date: $('#eS').value, adjusted_service_date: $('#eAs').value, release_date: $('#eRd').value, rehire_eligible: $('#eRh').value, job_title: $('#eT').value, department_id: $('#eD').value, manager_user_id: $('#eM').value,
+            work_location: $('#eW').value, contract_type: $('#eC').value, contract_end: $('#eCe').value, status: $('#eSt').value, probation_months: $('#ePm').value, job_description: $('#eJd').value, notes: $('#eN').value };
+          // A probation end typed in wins; left as it was, it follows the start date.
+          if ($('#ePe').value !== (p.probation_end || '')) body.probation_end = $('#ePe').value;
+          save(body);
+        };
+        var person = { id: uid, name: u.name, state: st, rehire_eligible: p.rehire_eligible, is_archived: u.is_archived, job_title: p.job_title, department_id: p.department_id, manager_user_id: p.manager_user_id, contract_type: p.contract_type };
+        var after = function (m) { reopen(f, m); };
+        if ($('#eRe')) $('#eRe').onclick = function () { rehireDialog(person, after); };
+        if ($('#eIn')) $('#eIn').onclick = function () { inactiveDialog(person, after); };
+        if ($('#eRel')) $('#eRel').onclick = function () { releaseDialog(person, after); };
+      },
+      notes: function () { notesPane(el, f); },
+      trans: function () { transPane(el, f, new Date().getFullYear()); },
+      contacts: function () { contactsPane(el, f.contacts, '/api/people/staff/' + uid + '/contacts', function (m) { reopen(f, m); }); },
+      job: function () {
+        el.innerHTML = '<p class="sub">Every change to the job or pay, newest first. A change dated today or earlier becomes the current job. Tick “pass on to Payroll” to change their pay there too' + (META.can_payroll ? '' : ' (only someone who may change pay can do that)') + '.</p>' +
+          '<div class="grid">' + field('What changed', '<select id="jK">' + opts(pairs(JOBK).filter(function (x) { return x[0] !== 'confirmation'; }), 'promotion') + '</select>') + field('From', inp('jE', today(), 'date')) + field('New job title', inp('jT', '')) +
+          field('New department', '<select id="jD">' + opts(META.departments, '', 'No change') + '</select>') + field('New manager', '<select id="jM">' + opts(META.people.filter(function (x) { return x.id !== uid; }), '', 'No change') + '</select>') +
+          field('New yearly salary (J$)', inp('jS', '')) + field('New hourly rate (J$)', inp('jH', '')) + '</div>' +
+          '<label class="sub">Reason</label><input id="jR" style="width:100%"><div class="controls" style="margin-top:8px"><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="jP"' + (META.can_payroll && f.payroll ? '' : ' disabled') + '> Pass the new pay on to Payroll</label><button class="primary" id="jGo">Record it</button></div>' +
+          (f.history.length ? '<div class="scroll"><table><thead><tr><th>From</th><th>What</th><th>Job</th><th>Department / manager</th><th>Pay</th><th>Reason</th><th></th></tr></thead><tbody>' + f.history.map(function (h) {
+            return '<tr><td>' + esc(day(h.effective_date)) + '</td><td>' + esc(JOBK[h.kind] || h.kind) + '</td><td>' + esc(h.job_title || '') + '</td><td>' + esc([h.department, h.manager].filter(Boolean).join(' / ')) + '</td>' +
+              '<td>' + (h.salary_annual != null ? jmd(h.salary_annual) + '/yr' : '') + (h.hourly_rate != null ? jmd(h.hourly_rate) + '/hr' : '') + (h.applied_to_payroll ? '<br><small>in Payroll</small>' : '') + '</td><td><small>' + esc(h.reason || '') + '<br>' + esc(h.by_name || '') + '</small></td>' +
+              '<td><button class="sm" data-jdel="' + h.id + '" title="Entered by mistake">✕</button></td></tr>';
+          }).join('') + '</tbody></table></div>' : '<div class="empty">No history yet. Record their start first.</div>');
+        $('#jGo').onclick = function () {
+          api('/api/people/staff/' + uid + '/job', 'POST', { kind: $('#jK').value, effective_date: $('#jE').value, job_title: $('#jT').value, department_id: $('#jD').value, manager_user_id: $('#jM').value, salary_annual: $('#jS').value, hourly_rate: $('#jH').value, reason: $('#jR').value, apply_payroll: $('#jP').checked })
+            .then(function (r) { reopen(f, r.payroll_updated ? 'Recorded, and Payroll updated' : 'Recorded'); }).catch(fail);
+        };
+        all('[data-jdel]', el).forEach(function (b) { b.onclick = function () { if (confirm('Remove this line? Use it only for a mistake. Pay already passed on to Payroll is not changed back.')) api('/api/people/staff/' + uid + '/job/' + b.getAttribute('data-jdel'), 'DELETE').then(function () { reopen(f, 'Removed'); }).catch(fail); }; });
+      },
+      conduct: function () {
+        el.innerHTML = (p.status === 'probation' ? '<div class="warn"><b>On probation</b>' + (p.probation_end ? ' until ' + esc(day(p.probation_end)) : '') + '. Best done with an end-of-probation review (Reviews &amp; goals), or here: ' +
+            '<button class="sm" id="prOk">Confirm in post</button> <button class="sm" id="prExt">Extend</button></div>' : '') +
+          '<h4>Warnings, discipline and commendations</h4><div class="grid">' + field('Kind', '<select id="cK">' + opts(pairs(CASEK), 'verbal_warning') + '</select>') + field('Date of what happened', inp('cD', today(), 'date')) + field('Stays on file until', inp('cE', '', 'date')) + '</div>' +
+          '<label class="sub">What happened, in a line</label><input id="cS" style="width:100%"><label class="sub">The details (facts, what was said, who was there)</label><textarea id="cDt" rows="3"></textarea>' +
+          '<label class="sub">What happens next (the improvement expected, the next step)</label><textarea id="cA" rows="2"></textarea>' +
+          '<div class="controls" style="margin-top:8px"><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="cL" checked> File the letter in their staff file (Document centre)</label><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="cT" checked> Tell them (a notice to read it in My HR file)</label><button class="primary" id="cGo">Record it</button></div>' +
+          (f.cases.length ? f.cases.map(function (c) {
+            var live = c.status === 'open' && (!c.expires_on || c.expires_on >= today());
+            return '<div class="item"><b>' + esc(CASEK[c.kind]) + '</b> · ' + esc(day(c.incident_date)) + ' <span class="pill' + (c.kind === 'commendation' ? ' ok' : live ? ' bad' : '') + '">' + esc(c.status) + (c.expires_on ? ', until ' + esc(day(c.expires_on)) : '') + '</span>' +
+              '<br>' + esc(c.summary) + (c.action ? '<br><small>Next: ' + esc(c.action) + '</small>' : '') +
+              '<br><small>' + esc(c.issued_by_name || '') + (c.document_number ? ' · letter ' + esc(c.document_number) : '') + (c.acknowledged_at ? ' · received by them ' + esc(day(c.acknowledged_at)) : ' · not yet acknowledged') + (c.employee_response ? ' · their reply: “' + esc(c.employee_response) + '”' : '') + '</small>' +
+              '<div style="margin-top:4px">' + (c.document_id ? '<button class="sm" data-csign="' + c.id + '">✍ Send to sign</button> ' : '') + (c.status === 'open' ? '<button class="sm" data-cst="' + c.id + ':closed">Close</button> <button class="sm" data-cst="' + c.id + ':appealed">Appealed</button> <button class="sm" data-cst="' + c.id + ':withdrawn">Withdraw</button>' : '<button class="sm" data-cst="' + c.id + ':open">Reopen</button>') + '</div></div>';
+          }).join('') : '<p class="sub">Nothing recorded.</p>');
+        if ($('#prOk')) $('#prOk').onclick = function () { var n = prompt('A note for the file (optional)', 'Probation passed'); if (n === null) return; api('/api/people/staff/' + uid + '/probation', 'POST', { outcome: 'confirm', note: n }).then(function () { reopen(f, 'Confirmed in post'); }).catch(fail); };
+        if ($('#prExt')) $('#prExt').onclick = function () { var u2 = prompt('Extend probation to (YYYY-MM-DD)', ''); if (!u2) return; api('/api/people/staff/' + uid + '/probation', 'POST', { outcome: 'extend', until: u2, note: prompt('Why?', '') || '' }).then(function () { reopen(f, 'Probation extended'); }).catch(fail); };
+        $('#cGo').onclick = function () {
+          api('/api/people/staff/' + uid + '/cases', 'POST', { kind: $('#cK').value, incident_date: $('#cD').value, expires_on: $('#cE').value, summary: $('#cS').value, details: $('#cDt').value, action: $('#cA').value, file_letter: $('#cL').checked, tell: $('#cT').checked })
+            .then(function (r) { reopen(f, r.document ? 'Recorded; letter filed as ' + r.document.number : 'Recorded'); }).catch(fail);
+        };
+        all('[data-csign]', el).forEach(function (b) { b.onclick = function () { sendToSign(f, { case_id: +b.getAttribute('data-csign'), kind: 'letter' }); }; });
+        all('[data-cst]', el).forEach(function (b) { b.onclick = function () { var x = b.getAttribute('data-cst').split(':'); api('/api/people/staff/' + uid + '/cases/' + x[0], 'PATCH', { status: x[1], note: prompt('Note (optional)', '') || '' }).then(function () { reopen(f, 'Updated'); }).catch(fail); }; });
+      },
+      leave: function () {
+        var l = f.leave || {};
+        el.innerHTML = '<p class="sub">The yearly allowance is set in <a href="/payroll.html">Payroll</a> (per person, or the shop’s number of days). Days off are recorded in <a href="/attendance.html#leave">Attendance › Leave</a>. Here you add or take off days: carried over from last year, long service, or a correction.</p>' +
+          (l.accrual === 'monthly' ? '<p class="sub">Leave builds up a twelfth each month worked (Payroll info tab): ' + l.vacation_earned + ' vacation and ' + l.sick_earned + ' sick days earned so far this year.</p>' : '') +
+          '<div class="kpis"><div class="kpi"><b>' + (l.vacation_left != null ? l.vacation_left : '–') + '</b><span>vacation days left of ' + (l.accrual === 'monthly' ? l.vacation_earned : l.vacation_entitled != null ? l.vacation_entitled : '–') + ' (' + (l.vacation_taken || 0) + ' taken)</span></div>' +
+          '<div class="kpi"><b>' + (l.sick_left != null ? l.sick_left : '–') + '</b><span>sick days left of ' + (l.accrual === 'monthly' ? l.sick_earned : l.sick_entitled != null ? l.sick_entitled : '–') + ' (' + (l.sick_taken || 0) + ' taken)</span></div>' +
+          '<div class="kpi"><b>' + ((l.unpaid_taken || 0) + (l.other_taken || 0)) + '</b><span>unpaid or other days this year</span></div></div>' +
+          '<div class="controls"><div><label>Year</label><input id="lY" type="number" value="' + new Date().getFullYear() + '" style="width:90px"></div><div><label>Kind</label><select id="lK"><option value="vacation">Vacation</option><option value="sick">Sick</option></select></div>' +
+          '<div><label>Days (minus to take off)</label><input id="lD" type="number" step="0.5" style="width:110px"></div><div style="flex:1;min-width:200px"><label>Reason</label><input id="lR" style="width:100%" placeholder="e.g. 3 days carried over from 2025"></div><button class="primary" id="lGo">Add</button></div>' +
+          (f.leave_adjustments.length ? '<table><thead><tr><th>Year</th><th>Kind</th><th>Days</th><th>Reason</th><th>By</th><th></th></tr></thead><tbody>' + f.leave_adjustments.map(function (a) { return '<tr><td>' + a.year + '</td><td>' + esc(a.kind) + '</td><td>' + (a.days > 0 ? '+' : '') + a.days + '</td><td>' + esc(a.reason || '') + '</td><td>' + esc(a.by_name || '') + '</td><td><button class="sm" data-ldel="' + a.id + '">✕</button></td></tr>'; }).join('') + '</tbody></table>' : '');
+        $('#lGo').onclick = function () { api('/api/people/staff/' + uid + '/leave-adjustments', 'POST', { year: $('#lY').value, kind: $('#lK').value, days: $('#lD').value, reason: $('#lR').value }).then(function () { reopen(f, 'Allowance changed'); }).catch(fail); };
+        all('[data-ldel]', el).forEach(function (b) { b.onclick = function () { api('/api/people/staff/' + uid + '/leave-adjustments/' + b.getAttribute('data-ldel'), 'DELETE').then(function () { reopen(f, 'Removed'); }).catch(fail); }; });
+      },
+      reviews: function () {
+        el.innerHTML = '<h4>Reviews</h4><div class="controls"><div><label>Kind</label><select id="rK">' + opts(pairs(REVK), p.status === 'probation' ? 'probation' : 'annual') + '</select></div><div><label>Due</label><input id="rD" type="date" value="' + esc(p.status === 'probation' && p.probation_end ? p.probation_end : '') + '"></div>' +
+          '<div><label>Reviewer</label><select id="rR">' + opts(META.people.filter(function (x) { return x.id !== uid; }), p.manager_user_id || '', 'Me') + '</select></div><div><label>Period from</label><input id="rF" type="date"></div><div><label>to</label><input id="rT" type="date"></div><button class="primary" id="rGo">Set up a review</button></div>' +
+          (f.reviews.length ? f.reviews.map(function (r) {
+            return '<div class="item"><b>' + esc(REVK[r.kind]) + ' review</b>' + (r.due_on ? ' · due ' + esc(day(r.due_on)) : '') + ' · ' + esc(r.reviewer || '') + ' <span class="pill' + (r.status === 'draft' ? (r.due_on && r.due_on < today() ? ' bad' : ' warn') : ' ok') + '">' + (r.status === 'draft' ? 'to do' : r.status === 'done' ? 'done, waiting for them to sign' : 'signed by them') + '</span>' +
+              (r.overall ? ' <b>' + r.overall + '/5</b>' : '') + (r.outcome ? ' · outcome: ' + esc(r.outcome) : '') + (r.employee_comments ? '<br><small>Their comments: “' + esc(r.employee_comments) + '”</small>' : '') +
+              '<div style="margin-top:4px"><button class="sm" data-rev="' + r.id + '">' + (r.status === 'draft' ? 'Fill in' : 'Open') + '</button></div></div>';
+          }).join('') : '<p class="sub">No reviews yet.</p>') +
+          '<h4>Goals</h4><div class="controls"><div style="flex:1;min-width:200px"><label>Goal</label><input id="gT" style="width:100%" placeholder="e.g. Learn the Toyota parts catalogue"></div><div style="flex:1;min-width:160px"><label>How we know it is done</label><input id="gM" style="width:100%"></div><div><label>By</label><input id="gD" type="date"></div><button class="primary" id="gGo">Add</button></div>' +
+          (f.goals.length ? f.goals.map(function (g) {
+            return '<div class="item" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1;min-width:200px"><b>' + esc(g.title) + '</b>' + (g.due_on ? ' · by ' + esc(day(g.due_on)) : '') + (g.measure ? '<br><small>' + esc(g.measure) + '</small>' : '') + '</span>' +
+              '<div class="bar" style="width:120px"><i style="width:' + g.progress + '%"></i></div><small>' + g.progress + '%</small><span class="pill' + (g.status === 'done' ? ' ok' : g.status === 'dropped' ? '' : ' warn') + '">' + esc(g.status) + '</span>' +
+              '<select data-gp="' + g.id + '">' + [0, 25, 50, 75, 100].map(function (n) { return '<option value="' + n + '"' + (g.progress === n ? ' selected' : '') + '>' + n + '%</option>'; }).join('') + '</select>' +
+              '<button class="sm" data-gs="' + g.id + ':done">Done</button><button class="sm" data-gs="' + g.id + ':dropped">Drop</button><button class="sm" data-gdel="' + g.id + '">✕</button></div>';
+          }).join('') : '<p class="sub">No goals yet.</p>');
+        $('#rGo').onclick = function () { api('/api/people/staff/' + uid + '/reviews', 'POST', { kind: $('#rK').value, due_on: $('#rD').value, reviewer_id: $('#rR').value, period_from: $('#rF').value, period_to: $('#rT').value }).then(function () { reopen(f, 'Review set up; the reviewer is told'); }).catch(fail); };
+        all('[data-rev]', el).forEach(function (b) { b.onclick = function () { reviewForm(f, f.reviews.filter(function (r) { return String(r.id) === b.getAttribute('data-rev'); })[0]); }; });
+        $('#gGo').onclick = function () { api('/api/people/staff/' + uid + '/goals', 'POST', { title: $('#gT').value, measure: $('#gM').value, due_on: $('#gD').value }).then(function () { reopen(f, 'Goal added'); }).catch(fail); };
+        var goal = function (id) { return f.goals.filter(function (g) { return String(g.id) === String(id); })[0]; };
+        var putGoal = function (g, ch) { api('/api/people/staff/' + uid + '/goals/' + g.id, 'PUT', Object.assign({}, g, ch)).then(function () { reopen(f, 'Goal updated'); }).catch(fail); };
+        all('[data-gp]', el).forEach(function (s) { s.onchange = function () { putGoal(goal(s.getAttribute('data-gp')), { progress: +s.value, status: +s.value === 100 ? 'done' : 'open' }); }; });
+        all('[data-gs]', el).forEach(function (b) { b.onclick = function () { var x = b.getAttribute('data-gs').split(':'); putGoal(goal(x[0]), { status: x[1] }); }; });
+        all('[data-gdel]', el).forEach(function (b) { b.onclick = function () { if (confirm('Remove this goal?')) api('/api/people/staff/' + uid + '/goals/' + b.getAttribute('data-gdel'), 'DELETE').then(function () { reopen(f, 'Removed'); }).catch(fail); }; });
+      },
+      docs: function () {
+        el.innerHTML = '<div class="empty">Loading…</div>';
+        api('/api/docs/for/staff/' + uid).then(function (d) {
+          el.innerHTML = '<p class="sub">Their papers in the <a href="/documents.html">Document centre</a>: contract, offer letter, IDs, warnings, appraisals, certificates. To add one, file it there and link it to this staff member. Opening a document is logged there.</p>' +
+            (d.documents.length ? '<table><thead><tr><th>Number</th><th>Document</th><th>Kind</th><th>Expires</th><th>Filed</th></tr></thead><tbody>' + d.documents.map(function (x) {
+              return '<tr><td>' + esc(x.number) + '</td><td><a href="/api/docs/' + x.id + '/file" target="_blank" rel="noopener">' + esc(x.title) + '</a></td><td>' + esc(x.category) + ' <small class="sub">' + esc(x.confidentiality) + '</small></td><td>' + esc(day(x.expiry_date)) + '</td><td>' + esc(day(x.created_at)) + '</td></tr>';
+            }).join('') + '</tbody></table>' : '<div class="empty">Nothing filed for them yet.</div>') + '<div class="controls" style="margin-top:8px"><a href="/documents.html"><button>Open the Document centre</button></a></div>';
+        }).catch(function (e) { el.innerHTML = '<div class="empty">' + esc(e.message) + ' (seeing staff files in the Document centre needs the Documents permissions)</div>'; });
+      },
+      tasks: function () {
+        var groups = { onboarding: 'Starting', offboarding: 'Leaving', other: 'Other' };
+        el.innerHTML = '<div class="controls"><div style="flex:1;min-width:200px"><label>Something to do</label><input id="tT" style="width:100%"></div><div><label>By</label><input id="tD" type="date"></div><div><label>Who</label><select id="tA">' + opts(META.people, '', 'Me') + '</select></div><button class="primary" id="tGo">Add</button>' +
+          (f.tasks.some(function (k) { return k.kind === 'onboarding'; }) ? '' : '<button id="tOn">Add the new-starter checklist</button>') + '</div>' +
+          (f.tasks.length ? Object.keys(groups).filter(function (g) { return f.tasks.some(function (k) { return k.kind === g; }); }).map(function (g) {
+            var list = f.tasks.filter(function (k) { return k.kind === g; }), done = list.filter(function (k) { return k.done_at; }).length;
+            return '<h4>' + groups[g] + ' (' + done + ' of ' + list.length + ' done)</h4>' + list.map(function (k) {
+              return '<div class="task' + (k.done_at ? ' done' : '') + '"><input type="checkbox" data-tk="' + k.id + '"' + (k.done_at ? ' checked' : '') + '><span>' + esc(k.title) + (k.link ? ' <a href="' + esc(k.link) + '" target="_blank">open ›</a>' : '') +
+                '<br><small class="sub">' + esc([k.assignee ? 'for ' + k.assignee : '', k.due_on ? 'by ' + day(k.due_on) : '', k.done_at ? 'done ' + day(k.done_at) + ' by ' + (k.done_by_name || '') : ''].filter(Boolean).join(' · ')) + '</small></span><button class="sm" data-tdel="' + k.id + '">✕</button></div>';
+            }).join('');
+          }).join('') : '<p class="sub">No checklist. New hires get the starter checklist automatically.</p>');
+        $('#tGo').onclick = function () { api('/api/people/staff/' + uid + '/tasks', 'POST', { title: $('#tT').value, due_on: $('#tD').value, assignee_id: $('#tA').value }).then(function () { reopen(f, 'Added'); }).catch(fail); };
+        if ($('#tOn')) $('#tOn').onclick = function () { api('/api/people/staff/' + uid + '/tasks', 'POST', { template: 'onboarding', due_on: p.start_date }).then(function () { reopen(f, 'Checklist added'); }).catch(fail); };
+        all('[data-tk]', el).forEach(function (c) { c.onchange = function () { api('/api/people/tasks/' + c.getAttribute('data-tk'), 'PATCH', { done: c.checked }).then(function () { reopen(f); }).catch(fail); }; });
+        all('[data-tdel]', el).forEach(function (b) { b.onclick = function () { if (confirm('Remove this item?')) api('/api/people/tasks/' + b.getAttribute('data-tdel'), 'DELETE').then(function () { reopen(f, 'Removed'); }).catch(fail); }; });
+      },
+      exit: function () {
+        var x = f.exits.filter(function (e) { return e.status === 'open'; })[0];
+        if (!x) {
+          el.innerHTML = (f.exits.length ? f.exits.map(function (e) { return '<div class="item"><b>' + esc(EXITK[e.kind]) + '</b> · last day ' + esc(day(e.last_day)) + ' <span class="pill">' + esc(e.status) + '</span>' + (e.reason ? '<br><small>' + esc(e.reason) + '</small>' : '') + (e.exit_interview ? '<br><small>Exit interview: ' + esc(e.exit_interview) + '</small>' : '') + (e.rehire != null ? '<br><small>Would take back: ' + (e.rehire ? 'yes' : 'no') + '</small>' : '') + '</div>'; }).join('') : '') +
+            (u.is_archived ? '<p class="sub">Their login was archived' + (u.left_on ? ' (left ' + esc(day(u.left_on)) + ')' : '') + '.</p>' :
+            '<h4>Someone is leaving</h4><p class="sub">Records the notice, puts them on “working notice” and gives you the leaving checklist (keys, final pay, archiving the login).</p><div class="grid">' + field('Why', '<select id="xK">' + opts(pairs(EXITK), 'resignation') + '</select>') + field('Notice given on', inp('xN', today(), 'date')) + field('Last day', inp('xL', '', 'date')) + field('Checklist for', '<select id="xA">' + opts(META.people, '', 'Me') + '</select>') + '</div>' +
+            '<label class="sub">Reason / details</label><textarea id="xR" rows="2"></textarea><div class="controls" style="margin-top:8px"><button class="primary" id="xGo">Start the exit</button></div>');
+          if ($('#xGo')) $('#xGo').onclick = function () { api('/api/people/staff/' + uid + '/exits', 'POST', { kind: $('#xK').value, notice_date: $('#xN').value, last_day: $('#xL').value, assignee_id: $('#xA').value, reason: $('#xR').value }).then(function () { fileTab = 'tasks'; reopen(f, 'Exit started: see the leaving checklist'); }).catch(fail); };
+          return;
+        }
+        var left = f.tasks.filter(function (k) { return k.exit_id === x.id && !k.done_at; }).length;
+        el.innerHTML = '<div class="warn"><b>' + esc(EXITK[x.kind]) + '</b> · notice ' + esc(day(x.notice_date)) + ' · last day <b>' + esc(day(x.last_day)) + '</b>. ' + (left ? left + ' leaving checklist item(s) still to do (Checklists tab).' : 'Leaving checklist done.') + '</div>' +
+          '<div class="grid">' + field('Last day', inp('xL', x.last_day, 'date')) + field('Would we take them back?', '<select id="xRh"><option value="">–</option><option value="yes"' + (x.rehire === true ? ' selected' : '') + '>Yes</option><option value="no"' + (x.rehire === false ? ' selected' : '') + '>No</option></select>') + '</div>' +
+          '<label class="sub">Reason</label><textarea id="xR" rows="2">' + esc(x.reason || '') + '</textarea><label class="sub">Exit interview: why they are leaving, what we could do better</label><textarea id="xI" rows="4">' + esc(x.exit_interview || '') + '</textarea>' +
+          '<div class="controls" style="margin-top:8px"><button id="xSave">Save</button><button class="primary" id="xDone">Complete the exit</button><button id="xCancel">They are staying (cancel)</button></div>';
+        var body = function () { return { last_day: $('#xL').value, reason: $('#xR').value, exit_interview: $('#xI').value, rehire: $('#xRh').value ? $('#xRh').value === 'yes' : null }; };
+        $('#xSave').onclick = function () { api('/api/people/exits/' + x.id, 'PATCH', body()).then(function () { reopen(f, 'Saved'); }).catch(fail); };
+        $('#xCancel').onclick = function () { if (confirm('Cancel the exit? Unfinished leaving tasks are removed.')) api('/api/people/exits/' + x.id, 'PATCH', { cancel: true }).then(function () { reopen(f, 'Exit cancelled'); }).catch(fail); };
+        $('#xDone').onclick = function () {
+          if (left && !confirm(left + ' checklist item(s) are not ticked. Complete the exit anyway?')) return;
+          var arch = !u.is_archived && confirm('Also archive their login now? This signs them out, stops sign-in and removes their till PIN. Their history stays.\n\nOK = archive now, Cancel = leave the login for now');
+          api('/api/people/exits/' + x.id, 'PATCH', Object.assign(body(), { complete: true })).then(function () {
+            if (!arch) return reopen(f, 'Exit completed');
+            return api('/api/admin/staff/' + uid, 'PATCH', { archived: true, left_on: $('#xL').value, archive_reason: EXITK[x.kind] + ($('#xR').value ? ' — ' + $('#xR').value.slice(0, 150) : '') })
+              .then(function () { reopen(f, 'Exit completed and login archived'); }, function (e) { reopen(f, 'Exit completed, but the login was not archived: ' + e.message); });
+          }).catch(fail);
+        };
+      },
+      contracts: function () { contractsPane(el, f); },
+      sign: function () { signPane(el, f); },
+      log: function () {
+        el.innerHTML = f.log.length ? '<table><thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead><tbody>' + f.log.map(function (x) { return '<tr><td><small>' + esc(when(x.at)) + '</small></td><td>' + esc(x.by_name || '') + '</td><td>' + esc(x.action) + (x.detail ? '<br><small class="sub">' + esc(x.detail) + '</small>' : '') + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="empty">No changes recorded yet.</div>';
+      },
+    };
+    H[fileTab]();
+  }
+  // Emergency contacts: used by HR on a file, and by each person on their own.
+  function contactsPane(el, list, base, done) {
+    var fail = function (e) { toast(e.message); };
+    el.innerHTML = '<p class="sub">Who to call if something happens at work. Keep at least one.</p>' + (list.length ? list.map(function (c) {
+      return '<div class="item"><b>' + esc(c.name) + '</b>' + (c.relationship ? ' (' + esc(c.relationship) + ')' : '') + (c.is_primary ? ' <span class="pill ok">call first</span>' : '') + '<br>' + esc([c.phone, c.alt_phone, c.email].filter(Boolean).join(' · ')) + (c.address ? '<br><small>' + esc(c.address) + '</small>' : '') +
+        '<div style="margin-top:4px"><button class="sm" data-ce="' + c.id + '">Edit</button> <button class="sm" data-cd="' + c.id + '">Remove</button></div></div>';
+    }).join('') : '<div class="warn">No emergency contact yet.</div>') + '<div class="controls" style="margin-top:8px"><button class="primary" id="ctNew">+ Contact</button></div>';
+    function form(c) {
+      c = c || {};
+      modal('<h2>' + (c.id ? 'Edit contact' : 'Emergency contact') + '</h2><div class="grid">' + field('Name', inp('ctN', c.name)) + field('Relationship', inp('ctR', c.relationship)) + field('Phone', inp('ctP', c.phone, 'tel')) + field('Other phone', inp('ctP2', c.alt_phone, 'tel')) + field('Email', inp('ctE', c.email, 'email')) + '</div>' +
+        '<label class="sub">Address</label><input id="ctA" value="' + esc(c.address || '') + '" style="width:100%"><label style="display:flex;gap:6px;align-items:center;margin:8px 0"><input type="checkbox" id="ctPr"' + (c.is_primary ? ' checked' : '') + '> Call this person first</label>' +
+        '<div class="controls"><button class="primary" id="ctGo">Save</button><button id="ctX">Cancel</button></div>', 2);
+      $('#ctX').onclick = function () { close(2); };
+      $('#ctGo').onclick = function () {
+        api(base + (c.id ? '/' + c.id : ''), c.id ? 'PUT' : 'POST', { name: $('#ctN').value, relationship: $('#ctR').value, phone: $('#ctP').value, alt_phone: $('#ctP2').value, email: $('#ctE').value, address: $('#ctA').value, is_primary: $('#ctPr').checked })
+          .then(function () { close(2); done('Saved'); }).catch(fail);
+      };
+    }
+    $('#ctNew').onclick = function () { form(null); };
+    all('[data-ce]', el).forEach(function (b) { b.onclick = function () { form(list.filter(function (c) { return String(c.id) === b.getAttribute('data-ce'); })[0]); }; });
+    all('[data-cd]', el).forEach(function (b) { b.onclick = function () { if (confirm('Remove this contact?')) api(base + '/' + b.getAttribute('data-cd'), 'DELETE').then(function () { done('Removed'); }).catch(fail); }; });
+  }
+  function reviewForm(f, r) {
+    var draft = r.status === 'draft', uid = f.user.id;
+    var mo = modal('<h2>' + esc(REVK[r.kind]) + ' review: ' + esc(f.user.name || '') + '</h2><p class="sub">Score each area 1 (poor) to 5 (excellent), with an example where you can. Finishing it sends it to them to read, comment on and sign off.</p>' +
+      (r.ratings || []).map(function (x) {
+        return '<div class="item" data-rk="' + esc(x.key) + '"><b>' + esc(x.label) + '</b><div class="stars">' + [1, 2, 3, 4, 5].map(function (n) { return '<button type="button" data-s="' + n + '"' + (x.score === n ? ' class="on"' : '') + (draft ? '' : ' disabled') + '>' + n + '</button>'; }).join('') + '</div>' +
+          '<input class="rc" value="' + esc(x.comment || '') + '" placeholder="Example or comment" style="width:100%;margin-top:4px"' + (draft ? '' : ' disabled') + '></div>';
+      }).join('') +
+      '<label class="sub">What they do well</label><textarea id="rvS" rows="2"' + (draft ? '' : ' disabled') + '>' + esc(r.strengths || '') + '</textarea>' +
+      '<label class="sub">What to improve</label><textarea id="rvI" rows="2"' + (draft ? '' : ' disabled') + '>' + esc(r.improve || '') + '</textarea>' +
+      '<label class="sub">Other comments</label><textarea id="rvC" rows="2"' + (draft ? '' : ' disabled') + '>' + esc(r.comments || '') + '</textarea>' +
+      (r.kind === 'probation' ? '<div class="controls"><div><label>Outcome of the probation</label><select id="rvO"' + (draft ? '' : ' disabled') + '><option value="">–</option><option value="confirm"' + (r.outcome === 'confirm' ? ' selected' : '') + '>Passed: confirm in post</option><option value="extend"' + (r.outcome === 'extend' ? ' selected' : '') + '>Extend the probation</option><option value="end"' + (r.outcome === 'end' ? ' selected' : '') + '>Not passed: end employment</option></select></div><div><label>Extend to</label><input id="rvX" type="date"' + (draft ? '' : ' disabled') + '></div></div>' : '') +
+      (r.employee_comments ? '<p><b>Their comments:</b> ' + esc(r.employee_comments) + '</p>' : '') +
+      '<div class="controls" style="margin-top:8px">' + (draft ? '<button class="primary" id="rvF">Finish and send to them</button><button id="rvSave">Save draft</button><button id="rvDel">Delete</button>' : '<button id="rvRe">Reopen to change</button>') + '<button id="rvClose">Close</button></div>', 2);
+    all('.stars button', mo).forEach(function (b) { b.onclick = function () { all('button', b.parentNode).forEach(function (x) { x.classList.toggle('on', x === b); }); }; });
+    $('#rvClose').onclick = function () { close(2); };
+    var body = function (finish) {
+      var b = { ratings: all('[data-rk]', mo).map(function (el) { var on = $('.stars .on', el); return { key: el.getAttribute('data-rk'), score: on ? +on.getAttribute('data-s') : null, comment: $('.rc', el).value }; }),
+        strengths: $('#rvS').value, improve: $('#rvI').value, comments: $('#rvC').value, finish: finish };
+      if ($('#rvO')) { b.outcome = $('#rvO').value; b.extend_until = $('#rvX').value; }
+      return b;
+    };
+    var put = function (b, msg) { api('/api/people/staff/' + uid + '/reviews/' + r.id, 'PUT', b).then(function () { close(2); reopen(f, msg); }).catch(function (e) { toast(e.message); }); };
+    if ($('#rvF')) $('#rvF').onclick = function () { if ($('#rvO') && $('#rvO').value === 'end' && !confirm('Not passed: after finishing, start their exit on the Leaving tab.')) return; put(body(true), 'Review finished; they are told'); };
+    if ($('#rvSave')) $('#rvSave').onclick = function () { put(body(false), 'Saved'); };
+    if ($('#rvRe')) $('#rvRe').onclick = function () { put({ reopen: true }, 'Reopened'); };
+    if ($('#rvDel')) $('#rvDel').onclick = function () { if (confirm('Delete this review?')) api('/api/people/staff/' + uid + '/reviews/' + r.id, 'DELETE').then(function () { close(2); reopen(f, 'Deleted'); }).catch(function (e) { toast(e.message); }); };
+  }
+
+  // ----------------------------------------------------------- add staff --
+  // A staff record with its HR file. The login stays off until a manager sets
+  // the role, password or PIN on Users & Staff.
+  // -------------------------------------------------------- payroll info --
+  // Read from Payroll, not copied. Changes go to Payroll, for someone who may change pay.
+  function payrollPane(el, f) {
+    var uid = f.user.id, p = f.profile || {};
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    api('/api/people/staff/' + uid + '/payroll').then(function (d) {
+      var a = d.access, e = d.employee, l = d.leave || {}, ro = !a.run ? ' disabled' : '';
+      var accrual = '<div class="controls"><div><label>Vacation and sick days build up</label><select id="prAc"><option value="year"' + (d.leave_accrual !== 'monthly' ? ' selected' : '') + '>All on 1 January</option><option value="monthly"' + (d.leave_accrual === 'monthly' ? ' selected' : '') + '>A twelfth each month worked</option></select></div>' +
+        (l.year ? '<p class="sub" style="margin:0 0 6px">' + l.year + ': vacation ' + l.vacation_left + ' left of ' + (l.accrual === 'monthly' ? l.vacation_earned + ' earned (' + l.vacation_entitled + ' a year)' : l.vacation_entitled) + ' · sick ' + l.sick_left + ' left of ' + (l.accrual === 'monthly' ? l.sick_earned + ' earned' : l.sick_entitled) + '</p>' : '') + '</div>';
+      if (!a.view) {
+        el.innerHTML = '<p class="sub">Pay, deductions and bank details are kept in Payroll and shown to people with the Payroll permission.</p><h4>Sick and vacation</h4>' + accrual + '<div class="controls"><button id="prAcS">Save</button></div>';
+        $('#prAcS').onclick = function () { api('/api/people/staff/' + uid + '/profile', 'PUT', { leave_accrual: $('#prAc').value }).then(function () { reopen(f, 'Saved'); }).catch(function (x) { toast(x.message); }); };
+        return;
+      }
+      if (!e) {
+        el.innerHTML = '<p class="sub">Not on Payroll yet.' + (a.run ? '' : ' Someone who may change pay adds them.') + (d.module_on ? '' : ' Payroll is switched off (Payroll › Settings).') + '</p>' +
+          (a.run && d.module_on ? '<div class="controls"><button class="primary" id="prAdd">Add to Payroll (pay off)</button></div>' : '') + '<h4>Sick and vacation</h4>' + accrual + '<div class="controls"><button id="prAcS">Save</button></div>';
+        if ($('#prAdd')) $('#prAdd').onclick = function () {
+          api('/api/payroll/employees', 'POST', { user_id: uid, name: f.user.name || f.user.email, email: /\.local$/i.test(f.user.email || '') ? '' : f.user.email, phone: f.user.phone, job_title: p.job_title, hire_date: p.start_date, date_of_birth: p.date_of_birth, is_active: false })
+            .then(function () { reopen(f, 'Added to Payroll with pay off. Enter the pay below.'); }).catch(function (x) { toast(x.message); });
+        };
+        $('#prAcS').onclick = function () { api('/api/people/staff/' + uid + '/profile', 'PUT', { leave_accrual: $('#prAc').value }).then(function () { reopen(f, 'Saved'); }).catch(function (x) { toast(x.message); }); };
+        return;
+      }
+      var rt = d.rates || {}, pct = function (x) { return x == null ? '' : (Math.round(x * 10000) / 100) + '%'; };
+      var earn = (d.items || []).filter(function (x) { return x.kind === 'earning'; }), ded = (d.items || []).filter(function (x) { return x.kind !== 'earning'; });
+      var itemRows = function (list) {
+        return list.length ? '<table><tbody>' + list.map(function (x) {
+          return '<tr' + (x.is_active ? '' : ' style="opacity:.55"') + '><td>' + esc(x.label) + (x.payee ? ' <small class="sub">to ' + esc(x.payee) + '</small>' : '') + '</td><td>' + (x.pct ? x.pct + '% of pay' : jmd(x.amount) + ' each pay') + '</td><td>' + (x.balance != null ? '<small>owed ' + jmd(x.balance) + '</small>' : '') + (x.end_date ? '<small> until ' + esc(day(x.end_date)) + '</small>' : '') + '</td>' +
+            '<td>' + (a.run ? '<button class="sm" data-it="' + x.id + ':' + (x.is_active ? '0' : '1') + '">' + (x.is_active ? 'Stop' : 'Start again') + '</button>' : (x.is_active ? '' : '<small>stopped</small>')) + '</td></tr>';
+        }).join('') + '</tbody></table>' : '<p class="sub">None.</p>';
+      };
+      el.innerHTML = (!a.run ? '<div class="warn">You can see this; changing pay is for someone with the Payroll permission to run payroll.</div>' : '') + (d.module_on ? '' : '<div class="warn">Payroll is switched off, so changes here cannot be saved until it is switched on (Payroll › Settings).</div>') +
+        '<h4>Pay schedule and earnings</h4><div class="grid">' + field('Pay', '<select id="prOn"' + ro + '><option value="1"' + (e.is_active ? ' selected' : '') + '>On: paid on each run</option><option value="0"' + (!e.is_active ? ' selected' : '') + '>Off</option></select>') +
+          field('Paid', '<select id="prFq"' + ro + '>' + opts(pairs(FREQ), e.frequency) + '</select>') + field('Pay type', '<select id="prTy"' + ro + '>' + opts(pairs(PAYT), e.pay_type) + '</select>') +
+          field('Yearly salary (J$)', '<input id="prSal" type="number" step="0.01" value="' + esc(e.salary_annual == null ? '' : e.salary_annual) + '"' + ro + '>') + field('Hourly rate (J$)', '<input id="prHr" type="number" step="0.01" value="' + esc(e.hourly_rate == null ? '' : e.hourly_rate) + '"' + ro + '>') +
+          field('Day rate (J$)', '<input id="prDr" type="number" step="0.01" value="' + esc(e.day_rate == null ? '' : e.day_rate) + '"' + ro + '>') + field('Overtime (× the rate)', '<input id="prOt" type="number" step="0.1" value="' + esc(e.ot_rate) + '"' + ro + '>') +
+          field('Hours a day', '<input id="prHd" type="number" step="0.5" value="' + esc(e.hours_per_day) + '"' + ro + '>') + field('Hours from the time clock', '<select id="prTc"' + ro + '><option value="1"' + (e.use_timeclock ? ' selected' : '') + '>Yes</option><option value="0"' + (!e.use_timeclock ? ' selected' : '') + '>No</option></select>') + '</div>' +
+          (e.hire_date || e.termination_date ? '<p class="sub">Paid from ' + esc(day(e.hire_date) || '–') + (e.termination_date ? ' to ' + esc(day(e.termination_date)) + (e.termination_reason ? ' (' + esc(e.termination_reason) + ')' : '') : '') + '.</p>' : '') +
+        '<h4>Additions (each pay)</h4>' + itemRows(earn) + '<h4>Deductions (each pay)</h4>' + itemRows(ded) +
+          (a.run ? '<div class="controls"><div><label>Add</label><select id="prItC">' + opts(d.catalogue.map(function (c) { return [c.code, (c.kind === 'earning' ? '+ ' : '− ') + c.label]; }), '', 'Choose…') + '</select></div><div><label>Amount each pay (J$)</label><input id="prItA" type="number" step="0.01" style="width:130px"></div><div><label>Owed (loans)</label><input id="prItB" type="number" step="0.01" style="width:120px"></div><button id="prItGo">Add</button></div>' : '') +
+        '<h4>Taxes and company contributions</h4><p class="sub">Worked out by Payroll on each payslip. Employee: NIS ' + pct(rt.nis_ee) + ', NHT ' + pct(rt.nht_ee) + ', Education Tax ' + pct(rt.ed_ee) + ', PAYE above the threshold. Company: NIS ' + pct(rt.nis_er) + ', NHT ' + pct(rt.nht_er) + ', Education Tax ' + pct(rt.ed_er) + ', HEART ' + pct(rt.heart_er) + (e.pension_er_pct ? ', pension ' + e.pension_er_pct + '%' : '') + '.</p>' +
+          '<div class="grid">' + field('TRN', '<input value="' + esc(e.trn || '') + '" disabled>') + field('NIS no.', '<input value="' + esc(e.nis_no || '') + '" disabled>') +
+          field('Pension: employee %', '<input id="prPe" type="number" step="0.1" value="' + esc(e.pension_ee_pct) + '"' + ro + '>') + field('Pension: company %', '<input id="prPc" type="number" step="0.1" value="' + esc(e.pension_er_pct) + '"' + ro + '>') +
+          field('Pension scheme', '<input id="prPs" value="' + esc(e.pension_scheme || '') + '"' + ro + '>') + field('Extra tax-free (J$ a year)', '<input id="prXt" type="number" step="0.01" value="' + esc(e.extra_threshold) + '"' + ro + '>') + '</div>' +
+          '<div class="controls">' + [['prXp', 'paye_exempt', 'No PAYE'], ['prXn', 'nis_exempt', 'No NIS'], ['prXh', 'nht_exempt', 'No NHT'], ['prXe', 'ed_exempt', 'No Education Tax']].map(function (x) { return '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="' + x[0] + '"' + (e[x[1]] ? ' checked' : '') + ro + '> ' + x[2] + '</label>'; }).join('') + '</div>' +
+          '<p class="sub">TRN and NIS are changed on the Personal tab.' + (d.ytd ? ' This year: PAYE ' + jmd(d.ytd.paye) + ', NIS ' + jmd(d.ytd.nis_ee) + ', NHT ' + jmd(d.ytd.nht_ee) + ', Education Tax ' + jmd(d.ytd.ed_ee) + '; company NIS ' + jmd(d.ytd.nis_er) + ', NHT ' + jmd(d.ytd.nht_er) + ', Education Tax ' + jmd(d.ytd.ed_er) + ', HEART ' + jmd(d.ytd.heart_er) + '.' : '') + '</p>' +
+        '<h4>Sick and vacation</h4><div class="grid">' + field('Vacation days a year', '<input id="prVd" type="number" step="0.5" placeholder="shop: ' + d.shop_vacation_days + '" value="' + esc(e.vacation_days == null ? '' : e.vacation_days) + '"' + ro + '>') +
+          field('Sick days a year', '<input id="prSd" type="number" step="0.5" placeholder="shop: ' + d.shop_sick_days + '" value="' + esc(e.sick_days == null ? '' : e.sick_days) + '"' + ro + '>') + '</div>' + accrual +
+        '<h4>Direct deposit</h4><div class="grid">' + field('Paid by', '<select id="prPm"' + ro + '>' + opts([['bank', 'Bank transfer'], ['cheque', 'Cheque'], ['cash', 'Cash']], e.pay_method) + '</select>') +
+          field('Bank', '<input id="prBn" value="' + esc(e.bank_name || '') + '"' + ro + '>') + field('Branch', '<input id="prBb" value="' + esc(e.bank_branch || '') + '"' + ro + '>') +
+          field('Account no.', '<input id="prBa" value="' + esc(e.bank_account || '') + '"' + ro + '>') + field('Account type', '<select id="prBt"' + ro + '>' + opts([['savings', 'Savings'], ['chequing', 'Chequing']], e.bank_account_type, '–') + '</select>') + '</div>' +
+        '<div class="controls"><button class="primary" id="prSave">Save</button><a href="/payroll.html"><button>Open in Payroll</button></a></div>';
+      var acc = function () { return $('#prAc').value !== d.leave_accrual ? api('/api/people/staff/' + uid + '/profile', 'PUT', { leave_accrual: $('#prAc').value }) : Promise.resolve(); };
+      $('#prSave').onclick = function () {
+        if (!a.run) return acc().then(function () { reopen(f, 'Saved'); }).catch(function (x) { toast(x.message); });
+        var v = function (id) { return $(id).value; };
+        var body = { is_active: v('#prOn') === '1', frequency: v('#prFq'), pay_type: v('#prTy'), salary_annual: v('#prSal'), hourly_rate: v('#prHr'), day_rate: v('#prDr'), ot_rate: v('#prOt'), hours_per_day: v('#prHd'), use_timeclock: v('#prTc') === '1',
+          pension_ee_pct: v('#prPe'), pension_er_pct: v('#prPc'), pension_scheme: v('#prPs'), extra_threshold: v('#prXt'), paye_exempt: $('#prXp').checked, nis_exempt: $('#prXn').checked, nht_exempt: $('#prXh').checked, ed_exempt: $('#prXe').checked,
+          vacation_days: v('#prVd'), sick_days: v('#prSd'), pay_method: v('#prPm'), bank_name: v('#prBn'), bank_branch: v('#prBb'), bank_account: v('#prBa'), bank_account_type: v('#prBt') };
+        api('/api/payroll/employees/' + e.id, 'PUT', body).then(acc).then(function () { reopen(f, 'Saved in Payroll'); }).catch(function (x) { toast(x.message); });
+      };
+      all('[data-it]', el).forEach(function (b) { b.onclick = function () { var x = b.getAttribute('data-it').split(':'); api('/api/payroll/employee-items/' + x[0], 'PUT', { is_active: x[1] === '1' }).then(function () { pane(f); }).catch(function (y) { toast(y.message); }); }; });
+      if ($('#prItGo')) $('#prItGo').onclick = function () { api('/api/payroll/employees/' + e.id + '/items', 'POST', { code: $('#prItC').value, amount: $('#prItA').value, balance: $('#prItB').value }).then(function () { toast('Added'); pane(f); }).catch(function (y) { toast(y.message); }); };
+    }).catch(function (x) { el.innerHTML = '<div class="empty">' + esc(x.message) + '</div>'; });
+  }
+
+  // ----------------------------------------------------- notes and to do's --
+  function notesPane(el, f) {
+    var uid = f.user.id;
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    api('/api/people/staff/' + uid + '/notes').then(function (d) {
+      var open = d.todos.filter(function (x) { return !x.done_at; }), done = d.todos.filter(function (x) { return x.done_at; });
+      var todo = function (x) {
+        var late = !x.done_at && x.due_on && x.due_on < today();
+        return '<div class="task' + (x.done_at ? ' done' : '') + '"><input type="checkbox" data-nd="' + x.id + '"' + (x.done_at ? ' checked' : '') + '><span>' + esc(x.body) +
+          '<br><small class="sub">' + esc([TODOT[x.todo_type], x.priority !== 'medium' ? PRIO[x.priority] + ' priority' : '', x.due_on ? 'by ' + day(x.due_on) : '', x.remind_at ? '⏰ ' + when(x.remind_at) + (x.reminded_at ? ' (reminded)' : '') : '', x.assignee ? 'for ' + x.assignee : '', x.done_at ? 'done ' + day(x.done_at) + ' by ' + (x.done_by_name || '') : ''].filter(Boolean).join(' · ')) + '</small>' + (late ? ' <span class="pill bad">late</span>' : '') + '</span>' +
+          '<button class="sm" data-ne="' + x.id + '">Edit</button><button class="sm" data-nx="' + x.id + '">✕</button></div>';
+      };
+      el.innerHTML = '<h4>To Do’s</h4><p class="sub">Calls, meetings and follow-ups about them. Set a reminder and whoever it is for gets a notice at that time.</p>' +
+        '<div class="controls"><div><label>Kind</label><select id="ntK">' + opts(pairs(TODOT), 'follow_up') + '</select></div><div style="flex:1;min-width:200px"><label>What</label><input id="ntB" style="width:100%" placeholder="e.g. Call about the medical certificate"></div>' +
+        '<div><label>By</label><input id="ntD" type="date"></div><div><label>Remind me at</label><input id="ntR" type="datetime-local"></div><div><label>Priority</label><select id="ntP">' + opts(pairs(PRIO), 'medium') + '</select></div>' +
+        '<div><label>For</label><select id="ntA">' + opts(META.people, '', 'Me') + '</select></div><button class="primary" id="ntGo">Add</button></div>' +
+        (open.length ? open.map(todo).join('') : '<p class="sub">Nothing to do.</p>') + (done.length ? '<details style="margin-top:6px"><summary class="sub">Done (' + done.length + ')</summary>' + done.map(todo).join('') + '</details>' : '') +
+        '<h4>Notes</h4><div class="controls"><div style="flex:1;min-width:240px"><textarea id="nnB" rows="2" placeholder="A note for their file (only HR sees notes)"></textarea></div><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="nnP"> Pin to the top</label><button class="primary" id="nnGo">Add note</button></div>' +
+        (d.notes.length ? d.notes.map(function (x) {
+          return '<div class="item">' + (x.pinned ? '📌 ' : '') + esc(x.body).replace(/\n/g, '<br>') + '<br><small>' + esc(x.by_name || '') + ' · ' + esc(when(x.created_at)) + (x.updated_at && x.updated_at !== x.created_at && Date.parse(x.updated_at) - Date.parse(x.created_at) > 60000 ? ' · changed ' + esc(when(x.updated_at)) : '') + '</small>' +
+            '<div style="margin-top:4px"><button class="sm" data-np="' + x.id + ':' + (x.pinned ? '0' : '1') + '">' + (x.pinned ? 'Unpin' : 'Pin') + '</button> <button class="sm" data-ne="' + x.id + '">Edit</button> <button class="sm" data-nx="' + x.id + '">✕</button></div></div>';
+        }).join('') : '<p class="sub">No notes.</p>');
+      var redo = function (m) { if (m) toast(m); notesPane(el, f); if (tab === 'staff') { myTodos(); if (String(sel) === String(uid)) side(uid); } };
+      var bad = function (x) { toast(x.message); };
+      $('#ntGo').onclick = function () { api('/api/people/staff/' + uid + '/notes', 'POST', { kind: 'todo', todo_type: $('#ntK').value, body: $('#ntB').value, due_on: $('#ntD').value, remind_at: $('#ntR').value, priority: $('#ntP').value, assignee_id: $('#ntA').value }).then(function () { redo('To do added'); }).catch(bad); };
+      $('#nnGo').onclick = function () { api('/api/people/staff/' + uid + '/notes', 'POST', { kind: 'note', body: $('#nnB').value, pinned: $('#nnP').checked }).then(function () { redo('Note added'); }).catch(bad); };
+      all('[data-nd]', el).forEach(function (c) { c.onchange = function () { api('/api/people/notes/' + c.getAttribute('data-nd'), 'PATCH', { done: c.checked }).then(function () { redo(); }).catch(bad); }; });
+      all('[data-np]', el).forEach(function (b) { b.onclick = function () { var x = b.getAttribute('data-np').split(':'); api('/api/people/notes/' + x[0], 'PATCH', { pinned: x[1] === '1' }).then(function () { redo(); }).catch(bad); }; });
+      all('[data-nx]', el).forEach(function (b) { b.onclick = function () { if (confirm('Remove this for good?')) api('/api/people/notes/' + b.getAttribute('data-nx'), 'DELETE').then(function () { redo('Removed'); }).catch(bad); }; });
+      all('[data-ne]', el).forEach(function (b) {
+        b.onclick = function () {
+          var x = d.notes.concat(d.todos).filter(function (y) { return String(y.id) === b.getAttribute('data-ne'); })[0];
+          var mo = modal('<h2>' + (x.kind === 'todo' ? 'Change the to do' : 'Change the note') + '</h2><textarea id="neB" rows="4">' + esc(x.body) + '</textarea>' +
+            (x.kind === 'todo' ? '<div class="grid">' + field('By', inp('neD', x.due_on, 'date')) + field('Remind at', '<input id="neR" type="datetime-local" value="' + esc(x.remind_at ? new Date(Date.parse(x.remind_at) - 5 * 3600000).toISOString().slice(0, 16) : '') + '">') +
+              field('Priority', '<select id="neP">' + opts(pairs(PRIO), x.priority) + '</select>') + field('For', '<select id="neA">' + opts(META.people, x.assignee_id, 'Me') + '</select>') + '</div>' : '') +
+            '<div class="controls"><button class="primary" id="neOk">Save</button><button id="neX">Cancel</button></div>', 2);
+          $('#neX').onclick = function () { close(2); };
+          $('#neOk').onclick = function () {
+            var body = { body: $('#neB').value };
+            if (x.kind === 'todo') Object.assign(body, { due_on: $('#neD').value, remind_at: $('#neR').value, priority: $('#neP').value, assignee_id: $('#neA').value });
+            api('/api/people/notes/' + x.id, 'PATCH', body).then(function () { close(2); redo('Saved'); }).catch(bad);
+          };
+          return mo;
+        };
+      });
+    }).catch(function (x) { el.innerHTML = '<div class="empty">' + esc(x.message) + '</div>'; });
+  }
+
+  // ------------------------------------------------------- transactions --
+  function transPane(el, f, year) {
+    var uid = f.user.id;
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    api('/api/people/staff/' + uid + '/transactions?year=' + year).then(function (d) {
+      var ys = (d.years || []).slice(); if (ys.indexOf(year) < 0) ys.push(year); ys.sort(function (a, b) { return b - a; });
+      var head = '<div class="controls"><div><label>Year</label><select id="trY">' + ys.map(function (y) { return '<option' + (y === year ? ' selected' : '') + '>' + y + '</option>'; }).join('') + '</select></div>' + (d.access.view && d.on_payroll ? '<button id="trX">Excel</button><button id="trP">Print</button>' : '') + '</div>';
+      var leave = '<h4>Leave taken in ' + year + '</h4>' + (d.leave.length ? '<table><thead><tr><th>From</th><th>To</th><th>Kind</th><th>Days</th><th>Note</th></tr></thead><tbody>' + d.leave.map(function (x) { return '<tr><td>' + esc(day(x.from_date)) + '</td><td>' + esc(day(x.to_date)) + '</td><td>' + esc(LEAVEK[x.kind] || x.kind) + '</td><td>' + x.days + '</td><td>' + esc(x.note || '') + '</td></tr>'; }).join('') + '</tbody></table>' : '<p class="sub">None recorded (Attendance › Leave).</p>');
+      if (!d.access.view) { el.innerHTML = head + '<p class="sub">Payslips and year-to-date pay are shown to people with the Payroll permission.</p>' + leave; }
+      else if (!d.on_payroll) { el.innerHTML = head + '<p class="sub">Not on Payroll, so no payslips.</p>' + leave; }
+      else {
+        var y = d.ytd, money = function (v) { return '<td style="text-align:right">' + jmd(v) + '</td>'; };
+        el.innerHTML = head + '<h4>Payslips</h4>' + (d.slips.length ? '<div class="scroll"><table><thead><tr><th>Paid</th><th>Payslip</th><th>Period</th><th>Gross</th><th>PAYE</th><th>NIS</th><th>NHT</th><th>Ed. tax</th><th>Pension</th><th>Other</th><th>Net</th><th>Cheque</th></tr></thead><tbody>' + d.slips.map(function (s) {
+            return '<tr' + (s.status === 'void' ? ' style="opacity:.55;text-decoration:line-through"' : '') + '><td>' + esc(day(s.pay_date)) + '</td><td>' + esc(s.number || '') + (s.status === 'void' ? ' (void)' : '') + '</td><td><small>' + esc(day(s.period_start)) + ' – ' + esc(day(s.period_end)) + '</small></td>' + money(s.gross) + money(s.paye) + money(s.nis_ee) + money(s.nht_ee) + money(s.ed_ee) + money(s.pension_ee) + money(s.other_ded) + '<td style="text-align:right"><b>' + jmd(s.net) + '</b></td><td>' + esc(s.cheque_number || '') + '</td></tr>';
+          }).join('') + '</tbody></table></div>' : '<p class="sub">No payslips in ' + year + '.</p>') +
+          '<h4>Year to date (' + y.slips + ' payslips)</h4><div class="kpis">' + [['gross', 'gross pay'], ['statutory', 'statutory income'], ['paye', 'PAYE'], ['nis_ee', 'NIS'], ['nht_ee', 'NHT'], ['ed_ee', 'Education Tax'], ['pension_ee', 'pension'], ['other_ded', 'other deductions'], ['net', 'net pay']].map(function (k) { return '<div class="kpi"><b style="font-size:17px">' + jmd(y[k[0]]) + '</b><span>' + k[1] + '</span></div>'; }).join('') + '</div>' +
+          '<p class="sub">Paid by the company on top: NIS ' + jmd(y.nis_er) + ', NHT ' + jmd(y.nht_er) + ', Education Tax ' + jmd(y.ed_er) + ', HEART ' + jmd(y.heart_er) + (y.pension_er ? ', pension ' + jmd(y.pension_er) : '') + '.</p>' +
+          '<h4>Employee summary by pay item</h4>' + (d.summary.length ? '<table><thead><tr><th>Item</th><th>Kind</th><th>Hours / qty</th><th style="text-align:right">Amount</th></tr></thead><tbody>' + d.summary.map(function (s) { return '<tr><td>' + esc(s.label || s.code) + '</td><td>' + esc(s.kind === 'earning' ? 'Earning' : s.kind === 'employer' ? 'Company' : 'Deduction') + '</td><td>' + (s.qty ? s.qty : '') + '</td>' + money(s.amount) + '</tr>'; }).join('') + '</tbody></table>' : '<p class="sub">Nothing paid in ' + year + '.</p>') +
+          (d.loans.length ? '<h4>Loans and advances</h4><table><thead><tr><th>Given</th><th>Kind</th><th>Amount</th><th>Still owed</th><th>How</th></tr></thead><tbody>' + d.loans.map(function (x) { return '<tr' + (x.voided_at ? ' style="opacity:.55"' : '') + '><td>' + esc(day(x.issue_date)) + '</td><td>' + esc(x.kind === 'loan' ? 'Loan' : 'Salary advance') + (x.voided_at ? ' (void)' : '') + '</td><td>' + jmd(x.amount) + '</td><td>' + (x.balance != null ? jmd(x.balance) : '') + '</td><td>' + esc(x.method === 'bank' ? 'Paid from the bank' : 'On a payslip') + '</td></tr>'; }).join('') + '</tbody></table>' : '') + leave;
+        var head1 = ['Paid', 'Payslip', 'Period from', 'Period to', 'Gross', 'PAYE', 'NIS', 'NHT', 'Education Tax', 'Pension', 'Other deductions', 'Net', 'Cheque', 'Status'];
+        var rows1 = d.slips.map(function (s) { return [s.pay_date, s.number, s.period_start, s.period_end, s.gross, s.paye, s.nis_ee, s.nht_ee, s.ed_ee, s.pension_ee, s.other_ded, s.net, s.cheque_number, s.status]; });
+        $('#trX').onclick = function () {
+          xlsx('pay-' + (f.user.name || uid).replace(/\s+/g, '-') + '-' + year, [{ title: 'Payslips ' + year, header: head1, rows: rows1 },
+            { title: 'Summary ' + year, header: ['Item', 'Kind', 'Hours / qty', 'Amount'], rows: d.summary.map(function (s) { return [s.label || s.code, s.kind, s.qty, s.amount]; }).concat([[], ['Year to date', '', '', '']], ['gross', 'statutory', 'paye', 'nis_ee', 'nht_ee', 'ed_ee', 'pension_ee', 'other_ded', 'net', 'nis_er', 'nht_er', 'ed_er', 'heart_er', 'pension_er'].map(function (k) { return [k.replace('_ee', ' (employee)').replace('_er', ' (company)').replace('_', ' '), '', '', y[k]]; })) },
+            { title: 'Leave ' + year, header: ['From', 'To', 'Kind', 'Days', 'Note'], rows: d.leave.map(function (x) { return [x.from_date, x.to_date, x.kind, x.days, x.note]; }) }]);
+        };
+        $('#trP').onclick = function () { printTable('Employee summary ' + year + ': ' + (f.user.name || ''), head1, rows1, 'Gross ' + jmd(y.gross) + ' · PAYE ' + jmd(y.paye) + ' · NIS ' + jmd(y.nis_ee) + ' · NHT ' + jmd(y.nht_ee) + ' · Education Tax ' + jmd(y.ed_ee) + ' · Net ' + jmd(y.net)); };
+      }
+      $('#trY').onchange = function () { transPane(el, f, Number($('#trY').value)); };
+    }).catch(function (x) { el.innerHTML = '<div class="empty">' + esc(x.message) + '</div>'; });
+  }
+
+  // ------------------------------------------------ new employee wizard --
+  function newEmployee() {
+    Promise.all([api('/api/people/defaults'), api('/api/people/custom-fields')]).then(function (r) {
+      var D = r[0].defaults, A = r[0].access, CAT = r[0].catalogue || [], FIELDS = r[1].fields.filter(function (x) { return x.is_active; });
+      var W = { personal: {}, contact: { parish: D.parish || '' }, employment: { start_date: today(), contract_type: D.contract_type, probation_months: D.probation_months, department_id: D.department_id || '', employee_type: D.employee_type, work_location: D.work_location || '', leave_accrual: D.leave_accrual },
+        payroll: { add: A.run && D.payroll.add, pay_on: false, pay_type: D.payroll.pay_type, frequency: D.payroll.frequency, pay_method: D.payroll.pay_method, vacation_days: D.payroll.vacation_days == null ? '' : D.payroll.vacation_days, sick_days: D.payroll.sick_days == null ? '' : D.payroll.sick_days, items: (D.payroll.items || []).slice() },
+        emergency: {}, custom: {}, onboarding: D.onboarding };
+      var STEPS = [['personal', 'Personal'], ['contact', 'Address & contact'], ['employment', 'Employment'], ['payroll', 'Payroll & tax'], ['more', 'Emergency & more'], ['check', 'Check & add']];
+      var at = 0;
+      var val = function (id) { var e = $('#' + id); return e ? (e.type === 'checkbox' ? e.checked : e.value) : undefined; };
+      function keep() {
+        var k = STEPS[at][0];
+        var take = function (o, map) { Object.keys(map).forEach(function (key) { var v = val(map[key]); if (v !== undefined) o[key] = v; }); };
+        if (k === 'personal') take(W.personal, { salutation: 'wSal', name: 'wNm', legal_name: 'wLn', preferred_name: 'wPn', gender: 'wG', date_of_birth: 'wDob', marital_status: 'wMs' });
+        if (k === 'contact') take(W.contact, { email: 'wEm', phone: 'wPh', mobile: 'wMo', personal_phone: 'wHp', personal_email: 'wPe', address: 'wAd', town: 'wTw', parish: 'wPa' });
+        if (k === 'employment') take(W.employment, { employee_no: 'wNo', job_title: 'wT', department_id: 'wD', manager_user_id: 'wM', start_date: 'wS', contract_type: 'wC', contract_end: 'wCe', probation_months: 'wPm', employee_type: 'wTy', work_location: 'wW', job_description: 'wJd', leave_accrual: 'wLa' });
+        if (k === 'payroll') take(W.payroll, { add: 'wPadd', pay_on: 'wPon', trn: 'wTrn', nis_no: 'wNis', pay_type: 'wPty', frequency: 'wFq', salary_annual: 'wSal2', hourly_rate: 'wHr', day_rate: 'wDr', pay_method: 'wPm2', bank_name: 'wBn', bank_branch: 'wBb', bank_account: 'wBa', bank_account_type: 'wBt', vacation_days: 'wVd', sick_days: 'wSd' });
+        if (k === 'more') { take(W.emergency, { name: 'wEn', relationship: 'wEr', phone: 'wEp' }); FIELDS.forEach(function (x) { var v = val('wcf' + x.id); if (v !== undefined) W.custom[x.id] = v; }); }
+        if (k === 'check') W.onboarding = val('wOn');
+      }
+      function check() {
+        var k = STEPS[at][0];
+        if (k === 'personal' && String(W.personal.name || '').trim().length < 3) return 'Their full name';
+        if (k === 'employment' && !W.employment.start_date) return 'Their start date';
+        if (k === 'more' && W.emergency.name && !W.emergency.phone) return 'A phone number for the emergency contact';
+        return null;
+      }
+      function draw() {
+        var k = STEPS[at][0], P = W.personal, C = W.contact, E = W.employment, Y = W.payroll, M = W.emergency, h = '';
+        if (k === 'personal') h = '<div class="grid">' + field('Mr / Ms', '<select id="wSal">' + opts(SALUT.map(function (s) { return [s, s]; }), P.salutation, '–') + '</select>') + field('Full name', inp('wNm', P.name)) + field('Legal name (as on the TRN card)', inp('wLn', P.legal_name)) +
+          field('Preferred name', inp('wPn', P.preferred_name)) + field('Gender', '<select id="wG">' + opts(pairs(GENDER), P.gender, '–') + '</select>') + field('Date of birth', inp('wDob', P.date_of_birth, 'date')) + field('Marital status', '<select id="wMs">' + opts(pairs(MARITAL), P.marital_status, '–') + '</select>') + '</div>';
+        if (k === 'contact') h = '<div class="grid">' + field('Work email (optional: their login)', inp('wEm', C.email, 'email')) + field('Work phone', inp('wPh', C.phone, 'tel')) + field('Mobile', inp('wMo', C.mobile, 'tel')) + field('Home phone', inp('wHp', C.personal_phone, 'tel')) +
+          field('Personal email', inp('wPe', C.personal_email, 'email')) + field('Town / district', inp('wTw', C.town)) + field('Parish', '<input id="wPa" list="wParishes" value="' + esc(C.parish || '') + '">') + '</div><datalist id="wParishes">' + PARISHES.map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>' +
+          '<label class="sub">Street address</label><textarea id="wAd" rows="2">' + esc(C.address || '') + '</textarea>';
+        if (k === 'employment') h = '<div class="grid">' + field('Employee no.', inp('wNo', E.employee_no)) + field('Job title', inp('wT', E.job_title)) + field('Department', '<select id="wD">' + opts(META.departments, E.department_id, '–') + '</select>') +
+          field('Supervisor', '<select id="wM">' + opts(META.people, E.manager_user_id, '–') + '</select>') + field('Hire date (first day)', inp('wS', E.start_date, 'date')) + field('Contract', '<select id="wC">' + opts(pairs(CONTRACT), E.contract_type) + '</select>') +
+          field('Contract ends (fixed term)', inp('wCe', E.contract_end, 'date')) + field('Probation (months)', inp('wPm', E.probation_months, 'number')) + field('Employee type', '<select id="wTy">' + opts(pairs(EMPTYPE), E.employee_type) + '</select>') + field('Works at', inp('wW', E.work_location)) +
+          field('Leave builds up', '<select id="wLa"><option value="year"' + (E.leave_accrual !== 'monthly' ? ' selected' : '') + '>All on 1 January</option><option value="monthly"' + (E.leave_accrual === 'monthly' ? ' selected' : '') + '>A twelfth each month</option></select>') + '</div>' +
+          '<label class="sub">Job description</label><textarea id="wJd" rows="3">' + esc(E.job_description || '') + '</textarea>';
+        if (k === 'payroll') h = !A.run ? '<div class="warn">Putting someone on Payroll (pay, TRN, NIS, bank) is for someone who may change pay. Add them now; they finish this part in Payroll. The starter checklist reminds them.</div>' :
+          '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="wPadd"' + (Y.add ? ' checked' : '') + '> Put them on Payroll now</label>' +
+          '<div class="grid">' + field('TRN', inp('wTrn', Y.trn)) + field('NIS no.', inp('wNis', Y.nis_no)) + field('Paid', '<select id="wFq">' + opts(pairs(FREQ), Y.frequency) + '</select>') + field('Pay type', '<select id="wPty">' + opts([['salary', 'Salary'], ['hourly', 'Hourly'], ['daily', 'Day rate']], Y.pay_type) + '</select>') +
+          field('Yearly salary (J$)', inp('wSal2', Y.salary_annual, 'number')) + field('Hourly rate (J$)', inp('wHr', Y.hourly_rate, 'number')) + field('Day rate (J$)', inp('wDr', Y.day_rate, 'number')) +
+          field('Vacation days a year', inp('wVd', Y.vacation_days, 'number')) + field('Sick days a year', inp('wSd', Y.sick_days, 'number')) + field('Paid by', '<select id="wPm2">' + opts([['bank', 'Bank transfer'], ['cheque', 'Cheque'], ['cash', 'Cash']], Y.pay_method) + '</select>') +
+          field('Bank', inp('wBn', Y.bank_name)) + field('Branch', inp('wBb', Y.bank_branch)) + field('Account no.', inp('wBa', Y.bank_account)) + field('Account type', '<select id="wBt">' + opts([['savings', 'Savings'], ['chequing', 'Chequing']], Y.bank_account_type, '–') + '</select>') + '</div>' +
+          (Y.items.length ? '<p class="sub">From the defaults, each pay: ' + Y.items.map(function (x) { var c = CAT.filter(function (y) { return y.code === x.code; })[0]; return esc(c ? c.label : x.code) + ' ' + jmd(x.amount); }).join(', ') + '.</p>' : '') +
+          '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="wPon"' + (Y.pay_on ? ' checked' : '') + '> Switch pay on now (otherwise it stays off until someone switches it on in Payroll)</label>';
+        if (k === 'more') h = '<h4>Emergency contact</h4><div class="grid">' + field('Name', inp('wEn', M.name)) + field('Relationship', inp('wEr', M.relationship)) + field('Phone', inp('wEp', M.phone, 'tel')) + '</div>' +
+          (FIELDS.length ? '<h4>Additional info</h4><div class="grid">' + FIELDS.map(function (x) {
+            var id = 'wcf' + x.id, v = W.custom[x.id] == null ? '' : W.custom[x.id];
+            return field(x.label, x.kind === 'list' ? '<select id="' + id + '">' + opts(x.options.map(function (o) { return [o, o]; }), v, '–') + '</select>' : x.kind === 'yesno' ? '<select id="' + id + '"><option value="">–</option><option' + (v === 'yes' ? ' selected' : '') + '>yes</option><option' + (v === 'no' ? ' selected' : '') + '>no</option></select>' : inp(id, v, x.kind === 'date' ? 'date' : x.kind === 'number' ? 'number' : 'text'));
+          }).join('') + '</div>' : '');
+        if (k === 'check') {
+          var ln = function (a, b) { return b ? '<tr><th>' + esc(a) + '</th><td>' + esc(b) + '</td></tr>' : ''; };
+          var dn = (META.departments.filter(function (x) { return String(x.id) === String(E.department_id); })[0] || {}).name, mn = (META.people.filter(function (x) { return String(x.id) === String(E.manager_user_id); })[0] || {}).name;
+          h = '<table class="kv">' + ln('Name', [P.salutation, P.name].filter(Boolean).join(' ')) + ln('Legal name', P.legal_name) + ln('Preferred name', P.preferred_name) + ln('Date of birth', day(P.date_of_birth)) + ln('Phone', [C.phone, C.mobile].filter(Boolean).join(' / ')) + ln('Email', C.email) +
+            ln('Address', [C.address, C.town, C.parish].filter(Boolean).join(', ')) + ln('Job', [E.job_title, dn].filter(Boolean).join(' · ')) + ln('Supervisor', mn) + ln('Hire date', day(E.start_date)) + ln('Contract', CONTRACT[E.contract_type] + (E.contract_end ? ' to ' + day(E.contract_end) : '')) +
+            ln('Probation', Number(E.probation_months) > 0 ? E.probation_months + ' months' : 'none') +
+            ln('Payroll', !A.run ? 'to be added by someone who may change pay' : Y.add ? [PAYT[Y.pay_type], FREQ[Y.frequency], Y.pay_type === 'hourly' ? (Y.hourly_rate ? jmd(Y.hourly_rate) + '/hr' : '') : Y.pay_type === 'daily' ? (Y.day_rate ? jmd(Y.day_rate) + '/day' : '') : (Y.salary_annual ? jmd(Y.salary_annual) + '/yr' : ''), Y.trn ? 'TRN given' : 'no TRN yet', 'pay ' + (Y.pay_on ? 'on' : 'off')].filter(Boolean).join(' · ') : 'not now') +
+            ln('Emergency contact', M.name ? M.name + (M.relationship ? ' (' + M.relationship + ')' : '') + ' ' + (M.phone || '') : 'none yet') + '</table>' +
+            '<label style="display:flex;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" id="wOn"' + (W.onboarding ? ' checked' : '') + '> Give them the new-starter checklist</label>' +
+            '<p class="sub">Their login is switched off until a manager gives them a role and a password or PIN on Users &amp; Staff.</p>';
+        }
+        modal('<h2>New employee</h2><div class="steps">' + STEPS.map(function (s, i) { return '<span class="' + (i === at ? 'on' : i < at ? 'done' : '') + '">' + (i + 1) + '. ' + s[1] + '</span>'; }).join('') + '</div>' + h +
+          '<div class="controls" style="margin-top:12px">' + (at ? '<button id="wBack">‹ Back</button>' : '') + (at < STEPS.length - 1 ? '<button class="primary" id="wNext">Next ›</button>' : '<button class="primary" id="wGo">Add employee</button>') + '<button id="wX">Cancel</button></div>');
+        $('#wX').onclick = function () { close(); };
+        if ($('#wBack')) $('#wBack').onclick = function () { keep(); at--; draw(); };
+        if ($('#wNext')) $('#wNext').onclick = function () { keep(); var m = check(); if (m) return toast(m); at++; draw(); };
+        if ($('#wGo')) $('#wGo').onclick = function () { keep(); send(false); };
+      }
+      function send(dup) {
+        var body = { personal: W.personal, contact: W.contact, employment: W.employment, payroll: A.run ? W.payroll : {}, emergency: W.emergency, custom: W.custom, onboarding: W.onboarding, confirm_duplicate: dup };
+        api('/api/people/new-employee', 'POST', body).then(function (r) { close(); toast('Added. ' + r.next); LIST.state = 'active'; sel = r.id; staffList($('#view')).then(function () { openFile(r.id); }); })
+          .catch(function (e) { if (/already on the staff list/.test(e.message) && !dup) { if (confirm(e.message)) send(true); } else toast(e.message); });
+      }
+      draw();
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // ---------------------------------------------- defaults and staff fields --
+  function defaultsDialog() {
+    api('/api/people/defaults').then(function (r) {
+      var D = r.defaults, A = r.access, Y = D.payroll, ro = A.run ? '' : ' disabled', CAT = r.catalogue || [];
+      var items = (Y.items || []).slice();
+      function itemsHtml() { return items.length ? items.map(function (x, i) { var c = CAT.filter(function (y) { return y.code === x.code; })[0]; return '<span class="pill">' + esc(c ? c.label : x.code) + ' ' + jmd(x.amount) + (A.run ? ' <button class="link" data-di="' + i + '">✕</button>' : '') + '</span> '; }).join('') : '<small class="sub">None</small>'; }
+      modal('<h2>Employee defaults</h2><p class="sub">What a new employee starts with in the New Employee wizard. Each can be changed for the person.</p>' +
+        '<h4>Employment</h4><div class="grid">' + field('Contract', '<select id="dC">' + opts(pairs(CONTRACT), D.contract_type) + '</select>') + field('Probation (months)', inp('dPm', D.probation_months, 'number')) + field('Department', '<select id="dD">' + opts(META.departments, D.department_id, '–') + '</select>') +
+          field('Employee type', '<select id="dTy">' + opts(pairs(EMPTYPE), D.employee_type) + '</select>') + field('Works at', inp('dW', D.work_location)) + field('Parish', '<input id="dPa" list="dParishes" value="' + esc(D.parish || '') + '">') +
+          field('Leave builds up', '<select id="dLa"><option value="year"' + (D.leave_accrual !== 'monthly' ? ' selected' : '') + '>All on 1 January</option><option value="monthly"' + (D.leave_accrual === 'monthly' ? ' selected' : '') + '>A twelfth each month</option></select>') + '</div>' +
+          '<datalist id="dParishes">' + PARISHES.map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>' +
+          '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="dOn"' + (D.onboarding ? ' checked' : '') + '> New employees get the new-starter checklist</label>' +
+        '<h4>Payroll' + (A.run ? '' : ' (for someone who may change pay)') + '</h4><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="dPadd"' + (Y.add ? ' checked' : '') + ro + '> Put new employees on Payroll in the wizard</label><div class="grid">' +
+          field('Paid', '<select id="dFq"' + ro + '>' + opts(pairs(FREQ), Y.frequency) + '</select>') + field('Pay type', '<select id="dPty"' + ro + '>' + opts([['salary', 'Salary'], ['hourly', 'Hourly'], ['daily', 'Day rate']], Y.pay_type) + '</select>') + field('Paid by', '<select id="dPm"' + ro + '>' + opts([['bank', 'Bank transfer'], ['cheque', 'Cheque'], ['cash', 'Cash']], Y.pay_method) + '</select>') +
+          field('Hours a day', '<input id="dHd" type="number" step="0.5" value="' + esc(Y.hours_per_day) + '"' + ro + '>') + field('Overtime (× the rate)', '<input id="dOt" type="number" step="0.1" value="' + esc(Y.ot_rate) + '"' + ro + '>') +
+          field('Vacation days a year', '<input id="dVd" type="number" step="0.5" placeholder="the shop setting" value="' + esc(Y.vacation_days == null ? '' : Y.vacation_days) + '"' + ro + '>') + field('Sick days a year', '<input id="dSd" type="number" step="0.5" placeholder="the shop setting" value="' + esc(Y.sick_days == null ? '' : Y.sick_days) + '"' + ro + '>') +
+          field('Pension: employee %', '<input id="dPe" type="number" step="0.1" value="' + esc(Y.pension_ee_pct) + '"' + ro + '>') + field('Pension: company %', '<input id="dPc" type="number" step="0.1" value="' + esc(Y.pension_er_pct) + '"' + ro + '>') + '</div>' +
+          '<label class="sub">Additions and deductions each pay</label><div id="dItems">' + itemsHtml() + '</div>' +
+          (A.run ? '<div class="controls"><select id="dItC">' + opts(CAT.map(function (c) { return [c.code, (c.kind === 'earning' ? '+ ' : '− ') + c.label]; }), '', 'Choose…') + '</select><input id="dItA" type="number" step="0.01" placeholder="J$ each pay" style="width:130px"><button id="dItGo">Add</button></div>' : '') +
+        '<div class="controls" style="margin-top:10px"><button class="primary" id="dSave">Save defaults</button><button id="dFields">Staff fields (Additional info)…</button><button id="dX">Close</button></div>');
+      var wire = function () { all('[data-di]').forEach(function (b) { b.onclick = function () { items.splice(+b.getAttribute('data-di'), 1); $('#dItems').innerHTML = itemsHtml(); wire(); }; }); };
+      wire();
+      if ($('#dItGo')) $('#dItGo').onclick = function () { if (!$('#dItC').value || !(Number($('#dItA').value) > 0)) return toast('Choose the item and the amount'); items.push({ code: $('#dItC').value, amount: Number($('#dItA').value) }); $('#dItems').innerHTML = itemsHtml(); wire(); };
+      $('#dX').onclick = function () { close(); };
+      $('#dFields').onclick = function () { fieldsDialog(); };
+      $('#dSave').onclick = function () {
+        var body = { contract_type: $('#dC').value, probation_months: $('#dPm').value, department_id: $('#dD').value, employee_type: $('#dTy').value, work_location: $('#dW').value, parish: $('#dPa').value, leave_accrual: $('#dLa').value, onboarding: $('#dOn').checked };
+        if (A.run) body.payroll = { add: $('#dPadd').checked, frequency: $('#dFq').value, pay_type: $('#dPty').value, pay_method: $('#dPm').value, hours_per_day: $('#dHd').value, ot_rate: $('#dOt').value, vacation_days: $('#dVd').value, sick_days: $('#dSd').value, pension_ee_pct: $('#dPe').value, pension_er_pct: $('#dPc').value, use_timeclock: Y.use_timeclock, items: items };
+        api('/api/people/defaults', 'PUT', body).then(function () { close(); toast('Defaults saved'); }).catch(function (e) { toast(e.message); });
+      };
+    }).catch(function (e) { toast(e.message); });
+  }
+  function fieldsDialog(after) {
+    api('/api/people/custom-fields').then(function (r) {
+      modal('<h2>Staff fields</h2><p class="sub">Your own fields on everyone’s file (Additional info), as “Define fields” in QuickBooks: uniform size, driver’s licence number and expiry, locker, shirt size, union member…</p>' +
+        (r.fields.length ? '<table><thead><tr><th>Field</th><th>Kind</th><th>Choices</th><th>Filled in</th><th></th></tr></thead><tbody>' + r.fields.map(function (x) {
+          return '<tr' + (x.is_active ? '' : ' style="opacity:.55"') + '><td><b>' + esc(x.label) + '</b></td><td>' + esc(FKIND[x.kind]) + '</td><td><small>' + esc((x.options || []).join(', ')) + '</small></td><td>' + x.used + '</td><td>' +
+            '<button class="sm" data-fe="' + x.id + '">Rename</button> <button class="sm" data-fa="' + x.id + ':' + (x.is_active ? '0' : '1') + '">' + (x.is_active ? 'Switch off' : 'Switch on') + '</button>' + (x.used ? '' : ' <button class="sm" data-fx="' + x.id + '">✕</button>') + '</td></tr>';
+        }).join('') + '</tbody></table>' : '<p class="sub">None yet.</p>') +
+        '<h4>Add a field</h4><div class="controls"><div><label>Name</label><input id="fL" placeholder="e.g. Uniform size"></div><div><label>Kind</label><select id="fK">' + opts(pairs(FKIND), 'text') + '</select></div><div style="flex:1;min-width:200px"><label>Choices (a list: one per line or comma)</label><input id="fO" style="width:100%" placeholder="S, M, L, XL"></div><button class="primary" id="fGo">Add</button></div>' +
+        '<div class="controls"><button id="fX">Close</button></div>', 2);
+      var redo = function (m) { if (m) toast(m); fieldsDialog(after); if (after) after(); };
+      var bad = function (e) { toast(e.message); };
+      $('#fX').onclick = function () { close(2); };
+      $('#fGo').onclick = function () { api('/api/people/custom-fields', 'POST', { label: $('#fL').value, kind: $('#fK').value, options: $('#fO').value }).then(function () { redo('Field added'); }).catch(bad); };
+      all('[data-fa]').forEach(function (b) { b.onclick = function () { var x = b.getAttribute('data-fa').split(':'); api('/api/people/custom-fields/' + x[0], 'PUT', { is_active: x[1] === '1' }).then(function () { redo(); }).catch(bad); }; });
+      all('[data-fe]').forEach(function (b) { b.onclick = function () { var x = r.fields.filter(function (y) { return String(y.id) === b.getAttribute('data-fe'); })[0]; var nm = prompt('New name', x.label); if (!nm) return; var o = x.kind === 'list' ? prompt('Choices (comma between)', (x.options || []).join(', ')) : null; api('/api/people/custom-fields/' + x.id, 'PUT', o != null ? { label: nm, options: o } : { label: nm }).then(function () { redo('Saved'); }).catch(bad); }; });
+      all('[data-fx]').forEach(function (b) { b.onclick = function () { if (confirm('Remove this field?')) api('/api/people/custom-fields/' + b.getAttribute('data-fx'), 'DELETE').then(function () { redo('Removed'); }).catch(bad); }; });
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // ------------------------------------- make inactive, release and rehire --
+  function inactiveDialog(p, after) {
+    if (p.state === 'inactive') return api('/api/people/staff/' + p.id + '/inactive', 'POST', { inactive: false }).then(function () { after('Active again'); }).catch(function (e) { toast(e.message); });
+    modal('<h2>Make ' + esc(p.name) + ' inactive</h2><p class="sub">Takes them off the active list without releasing them: long sick leave, maternity leave, a break. Nothing changes in Payroll; their login stays as it is. Make them active again from the Inactive list.</p>' +
+      '<label class="sub">Why</label><input id="inR" style="width:100%" placeholder="e.g. Maternity leave to March">' +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="inGo">Make inactive</button><button id="inX">Cancel</button></div>', 2);
+    $('#inX').onclick = function () { close(2); };
+    $('#inGo').onclick = function () { api('/api/people/staff/' + p.id + '/inactive', 'POST', { inactive: true, reason: $('#inR').value }).then(function () { close(2); after('Made inactive'); }).catch(function (e) { toast(e.message); }); };
+  }
+  function releaseDialog(p, after) {
+    modal('<h2>Release ' + esc(p.name) + '</h2><p class="sub">Their last day worked. They move to the Released list; Payroll pays them up to that day and no further (the final pay is worked out on the next run). For notice, an exit interview and the leaving checklist, use the Leaving tab instead.</p>' +
+      '<div class="grid">' + field('Release date (last day worked)', inp('rlD', today(), 'date')) + field('Why', '<select id="rlK">' + opts(pairs(EXITK), 'resignation') + '</select>') +
+        field('Eligible for rehire', '<select id="rlRh"><option value="">Not decided</option><option value="yes">Yes</option><option value="no">No</option></select>') + '</div>' +
+      '<label class="sub">Details</label><input id="rlN" style="width:100%">' +
+      (p.is_archived ? '' : '<label style="display:flex;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" id="rlA"> Also archive their login now (signs them out, stops sign-in, removes the till PIN; their history stays)</label>') +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="rlGo">Release</button><button id="rlX">Cancel</button></div>', 2);
+    $('#rlX').onclick = function () { close(2); };
+    $('#rlGo').onclick = function () {
+      var on = $('#rlD').value, why = EXITK[$('#rlK').value] + ($('#rlN').value ? ' — ' + $('#rlN').value : '');
+      api('/api/people/staff/' + p.id + '/release', 'POST', { release_date: on, reason: why, rehire_eligible: $('#rlRh').value === '' ? null : $('#rlRh').value === 'yes' }).then(function (r) {
+        close(2);
+        if (!($('#rlA') && $('#rlA').checked)) return after('Released. ' + r.payroll);
+        return api('/api/admin/staff/' + p.id, 'PATCH', { archived: true, left_on: on, archive_reason: why.slice(0, 200) })
+          .then(function () { after('Released and login archived. ' + r.payroll); }, function (e) { after('Released, but the login was not archived: ' + e.message); });
+      }).catch(function (e) { toast(e.message); });
+    };
+  }
+  function rehireDialog(p, after) {
+    modal('<h2>Rehire ' + esc(p.name) + '</h2>' + (p.rehire_eligible === false ? '<div class="warn">Their file says they are <b>not</b> eligible for rehire. Give the reason to go ahead.</div>' : '') +
+      '<p class="sub">Back on the active list from the date below. The original hire date stays; their earlier history stays on the file.</p>' +
+      '<div class="grid">' + field('Starts again on', inp('rhD', today(), 'date')) + field('Service', '<select id="rhS"><option value="restart">Counts from this date (adjusted service date)</option><option value="continue">Continues from before (a short break)</option></select>') +
+        field('Job title', inp('rhT', p.job_title)) + field('Department', '<select id="rhDp">' + opts(META.departments, p.department_id, 'As before') + '</select>') +
+        field('Supervisor', '<select id="rhM">' + opts(META.people.filter(function (x) { return x.id !== p.id; }), p.manager_user_id, 'As before') + '</select>') + field('Contract', '<select id="rhC">' + opts(pairs(CONTRACT), p.contract_type || 'permanent') + '</select>') +
+        field('Probation (months)', inp('rhPm', 0, 'number')) + '</div>' +
+      (p.rehire_eligible === false ? '<label class="sub">Why we are taking them back</label><input id="rhO" style="width:100%">' : '') +
+      '<label class="sub">Note</label><input id="rhN" style="width:100%">' +
+      '<label style="display:flex;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" id="rhOn" checked> Give them the new-starter checklist</label>' +
+      (p.is_archived ? '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="rhL" checked> Restore their login from the archive (a manager sets the password or PIN)</label>' : '') +
+      '<div class="controls" style="margin-top:10px"><button class="primary" id="rhGo">Rehire</button><button id="rhX">Cancel</button></div>', 2);
+    $('#rhX').onclick = function () { close(2); };
+    $('#rhGo').onclick = function () {
+      var body = { rehire_date: $('#rhD').value, service: $('#rhS').value, job_title: $('#rhT').value, department_id: $('#rhDp').value, manager_user_id: $('#rhM').value, contract_type: $('#rhC').value, probation_months: $('#rhPm').value,
+        reason: $('#rhN').value, override_reason: $('#rhO') ? $('#rhO').value : '', onboarding: $('#rhOn').checked };
+      api('/api/people/staff/' + p.id + '/rehire', 'POST', body).then(function (r) {
+        close(2);
+        if (!($('#rhL') && $('#rhL').checked)) return after('Rehired. ' + r.payroll);
+        return api('/api/admin/staff/' + p.id, 'PATCH', { archived: false }).then(function () { after('Rehired and login restored. ' + r.payroll); }, function (e) { after('Rehired, but the login was not restored: ' + e.message); });
+      }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  // -------------------------------------------- lists, as in QuickBooks --
+  var LISTS = [['contacts', 'Employee contact list'], ['details', 'Employee details'], ['withholding', 'Withholding (TRN / NIS)'], ['pto', 'Paid time off'], ['birthdays', 'Birthdays and anniversaries']];
+  function listsCard() {
+    return '<div class="card"><h2>Employee lists</h2><p class="sub">As the QuickBooks employee reports. Pick one; print it or take it to Excel.</p><div class="controls">' + LISTS.map(function (l) { return '<button data-ls="' + l[0] + '">' + esc(l[1]) + '</button>'; }).join('') + '</div><div id="lsOut"></div></div>';
+  }
+  function listsWire(v) { all('[data-ls]', v).forEach(function (b) { b.onclick = function () { all('[data-ls]', v).forEach(function (x) { x.classList.toggle('primary', x === b); }); showList(b.getAttribute('data-ls'), {}); }; }); }
+  function showList(name, o) {
+    var out = $('#lsOut'); out.innerHTML = '<div class="empty">Loading…</div>';
+    var year = o.year || new Date().getFullYear(), state = o.state || 'active', days = o.days || 60;
+    api('/api/people/lists/' + name + '?state=' + state + '&year=' + year + '&days=' + days).then(function (d) {
+      var title = LISTS.filter(function (l) { return l[0] === name; })[0][1], header = [], rows = [], note = '';
+      var nm = function (r) { return r.name; };
+      if (name === 'contacts') {
+        header = ['Name', 'Work phone', 'Mobile', 'Home phone', 'Email', 'Address', 'Town', 'Parish', 'Emergency contact', 'Their phone'];
+        rows = d.rows.map(function (r) { return [r.name, r.phone, r.mobile, r.personal_phone, r.email || r.personal_email, r.address, r.town, r.parish, r.emergency ? r.emergency.name + (r.emergency.relationship ? ' (' + r.emergency.relationship + ')' : '') : '', r.emergency ? r.emergency.phone : '']; });
+      } else if (name === 'details') {
+        header = ['Name', 'Employee no.', 'Legal name', 'Preferred name', 'Gender', 'Date of birth', 'Marital status', 'Job', 'Department', 'Supervisor', 'Hire date', 'Adjusted service', 'Release date', 'Contract', 'Employee type', 'Status', 'Eligible for rehire'].concat(d.access.view ? ['TRN', 'NIS no.', 'Pay type', 'Paid', 'Rate (J$)'] : []).concat(d.fields.map(function (f) { return f.label; }));
+        rows = d.rows.map(function (r) { return [r.name, r.employee_no, r.legal_name, r.preferred_name, GENDER[r.gender] || '', r.date_of_birth, MARITAL[r.marital_status] || '', r.job_title, r.department, r.manager, r.start_date, r.adjusted_service_date, r.release_date, CONTRACT[r.contract_type] || '', EMPTYPE[r.employee_type] || '', STATUS[r.status] || r.status, r.rehire_eligible == null ? '' : r.rehire_eligible ? 'Yes' : 'No']
+          .concat(d.access.view ? [r.trn, r.nis_no, PAYT[r.pay_type] || '', FREQ[r.frequency] || '', r.pay_type === 'hourly' ? r.hourly_rate : r.pay_type === 'daily' ? r.day_rate : r.salary_annual] : []).concat(d.fields.map(function (f) { return r.custom && r.custom[f.id] != null ? r.custom[f.id] : ''; })); });
+      } else if (name === 'withholding') {
+        header = ['Name', 'TRN', 'NIS no.', 'Exempt from', 'Extra tax-free (yr)', 'Pension %', 'Gross ' + year, 'Statutory income', 'PAYE', 'NIS', 'NHT', 'Education Tax', 'Company NIS', 'Company NHT', 'Company Ed. Tax', 'HEART'];
+        rows = d.rows.map(function (r) { var x = r.tax || {}; return [r.name, r.trn, r.nis_no, [x.paye_exempt ? 'PAYE' : '', x.nis_exempt ? 'NIS' : '', x.nht_exempt ? 'NHT' : '', x.ed_exempt ? 'Ed. Tax' : ''].filter(Boolean).join(', '), x.extra_threshold || '', x.pension_ee_pct || '', x.gross, x.statutory, x.paye, x.nis_ee, x.nht_ee, x.ed_ee, x.nis_er, x.nht_er, x.ed_er, x.heart_er]; });
+        var missing = d.rows.filter(function (r) { return !r.has_trn || !r.has_nis; }).map(nm);
+        note = (missing.length ? 'TRN or NIS missing: ' + missing.join(', ') + '. ' : 'Everyone has a TRN and NIS number. ') + (d.not_on_payroll.length ? 'Not on Payroll: ' + d.not_on_payroll.map(nm).join(', ') + '.' : '') + (d.access.run ? '' : ' Numbers are shown in part: only someone who may change pay sees them whole.');
+      } else if (name === 'pto') {
+        header = ['Name', 'Department', 'Builds up', 'Vacation a year', 'Earned so far', 'Taken', 'Left', 'Sick a year', 'Earned so far', 'Taken', 'Left', 'Unpaid', 'Other'];
+        rows = d.rows.map(function (r) { return [r.name, r.department, r.leave_accrual === 'monthly' ? 'Monthly' : '1 January', r.vacation_entitled, r.vacation_earned, r.vacation_taken, r.vacation_left, r.sick_entitled, r.sick_earned, r.sick_taken, r.sick_left, r.unpaid_taken, r.other_taken]; });
+      } else if (name === 'birthdays') {
+        header = ['Date', 'Name', 'Department', 'What'];
+        rows = d.rows.map(function (r) { return [r.date, r.name, r.department, r.kind === 'birthday' ? 'Birthday (' + r.years + ')' : r.years + ' year' + (r.years > 1 ? 's' : '') + ' with us']; });
+        note = 'From ' + day(d.from) + ' to ' + day(d.until) + '.';
+      }
+      out.innerHTML = '<div class="controls">' + (name === 'pto' || name === 'withholding' ? '<div><label>Year</label><input id="lsY" type="number" value="' + year + '" style="width:90px"></div>' : '') +
+        (name === 'birthdays' ? '<div><label>The next</label><select id="lsDays">' + [30, 60, 90, 180, 365].map(function (x) { return '<option value="' + x + '"' + (x === days ? ' selected' : '') + '>' + x + ' days</option>'; }).join('') + '</select></div>' : '') +
+        '<div><label>Who</label><select id="lsSt">' + ['active', 'inactive', 'released', 'all'].map(function (k) { return '<option value="' + k + '"' + (k === state ? ' selected' : '') + '>' + STATEL[k] + '</option>'; }).join('') + '</select></div>' +
+        '<button id="lsX">Excel</button><button id="lsC">CSV</button><button id="lsP">Print</button></div>' + (note ? '<p class="sub">' + esc(note) + '</p>' : '') +
+        (rows.length ? '<div class="scroll"><table><thead><tr>' + header.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') + '</tr></thead><tbody>' + rows.map(function (r, i) {
+          return '<tr class="row" data-lu="' + d.rows[i].id + '">' + r.map(function (c, j) { return '<td>' + (typeof c === 'number' && (name === 'withholding' && j >= 6) ? jmd(c) : /^\d{4}-\d{2}-\d{2}$/.test(String(c)) ? esc(day(c)) : esc(c == null ? '' : c)) + '</td>'; }).join('') + '</tr>';
+        }).join('') + '</tbody></table></div>' : '<div class="empty">Nobody on this list.</div>');
+      var again = function () { showList(name, { year: $('#lsY') ? Number($('#lsY').value) : year, state: $('#lsSt').value, days: $('#lsDays') ? Number($('#lsDays').value) : days }); };
+      if ($('#lsY')) $('#lsY').onchange = again; if ($('#lsDays')) $('#lsDays').onchange = again; $('#lsSt').onchange = again;
+      $('#lsX').onclick = function () { xlsx(name, [{ title: title, header: header, rows: rows }]); };
+      $('#lsC').onclick = function () { csv(name, [header].concat(rows)); };
+      $('#lsP').onclick = function () { printTable(title, header, rows, note); };
+      all('[data-lu]', out).forEach(function (r) { r.onclick = function () { openFile(r.getAttribute('data-lu')); }; });
+    }).catch(function (e) { out.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+
+  // ----------------------------------------------------------- contracts --
+  var CKIND = { employment: 'Contract of employment', fixed_term: 'Fixed-term contract', amendment: 'Change to terms', confidentiality: 'Confidentiality agreement', other: 'Other agreement' };
+  var CST = { draft: 'Draft', sent: 'Sent to sign', signed: 'Signed', declined: 'Declined', ended: 'Ended', cancelled: 'Cancelled' };
+  function contractsPane(el, f) {
+    var uid = f.user.id;
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    api('/api/people/staff/' + uid + '/contracts').then(function (d) {
+      el.innerHTML = '<p class="sub">Contracts written from the file and sent to them to sign. The signed copy is filed in the Document centre (restricted). A change later is a new “change to terms”.</p>' +
+        '<div class="controls"><button class="primary" id="ctNew">+ New contract</button></div>' +
+        (d.contracts.length ? d.contracts.map(function (c) {
+          return '<div class="item"><b>' + esc(c.title) + '</b> <span class="pill' + (c.status === 'signed' ? ' ok' : c.status === 'declined' || c.status === 'cancelled' ? ' bad' : ' warn') + '">' + esc(CST[c.status]) + '</span>' +
+            '<br><small>' + esc([c.job_title, c.start_date ? 'from ' + day(c.start_date) : '', c.end_date ? 'to ' + day(c.end_date) : '', c.salary_annual ? jmd(c.salary_annual) + ' a year' : c.hourly_rate ? jmd(c.hourly_rate) + ' an hour' : '',
+              c.signed_at ? 'signed ' + day(c.signed_at) : c.viewed_at ? 'opened ' + day(c.viewed_at) : '', c.document_number ? 'filed ' + c.document_number : ''].filter(Boolean).join(' · ')) + '</small>' +
+            '<div style="margin-top:4px"><a href="/api/people/contracts/' + c.id + '/preview" target="_blank" rel="noopener"><button class="sm">Read</button></a> ' +
+            (c.status === 'draft' || c.status === 'declined' ? '<button class="sm" data-ced="' + c.id + '">Edit</button> <button class="sm primary" data-csend="' + c.id + '">✍ Send to sign</button> <button class="sm" data-cst2="' + c.id + ':cancelled">Cancel</button>' : '') +
+            (c.status === 'sent' ? '<button class="sm" data-cst2="' + c.id + ':cancelled">Withdraw</button>' : '') + (c.status === 'signed' ? '<button class="sm" data-cst2="' + c.id + ':ended">Mark ended</button>' : '') + '</div></div>';
+        }).join('') : '<p class="sub">No contracts yet.</p>');
+      var byId = function (x) { return d.contracts.filter(function (c) { return String(c.id) === String(x); })[0]; };
+      $('#ctNew').onclick = function () { contractForm(f, null); };
+      all('[data-ced]', el).forEach(function (b) { b.onclick = function () { contractForm(f, byId(b.getAttribute('data-ced'))); }; });
+      all('[data-csend]', el).forEach(function (b) { b.onclick = function () { sendToSign(f, { contract_id: +b.getAttribute('data-csend'), kind: 'contract' }); }; });
+      all('[data-cst2]', el).forEach(function (b) { b.onclick = function () {
+        var x = b.getAttribute('data-cst2').split(':');
+        if (!confirm(x[1] === 'ended' ? 'Mark this contract ended?' : 'Cancel this contract? A link already sent stops working.')) return;
+        api('/api/people/contracts/' + x[0] + '/status', 'POST', { status: x[1] }).then(function () { reopen(f, 'Done'); }).catch(function (e) { toast(e.message); });
+      }; });
+    }).catch(function (e) { el.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+  function contractForm(f, c) {
+    var p = f.profile || {}, pay = f.payroll || {};
+    c = c || { kind: p.contract_type === 'fixed_term' ? 'fixed_term' : 'employment', job_title: p.job_title, start_date: p.start_date, end_date: p.contract_end, pay_type: pay.pay_type === 'hourly' ? 'hourly' : 'salary',
+      salary_annual: pay.salary_annual, hourly_rate: pay.hourly_rate, frequency: pay.frequency || 'monthly', probation_months: p.status === 'probation' ? p.probation_months : 0, notice_weeks: 2,
+      vacation_days: pay.vacation_days != null ? pay.vacation_days : (f.leave && f.leave.vacation_entitled), hours: 'Monday to Saturday, 8:00 a.m. to 5:00 p.m., with a one-hour lunch' };
+    modal('<h2>' + (c.id ? 'Edit contract' : 'New contract') + ': ' + esc(f.user.name || '') + '</h2><p class="sub">Filled in from their file and Payroll. Pay is written as before PAYE, NIS, NHT and Education Tax.</p>' +
+      '<div class="grid">' + field('Kind', '<select id="kK">' + opts(pairs(CKIND), c.kind) + '</select>') + field('Title (optional)', inp('kTi', c.title)) + field('Job title', inp('kJ', c.job_title)) +
+      field('Start date', inp('kS', c.start_date, 'date')) + field('End date (fixed term)', inp('kE', c.end_date, 'date')) + field('Paid', '<select id="kPt">' + opts([['salary', 'Salary'], ['hourly', 'By the hour']], c.pay_type) + '</select>') +
+      field('Yearly salary (J$)', inp('kSa', c.salary_annual)) + field('Hourly rate (J$)', inp('kHr', c.hourly_rate)) + field('Pay day', '<select id="kF">' + opts([['weekly', 'Weekly'], ['fortnightly', 'Fortnightly'], ['monthly', 'Monthly']], c.frequency) + '</select>') +
+      field('Probation (months)', inp('kPm', c.probation_months, 'number')) + field('Notice (weeks)', inp('kN', c.notice_weeks, 'number')) + field('Vacation days a year', inp('kV', c.vacation_days, 'number')) + '</div>' +
+      '<label class="sub">Hours of work</label><input id="kH" value="' + esc(c.hours || '') + '" style="width:100%"><label class="sub">Other terms (or, for an agreement, what is agreed)</label><textarea id="kT" rows="5">' + esc(c.terms || '') + '</textarea>' +
+      '<div class="controls" style="margin-top:8px"><button class="primary" id="kGo">Save draft</button><button id="kX">Cancel</button></div>', 2);
+    $('#kX').onclick = function () { close(2); };
+    $('#kGo').onclick = function () {
+      var body = { kind: $('#kK').value, title: $('#kTi').value, job_title: $('#kJ').value, start_date: $('#kS').value, end_date: $('#kE').value, pay_type: $('#kPt').value, salary_annual: $('#kSa').value, hourly_rate: $('#kHr').value,
+        frequency: $('#kF').value, probation_months: $('#kPm').value, notice_weeks: $('#kN').value, vacation_days: $('#kV').value, hours: $('#kH').value, terms: $('#kT').value };
+      api(c.id ? '/api/people/contracts/' + c.id : '/api/people/staff/' + f.user.id + '/contracts', c.id ? 'PUT' : 'POST', body).then(function () { close(2); fileTab = 'contracts'; reopen(f, 'Saved. Read it, then Send to sign.'); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  // -------------------------------------------------------- to be signed --
+  // what: { contract_id } | { case_id } | { document_number }
+  function sendToSign(f, what) {
+    var u = f.user, p = f.profile || {};
+    var mail = /\.local$/i.test(u.email || '') ? (p.personal_email || '') : u.email;
+    modal('<h2>Send to ' + esc(u.name || '') + ' to sign</h2>' +
+      (what.document_number !== undefined ? '<div class="grid">' + field('Document number in the Document centre', inp('sgDoc', what.document_number || '', 'text')) + field('Kind', '<select id="sgK">' + opts([['policy', 'Policy or handbook'], ['letter', 'Letter'], ['contract', 'Contract'], ['other', 'Other']], 'policy') + '</select>') + '</div>' : '') +
+      '<p class="sub">They get a notice to sign it in My HR file, and a private link by email (for staff who do not sign in). What they sign is fingerprinted now: if the file changes, it cannot be signed.</p>' +
+      '<div class="grid">' + field('Send the link to', inp('sgE', mail || '', 'email')) + field('Link works for (days)', inp('sgDays', 14, 'number')) + '</div>' +
+      '<label style="display:flex;gap:6px;align-items:center;margin:4px 0"><input type="checkbox" id="sgCode"> Ask for an access code before it opens (you give them the code by phone, not by email)</label>' +
+      '<label class="sub">Message (optional)</label><textarea id="sgM" rows="2"></textarea>' +
+      '<div class="controls" style="margin-top:8px"><button class="primary" id="sgGo">Send</button><button id="sgX">Cancel</button></div>', 2);
+    $('#sgX').onclick = function () { close(2); };
+    $('#sgGo').onclick = function () {
+      this.disabled = true;
+      var body = Object.assign({}, what, { email: $('#sgE').value, days: $('#sgDays').value, code: $('#sgCode').checked, message: $('#sgM').value });
+      if ($('#sgDoc')) { body.document_number = $('#sgDoc').value; body.kind = $('#sgK').value; }
+      api('/api/people/staff/' + u.id + '/signatures', 'POST', body).then(function (r) { close(2); fileTab = 'sign'; reopen(f); showLink(r); })
+        .catch(function (e) { $('#sgGo').disabled = false; toast(e.message); });
+    };
+  }
+  // The link and code are shown once: only their fingerprints are kept.
+  function showLink(r) {
+    modal('<h2>Sent</h2><p>' + (r.emailed ? 'The link was emailed to ' + esc(r.sent_to) + '.' : 'The link was <b>not</b> emailed (no email address, or email is not set up on this till). Copy it to them by WhatsApp, or they can sign in My HR file.') + '</p>' +
+      '<label class="sub">Their private link (works ' + r.expires_in_days + ' days; shown only now)</label><input readonly value="' + esc(r.link) + '" style="width:100%" onclick="this.select()">' +
+      (r.code ? '<div class="warn">Access code: <b style="font-size:20px;letter-spacing:3px">' + esc(r.code) + '</b><br>Give it to them by phone or in person, not with the link. Shown only now.</div>' : '') +
+      '<div class="controls" style="margin-top:8px"><button id="slX">Done</button></div>', 2);
+    $('#slX').onclick = function () { close(2); };
+  }
+  function signPane(el, f) {
+    var uid = f.user.id;
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    api('/api/people/staff/' + uid + '/signatures').then(function (d) {
+      el.innerHTML = '<p class="sub">Documents sent to them to sign: contracts (Contracts tab), letters (Probation &amp; conduct) or any file in the Document centre, such as the staff handbook. Signed copies carry a certificate (who, when, from where, a fingerprint and a seal) and are filed in their staff file.</p>' +
+        '<div class="controls"><button class="primary" id="sgDocB">✍ Send a Document centre file to sign</button></div>' +
+        (d.signatures.length ? d.signatures.map(function (s) {
+          return '<div class="item"><b>' + esc(s.title) + '</b> <span class="pill' + (s.status === 'signed' ? ' ok' : s.status === 'sent' ? ' warn' : ' bad') + '">' + esc(SIGNST[s.status]) + '</span>' + (s.code_locked ? ' <span class="pill bad">code locked</span>' : '') +
+            '<br><small>' + esc(['sent ' + day(s.sent_at) + (s.sent_by ? ' by ' + s.sent_by : ''), s.sent_to ? 'link to ' + s.sent_to : 'no email', s.needs_code ? 'access code' : '', s.viewed_at ? 'opened ' + when(s.viewed_at) : 'not opened yet',
+              s.signed_at ? 'signed ' + when(s.signed_at) + ' as “' + s.signer_name + '”' + (s.method === 'in_app' ? ' in My HR file' : ' from the link') : '', s.declined ? 'declined: ' + s.declined : '', s.signed_number ? 'filed ' + s.signed_number : '',
+              s.status === 'signed' ? (s.sealed ? 'seal checks out' : 'SEAL DOES NOT MATCH') : ''].filter(Boolean).join(' · ')) + '</small>' +
+            '<div style="margin-top:4px">' + (s.status === 'signed' ? '<a href="/api/people/signatures/' + s.id + '/copy" target="_blank" rel="noopener"><button class="sm">Signed copy</button></a>' : '') +
+            (s.status === 'sent' ? '<button class="sm" data-sgre="' + s.id + '">New link</button> <button class="sm" data-sgcan="' + s.id + '">Withdraw</button>' : '') + '</div></div>';
+        }).join('') : '<p class="sub">Nothing sent yet.</p>');
+      $('#sgDocB').onclick = function () { sendToSign(f, { document_number: '' }); };
+      all('[data-sgre]', el).forEach(function (b) { b.onclick = function () {
+        if (!confirm('Make a new link? The old link stops working.')) return;
+        api('/api/people/signatures/' + b.getAttribute('data-sgre') + '/resend', 'POST', {}).then(function (r) { reopen(f); r.expires_in_days = 14; r.sent_to = 'them'; showLink(r); }).catch(function (e) { toast(e.message); });
+      }; });
+      all('[data-sgcan]', el).forEach(function (b) { b.onclick = function () { if (confirm('Withdraw it? The link stops working.')) api('/api/people/signatures/' + b.getAttribute('data-sgcan') + '/cancel', 'POST').then(function () { reopen(f, 'Withdrawn'); }).catch(function (e) { toast(e.message); }); }; });
+    }).catch(function (e) { el.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+  // My HR file: what I have to sign, and my signed copies.
+  function mySignatures(el, after) {
+    api('/api/people/me/signatures').then(function (d) {
+      var open = d.signatures.filter(function (s) { return s.status === 'sent'; }), done = d.signatures.filter(function (s) { return s.status !== 'sent'; });
+      el.innerHTML = (open.length ? '<div class="warn">' + open.length + ' document(s) waiting for your signature.</div>' + open.map(function (s) {
+        return '<div class="item"><b>' + esc(s.title) + '</b><br><small>from ' + esc(s.sent_by || 'HR') + ' · ' + esc(day(s.sent_at)) + '</small>' + (s.message ? '<br>' + esc(s.message) : '') + '<div style="margin-top:4px"><button class="sm primary" data-msg="' + s.id + '">Read and sign</button></div></div>';
+      }).join('') : '<p class="sub">Nothing waiting for you.</p>') +
+        (done.length ? '<h4>Signed and other</h4>' + done.map(function (s) { return '<div class="item">' + esc(s.title) + ' <span class="pill' + (s.status === 'signed' ? ' ok' : '') + '">' + esc(SIGNST[s.status]) + '</span>' + (s.signed_at ? ' <small>' + esc(day(s.signed_at)) + '</small>' : '') + (s.status === 'signed' ? ' <a href="/api/people/me/signatures/' + s.id + '/copy" target="_blank" rel="noopener">My signed copy</a>' : '') + '</div>'; }).join('') : '');
+      all('[data-msg]', el).forEach(function (b) { b.onclick = function () { signBox(open.filter(function (s) { return String(s.id) === b.getAttribute('data-msg'); })[0], after); }; });
+    }).catch(function (e) { el.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+  function signBox(s, after) {
+    var src = '/api/people/me/signatures/' + s.id + '/content';
+    var mo = modal('<h2>' + esc(s.title) + '</h2><p class="sub">Read it all before you sign. ' + (s.is_file ? '<a href="' + src + '" target="_blank" rel="noopener">Open it in a new tab</a> if it does not show here.' : '') + '</p>' +
+      '<iframe src="' + src + '" sandbox style="width:100%;height:55vh;border:1px solid var(--line);border-radius:8px;background:#fff" title="The document"></iframe>' +
+      '<label class="sub">Type your full name</label><input id="sbN" autocomplete="name" style="width:100%"><label class="sub">Sign in the box</label><div id="sbPad"></div>' +
+      '<label style="display:flex;gap:6px;align-items:flex-start;margin:8px 0"><input type="checkbox" id="sbA"> I have read “' + esc(s.title) + '” and agree to it.</label>' +
+      '<div class="controls"><button class="primary" id="sbGo">Sign</button><button id="sbClr">Clear</button><button id="sbNo">I will not sign</button><button id="sbX">Close</button></div>');
+    var pad = window.VAScan && window.VAScan.pad ? window.VAScan.pad($('#sbPad', mo)) : null;
+    $('#sbX').onclick = function () { close(); };
+    $('#sbClr').onclick = function () { if (pad) pad.clear(); };
+    $('#sbGo').onclick = function () {
+      if (!pad || pad.empty()) return toast('Sign in the box first');
+      api('/api/people/me/signatures/' + s.id + '/sign', 'POST', { name: $('#sbN').value, image: pad.png(), agree: $('#sbA').checked }).then(function () { close(); toast('Signed. Your copy is under Signed and other.'); after(); }).catch(function (e) { toast(e.message); });
+    };
+    $('#sbNo').onclick = function () {
+      var why = prompt('Why are you not signing? HR will follow up.', '');
+      if (why) api('/api/people/me/signatures/' + s.id + '/decline', 'POST', { reason: why }).then(function () { close(); toast('HR has been told'); after(); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  // ------------------------------------------------- QuickBooks import --
+  function importView(v) {
+    v.innerHTML = '<div class="card"><h2>Employees from QuickBooks</h2><p class="sub">In QuickBooks Desktop: Reports › List › Employee Contact List, then Excel › Create New Worksheet › save as CSV; or File › Utilities › Export › Lists to IIF Files › Employee List. In QuickBooks Online: Payroll › Employees › Export. ' +
+      'You see each employee first: new, changed (with each change) or the same. Only what you tick is added or changed. New people get an HR file and a staff record with the login switched off; anyone with a release date in the past is put straight into the archive. TRN, NIS and pay go to Payroll (switched off) only if you may change pay.</p>' +
+      '<div class="controls"><input type="file" id="qeF" accept=".csv,.iif,.txt"><button id="qeP">Preview</button></div><div id="qeOut"></div></div>' +
+      '<div class="card"><h2>Payroll items from QuickBooks</h2><p class="sub">Lists › Payroll Item List › Reports › Payroll Item Listing, saved as CSV. Earnings, deductions and company contributions that are not here yet are added; PAYE, NIS, NHT, Education Tax and HEART are not imported, because Payroll works them out by the TAJ rules. Check the tax ticks on each new item in Payroll settings. Needs the pay permission.</p>' +
+      '<div class="controls"><input type="file" id="qiF" accept=".csv,.txt"><button id="qiP">Preview</button></div><div id="qiOut"></div></div>';
+    function read(input) { return new Promise(function (ok, bad) { var f = input.files[0]; if (!f) return bad(new Error('Choose the file first')); if (f.size > 5 * 1024 * 1024) return bad(new Error('The file is over 5 MB')); var r = new FileReader(); r.onload = function () { ok(String(r.result)); }; r.onerror = function () { bad(new Error('Could not read the file')); }; r.readAsText(f); }); }
+    var ST = { new: ['New', ' ok'], changed: ['Changed', ' warn'], same: ['Same', ''], duplicate: ['Twice in file', ' bad'], skip: ['Not imported', ''] };
+    function preview(url, input, out, cols) {
+      read(input).then(function (file) {
+        return api(url, 'POST', { file: file, preview: true }).then(function (d) {
+          var can = d.rows.filter(function (r) { return r.status === 'new' || r.status === 'changed'; });
+          out.innerHTML = '<p class="sub">' + d.rows.length + ' in the file: ' + can.length + ' to add or change.' + (d.payroll === false ? ' Pay details are left out: you may not change pay.' : '') + '</p>' +
+            '<div class="scroll"><table><thead><tr><th><input type="checkbox" id="' + out.id + 'All" checked></th>' + cols.map(function (c) { return '<th>' + c[0] + '</th>'; }).join('') + '<th>Status</th><th>What changes</th></tr></thead><tbody>' + d.rows.map(function (r) {
+              var on = r.status === 'new' || r.status === 'changed';
+              return '<tr><td>' + (on ? '<input type="checkbox" data-qi="' + r.i + '" checked>' : '') + '</td>' + cols.map(function (c) { return '<td>' + esc(c[1](r) || '') + '</td>'; }).join('') +
+                '<td><span class="pill' + ST[r.status][1] + '">' + ST[r.status][0] + '</span></td><td><small>' + esc(r.reason || (r.changes || []).map(function (x) { return x.label + ': ' + (x.from || '–') + ' → ' + x.to; }).join('; ') || (r.existing ? 'matches ' + r.existing : '')) + '</small></td></tr>';
+            }).join('') + '</tbody></table></div>' + (can.length ? '<div class="controls" style="margin-top:8px"><button class="primary" id="' + out.id + 'Go">Import the ticked ones</button></div>' : '');
+          if (!can.length) return;
+          $('#' + out.id + 'All').onchange = function () { var c = this.checked; all('[data-qi]', out).forEach(function (x) { x.checked = c; }); };
+          $('#' + out.id + 'Go').onclick = function () {
+            this.disabled = true;
+            api(url, 'POST', { file: file, include: all('[data-qi]', out).filter(function (x) { return x.checked; }).map(function (x) { return +x.getAttribute('data-qi'); }) })
+              .then(function (r) { out.innerHTML = '<div class="warn">Done: ' + [r.added != null ? r.added + ' added' : '', r.updated != null ? r.updated + ' updated' : '', r.left ? r.left + ' archived as released' : ''].filter(Boolean).join(', ') + '.</div>'; })
+              .catch(function (e) { toast(e.message); });
+          };
+        });
+      }).catch(function (e) { toast(e.message); });
+    }
+    $('#qeP').onclick = function () { preview('/api/people/import/employees', $('#qeF'), $('#qeOut'), [['Name', function (r) { return r.name; }], ['Email', function (r) { return r.email; }], ['Phone', function (r) { return r.phone; }], ['Hired', function (r) { return r.hired; }], ['Released', function (r) { return r.released; }]]); };
+    $('#qiP').onclick = function () { preview('/api/people/import/payroll-items', $('#qiF'), $('#qiOut'), [['Item', function (r) { return r.label; }], ['QuickBooks type', function (r) { return r.type; }], ['Becomes', function (r) { return r.kind || ''; }]]); };
+  }
+
+  // ----------------------------------------------------------- org chart --
+  function orgChart(v) {
+    return api('/api/people/org').then(function (d) {
+      var kids = {}; d.people.forEach(function (p) { (kids[p.manager_id || 0] = kids[p.manager_id || 0] || []).push(p); });
+      function tree(id, depth) {
+        var list = kids[id] || [];
+        if (!list.length || depth > 20) return '';
+        return '<ul>' + list.map(function (p) { return '<li><span class="node" data-u="' + p.id + '"><b>' + esc(p.name) + '</b><small>' + esc([p.job_title, p.department].filter(Boolean).join(' · ') || 'job not set') + ((kids[p.id] || []).length ? ' · ' + kids[p.id].length + ' report' + (kids[p.id].length > 1 ? 's' : '') : '') + '</small></span>' + tree(p.id, depth + 1) + '</li>'; }).join('') + '</ul>';
+      }
+      var none = (kids[0] || []).filter(function (p) { return !(kids[p.id] || []).length; });
+      kids[0] = (kids[0] || []).filter(function (p) { return (kids[p.id] || []).length; });
+      v.innerHTML = '<div class="card"><h2>Org chart</h2><p class="sub">Who reports to whom, from the manager on each staff file. Click a person to open their file.</p><div class="org">' + (tree(0, 0) || '<div class="empty">No managers set yet. Set each person’s manager on their profile.</div>') + '</div>' +
+        (none.length ? '<h4>Manager not set (' + none.length + ')</h4><div class="org"><ul>' + none.map(function (p) { return '<li><span class="node" data-u="' + p.id + '"><b>' + esc(p.name) + '</b><small>' + esc(p.job_title || 'job not set') + '</small></span></li>'; }).join('') + '</ul></div>' : '') + '</div>';
+      all('[data-u]', v).forEach(function (n) { n.onclick = function () { openFile(n.getAttribute('data-u')); }; });
+    });
+  }
+
+  // --------------------------------------------------------------- leave --
+  function leaveView(v) {
+    var year = ($('#lvY') && $('#lvY').value) || new Date().getFullYear();
+    return api('/api/people/leave?year=' + year).then(function (d) {
+      v.innerHTML = '<div class="card"><h2>Leave balances</h2><p class="sub">Allowance from Payroll plus or minus changes on each file; days taken from <a href="/attendance.html#leave">Attendance › Leave</a> (Monday to Saturday). Record time off there.</p>' +
+        '<div class="controls"><div><label>Year</label><input id="lvY" type="number" value="' + d.year + '" style="width:90px"></div><button id="lvCsv">Export CSV</button><a href="/attendance.html#leave"><button>Record leave ›</button></a></div>' +
+        '<div class="scroll"><table><thead><tr><th>Name</th><th>Department</th><th>Vacation: allowed</th><th>taken</th><th>left</th><th>Sick: allowed</th><th>taken</th><th>left</th><th>Unpaid / other</th></tr></thead><tbody>' + d.staff.map(function (s) {
+          return '<tr class="row" data-u="' + s.id + '"><td><b>' + esc(s.name) + '</b></td><td>' + esc(s.department || '') + '</td><td>' + s.vacation_entitled + (s.adjusted_vacation ? ' <small>(' + (s.adjusted_vacation > 0 ? '+' : '') + s.adjusted_vacation + ')</small>' : '') + '</td><td>' + s.vacation_taken + '</td>' +
+            '<td><b' + (s.vacation_left < 0 ? ' style="color:var(--red)"' : '') + '>' + s.vacation_left + '</b></td><td>' + s.sick_entitled + '</td><td>' + s.sick_taken + '</td><td' + (s.sick_left < 0 ? ' style="color:var(--red)"' : '') + '>' + s.sick_left + '</td><td>' + (s.unpaid_taken + s.other_taken) + '</td></tr>';
+        }).join('') + '</tbody></table></div></div>';
+      $('#lvY').onchange = function () { leaveView(v); };
+      $('#lvCsv').onclick = function () { csv('leave-' + d.year, [['Name', 'Department', 'Vacation allowed', 'Vacation taken', 'Vacation left', 'Sick allowed', 'Sick taken', 'Sick left', 'Unpaid', 'Other']].concat(d.staff.map(function (s) { return [s.name, s.department, s.vacation_entitled, s.vacation_taken, s.vacation_left, s.sick_entitled, s.sick_taken, s.sick_left, s.unpaid_taken, s.other_taken]; }))); };
+      all('[data-u]', v).forEach(function (r) { r.onclick = function () { fileTab = 'leave'; openFile(r.getAttribute('data-u'), true); }; });
+    });
+  }
+
+  // ---------------------------------------------------------- checklists --
+  function tasksView(v) {
+    return api('/api/people/tasks').then(function (d) {
+      var kinds = { onboarding: 'Starting', offboarding: 'Leaving', other: 'Other' };
+      v.innerHTML = '<div class="card"><h2>Checklists still open</h2><p class="sub">Starter and leaver checklists, and other HR tasks, for everyone. Tick them on the person’s file.</p>' +
+        (d.tasks.length ? '<div class="scroll"><table><thead><tr><th>Person</th><th>Kind</th><th>To do</th><th>For</th><th>By</th></tr></thead><tbody>' + d.tasks.map(function (k) {
+          return '<tr class="row" data-u="' + k.user_id + '"><td><b>' + esc(k.person) + '</b></td><td>' + esc(kinds[k.kind] || k.kind) + '</td><td>' + esc(k.title) + '</td><td>' + esc(k.assignee || '') + '</td><td' + (k.due_on && k.due_on < today() ? ' style="color:var(--red)"' : '') + '>' + esc(day(k.due_on)) + '</td></tr>';
+        }).join('') + '</tbody></table></div>' : '<div class="empty">Nothing open.</div>') + '</div>';
+      all('[data-u]', v).forEach(function (r) { r.onclick = function () { fileTab = 'tasks'; openFile(r.getAttribute('data-u'), true); }; });
+    });
+  }
+
+  // ------------------------------------------------------------- reports --
+  function reportsView(v) {
+    return api('/api/people/reports').then(function (r) {
+      var mx = function (list) { return Math.max.apply(null, [1].concat(list.map(function (x) { return x.n; }))); };
+      var bars = function (title, list, labels) {
+        var m = mx(list);
+        return '<div class="card"><h2>' + title + '</h2>' + (list.length ? '<table>' + list.map(function (x) { return '<tr><td>' + esc((labels && labels[x.label]) || x.label) + '</td><td style="width:55%"><div class="bar"><i style="width:' + Math.round(100 * x.n / m) + '%"></i></div></td><td><b>' + x.n + '</b></td></tr>'; }).join('') + '</table>' : '<div class="empty">None</div>') + '</div>';
+      };
+      var people = function (title, list, cols, note) {
+        return '<div class="card"><h2>' + title + ' <span class="pill' + (list.length ? ' warn' : ' ok') + '">' + list.length + '</span></h2>' + (note ? '<p class="sub">' + note + '</p>' : '') + (list.length ? '<table>' + list.map(function (x) { return '<tr class="row" data-u="' + x.id + '"><td><b>' + esc(x.name) + '</b></td>' + cols.map(function (c) { return '<td>' + esc(c(x)) + '</td>'; }).join('') + '</tr>'; }).join('') + '</table>' : '<p class="sub">Nothing.</p>') + '</div>';
+      };
+      var mm = Math.max.apply(null, [1].concat(r.moves.map(function (m) { return Math.max(m.starters, m.leavers); })));
+      v.innerHTML = listsCard() + '<div class="kpis"><div class="kpi"><b>' + r.headcount + '</b><span>staff now</span></div><div class="kpi"><b>' + r.starters12 + '</b><span>started in the last 12 months</span></div>' +
+        '<div class="kpi"><b>' + r.leavers12 + '</b><span>left in the last 12 months</span></div><div class="kpi"><b>' + r.turnover_pct + '%</b><span>turnover (leavers ÷ average staff)</span></div>' +
+        '<div class="kpi"><b>' + (r.hiring.in_progress || 0) + '</b><span>applicants in progress · ' + (r.hiring.posts_open || 0) + ' jobs open</span></div><div class="kpi"><b>' + (r.hiring.days_to_hire != null ? r.hiring.days_to_hire : '–') + '</b><span>average days from applying to hired</span></div></div>' +
+        '<div class="controls"><button id="rpPrint">Print</button></div>' +
+        '<div class="card"><h2>Starters and leavers by month</h2><table>' + r.moves.map(function (m) { return '<tr><td style="width:90px">' + esc(m.ym) + '</td><td><div class="bar"><i style="width:' + Math.round(100 * m.starters / mm) + '%;background:var(--ok)"></i></div><div class="bar" style="margin-top:2px"><i style="width:' + Math.round(100 * m.leavers / mm) + '%"></i></div></td><td><small>+' + m.starters + ' / −' + m.leavers + '</small></td></tr>'; }).join('') + '</table><p class="sub">Green: started. Red: left.</p></div>' +
+        bars('Staff by department', r.by_department) + bars('Staff by contract', r.by_contract, CONTRACT) + bars('Staff by status', r.by_status, STATUS) + bars('Length of service', r.service) + bars('Why people left (last 12 months)', r.exits, EXITK) +
+        people('Probation ending within 30 days', r.probation_due, [function (x) { return day(x.due); }], 'Hold the end-of-probation review before this date.') +
+        people('Contracts ending within 60 days', r.contracts_ending, [function (x) { return CONTRACT[x.contract_type] || ''; }, function (x) { return day(x.due); }]) +
+        people('Warnings still on file', r.warnings, [function (x) { return CASEK[x.kind]; }, function (x) { return x.summary; }, function (x) { return x.expires_on ? 'until ' + day(x.expires_on) : ''; }]) +
+        people('Reviews overdue', r.reviews_overdue, [function (x) { return REVK[x.kind]; }, function (x) { return 'due ' + day(x.due); }]) +
+        people('No emergency contact', r.no_contact, []) +
+        people('Start date or job title missing', r.missing, [function (x) { return [x.no_start ? 'start date' : '', x.no_title ? 'job title' : ''].filter(Boolean).join(', '); }]) +
+        people('Birthdays this month', r.birthdays, [function (x) { return x.day; }]);
+      $('#rpPrint').onclick = function () { window.print(); };
+      listsWire(v);
+      all('[data-u]', v).forEach(function (n) { n.onclick = function () { openFile(n.getAttribute('data-u')); }; });
+    });
+  }
+  function auditView(v) {
+    return api('/api/people/audit').then(function (d) {
+      v.innerHTML = '<div class="card"><h2>HR log</h2><p class="sub">Every change to a staff file and every hiring decision: who, when and what. Nothing here can be edited.</p>' +
+        (d.log.length ? '<div class="scroll"><table><thead><tr><th>When</th><th>Who</th><th>About</th><th>What</th></tr></thead><tbody>' + d.log.map(function (x) {
+          return '<tr><td><small>' + esc(when(x.at)) + '</small></td><td>' + esc(x.by_name || '') + '</td><td>' + (x.user_id ? '<button class="link" data-u="' + x.user_id + '">' + esc(x.person || '#' + x.user_id) + '</button>' : x.application_id ? '<a href="/hiring.html#app=' + x.application_id + '">applicant #' + x.application_id + '</a>' : esc(x.entity)) + '</td><td>' + esc(x.action) + (x.detail ? '<br><small class="sub">' + esc(x.detail) + '</small>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div>' : '<div class="empty">Nothing yet.</div>') + '</div>';
+      all('[data-u]', v).forEach(function (n) { n.onclick = function () { fileTab = 'log'; openFile(n.getAttribute('data-u'), true); }; });
+    });
+  }
+
+  // --------------------------------------------------------- my HR file --
+  function myFile(v) {
+    return api('/api/people/me').then(function (f) {
+      var p = f.profile || {}, l = f.leave || {};
+      var waiting = f.reviews.filter(function (r) { return r.status === 'done'; }), letters = f.cases.filter(function (c) { return !c.acknowledged_at; });
+      v.innerHTML = '<div class="card"><h2>My HR file</h2><p class="sub">' + esc([p.job_title, p.department, p.manager ? 'reports to ' + p.manager : '', p.start_date ? 'started ' + day(p.start_date) : ''].filter(Boolean).join(' · ')) + '</p>' +
+        (waiting.length || letters.length ? '<div class="warn">Waiting for you: ' + [waiting.length ? waiting.length + ' review(s) to read and sign' : '', letters.length ? letters.length + ' letter(s) to read' : ''].filter(Boolean).join(', ') + '.</div>' : '') +
+        '<div class="kpis"><div class="kpi"><b>' + (l.vacation_left != null ? l.vacation_left : '–') + '</b><span>vacation days left this year</span></div><div class="kpi"><b>' + (l.sick_left != null ? l.sick_left : '–') + '</b><span>sick days left</span></div>' +
+        '<div class="kpi"><b>' + (STATUS[p.status] || 'Active') + '</b><span>' + (p.status === 'probation' && p.probation_end ? 'until ' + esc(day(p.probation_end)) : 'status') + '</span></div></div>' +
+        '<p class="sub">To book time off, ask your manager or use the leave form in the <a href="/documents.html">Document centre</a>. Your payslips are in <a href="/my-time.html">My time</a> and Payroll.</p></div>' +
+        '<div class="card"><h2>My contact details</h2><div class="grid">' + field('Personal phone', inp('mPh', p.personal_phone, 'tel')) + field('Personal email', inp('mEm', p.personal_email, 'email')) + field('Mobile', inp('mMo', p.mobile, 'tel')) + field('Parish', inp('mPa', p.parish)) + '</div>' +
+        '<label class="sub">Home address</label><textarea id="mA" rows="2">' + esc(p.address || '') + '</textarea><div class="controls" style="margin-top:8px"><button class="primary" id="mSave">Save</button></div></div>' +
+        '<div class="card" id="mSignCard"><h2>Documents to sign</h2><div id="mSign"><div class="empty">Loading…</div></div></div>' +
+        '<div class="card"><h2>My emergency contacts</h2><div id="mC"></div></div>' +
+        (f.my_tasks.length ? '<div class="card"><h2>HR tasks for me</h2>' + f.my_tasks.map(function (k) { return '<div class="task"><input type="checkbox" data-mt="' + k.id + '"><span>' + esc(k.title) + (k.link ? ' <a href="' + esc(k.link) + '">open ›</a>' : '') + (k.due_on ? '<br><small class="sub">by ' + esc(day(k.due_on)) + '</small>' : '') + '</span></div>'; }).join('') + '</div>' : '') +
+        '<div class="card"><h2>My reviews and goals</h2>' + (f.reviews.length ? f.reviews.map(function (r) {
+          return '<div class="item"><b>' + esc(REVK[r.kind]) + ' review</b> · ' + esc(r.reviewer || '') + ' · ' + esc(day(r.completed_at)) + (r.overall ? ' · <b>' + r.overall + '/5</b>' : '') + '<br>' +
+            (r.ratings || []).filter(function (x) { return x.score; }).map(function (x) { return esc(x.label) + ': ' + x.score + (x.comment ? ' (' + esc(x.comment) + ')' : ''); }).join('<br>') +
+            (r.strengths ? '<br><small>Well done: ' + esc(r.strengths) + '</small>' : '') + (r.improve ? '<br><small>To improve: ' + esc(r.improve) + '</small>' : '') + (r.comments ? '<br><small>' + esc(r.comments) + '</small>' : '') +
+            (r.status === 'done' ? '<textarea id="mrc' + r.id + '" rows="2" placeholder="Your comments (optional)" style="margin-top:6px"></textarea><button class="sm primary" data-mr="' + r.id + '">I have read this review</button>' : '<br><small>Signed by you ' + esc(day(r.acknowledged_at)) + (r.employee_comments ? ': “' + esc(r.employee_comments) + '”' : '') + '</small>') + '</div>';
+        }).join('') : '<p class="sub">No reviews yet.</p>') +
+        (f.goals.length ? '<h4>Goals</h4>' + f.goals.map(function (g) { return '<div class="item"><b>' + esc(g.title) + '</b>' + (g.due_on ? ' · by ' + esc(day(g.due_on)) : '') + ' <span class="pill">' + esc(g.status) + ' ' + g.progress + '%</span>' + (g.measure ? '<br><small>' + esc(g.measure) + '</small>' : '') + '</div>'; }).join('') : '') + '</div>' +
+        '<div class="card"><h2>Letters</h2>' + (f.cases.length ? f.cases.map(function (c) {
+          return '<div class="item"><b>' + esc(CASEK[c.kind]) + '</b> · ' + esc(day(c.incident_date || c.created_at)) + '<br>' + esc(c.summary) + (c.details ? '<br><small>' + esc(c.details) + '</small>' : '') + (c.action ? '<br><small>Next: ' + esc(c.action) + '</small>' : '') + (c.expires_on ? '<br><small>On file until ' + esc(day(c.expires_on)) + '</small>' : '') +
+            (c.acknowledged_at ? '<br><small>Received ' + esc(day(c.acknowledged_at)) + (c.employee_response ? '. Your reply: “' + esc(c.employee_response) + '”' : '') + '</small>' :
+              '<textarea id="mcr' + c.id + '" rows="2" placeholder="Your reply (optional)" style="margin-top:6px"></textarea><button class="sm primary" data-mc="' + c.id + '">I have received this letter</button>') + '</div>';
+        }).join('') : '<p class="sub">None.</p>') + '</div>';
+      $('#mSave').onclick = function () { api('/api/people/me/details', 'PUT', { personal_phone: $('#mPh').value, personal_email: $('#mEm').value, mobile: $('#mMo').value, parish: $('#mPa').value, address: $('#mA').value }).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); }); };
+      contactsPane($('#mC'), f.contacts, '/api/people/me/contacts', function (m) { toast(m); myFile(v); });
+      mySignatures($('#mSign'), function () { myFile(v); });
+      all('[data-mr]', v).forEach(function (b) { b.onclick = function () { var id = b.getAttribute('data-mr'); api('/api/people/me/reviews/' + id + '/ack', 'POST', { comments: $('#mrc' + id).value }).then(function () { toast('Thank you'); myFile(v); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-mc]', v).forEach(function (b) { b.onclick = function () { var id = b.getAttribute('data-mc'); api('/api/people/me/cases/' + id + '/ack', 'POST', { response: $('#mcr' + id).value }).then(function () { toast('Recorded'); myFile(v); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-mt]', v).forEach(function (c) { c.onchange = function () { api('/api/people/me/tasks/' + c.getAttribute('data-mt'), 'PATCH', { done: c.checked }).then(function () { toast('Done'); myFile(v); }).catch(function (e) { toast(e.message); }); }; });
+    });
+  }
+
+  // ---------------------------------------------------------------- start --
+  // #staff=12 opens a file over the staff list; #org, #leave... pick a tab.
+  var drawn = false;
+  function route() {
+    var h = location.hash.slice(1), m = /^staff=(\d+)$/.exec(h);
+    var want = !CAN ? 'me' : m ? 'staff' : TABS.some(function (t) { return t[0] === h; }) ? h : 'staff';
+    if (want !== tab || !drawn) { tab = want; drawn = true; show(); }
+    if (m && CAN) openFile(m[1]);
+  }
+  window.addEventListener('hashchange', route);
+  api('/api/people/meta').then(function (m) { META = m; CAN = true; }, function () { CAN = false; }).then(route);
+})();
+</script>
+<script src="/assets/invoice-scan.js?v=20261028"></script>
+<script src="/assets/staff-assist.js?v=20261020" defer></script>
+<script src="/assets/module-look.js?v=20261101" defer></script>
+</body>
+</html>

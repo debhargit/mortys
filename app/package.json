@@ -14,19 +14,21 @@
     "cf:dev": "npm run cf:build && wrangler pages dev public --d1 DB=mortysautoparts-db --compatibility-flags nodejs_compat",
     "cf:deploy": "npm run cf:build && wrangler pages deploy public --project-name mortysautoparts --branch main",
     "cf:migrate:local": "wrangler d1 migrations apply mortysautoparts-db --local",
-    "cf:migrate": "wrangler d1 migrations apply mortysautoparts-db",
+    "cf:migrate": "wrangler d1 migrations apply mortysautoparts-db --remote",
     "cf:data": "node tools/pg2d1.mjs --out dist/d1-data",
     "cf:data:selftest": "node tools/pg2d1.mjs --selftest"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
     "bcryptjs": "^2.4.3",
+    "compression": "^1.8.1",
     "cookie-session": "^2.1.0",
     "dotenv": "^16.4.5",
     "exceljs": "^4.4.0",
     "express": "^4.19.2",
     "hono": "^4.12.31",
     "multer": "^1.4.5-lts.1",
-    "nodemailer": "^9.0.5",
+    "nodemailer": "^10.2.1",
     "pg": "^8.12.0",
     "selfsigned": "^5.5.0",
     "stripe": "^16.10.0",
@@ -38,5 +40,13 @@
   "devDependencies": {
     "jsdom": "^30.0.1",
     "wrangler": "^4.127.1"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "^11.1.1"
+    },
+    "miniflare": {
+      "undici": "^7.30.1"
+    }
   }
 }

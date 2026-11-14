@@ -320,6 +320,32 @@ CREATE INDEX IF NOT EXISTS idx_work_orders_mech ON work_orders (assigned_mechani
 ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS service_advisor_id INTEGER REFERENCES mechanics(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_work_orders_advisor ON work_orders (service_advisor_id);
 
+-- Customer phone reduced to digits, stored, so the public work-order lookup
+-- and the customer path of the invoice route can be indexed (audit M7).
+--
+-- Those two routes match on the last 7 digits a customer types. They did it
+-- with regexp_replace(customer_phone, '[^0-9]', '', 'g') LIKE '%' || $2 --
+-- computing that regexp for every row of work_orders on every call, and a
+-- sequential scan regardless, since no index can serve a leading-wildcard
+-- LIKE. The lookup is unauthenticated, so that was both a cheap way to load
+-- the database from outside and an oracle for guessing a phone number against
+-- a known WO number.
+--
+-- Same trick as products.search_text below: do the normalising once, on write.
+-- The index is on right(...,7) rather than on the column itself, because the
+-- match is a SUFFIX comparison -- a b-tree on the whole digit string cannot
+-- answer one, which is why the stored column on its own would not have been
+-- enough and why this departs from the audit's sketch. With 7 digits in hand
+-- the routes compare right(customer_phone_digits,7) = $2, an equality the
+-- index answers directly. A customer who types fewer than 7 digits still
+-- falls back to a LIKE, now at least free of the per-row regexp and sitting
+-- behind a throttle; keeping that path means a partial number still matches
+-- exactly as it always did.
+ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS customer_phone_digits TEXT GENERATED ALWAYS AS (
+  regexp_replace(coalesce(customer_phone,''), '[^0-9]', '', 'g')
+) STORED;
+CREATE INDEX IF NOT EXISTS idx_work_orders_phone_last7 ON work_orders (right(customer_phone_digits, 7));
+
 -- Labor lines (one per task the mechanic did)
 CREATE TABLE IF NOT EXISTS work_order_labor (
   id              SERIAL PRIMARY KEY,
@@ -756,6 +782,26 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS tax_exempt BOOLEAN NOT NULL DEFAULT f
 -- customer.tax_exempt at read time) so a receipt/invoice reprint stays
 -- accurate even if the customer's tax status is changed later.
 ALTER TABLE pos_sales ADD COLUMN IF NOT EXISTS tax_exempt BOOLEAN NOT NULL DEFAULT false;
+
+-- ----- Customer markup: selling an account ABOVE list ------------------------
+-- The mirror of discount_pct. That column only ever reduces -- the sale code
+-- reads `if (rate > 0)` and every discount path clamps at zero -- so there was
+-- no way to price an account up. A customer who has to be charged over list
+-- (a reseller the shop marks up, an account carrying its own overhead) had to
+-- have every line re-typed by hand, which also needed pos.price_override.
+--
+-- markup_pct applies to the unit price the line has already resolved to (sale
+-- price, tier price and quantity breaks first), so the INVOICE shows the
+-- increased unit price rather than list plus a surcharge line -- which is what
+-- the counter asked for. It deliberately does NOT travel through discount_usd:
+-- that field feeds commission and the discount columns of the sales reports,
+-- and a markup is not a negative discount.
+--
+-- Recorded on the sale as well as on the customer so a reprint stays accurate
+-- after the account's rate is changed later, exactly like tax_exempt above.
+ALTER TABLE users     ADD COLUMN IF NOT EXISTS markup_pct NUMERIC(5,2);
+ALTER TABLE pos_sales ADD COLUMN IF NOT EXISTS markup_pct NUMERIC(5,2);
+
 CREATE INDEX IF NOT EXISTS idx_users_account_number ON users (account_number);
 -- Backfill account numbers for rows that existed before this column did.
 --
@@ -1017,6 +1063,9 @@ ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS website          TEXT;
 ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS payment_terms    TEXT;
 ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS account_number   TEXT;
 ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS lead_time_days   INTEGER DEFAULT 7;
+-- QuickBooks-style vendor record: the supplier's TRN and a remit-to address.
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS tax_id           TEXT;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS remit_address    TEXT;
 
 ALTER TABLE services ADD COLUMN IF NOT EXISTS default_labor_usd NUMERIC(10,2);
 ALTER TABLE services ADD COLUMN IF NOT EXISTS default_parts_usd NUMERIC(10,2);
@@ -1270,7 +1319,8 @@ CREATE TABLE IF NOT EXISTS coupon_redemptions (
 ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_role TEXT NOT NULL DEFAULT 'manager';
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_admin_role_check') THEN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_admin_role_check')
+     AND NOT EXISTS (SELECT 1 FROM users WHERE admin_role NOT IN ('owner','manager','cashier')) THEN  -- custom roles exist: dropped below anyway
     ALTER TABLE users ADD CONSTRAINT users_admin_role_check CHECK (admin_role IN ('owner','manager','cashier'));
   END IF;
 END $$;
@@ -1384,7 +1434,11 @@ CREATE TABLE IF NOT EXISTS account_payments (
   received_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
   created_at    TIMESTAMPTZ DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_account_payments_customer ON account_payments (customer_id);
+-- account_payments becomes a view later (receivables): index the real table, whichever name it has.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_class WHERE relname = 'account_payments_all' AND relkind = 'r') THEN CREATE INDEX IF NOT EXISTS idx_account_payments_customer ON account_payments_all (customer_id);
+  ELSE CREATE INDEX IF NOT EXISTS idx_account_payments_customer ON account_payments (customer_id); END IF;
+END $$;
 
 -- =============================================================================
 --  SHOP SETTINGS (2026-08-19) -- single-row shop configuration: company
@@ -2053,6 +2107,20 @@ CREATE TABLE IF NOT EXISTS backup_log (
 );
 CREATE INDEX IF NOT EXISTS idx_backup_log_at ON backup_log (created_at DESC);
 
+-- ---------------------------------------------------------------------------
+-- Missing foreign-key indexes on the two biggest child tables.
+--
+-- Postgres does not index the referencing side of a FK automatically. These
+-- went unnoticed while the tables were small, but every receipt/invoice view
+-- filters pos_sale_items by sale_id and every purchase-order view filters
+-- purchase_order_items by po_id, so without them each lookup is a full
+-- sequential scan. The legacy import (app/tools/seed-legacy.mjs) takes those
+-- tables to ~1.05M and ~178k rows, which makes the difference stark.
+-- ---------------------------------------------------------------------------
+CREATE INDEX IF NOT EXISTS pos_sale_items_sale_idx     ON pos_sale_items (sale_id);
+CREATE INDEX IF NOT EXISTS purchase_order_items_po_idx ON purchase_order_items (po_id);
+
+
 -- =============================================================================
 --  PETTY CASH  (ported from the D1 backend: functions/_routes/ops.js +
 --  functions/_lib/petty_cash.js, D1 migrations 0049 + 0058.)
@@ -2211,14 +2279,5368 @@ CREATE TABLE IF NOT EXISTS purchase_order_payments (
 CREATE INDEX IF NOT EXISTS idx_po_payments_po ON purchase_order_payments (po_id);
 
 -- Existing POs start owing their full total -- nothing paid yet.
-UPDATE purchase_orders SET balance_due_usd = total_usd WHERE amount_paid_usd = 0;
+--
+-- Except the ones imported from the legacy INVREC export (app/tools/
+-- load-invrec.mjs stamps those with legacy_key). Those are 25,235 historical
+-- goods-receipt batches going back to 2009, and INVREC carries no accounts-
+-- payable data whatsoever: SUB_TOTAL, TOTAL, TOTAL_PAID and PAY_DATE are empty
+-- on all 206,956 rows. Defaulting them to "owes the full total" asserted
+-- J$1,566,709,559 of outstanding supplier debt on stock that was received and
+-- sold years ago, which then flowed into payables, cash-flow and the executive
+-- summary. Nothing is known about what was paid, so nothing is claimed: the
+-- balance stays 0 and the payables report simply has no AP history before the
+-- first PO raised in this system.
+--
+-- Guarded, because legacy_key is added by app/tools/lib/legacy-schema.sql when
+-- the seeder runs, not by this file -- on a database that has never imported,
+-- the column does not exist and the plain form is correct.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_name = 'purchase_orders' AND column_name = 'legacy_key') THEN
+    UPDATE purchase_orders SET balance_due_usd = total_usd
+     WHERE amount_paid_usd = 0 AND legacy_key IS NULL;
+    UPDATE purchase_orders SET balance_due_usd = 0
+     WHERE amount_paid_usd = 0 AND legacy_key IS NOT NULL AND balance_due_usd <> 0;
+  ELSE
+    UPDATE purchase_orders SET balance_due_usd = total_usd WHERE amount_paid_usd = 0;
+  END IF;
+END $$;
+
 
 -- =============================================================================
---  sku had no index (only products.img, the primary key, does). The
---  receival/sales importers (functions/_routes/inventory.js, pos_txn.js;
---  server.js's equivalents) match existing stock with "img IN (...) OR sku
---  IN (...)", and an unindexed sku forces the planner to fall back to a full
---  table scan for that half of the OR instead of an index lookup on both
---  sides. Partial (WHERE sku IS NOT NULL) since most rows may have no sku.
+--  REPORT INDEXES — the lookups the reporting module cannot work without.
+--
+--  Postgres does not index the referencing side of a foreign key, and these
+--  were all absent. The cost is not academic: the Orders list spent 26,915ms
+--  without pos_sale_items(sale_id) and 49ms with it, the order-quality report
+--  10,696ms without pos_sale_items(product_img) and 349ms with it, and the
+--  supplier report 4,640ms without the two supplier_id indexes and 26ms with
+--  them. Everything here is a plain btree on the column a report filters by.
 -- =============================================================================
-CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku) WHERE sku IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_pos_sale_items_product_img ON pos_sale_items (product_img);
+CREATE INDEX IF NOT EXISTS idx_products_supplier          ON products (supplier_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_supplier   ON purchase_orders (supplier_id);
+-- account_payments becomes a view later (receivables): index the real table, whichever name it has.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_class WHERE relname = 'account_payments_all' AND relkind = 'r') THEN CREATE INDEX IF NOT EXISTS idx_account_payments_reference ON account_payments_all (reference);
+  ELSE CREATE INDEX IF NOT EXISTS idx_account_payments_reference ON account_payments (reference); END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_warehouse_activity_kind    ON warehouse_activity (kind, created_at);
+-- sku is not the primary key (img is), but both the receival and sales
+-- importers match existing stock with "img IN (...) OR sku IN (...)"; an
+-- unindexed sku forces a full scan for that half of the OR. Partial, because
+-- most rows may carry no sku.
+CREATE INDEX IF NOT EXISTS idx_products_sku ON products (sku) WHERE sku IS NOT NULL;
+
+-- =============================================================================
+--  COLUMNS THE REPORTING MODULE READS
+--
+--  Three columns the ported reports reference that this schema never declared.
+--  Without them `reorder` fails on "column pr.reorder_point does not exist" and
+--  both `exceptions` and `users-staff` on "column must_change_password does not
+--  exist" -- a 500 on the report rather than a missing figure, because the
+--  column is named in the SELECT list.
+-- =============================================================================
+
+-- Set while an account is still on a seeded/reset default password. The guards
+-- refuse to authorise anything except changing it, so a default credential
+-- grants a session and nothing else. Cleared when the password is changed.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT false;
+
+-- Optional manual overrides of the computed reorder point / order quantity.
+-- scoreItems() derives both from demand when these are NULL, which is the
+-- normal case; a buyer sets them to pin a part to their own numbers.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS reorder_point INTEGER;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS reorder_qty   INTEGER;
+
+-- =============================================================================
+--  SALES COMMISSION
+--
+--  A line's commission is resolved per line, never stored on the sale, so that
+--  changing a rate recalculates history the same way the margin report already
+--  recalculates off products.cost_usd. Resolution order:
+--
+--    products.commission_type = 'none'     -> nothing on this part, ever
+--                             = 'amount'   -> commission_value per unit sold
+--                             = 'percent'  -> commission_value % of the line
+--    no override on the part               -> mechanics.commission_pct, the
+--                                             crediting rep's default rate
+--
+--  The rep is pos_sales.sales_rep_id (a mechanics row -- see syncStaffProfile,
+--  which mirrors any staff user in the 'sales_rep' category into mechanics).
+--  A sale with no rep earns nobody anything and is left out of the report.
+-- =============================================================================
+
+-- The rep's default rate, applied to any line whose part carries no override.
+-- NULL means "no default", which earns nothing rather than zero-by-accident.
+ALTER TABLE mechanics ADD COLUMN IF NOT EXISTS commission_pct NUMERIC(5,2);
+
+-- Per-part override. NULL type = fall through to the rep's default.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_type  TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_value NUMERIC(10,2);
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'products_commission_type_chk') THEN
+    ALTER TABLE products ADD CONSTRAINT products_commission_type_chk
+      CHECK (commission_type IS NULL OR commission_type IN ('percent', 'amount', 'none'));
+  END IF;
+END $$;
+
+-- What has actually been handed over. Commission earned is computed from the
+-- sale lines; this is the other side of the ledger, so "owed" is earned minus
+-- paid. Money is *_usd to match the rest of the Postgres side (the D1 port
+-- stores amount_cents and divides by 100).
+CREATE TABLE IF NOT EXISTS commission_payouts (
+  id           SERIAL PRIMARY KEY,
+  mechanic_id  INTEGER NOT NULL REFERENCES mechanics(id) ON DELETE CASCADE,
+  amount_usd   NUMERIC(10,2) NOT NULL CHECK (amount_usd > 0),
+  notes        TEXT,
+  paid_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_commission_payouts_mech ON commission_payouts (mechanic_id, created_at);
+
+-- =============================================================================
+--  SUPPLIER INVOICE DETAIL ON A RECEIPT
+--
+--  Receiving stock and being billed for it are two different events on two
+--  different dates, and the paperwork that arrives with the goods carries
+--  figures of its own. Before this the only dates a PO had were expected_date
+--  and received_date, and the only totals were the ones this system computed
+--  from the lines -- so a supplier invoice dated the 3rd, entered on the 11th,
+--  on 30-day terms, billing a total that disagreed with the lines by a freight
+--  rounding, had nowhere to be recorded.
+--
+--    invoice_date       what the supplier's invoice is dated. The clock for
+--                       payment terms starts here, NOT at received_date.
+--    received_date      when the stock was entered here (already existed)
+--    invoice_total_usd  what the supplier actually billed. Deliberately
+--                       separate from total_usd, which recalcPoTotals() derives
+--                       from the lines plus shipping and tax: when the two
+--                       disagree that is a discrepancy to look at, and
+--                       overwriting one with the other would hide it.
+--    payment_terms_days net days from invoice_date
+--    due_date           invoice_date + payment_terms_days, stored so ageing can
+--                       sort and filter on it without recomputing per row
+-- =============================================================================
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS invoice_date        DATE;
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS invoice_total_usd   NUMERIC(10,2);
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS payment_terms_days  INTEGER;
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS due_date            DATE;
+
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_invoice_date ON purchase_orders (invoice_date);
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_due_date     ON purchase_orders (due_date) WHERE due_date IS NOT NULL;
+
+-- Supplier payments already have a home (purchase_order_payments, added with
+-- the reports module) but nothing could write to it: the payables report read
+-- a table no endpoint ever inserted into, so "paid" was always zero. A method
+-- vocabulary matching the POS side keeps the two reconcilable.
+ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS paid_on DATE;
+UPDATE purchase_order_payments SET paid_on = created_at::date WHERE paid_on IS NULL;
+CREATE INDEX IF NOT EXISTS idx_po_payments_paid_on ON purchase_order_payments (paid_on);
+
+-- =============================================================================
+--  WAREHOUSE FOUNDATION (Phase 1, 2026-10): bins, stock per bin, scan log
+--
+--  products.stock_count stays the single total every existing screen reads and
+--  writes (POS sales, returns, PO receiving, manual adjust). stock_by_bin says
+--  WHERE that total sits. The trigger below keeps the two equal without
+--  touching any of those code paths: a total that drops is taken out of the
+--  item's bins (primary bin first), a total that rises lands in the primary bin
+--  (or UNASSIGNED). Bin-aware code (moves, putaway, bin counts) maintains
+--  stock_by_bin itself and switches the trigger off for its own transaction
+--  with  SELECT set_config('vision.bin_sync_off','on',true).
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS warehouse_settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT
+);
+
+CREATE TABLE IF NOT EXISTS bins (
+  id            SERIAL PRIMARY KEY,
+  code          TEXT NOT NULL,
+  kind          TEXT NOT NULL DEFAULT 'storage', -- storage | display | receiving | staging | damaged | returns | unassigned
+  zone          TEXT,
+  aisle         TEXT,
+  rack          TEXT,
+  shelf         TEXT,
+  pick_sequence INTEGER,                         -- walk order for route-sorted pick lists (Phase 3)
+  is_active     BOOLEAN NOT NULL DEFAULT true,
+  notes         TEXT,
+  created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_bins_code ON bins (upper(code));
+
+CREATE TABLE IF NOT EXISTS stock_by_bin (
+  product_img TEXT    NOT NULL REFERENCES products(img) ON DELETE CASCADE ON UPDATE CASCADE,
+  bin_id      INTEGER NOT NULL REFERENCES bins(id) ON DELETE RESTRICT,
+  qty         INTEGER NOT NULL DEFAULT 0 CHECK (qty >= 0),
+  updated_at  TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (product_img, bin_id)
+);
+CREATE INDEX IF NOT EXISTS idx_stock_by_bin_bin ON stock_by_bin (bin_id);
+
+ALTER TABLE warehouse_activity ADD COLUMN IF NOT EXISTS bin_id    INTEGER;
+ALTER TABLE warehouse_activity ADD COLUMN IF NOT EXISTS to_bin_id INTEGER;
+ALTER TABLE warehouse_activity ADD COLUMN IF NOT EXISTS terminal  TEXT;
+ALTER TABLE warehouse_activity ADD COLUMN IF NOT EXISTS photo     TEXT;
+CREATE INDEX IF NOT EXISTS idx_warehouse_activity_created ON warehouse_activity (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_warehouse_activity_product ON warehouse_activity (product_img, created_at DESC);
+
+-- Legacy DOS locations carry a trailing marker after '*' ("J14*C", "OIL ROOM*",
+-- "OIL ROOM*CC"); the shelf itself is the part before it. The original text is
+-- left untouched in products.bin_location.
+CREATE OR REPLACE FUNCTION wh_norm_bin(t TEXT) RETURNS TEXT
+  LANGUAGE sql IMMUTABLE AS
+$$ SELECT NULLIF(upper(btrim(regexp_replace(COALESCE(t, ''), '\*[A-Za-z]*\s*$', ''))), '') $$;
+
+CREATE OR REPLACE FUNCTION wh_unassigned_bin() RETURNS INTEGER
+  LANGUAGE plpgsql AS
+$$
+DECLARE bid INTEGER;
+BEGIN
+  SELECT id INTO bid FROM bins WHERE upper(code) = 'UNASSIGNED';
+  IF bid IS NULL THEN
+    INSERT INTO bins (code, kind, notes)
+      VALUES ('UNASSIGNED', 'unassigned', 'Stock whose shelf is not known yet. Put it away to a real bin.')
+      RETURNING id INTO bid;
+  END IF;
+  RETURN bid;
+END $$;
+
+CREATE OR REPLACE FUNCTION products_sync_bins() RETURNS trigger
+  LANGUAGE plpgsql AS
+$$
+DECLARE
+  delta   INTEGER;
+  need    INTEGER;
+  take    INTEGER;
+  primary_id INTEGER;
+  r       RECORD;
+BEGIN
+  IF COALESCE(current_setting('vision.bin_sync_off', true), '') = 'on' THEN RETURN NEW; END IF;
+  IF NOT EXISTS (SELECT 1 FROM warehouse_settings WHERE key = 'bins_enabled' AND value = 'on') THEN RETURN NEW; END IF;
+
+  delta := COALESCE(NEW.stock_count, 0) - (CASE WHEN TG_OP = 'INSERT' THEN 0 ELSE COALESCE(OLD.stock_count, 0) END);
+  IF delta = 0 THEN RETURN NEW; END IF;
+
+  SELECT id INTO primary_id FROM bins WHERE upper(code) = wh_norm_bin(NEW.bin_location);
+
+  IF delta > 0 THEN
+    INSERT INTO stock_by_bin (product_img, bin_id, qty, updated_at)
+      VALUES (NEW.img, COALESCE(primary_id, wh_unassigned_bin()), delta, NOW())
+    ON CONFLICT (product_img, bin_id) DO UPDATE
+      SET qty = stock_by_bin.qty + EXCLUDED.qty, updated_at = NOW();
+  ELSE
+    need := -delta;
+    FOR r IN
+      SELECT s.bin_id, s.qty FROM stock_by_bin s JOIN bins b ON b.id = s.bin_id
+       WHERE s.product_img = NEW.img AND s.qty > 0
+       ORDER BY (s.bin_id = primary_id) DESC NULLS LAST,
+                (b.kind = 'unassigned') DESC,
+                b.pick_sequence NULLS LAST, s.qty
+       FOR UPDATE OF s
+    LOOP
+      EXIT WHEN need <= 0;
+      take := LEAST(r.qty, need);
+      UPDATE stock_by_bin SET qty = qty - take, updated_at = NOW()
+       WHERE product_img = NEW.img AND bin_id = r.bin_id;
+      need := need - take;
+    END LOOP;
+    -- Keep the primary bin's row (a known home, even at zero); drop other empties.
+    DELETE FROM stock_by_bin
+     WHERE product_img = NEW.img AND qty = 0 AND bin_id IS DISTINCT FROM primary_id;
+  END IF;
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS trg_products_sync_bins ON products;
+CREATE TRIGGER trg_products_sync_bins
+  AFTER INSERT OR UPDATE OF stock_count ON products
+  FOR EACH ROW EXECUTE FUNCTION products_sync_bins();
+
+-- One-time load from the legacy bin_location text. Guarded by a settings row so
+-- it never runs twice; bins_enabled switches the trigger on only after it.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM warehouse_settings WHERE key = 'bins_loaded') THEN
+    PERFORM wh_unassigned_bin();
+    INSERT INTO bins (code, kind, notes)
+    SELECT n.code,
+           CASE WHEN n.code LIKE 'DISPLAY%' THEN 'display' ELSE 'storage' END,
+           'Imported from legacy locations'
+      FROM (SELECT DISTINCT wh_norm_bin(bin_location) AS code FROM products) n
+     WHERE n.code IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM bins b WHERE upper(b.code) = n.code);
+
+    INSERT INTO stock_by_bin (product_img, bin_id, qty)
+    SELECT p.img, COALESCE(b.id, wh_unassigned_bin()), p.stock_count
+      FROM products p
+      LEFT JOIN bins b ON upper(b.code) = wh_norm_bin(p.bin_location)
+     WHERE p.stock_count > 0 AND p.img IS NOT NULL
+    ON CONFLICT (product_img, bin_id) DO NOTHING;
+
+    INSERT INTO warehouse_settings (key, value) VALUES ('bins_loaded', NOW()::text), ('bins_enabled', 'on')
+    ON CONFLICT (key) DO NOTHING;
+  END IF;
+END $$;
+
+-- =============================================================================
+--  INBOUND (Phase 2, 2026-10): exchange rates, receipts with batches, landed
+--  cost, average cost, pricing rules, supplier bills, backorders.
+--
+--  Base currency is J$. The product money columns are named *_usd for
+--  historical reasons but hold J$ (the legacy import kept the names), so
+--  cost_usd / price_usd stay as the J$ figures every screen already shows.
+--  A PO and its lines are in the SUPPLIER's currency (purchase_orders.currency);
+--  receipts convert to J$ at the receipt's fx_rate.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS exchange_rates (
+  id         SERIAL PRIMARY KEY,
+  currency   TEXT NOT NULL,                 -- USD, CAD, ...  (J$ per 1 unit)
+  rate_date  DATE NOT NULL,
+  buy        NUMERIC(14,5),
+  sell       NUMERIC(14,5),
+  rate       NUMERIC(14,5) NOT NULL,        -- the figure used for costing
+  source     TEXT NOT NULL DEFAULT 'boj',   -- boj | manual
+  set_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  note       TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (currency, rate_date, source)
+);
+
+ALTER TABLE suppliers            ADD COLUMN IF NOT EXISTS currency      TEXT NOT NULL DEFAULT 'JMD';
+ALTER TABLE purchase_orders      ADD COLUMN IF NOT EXISTS currency      TEXT NOT NULL DEFAULT 'JMD';
+ALTER TABLE purchase_orders      ADD COLUMN IF NOT EXISTS ordered_at    TIMESTAMPTZ;   -- sent to supplier: start of the real lead time
+ALTER TABLE purchase_orders      ADD COLUMN IF NOT EXISTS origin        TEXT;          -- reorder = drafted from suggestions
+ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS qty_cancelled INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS receipts (
+  id                      SERIAL PRIMARY KEY,
+  receipt_number          TEXT UNIQUE,
+  po_id                   INTEGER REFERENCES purchase_orders(id) ON DELETE SET NULL,
+  supplier_id             INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+  status                  TEXT NOT NULL DEFAULT 'open',      -- open | posted | void
+  currency                TEXT NOT NULL DEFAULT 'JMD',
+  fx_rate                 NUMERIC(14,5) NOT NULL DEFAULT 1,  -- J$ per 1 unit of currency
+  fx_source               TEXT,
+  freight                 NUMERIC(14,2) NOT NULL DEFAULT 0,  -- landed-cost extras, all in J$
+  duty                    NUMERIC(14,2) NOT NULL DEFAULT 0,
+  customs                 NUMERIC(14,2) NOT NULL DEFAULT 0,
+  brokerage               NUMERIC(14,2) NOT NULL DEFAULT 0,
+  other_costs             NUMERIC(14,2) NOT NULL DEFAULT 0,
+  allocation_method       TEXT NOT NULL DEFAULT 'value',     -- value | qty
+  supplier_invoice_number TEXT,
+  supplier_invoice_date   DATE,
+  supplier_invoice_total  NUMERIC(14,2),                     -- in the receipt currency
+  payment_terms_days      INTEGER,
+  bill_status             TEXT NOT NULL DEFAULT 'pending',   -- pending | confirmed | disputed
+  bill_amount_jmd         NUMERIC(14,2),
+  bill_variance_note      TEXT,
+  bill_confirmed_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  bill_confirmed_at       TIMESTAMPTZ,
+  due_date                DATE,
+  receiving_bin_id        INTEGER REFERENCES bins(id),
+  received_by             INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  received_at             TIMESTAMPTZ DEFAULT NOW(),
+  posted_by               INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  posted_at               TIMESTAMPTZ,
+  notes                   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_receipts_po     ON receipts (po_id);
+CREATE INDEX IF NOT EXISTS idx_receipts_status ON receipts (status, bill_status);
+
+CREATE TABLE IF NOT EXISTS receipt_lines (
+  id               SERIAL PRIMARY KEY,
+  receipt_id       INTEGER NOT NULL REFERENCES receipts(id) ON DELETE CASCADE,
+  po_item_id       INTEGER REFERENCES purchase_order_items(id) ON DELETE SET NULL,
+  product_img      TEXT REFERENCES products(img) ON DELETE SET NULL ON UPDATE CASCADE,
+  batch_code       TEXT UNIQUE,                     -- printed as BATCH:<code>
+  qty_received     INTEGER NOT NULL DEFAULT 0,      -- good units
+  qty_damaged      INTEGER NOT NULL DEFAULT 0,      -- arrived damaged: not stocked, claim from supplier
+  unit_cost        NUMERIC(14,4),                   -- receipt currency
+  landed_unit_cost NUMERIC(14,4),                   -- J$, incl. allocated extras
+  old_avg_cost     NUMERIC(14,4),
+  new_avg_cost     NUMERIC(14,4),
+  old_price        NUMERIC(14,2),
+  suggested_price  NUMERIC(14,2),
+  new_price        NUMERIC(14,2),
+  price_action     TEXT,                            -- kept | updated
+  qty_putaway      INTEGER NOT NULL DEFAULT 0,
+  notes            TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_receipt_lines_receipt ON receipt_lines (receipt_id);
+CREATE INDEX IF NOT EXISTS idx_receipt_lines_product ON receipt_lines (product_img);
+
+CREATE TABLE IF NOT EXISTS pricing_rules (
+  id             SERIAL PRIMARY KEY,
+  category       TEXT,                              -- NULL = default for every category without its own rule
+  markup_pct     NUMERIC(8,2) NOT NULL,             -- on cost
+  round_to       NUMERIC(10,2) NOT NULL DEFAULT 10, -- round the price UP to a multiple of this (J$)
+  min_margin_pct NUMERIC(8,2),                      -- never suggest below this gross margin
+  never_lower    BOOLEAN NOT NULL DEFAULT true,     -- keep the current price if the rule would cut it
+  is_active      BOOLEAN NOT NULL DEFAULT true,
+  updated_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pricing_rules_category ON pricing_rules (COALESCE(lower(category), ''));
+
+-- Sales-history lookups for reorder suggestions.
+CREATE INDEX IF NOT EXISTS idx_pos_sales_created      ON pos_sales (created_at);
+CREATE INDEX IF NOT EXISTS idx_pos_sale_items_sale    ON pos_sale_items (sale_id);
+CREATE INDEX IF NOT EXISTS idx_pos_sale_items_product ON pos_sale_items (product_img);
+CREATE INDEX IF NOT EXISTS idx_po_items_product       ON purchase_order_items (product_img);
+
+-- Receiving and damaged areas; reorder settings; starting pricing rules taken
+-- from the shop's own current markups (median price/cost per category).
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM bins WHERE upper(code) = 'RECEIVING') THEN
+    INSERT INTO bins (code, kind, notes) VALUES ('RECEIVING', 'receiving', 'Goods received, waiting to be put away');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM bins WHERE upper(code) = 'DAMAGED') THEN
+    INSERT INTO bins (code, kind, notes) VALUES ('DAMAGED', 'damaged', 'Damaged stock, not for sale');
+  END IF;
+  INSERT INTO warehouse_settings (key, value) VALUES
+    ('reorder_review_days', '14'), ('reorder_service_z', '1.65'), ('fx_use', 'sell'), ('bill_tolerance_pct', '1')
+  ON CONFLICT (key) DO NOTHING;
+
+  IF NOT EXISTS (SELECT 1 FROM warehouse_settings WHERE key = 'pricing_rules_seeded') THEN
+    INSERT INTO pricing_rules (category, markup_pct, round_to)
+    SELECT NULL, ROUND(((percentile_cont(0.5) WITHIN GROUP (ORDER BY price_usd / cost_usd)) - 1)::numeric * 100, 1), 10
+      FROM products WHERE cost_usd > 0 AND price_usd > cost_usd
+    HAVING COUNT(*) > 0;  -- no priced products (fresh install) = no default rule, not a NULL markup
+    INSERT INTO pricing_rules (category, markup_pct, round_to)
+    SELECT category, ROUND(((percentile_cont(0.5) WITHIN GROUP (ORDER BY price_usd / cost_usd)) - 1)::numeric * 100, 1), 10
+      FROM products WHERE cost_usd > 0 AND price_usd > cost_usd AND COALESCE(category, '') <> ''
+     GROUP BY category HAVING COUNT(*) >= 20;
+    INSERT INTO warehouse_settings (key, value) VALUES ('pricing_rules_seeded', NOW()::text);
+  END IF;
+END $$;
+
+-- =============================================================================
+--  OUTBOUND (Phase 3, 2026-10): fulfilment orders, picking, packing,
+--  manifests, pickup codes, holds, tracking events.
+--
+--  A fulfilment is the warehouse's job for one sale: pick it, pack it, then
+--  hand it over (counter pickup) or send it (delivery / shipping). It sits
+--  beside the POS: sales are made exactly as before, and a sweep in
+--  outbound.js creates the fulfilment from new pos_sales / web orders.
+--  Stock was already taken off at the sale (trigger), so picking moves no
+--  stock; it records who took what from which bin, and shortages.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS fulfilments (
+  id              SERIAL PRIMARY KEY,
+  number          TEXT UNIQUE,                          -- F-000123
+  source_kind     TEXT NOT NULL,                        -- pos_sale | web_order | manual
+  source_id       INTEGER,
+  source_ref      TEXT,                                 -- receipt / order number shown to staff
+  customer_name   TEXT,
+  customer_phone  TEXT,
+  customer_email  TEXT,
+  method          TEXT NOT NULL DEFAULT 'pickup',       -- pickup | delivery | shipping
+  ship_to         JSONB,                                -- {name, phone, line1, line2, city, parish, country}
+  status          TEXT NOT NULL DEFAULT 'new',          -- new | picking | picked | packed | ready | dispatched | delivered | collected | cancelled
+  priority        INTEGER NOT NULL DEFAULT 0,           -- higher first
+  on_hold         BOOLEAN NOT NULL DEFAULT false,
+  hold_reason     TEXT,
+  held_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  held_at         TIMESTAMPTZ,
+  picker_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  pick_started_at TIMESTAMPTZ,
+  picked_at       TIMESTAMPTZ,
+  packer_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  packed_at       TIMESTAMPTZ,
+  ready_at        TIMESTAMPTZ,
+  pickup_code     TEXT,                                 -- 6 digits, given to the customer only
+  pickup_attempts INTEGER NOT NULL DEFAULT 0,
+  manifest_id     INTEGER,
+  carrier         TEXT,
+  tracking_number TEXT,
+  dispatched_at   TIMESTAMPTZ,
+  completed_at    TIMESTAMPTZ,                          -- delivered or collected
+  completed_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  received_by_name TEXT,                                -- who signed / collected
+  track_token     TEXT UNIQUE,                          -- random, for the customer's tracking page
+  notes           TEXT,
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (source_kind, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_fulfilments_status ON fulfilments (status, created_at);
+
+CREATE TABLE IF NOT EXISTS fulfilment_lines (
+  id             SERIAL PRIMARY KEY,
+  fulfilment_id  INTEGER NOT NULL REFERENCES fulfilments(id) ON DELETE CASCADE,
+  product_img    TEXT REFERENCES products(img) ON DELETE SET NULL ON UPDATE CASCADE,
+  sku            TEXT,
+  description    TEXT,
+  qty            INTEGER NOT NULL,
+  qty_picked     INTEGER NOT NULL DEFAULT 0,
+  qty_short      INTEGER NOT NULL DEFAULT 0,
+  short_reason   TEXT,                                 -- not_found | damaged | wrong_part | other
+  bin_id         INTEGER REFERENCES bins(id),           -- where the picker took it from
+  picked_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  picked_at      TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_fulfilment_lines_f ON fulfilment_lines (fulfilment_id);
+
+CREATE TABLE IF NOT EXISTS fulfilment_packages (
+  id             SERIAL PRIMARY KEY,
+  fulfilment_id  INTEGER NOT NULL REFERENCES fulfilments(id) ON DELETE CASCADE,
+  seq            INTEGER NOT NULL,                     -- 1, 2, 3 ... of this order
+  kind           TEXT NOT NULL DEFAULT 'box',           -- bag | box | tyre | pallet | envelope
+  weight_kg      NUMERIC(8,2),
+  contents       TEXT,
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (fulfilment_id, seq)
+);
+
+CREATE TABLE IF NOT EXISTS manifests (
+  id           SERIAL PRIMARY KEY,
+  number       TEXT UNIQUE,                            -- M-000045
+  kind         TEXT NOT NULL DEFAULT 'delivery',       -- delivery (own driver) | carrier
+  carrier      TEXT,
+  driver_name  TEXT,
+  vehicle      TEXT,
+  status       TEXT NOT NULL DEFAULT 'open',           -- open | dispatched | closed
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  dispatched_at TIMESTAMPTZ,
+  closed_at    TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS fulfilment_events (
+  id             SERIAL PRIMARY KEY,
+  fulfilment_id  INTEGER NOT NULL REFERENCES fulfilments(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL,                        -- created | hold | release | pick_start | picked | short | packed | ready | notified | dispatched | delivered | collected | pickup_failed | cancelled
+  note           TEXT,
+  by_user        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  terminal       TEXT,
+  public         BOOLEAN NOT NULL DEFAULT false,       -- shown on the customer's tracking page
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fulfilment_events_f ON fulfilment_events (fulfilment_id, created_at);
+
+DO $$
+BEGIN
+  INSERT INTO warehouse_settings (key, value) VALUES
+    ('fulfil_auto', 'off'),          -- off | delivery | all : which new POS sales become pick orders
+    ('fulfil_sweep_from', NULL),     -- pos_sales.id to start the sweep after (set when auto is switched on)
+    ('fulfil_sla_minutes', '15'),    -- counter orders older than this turn red on the board
+    ('fulfil_notify', 'on')          -- send SMS/email when an order is ready
+  ON CONFLICT (key) DO NOTHING;
+END $$;
+
+-- =============================================================================
+--  STOCK LEDGER + COST AT SALE (balancing report, 2026-10)
+--
+--  Stock changes in many places (POS sale, credit note, PO receive, Receive
+--  screen, stock adjust, count posting, product edit, voids). None of them
+--  kept a history, so no past opening stock or variance could be proven.
+--  This trigger records EVERY change to products.stock_count, whatever code
+--  made it, with the cost and price at that moment. From the day it starts,
+--  opening / closing stock at any date is exact, and changes that are not a
+--  sale, return or receipt show up as adjustments.
+--
+--  Code may label a change: SELECT set_config('vision.stock_reason','count',true).
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS stock_ledger (
+  id          BIGSERIAL PRIMARY KEY,
+  product_img TEXT NOT NULL,
+  delta       INTEGER NOT NULL,
+  qty_after   INTEGER,
+  unit_cost   NUMERIC(14,4),
+  unit_price  NUMERIC(14,2),
+  reason      TEXT,
+  db_user     TEXT DEFAULT current_user,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_stock_ledger_created ON stock_ledger (created_at);
+CREATE INDEX IF NOT EXISTS idx_stock_ledger_product ON stock_ledger (product_img, created_at);
+
+CREATE OR REPLACE FUNCTION products_stock_ledger() RETURNS trigger
+  LANGUAGE plpgsql AS
+$$
+DECLARE d INTEGER;
+BEGIN
+  d := COALESCE(NEW.stock_count, 0) - (CASE WHEN TG_OP = 'INSERT' THEN 0 ELSE COALESCE(OLD.stock_count, 0) END);
+  IF d <> 0 AND NEW.img IS NOT NULL THEN
+    INSERT INTO stock_ledger (product_img, delta, qty_after, unit_cost, unit_price, reason)
+    VALUES (NEW.img, d, NEW.stock_count, NEW.cost_usd, NEW.price_usd, NULLIF(current_setting('vision.stock_reason', true), ''));
+  END IF;
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS trg_products_stock_ledger ON products;
+CREATE TRIGGER trg_products_stock_ledger
+  AFTER INSERT OR UPDATE OF stock_count ON products
+  FOR EACH ROW EXECUTE FUNCTION products_stock_ledger();
+
+-- Cost of the part at the moment it was sold, so cost of sales stops moving
+-- when the average cost changes later. Old lines keep NULL (the report then
+-- uses today's cost and says so).
+ALTER TABLE pos_sale_items ADD COLUMN IF NOT EXISTS unit_cost NUMERIC(14,4);
+
+CREATE OR REPLACE FUNCTION pos_sale_items_cost() RETURNS trigger
+  LANGUAGE plpgsql AS
+$$
+BEGIN
+  IF NEW.unit_cost IS NULL AND NEW.product_img IS NOT NULL THEN
+    SELECT cost_usd INTO NEW.unit_cost FROM products WHERE img = NEW.product_img;
+  END IF;
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS trg_pos_sale_items_cost ON pos_sale_items;
+CREATE TRIGGER trg_pos_sale_items_cost
+  BEFORE INSERT ON pos_sale_items
+  FOR EACH ROW EXECUTE FUNCTION pos_sale_items_cost();
+
+INSERT INTO warehouse_settings (key, value) VALUES ('stock_ledger_started', NOW()::text)
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  CASHIER MODULE (2026-10): stations, POS orders awaiting payment, drawer
+--  (till) sessions.
+--
+--  pos_stations   a counter position, bound to one device by a key. Kinds:
+--                 order       builds carts; checkout sends them to a cashier
+--                 cashier     takes payment for the order stations it serves
+--                 integrated  single-user: rings and takes payment itself
+--  pos_orders     a cart saved without payment ('Save as order' in the POS),
+--                 routed to the order station's cashier (or its backup, or
+--                 any cashier). Paying it replays the cart through the normal
+--                 sale code (posSaleHandler), so stock and the invoice are
+--                 made exactly as for a counter sale.
+--  till_sessions  one cash drawer shift: one station, one cashier, opening
+--                 float by denomination, blind close, expected vs counted.
+--  till_sales     which sales belong to which shift (cash expected).
+--  The older single cash_drawer_sessions table is left as it is.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS pos_stations (
+  id                 SERIAL PRIMARY KEY,
+  name               TEXT NOT NULL,
+  kind               TEXT NOT NULL DEFAULT 'order',   -- order | cashier | integrated
+  cashier_station_id INTEGER REFERENCES pos_stations(id) ON DELETE SET NULL,  -- order stations: who takes their payments
+  backup_station_id  INTEGER REFERENCES pos_stations(id) ON DELETE SET NULL,  -- cashier stations: who covers when closed
+  device_key_hash    TEXT,
+  bound_at           TIMESTAMPTZ,
+  bound_by           INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  is_active          BOOLEAN NOT NULL DEFAULT true,
+  created_at         TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pos_stations_name ON pos_stations (lower(name));
+
+CREATE TABLE IF NOT EXISTS pos_orders (
+  id                 SERIAL PRIMARY KEY,
+  status             TEXT NOT NULL DEFAULT 'pending', -- pending | invoicing | completed | cancelled | expired
+  payload            JSONB NOT NULL,                  -- the POS sale body, without payments
+  total_usd          NUMERIC(14,2),                   -- exact, from a dry run of the sale code (J$)
+  preview            JSONB,
+  customer_id        INTEGER,
+  customer_name      TEXT,
+  customer_phone     TEXT,
+  sales_rep_id       INTEGER,
+  sales_rep_name     TEXT,
+  ship_instructions  TEXT,
+  taken_by           INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  order_station_id   INTEGER REFERENCES pos_stations(id) ON DELETE SET NULL,
+  cashier_station_id INTEGER REFERENCES pos_stations(id) ON DELETE SET NULL,
+  claimed_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  claimed_at         TIMESTAMPTZ,
+  converted_sale_id  INTEGER,
+  till_session_id    INTEGER,
+  cancel_reason      TEXT,
+  cancelled_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at         TIMESTAMPTZ DEFAULT NOW(),
+  completed_at       TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_pos_orders_status ON pos_orders (status, created_at);
+
+CREATE TABLE IF NOT EXISTS till_sessions (
+  id              SERIAL PRIMARY KEY,
+  station_id      INTEGER NOT NULL REFERENCES pos_stations(id),
+  user_id         INTEGER NOT NULL REFERENCES users(id),
+  status          TEXT NOT NULL DEFAULT 'open',       -- open | closed
+  opening_float   NUMERIC(14,2) NOT NULL DEFAULT 0,
+  opening_count   JSONB,                              -- {"5000": 2, "1000": 5, ...}
+  opened_at       TIMESTAMPTZ DEFAULT NOW(),
+  counted_cash    NUMERIC(14,2),
+  closing_count   JSONB,
+  expected_cash   NUMERIC(14,2),
+  variance        NUMERIC(14,2),
+  closed_at       TIMESTAMPTZ,
+  closed_by       INTEGER REFERENCES users(id),
+  close_notes     TEXT,
+  reviewed_by     INTEGER REFERENCES users(id),
+  reviewed_at     TIMESTAMPTZ,
+  review_note     TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_till_sessions_open ON till_sessions (station_id) WHERE status = 'open';
+
+CREATE TABLE IF NOT EXISTS till_movements (
+  id          SERIAL PRIMARY KEY,
+  session_id  INTEGER NOT NULL REFERENCES till_sessions(id) ON DELETE CASCADE,
+  kind        TEXT NOT NULL,                          -- drop (to safe) | payout (petty) | float_in | no_sale
+  amount      NUMERIC(14,2) NOT NULL DEFAULT 0,
+  reason      TEXT,
+  by_user     INTEGER REFERENCES users(id),
+  approved_by INTEGER REFERENCES users(id),
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS till_sales (
+  session_id  INTEGER NOT NULL REFERENCES till_sessions(id) ON DELETE CASCADE,
+  sale_id     INTEGER NOT NULL,
+  PRIMARY KEY (session_id, sale_id)
+);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('cash_order_expiry_min', '240'),   -- unpaid POS orders expire after this many minutes
+  ('cash_payout_limit', '5000')       -- payouts above this need a manager PIN
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  STOCK COUNTS (Phase 4, 2026-10): bin counts by scan, blind, recount on
+--  variance by a second person, photos, manager approval, ABC cycle schedule.
+--
+--  A count covers a list of bins. Each bin is counted by scanning what is on
+--  the shelf; the expected quantity is never shown to the counter (blind).
+--  When a bin is finished, its lines are compared with stock_by_bin AT THAT
+--  MOMENT (sales keep running during a count). Differences over the tolerance
+--  need a recount by someone else; then a manager approves and posting moves
+--  stock_by_bin and products.stock_count by the difference (labelled 'count'
+--  in the stock ledger).
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS bin_counts (
+  id          SERIAL PRIMARY KEY,
+  number      TEXT UNIQUE,                       -- CNT-000012
+  kind        TEXT NOT NULL DEFAULT 'adhoc',     -- adhoc | cycle | full
+  status      TEXT NOT NULL DEFAULT 'counting',  -- counting | review | posted | cancelled
+  note        TEXT,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  posted_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  posted_at   TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS bin_count_bins (
+  count_id    INTEGER NOT NULL REFERENCES bin_counts(id) ON DELETE CASCADE,
+  bin_id      INTEGER NOT NULL REFERENCES bins(id),
+  status      TEXT NOT NULL DEFAULT 'open',      -- open | counted | recount | approved
+  counted_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  counted_at  TIMESTAMPTZ,
+  recount_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  recount_at  TIMESTAMPTZ,
+  photo       TEXT,
+  PRIMARY KEY (count_id, bin_id)
+);
+
+CREATE TABLE IF NOT EXISTS bin_count_lines (
+  id           SERIAL PRIMARY KEY,
+  count_id     INTEGER NOT NULL REFERENCES bin_counts(id) ON DELETE CASCADE,
+  bin_id       INTEGER NOT NULL REFERENCES bins(id),
+  product_img  TEXT NOT NULL REFERENCES products(img) ON UPDATE CASCADE ON DELETE CASCADE,
+  counted_qty  INTEGER NOT NULL DEFAULT 0,       -- first count
+  recount_qty  INTEGER,                          -- second person's count, when asked
+  system_qty   INTEGER,                          -- what the system held when the bin was finished
+  unit_cost    NUMERIC(14,4),
+  photo        TEXT,
+  note         TEXT,
+  UNIQUE (count_id, bin_id, product_img)
+);
+CREATE INDEX IF NOT EXISTS idx_bin_count_lines_count ON bin_count_lines (count_id, bin_id);
+
+ALTER TABLE products ADD COLUMN IF NOT EXISTS last_counted_at TIMESTAMPTZ;
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('count_tolerance_units', '0'),     -- a difference above this many units needs a recount
+  ('count_tolerance_value', '5000'),  -- ...or above this J$ value at cost
+  ('count_cycle_days_a', '30'), ('count_cycle_days_b', '90'), ('count_cycle_days_c', '365')
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 5: lost sales and planning
+--  lost_sales holds sales staff could not make (recorded at the counter, on the
+--  phone or in the warehouse). Short picks and expired / cancelled POS orders
+--  are not copied here: the planning report reads them where they live.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS lost_sales (
+  id              SERIAL PRIMARY KEY,
+  product_img     TEXT REFERENCES products(img) ON DELETE SET NULL ON UPDATE CASCADE,
+  description     TEXT NOT NULL,                     -- the part asked for, as the customer put it
+  vehicle         TEXT,
+  qty             INTEGER NOT NULL DEFAULT 1 CHECK (qty > 0),
+  unit_price      NUMERIC(14,2),                     -- J$ quoted or list price, when known
+  reason          TEXT NOT NULL DEFAULT 'out_of_stock', -- out_of_stock | not_stocked | price | lead_time | quality | other
+  channel         TEXT NOT NULL DEFAULT 'counter',   -- counter | phone | online | warehouse
+  competitor      TEXT,
+  customer_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  customer_name   TEXT,
+  customer_phone  TEXT,
+  follow_up       BOOLEAN NOT NULL DEFAULT false,    -- call the customer when it comes in
+  followed_up_at  TIMESTAMPTZ,
+  note            TEXT,
+  recorded_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_lost_sales_created ON lost_sales (created_at);
+CREATE INDEX IF NOT EXISTS idx_lost_sales_product ON lost_sales (product_img);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('plan_dead_days', '365'),        -- no sale in this many days = dead stock
+  ('plan_slow_days', '180'),        -- no sale in this many days = slow
+  ('plan_target_days_cover', '90'), -- inventory days the business aims for
+  ('plan_target_fill_rate', '95')   -- % of units asked for that were supplied
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 6: customer notifications, pickup by someone else, delivery report
+--  notify_templates: one message per event and channel, editable by staff.
+--  notifications: every message the system tried to send (sent, stubbed when
+--  SMS/email are not set up, skipped with the reason, failed and retried).
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS notify_templates (
+  event       TEXT NOT NULL,                 -- order_received | ready_pickup | ready_delivery | out_for_delivery | shipped | delivered | collected | part_in_stock
+  channel     TEXT NOT NULL,                 -- sms | email | whatsapp
+  enabled     BOOLEAN NOT NULL DEFAULT true,
+  subject     TEXT,                          -- email only
+  body        TEXT NOT NULL,                 -- {shop} {name} {number} {code} {link} {carrier} {tracking} {part} {received_by} {phone}
+  updated_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at  TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (event, channel)
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id            BIGSERIAL PRIMARY KEY,
+  event         TEXT NOT NULL,
+  channel       TEXT NOT NULL,
+  to_addr       TEXT,
+  subject       TEXT,
+  body          TEXT,
+  status        TEXT NOT NULL DEFAULT 'queued', -- queued | sent | stubbed | link | skipped | failed
+  reason        TEXT,                           -- why skipped / the error
+  attempts      INTEGER NOT NULL DEFAULT 0,
+  send_after    TIMESTAMPTZ DEFAULT NOW(),      -- quiet hours push SMS to the morning
+  related_kind  TEXT,                           -- fulfilment | lost_sale
+  related_id    INTEGER,
+  customer_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  by_user       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  sent_at       TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_due ON notifications (send_after) WHERE status IN ('queued', 'failed');
+CREATE INDEX IF NOT EXISTS idx_notifications_related ON notifications (related_kind, related_id);
+
+-- Pickup by someone other than the customer, and the ID shown at the counter.
+ALTER TABLE fulfilments ADD COLUMN IF NOT EXISTS authorised_collector TEXT;   -- named by the customer in advance
+ALTER TABLE fulfilments ADD COLUMN IF NOT EXISTS collected_by_other   BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE fulfilments ADD COLUMN IF NOT EXISTS id_checked           TEXT;   -- e.g. "Driver's licence ...1234"
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('notify_enabled', 'on'),
+  ('notify_quiet_from', '21:00'),   -- SMS / WhatsApp held overnight; email goes any time
+  ('notify_quiet_to', '07:30'),
+  ('notify_shop_phone', '876-905-4111'),
+  ('pickup_uncollected_days', '7')
+ON CONFLICT (key) DO NOTHING;
+
+INSERT INTO notify_templates (event, channel, enabled, subject, body) VALUES
+  ('order_received',   'sms',      false, NULL, '{shop}: we have your order {number}. We will text you when it is ready.{link}'),
+  ('order_received',   'email',    true,  'We have your order {number}', E'Hi {name},\n\nThanks for your order {number}. We are getting it ready and will let you know as soon as it is.{link}\n\n{shop} · {phone}'),
+  ('ready_pickup',     'sms',      true,  NULL, '{shop}: order {number} is ready. Pickup code {code}. Anyone collecting for you needs this code and ID.{link}'),
+  ('ready_pickup',     'email',    true,  'Order {number} is ready for pickup', E'Hi {name},\n\nYour order {number} is ready for pickup.\n\nPickup code: {code}\n\nBring this code with you. If someone else is collecting, give them the code; they will need ID.{link}\n\n{shop} · {phone}'),
+  ('ready_pickup',     'whatsapp', true,  NULL, '{shop}: order {number} is ready for pickup. Pickup code {code}.'),
+  ('ready_delivery',   'sms',      false, NULL, '{shop}: order {number} is packed and will go out soon.{link}'),
+  ('ready_delivery',   'email',    true,  'Order {number} is packed', E'Hi {name},\n\nYour order {number} is packed and will be sent out soon.{link}\n\n{shop} · {phone}'),
+  ('out_for_delivery', 'sms',      true,  NULL, '{shop}: order {number} is out for delivery today.{link}'),
+  ('out_for_delivery', 'email',    true,  'Order {number} is on the way', E'Hi {name},\n\nYour order {number} is out for delivery.{link}\n\n{shop} · {phone}'),
+  ('shipped',          'sms',      true,  NULL, '{shop}: order {number} was handed to {carrier}. Tracking {tracking}.{link}'),
+  ('shipped',          'email',    true,  'Order {number} has shipped', E'Hi {name},\n\nYour order {number} was handed to {carrier}. Tracking number: {tracking}.{link}\n\n{shop} · {phone}'),
+  ('delivered',        'sms',      false, NULL, '{shop}: order {number} was delivered and signed for by {received_by}. Thank you!'),
+  ('delivered',        'email',    true,  'Order {number} was delivered', E'Hi {name},\n\nYour order {number} was delivered and received by {received_by}. Thank you for your business.\n\n{shop} · {phone}'),
+  ('collected',        'sms',      false, NULL, '{shop}: order {number} was collected by {received_by}. Thank you!'),
+  ('collected',        'email',    true,  'Order {number} was collected', E'Hi {name},\n\nYour order {number} was collected by {received_by}. If that was not you or someone you sent, call us on {phone}.\n\n{shop}'),
+  ('part_in_stock',    'sms',      true,  NULL, '{shop}: good news, {part} is in stock now. Call {phone} or come in and we will put it aside.'),
+  ('part_in_stock',    'whatsapp', true,  NULL, 'Hi {name}, {shop} here: {part} is in stock now. Shall we put it aside for you?')
+ON CONFLICT (event, channel) DO NOTHING;
+
+-- =============================================================================
+--  Phase 7: accounting backbone (general ledger)
+--  gl.js posts finished documents (sales, payments, returns, receipts, bills,
+--  supplier payments, drawer shifts, stock adjustments) as balanced journal
+--  entries from the ledger start date on. Entries never change: corrections
+--  are reversing entries, and a closed month takes no new entries.
+--  Amounts are J$; a line's amount is + for a debit and - for a credit.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS gl_accounts (
+  id          SERIAL PRIMARY KEY,
+  code        TEXT NOT NULL UNIQUE,
+  name        TEXT NOT NULL,
+  type        TEXT NOT NULL CHECK (type IN ('asset','liability','equity','income','cogs','expense','other_income','other_expense')),
+  qb_name     TEXT,                       -- the account's exact name in QuickBooks (Parent:Child), used in the IIF export
+  qb_type     TEXT,                       -- BANK | AR | OCASSET | FIXASSET | AP | OCLIAB | LTLIAB | EQUITY | INC | COGS | EXP | EXINC | EXEXP
+  system_key  TEXT UNIQUE,                -- what the posting rules look for
+  is_active   BOOLEAN NOT NULL DEFAULT true,
+  notes       TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Mapping rules: which account a payment method, product category or stock
+-- reason posts to. Missing rules fall back to the system default account.
+CREATE TABLE IF NOT EXISTS gl_map (
+  kind        TEXT NOT NULL,              -- pay_method | revenue_category | cogs_category | stock_reason | till_payout
+  key         TEXT NOT NULL,
+  account_id  INTEGER NOT NULL REFERENCES gl_accounts(id),
+  PRIMARY KEY (kind, key)
+);
+
+CREATE TABLE IF NOT EXISTS gl_entries (
+  id           BIGSERIAL PRIMARY KEY,
+  number       TEXT UNIQUE,                -- JE-000001
+  entry_date   DATE NOT NULL,              -- Jamaica date the books show it
+  book         TEXT NOT NULL,              -- sales | purchases | cash | stock | opening | manual
+  source_kind  TEXT NOT NULL,              -- sale | sale_payment | sale_void | return | account_payment | receipt | bill | po_payment | po_invoice | till_open | till_movement | till_close | stock_day | gift_card | commission | opening | manual | reversal
+  source_id    BIGINT NOT NULL,
+  source_ref   TEXT,                       -- receipt / document number shown to people
+  memo         TEXT,
+  reverses_id  BIGINT REFERENCES gl_entries(id),
+  reversed_by  BIGINT REFERENCES gl_entries(id),
+  posted_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  posted_at    TIMESTAMPTZ DEFAULT NOW(),
+  export_id    INTEGER,
+  UNIQUE (source_kind, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_gl_entries_date ON gl_entries (entry_date);
+
+CREATE TABLE IF NOT EXISTS gl_lines (
+  id          BIGSERIAL PRIMARY KEY,
+  entry_id    BIGINT NOT NULL REFERENCES gl_entries(id),
+  account_id  INTEGER NOT NULL REFERENCES gl_accounts(id),
+  amount      NUMERIC(14,2) NOT NULL,     -- + debit, - credit
+  party       TEXT,                       -- customer / supplier name (QuickBooks needs it on A/R and A/P lines)
+  memo        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_gl_lines_entry ON gl_lines (entry_id);
+CREATE INDEX IF NOT EXISTS idx_gl_lines_account ON gl_lines (account_id);
+
+CREATE TABLE IF NOT EXISTS gl_periods (
+  month      DATE PRIMARY KEY,            -- first day of the month
+  closed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  closed_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  note       TEXT
+);
+
+CREATE TABLE IF NOT EXISTS gl_exports (
+  id          SERIAL PRIMARY KEY,
+  kind        TEXT NOT NULL,              -- iif | csv
+  from_date   DATE NOT NULL,
+  to_date     DATE NOT NULL,
+  entries     INTEGER NOT NULL DEFAULT 0,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Guards: lines never change; entries change only to record a reversal or an export.
+CREATE OR REPLACE FUNCTION gl_lines_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'Journal lines cannot be changed or deleted: post a reversing entry'; END $$;
+DROP TRIGGER IF EXISTS gl_lines_no_change ON gl_lines;
+CREATE TRIGGER gl_lines_no_change BEFORE UPDATE OR DELETE ON gl_lines FOR EACH ROW EXECUTE FUNCTION gl_lines_immutable();
+
+CREATE OR REPLACE FUNCTION gl_entries_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'Journal entries cannot be deleted: post a reversing entry'; END IF;
+  IF TG_OP = 'UPDATE' THEN
+    IF (NEW.entry_date, NEW.book, NEW.source_kind, NEW.source_id, NEW.memo, NEW.reverses_id, NEW.posted_at)
+       IS DISTINCT FROM (OLD.entry_date, OLD.book, OLD.source_kind, OLD.source_id, OLD.memo, OLD.reverses_id, OLD.posted_at)
+       OR (OLD.number IS NOT NULL AND NEW.number IS DISTINCT FROM OLD.number) THEN
+      RAISE EXCEPTION 'Journal entries cannot be changed: post a reversing entry';
+    END IF;
+    RETURN NEW;
+  END IF;
+  -- INSERT: not into a closed month
+  IF EXISTS (SELECT 1 FROM gl_periods WHERE month = date_trunc('month', NEW.entry_date)::date) THEN
+    RAISE EXCEPTION 'The books for % are closed', to_char(NEW.entry_date, 'Mon YYYY');
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS gl_entries_guard ON gl_entries;
+CREATE TRIGGER gl_entries_guard BEFORE INSERT OR UPDATE OR DELETE ON gl_entries FOR EACH ROW EXECUTE FUNCTION gl_entries_guard();
+
+-- Every entry must balance, checked when the transaction commits.
+CREATE OR REPLACE FUNCTION gl_check_balance() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE d NUMERIC; n INTEGER;
+BEGIN
+  SELECT COALESCE(SUM(amount), 0), COUNT(*) INTO d, n FROM gl_lines WHERE entry_id = NEW.entry_id;
+  IF d <> 0 THEN RAISE EXCEPTION 'Journal entry % does not balance (off by %)', NEW.entry_id, d; END IF;
+  IF n < 2 THEN RAISE EXCEPTION 'Journal entry % needs at least two lines', NEW.entry_id; END IF;
+  RETURN NULL;
+END $$;
+DROP TRIGGER IF EXISTS gl_lines_balance ON gl_lines;
+CREATE CONSTRAINT TRIGGER gl_lines_balance AFTER INSERT ON gl_lines DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION gl_check_balance();
+
+-- Starting chart. Names follow common QuickBooks naming; set qb_name to your
+-- own QuickBooks account names (or import your chart) before exporting.
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('1000', 'Cash Drawers',                       'asset',     'Cash Drawers',                       'OCASSET', 'cash_drawers'),
+  ('1010', 'Undeposited Funds (Safe)',           'asset',     'Undeposited Funds',                  'OCASSET', 'cash_safe'),
+  ('1020', 'Bank - Operating',                   'asset',     'Bank - Operating',                   'BANK',    'bank'),
+  ('1030', 'Cheques to Deposit',                 'asset',     'Cheques to Deposit',                 'OCASSET', 'cheques'),
+  ('1040', 'Card Settlements Clearing',          'asset',     'Card Settlements Clearing',          'OCASSET', 'card_clearing'),
+  ('1100', 'Accounts Receivable',                'asset',     'Accounts Receivable',                'AR',      'ar'),
+  ('1150', 'Supplier Claims Receivable',         'asset',     'Supplier Claims Receivable',         'OCASSET', 'supplier_claims'),
+  ('1200', 'Inventory Asset',                    'asset',     'Inventory Asset',                    'OCASSET', 'inventory'),
+  ('2000', 'Accounts Payable',                   'liability', 'Accounts Payable',                   'AP',      'ap'),
+  ('2050', 'Goods Received Not Invoiced',        'liability', 'Goods Received Not Invoiced',        'OCLIAB',  'grni'),
+  ('2060', 'Landed Cost Accrual',                'liability', 'Landed Cost Accrual',                'OCLIAB',  'landed_accrual'),
+  ('2100', 'GCT Payable',                        'liability', 'GCT Payable',                        'OCLIAB',  'gct'),
+  ('2150', 'Gift Cards and Store Credit',        'liability', 'Gift Cards and Store Credit',        'OCLIAB',  'gift_cards'),
+  ('3000', 'Opening Balance Equity',             'equity',    'Opening Balance Equity',             'EQUITY',  'opening_equity'),
+  ('4000', 'Sales - Parts',                      'income',    'Sales - Parts',                      'INC',     'sales'),
+  ('4050', 'Sales - Labour and Services',        'income',    'Sales - Labour and Services',        'INC',     'sales_services'),
+  ('4090', 'Sales Returns',                      'income',    'Sales Returns',                      'INC',     'sales_returns'),
+  ('4100', 'Sales Discounts',                    'income',    'Sales Discounts',                    'INC',     'sales_discounts'),
+  ('4200', 'Delivery and Shipping Income',       'income',    'Delivery and Shipping Income',       'INC',     'delivery_income'),
+  ('5000', 'Cost of Goods Sold',                 'cogs',      'Cost of Goods Sold',                 'COGS',    'cogs'),
+  ('5050', 'Purchase Price Variance',            'cogs',      'Purchase Price Variance',            'COGS',    'ppv'),
+  ('5100', 'Inventory Adjustments and Shrinkage','cogs',      'Inventory Adjustments and Shrinkage','COGS',    'inv_adjust'),
+  ('5150', 'Parts Used in Workshop',             'cogs',      'Parts Used in Workshop',             'COGS',    'workshop_parts'),
+  ('6000', 'Cash Over and Short',                'expense',   'Cash Over and Short',                'EXP',     'cash_over_short'),
+  ('6100', 'Till Payouts and Petty Expenses',    'expense',   'Petty Cash Expenses',                'EXP',     'petty_expense'),
+  ('6200', 'Commissions',                        'expense',   'Commissions',                        'EXP',     'commissions'),
+  ('6300', 'Loyalty Rewards',                    'expense',   'Loyalty Rewards',                    'EXP',     'loyalty'),
+  ('6900', 'Suspense (to be reviewed)',          'expense',   'Ask My Accountant',                  'EXP',     'suspense')
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO gl_map (kind, key, account_id)
+SELECT m.kind, m.key, a.id FROM (VALUES
+  ('pay_method', 'cash', 'cash_drawers'), ('pay_method', 'cheque', 'cheques'), ('pay_method', 'card', 'card_clearing'),
+  ('pay_method', 'bank', 'bank'), ('pay_method', 'transfer', 'bank'), ('pay_method', 'gift_card', 'gift_cards'),
+  ('pay_method', 'store_credit', 'gift_cards'), ('pay_method', 'loyalty', 'loyalty'), ('pay_method', 'credit_note', 'ar'),
+  ('pay_method', 'charge', 'ar'), ('pay_method', 'account', 'ar'),
+  ('stock_reason', 'count', 'inv_adjust'), ('stock_reason', 'requisition', 'workshop_parts'), ('stock_reason', 'other', 'inv_adjust'),
+  ('stock_reason', 'po_quick_receive', 'grni')
+) m(kind, key, sk) JOIN gl_accounts a ON a.system_key = m.sk
+ON CONFLICT (kind, key) DO NOTHING;
+
+INSERT INTO warehouse_settings (key, value) VALUES ('gl_auto_post', 'on') ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 8.1: sign-in security and audit log (security.js)
+--  Failed-password lockout, idle sign-out, 2-step sign-in (authenticator app,
+--  RFC 6238) with one-time recovery codes, and a log of every change staff make.
+-- =============================================================================
+ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_logins    INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until     TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret      TEXT;          -- base32; set only once confirmed
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_pending     TEXT;          -- base32 being set up, not yet confirmed
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled_at  TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_recovery    JSONB;         -- sha256 of unused one-time recovery codes
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_last_step   BIGINT;        -- last time-step accepted: a code works once
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at    TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_ip    TEXT;
+
+CREATE TABLE IF NOT EXISTS audit_log (
+  id         BIGSERIAL PRIMARY KEY,
+  at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  user_id    INTEGER,
+  user_name  TEXT,
+  action     TEXT NOT NULL,          -- "PATCH /api/admin/products/:id" or signin, signin_failed, locked, 2fa_on ...
+  target     TEXT,                   -- the id in the path, when there is one
+  status     INTEGER,
+  ip         TEXT,
+  remote     BOOLEAN NOT NULL DEFAULT false,   -- came in over the internet, not the shop network
+  station    TEXT,
+  detail     JSONB                   -- request fields (passwords, PINs, codes and tokens removed)
+);
+CREATE INDEX IF NOT EXISTS idx_audit_log_at ON audit_log (at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log (user_id, at DESC);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('sec_lockout_attempts', '5'),     -- wrong passwords in a row before the account locks
+  ('sec_lockout_minutes', '15'),
+  ('sec_idle_minutes', '720'),       -- signed out after this long with no activity (0 = never)
+  ('sec_2fa_policy', 'off'),         -- off | remote | managers | staff
+  ('sec_audit_days', '730')          -- audit rows kept this long
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 8.2: departments and the terminal journal (terminal.js)
+--  A department is a set of product categories. Staff and cashier stations
+--  are given departments; a counter agent can only sell their departments'
+--  parts unless a manager approves with a PIN (logged). pos_events records
+--  what happens on the till screen (items added / removed, price, quantity
+--  and discount changes, carts emptied, holds recalled, overrides); sales,
+--  voids, refunds and drawer events are read from their own tables.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS departments (
+  id          SERIAL PRIMARY KEY,
+  code        TEXT NOT NULL UNIQUE,
+  name        TEXT NOT NULL,
+  categories  TEXT[] NOT NULL DEFAULT '{}',   -- lower-case product categories in this department
+  is_active   BOOLEAN NOT NULL DEFAULT true,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS user_departments (
+  user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  department_id  INTEGER NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
+  PRIMARY KEY (user_id, department_id)
+);
+CREATE TABLE IF NOT EXISTS station_departments (
+  station_id     INTEGER NOT NULL REFERENCES pos_stations(id) ON DELETE CASCADE,
+  department_id  INTEGER NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
+  PRIMARY KEY (station_id, department_id)
+);
+
+CREATE TABLE IF NOT EXISTS pos_events (
+  id            BIGSERIAL PRIMARY KEY,
+  at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),   -- when the server received it
+  client_at     TIMESTAMPTZ,                          -- when it happened on the till
+  user_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  user_name     TEXT,
+  station_id    INTEGER,
+  terminal      TEXT,
+  ticket        TEXT,                                 -- the till's id for this cart, ties events together
+  kind          TEXT NOT NULL,                        -- item_added | item_removed | qty_changed | price_changed | discount_changed | cart_cleared | hold_recalled | dept_override | dept_blocked
+  product_img   TEXT,
+  sku           TEXT,
+  name          TEXT,
+  qty           NUMERIC(12,3),
+  value_before  NUMERIC(14,2),
+  value_after   NUMERIC(14,2),
+  amount        NUMERIC(14,2),                        -- J$ at stake (line value, removed value, price drop x qty ...)
+  note          TEXT,
+  approved_by   INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pos_events_at ON pos_events (at DESC);
+CREATE INDEX IF NOT EXISTS idx_pos_events_user ON pos_events (user_id, at DESC);
+CREATE INDEX IF NOT EXISTS idx_pos_events_kind ON pos_events (kind, at DESC);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('dept_enforce', 'off'),            -- on: staff with departments can only sell those parts without a manager PIN
+  ('tj_void_alert', '20000'),         -- J$: voids and refunds at or above this are exceptions
+  ('tj_discount_pct_alert', '20'),    -- % off a sale at or above this is an exception
+  ('tj_nosale_per_day', '5'),         -- no-sale drawer opens per person per day above this
+  ('tj_removed_per_day', '15')        -- items taken back off carts per person per day above this
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 8.3: commission v2 (commission.js)
+--  Commission is worked out once per sale line and STORED (commission_entries),
+--  so changing a rate never rewrites what people were already owed. Rules by
+--  rep, category, supplier or part: % of the sale, % of the margin, or a flat
+--  amount per unit, with monthly tiers. Splits between reps, clawback on
+--  returns and voids, optional "only on collected sales", statements that a
+--  manager approves and pays, posted to the ledger (accrual, then payout).
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS commission_rules (
+  id           SERIAL PRIMARY KEY,
+  name         TEXT NOT NULL,
+  scope        TEXT NOT NULL DEFAULT 'all',     -- all | category | supplier | product
+  scope_value  TEXT,                            -- category name / supplier id / product img
+  rep_id       INTEGER REFERENCES mechanics(id) ON DELETE CASCADE,   -- NULL = every rep
+  basis        TEXT NOT NULL DEFAULT 'sale',    -- sale (% of line, ex GCT) | margin (% of line less cost) | flat (J$ per unit)
+  rate         NUMERIC(10,3) NOT NULL DEFAULT 0,
+  tiers        JSONB,                           -- [{"from": 500000, "rate": 4}, ...] month-to-date net sales of the rep
+  priority     INTEGER NOT NULL DEFAULT 0,      -- higher wins when several rules fit
+  starts_on    DATE,
+  ends_on      DATE,
+  is_active    BOOLEAN NOT NULL DEFAULT true,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Two or more reps sharing one sale. No rows = 100% to pos_sales.sales_rep_id.
+CREATE TABLE IF NOT EXISTS sale_reps (
+  sale_id    INTEGER NOT NULL REFERENCES pos_sales(id) ON DELETE CASCADE,
+  rep_id     INTEGER NOT NULL REFERENCES mechanics(id) ON DELETE CASCADE,
+  share_pct  NUMERIC(6,2) NOT NULL CHECK (share_pct > 0 AND share_pct <= 100),
+  set_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  set_at     TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (sale_id, rep_id)
+);
+
+CREATE TABLE IF NOT EXISTS commission_statements (
+  id           SERIAL PRIMARY KEY,
+  number       TEXT UNIQUE,                     -- CS-000012
+  rep_id       INTEGER NOT NULL REFERENCES mechanics(id),
+  period_to    DATE NOT NULL,                   -- everything earned up to this date
+  total        NUMERIC(14,2) NOT NULL DEFAULT 0,
+  status       TEXT NOT NULL DEFAULT 'draft',   -- draft | approved | paid | cancelled
+  note         TEXT,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  approved_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  approved_at  TIMESTAMPTZ,
+  paid_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  paid_at      TIMESTAMPTZ,
+  payout_id    INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS commission_entries (
+  id            BIGSERIAL PRIMARY KEY,
+  rep_id        INTEGER NOT NULL REFERENCES mechanics(id),
+  sale_id       INTEGER REFERENCES pos_sales(id) ON DELETE SET NULL,
+  sale_item_id  INTEGER,
+  return_id     INTEGER,
+  kind          TEXT NOT NULL,                  -- earned | clawback_return | clawback_void | adjust
+  basis         TEXT,                           -- sale | margin | flat
+  basis_amount  NUMERIC(14,2),
+  rate          NUMERIC(10,3),
+  share_pct     NUMERIC(6,2) NOT NULL DEFAULT 100,
+  amount        NUMERIC(14,2) NOT NULL,
+  rule_id       INTEGER,
+  rule_name     TEXT,
+  status        TEXT NOT NULL DEFAULT 'earned', -- pending (sale not paid yet) | earned | void | on_statement | approved | paid
+  statement_id  INTEGER REFERENCES commission_statements(id),
+  earned_at     TIMESTAMPTZ NOT NULL,           -- the sale / return time
+  note          TEXT,
+  created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_commission_earned ON commission_entries (sale_item_id, rep_id) WHERE kind = 'earned';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_commission_ret ON commission_entries (return_id, sale_item_id, rep_id) WHERE kind = 'clawback_return';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_commission_void ON commission_entries (sale_item_id, rep_id) WHERE kind = 'clawback_void';
+CREATE INDEX IF NOT EXISTS idx_commission_entries_rep ON commission_entries (rep_id, status, earned_at);
+CREATE INDEX IF NOT EXISTS idx_commission_entries_sale ON commission_entries (sale_id);
+
+ALTER TABLE commission_payouts ADD COLUMN IF NOT EXISTS statement_id INTEGER REFERENCES commission_statements(id);
+
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('2200', 'Commissions Payable', 'liability', 'Commissions Payable', 'OCLIAB', 'commissions_payable')
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('comm_paid_on', 'sale'),             -- sale: earned when sold | collected: only once the sale is fully paid
+  ('comm_unpaid_days', '90')            -- account sales still unpaid after this many days earn nothing
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 8.4: freelance reps, send-a-link, referrals (reps.js)
+--  A freelance rep is a staff login with the 'rep' role (no admin panel) and a
+--  rep record (mechanics). They join through a one-time invite link where they
+--  set a password and 2-step sign-in, which is then always required. In their
+--  portal they see prices and stock (never cost), keep their own customers,
+--  make quotes and orders that go to the shop's cashier queue, send tracked
+--  links, and see their sales and commission. A referral code ties new
+--  customers who arrive through their link to them.
+-- =============================================================================
+INSERT INTO roles (code, label, rank, can_manage, hidden_tabs, is_system) VALUES
+  ('rep', 'Freelance rep', 80, FALSE, '[]'::jsonb, TRUE)
+ON CONFLICT (code) DO NOTHING;
+
+ALTER TABLE mechanics ADD COLUMN IF NOT EXISTS is_freelance  BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE mechanics ADD COLUMN IF NOT EXISTS referral_code TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_mechanics_referral ON mechanics (upper(referral_code)) WHERE referral_code IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS rep_invites (
+  id           SERIAL PRIMARY KEY,
+  token_hash   TEXT NOT NULL UNIQUE,
+  mechanic_id  INTEGER NOT NULL REFERENCES mechanics(id) ON DELETE CASCADE,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at   TIMESTAMPTZ NOT NULL,
+  used_at      TIMESTAMPTZ,
+  revoked_at   TIMESTAMPTZ,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS share_links (
+  id              SERIAL PRIMARY KEY,
+  token           TEXT NOT NULL UNIQUE,          -- in the URL: /l/<token>
+  kind            TEXT NOT NULL,                 -- product | quote | search | page | video
+  target          TEXT NOT NULL,                 -- part img / quote id / search words / site path / video URL
+  title           TEXT,
+  message         TEXT,
+  rep_id          INTEGER REFERENCES mechanics(id) ON DELETE SET NULL,
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  customer_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  sent_to         TEXT,                          -- phone or email it went to
+  channel         TEXT,                          -- sms | whatsapp | email | copy
+  expires_at      TIMESTAMPTZ NOT NULL,
+  opens           INTEGER NOT NULL DEFAULT 0,
+  first_opened_at TIMESTAMPTZ,
+  last_opened_at  TIMESTAMPTZ,
+  converted_at    TIMESTAMPTZ,
+  conversion_ref  TEXT,                          -- order / sale it turned into
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_share_links_rep ON share_links (rep_id, created_at DESC);
+
+-- Orders from reps (or accepted quotes) wait longer than a counter order.
+ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS source     TEXT;   -- counter | rep | link
+
+INSERT INTO notify_templates (event, channel, enabled, subject, body) VALUES
+  ('share_link', 'sms',      true, NULL, '{shop}: {message} {url}'),
+  ('share_link', 'email',    true, '{title}', E'Hi {name},\n\n{message}\n\n{url}\n\n{shop} · {phone}'),
+  ('share_link', 'whatsapp', true, NULL, '{message} {url}')
+ON CONFLICT (event, channel) DO NOTHING;
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('public_base_url', ''),      -- the address customers reach this system on (for links); blank = this server
+  ('link_days', '14'),          -- links expire after this many days
+  ('rep_order_days', '7')       -- rep / link orders wait this many days for payment
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 8.5: careers and applicant tracking (careers.js)
+--  Public job posts with an application form (CV, consent); applications move
+--  New -> Screen -> Interview -> Offer -> Hired / Rejected; a hire becomes a
+--  staff login. CVs are stored outside the website folder and, with the
+--  applicant's details, removed after the retention period (Data Protection
+--  Act): only the job, dates and stage are kept for hiring statistics.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS job_posts (
+  id            SERIAL PRIMARY KEY,
+  title         TEXT NOT NULL,
+  department    TEXT,
+  location      TEXT,
+  kind          TEXT NOT NULL DEFAULT 'full_time',  -- full_time | part_time | contract | freelance_rep
+  pay           TEXT,
+  summary       TEXT,
+  description   TEXT,
+  requirements  TEXT,
+  is_open       BOOLEAN NOT NULL DEFAULT true,
+  closes_on     DATE,
+  created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS job_applications (
+  id              SERIAL PRIMARY KEY,
+  job_id          INTEGER REFERENCES job_posts(id) ON DELETE SET NULL,
+  name            TEXT,
+  email           TEXT,
+  phone           TEXT,
+  parish          TEXT,
+  cover           TEXT,
+  cv_file         TEXT,                   -- file name in data/careers-cvs (never served directly)
+  cv_name         TEXT,                   -- the applicant's original file name
+  consent_at      TIMESTAMPTZ NOT NULL,
+  consent_text    TEXT NOT NULL,
+  stage           TEXT NOT NULL DEFAULT 'new',   -- new | screen | interview | offer | hired | rejected
+  rating          SMALLINT,
+  interview_at    TIMESTAMPTZ,
+  hired_user_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  ip              TEXT,
+  retain_until    DATE NOT NULL,
+  anonymised_at   TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_job_applications_job ON job_applications (job_id, stage);
+
+CREATE TABLE IF NOT EXISTS application_notes (
+  id              SERIAL PRIMARY KEY,
+  application_id  INTEGER NOT NULL REFERENCES job_applications(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL DEFAULT 'note',  -- note | stage | cv_viewed
+  note            TEXT,
+  by_user         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  at              TIMESTAMPTZ DEFAULT NOW()
+);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('careers_retention_days', '365')   -- applicants not hired: CV and details removed after this
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 8b: time clock and attendance (timeclock.js)
+--  Separate from time_entries / time_punches, which time workshop jobs.
+--  Staff clock in with a PIN, password, badge or fingerprint / face (passkey:
+--  the fingerprint never leaves the device, only a public key is kept here).
+--  Being clocked in on site, inside the shift or approved overtime, is what
+--  lets someone take money. Overtime and extensions are approved by the admin
+--  and the department manager (screen or a signed email link). Timesheets with
+--  per-person overtime rules, weekly approval and a payroll export.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS staff_clock (
+  user_id            INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  methods            TEXT[] NOT NULL DEFAULT ARRAY['pin','password','badge','biometric'],
+  require_biometric  BOOLEAN NOT NULL DEFAULT false,   -- clock-in only with fingerprint / face
+  remote_allowed     BOOLEAN NOT NULL DEFAULT false,   -- may clock in from outside the shop (no money)
+  hourly_rate        NUMERIC(10,2),                    -- J$
+  ot_daily_hours     NUMERIC(5,2) NOT NULL DEFAULT 8,  -- overtime after this many hours in a day
+  ot_weekly_hours    NUMERIC(5,2) NOT NULL DEFAULT 40, -- ... or in a week
+  ot_rate            NUMERIC(4,2) NOT NULL DEFAULT 1.5,
+  approver_user_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,  -- besides the admin
+  badge_hash         TEXT,                             -- sha256 of the badge code (BADGE:...)
+  badge_issued_at    TIMESTAMPTZ,
+  updated_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at         TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_staff_clock_badge ON staff_clock (badge_hash) WHERE badge_hash IS NOT NULL;
+
+ALTER TABLE departments ADD COLUMN IF NOT EXISTS manager_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS staff_shifts (           -- the weekly pattern
+  id             SERIAL PRIMARY KEY,
+  user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  weekday        SMALLINT NOT NULL CHECK (weekday BETWEEN 0 AND 6),   -- 0 = Sunday
+  start_time     TIME NOT NULL,
+  end_time       TIME NOT NULL,
+  break_minutes  INTEGER NOT NULL DEFAULT 60,       -- unpaid
+  UNIQUE (user_id, weekday)
+);
+CREATE TABLE IF NOT EXISTS staff_leave (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  from_date   DATE NOT NULL,
+  to_date     DATE NOT NULL,
+  kind        TEXT NOT NULL DEFAULT 'vacation',     -- vacation | sick | unpaid | other
+  note        TEXT,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS public_holidays (
+  day   DATE PRIMARY KEY,
+  name  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS attendance (
+  id              BIGSERIAL PRIMARY KEY,
+  user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  work_day        DATE NOT NULL,                    -- Jamaica date of the clock-in
+  clock_in_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  clock_out_at    TIMESTAMPTZ,
+  mode            TEXT NOT NULL DEFAULT 'onsite',   -- onsite | remote
+  method_in       TEXT,                             -- pin | password | badge | biometric | manager
+  method_out      TEXT,
+  where_in        TEXT,                             -- station / terminal / address
+  photo_in        TEXT,
+  photo_out       TEXT,
+  shift_start     TIMESTAMPTZ,                      -- the schedule at clock-in, kept as it was
+  shift_end       TIMESTAMPTZ,
+  outside_shift   BOOLEAN NOT NULL DEFAULT false,
+  ot_reason       TEXT,
+  ot_status       TEXT NOT NULL DEFAULT 'none',     -- none | pending | approved | rejected
+  ext_until       TIMESTAMPTZ,                      -- approved extension: may work until
+  auto_closed     BOOLEAN NOT NULL DEFAULT false,
+  closed_note     TEXT,
+  edited          BOOLEAN NOT NULL DEFAULT false,   -- changed by an approved correction
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_attendance_open ON attendance (user_id) WHERE clock_out_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_attendance_day ON attendance (work_day, user_id);
+
+CREATE TABLE IF NOT EXISTS attendance_breaks (
+  id             BIGSERIAL PRIMARY KEY,
+  attendance_id  BIGINT NOT NULL REFERENCES attendance(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL DEFAULT 'break',     -- break | lunch
+  start_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  end_at         TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS clock_requests (
+  id             SERIAL PRIMARY KEY,
+  user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  attendance_id  BIGINT REFERENCES attendance(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL,                     -- extension | overtime | correction
+  minutes        INTEGER,                           -- extension length
+  reason         TEXT NOT NULL,
+  wanted         JSONB,                             -- correction: {clock_in_at, clock_out_at, day}
+  original       JSONB,                             -- correction: what it was (kept for the audit)
+  status         TEXT NOT NULL DEFAULT 'pending',   -- pending | approved | rejected | expired
+  token_hash     TEXT,                              -- the email approve / reject link (single use)
+  expires_at     TIMESTAMPTZ,
+  decided_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  decided_at     TIMESTAMPTZ,
+  decided_via    TEXT,                              -- screen | email
+  decision_note  TEXT,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_clock_requests_status ON clock_requests (status, created_at);
+
+CREATE TABLE IF NOT EXISTS passkeys (
+  id             SERIAL PRIMARY KEY,
+  user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  credential_id  TEXT NOT NULL UNIQUE,              -- base64url
+  public_key     JSONB NOT NULL,                    -- JWK
+  sign_count     BIGINT NOT NULL DEFAULT 0,
+  label          TEXT,
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  last_used_at   TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS timesheet_weeks (
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  week_start   DATE NOT NULL,                       -- Monday
+  totals       JSONB NOT NULL,                      -- frozen at approval
+  approved_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  approved_at  TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (user_id, week_start)
+);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('clock_enforce', 'off'),            -- on: money is taken only by staff clocked in on site, in their shift or approved overtime
+  ('clock_exempt_roles', 'owner'),     -- roles the rule never applies to
+  ('clock_early_minutes', '15'),       -- clocking in this early is not overtime
+  ('clock_late_minutes', '5'),         -- later than this counts as late
+  ('clock_grace_minutes', '15'),       -- an extension request keeps them working this long while waiting
+  ('clock_photo', 'off'),              -- take a photo at each punch
+  ('clock_break_paid_minutes', '15')   -- breaks up to this long are paid; lunch never is
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 8b (cont.) -- one approve / reject link per approver
+--
+--  Each approver gets their own single-use link, so an emailed decision is
+--  logged against the person who made it. Deciding (by any link or on screen)
+--  removes every link for that request.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS clock_request_links (
+  token_hash  TEXT PRIMARY KEY,
+  request_id  INTEGER NOT NULL REFERENCES clock_requests(id) ON DELETE CASCADE,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_clock_request_links_req ON clock_request_links (request_id);
+
+-- =============================================================================
+--  Phase 9 -- inventory to marketing (stock-to-cash)
+--
+--  Stock classes (overstock, aged, dead, damaged / open box, returned,
+--  discontinued / superseded) are worked out live from sales history; these
+--  tables hold only what people decide about them:
+--    * the clearance price ladder on the product (the regular price is kept
+--      so ending clearance puts it back);
+--    * discontinued / superseded flags (reorder suggestions skip them);
+--    * open-box and damaged copies of a part (variant_of), so they sell at
+--      their own price through the normal till and website;
+--    * dispositions: units moved to open box / damaged, written off or claimed
+--      from the supplier -- each with the stock ledger reason the GL posts;
+--    * return grading (A back to stock, B open box, C write-off or claim);
+--    * liquidation lots, the marketing worklist and campaign recipients.
+-- =============================================================================
+ALTER TABLE products ADD COLUMN IF NOT EXISTS clearance_step       SMALLINT NOT NULL DEFAULT 0;   -- 0 = not on clearance
+ALTER TABLE products ADD COLUMN IF NOT EXISTS clearance_pct        NUMERIC(5,2);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS clearance_base_price NUMERIC(10,2);                 -- the regular price, restored at the end
+ALTER TABLE products ADD COLUMN IF NOT EXISTS clearance_since      TIMESTAMPTZ;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS clearance_stepped_at TIMESTAMPTZ;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS discontinued         BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS superseded_by        TEXT;                          -- img of the newer part
+ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_class_override TEXT;                          -- 'dead' (model years no longer common) | 'keep'
+ALTER TABLE products ADD COLUMN IF NOT EXISTS variant_of           TEXT;                          -- img of the part this is an open-box / damaged copy of
+ALTER TABLE products ADD COLUMN IF NOT EXISTS variant_kind         TEXT;                          -- open_box | damaged
+ALTER TABLE products ADD COLUMN IF NOT EXISTS comm_boost_prev      JSONB;                         -- commission before a sell-through boost
+CREATE INDEX IF NOT EXISTS idx_products_clearance ON products (clearance_step) WHERE clearance_step > 0;
+CREATE INDEX IF NOT EXISTS idx_products_variant   ON products (variant_of) WHERE variant_of IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS stock_dispositions (
+  id            SERIAL PRIMARY KEY,
+  product_img   TEXT NOT NULL,
+  qty           INTEGER NOT NULL CHECK (qty > 0),
+  kind          TEXT NOT NULL,          -- open_box | damaged | writeoff | vendor_claim
+  source        TEXT NOT NULL,          -- return | receiving | count | manual
+  source_ref    TEXT,                   -- e.g. the return item id
+  to_img        TEXT,                   -- open_box / damaged: the copy the units went to
+  unit_cost     NUMERIC(12,2),
+  supplier_id   INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+  claim_status  TEXT,                   -- vendor_claim: open | credited | rejected
+  claim_amount  NUMERIC(12,2),
+  note          TEXT,
+  created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  resolved_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  resolved_at   TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_dispositions_claims ON stock_dispositions (claim_status) WHERE kind = 'vendor_claim';
+
+ALTER TABLE pos_sale_return_items ADD COLUMN IF NOT EXISTS grade          CHAR(1);   -- A | B | C (NULL = not inspected)
+ALTER TABLE pos_sale_return_items ADD COLUMN IF NOT EXISTS graded_by      INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE pos_sale_return_items ADD COLUMN IF NOT EXISTS graded_at      TIMESTAMPTZ;
+ALTER TABLE pos_sale_return_items ADD COLUMN IF NOT EXISTS disposition_id INTEGER REFERENCES stock_dispositions(id) ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS clearance_lots (
+  id           SERIAL PRIMARY KEY,
+  name         TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'open',   -- open | at_till | sold | cancelled
+  buyer_name   TEXT,
+  buyer_phone  TEXT,
+  note         TEXT,
+  pos_order_id INTEGER,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  closed_at    TIMESTAMPTZ
+);
+CREATE TABLE IF NOT EXISTS clearance_lot_items (
+  lot_id      INTEGER NOT NULL REFERENCES clearance_lots(id) ON DELETE CASCADE,
+  product_img TEXT NOT NULL,
+  qty         INTEGER NOT NULL CHECK (qty > 0),
+  unit_price  NUMERIC(12,2) NOT NULL CHECK (unit_price >= 0),
+  PRIMARY KEY (lot_id, product_img)
+);
+
+CREATE TABLE IF NOT EXISTS marketing_tasks (
+  id          SERIAL PRIMARY KEY,
+  product_img TEXT,
+  kind        TEXT NOT NULL,     -- step_price | list_marketplace | return_vendor | photograph | bundle | boost_commission | inspect_return | chase_claim | other
+  title       TEXT NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'open',   -- open | done | skipped
+  assigned_to INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  due_on      DATE,
+  note        TEXT,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  done_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  done_at     TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_marketing_tasks_open ON marketing_tasks (product_img, kind) WHERE status = 'open';
+
+-- Campaigns: what was offered, to whom, and the result.
+ALTER TABLE marketing_campaigns ADD COLUMN IF NOT EXISTS coupon_code TEXT;
+ALTER TABLE marketing_campaigns ADD COLUMN IF NOT EXISTS audience    JSONB;
+ALTER TABLE marketing_campaigns ADD COLUMN IF NOT EXISTS items       JSONB;   -- product imgs featured
+ALTER TABLE marketing_campaigns ADD COLUMN IF NOT EXISTS views       INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS marketing_campaign_recipients (
+  campaign_id INTEGER NOT NULL REFERENCES marketing_campaigns(id) ON DELETE CASCADE,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  channel     TEXT NOT NULL,
+  status      TEXT NOT NULL,     -- sent | failed | skipped | share (WhatsApp: sent by hand)
+  detail      TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (campaign_id, user_id, channel)
+);
+-- When and how a customer's marketing choice was last changed (consent record).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS marketing_changed_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS marketing_changed_by TEXT;    -- 'unsubscribe link' | staff name | 'customer'
+
+-- Coupons that only discount clearance items.
+ALTER TABLE coupons ADD COLUMN IF NOT EXISTS scope TEXT;                 -- NULL = whole order | 'clearance'
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('mkt_overstock_months', '6'), ('mkt_slow_days', '180'), ('mkt_dead_days', '365'),
+  ('mkt_ladder', '10,20,30'), ('mkt_ladder_days', '30'),
+  ('mkt_open_box_pct', '25'), ('mkt_damaged_pct', '40'), ('mkt_boost_pct', '5')
+ON CONFLICT (key) DO NOTHING;
+
+-- GL: where the new stock ledger reasons post.
+INSERT INTO gl_map (kind, key, account_id)
+SELECT m.kind, m.key, a.id FROM (VALUES
+  ('stock_reason', 'regrade', 'inv_adjust'), ('stock_reason', 'writeoff', 'inv_adjust'), ('stock_reason', 'vendor_claim', 'supplier_claims')
+) m(kind, key, sk) JOIN gl_accounts a ON a.system_key = m.sk
+ON CONFLICT (kind, key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 10a -- AI counter sales agent (website chat and counter kiosk)
+--
+--  The agent runs on the Claude API with tools that work on this database:
+--  find parts, explain a part, save the customer (with consent), put an order in
+--  the cashier queue at catalogue prices, record a lost sale, call a person.
+--  Every conversation is kept (append-only, exactly as sent to the model) and
+--  every action the agent takes is written to the till journal (pos_events).
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS ai_conversations (
+  id            SERIAL PRIMARY KEY,
+  token_hash    TEXT NOT NULL UNIQUE,           -- the visitor's chat key (only its hash is kept)
+  channel       TEXT NOT NULL,                  -- web | kiosk | phone | staff
+  status        TEXT NOT NULL DEFAULT 'open',   -- open | handoff | closed
+  customer_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  customer_name TEXT,
+  customer_phone TEXT,
+  vehicle       TEXT,
+  order_ids     INTEGER[] NOT NULL DEFAULT '{}',
+  handoff_reason TEXT,
+  handoff_at    TIMESTAMPTZ,
+  claimed_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  claimed_at    TIMESTAMPTZ,
+  summary       TEXT,
+  turns         INTEGER NOT NULL DEFAULT 0,
+  input_tokens  BIGINT NOT NULL DEFAULT 0,
+  output_tokens BIGINT NOT NULL DEFAULT 0,
+  cache_read_tokens BIGINT NOT NULL DEFAULT 0,
+  ip_hash       TEXT,
+  station_id    INTEGER,
+  started_at    TIMESTAMPTZ DEFAULT NOW(),
+  last_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ai_conv_status ON ai_conversations (status, last_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_conv_customer ON ai_conversations (customer_id);
+
+-- Messages exactly as sent to / received from the model (content blocks), so a
+-- conversation is replayed unchanged on the next turn.
+CREATE TABLE IF NOT EXISTS ai_messages (
+  id          BIGSERIAL PRIMARY KEY,
+  conv_id     INTEGER NOT NULL REFERENCES ai_conversations(id) ON DELETE CASCADE,
+  role        TEXT NOT NULL,                   -- user | assistant
+  content     JSONB NOT NULL,
+  shown_text  TEXT,                            -- what the person saw / typed (card numbers removed)
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ai_messages_conv ON ai_messages (conv_id, id);
+
+-- Daily spend guard (tokens), so a busy or abused chat cannot run up a bill.
+CREATE TABLE IF NOT EXISTS ai_usage_days (
+  day           DATE PRIMARY KEY,
+  requests      INTEGER NOT NULL DEFAULT 0,
+  input_tokens  BIGINT NOT NULL DEFAULT 0,
+  output_tokens BIGINT NOT NULL DEFAULT 0,
+  cache_read_tokens BIGINT NOT NULL DEFAULT 0
+);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('ai_enabled', 'off'), ('ai_channels', 'web,kiosk'), ('ai_model', 'claude-opus-5-5'), ('ai_effort', 'medium'),
+  ('ai_handoff_value', '150000'),        -- J$: orders above this go to a person
+  ('ai_max_order_lines', '15'),
+  ('ai_daily_token_cap', '3000000'),     -- input + output tokens per day across all chats
+  ('ai_max_turns', '40')                 -- customer messages per conversation
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 10b -- AI phone agent (Twilio Voice) and WhatsApp / text replies
+--
+--  Calls and messages use the same assistant and tools as the website chat.
+--  caller_id is the number the call or message came from (caller ID), kept
+--  apart from customer_phone, which is only set when the customer agrees to
+--  be saved. Each call gets a transcript (ai_messages) and a summary.
+-- =============================================================================
+ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS caller_id TEXT;
+ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS call_sid  TEXT;
+ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS ended_at  TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_ai_conv_caller ON ai_conversations (caller_id, last_at DESC) WHERE caller_id IS NOT NULL;
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('ai_phone_handoff_number', '')       -- where "talk to a person" calls are put through (E.164, e.g. +18765551234)
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Phase 10c -- staff assistant and training
+--
+--  Training modules (a lesson, a quiz, a pass mark, how long a pass is valid),
+--  their questions, quiz attempts (graded on the server; the right answers
+--  never reach the browser) and practice orders on a sandbox till that prices
+--  through the real till code without saving anything.
+--  The lessons are also what the staff assistant answers "how do I..." from.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS training_modules (
+  id           SERIAL PRIMARY KEY,
+  key          TEXT NOT NULL UNIQUE,
+  title        TEXT NOT NULL,
+  summary      TEXT,
+  body         TEXT NOT NULL DEFAULT '',          -- the lesson (plain text, short paragraphs)
+  sort         INTEGER NOT NULL DEFAULT 100,
+  pass_pct     INTEGER NOT NULL DEFAULT 80,
+  valid_months INTEGER NOT NULL DEFAULT 12,       -- a pass must be renewed after this
+  quiz         BOOLEAN NOT NULL DEFAULT true,     -- false: reference only (e.g. management SOPs)
+  practice     BOOLEAN NOT NULL DEFAULT false,    -- has practice orders on the sandbox till
+  roles        TEXT[],                            -- who must take it (NULL = everyone)
+  active       BOOLEAN NOT NULL DEFAULT true,
+  updated_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS training_questions (
+  id         SERIAL PRIMARY KEY,
+  module_id  INTEGER NOT NULL REFERENCES training_modules(id) ON DELETE CASCADE,
+  question   TEXT NOT NULL,
+  choices    JSONB NOT NULL,                      -- ["...", "...", ...]
+  answer     INTEGER NOT NULL,                    -- index into choices
+  explain    TEXT,
+  sort       INTEGER NOT NULL DEFAULT 100,
+  active     BOOLEAN NOT NULL DEFAULT true
+);
+CREATE INDEX IF NOT EXISTS idx_training_q_module ON training_questions (module_id);
+
+CREATE TABLE IF NOT EXISTS training_attempts (
+  id           BIGSERIAL PRIMARY KEY,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  module_id    INTEGER NOT NULL REFERENCES training_modules(id) ON DELETE CASCADE,
+  key_map      JSONB NOT NULL,                    -- question id -> right choice as shown (server only)
+  score_pct    NUMERIC(5,1),
+  passed       BOOLEAN,
+  answers      JSONB,
+  started_at   TIMESTAMPTZ DEFAULT NOW(),
+  finished_at  TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_training_attempts_user ON training_attempts (user_id, module_id, finished_at DESC);
+
+CREATE TABLE IF NOT EXISTS training_practice (
+  id          BIGSERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  task        JSONB NOT NULL,                     -- what the "customer" wants and how they pay
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  done_at     TIMESTAMPTZ,
+  passed      BOOLEAN,
+  result      JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_training_practice_user ON training_practice (user_id, created_at DESC);
+
+-- =============================================================================
+--  Receivables, payables and banking (QuickBooks-style)
+--
+--  Receivables: a payment is applied to the invoices it pays (ar_applications);
+--  what is not applied stays as a credit on the account. Payments can be
+--  voided: every payment lives in account_payments_all, and account_payments
+--  becomes a view of the ones not voided, so every existing balance, statement
+--  and report leaves voided payments out without being rewritten.
+--  NOTE: the view is SELECT * -- after adding a column to account_payments_all,
+--  re-create the view (this block does it on every boot).
+--
+--  Payables: bills are confirmed goods receipts, PO invoices, and expense bills
+--  entered here (ap_bills, coded to accounts, with GCT); vendor credits are
+--  ap_bills of kind 'credit'. One payment can pay several bills and use credits
+--  (ap_applications).
+--
+--  Banking: cheques / spend money, receive money, transfers and deposits of
+--  undeposited funds (bank_txns); reconciliations tick off ledger lines on a
+--  bank account (bank_cleared); imported statement lines are matched to the
+--  ledger or added as transactions (bank_feed_lines, bank_rules).
+--  Everything posts to the general ledger (gl.js); voids post a reversal.
+-- =============================================================================
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'account_payments' AND c.relkind = 'r' AND n.nspname = current_schema()) THEN
+    ALTER TABLE account_payments RENAME TO account_payments_all;
+  END IF;
+END $$;
+ALTER TABLE account_payments_all ADD COLUMN IF NOT EXISTS paid_on            DATE;
+ALTER TABLE account_payments_all ADD COLUMN IF NOT EXISTS deposit_account_id INTEGER REFERENCES gl_accounts(id);
+ALTER TABLE account_payments_all ADD COLUMN IF NOT EXISTS voided_at          TIMESTAMPTZ;
+ALTER TABLE account_payments_all ADD COLUMN IF NOT EXISTS voided_by          INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE account_payments_all ADD COLUMN IF NOT EXISTS void_reason        TEXT;
+CREATE OR REPLACE VIEW account_payments AS SELECT * FROM account_payments_all WHERE voided_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS ar_applications (
+  id          SERIAL PRIMARY KEY,
+  payment_id  INTEGER NOT NULL REFERENCES account_payments_all(id) ON DELETE CASCADE,
+  sale_id     INTEGER NOT NULL REFERENCES pos_sales(id) ON DELETE CASCADE,
+  amount      NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+  applied_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  applied_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ar_app_payment ON ar_applications (payment_id);
+CREATE INDEX IF NOT EXISTS idx_ar_app_sale    ON ar_applications (sale_id);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS credit_hold        BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS credit_hold_reason TEXT;
+
+CREATE TABLE IF NOT EXISTS ar_notes (
+  id             SERIAL PRIMARY KEY,
+  customer_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL DEFAULT 'note',      -- note | call | email | promise | reminder | hold
+  note           TEXT NOT NULL,
+  promise_date   DATE,
+  promise_amount NUMERIC(14,2),
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ar_notes_customer ON ar_notes (customer_id, created_at DESC);
+
+-- ----------------------------------------------------------------- payables --
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS payment_terms_days INTEGER;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS default_account_id INTEGER REFERENCES gl_accounts(id);
+
+CREATE TABLE IF NOT EXISTS ap_bills (
+  id           SERIAL PRIMARY KEY,
+  kind         TEXT NOT NULL DEFAULT 'bill',       -- bill | credit
+  supplier_id  INTEGER NOT NULL REFERENCES suppliers(id),
+  number       TEXT,                               -- the supplier's invoice / credit note number
+  bill_date    DATE NOT NULL,
+  due_date     DATE,
+  memo         TEXT,
+  gct_amount   NUMERIC(14,2) NOT NULL DEFAULT 0,    -- GCT on the bill (claimable input tax)
+  total        NUMERIC(14,2) NOT NULL CHECK (total > 0),
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  voided_at    TIMESTAMPTZ,
+  voided_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  void_reason  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ap_bills_supplier ON ap_bills (supplier_id, bill_date DESC);
+CREATE TABLE IF NOT EXISTS ap_bill_lines (
+  id          SERIAL PRIMARY KEY,
+  bill_id     INTEGER NOT NULL REFERENCES ap_bills(id) ON DELETE CASCADE,
+  account_id  INTEGER NOT NULL REFERENCES gl_accounts(id),
+  description TEXT,
+  amount      NUMERIC(14,2) NOT NULL CHECK (amount > 0)
+);
+
+CREATE TABLE IF NOT EXISTS ap_payments (
+  id             SERIAL PRIMARY KEY,
+  supplier_id    INTEGER NOT NULL REFERENCES suppliers(id),
+  pay_date       DATE NOT NULL,
+  method         TEXT NOT NULL,                    -- cheque | transfer | cash | card
+  account_id     INTEGER NOT NULL REFERENCES gl_accounts(id),   -- paid from
+  cheque_number  TEXT,
+  reference      TEXT,
+  amount         NUMERIC(14,2) NOT NULL CHECK (amount >= 0),     -- 0 when credits cover the bills
+  memo           TEXT,
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  voided_at      TIMESTAMPTZ,
+  voided_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  void_reason    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ap_payments_supplier ON ap_payments (supplier_id, pay_date DESC);
+CREATE TABLE IF NOT EXISTS ap_applications (
+  id          SERIAL PRIMARY KEY,
+  payment_id  INTEGER NOT NULL REFERENCES ap_payments(id) ON DELETE CASCADE,
+  bill_kind   TEXT NOT NULL,                       -- receipt | po | bill | credit
+  bill_id     INTEGER NOT NULL,
+  amount      NUMERIC(14,2) NOT NULL CHECK (amount > 0)
+);
+CREATE INDEX IF NOT EXISTS idx_ap_app_bill ON ap_applications (bill_kind, bill_id);
+
+-- ------------------------------------------------------------------ banking --
+CREATE TABLE IF NOT EXISTS bank_txns (
+  id             SERIAL PRIMARY KEY,
+  kind           TEXT NOT NULL,                    -- expense | deposit | transfer
+  account_id     INTEGER NOT NULL REFERENCES gl_accounts(id),   -- the bank / cash account
+  txn_date       DATE NOT NULL,
+  payee          TEXT,
+  supplier_id    INTEGER REFERENCES suppliers(id),
+  cheque_number  TEXT,
+  reference      TEXT,
+  memo           TEXT,
+  amount         NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  voided_at      TIMESTAMPTZ,
+  voided_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  void_reason    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_bank_txns_account ON bank_txns (account_id, txn_date DESC);
+CREATE TABLE IF NOT EXISTS bank_txn_lines (
+  id          SERIAL PRIMARY KEY,
+  txn_id      INTEGER NOT NULL REFERENCES bank_txns(id) ON DELETE CASCADE,
+  account_id  INTEGER NOT NULL REFERENCES gl_accounts(id),
+  amount      NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+  memo        TEXT,
+  gl_line_id  BIGINT REFERENCES gl_lines(id)          -- a deposit: the undeposited item it banks
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_bank_txn_lines_glline ON bank_txn_lines (gl_line_id) WHERE gl_line_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS bank_recons (
+  id                SERIAL PRIMARY KEY,
+  account_id        INTEGER NOT NULL REFERENCES gl_accounts(id),
+  statement_date    DATE NOT NULL,
+  statement_balance NUMERIC(14,2) NOT NULL,
+  opening_balance   NUMERIC(14,2) NOT NULL,
+  status            TEXT NOT NULL DEFAULT 'open',   -- open | done
+  created_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at        TIMESTAMPTZ DEFAULT NOW(),
+  finished_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  finished_at       TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_bank_recons_open ON bank_recons (account_id) WHERE status = 'open';
+CREATE TABLE IF NOT EXISTS bank_cleared (
+  gl_line_id  BIGINT PRIMARY KEY REFERENCES gl_lines(id),
+  recon_id    INTEGER NOT NULL REFERENCES bank_recons(id) ON DELETE CASCADE,
+  cleared_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  cleared_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS bank_feed_lines (
+  id           SERIAL PRIMARY KEY,
+  account_id   INTEGER NOT NULL REFERENCES gl_accounts(id),
+  import_ref   TEXT,
+  txn_date     DATE NOT NULL,
+  description  TEXT NOT NULL,
+  amount       NUMERIC(14,2) NOT NULL,             -- + money in, - money out
+  line_hash    TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'new',        -- new | matched | added | ignored
+  gl_line_id   BIGINT REFERENCES gl_lines(id),
+  bank_txn_id  INTEGER REFERENCES bank_txns(id),
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (account_id, line_hash)
+);
+CREATE TABLE IF NOT EXISTS bank_rules (
+  id             SERIAL PRIMARY KEY,
+  contains       TEXT NOT NULL,                    -- text in the statement description
+  gl_account_id  INTEGER NOT NULL REFERENCES gl_accounts(id),
+  payee          TEXT,
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Accounts the new screens need, and the usual expense accounts for a shop in Jamaica.
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('1160', 'GCT Recoverable (Input Tax)', 'asset',   'GCT Recoverable',             'OCASSET', 'gct_input'),
+  ('6950', 'Bank Charges and Interest',   'expense', 'Bank Service Charges',        'EXP',     'bank_charges'),
+  ('6960', 'Reconciliation Discrepancies','expense', 'Reconciliation Discrepancies','EXP',     'recon_diff')
+ON CONFLICT (code) DO NOTHING;
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type) VALUES
+  ('6400', 'Rent',                                  'expense', 'Rent',                        'EXP'),
+  ('6410', 'Electricity',                           'expense', 'Electricity',                 'EXP'),
+  ('6420', 'Water',                                 'expense', 'Water',                       'EXP'),
+  ('6430', 'Telephone and Internet',                'expense', 'Telephone and Internet',      'EXP'),
+  ('6500', 'Salaries and Wages',                    'expense', 'Salaries and Wages',          'EXP'),
+  ('6510', 'Statutory Contributions (NIS, NHT, Education Tax, HEART)', 'expense', 'Statutory Contributions', 'EXP'),
+  ('6600', 'Repairs and Maintenance',               'expense', 'Repairs and Maintenance',     'EXP'),
+  ('6700', 'Insurance',                             'expense', 'Insurance',                   'EXP'),
+  ('6800', 'Professional Fees',                     'expense', 'Professional Fees',           'EXP'),
+  ('6850', 'Fuel and Motor Vehicle',                'expense', 'Fuel and Motor Vehicle',      'EXP'),
+  ('6870', 'Advertising and Promotion',             'expense', 'Advertising and Promotion',   'EXP'),
+  ('6880', 'Office Supplies and Stationery',        'expense', 'Office Supplies',             'EXP'),
+  ('6890', 'Security',                              'expense', 'Security',                    'EXP')
+ON CONFLICT (code) DO NOTHING;
+
+-- =============================================================================
+--  Payroll (payroll.js) -- an optional module, OFF until switched on
+--
+--  Jamaican payroll: PAYE (income tax), NIS, NHT, Education Tax and HEART/NSTA,
+--  approved pension, recurring earnings and deductions (loans, advances,
+--  union dues, insurance), pay runs (weekly / fortnightly / monthly) built from
+--  salaries or the time clock's approved timesheets, commission statements,
+--  leave and public holidays; payslips, bank file, S01 monthly return and
+--  remittance, S02 / P24 year end, P45 on leaving. Approved runs post to the
+--  ledger (when it is started and the setting is on).
+--
+--  Statutory rates are effective-dated rows in payroll_rates: when the
+--  government changes a rate or the tax-free threshold, add a row -- old pay
+--  runs keep the rates they were worked out with (a copy is kept on the run).
+-- =============================================================================
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('payroll_module', 'off'),              -- on: the module is in use (screens, routes, posting)
+  ('payroll_use_timeclock', 'on'),        -- hourly staff are paid from approved time clock weeks
+  ('payroll_include_commission', 'on'),   -- approved commission statements are paid through payroll
+  ('payroll_post_ledger', 'on'),          -- approved runs post to the general ledger
+  ('payroll_self_service', 'on'),         -- staff see their own payslips
+  ('payroll_two_person', 'off'),          -- on: the person who prepared a run cannot approve it
+  ('payroll_heart', 'on'),                -- employer pays HEART/NSTA 3%
+  ('payroll_vacation_days', '10'),        -- statutory: 2 weeks after 220 days worked in the year
+  ('payroll_sick_days', '10'),            -- statutory: 10 days after 110 days worked
+  ('payroll_employer_trn', ''),
+  ('payroll_employer_nis', '')
+ON CONFLICT (key) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS payroll_rates (
+  id               SERIAL PRIMARY KEY,
+  effective_from   DATE NOT NULL UNIQUE,              -- by pay date
+  paye_threshold   NUMERIC(14,2) NOT NULL,            -- annual tax-free income
+  paye_rate1       NUMERIC(6,4) NOT NULL DEFAULT 0.25,
+  paye_band2_from  NUMERIC(14,2) NOT NULL DEFAULT 6000000,   -- annual statutory income taxed at rate 2 above this
+  paye_rate2       NUMERIC(6,4) NOT NULL DEFAULT 0.30,
+  nis_ee           NUMERIC(6,4) NOT NULL DEFAULT 0.03,
+  nis_er           NUMERIC(6,4) NOT NULL DEFAULT 0.03,
+  nis_ceiling      NUMERIC(14,2) NOT NULL DEFAULT 5000000,   -- annual insurable wage ceiling
+  nht_ee           NUMERIC(6,4) NOT NULL DEFAULT 0.02,
+  nht_er           NUMERIC(6,4) NOT NULL DEFAULT 0.03,
+  ed_ee            NUMERIC(6,4) NOT NULL DEFAULT 0.0225,
+  ed_er            NUMERIC(6,4) NOT NULL DEFAULT 0.035,
+  heart_er         NUMERIC(6,4) NOT NULL DEFAULT 0.03,
+  pension_cap      NUMERIC(6,4) NOT NULL DEFAULT 0.20,       -- approved pension deductible up to this share of pay
+  min_wage_week    NUMERIC(10,2),                            -- national minimum wage per 40-hour week
+  min_wage_hours   NUMERIC(5,2) NOT NULL DEFAULT 40,
+  note             TEXT,
+  updated_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+INSERT INTO payroll_rates (effective_from, paye_threshold, min_wage_week, note) VALUES
+  ('2026-04-01', 1902360, 16000, 'Threshold J$1,902,360 from 1 April 2026; minimum wage J$16,000 a 40-hour week. Check against TAJ / MLSS notices.'),
+  ('2026-07-01', 1902360, 17000, 'Minimum wage J$17,000 a 40-hour week from 1 July 2026.')
+ON CONFLICT (effective_from) DO NOTHING;
+
+-- Earning and deduction types. Flags say which contributions an earning attracts.
+CREATE TABLE IF NOT EXISTS payroll_items (
+  code           TEXT PRIMARY KEY,
+  label          TEXT NOT NULL,
+  kind           TEXT NOT NULL CHECK (kind IN ('earning', 'deduction')),
+  paye           BOOLEAN NOT NULL DEFAULT true,
+  nis            BOOLEAN NOT NULL DEFAULT true,
+  nht            BOOLEAN NOT NULL DEFAULT true,
+  ed             BOOLEAN NOT NULL DEFAULT true,
+  heart          BOOLEAN NOT NULL DEFAULT true,
+  gl_account_id  INTEGER REFERENCES gl_accounts(id),       -- blank: wages (earnings) / deductions payable
+  is_system      BOOLEAN NOT NULL DEFAULT false,           -- worked out by the system (cannot be removed)
+  is_active      BOOLEAN NOT NULL DEFAULT true,
+  sort           INTEGER NOT NULL DEFAULT 100
+);
+INSERT INTO payroll_items (code, label, kind, paye, nis, nht, ed, heart, is_system, sort) VALUES
+  ('basic',          'Basic pay',                     'earning',   true,  true,  true,  true,  true,  true,  10),
+  ('overtime',       'Overtime',                      'earning',   true,  true,  true,  true,  true,  true,  20),
+  ('holiday_work',   'Public holiday worked (extra)', 'earning',   true,  true,  true,  true,  true,  true,  25),
+  ('holiday_pay',    'Public holiday pay',            'earning',   true,  true,  true,  true,  true,  true,  26),
+  ('vacation_pay',   'Vacation pay',                  'earning',   true,  true,  true,  true,  true,  true,  30),
+  ('sick_pay',       'Sick pay',                      'earning',   true,  true,  true,  true,  true,  true,  31),
+  ('unpaid_leave',   'Unpaid leave',                  'earning',   true,  true,  true,  true,  true,  true,  32),
+  ('commission',     'Commission',                    'earning',   true,  true,  true,  true,  true,  true,  40),
+  ('bonus',          'Bonus',                         'earning',   true,  true,  true,  true,  true,  false, 50),
+  ('back_pay',       'Back pay / retroactive',        'earning',   true,  true,  true,  true,  true,  false, 55),
+  ('travel_allow',   'Travelling allowance',          'earning',   true,  true,  true,  true,  true,  false, 60),
+  ('meal_allow',     'Meal allowance',                'earning',   true,  true,  true,  true,  true,  false, 61),
+  ('other_allow',    'Other allowance',               'earning',   true,  true,  true,  true,  true,  false, 62),
+  ('reimbursement',  'Reimbursement (not pay)',       'earning',   false, false, false, false, false, false, 90),
+  ('loan',           'Loan repayment',                'deduction', false, false, false, false, false, false, 110),
+  ('advance',        'Salary advance recovered',      'deduction', false, false, false, false, false, false, 111),
+  ('union_dues',     'Union dues',                    'deduction', false, false, false, false, false, false, 120),
+  ('health_ins',     'Health insurance',              'deduction', false, false, false, false, false, false, 121),
+  ('credit_union',   'Credit union / savings',        'deduction', false, false, false, false, false, false, 122),
+  ('court_order',    'Court order / garnishment',     'deduction', false, false, false, false, false, false, 123),
+  ('other_ded',      'Other deduction',               'deduction', false, false, false, false, false, false, 130)
+ON CONFLICT (code) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS payroll_employees (
+  id                  SERIAL PRIMARY KEY,
+  user_id             INTEGER UNIQUE REFERENCES users(id) ON DELETE SET NULL,   -- blank: not a system user
+  employee_no         TEXT,
+  name                TEXT NOT NULL,
+  email               TEXT,
+  phone               TEXT,
+  address             TEXT,
+  trn                 TEXT,
+  nis_no              TEXT,
+  date_of_birth       DATE,
+  hire_date           DATE,
+  termination_date    DATE,
+  termination_reason  TEXT,
+  job_title           TEXT,
+  department          TEXT,
+  pay_type            TEXT NOT NULL DEFAULT 'salary' CHECK (pay_type IN ('salary', 'hourly')),
+  frequency           TEXT NOT NULL DEFAULT 'monthly' CHECK (frequency IN ('weekly', 'fortnightly', 'monthly')),
+  salary_annual       NUMERIC(14,2),
+  hourly_rate         NUMERIC(10,2),
+  ot_rate             NUMERIC(4,2) NOT NULL DEFAULT 1.5,
+  hours_per_period    NUMERIC(6,2),            -- hourly staff not on the time clock
+  hours_per_day       NUMERIC(4,2) NOT NULL DEFAULT 8,
+  use_timeclock       BOOLEAN NOT NULL DEFAULT true,
+  pay_method          TEXT NOT NULL DEFAULT 'bank' CHECK (pay_method IN ('bank', 'cheque', 'cash')),
+  bank_name           TEXT,
+  bank_branch         TEXT,
+  bank_account        TEXT,
+  bank_account_type   TEXT,
+  pension_ee_pct      NUMERIC(6,3) NOT NULL DEFAULT 0,
+  pension_er_pct      NUMERIC(6,3) NOT NULL DEFAULT 0,
+  pension_scheme      TEXT,
+  extra_threshold     NUMERIC(14,2) NOT NULL DEFAULT 0,    -- annual: e.g. a pensioner's extra allowance
+  paye_exempt         BOOLEAN NOT NULL DEFAULT false,
+  nis_exempt          BOOLEAN NOT NULL DEFAULT false,
+  nht_exempt          BOOLEAN NOT NULL DEFAULT false,
+  ed_exempt           BOOLEAN NOT NULL DEFAULT false,
+  vacation_days       NUMERIC(5,2),            -- blank: the shop's setting
+  sick_days           NUMERIC(5,2),
+  is_active           BOOLEAN NOT NULL DEFAULT true,
+  notes               TEXT,
+  created_at          TIMESTAMPTZ DEFAULT NOW(),
+  updated_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Recurring earnings / deductions per person. A loan stops when its balance is paid.
+CREATE TABLE IF NOT EXISTS payroll_employee_items (
+  id           SERIAL PRIMARY KEY,
+  employee_id  INTEGER NOT NULL REFERENCES payroll_employees(id) ON DELETE CASCADE,
+  code         TEXT NOT NULL REFERENCES payroll_items(code),
+  amount       NUMERIC(14,2) NOT NULL,           -- per pay period
+  balance      NUMERIC(14,2),                    -- loans / advances: still owed
+  note         TEXT,
+  is_active    BOOLEAN NOT NULL DEFAULT true,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_payroll_emp_items ON payroll_employee_items (employee_id);
+
+CREATE TABLE IF NOT EXISTS payroll_runs (
+  id            SERIAL PRIMARY KEY,
+  number        TEXT UNIQUE,                     -- PR-000001
+  frequency     TEXT NOT NULL CHECK (frequency IN ('weekly', 'fortnightly', 'monthly')),
+  period_start  DATE NOT NULL,
+  period_end    DATE NOT NULL,
+  pay_date      DATE NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'approved', 'paid', 'void')),
+  note          TEXT,
+  rates         JSONB,                           -- the statutory rates used (copy)
+  totals        JSONB,
+  post_gl       BOOLEAN NOT NULL DEFAULT true,
+  created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  approved_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  approved_at   TIMESTAMPTZ,
+  voided_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  voided_at     TIMESTAMPTZ,
+  void_reason   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_payroll_runs_pay ON payroll_runs (pay_date);
+
+CREATE TABLE IF NOT EXISTS payroll_slips (
+  id             SERIAL PRIMARY KEY,
+  run_id         INTEGER NOT NULL REFERENCES payroll_runs(id) ON DELETE CASCADE,
+  employee_id    INTEGER NOT NULL REFERENCES payroll_employees(id),
+  snapshot       JSONB NOT NULL,                 -- name, TRN, NIS no., title, pay type and rate as at the run
+  lines          JSONB NOT NULL DEFAULT '[]',    -- [{code, label, kind, qty, rate, amount, source}]
+  warnings       JSONB NOT NULL DEFAULT '[]',
+  edited         BOOLEAN NOT NULL DEFAULT false, -- lines changed by hand: a recalculation keeps them
+  gross          NUMERIC(14,2) NOT NULL DEFAULT 0,
+  statutory      NUMERIC(14,2) NOT NULL DEFAULT 0,   -- statutory income (PAYE base after NIS and pension)
+  nis_ee         NUMERIC(14,2) NOT NULL DEFAULT 0,
+  nis_er         NUMERIC(14,2) NOT NULL DEFAULT 0,
+  nht_ee         NUMERIC(14,2) NOT NULL DEFAULT 0,
+  nht_er         NUMERIC(14,2) NOT NULL DEFAULT 0,
+  ed_ee          NUMERIC(14,2) NOT NULL DEFAULT 0,
+  ed_er          NUMERIC(14,2) NOT NULL DEFAULT 0,
+  heart_er       NUMERIC(14,2) NOT NULL DEFAULT 0,
+  paye           NUMERIC(14,2) NOT NULL DEFAULT 0,
+  pension_ee     NUMERIC(14,2) NOT NULL DEFAULT 0,
+  pension_er     NUMERIC(14,2) NOT NULL DEFAULT 0,
+  other_ded      NUMERIC(14,2) NOT NULL DEFAULT 0,
+  net            NUMERIC(14,2) NOT NULL DEFAULT 0,
+  cheque_number  TEXT,
+  commission_ids INTEGER[] NOT NULL DEFAULT '{}',    -- commission statements paid on this slip
+  UNIQUE (run_id, employee_id)
+);
+CREATE INDEX IF NOT EXISTS idx_payroll_slips_emp ON payroll_slips (employee_id);
+
+CREATE TABLE IF NOT EXISTS payroll_payments (
+  id           SERIAL PRIMARY KEY,
+  run_id       INTEGER NOT NULL REFERENCES payroll_runs(id),
+  account_id   INTEGER NOT NULL REFERENCES gl_accounts(id),
+  pay_date     DATE NOT NULL,
+  per_person   BOOLEAN NOT NULL DEFAULT true,     -- one bank line per person (cheques) or one for the batch
+  reference    TEXT,
+  amount       NUMERIC(14,2) NOT NULL,
+  post_gl      BOOLEAN NOT NULL DEFAULT true,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  voided_at    TIMESTAMPTZ,
+  voided_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  void_reason  TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_payroll_payment_live ON payroll_payments (run_id) WHERE voided_at IS NULL;
+
+-- Statutory deductions paid to TAJ (S01, due the 14th of the next month).
+CREATE TABLE IF NOT EXISTS payroll_remittances (
+  id           SERIAL PRIMARY KEY,
+  month        DATE NOT NULL,                     -- first day of the month remitted for
+  paye         NUMERIC(14,2) NOT NULL DEFAULT 0,
+  nis          NUMERIC(14,2) NOT NULL DEFAULT 0,
+  nht          NUMERIC(14,2) NOT NULL DEFAULT 0,
+  ed           NUMERIC(14,2) NOT NULL DEFAULT 0,
+  heart        NUMERIC(14,2) NOT NULL DEFAULT 0,
+  pension      NUMERIC(14,2) NOT NULL DEFAULT 0,  -- to the pension scheme (not TAJ), optional
+  total        NUMERIC(14,2) NOT NULL,
+  account_id   INTEGER NOT NULL REFERENCES gl_accounts(id),
+  pay_date     DATE NOT NULL,
+  reference    TEXT,
+  post_gl      BOOLEAN NOT NULL DEFAULT true,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  voided_at    TIMESTAMPTZ,
+  voided_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  void_reason  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_payroll_remit_month ON payroll_remittances (month);
+
+ALTER TABLE commission_statements ADD COLUMN IF NOT EXISTS payroll_run_id INTEGER;
+
+-- Ledger accounts for payroll.
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('1170', 'Staff Loans and Advances',          'asset',     'Staff Loans and Advances',  'OCASSET', 'staff_loans'),
+  ('2310', 'Net Wages Payable',                 'liability', 'Net Wages Payable',         'OCLIAB',  'net_wages_payable'),
+  ('2320', 'PAYE Income Tax Payable',           'liability', 'PAYE Payable',              'OCLIAB',  'paye_payable'),
+  ('2330', 'NIS Payable',                       'liability', 'NIS Payable',               'OCLIAB',  'nis_payable'),
+  ('2340', 'NHT Payable',                       'liability', 'NHT Payable',               'OCLIAB',  'nht_payable'),
+  ('2350', 'Education Tax Payable',             'liability', 'Education Tax Payable',     'OCLIAB',  'edtax_payable'),
+  ('2360', 'HEART/NSTA Payable',                'liability', 'HEART NSTA Payable',        'OCLIAB',  'heart_payable'),
+  ('2370', 'Pension Contributions Payable',     'liability', 'Pension Payable',           'OCLIAB',  'pension_payable'),
+  ('2380', 'Other Payroll Deductions Payable',  'liability', 'Payroll Deductions Payable','OCLIAB',  'payroll_deductions_payable'),
+  ('6520', 'Employer Pension Contributions',    'expense',   'Employer Pension',          'EXP',     'pension_expense')
+ON CONFLICT (code) DO NOTHING;
+UPDATE gl_accounts SET system_key = 'wages' WHERE code = '6500' AND system_key IS NULL AND NOT EXISTS (SELECT 1 FROM gl_accounts WHERE system_key = 'wages');
+UPDATE gl_accounts SET system_key = 'payroll_taxes' WHERE code = '6510' AND system_key IS NULL AND NOT EXISTS (SELECT 1 FROM gl_accounts WHERE system_key = 'payroll_taxes');
+UPDATE payroll_items SET gl_account_id = (SELECT id FROM gl_accounts WHERE system_key = 'staff_loans') WHERE code IN ('loan', 'advance') AND gl_account_id IS NULL;
+
+-- =============================================================================
+--  Payroll (cont.) -- contractors, day workers, work / invoice pay, contracts,
+--  loans and advances, third-party deductions, contractor levy, withholding tax
+--
+--  Worker types: employee (statutory deductions), day_worker (an employee paid
+--  by the day: statutory deductions apply), contractor (self-employed: no PAYE,
+--  NIS, NHT, Education Tax or HEART; contractor levy 2% on construction,
+--  haulage and tillage work; withholding tax 3% on specified services when the
+--  business is a withholding agent -- per invoice of J$50,000 or more, or
+--  smaller invoices adding to J$100,000 in 30 days). Levy and WHT are paid to
+--  TAJ by the 14th of the next month with the payroll deductions.
+--  Pay by the work: payroll_work holds days worked, piece work, hours and
+--  invoices; a pay run picks up everything not yet paid up to its end date.
+-- =============================================================================
+ALTER TABLE payroll_employees ADD COLUMN IF NOT EXISTS worker_type     TEXT NOT NULL DEFAULT 'employee';
+ALTER TABLE payroll_employees ADD COLUMN IF NOT EXISTS day_rate        NUMERIC(12,2);
+ALTER TABLE payroll_employees ADD COLUMN IF NOT EXISTS fee_per_period  NUMERIC(14,2);    -- contractor retainer each pay
+ALTER TABLE payroll_employees ADD COLUMN IF NOT EXISTS business_name   TEXT;
+ALTER TABLE payroll_employees ADD COLUMN IF NOT EXISTS tcc_no          TEXT;             -- tax compliance certificate
+ALTER TABLE payroll_employees ADD COLUMN IF NOT EXISTS tcc_expiry      DATE;
+ALTER TABLE payroll_employees ADD COLUMN IF NOT EXISTS levy_applies    BOOLEAN NOT NULL DEFAULT false;   -- construction / haulage / tillage
+ALTER TABLE payroll_employees ADD COLUMN IF NOT EXISTS wht_applies     BOOLEAN NOT NULL DEFAULT false;   -- a specified service
+DO $$ BEGIN
+  ALTER TABLE payroll_employees DROP CONSTRAINT IF EXISTS payroll_employees_pay_type_check;
+  ALTER TABLE payroll_employees ADD CONSTRAINT payroll_employees_pay_type_check CHECK (pay_type IN ('salary', 'hourly', 'daily', 'piece', 'contract'));
+  ALTER TABLE payroll_employees DROP CONSTRAINT IF EXISTS payroll_employees_worker_type_check;
+  ALTER TABLE payroll_employees ADD CONSTRAINT payroll_employees_worker_type_check CHECK (worker_type IN ('employee', 'day_worker', 'contractor'));
+END $$;
+
+ALTER TABLE payroll_employee_items ADD COLUMN IF NOT EXISTS payee      TEXT;   -- who the deduction is paid to (court, insurer, union...)
+ALTER TABLE payroll_employee_items ADD COLUMN IF NOT EXISTS reference  TEXT;   -- policy / order / account number
+ALTER TABLE payroll_employee_items ADD COLUMN IF NOT EXISTS end_date   DATE;   -- stops after this date
+
+ALTER TABLE payroll_slips ADD COLUMN IF NOT EXISTS levy NUMERIC(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE payroll_slips ADD COLUMN IF NOT EXISTS wht  NUMERIC(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE payroll_remittances ADD COLUMN IF NOT EXISTS levy NUMERIC(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE payroll_remittances ADD COLUMN IF NOT EXISTS wht  NUMERIC(14,2) NOT NULL DEFAULT 0;
+
+ALTER TABLE payroll_rates ADD COLUMN IF NOT EXISTS levy_rate      NUMERIC(6,4)  NOT NULL DEFAULT 0.02;
+ALTER TABLE payroll_rates ADD COLUMN IF NOT EXISTS wht_rate       NUMERIC(6,4)  NOT NULL DEFAULT 0.03;
+ALTER TABLE payroll_rates ADD COLUMN IF NOT EXISTS wht_threshold  NUMERIC(14,2) NOT NULL DEFAULT 50000;    -- per invoice
+ALTER TABLE payroll_rates ADD COLUMN IF NOT EXISTS wht_aggregate  NUMERIC(14,2) NOT NULL DEFAULT 100000;   -- smaller invoices in 30 days
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('payroll_wht_agent', 'off')            -- on: the business is a withholding agent for specified services
+ON CONFLICT (key) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS payroll_contracts (
+  id           SERIAL PRIMARY KEY,
+  employee_id  INTEGER NOT NULL REFERENCES payroll_employees(id) ON DELETE CASCADE,
+  title        TEXT NOT NULL,
+  value        NUMERIC(14,2),                    -- agreed price (blank: open-ended)
+  start_date   DATE,
+  end_date     DATE,
+  status       TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done', 'cancelled')),
+  notes        TEXT,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Work to be paid: days, piece work, extra hours, invoices / contract stages.
+CREATE TABLE IF NOT EXISTS payroll_work (
+  id           SERIAL PRIMARY KEY,
+  employee_id  INTEGER NOT NULL REFERENCES payroll_employees(id) ON DELETE CASCADE,
+  kind         TEXT NOT NULL CHECK (kind IN ('days', 'piece', 'hours', 'invoice')),
+  work_date    DATE NOT NULL,
+  description  TEXT NOT NULL,
+  qty          NUMERIC(12,2) NOT NULL DEFAULT 1,
+  rate         NUMERIC(14,2) NOT NULL DEFAULT 0,
+  amount       NUMERIC(14,2) NOT NULL,
+  invoice_no   TEXT,
+  contract_id  INTEGER REFERENCES payroll_contracts(id) ON DELETE SET NULL,
+  slip_id      INTEGER REFERENCES payroll_slips(id) ON DELETE SET NULL,   -- the payslip paying it
+  wht          NUMERIC(14,2) NOT NULL DEFAULT 0,                         -- withholding tax taken on it
+  voided_at    TIMESTAMPTZ,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_payroll_work_emp ON payroll_work (employee_id, work_date);
+
+-- Loans and salary advances handed out (repaid through payroll_employee_items).
+CREATE TABLE IF NOT EXISTS payroll_loans (
+  id           SERIAL PRIMARY KEY,
+  employee_id  INTEGER NOT NULL REFERENCES payroll_employees(id) ON DELETE CASCADE,
+  kind         TEXT NOT NULL CHECK (kind IN ('loan', 'advance')),
+  amount       NUMERIC(14,2) NOT NULL,
+  issue_date   DATE NOT NULL,
+  method       TEXT NOT NULL CHECK (method IN ('bank', 'payslip')),   -- paid out now from an account, or on the next payslip
+  account_id   INTEGER REFERENCES gl_accounts(id),
+  item_id      INTEGER REFERENCES payroll_employee_items(id) ON DELETE SET NULL,
+  slip_id      INTEGER REFERENCES payroll_slips(id) ON DELETE SET NULL,
+  reference    TEXT,
+  note         TEXT,
+  post_gl      BOOLEAN NOT NULL DEFAULT true,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  voided_at    TIMESTAMPTZ,
+  voided_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  void_reason  TEXT
+);
+
+-- Deductions paid over to whoever they are for (insurer, union, court, credit union, NHT, SLB...).
+CREATE TABLE IF NOT EXISTS payroll_ded_payments (
+  id           SERIAL PRIMARY KEY,
+  month        DATE NOT NULL,
+  code         TEXT NOT NULL REFERENCES payroll_items(code),
+  payee        TEXT NOT NULL,
+  amount       NUMERIC(14,2) NOT NULL,
+  account_id   INTEGER NOT NULL REFERENCES gl_accounts(id),
+  pay_date     DATE NOT NULL,
+  reference    TEXT,
+  post_gl      BOOLEAN NOT NULL DEFAULT true,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  voided_at    TIMESTAMPTZ,
+  voided_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  void_reason  TEXT
+);
+
+UPDATE payroll_items SET label = 'Medical / health insurance' WHERE code = 'health_ins' AND label = 'Health insurance';
+INSERT INTO payroll_items (code, label, kind, paye, nis, nht, ed, heart, is_system, sort) VALUES
+  ('day_work',        'Days worked',                         'earning',   true,  true,  true,  true,  true,  true,  12),
+  ('piece_work',      'Piece / job work',                    'earning',   true,  true,  true,  true,  true,  true,  14),
+  ('extra_hours',     'Extra hours',                         'earning',   true,  true,  true,  true,  true,  true,  16),
+  ('contract_work',   'Contract work / invoice',             'earning',   true,  true,  true,  true,  true,  true,  17),
+  ('advance_paid',    'Loan / advance paid out (not pay)',   'earning',   false, false, false, false, false, true,  95),
+  ('gratuity',        'Gratuity / honorarium',               'earning',   true,  true,  true,  true,  true,  false, 56),
+  ('redundancy',      'Redundancy / severance (check tax)',  'earning',   false, false, false, false, false, false, 57),
+  ('salary_deduction','Salary deduction (agreed in writing)','deduction', false, false, false, false, false, false, 112),
+  ('child_maint',     'Child maintenance (court order)',     'deduction', false, false, false, false, false, false, 124),
+  ('life_ins',        'Life insurance',                      'deduction', false, false, false, false, false, false, 125),
+  ('pension_avc',     'Extra pension (voluntary)',           'deduction', false, false, false, false, false, false, 126),
+  ('nht_mortgage',    'NHT mortgage repayment',              'deduction', false, false, false, false, false, false, 127),
+  ('slb_loan',        'Student Loan Bureau',                 'deduction', false, false, false, false, false, false, 128),
+  ('staff_purchase',  'Staff purchase',                      'deduction', false, false, false, false, false, false, 129),
+  ('cash_shortage',   'Cash shortage (agreed in writing)',   'deduction', false, false, false, false, false, false, 131),
+  ('uniform',         'Uniform / tools',                     'deduction', false, false, false, false, false, false, 132)
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('2390', 'Contractor Levy Payable',  'liability', 'Contractor Levy Payable',  'OCLIAB', 'contractor_levy_payable'),
+  ('2395', 'Withholding Tax Payable',  'liability', 'Withholding Tax Payable',  'OCLIAB', 'wht_payable'),
+  ('6530', 'Contract Labour',          'expense',   'Contract Labour',          'EXP',    'contract_labour')
+ON CONFLICT (code) DO NOTHING;
+UPDATE payroll_items SET gl_account_id = (SELECT id FROM gl_accounts WHERE system_key = 'staff_loans') WHERE code = 'advance_paid' AND gl_account_id IS NULL;
+
+-- =============================================================================
+--  Payroll (cont.) -- employer contributions to insurance, pensions and other
+--  benefits, and percentage-of-pay items
+--
+--  payroll_items.kind 'employer': paid by the business for the person (group
+--  health, group life, extra pension, other). Not cash in hand: it does not
+--  change gross or net pay. Its PAYE / NIS / NHT / Ed / HEART ticks make it a
+--  taxable benefit (added to those bases) -- off by default; tick on advice.
+--  pension_relief: an employee deduction that counts toward the approved
+--  pension relief (with the employee pension %, up to the cap).
+--  payroll_employee_items.pct: the item is a percentage of the person's pay
+--  (pensionable / taxable pay) instead of a fixed amount.
+-- =============================================================================
+DO $$ BEGIN
+  ALTER TABLE payroll_items DROP CONSTRAINT IF EXISTS payroll_items_kind_check;
+  ALTER TABLE payroll_items ADD CONSTRAINT payroll_items_kind_check CHECK (kind IN ('earning', 'deduction', 'employer'));
+END $$;
+ALTER TABLE payroll_items ADD COLUMN IF NOT EXISTS pension_relief BOOLEAN NOT NULL DEFAULT false;
+UPDATE payroll_items SET pension_relief = true WHERE code = 'pension_avc';
+UPDATE payroll_items SET label = 'Extra pension (voluntary, approved scheme)' WHERE code = 'pension_avc' AND label = 'Extra pension (voluntary)';
+ALTER TABLE payroll_employee_items ADD COLUMN IF NOT EXISTS pct NUMERIC(6,3);
+ALTER TABLE payroll_slips ADD COLUMN IF NOT EXISTS er_benefits      NUMERIC(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE payroll_slips ADD COLUMN IF NOT EXISTS taxable_benefits NUMERIC(14,2) NOT NULL DEFAULT 0;
+
+INSERT INTO payroll_items (code, label, kind, paye, nis, nht, ed, heart, is_system, sort) VALUES
+  ('er_health',  'Health insurance (employer share)',        'employer', false, false, false, false, false, false, 200),
+  ('er_life',    'Group life insurance (employer)',          'employer', false, false, false, false, false, false, 201),
+  ('er_pension', 'Pension (extra employer contribution)',    'employer', false, false, false, false, false, false, 202),
+  ('er_dental',  'Dental / vision (employer share)',         'employer', false, false, false, false, false, false, 203),
+  ('er_other',   'Other employer contribution',              'employer', false, false, false, false, false, false, 209),
+  ('life_ins_ee','Group life insurance (employee share)',    'deduction', false, false, false, false, false, false, 125),
+  ('pension_ee2','Pension (second scheme, employee)',        'deduction', false, false, false, false, false, false, 126)
+ON CONFLICT (code) DO NOTHING;
+UPDATE payroll_items SET pension_relief = true WHERE code = 'pension_ee2';
+
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('6540', 'Employee Benefits (Insurance)', 'expense', 'Employee Benefits', 'EXP', 'benefits_expense')
+ON CONFLICT (code) DO NOTHING;
+
+-- =============================================================================
+--  System management (sysops.js): audit, security and tech support
+--
+--  A console of its own, separate from running the business, with its own
+--  capabilities: sys.audit, sys.security, sys.support (manager-only unless
+--  granted) and support.raise (every staff member can ask IT for help).
+--
+--  Audit chain: every audit_log row written from now on carries a sha256 of
+--  its own fields and the previous row's hash, set by a trigger under an
+--  advisory lock, so deleting or editing any row breaks the chain and the
+--  verify check says where. Rows from before the chain started have no hash.
+-- =============================================================================
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at         TIMESTAMPTZ;   -- last request (updated at most every few minutes)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_ip         TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS sessions_revoked_at  TIMESTAMPTZ;   -- sessions signed in before this are ended
+
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS prev_hash TEXT;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS hash      TEXT;
+
+CREATE OR REPLACE FUNCTION audit_log_chain() RETURNS trigger AS $$
+DECLARE prev TEXT;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('audit_log_chain'));
+  SELECT hash INTO prev FROM audit_log WHERE hash IS NOT NULL ORDER BY id DESC LIMIT 1;
+  NEW.prev_hash := COALESCE(prev, 'genesis');
+  NEW.hash := encode(sha256(convert_to(
+      NEW.prev_hash || '|' || NEW.id::text || '|' || to_char(NEW.at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') || '|' ||
+      COALESCE(NEW.user_id::text, '') || '|' || COALESCE(NEW.action, '') || '|' || COALESCE(NEW.target, '') || '|' ||
+      COALESCE(NEW.status::text, '') || '|' || COALESCE(NEW.ip, '') || '|' || COALESCE(NEW.detail::text, ''), 'UTF8')), 'hex');
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_audit_log_chain ON audit_log;
+CREATE TRIGGER trg_audit_log_chain BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION audit_log_chain();
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('sys_signout_at', '0'),              -- ms epoch: every session signed in before this is ended
+  ('sys_business_open', '07:00'),       -- sign-ins outside these hours are an audit exception
+  ('sys_business_close', '19:00'),
+  ('sys_dormant_days', '60'),           -- an enabled staff login unused this long is flagged
+  ('sys_sla_urgent_hours', '4'),
+  ('sys_sla_high_hours', '24'),
+  ('sys_sla_normal_hours', '72'),
+  ('sys_sla_low_hours', '168')
+ON CONFLICT (key) DO NOTHING;
+
+-- Security incidents (lost laptop, suspected fraud, phishing, data leak, outage...)
+CREATE TABLE IF NOT EXISTS sys_incidents (
+  id            SERIAL PRIMARY KEY,
+  number        TEXT UNIQUE,                       -- INC-0001
+  title         TEXT NOT NULL,
+  kind          TEXT NOT NULL DEFAULT 'security' CHECK (kind IN ('security', 'fraud', 'privacy', 'outage', 'data', 'physical', 'other')),
+  severity      TEXT NOT NULL DEFAULT 'medium' CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+  status        TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'investigating', 'contained', 'resolved', 'closed')),
+  description   TEXT,
+  impact        TEXT,
+  root_cause    TEXT,
+  occurred_at   TIMESTAMPTZ,
+  reported_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  assigned_to   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  timeline      JSONB NOT NULL DEFAULT '[]',       -- [{at, by, status?, note}]
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  resolved_at   TIMESTAMPTZ,
+  closed_at     TIMESTAMPTZ
+);
+
+-- Equipment register.
+CREATE TABLE IF NOT EXISTS sys_assets (
+  id              SERIAL PRIMARY KEY,
+  tag             TEXT UNIQUE,                      -- asset tag on the device (IT-0001)
+  name            TEXT NOT NULL,
+  kind            TEXT NOT NULL DEFAULT 'pc',       -- pc, till, server, printer, receipt_printer, label_printer, scanner, cash_drawer, phone, tablet, router, switch, ups, camera, other
+  make            TEXT,
+  model           TEXT,
+  serial          TEXT,
+  location        TEXT,
+  assigned_to     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  terminal_id     INTEGER REFERENCES terminals(id) ON DELETE SET NULL,
+  ip              TEXT,
+  mac             TEXT,
+  purchase_date   DATE,
+  cost            NUMERIC(14,2),
+  supplier        TEXT,
+  warranty_until  DATE,
+  status          TEXT NOT NULL DEFAULT 'in_use' CHECK (status IN ('in_use', 'spare', 'repair', 'retired', 'lost')),
+  notes           TEXT,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Help desk.
+CREATE TABLE IF NOT EXISTS sys_tickets (
+  id                 SERIAL PRIMARY KEY,
+  number             TEXT UNIQUE,                    -- TCK-0001
+  title              TEXT NOT NULL,
+  description        TEXT,
+  category           TEXT NOT NULL DEFAULT 'other',  -- hardware, software, till, printer, network, account, website, email, other
+  priority           TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+  status             TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'assigned', 'in_progress', 'waiting', 'resolved', 'closed')),
+  requester_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  assignee_id        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  asset_id           INTEGER REFERENCES sys_assets(id) ON DELETE SET NULL,
+  location           TEXT,
+  due_at             TIMESTAMPTZ,                    -- SLA by priority
+  first_response_at  TIMESTAMPTZ,
+  resolved_at        TIMESTAMPTZ,
+  closed_at          TIMESTAMPTZ,
+  resolution         TEXT,
+  satisfaction       SMALLINT CHECK (satisfaction BETWEEN 1 AND 5),
+  created_at         TIMESTAMPTZ DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_sys_tickets_status ON sys_tickets (status, due_at);
+CREATE TABLE IF NOT EXISTS sys_ticket_notes (
+  id          SERIAL PRIMARY KEY,
+  ticket_id   INTEGER NOT NULL REFERENCES sys_tickets(id) ON DELETE CASCADE,
+  user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  body        TEXT NOT NULL,
+  internal    BOOLEAN NOT NULL DEFAULT false,      -- IT-only note, hidden from the requester
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Repairs, services, upgrades on a device.
+CREATE TABLE IF NOT EXISTS sys_maintenance (
+  id          SERIAL PRIMARY KEY,
+  asset_id    INTEGER REFERENCES sys_assets(id) ON DELETE CASCADE,
+  ticket_id   INTEGER REFERENCES sys_tickets(id) ON DELETE SET NULL,
+  kind        TEXT NOT NULL DEFAULT 'repair',      -- repair, service, upgrade, replacement, check
+  done_at     DATE NOT NULL DEFAULT CURRENT_DATE,
+  done_by     TEXT,
+  cost        NUMERIC(14,2),
+  notes       TEXT,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Change log (software updates, config changes, new hardware, access changes).
+CREATE TABLE IF NOT EXISTS sys_changes (
+  id             SERIAL PRIMARY KEY,
+  number         TEXT UNIQUE,                      -- CHG-0001
+  title          TEXT NOT NULL,
+  description    TEXT,
+  kind           TEXT NOT NULL DEFAULT 'software', -- software, config, hardware, access, data, network
+  risk           TEXT NOT NULL DEFAULT 'low' CHECK (risk IN ('low', 'medium', 'high')),
+  status         TEXT NOT NULL DEFAULT 'planned' CHECK (status IN ('planned', 'approved', 'done', 'rolled_back', 'cancelled')),
+  planned_at     TIMESTAMPTZ,
+  done_at        TIMESTAMPTZ,
+  rollback_plan  TEXT,
+  result         TEXT,
+  requested_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  approved_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Signed-off audit reviews: a period looked at, with the exception counts frozen.
+CREATE TABLE IF NOT EXISTS sys_audit_reviews (
+  id           SERIAL PRIMARY KEY,
+  from_date    DATE NOT NULL,
+  to_date      DATE NOT NULL,
+  exceptions   JSONB NOT NULL,
+  chain        JSONB,
+  notes        TEXT,
+  reviewed_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reviewed_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Access reviews: who can do what, decided person by person.
+CREATE TABLE IF NOT EXISTS sys_access_reviews (
+  id           SERIAL PRIMARY KEY,
+  title        TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'finished')),
+  started_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  started_at   TIMESTAMPTZ DEFAULT NOW(),
+  finished_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  finished_at  TIMESTAMPTZ
+);
+CREATE TABLE IF NOT EXISTS sys_access_review_items (
+  id          SERIAL PRIMARY KEY,
+  review_id   INTEGER NOT NULL REFERENCES sys_access_reviews(id) ON DELETE CASCADE,
+  user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  snapshot    JSONB NOT NULL,                      -- name, role, supervisory powers, 2-step, last sign-in, disabled
+  decision    TEXT CHECK (decision IN ('keep', 'change', 'disable')),
+  note        TEXT,
+  decided_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  decided_at  TIMESTAMPTZ,
+  UNIQUE (review_id, user_id)
+);
+
+-- =============================================================================
+--  System management (cont.): cyber security, threats and mitigation, network
+--  management (cyber.js)
+--
+--  sys_threats      what the detectors found; one open row per kind + source,
+--                   counting repeats; worked to mitigated / false positive
+--  sys_ip_blocks    addresses refused at the door (manual or automatic, with
+--                   an expiry); local and shop-network addresses are never
+--                   blocked automatically
+--  sys_risks        risk register: likelihood x impact, owner, mitigation
+--  sys_net_*        monitored devices and services, their check history, and
+--                   the register of the shop's networks (Wi-Fi, VLANs)
+-- =============================================================================
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('sys_autoblock', 'on'),             -- block internet addresses that attack the site
+  ('sys_autoblock_hits', '10'),        -- attack signatures from one address before it is blocked
+  ('sys_autoblock_minutes', '60'),
+  ('sys_scan_404', '40'),              -- missing pages asked for in 10 minutes = someone scanning
+  ('sys_secure_headers', 'on'),        -- nosniff, frame and referrer headers on every response
+  ('sys_threat_last_audit_id', '0')    -- the detector's place in the audit log
+ON CONFLICT (key) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS sys_threats (
+  id           SERIAL PRIMARY KEY,
+  kind         TEXT NOT NULL,                     -- web_attack, scanning, brute_force, credential_stuffing, new_location, mass_delete, privilege_change, data_export, fraud_pattern, audit_tamper, network_down, unknown_device, after_hours
+  severity     TEXT NOT NULL DEFAULT 'medium' CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+  status       TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'acknowledged', 'mitigated', 'false_positive')),
+  title        TEXT NOT NULL,
+  source_ip    TEXT,
+  user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  dedup        TEXT,                              -- extra key (a device MAC, a monitored target)
+  samples      JSONB NOT NULL DEFAULT '[]',       -- the last few occurrences
+  count        INTEGER NOT NULL DEFAULT 1,
+  first_seen   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  actions      JSONB NOT NULL DEFAULT '[]',       -- [{at, by, action, note}]
+  auto_action  TEXT,                              -- what the system did by itself
+  incident_id  INTEGER REFERENCES sys_incidents(id) ON DELETE SET NULL,
+  handled_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  handled_at   TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sys_threats_open ON sys_threats (kind, COALESCE(source_ip, ''), COALESCE(user_id, 0), COALESCE(dedup, ''))
+  WHERE status IN ('new', 'acknowledged');
+CREATE INDEX IF NOT EXISTS idx_sys_threats_status ON sys_threats (status, last_seen DESC);
+
+CREATE TABLE IF NOT EXISTS sys_ip_blocks (
+  id           SERIAL PRIMARY KEY,
+  cidr         TEXT NOT NULL,                     -- 203.0.113.7 or 203.0.113.0/24
+  reason       TEXT NOT NULL,
+  auto         BOOLEAN NOT NULL DEFAULT false,
+  expires_at   TIMESTAMPTZ,                       -- blank: until removed
+  hits         INTEGER NOT NULL DEFAULT 0,        -- requests refused
+  last_hit_at  TIMESTAMPTZ,
+  threat_id    INTEGER REFERENCES sys_threats(id) ON DELETE SET NULL,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  removed_at   TIMESTAMPTZ,
+  removed_by   INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS sys_risks (
+  id                   SERIAL PRIMARY KEY,
+  number               TEXT UNIQUE,               -- RSK-0001
+  title                TEXT NOT NULL,
+  category             TEXT NOT NULL DEFAULT 'cyber' CHECK (category IN ('cyber', 'network', 'people', 'process', 'physical', 'third_party', 'compliance', 'data')),
+  description          TEXT,
+  likelihood           SMALLINT NOT NULL DEFAULT 3 CHECK (likelihood BETWEEN 1 AND 5),
+  impact               SMALLINT NOT NULL DEFAULT 3 CHECK (impact BETWEEN 1 AND 5),
+  residual_likelihood  SMALLINT CHECK (residual_likelihood BETWEEN 1 AND 5),
+  residual_impact      SMALLINT CHECK (residual_impact BETWEEN 1 AND 5),
+  mitigation           TEXT,
+  owner_id             INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  status               TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'mitigating', 'accepted', 'closed')),
+  review_date          DATE,
+  created_by           INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at           TIMESTAMPTZ DEFAULT NOW(),
+  updated_at           TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS sys_net_targets (
+  id            SERIAL PRIMARY KEY,
+  name          TEXT NOT NULL,
+  kind          TEXT NOT NULL DEFAULT 'ping' CHECK (kind IN ('ping', 'tcp', 'http')),
+  host          TEXT,                             -- ping / tcp
+  port          INTEGER,                          -- tcp
+  url           TEXT,                             -- http
+  interval_s    INTEGER NOT NULL DEFAULT 60,
+  critical      BOOLEAN NOT NULL DEFAULT false,   -- a failure is a high-severity alert
+  asset_id      INTEGER REFERENCES sys_assets(id) ON DELETE SET NULL,
+  enabled       BOOLEAN NOT NULL DEFAULT true,
+  last_ok       BOOLEAN,
+  last_ms       INTEGER,
+  last_error    TEXT,
+  last_checked  TIMESTAMPTZ,
+  down_since    TIMESTAMPTZ,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS sys_net_checks (
+  id         BIGSERIAL PRIMARY KEY,
+  target_id  INTEGER NOT NULL REFERENCES sys_net_targets(id) ON DELETE CASCADE,
+  at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  ok         BOOLEAN NOT NULL,
+  ms         INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_sys_net_checks ON sys_net_checks (target_id, at DESC);
+
+CREATE TABLE IF NOT EXISTS sys_networks (
+  id                   SERIAL PRIMARY KEY,
+  name                 TEXT NOT NULL,
+  purpose              TEXT NOT NULL DEFAULT 'staff' CHECK (purpose IN ('staff', 'pos', 'guest', 'cameras', 'management', 'other')),
+  ssid                 TEXT,
+  subnet               TEXT,
+  vlan                 TEXT,
+  security             TEXT NOT NULL DEFAULT 'wpa2' CHECK (security IN ('wpa3', 'wpa2', 'wpa', 'wep', 'open', 'wired')),
+  isolated_from_pos    BOOLEAN NOT NULL DEFAULT false,
+  password_changed_at  DATE,
+  notes                TEXT,
+  created_at           TIMESTAMPTZ DEFAULT NOW(),
+  updated_at           TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- =============================================================================
+--  Document and communication centre (docs.js)
+--
+--  documents          every filed document: number, category, folder, tags,
+--                     confidentiality, dates (issued / expires / keep until),
+--                     legal hold, status (forms go draft -> submitted ->
+--                     approved / rejected), file + checksum, extracted text
+--  document_versions  every file ever uploaded for a document
+--  document_links     what a document belongs to: a supplier, a bill, a staff
+--                     member, a customer, a product, an asset, an applicant...
+--  document_access    who opened / downloaded / changed what, and when
+--  doc_folders        the filing structure (seeded, editable)
+--  comm_log           every email and SMS the system sends (captured where
+--                     they leave), plus calls, letters and visits logged by hand
+--
+--  Files live in data/documents (outside the website folder, never served
+--  directly). Templates are documents with category 'template' and a body.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS doc_folders (
+  id          SERIAL PRIMARY KEY,
+  parent_id   INTEGER REFERENCES doc_folders(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  category    TEXT,                               -- default category for files put here
+  sort        INTEGER NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_folders_name ON doc_folders (COALESCE(parent_id, 0), lower(name));
+
+CREATE TABLE IF NOT EXISTS documents (
+  id               SERIAL PRIMARY KEY,
+  number           TEXT UNIQUE,                   -- DOC-000001
+  title            TEXT NOT NULL,
+  description      TEXT,
+  category         TEXT NOT NULL DEFAULT 'general',
+  folder_id        INTEGER REFERENCES doc_folders(id) ON DELETE SET NULL,
+  tags             TEXT[] NOT NULL DEFAULT '{}',
+  confidentiality  TEXT NOT NULL DEFAULT 'internal' CHECK (confidentiality IN ('public', 'internal', 'confidential', 'restricted')),
+  status           TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('draft', 'active', 'submitted', 'approved', 'rejected', 'archived')),
+  version          INTEGER NOT NULL DEFAULT 1,
+  file_name        TEXT,                          -- original name
+  mime             TEXT,
+  size             BIGINT,
+  sha256           TEXT,
+  storage          TEXT,                          -- path under data/documents
+  text_content     TEXT,                          -- searchable text (text files, generated forms, templates)
+  template_body    TEXT,                          -- templates: HTML with {{fields}}
+  template_fields  JSONB,                         -- templates: [{key,label,type,required}]
+  needs_approval   BOOLEAN NOT NULL DEFAULT false,-- templates: forms made from it go to approval
+  template_id      INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  form_data        JSONB,
+  reference        TEXT,                          -- the paper's own number (ID no., invoice no., policy no.)
+  issuer           TEXT,                          -- who issued it (TAJ, insurer, supplier...)
+  issue_date       DATE,
+  expiry_date      DATE,
+  remind_days      INTEGER NOT NULL DEFAULT 30,
+  keep_until       DATE,                          -- retention: may be destroyed after this
+  legal_hold       BOOLEAN NOT NULL DEFAULT false,
+  owner_id         INTEGER REFERENCES users(id) ON DELETE SET NULL,   -- the person it is about / who owns it
+  uploaded_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  source           TEXT NOT NULL DEFAULT 'upload',-- upload | template | scan | import | module
+  decided_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  decided_at       TIMESTAMPTZ,
+  decision_note    TEXT,
+  deleted_at       TIMESTAMPTZ,                   -- recycle bin
+  deleted_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ DEFAULT NOW(),
+  search           tsvector                       -- kept current by trg_documents_search
+);
+CREATE OR REPLACE FUNCTION documents_search_tsv() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.search :=
+    setweight(to_tsvector('simple', coalesce(NEW.number, '') || ' ' || coalesce(NEW.title, '') || ' ' || coalesce(NEW.reference, '')), 'A') ||
+    setweight(to_tsvector('english', coalesce(NEW.description, '') || ' ' || array_to_string(NEW.tags, ' ') || ' ' || coalesce(NEW.file_name, '') || ' ' || coalesce(NEW.issuer, '')), 'B') ||
+    setweight(to_tsvector('english', left(coalesce(NEW.text_content, ''), 200000)), 'C');
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS trg_documents_search ON documents;
+CREATE TRIGGER trg_documents_search BEFORE INSERT OR UPDATE ON documents FOR EACH ROW EXECUTE FUNCTION documents_search_tsv();
+CREATE INDEX IF NOT EXISTS idx_documents_search ON documents USING GIN (search);
+CREATE INDEX IF NOT EXISTS idx_documents_cat ON documents (category, created_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_documents_folder ON documents (folder_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_documents_expiry ON documents (expiry_date) WHERE deleted_at IS NULL AND expiry_date IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_documents_sha ON documents (sha256);
+CREATE INDEX IF NOT EXISTS idx_documents_tags ON documents USING GIN (tags);
+CREATE SEQUENCE IF NOT EXISTS doc_number_seq;
+-- Carry on after the highest number already issued (never reuse a number).
+SELECT setval('doc_number_seq', (SELECT MAX(substring(number from 5)::int) FROM documents WHERE number ~ '^DOC-[0-9]+$'), true)
+ WHERE COALESCE((SELECT MAX(substring(number from 5)::int) FROM documents WHERE number ~ '^DOC-[0-9]+$'), 0) > (SELECT last_value FROM doc_number_seq);
+
+CREATE TABLE IF NOT EXISTS document_versions (
+  id           SERIAL PRIMARY KEY,
+  document_id  INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  version      INTEGER NOT NULL,
+  file_name    TEXT,
+  mime         TEXT,
+  size         BIGINT,
+  sha256       TEXT,
+  storage      TEXT,
+  note         TEXT,
+  uploaded_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (document_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS document_links (
+  id           SERIAL PRIMARY KEY,
+  document_id  INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  entity_type  TEXT NOT NULL,                     -- supplier, bill, po, staff, employee, customer, product, asset, applicant, inquiry, order, incident, ticket, risk, journal, investment
+  entity_id    TEXT NOT NULL,
+  label        TEXT,                              -- how it read when linked ("Bill 4411 - Toyota Tsusho")
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (document_id, entity_type, entity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_document_links_entity ON document_links (entity_type, entity_id);
+
+CREATE TABLE IF NOT EXISTS document_access (
+  id           BIGSERIAL PRIMARY KEY,
+  document_id  INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+  user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  action       TEXT NOT NULL,                     -- view, download, upload, new_version, edit, link, unlink, submit, approve, reject, delete, restore, purge, hold
+  detail       TEXT,
+  ip           TEXT,
+  at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_document_access_doc ON document_access (document_id, at DESC);
+CREATE INDEX IF NOT EXISTS idx_document_access_at ON document_access (at DESC);
+
+CREATE TABLE IF NOT EXISTS comm_log (
+  id            BIGSERIAL PRIMARY KEY,
+  channel       TEXT NOT NULL,                    -- email | sms | whatsapp | call | letter | visit | other
+  direction     TEXT NOT NULL DEFAULT 'out' CHECK (direction IN ('in', 'out')),
+  to_addr       TEXT,
+  from_addr     TEXT,
+  subject       TEXT,
+  body          TEXT,
+  status        TEXT NOT NULL DEFAULT 'sent',     -- sent | stubbed | failed | logged
+  error         TEXT,
+  source        TEXT,                             -- which part of the system sent it (payroll, notify, cyber...) or 'manual'
+  entity_type   TEXT,
+  entity_id     TEXT,
+  customer_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  staff_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  document_id   INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_comm_log_at ON comm_log (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_comm_log_to ON comm_log (lower(to_addr));
+CREATE INDEX IF NOT EXISTS idx_comm_log_entity ON comm_log (entity_type, entity_id);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('docs_last_expiry_mail', ''),
+  ('docs_max_mb', '25')
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Dispatch, driver app and vehicle tracking (fleet.js)
+--
+--  dispatch_jobs      everything a driver does: customer deliveries (one per
+--                     row in deliveries, created automatically), parts
+--                     pick-ups, bank drops, documents / letters / cheques,
+--                     collections, errands. Address + map position, who it is
+--                     assigned to, its place in that driver's route, status,
+--                     and proof (recipient, signature, photo, where it was
+--                     completed).
+--  driver_shifts      a driver is tracked only while on shift
+--  driver_positions   GPS pings from the driver app (kept 90 days)
+--  fleet_alerts       SOS, phone gone quiet, stopped too long, speeding
+--  fleet_screens      read-only links for the security monitor
+--  geocode_cache      addresses already looked up
+-- =============================================================================
+CREATE SEQUENCE IF NOT EXISTS dispatch_job_seq;
+
+CREATE TABLE IF NOT EXISTS dispatch_jobs (
+  id                 SERIAL PRIMARY KEY,
+  number             TEXT UNIQUE,                  -- JOB-000123
+  kind               TEXT NOT NULL DEFAULT 'delivery' CHECK (kind IN ('delivery', 'parts_pickup', 'bank_drop', 'document', 'cheque', 'collection', 'errand', 'other')),
+  title              TEXT NOT NULL,
+  details            TEXT,
+  delivery_id        INTEGER UNIQUE REFERENCES deliveries(id) ON DELETE SET NULL,
+  contact_name       TEXT,
+  contact_phone      TEXT,
+  address            TEXT,
+  lat                DOUBLE PRECISION,
+  lng                DOUBLE PRECISION,
+  geo_source         TEXT,                         -- geocoded | map | driver | none
+  priority           SMALLINT NOT NULL DEFAULT 2 CHECK (priority BETWEEN 1 AND 3),   -- 1 urgent, 2 normal, 3 when convenient
+  due_date           DATE,
+  window_from        TIME,
+  window_to          TIME,
+  amount             NUMERIC(14,2),                -- cash to bank, cheque value, money to collect
+  needs_signature    BOOLEAN NOT NULL DEFAULT true,
+  needs_photo        BOOLEAN NOT NULL DEFAULT false,
+  driver_id          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  seq                INTEGER,                      -- order in the driver's route
+  status             TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'assigned', 'en_route', 'arrived', 'done', 'failed', 'cancelled')),
+  assigned_at        TIMESTAMPTZ,
+  started_at         TIMESTAMPTZ,
+  arrived_at         TIMESTAMPTZ,
+  done_at            TIMESTAMPTZ,
+  fail_reason        TEXT,
+  recipient_name     TEXT,
+  signature_file     TEXT,                         -- under data/fleet-proof
+  photo_file         TEXT,
+  done_lat           DOUBLE PRECISION,
+  done_lng           DOUBLE PRECISION,
+  done_note          TEXT,
+  created_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at         TIMESTAMPTZ DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_dispatch_jobs_open ON dispatch_jobs (status, driver_id, seq) WHERE status NOT IN ('done', 'failed', 'cancelled');
+CREATE INDEX IF NOT EXISTS idx_dispatch_jobs_done ON dispatch_jobs (done_at DESC);
+
+CREATE TABLE IF NOT EXISTS driver_shifts (
+  id               SERIAL PRIMARY KEY,
+  user_id          INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  vehicle          TEXT,
+  start_odometer   INTEGER,
+  end_odometer     INTEGER,
+  started_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  ended_at         TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_driver_shift_open ON driver_shifts (user_id) WHERE ended_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS driver_positions (
+  id         BIGSERIAL PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  shift_id   INTEGER REFERENCES driver_shifts(id) ON DELETE SET NULL,
+  lat        DOUBLE PRECISION NOT NULL,
+  lng        DOUBLE PRECISION NOT NULL,
+  accuracy   REAL,
+  speed      REAL,                                 -- metres per second, from the phone
+  heading    REAL,
+  battery    REAL,
+  at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_driver_positions ON driver_positions (user_id, at DESC);
+
+CREATE TABLE IF NOT EXISTS fleet_alerts (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  kind        TEXT NOT NULL,                       -- sos | quiet | stopped | speeding
+  message     TEXT NOT NULL,
+  lat         DOUBLE PRECISION,
+  lng         DOUBLE PRECISION,
+  job_id      INTEGER REFERENCES dispatch_jobs(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  cleared_at  TIMESTAMPTZ,
+  cleared_by  INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fleet_alert_open ON fleet_alerts (user_id, kind) WHERE cleared_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS fleet_screens (
+  id            SERIAL PRIMARY KEY,
+  name          TEXT NOT NULL,
+  token_hash    TEXT NOT NULL UNIQUE,
+  created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  last_seen_at  TIMESTAMPTZ,
+  last_ip       TEXT,
+  revoked_at    TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS geocode_cache (
+  q        TEXT PRIMARY KEY,
+  lat      DOUBLE PRECISION,
+  lng      DOUBLE PRECISION,
+  label    TEXT,
+  at       TIMESTAMPTZ DEFAULT NOW()
+);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('fleet_shop_lat', '18.0089'),          -- 51 Red Hills Road (move the pin in Dispatch > Settings)
+  ('fleet_shop_lng', '-76.8207'),
+  ('fleet_ping_seconds', '20'),
+  ('fleet_quiet_minutes', '5'),           -- on shift but no position for this long
+  ('fleet_stop_minutes', '25'),           -- not moving, away from the shop and any stop
+  ('fleet_speed_kmh', '100'),
+  ('fleet_arrive_metres', '120')          -- inside this distance the job is marked arrived by itself
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Login help: password reset by email, and customer passkeys / Google sign-in
+--  (auth-extra.js). The passkeys table already exists (shared with the time
+--  clock); this only adds the reset-token table.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS password_resets (
+  id            SERIAL PRIMARY KEY,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash    TEXT NOT NULL UNIQUE,          -- sha256 of the link token; the token itself is only in the email
+  expires_at    TIMESTAMPTZ NOT NULL,
+  requested_ip  TEXT,
+  used_at       TIMESTAMPTZ,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets (user_id);
+CREATE INDEX IF NOT EXISTS idx_password_resets_exp ON password_resets (expires_at);
+
+-- Passkeys belong to a user; a customer may have several (phone + laptop). The
+-- shared table was staff-only before, so make sure the extra column exists.
+ALTER TABLE passkeys ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ;
+
+-- =============================================================================
+--  Supplier portal (supplierportal.js)
+--
+--  supplier_users      portal logins for a supplier's own staff, with roles
+--  supplier_items      the supplier's catalogue: what they can supply / consign
+--                      / retail through our portal, with their price, stock and
+--                      warehouse location; links to our products when matched
+--  supplier_catalog_uploads  each price-list upload, and what the compare found
+--  consignment_ledger  what we owe a supplier when their consigned stock sells
+--  supplier_orders     orders between us and the supplier (restock, consignment
+--                      replenish, and retail orders a supplier sends a customer
+--                      through our portal), with a pick/pack/ship queue
+--  supplier_order_lines
+--  supplier_training   training notes / links shown in the portal
+-- =============================================================================
+
+-- Terms with each supplier. The credit limit is what THEY extend to US (how
+-- much we may owe them); the supplier sets it in the portal, an admin may also.
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS portal_enabled      BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS credit_limit        NUMERIC(14,2);
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS credit_set_by       TEXT;           -- 'supplier' | 'admin'
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS credit_updated_at   TIMESTAMPTZ;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS web_retail_enabled  BOOLEAN NOT NULL DEFAULT false;
+
+CREATE TABLE IF NOT EXISTS supplier_users (
+  id             SERIAL PRIMARY KEY,
+  supplier_id    INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+  email          TEXT UNIQUE NOT NULL,
+  password_hash  TEXT,
+  name           TEXT,
+  phone          TEXT,
+  role           TEXT NOT NULL DEFAULT 'staff' CHECK (role IN ('owner', 'manager', 'staff')),
+  perms          JSONB NOT NULL DEFAULT '{}',    -- overrides on top of the role
+  is_active      BOOLEAN NOT NULL DEFAULT true,
+  failed_logins  INTEGER NOT NULL DEFAULT 0,
+  locked_until   TIMESTAMPTZ,
+  last_login_at  TIMESTAMPTZ,
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,   -- the shop admin who invited them
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_users_sup ON supplier_users (supplier_id);
+
+CREATE TABLE IF NOT EXISTS supplier_items (
+  id                SERIAL PRIMARY KEY,
+  supplier_id       INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+  supplier_sku      TEXT,                          -- the supplier's own part number
+  name              TEXT NOT NULL,
+  brand             TEXT,
+  category          TEXT,
+  description       TEXT,
+  barcode           TEXT,
+  supply_price      NUMERIC(14,2),                 -- what they charge us (J$)
+  retail_price      NUMERIC(14,2),                 -- price to a customer buying it through our portal (J$)
+  qty_available     INTEGER NOT NULL DEFAULT 0,    -- their own stock they can supply
+  warehouse_location TEXT,                         -- their bin/aisle, printed on pick slips
+  product_img       TEXT REFERENCES products(img) ON DELETE SET NULL ON UPDATE CASCADE,  -- our product, when matched
+  is_consignment    BOOLEAN NOT NULL DEFAULT false,
+  consigned_qty     INTEGER NOT NULL DEFAULT 0,    -- units physically in our shop on consignment
+  web_retail        BOOLEAN NOT NULL DEFAULT false,-- offered to customers through our portal
+  status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+  created_by        INTEGER REFERENCES supplier_users(id) ON DELETE SET NULL,
+  created_at        TIMESTAMPTZ DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (supplier_id, supplier_sku)
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_items_sup ON supplier_items (supplier_id);
+CREATE INDEX IF NOT EXISTS idx_supplier_items_product ON supplier_items (product_img);
+CREATE INDEX IF NOT EXISTS idx_supplier_items_barcode ON supplier_items (barcode);
+
+CREATE TABLE IF NOT EXISTS supplier_catalog_uploads (
+  id              SERIAL PRIMARY KEY,
+  supplier_id     INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+  filename        TEXT,
+  rows_total      INTEGER NOT NULL DEFAULT 0,
+  rows_added      INTEGER NOT NULL DEFAULT 0,
+  rows_updated    INTEGER NOT NULL DEFAULT 0,
+  lost_sales_hits INTEGER NOT NULL DEFAULT 0,       -- items we had lost sales for
+  cheaper_hits    INTEGER NOT NULL DEFAULT 0,       -- items they can supply below our current cost
+  result          JSONB,                            -- the full comparison, for the report
+  uploaded_by     INTEGER REFERENCES supplier_users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS consignment_ledger (
+  id               SERIAL PRIMARY KEY,
+  supplier_id      INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+  supplier_item_id INTEGER REFERENCES supplier_items(id) ON DELETE SET NULL,
+  product_img      TEXT,
+  kind             TEXT NOT NULL DEFAULT 'sale' CHECK (kind IN ('intake', 'sale', 'return', 'settlement', 'adjustment')),
+  qty              INTEGER NOT NULL DEFAULT 0,
+  unit_cost        NUMERIC(14,2) NOT NULL DEFAULT 0, -- what we owe the supplier per unit
+  amount           NUMERIC(14,2) NOT NULL DEFAULT 0, -- + owed to supplier, - settled/returned
+  sale_ref         TEXT,                             -- pos_sale / order reference
+  settled          BOOLEAN NOT NULL DEFAULT false,
+  settled_at       TIMESTAMPTZ,
+  note             TEXT,
+  created_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_consignment_ledger_sup ON consignment_ledger (supplier_id, created_at DESC);
+
+CREATE SEQUENCE IF NOT EXISTS supplier_order_seq;
+CREATE TABLE IF NOT EXISTS supplier_orders (
+  id              SERIAL PRIMARY KEY,
+  number          TEXT UNIQUE,                      -- SPO-000001
+  supplier_id     INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL DEFAULT 'purchase' CHECK (kind IN ('purchase', 'consignment_replenish', 'retail')),
+  status          TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'acknowledged', 'preparing', 'shipped', 'received', 'cancelled')),
+  po_id           INTEGER REFERENCES purchase_orders(id) ON DELETE SET NULL,  -- when it mirrors one of our POs
+  customer_name   TEXT,                             -- retail: who it is for
+  customer_phone  TEXT,
+  ship_address    TEXT,
+  tracking        TEXT,
+  notes           TEXT,
+  total           NUMERIC(14,2) NOT NULL DEFAULT 0,
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,            -- shop side
+  created_by_supplier INTEGER REFERENCES supplier_users(id) ON DELETE SET NULL, -- supplier side (retail)
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  acknowledged_at TIMESTAMPTZ,
+  shipped_at      TIMESTAMPTZ,
+  received_at     TIMESTAMPTZ,
+  updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_orders_sup ON supplier_orders (supplier_id, status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS supplier_order_lines (
+  id               SERIAL PRIMARY KEY,
+  order_id         INTEGER NOT NULL REFERENCES supplier_orders(id) ON DELETE CASCADE,
+  supplier_item_id INTEGER REFERENCES supplier_items(id) ON DELETE SET NULL,
+  product_img      TEXT,
+  supplier_sku     TEXT,
+  description      TEXT NOT NULL,
+  warehouse_location TEXT,
+  qty              INTEGER NOT NULL DEFAULT 1,
+  qty_shipped      INTEGER NOT NULL DEFAULT 0,
+  unit_price       NUMERIC(14,2) NOT NULL DEFAULT 0,
+  line_total       NUMERIC(14,2) NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_order_lines ON supplier_order_lines (order_id);
+
+CREATE TABLE IF NOT EXISTS supplier_training (
+  id           SERIAL PRIMARY KEY,
+  supplier_id  INTEGER REFERENCES suppliers(id) ON DELETE CASCADE,  -- NULL = shown to all suppliers
+  title        TEXT NOT NULL,
+  body         TEXT,
+  url          TEXT,
+  sort         INTEGER NOT NULL DEFAULT 0,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('supplier_portal_enabled', 'on'),
+  ('cost_stale_days', '365')               -- a product's cost/price older than this is "old"
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  DEPARTMENT STORE (Phase 3, 2026-10): store locations containing departments.
+--
+--  The business already has DEPARTMENTS (terminal.js): a department is a set of
+--  product categories, with staff (user_departments) and tills
+--  (station_departments) assigned, and an optional "sell only your department"
+--  rule. This migration adds the layer ABOVE departments -- physical STORE
+--  LOCATIONS (branches) -- plus Supermarket and Wholesale departments, per
+--  location stock on hand, and stock transfers between locations.
+--
+--  Everything is additive and defaults to one "Main Store" so the existing
+--  single-till setup is unchanged: existing departments and tills move under
+--  Main, and Main's stock mirrors products.stock_count. New locations start
+--  empty and receive stock by transfer.
+-- =============================================================================
+
+-- --- Store locations (branches) ---------------------------------------------
+CREATE TABLE IF NOT EXISTS store_locations (
+  id          SERIAL PRIMARY KEY,
+  code        TEXT NOT NULL UNIQUE,
+  name        TEXT NOT NULL,
+  kind        TEXT NOT NULL DEFAULT 'store'
+                CHECK (kind IN ('store','supermarket','wholesale','warehouse','branch')),
+  address     TEXT,
+  phone       TEXT,
+  is_active   BOOLEAN NOT NULL DEFAULT true,
+  is_default  BOOLEAN NOT NULL DEFAULT false,
+  sort        INTEGER NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Seed the Main Store as the default location (only when none exist yet).
+INSERT INTO store_locations (code, name, kind, is_default, sort)
+  SELECT 'MAIN', 'Main Store', 'store', true, 0
+  WHERE NOT EXISTS (SELECT 1 FROM store_locations);
+
+-- Guarantee exactly one default location.
+UPDATE store_locations SET is_default = true
+  WHERE id = (SELECT id FROM store_locations ORDER BY sort, id LIMIT 1)
+  AND NOT EXISTS (SELECT 1 FROM store_locations WHERE is_default);
+
+-- --- Departments: place each under a location, add kind + sort --------------
+ALTER TABLE departments ADD COLUMN IF NOT EXISTS location_id INTEGER REFERENCES store_locations(id) ON DELETE CASCADE;
+ALTER TABLE departments ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'parts';
+ALTER TABLE departments ADD COLUMN IF NOT EXISTS sort INTEGER NOT NULL DEFAULT 0;
+
+UPDATE departments SET location_id = (SELECT id FROM store_locations WHERE is_default LIMIT 1)
+  WHERE location_id IS NULL;
+
+-- Department codes were globally unique; make them unique per location instead,
+-- so two branches can each have a "Supermarket" department.
+DO $$
+DECLARE c text;
+BEGIN
+  SELECT conname INTO c FROM pg_constraint
+    WHERE conrelid = 'departments'::regclass AND contype = 'u'
+      AND pg_get_constraintdef(oid) ILIKE '%(code)%';
+  IF c IS NOT NULL THEN EXECUTE 'ALTER TABLE departments DROP CONSTRAINT ' || quote_ident(c); END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_departments_loc_code ON departments (location_id, code);
+
+-- Supermarket and Wholesale departments under the default store (once).
+INSERT INTO departments (code, name, categories, kind, location_id, sort)
+  SELECT v.code, v.name, '{}'::text[], v.kind,
+         (SELECT id FROM store_locations WHERE is_default LIMIT 1), v.sort
+    FROM (VALUES ('SUPERMARKET', 'Supermarket', 'supermarket', 90),
+                 ('WHOLESALE',   'Wholesale',   'wholesale',   91)) AS v(code, name, kind, sort)
+   WHERE NOT EXISTS (SELECT 1 FROM departments d WHERE d.code = v.code);
+
+-- --- Tills belong to a location ---------------------------------------------
+ALTER TABLE pos_stations ADD COLUMN IF NOT EXISTS location_id INTEGER REFERENCES store_locations(id) ON DELETE SET NULL;
+UPDATE pos_stations SET location_id = (SELECT id FROM store_locations WHERE is_default LIMIT 1)
+  WHERE location_id IS NULL;
+
+-- --- Per-location stock on hand ---------------------------------------------
+CREATE TABLE IF NOT EXISTS location_stock (
+  product_img TEXT    NOT NULL REFERENCES products(img) ON DELETE CASCADE ON UPDATE CASCADE,
+  location_id INTEGER NOT NULL REFERENCES store_locations(id) ON DELETE CASCADE,
+  qty         INTEGER NOT NULL DEFAULT 0 CHECK (qty >= 0),
+  updated_at  TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (product_img, location_id)
+);
+CREATE INDEX IF NOT EXISTS idx_location_stock_loc ON location_stock (location_id);
+
+-- (The default store's stock is derived -- see Phase 3b below; it is not seeded.)
+
+-- --- Sales location attribution (set by the POS later; NULL = default store) -
+ALTER TABLE pos_sales ADD COLUMN IF NOT EXISTS location_id INTEGER REFERENCES store_locations(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_pos_sales_location ON pos_sales (location_id, created_at);
+
+-- --- Stock transfers between locations --------------------------------------
+CREATE SEQUENCE IF NOT EXISTS stock_transfer_seq START 1;
+CREATE TABLE IF NOT EXISTS stock_transfers (
+  id               SERIAL PRIMARY KEY,
+  number           TEXT UNIQUE,                       -- TRF-000012
+  from_location_id INTEGER NOT NULL REFERENCES store_locations(id),
+  to_location_id   INTEGER NOT NULL REFERENCES store_locations(id),
+  status           TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','posted','cancelled')),
+  note             TEXT,
+  created_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  posted_at        TIMESTAMPTZ,
+  posted_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  CHECK (from_location_id <> to_location_id)
+);
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_status ON stock_transfers (status, created_at DESC);
+CREATE TABLE IF NOT EXISTS stock_transfer_lines (
+  id          SERIAL PRIMARY KEY,
+  transfer_id INTEGER NOT NULL REFERENCES stock_transfers(id) ON DELETE CASCADE,
+  product_img TEXT NOT NULL,
+  description TEXT,
+  qty         INTEGER NOT NULL CHECK (qty > 0)
+);
+CREATE INDEX IF NOT EXISTS idx_stock_transfer_lines_t ON stock_transfer_lines (transfer_id);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('deptstore_enabled', 'on')          -- show the department-store hub
+ON CONFLICT (key) DO NOTHING;
+
+-- Refresh planner statistics for products after migrations. Newly added filter
+-- columns (discontinued, superseded_by, variant_of) otherwise have NO stats, which
+-- made the reorder query (inbound.js) mis-plan into a ~49-minute nested loop.
+ANALYZE products;
+
+-- =============================================================================
+--  DEPARTMENT STORE (Phase 3b, 2026-10): location-aware POS stock.
+--
+--  Residual model: each BRANCH keeps an explicit quantity in location_stock;
+--  the DEFAULT store's quantity is derived as products.stock_count minus all
+--  branch quantities. Receiving, counts and adjustments keep moving the total,
+--  so the main store stays right without changes to those paths.
+--
+--  The POS tags a sale / void / return transaction with its store via
+--  set_config('vision.location_id', <id>, true). When products.stock_count moves
+--  inside such a transaction and the store is a branch, the trigger applies the
+--  same delta to that branch's row. Untagged moves (or main-store moves) touch
+--  only the total, i.e. the main store.
+-- =============================================================================
+
+-- The default store's rows are now derived, never stored.
+DELETE FROM location_stock
+ WHERE location_id IN (SELECT id FROM store_locations WHERE is_default);
+
+-- Effective on-hand per (product, store): explicit branch rows + derived main.
+CREATE OR REPLACE VIEW location_stock_v AS
+  SELECT ls.product_img, ls.location_id, ls.qty
+    FROM location_stock ls
+    JOIN store_locations l ON l.id = ls.location_id AND NOT l.is_default
+  UNION ALL
+  SELECT p.img AS product_img, d.id AS location_id,
+         GREATEST(0, COALESCE(p.stock_count, 0) - COALESCE(b.q, 0))::int AS qty
+    FROM products p
+   CROSS JOIN (SELECT id FROM store_locations WHERE is_default ORDER BY sort, id LIMIT 1) d
+    LEFT JOIN (SELECT x.product_img, SUM(x.qty) AS q
+                 FROM location_stock x
+                 JOIN store_locations xl ON xl.id = x.location_id AND NOT xl.is_default
+                GROUP BY x.product_img) b ON b.product_img = p.img;
+
+CREATE OR REPLACE FUNCTION products_location_delta() RETURNS trigger AS $$
+DECLARE
+  loc INTEGER;
+  d   INTEGER;
+BEGIN
+  IF NEW.stock_count IS NOT DISTINCT FROM OLD.stock_count THEN RETURN NEW; END IF;
+  loc := NULLIF(current_setting('vision.location_id', true), '')::int;
+  IF loc IS NULL THEN RETURN NEW; END IF;
+  IF EXISTS (SELECT 1 FROM store_locations WHERE id = loc AND is_default) THEN RETURN NEW; END IF;
+  d := COALESCE(NEW.stock_count, 0) - COALESCE(OLD.stock_count, 0);
+  INSERT INTO location_stock (product_img, location_id, qty)
+       VALUES (NEW.img, loc, GREATEST(0, d))
+  ON CONFLICT (product_img, location_id)
+       DO UPDATE SET qty = GREATEST(0, location_stock.qty + d), updated_at = NOW();
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_products_location_delta ON products;
+CREATE TRIGGER trg_products_location_delta
+  AFTER UPDATE OF stock_count ON products
+  FOR EACH ROW EXECUTE FUNCTION products_location_delta();
+
+-- =============================================================================
+--  DEPARTMENT STORE (Phase 3c, 2026-10): GENERAL department + default till.
+--
+--  GENERAL is a mode, not a category set: owners and managers working in it
+--  sell from every department as one stock and choose which cashier collects
+--  (terminal.js deptChoice, cashier.js /api/admin/pos/order collect_station_id).
+--  It has no categories and is left out of the department roll-ups.
+--
+--  cash_auto_open: the POS opens its till's shift as soon as it loads.
+--  cash_default_float: J$ float that auto-opened shift starts with.
+--  (cash_default_station_id is written on first use by cashier.js.)
+-- =============================================================================
+INSERT INTO departments (code, name, categories, kind, location_id, sort)
+  SELECT 'GENERAL', 'General', '{}'::text[], 'general',
+         (SELECT id FROM store_locations WHERE is_default ORDER BY sort, id LIMIT 1), 0
+   WHERE NOT EXISTS (SELECT 1 FROM departments WHERE code = 'GENERAL');
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('cash_auto_open', 'on'),
+  ('cash_default_float', '0')
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  DEPARTMENT STORE (Phase 3e, 2026-10): the Auto Parts department.
+--
+--  The shop's whole catalogue is auto parts, but no department held it, so
+--  every part fell into "Unassigned" and the POS department list had no Auto
+--  Parts. Created once, owning every product category not already claimed by
+--  another department (Supermarket / Wholesale start empty). Categories added
+--  later are assigned on the Departments screen.
+-- =============================================================================
+INSERT INTO departments (code, name, categories, kind, location_id, sort)
+  SELECT 'AUTOPARTS', 'Auto Parts',
+         COALESCE((SELECT array_agg(c ORDER BY c) FROM (
+                     SELECT DISTINCT lower(trim(p.category)) AS c FROM products p
+                      WHERE COALESCE(trim(p.category), '') <> ''
+                        AND lower(trim(p.category)) NOT IN (
+                              SELECT unnest(d.categories) FROM departments d WHERE d.kind <> 'general')) t), '{}'::text[]),
+         'parts', (SELECT id FROM store_locations WHERE is_default ORDER BY sort, id LIMIT 1), 10
+   WHERE NOT EXISTS (SELECT 1 FROM departments WHERE code = 'AUTOPARTS');
+
+-- =============================================================================
+--  CHART OF ACCOUNTS: sub-accounts (2026-10).
+--  A sub-account hangs off a parent account (parent_id). Its code is the
+--  parent's code + "-" + a 1-4 digit number (6400-1, 6400-0012), its type is
+--  the parent's, and its QuickBooks name is Parent:Child. Sub-accounts can
+--  have sub-accounts. A parent with sub-accounts keeps its code and type.
+-- =============================================================================
+ALTER TABLE gl_accounts ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES gl_accounts(id) ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_gl_accounts_parent ON gl_accounts (parent_id);
+
+-- =============================================================================
+--  LOANS, RECURRING BILLING, REMINDERS AND LATE FEES (billing.js, 2026-10)
+--
+--  Loans      the company as borrower. A loan's repayment schedule is worked
+--             out once (loan_instalments) and each instalment becomes an
+--             ordinary A/P bill on its due date: principal to Loans Payable,
+--             interest to Interest Expense. The ap_bill poster in gl.js does
+--             the ledger; nothing loan-specific is posted.
+--  Invoices   receivables raised on the books rather than at the till (rent,
+--             recharges, late fees). They sit in A/R beside POS sales: the
+--             open-item SQL (AR_OPEN_SQL in server.js) unions them in, and
+--             Receive Payment applies money to either (ar_applications gets
+--             invoice_id beside sale_id, exactly one of the two set).
+--  Plans      one table for both sides: an 'ar' plan raises an invoice for a
+--             customer each period, an 'ap' plan a bill from a supplier
+--             (standing orders, fixed monthly costs). billing_runs is keyed by
+--             (plan, period) so a period is billed once however many times the
+--             worker runs or the server restarts.
+--  Reminders  per-customer settings; ar_reminder_log keyed by (document,
+--             stage) so a reminder is sent once.
+--  Late fees  a rule on the plan, or a customer-wide rule; the fee is its own
+--             invoice, unique per (late invoice, period) -- a waived (voided)
+--             fee still holds its key, so waiving is never undone by the next run.
+-- =============================================================================
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('2500', 'Loans Payable',    'liability',     'Loans Payable',    'LTLIAB', 'loans_payable'),
+  ('7100', 'Rental Income',    'other_income',  'Rental Income',    'EXINC',  'rental_income'),
+  ('7200', 'Interest Income',  'other_income',  'Interest Income',  'EXINC',  'interest_income'),
+  ('7300', 'Late Fee Income',  'other_income',  'Late Fee Income',  'EXINC',  'late_fee_income'),
+  ('8100', 'Interest Expense', 'other_expense', 'Interest Expense', 'EXEXP',  'interest_expense')
+ON CONFLICT DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS billing_plans (
+  id                  SERIAL PRIMARY KEY,
+  side                TEXT NOT NULL CHECK (side IN ('ar', 'ap')),
+  name                TEXT NOT NULL,                       -- "Unit 2 rent", "Internet"
+  customer_id         INTEGER REFERENCES users(id),        -- side 'ar'
+  supplier_id         INTEGER REFERENCES suppliers(id),    -- side 'ap'
+  frequency           TEXT NOT NULL CHECK (frequency IN ('weekly', 'fortnightly', 'monthly', 'quarterly', 'yearly')),
+  start_date          DATE NOT NULL,                       -- the first period's document date; monthly runs keep its day
+  end_date            DATE,                                -- no period dated after this
+  max_runs            INTEGER CHECK (max_runs IS NULL OR max_runs > 0),
+  next_run            DATE,                                -- the next period to bill; NULL once ended
+  due_days            INTEGER NOT NULL DEFAULT 0 CHECK (due_days BETWEEN 0 AND 365),
+  lines               JSONB NOT NULL,                      -- [{account_id, description, amount}]
+  gct_amount          NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (gct_amount >= 0),
+  memo                TEXT,
+  pay_mode            TEXT NOT NULL DEFAULT 'manual' CHECK (pay_mode IN ('manual', 'standing_order')),
+  status              TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'ended')),
+  status_reason       TEXT,
+  -- Late fee for this agreement (side 'ar'). NULL type: the customer's rule applies; 'none': no fee.
+  late_fee_type       TEXT CHECK (late_fee_type IN ('flat', 'percent', 'none')),
+  late_fee_amount     NUMERIC(14,2),                       -- J$ (flat) or % of the open balance
+  late_fee_grace_days INTEGER NOT NULL DEFAULT 0,
+  late_fee_repeat     TEXT NOT NULL DEFAULT 'once' CHECK (late_fee_repeat IN ('once', 'monthly')),
+  late_fee_min        NUMERIC(14,2),
+  late_fee_max        NUMERIC(14,2),
+  created_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at          TIMESTAMPTZ DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ DEFAULT NOW(),
+  CHECK ((side = 'ar' AND customer_id IS NOT NULL) OR (side = 'ap' AND supplier_id IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_billing_plans_next ON billing_plans (next_run) WHERE status = 'active';
+
+CREATE TABLE IF NOT EXISTS ar_invoices (
+  id                SERIAL PRIMARY KEY,
+  number            TEXT UNIQUE,                           -- INV-000001
+  kind              TEXT NOT NULL DEFAULT 'invoice' CHECK (kind IN ('invoice', 'late_fee')),
+  customer_id       INTEGER NOT NULL REFERENCES users(id),
+  invoice_date      DATE NOT NULL,
+  due_date          DATE,
+  memo              TEXT,
+  gct_amount        NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (gct_amount >= 0),
+  total             NUMERIC(14,2) NOT NULL CHECK (total > 0),
+  plan_id           INTEGER REFERENCES billing_plans(id),
+  source_invoice_id INTEGER REFERENCES ar_invoices(id),    -- late fee: the invoice that was late
+  fee_period        TEXT,                                  -- late fee: 'once', or 1, 2, 3 ... per month it stays unpaid
+  created_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at        TIMESTAMPTZ DEFAULT NOW(),
+  voided_at         TIMESTAMPTZ,
+  voided_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  void_reason       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ar_invoices_customer ON ar_invoices (customer_id, invoice_date);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ar_invoices_fee ON ar_invoices (source_invoice_id, fee_period) WHERE kind = 'late_fee';
+CREATE TABLE IF NOT EXISTS ar_invoice_lines (
+  id          SERIAL PRIMARY KEY,
+  invoice_id  INTEGER NOT NULL REFERENCES ar_invoices(id) ON DELETE CASCADE,
+  account_id  INTEGER NOT NULL REFERENCES gl_accounts(id),
+  description TEXT,
+  amount      NUMERIC(14,2) NOT NULL CHECK (amount > 0)
+);
+
+ALTER TABLE ar_applications ALTER COLUMN sale_id DROP NOT NULL;
+ALTER TABLE ar_applications ADD COLUMN IF NOT EXISTS invoice_id INTEGER REFERENCES ar_invoices(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_ar_app_invoice ON ar_applications (invoice_id) WHERE invoice_id IS NOT NULL;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ar_applications_one_doc') THEN
+    ALTER TABLE ar_applications ADD CONSTRAINT ar_applications_one_doc CHECK ((sale_id IS NULL) <> (invoice_id IS NULL));
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS billing_runs (
+  plan_id       INTEGER NOT NULL REFERENCES billing_plans(id) ON DELETE CASCADE,
+  period_date   DATE NOT NULL,
+  ar_invoice_id INTEGER REFERENCES ar_invoices(id),
+  ap_bill_id    INTEGER REFERENCES ap_bills(id),
+  created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,   -- NULL: the worker
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (plan_id, period_date)
+);
+
+CREATE TABLE IF NOT EXISTS loans (
+  id                   SERIAL PRIMARY KEY,
+  name                 TEXT NOT NULL,                      -- "NCB business loan"
+  supplier_id          INTEGER NOT NULL REFERENCES suppliers(id),   -- the lender, billed through Payables
+  reference            TEXT,                               -- the lender's loan / account number
+  principal            NUMERIC(14,2) NOT NULL CHECK (principal > 0),
+  annual_rate          NUMERIC(8,4) NOT NULL CHECK (annual_rate >= 0 AND annual_rate < 100),
+  instalments          INTEGER NOT NULL CHECK (instalments BETWEEN 1 AND 600),
+  frequency            TEXT NOT NULL CHECK (frequency IN ('weekly', 'fortnightly', 'monthly', 'quarterly', 'yearly')),
+  method               TEXT NOT NULL DEFAULT 'annuity' CHECK (method IN ('annuity', 'equal_principal', 'interest_only')),
+  start_date           DATE NOT NULL,                      -- the day the money was received
+  first_due            DATE NOT NULL,
+  pay_mode             TEXT NOT NULL DEFAULT 'manual' CHECK (pay_mode IN ('manual', 'standing_order')),
+  liability_account_id INTEGER NOT NULL REFERENCES gl_accounts(id),
+  interest_account_id  INTEGER NOT NULL REFERENCES gl_accounts(id),
+  received             TEXT NOT NULL DEFAULT 'deposit' CHECK (received IN ('deposit', 'existing')),
+  deposit_txn_id       INTEGER REFERENCES bank_txns(id),
+  status               TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paid', 'cancelled')),
+  notes                TEXT,
+  created_by           INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at           TIMESTAMPTZ DEFAULT NOW(),
+  cancelled_at         TIMESTAMPTZ,
+  cancel_reason        TEXT
+);
+CREATE TABLE IF NOT EXISTS loan_instalments (
+  id         SERIAL PRIMARY KEY,
+  loan_id    INTEGER NOT NULL REFERENCES loans(id) ON DELETE CASCADE,
+  n          INTEGER NOT NULL,
+  kind       TEXT NOT NULL DEFAULT 'regular' CHECK (kind IN ('regular', 'extra')),   -- extra: a lump sum off the principal
+  due_date   DATE NOT NULL,
+  opening    NUMERIC(14,2) NOT NULL,
+  principal  NUMERIC(14,2) NOT NULL CHECK (principal >= 0),
+  interest   NUMERIC(14,2) NOT NULL CHECK (interest >= 0),
+  payment    NUMERIC(14,2) NOT NULL,
+  closing    NUMERIC(14,2) NOT NULL,
+  status     TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'billed')),
+  ap_bill_id INTEGER UNIQUE REFERENCES ap_bills(id),
+  UNIQUE (loan_id, n)
+);
+CREATE INDEX IF NOT EXISTS idx_loan_inst_due ON loan_instalments (due_date) WHERE status = 'scheduled';
+
+CREATE TABLE IF NOT EXISTS ar_billing_settings (
+  customer_id         INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  reminders           BOOLEAN NOT NULL DEFAULT false,
+  days_before         INTEGER CHECK (days_before IS NULL OR days_before BETWEEN 1 AND 30),
+  on_due              BOOLEAN NOT NULL DEFAULT true,
+  days_after          INTEGER[] NOT NULL DEFAULT '{1,7,14}',   -- never past day 14: from day 15 it is a phone call (SOP-09)
+  late_fee_type       TEXT CHECK (late_fee_type IN ('flat', 'percent')),   -- NULL: no customer-wide fee
+  late_fee_amount     NUMERIC(14,2),
+  late_fee_grace_days INTEGER NOT NULL DEFAULT 0,
+  late_fee_repeat     TEXT NOT NULL DEFAULT 'once' CHECK (late_fee_repeat IN ('once', 'monthly')),
+  late_fee_min        NUMERIC(14,2),
+  late_fee_max        NUMERIC(14,2),
+  late_fee_from       DATE,                                -- only invoices dated on or after this
+  updated_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS ar_reminder_log (
+  doc         TEXT NOT NULL,                               -- sale | invoice
+  doc_id      INTEGER NOT NULL,
+  stage       TEXT NOT NULL,                               -- before | due | after:7
+  customer_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  status      TEXT NOT NULL DEFAULT 'sending',             -- sending | sent | failed | no_email | held
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (doc, doc_id, stage)
+);
+-- Loan instalments and recurring bills paid by hand (not standing orders): the accounts
+-- email is told once, a few days before the due date. Key: 'loan:<instalment id>' or 'plan:<id>:<period>'.
+CREATE TABLE IF NOT EXISTS billing_notices (
+  key        TEXT PRIMARY KEY,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- =============================================================================
+--  CATEGORIES AND CLASSES, QuickBooks style (gl.js, books.js, billing.js, 2026-10)
+--
+--  A "category" is an account in the chart (sub-accounts for detail), as in
+--  QuickBooks, so the IIF export needs nothing new for it. What this adds:
+--    products     their own income / cost account, before their category's rule
+--    customers    a default income category and class for new invoice lines
+--    suppliers    a default class (they already have a default account)
+--    classes      QuickBooks classes: one per store location (kept in step by a
+--                 trigger) plus custom ones; every ledger line can carry one
+--    bank rules   one account (as before) or a split across several categories
+--  The product-category posting rules are filled with the current defaults
+--  (Sales / Cost of sales) for every category, so the Posting rules screen
+--  lists them ready to change; a rule already set is left alone.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS gl_classes (
+  id          SERIAL PRIMARY KEY,
+  name        TEXT NOT NULL UNIQUE,
+  location_id INTEGER UNIQUE REFERENCES store_locations(id) ON DELETE SET NULL,   -- NULL: a custom class
+  is_active   BOOLEAN NOT NULL DEFAULT true,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+INSERT INTO gl_classes (name, location_id)
+  SELECT sl.name, sl.id FROM store_locations sl
+   WHERE NOT EXISTS (SELECT 1 FROM gl_classes c WHERE c.location_id = sl.id)
+     AND NOT EXISTS (SELECT 1 FROM gl_classes c WHERE lower(c.name) = lower(sl.name))
+ON CONFLICT DO NOTHING;
+CREATE OR REPLACE FUNCTION gl_class_for_location() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM gl_classes WHERE location_id = NEW.id) THEN
+    INSERT INTO gl_classes (name, location_id)
+      VALUES (CASE WHEN EXISTS (SELECT 1 FROM gl_classes WHERE lower(name) = lower(NEW.name)) THEN NEW.name || ' (' || NEW.code || ')' ELSE NEW.name END, NEW.id)
+    ON CONFLICT DO NOTHING;
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS store_locations_class ON store_locations;
+CREATE TRIGGER store_locations_class AFTER INSERT ON store_locations FOR EACH ROW EXECUTE FUNCTION gl_class_for_location();
+
+ALTER TABLE gl_lines         ADD COLUMN IF NOT EXISTS class_id INTEGER REFERENCES gl_classes(id);
+ALTER TABLE ap_bill_lines    ADD COLUMN IF NOT EXISTS class_id INTEGER REFERENCES gl_classes(id);
+ALTER TABLE ar_invoice_lines ADD COLUMN IF NOT EXISTS class_id INTEGER REFERENCES gl_classes(id);
+ALTER TABLE bank_txn_lines   ADD COLUMN IF NOT EXISTS class_id INTEGER REFERENCES gl_classes(id);
+CREATE INDEX IF NOT EXISTS idx_gl_lines_class ON gl_lines (class_id) WHERE class_id IS NOT NULL;
+
+ALTER TABLE users     ADD COLUMN IF NOT EXISTS default_income_account_id INTEGER REFERENCES gl_accounts(id);
+ALTER TABLE users     ADD COLUMN IF NOT EXISTS default_class_id          INTEGER REFERENCES gl_classes(id);
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS default_class_id          INTEGER REFERENCES gl_classes(id);
+ALTER TABLE products  ADD COLUMN IF NOT EXISTS income_account_id         INTEGER REFERENCES gl_accounts(id);
+ALTER TABLE products  ADD COLUMN IF NOT EXISTS cogs_account_id           INTEGER REFERENCES gl_accounts(id);
+
+ALTER TABLE bank_rules ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'single';   -- single | split
+CREATE TABLE IF NOT EXISTS bank_rule_splits (
+  id         SERIAL PRIMARY KEY,
+  rule_id    INTEGER NOT NULL REFERENCES bank_rules(id) ON DELETE CASCADE,
+  sort       INTEGER NOT NULL DEFAULT 0,
+  account_id INTEGER NOT NULL REFERENCES gl_accounts(id),
+  class_id   INTEGER REFERENCES gl_classes(id),
+  kind       TEXT NOT NULL CHECK (kind IN ('amount', 'percent', 'rest')),   -- rest: whatever the others leave
+  value      NUMERIC(14,4),
+  memo       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_bank_rule_splits_rule ON bank_rule_splits (rule_id, sort);
+
+INSERT INTO gl_map (kind, key, account_id)
+  SELECT k.kind, k.key, a.id
+    FROM (SELECT DISTINCT 'revenue_category' AS kind, lower(category) AS key, 'sales' AS sk FROM products WHERE COALESCE(category, '') <> ''
+          UNION SELECT DISTINCT 'cogs_category', lower(category), 'cogs' FROM products WHERE COALESCE(category, '') <> '') k
+    JOIN gl_accounts a ON a.system_key = k.sk
+ON CONFLICT (kind, key) DO NOTHING;
+
+-- =============================================================================
+--  RECEIVE STOCK WITH THE SUPPLIER'S BILL (server.js /api/admin/receive-stock, 2026-10)
+--
+--  One screen receives a delivery (against a PO or without one) and, when the
+--  bill came with it, records that bill in Payables in the same step: Dr Goods
+--  Received Not Invoiced for what arrived, Dr GCT Recoverable, Dr Freight and
+--  Duty In, Cr Accounts Payable. When the bill's subtotal and the value received
+--  differ, staff say why and the difference goes to: back order (stays in Goods
+--  Received Not Invoiced until the rest arrives; with no PO a back-order PO is
+--  opened), bill adjustment (Purchase Price Variance), supplier credit due
+--  (Supplier Claims Receivable) or another account with a reason. ap_bills.po_id
+--  ties the bill to its PO; such a PO is not also billed through its own invoice
+--  total (that would count it twice in Payables).
+--  A bill line may now be negative (a price adjustment in our favour); every
+--  other screen still enters positive lines.
+-- =============================================================================
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('5060', 'Freight and Duty In', 'cogs', 'Freight and Duty In', 'COGS', 'freight_in')
+ON CONFLICT DO NOTHING;
+ALTER TABLE ap_bills ADD COLUMN IF NOT EXISTS po_id           INTEGER REFERENCES purchase_orders(id);
+ALTER TABLE ap_bills ADD COLUMN IF NOT EXISTS variance_kind   TEXT;            -- rounding | back_order | adjustment | credit | other
+ALTER TABLE ap_bills ADD COLUMN IF NOT EXISTS variance_amount NUMERIC(14,2);   -- bill subtotal less the value received
+ALTER TABLE ap_bills ADD COLUMN IF NOT EXISTS variance_reason TEXT;
+CREATE INDEX IF NOT EXISTS idx_ap_bills_po ON ap_bills (po_id) WHERE po_id IS NOT NULL;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ap_bill_lines_amount_check') THEN
+    ALTER TABLE ap_bill_lines DROP CONSTRAINT ap_bill_lines_amount_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ap_bill_lines_amount_nonzero') THEN
+    ALTER TABLE ap_bill_lines ADD CONSTRAINT ap_bill_lines_amount_nonzero CHECK (amount <> 0);
+  END IF;
+END $$;
+
+
+-- =============================================================================
+--  POS ADD-ONS ON THE TILL: warranty claims, redeemable instruments, terminal
+--  presence, and the ledger accounts petty cash and redeemables post to.
+--  (Ported from the D1 backend: functions/_routes/warranty.js, redemptions.js,
+--  admin_misc.js presence; migrations 0056, 0057. Routes in posaddons.js; the
+--  petty cash tables themselves are further up, under PETTY CASH.)
+--
+--  Warranty   the register is a read model over pos_sale_items.warranty_until
+--             (the till has no product_serials table: a line's serial_number
+--             is the unit). Claims are their own small workflow; a refund or a
+--             replacement still goes through the ordinary return / sale, which
+--             post to the ledger, so a claim posts nothing itself.
+--  Redeemables lottery / scratch cards sold as agent for the operator (the
+--             owner's decision, 2026-10-20): the sale line is money held for
+--             the operator (2160), not our income, and carries no cost of
+--             sales; a winning card paid out of the drawer reduces that
+--             liability. Our commission arrives when the operator settles.
+--  Presence   one heartbeat row per admin browser (terminal_id from its
+--             localStorage); a row counts as online for ~2.5 min.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS warranty_claims (
+  id                  SERIAL PRIMARY KEY,
+  product_img         TEXT,
+  serial              TEXT,
+  serial_id           INTEGER,                       -- D1 product_serials id; unused on the till
+  sale_id             INTEGER REFERENCES pos_sales(id) ON DELETE SET NULL,
+  sale_item_id        INTEGER REFERENCES pos_sale_items(id) ON DELETE SET NULL,
+  customer_name       TEXT,
+  customer_phone      TEXT,
+  fault               TEXT,
+  status              TEXT NOT NULL DEFAULT 'open'
+                        CHECK (status IN ('open', 'repair', 'replace', 'refund', 'denied', 'closed')),
+  resolution_note     TEXT,
+  return_id           INTEGER,
+  replacement_sale_id INTEGER,
+  opened_by           INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  opened_at           TIMESTAMPTZ DEFAULT NOW(),
+  resolved_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  resolved_at         TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_warranty_claims_item ON warranty_claims (sale_item_id);
+CREATE INDEX IF NOT EXISTS idx_warranty_claims_status ON warranty_claims (status, opened_at);
+CREATE INDEX IF NOT EXISTS idx_pos_sale_items_warranty ON pos_sale_items (warranty_until) WHERE warranty_until IS NOT NULL;
+
+ALTER TABLE products ADD COLUMN IF NOT EXISTS is_redeemable BOOLEAN NOT NULL DEFAULT false;
+CREATE TABLE IF NOT EXISTS redemption_instruments (
+  id               SERIAL PRIMARY KEY,
+  code             TEXT NOT NULL UNIQUE,
+  product_img      TEXT NOT NULL,
+  sale_id          INTEGER REFERENCES pos_sales(id) ON DELETE SET NULL,
+  sale_item_id     INTEGER REFERENCES pos_sale_items(id) ON DELETE SET NULL,
+  status           TEXT NOT NULL DEFAULT 'sold' CHECK (status IN ('in_stock', 'sold', 'redeemed', 'void')),
+  face_value_cents BIGINT NOT NULL DEFAULT 0,
+  payout_cents     BIGINT,
+  sold_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  redeemed_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  redeemed_at      TIMESTAMPTZ,
+  notes            TEXT,
+  received_at      TIMESTAMPTZ,                      -- set when pre-loaded; NULL when minted at sale
+  received_note    TEXT,
+  created_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_redemption_product ON redemption_instruments (product_img, status);
+CREATE INDEX IF NOT EXISTS idx_redemption_sale ON redemption_instruments (sale_id);
+
+CREATE TABLE IF NOT EXISTS admin_presence (
+  terminal_id TEXT PRIMARY KEY,
+  label       TEXT,
+  user_id     INTEGER,
+  user_name   TEXT,
+  ip          TEXT,
+  user_agent  TEXT,
+  first_seen  TIMESTAMPTZ DEFAULT NOW(),
+  last_seen   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_admin_presence_seen ON admin_presence (last_seen);
+
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('1015', 'Petty Cash',                          'asset',     'Petty Cash',                          'BANK',   'petty_cash'),
+  ('2160', 'Redeemables Held for Operator',       'liability', 'Redeemables Held for Operator',       'OCLIAB', 'redeemables_payable')
+ON CONFLICT DO NOTHING;
+
+-- =============================================================================
+--  INVOICE SCANNING AND SIGNATURES (invoice-docs.js)
+--  Signatures on A/R invoices, in person or from a one-time link, sealed with a
+--  hash of the invoice and an HMAC; the signed copy is filed in documents.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS invoice_sign_requests (
+  id            SERIAL PRIMARY KEY,
+  invoice_id    INTEGER NOT NULL REFERENCES ar_invoices(id) ON DELETE CASCADE,
+  token_sha256  TEXT NOT NULL UNIQUE,                       -- the link's token is never stored
+  sent_to       TEXT,
+  sent_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  expires_at    TIMESTAMPTZ NOT NULL,
+  used_at       TIMESTAMPTZ,
+  cancelled_at  TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_sign_requests_invoice ON invoice_sign_requests (invoice_id);
+CREATE TABLE IF NOT EXISTS invoice_signatures (
+  id              SERIAL PRIMARY KEY,
+  invoice_id      INTEGER NOT NULL REFERENCES ar_invoices(id) ON DELETE CASCADE,
+  method          TEXT NOT NULL CHECK (method IN ('in_person', 'remote')),
+  signer_name     TEXT NOT NULL,
+  signer_email    TEXT,
+  image           TEXT NOT NULL,                            -- data:image/png;base64,...
+  content_sha256  TEXT NOT NULL,                            -- the invoice as signed
+  seal            TEXT NOT NULL,                            -- HMAC over invoice, hash, method, signer, time, picture, email, ip, witness, request
+  ip              TEXT,
+  user_agent      TEXT,
+  witnessed_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  request_id      INTEGER REFERENCES invoice_sign_requests(id) ON DELETE SET NULL,
+  document_id     INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  signed_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_signatures_invoice ON invoice_signatures (invoice_id);
+
+-- =============================================================================
+--  BUDGET AND FORECAST (budget.js, 2026-10)
+--  Budgets per P&L account and month (class_id NULL: the whole business), the
+--  cash forecast's own one-off lines, and the investments tracked for ROI.
+--  Settings (financial year start, forecast assumptions, which expense
+--  accounts count as variable for break-even) are warehouse_settings keys
+--  starting budget_ / forecast_ / breakeven_.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS gl_budgets (
+  id          SERIAL PRIMARY KEY,
+  account_id  INTEGER NOT NULL REFERENCES gl_accounts(id) ON DELETE CASCADE,
+  class_id    INTEGER REFERENCES gl_classes(id) ON DELETE CASCADE,
+  month       DATE NOT NULL CHECK (EXTRACT(DAY FROM month) = 1),   -- first of the month
+  amount      NUMERIC(14,2) NOT NULL DEFAULT 0,
+  updated_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_gl_budgets ON gl_budgets (account_id, COALESCE(class_id, 0), month);
+CREATE TABLE IF NOT EXISTS cash_forecast_items (
+  id          SERIAL PRIMARY KEY,
+  day         DATE NOT NULL,                     -- the week it falls in is worked out from this
+  direction   TEXT NOT NULL CHECK (direction IN ('in', 'out')),
+  amount      NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+  description TEXT NOT NULL,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_cash_forecast_items_day ON cash_forecast_items (day);
+CREATE TABLE IF NOT EXISTS investments (
+  id              SERIAL PRIMARY KEY,
+  name            TEXT NOT NULL,                  -- "Delivery van", "Spanish Town branch"
+  class_id        INTEGER REFERENCES gl_classes(id) ON DELETE SET NULL,   -- its actual profit, when set
+  start_date      DATE NOT NULL,
+  amount          NUMERIC(14,2) NOT NULL CHECK (amount > 0),              -- what was invested
+  monthly_profit  NUMERIC(14,2) NOT NULL DEFAULT 0,                       -- what it is expected to earn a month
+  notes           TEXT,
+  status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'closed')),
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+-- Saved budget versions: a named copy of one year's budget (whole business or
+-- a class) -- "Original 2027", "Revised after Q1" -- kept while the working
+-- budget in gl_budgets is changed. data = {months: [12 x 'YYYY-MM-01'],
+-- rows: [{account_id, amounts[12]}]}, in J$. Putting one back copies it into
+-- gl_budgets (after keeping the working budget as a version of its own).
+CREATE TABLE IF NOT EXISTS gl_budget_versions (
+  id          SERIAL PRIMARY KEY,
+  year        INTEGER NOT NULL,
+  class_id    INTEGER REFERENCES gl_classes(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  notes       TEXT,
+  data        JSONB NOT NULL,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_gl_budget_versions_year ON gl_budget_versions (year, class_id);
+-- Notes on each line of a year's budget (budget.js "BUDGET FROM HISTORY"):
+-- the kind of cost (growth, fixed, disc, estimate, none, manual), how a budget
+-- made from history worked the figure out (basis), and the words on it (note).
+-- edited: a manager wrote the note, so recreating the budget keeps it.
+CREATE TABLE IF NOT EXISTS gl_budget_notes (
+  id          SERIAL PRIMARY KEY,
+  year        INTEGER NOT NULL,
+  class_id    INTEGER REFERENCES gl_classes(id) ON DELETE CASCADE,
+  account_id  INTEGER NOT NULL REFERENCES gl_accounts(id) ON DELETE CASCADE,
+  kind        TEXT NOT NULL CHECK (kind IN ('growth', 'fixed', 'disc', 'estimate', 'none', 'manual')),
+  basis       TEXT,
+  note        TEXT,
+  edited      BOOLEAN NOT NULL DEFAULT false,
+  updated_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_gl_budget_notes ON gl_budget_notes (year, COALESCE(class_id, 0), account_id);
+-- Financial health reports kept for comparison over time: the report exactly as
+-- it was worked out from the books that day (budget.js buildHealth).
+CREATE TABLE IF NOT EXISTS financial_health_reports (
+  id          SERIAL PRIMARY KEY,
+  as_of       DATE NOT NULL,
+  score       INTEGER,
+  report      JSONB NOT NULL,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+-- QuickBooks bank register import (books.js): register lines join the
+-- statement review list with where they came from, QuickBooks's payee and
+-- number, the account its Split column names here, and a note when the line
+-- needs Pay Bills or Receive Payment instead.
+ALTER TABLE bank_feed_lines ADD COLUMN IF NOT EXISTS source             TEXT NOT NULL DEFAULT 'bank';   -- bank | quickbooks
+ALTER TABLE bank_feed_lines ADD COLUMN IF NOT EXISTS payee              TEXT;
+ALTER TABLE bank_feed_lines ADD COLUMN IF NOT EXISTS reference          TEXT;
+ALTER TABLE bank_feed_lines ADD COLUMN IF NOT EXISTS suggest_account_id INTEGER REFERENCES gl_accounts(id);
+ALTER TABLE bank_feed_lines ADD COLUMN IF NOT EXISTS note               TEXT;
+-- Bills brought over from QuickBooks (books.js import): a later import of the
+-- Unpaid Bills report compares itself with these, so a changed bill is voided
+-- and entered again as it is now, and one paid in QuickBooks can be voided.
+ALTER TABLE ap_bills ADD COLUMN IF NOT EXISTS source TEXT;   -- NULL: entered here | quickbooks
+UPDATE ap_bills SET source = 'quickbooks' WHERE source IS NULL AND memo LIKE 'Imported from QuickBooks (%';
+-- Manage users (admin.html): past employees are archived rather than deleted,
+-- with the day they left and why, so their sales, time and pay history keep a
+-- name. Archiving also disables sign-in and removes the till PIN.
+-- extra_roles: further limited roles a person holds on top of admin_role, the
+-- QuickBooks way of giving someone two jobs. Each adds the screens it opens;
+-- manager rights still come only from admin_role.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS archived_at    TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS left_on        DATE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS archive_reason TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS extra_roles    JSONB NOT NULL DEFAULT '[]';
+-- Careers (careers.js): what a posting asks for, and what applicants send.
+-- documents: [{key, label, required}]  questions: [{key, q, kind: text|yesno, required}]
+ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS openings    INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS documents   JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS questions   JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS cv_required BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS updated_at  TIMESTAMPTZ;
+-- ref: the number quoted to the applicant (VA-26-0042). token: the private
+-- link to their status page, cleared when the application is deleted.
+ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS ref     TEXT;
+ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS token   TEXT;
+ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS answers JSONB NOT NULL DEFAULT '[]';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_job_applications_token ON job_applications (token) WHERE token IS NOT NULL;
+-- Files sent with an application or added later (by the applicant from their
+-- link, or by staff for paper copies). Stored like CVs, in data/careers-cvs.
+CREATE TABLE IF NOT EXISTS application_documents (
+  id              SERIAL PRIMARY KEY,
+  application_id  INTEGER NOT NULL REFERENCES job_applications(id) ON DELETE CASCADE,
+  doc_key         TEXT NOT NULL,          -- the job's document key, or 'other'
+  label           TEXT NOT NULL,
+  file            TEXT NOT NULL,          -- random name in data/careers-cvs (never served directly)
+  orig_name       TEXT,
+  bytes           INTEGER,
+  via             TEXT NOT NULL DEFAULT 'apply',   -- apply | applicant | staff
+  uploaded_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_application_documents_app ON application_documents (application_id);
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('careers_notify_email', ''),   -- told about every new application; blank for none
+  ('careers_templates', '{}')     -- edited email templates; blank ones use the defaults in careers.js
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Team chat, calls and staff calendar (team.js). Staff only. The All staff
+--  group (kind 'company') follows the active staff list automatically.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS team_conversations (
+  id               SERIAL PRIMARY KEY,
+  kind             TEXT NOT NULL CHECK (kind IN ('direct', 'group', 'company')),
+  title            TEXT,
+  description      TEXT,
+  direct_key       TEXT,                           -- "lowId:highId" for one-to-one chats
+  only_admins_post BOOLEAN NOT NULL DEFAULT FALSE,
+  event_id         INTEGER,                        -- the calendar event this group was made for
+  created_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  last_message_at  TIMESTAMPTZ,
+  archived_at      TIMESTAMPTZ                     -- closed by a group admin or management
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_team_conv_direct ON team_conversations (direct_key) WHERE direct_key IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_team_conv_company ON team_conversations (kind) WHERE kind = 'company';
+CREATE TABLE IF NOT EXISTS team_members (
+  conversation_id  INTEGER NOT NULL REFERENCES team_conversations(id) ON DELETE CASCADE,
+  user_id          INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role             TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member', 'admin')),
+  joined_at        TIMESTAMPTZ DEFAULT NOW(),
+  left_at          TIMESTAMPTZ,
+  last_read_id     BIGINT NOT NULL DEFAULT 0,
+  muted            BOOLEAN NOT NULL DEFAULT FALSE,
+  pinned           BOOLEAN NOT NULL DEFAULT FALSE,
+  PRIMARY KEY (conversation_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members (user_id) WHERE left_at IS NULL;
+CREATE TABLE IF NOT EXISTS team_messages (
+  id               BIGSERIAL PRIMARY KEY,
+  conversation_id  INTEGER NOT NULL REFERENCES team_conversations(id) ON DELETE CASCADE,
+  sender_id        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  kind             TEXT NOT NULL DEFAULT 'text' CHECK (kind IN ('text', 'file', 'memo', 'call', 'system')),
+  body             TEXT,
+  subject          TEXT,                           -- memos
+  require_ack      BOOLEAN NOT NULL DEFAULT FALSE,
+  meta             JSONB,                          -- calls: media, seconds, missed; voice notes: seconds
+  file_path        TEXT,                           -- random name in data/team-files (never served directly)
+  file_name        TEXT,
+  file_type        TEXT,
+  file_size        INTEGER,
+  reply_to         BIGINT REFERENCES team_messages(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  edited_at        TIMESTAMPTZ,
+  original_body    TEXT,                           -- the first wording of an edited message, for management
+  deleted_at       TIMESTAMPTZ,                    -- hidden from members, still visible to management
+  deleted_by       INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_team_messages_conv ON team_messages (conversation_id, id);
+CREATE INDEX IF NOT EXISTS idx_team_messages_sender ON team_messages (sender_id, created_at);
+CREATE TABLE IF NOT EXISTS team_reactions (
+  message_id  BIGINT NOT NULL REFERENCES team_messages(id) ON DELETE CASCADE,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  emoji       TEXT NOT NULL,
+  PRIMARY KEY (message_id, user_id, emoji)
+);
+CREATE TABLE IF NOT EXISTS team_acks (            -- memo acknowledgements
+  message_id  BIGINT NOT NULL REFERENCES team_messages(id) ON DELETE CASCADE,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  at          TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (message_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS team_presence (
+  user_id      INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  status       TEXT NOT NULL DEFAULT 'available',  -- available | busy | away | dnd
+  status_text  TEXT,
+  last_seen    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS team_notices (
+  id               SERIAL PRIMARY KEY,
+  user_id          INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind             TEXT NOT NULL,                  -- memo | event | reminder | call
+  title            TEXT NOT NULL,
+  body             TEXT,
+  conversation_id  INTEGER REFERENCES team_conversations(id) ON DELETE CASCADE,
+  message_id       BIGINT REFERENCES team_messages(id) ON DELETE CASCADE,
+  event_id         INTEGER,
+  urgent           BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  read_at          TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_team_notices_user ON team_notices (user_id, id DESC);
+CREATE TABLE IF NOT EXISTS team_calls (
+  id               SERIAL PRIMARY KEY,
+  conversation_id  INTEGER NOT NULL REFERENCES team_conversations(id) ON DELETE CASCADE,
+  started_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  media            TEXT NOT NULL DEFAULT 'audio',  -- audio | video
+  started_at       TIMESTAMPTZ DEFAULT NOW(),
+  ended_at         TIMESTAMPTZ,
+  answered         BOOLEAN NOT NULL DEFAULT FALSE,
+  seconds          INTEGER NOT NULL DEFAULT 0,
+  joined           JSONB NOT NULL DEFAULT '[]'::jsonb
+);
+CREATE TABLE IF NOT EXISTS team_audit (           -- management reading, searching, deleting, exporting
+  id               SERIAL PRIMARY KEY,
+  user_id          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  action           TEXT NOT NULL,
+  conversation_id  INTEGER REFERENCES team_conversations(id) ON DELETE SET NULL,
+  message_id       BIGINT,
+  detail           TEXT,
+  at               TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS team_events (
+  id               SERIAL PRIMARY KEY,
+  title            TEXT NOT NULL,
+  description      TEXT,
+  location         TEXT,
+  kind             TEXT NOT NULL DEFAULT 'meeting',  -- meeting | training | shift | deadline | leave | holiday | social | other
+  all_day          BOOLEAN NOT NULL DEFAULT FALSE,
+  starts_at        TIMESTAMPTZ NOT NULL,
+  ends_at          TIMESTAMPTZ NOT NULL,
+  visibility       TEXT NOT NULL DEFAULT 'invitees' CHECK (visibility IN ('company', 'invitees', 'private')),
+  recurrence       TEXT NOT NULL DEFAULT 'none',     -- none | daily | weekdays | weekly | monthly
+  recur_until      DATE,
+  remind_minutes   INTEGER NOT NULL DEFAULT 15,
+  video            BOOLEAN NOT NULL DEFAULT FALSE,   -- online: join a call in the event's chat
+  conversation_id  INTEGER REFERENCES team_conversations(id) ON DELETE SET NULL,
+  created_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ,
+  cancelled_at     TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_team_events_start ON team_events (starts_at);
+CREATE TABLE IF NOT EXISTS team_event_attendees (
+  event_id   INTEGER NOT NULL REFERENCES team_events(id) ON DELETE CASCADE,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  response   TEXT NOT NULL DEFAULT 'pending',      -- pending | yes | no | maybe
+  PRIMARY KEY (event_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS team_event_reminders ( -- one reminder per occurrence
+  event_id   INTEGER NOT NULL REFERENCES team_events(id) ON DELETE CASCADE,
+  occurs_at  TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (event_id, occurs_at)
+);
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('team_ice_servers', ''),       -- JSON list of STUN/TURN servers for calls; blank for the default
+  ('team_retention_days', '0')    -- delete chat messages older than this (memos kept); 0 keeps them
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================================================
+--  Time clock (cont.) -- the punch log, lateness letters, leaving time
+--
+--  clock_events: every clock in / out / break, and every refused try (a wrong
+--  PIN, someone not allowed off site), with where it came from: the device id
+--  (a random id the browser keeps), IP address, the browser, the till station,
+--  the location the device gave (and how far that is from the shop), and the
+--  device's own clock beside the server's. attendance keeps the in / out
+--  summary of the same.
+--  clock_warnings: lateness letters. Late on N days in a month (3 by default)
+--  issues a letter, filed in the person's staff file and sent to them (and the
+--  managers) as a notice and by email; they acknowledge it. Excused late days
+--  do not count; a manager can withdraw a letter.
+--  At the end of the shift people get a leaving window before the automatic
+--  clock out; whoever stayed on can log the extra time afterwards (approved
+--  like overtime).
+-- =============================================================================
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS ip_in        TEXT;
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS ip_out       TEXT;
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS device_in    TEXT;
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS device_out   TEXT;
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS loc_in       JSONB;     -- {lat, lng, acc, dist}
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS loc_out      JSONB;
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS late_minutes INTEGER;   -- first clock-in of the day, past the late allowance
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS late_excused BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS late_excused_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS late_excuse  TEXT;
+
+CREATE TABLE IF NOT EXISTS clock_events (
+  id             BIGSERIAL PRIMARY KEY,
+  at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  user_id        INTEGER REFERENCES users(id) ON DELETE SET NULL,   -- null: not recognised
+  attendance_id  BIGINT REFERENCES attendance(id) ON DELETE SET NULL,
+  action         TEXT NOT NULL,          -- in | out | break_start | lunch_start | break_end | auto_out | extra_time
+  result         TEXT NOT NULL DEFAULT 'ok',   -- ok | refused
+  message        TEXT,
+  method         TEXT,                   -- pin | password | badge | biometric | session | auto
+  mode           TEXT,                   -- onsite | remote
+  on_site        BOOLEAN,
+  ip             TEXT,
+  forwarded_for  TEXT,
+  device_id      TEXT,
+  device_name    TEXT,
+  user_agent     TEXT,
+  platform       TEXT,                   -- e.g. "Windows · Chrome"
+  station        TEXT,                   -- the bound till station, or the terminal name
+  lat            DOUBLE PRECISION,
+  lng            DOUBLE PRECISION,
+  accuracy_m     INTEGER,
+  distance_m     INTEGER,                -- from the shop, when the shop's location is set
+  location_status TEXT,                  -- given | denied | unavailable | off
+  client_time    TIMESTAMPTZ,            -- the device's clock
+  client_tz      TEXT,
+  shift_start    TIMESTAMPTZ,
+  shift_end      TIMESTAMPTZ,
+  late_minutes   INTEGER,
+  photo          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_clock_events_at ON clock_events (at DESC);
+CREATE INDEX IF NOT EXISTS idx_clock_events_user ON clock_events (user_id, at DESC);
+
+CREATE TABLE IF NOT EXISTS clock_warnings (
+  id              SERIAL PRIMARY KEY,
+  user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  month           DATE NOT NULL,             -- first day of the month
+  level           INTEGER NOT NULL DEFAULT 1, -- 1 at N late days, 2 at 2N, ...
+  late_count      INTEGER NOT NULL,
+  late_days       JSONB NOT NULL,            -- [{day, minutes, clock_in_at, shift_start}]
+  letter_html     TEXT,
+  document_id     INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  status          TEXT NOT NULL DEFAULT 'issued',   -- issued | acknowledged | withdrawn
+  issued_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,  -- null: issued automatically
+  issued_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  acknowledged_at TIMESTAMPTZ,
+  ack_note        TEXT,
+  withdrawn_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  withdrawn_at    TIMESTAMPTZ,
+  withdrawn_reason TEXT,
+  UNIQUE (user_id, month, level)
+);
+
+INSERT INTO warehouse_settings (key, value) VALUES
+  ('clock_late_warn', 'letter'),        -- letter: letter + notice | notice: notice only | off
+  ('clock_late_warn_count', '3'),       -- late days in a month before a letter
+  ('clock_leave_minutes', '15'),        -- after the shift ends, time to finish and leave before the automatic clock out
+  ('clock_location', 'ask'),            -- off | ask (record it when the device allows) | required
+  ('clock_shop_lat', ''),
+  ('clock_shop_lng', ''),
+  ('clock_shop_radius_m', '200')        -- farther than this from the shop is flagged
+ON CONFLICT (key) DO NOTHING;
+ALTER TABLE team_notices ADD COLUMN IF NOT EXISTS link TEXT;   -- a page in the system the notice opens (lateness letter, a request)
+
+-- =============================================================================
+--  Training record per employee (training.js)
+--
+--  Besides the lessons and quizzes: training done anywhere else (a course, a
+--  certificate or licence, on-the-job training signed off by a trainer, an
+--  induction, health and safety), with hours, result, expiry and the
+--  certificate file; training assigned to someone with a due date (a lesson,
+--  which is done when they pass its quiz, or anything else, marked done); and
+--  which lessons each person has opened. All of it can be searched.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS training_records (
+  id              SERIAL PRIMARY KEY,
+  user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL DEFAULT 'course',   -- course | certification | on_the_job | induction | safety | external | other
+  title           TEXT NOT NULL,
+  provider        TEXT,                             -- school, supplier, body that issued it
+  trainer_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  trainer_name    TEXT,                             -- someone outside the system
+  completed_on    DATE,
+  hours           NUMERIC(6,2),
+  result          TEXT NOT NULL DEFAULT 'completed', -- completed | passed | failed | attended | in progress
+  score           TEXT,
+  expires_on      DATE,
+  certificate_no  TEXT,
+  notes           TEXT,
+  file_name       TEXT,
+  file_mime       TEXT,
+  file_storage    TEXT,                             -- under data/training-files
+  expiry_reminded DATE,                             -- the expiry this reminder was sent for
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at      TIMESTAMPTZ,
+  deleted_at      TIMESTAMPTZ,
+  deleted_by      INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_training_records_user ON training_records (user_id) WHERE deleted_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS training_assignments (
+  id            SERIAL PRIMARY KEY,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  module_id     INTEGER REFERENCES training_modules(id) ON DELETE CASCADE,  -- a lesson; done when its quiz is passed (or read, for reference lessons)
+  title         TEXT,                                                       -- anything else
+  due_on        DATE,
+  note          TEXT,
+  assigned_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  assigned_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  done_at       TIMESTAMPTZ,                                                -- marked done (not a lesson)
+  done_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  cancelled_at  TIMESTAMPTZ,
+  cancelled_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reminded_on   DATE
+);
+CREATE INDEX IF NOT EXISTS idx_training_assignments_user ON training_assignments (user_id) WHERE cancelled_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS training_views (       -- who opened which lesson
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  module_id  INTEGER NOT NULL REFERENCES training_modules(id) ON DELETE CASCADE,
+  first_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  views      INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (user_id, module_id)
+);
+
+-- =============================================================================
+--  Emergency alarm (team.js): the staff 911. Any staff member raises one; it
+--  sounds on every staff screen until each person answers, and stays up until
+--  the person who raised it or a manager gives the all clear.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS team_emergencies (
+  id          SERIAL PRIMARY KEY,
+  kind        TEXT NOT NULL,                      -- fire | medical | robbery | evacuate | other
+  location    TEXT,                               -- where in the shop
+  details     TEXT,
+  silent      BOOLEAN NOT NULL DEFAULT FALSE,     -- banner only, no siren (a robbery)
+  raised_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  raised_at   TIMESTAMPTZ DEFAULT NOW(),
+  raised_ip   TEXT,
+  ended_at    TIMESTAMPTZ,
+  ended_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  outcome     TEXT,                               -- all_clear | false_alarm
+  end_note    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_team_emergencies_open ON team_emergencies (id) WHERE ended_at IS NULL;
+CREATE TABLE IF NOT EXISTS team_emergency_replies (  -- the roll call
+  emergency_id  INTEGER NOT NULL REFERENCES team_emergencies(id) ON DELETE CASCADE,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status        TEXT NOT NULL CHECK (status IN ('safe', 'responding', 'help')),
+  note          TEXT,
+  at            TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (emergency_id, user_id)
+);
+
+-- =============================================================================
+--  People & HR (hr.js, people.html): the staff file beside the login.
+--  Personal details, emergency contacts, the job (title, department, manager,
+--  start date, contract), probation and confirmation, every promotion,
+--  transfer and pay change, warnings and discipline, leave allowance changes,
+--  reviews and goals, onboarding and exit checklists, and an audit of every
+--  HR change. Pay itself stays in Payroll (payroll_employees), leave days
+--  taken in Attendance (staff_leave), training in Training, papers in the
+--  Document centre (linked to the staff member).
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS hr_employees (
+  user_id          INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  job_title        TEXT,
+  department_id    INTEGER REFERENCES departments(id) ON DELETE SET NULL,
+  manager_user_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  start_date       DATE,
+  contract_type    TEXT NOT NULL DEFAULT 'permanent',  -- permanent | fixed_term | part_time | casual | contractor | intern
+  contract_end     DATE,                               -- fixed term: when it ends
+  work_location    TEXT,
+  status           TEXT NOT NULL DEFAULT 'active',     -- probation | active | notice | left
+  probation_months INTEGER NOT NULL DEFAULT 3,
+  probation_end    DATE,
+  confirmed_on     DATE,
+  confirmed_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  date_of_birth    DATE,
+  personal_email   TEXT,
+  personal_phone   TEXT,
+  address          TEXT,
+  parish           TEXT,
+  notes            TEXT,
+  from_application INTEGER REFERENCES job_applications(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  updated_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_employees_manager ON hr_employees (manager_user_id);
+
+CREATE TABLE IF NOT EXISTS hr_contacts (             -- emergency contacts / next of kin
+  id            SERIAL PRIMARY KEY,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  relationship  TEXT,
+  phone         TEXT,
+  alt_phone     TEXT,
+  email         TEXT,
+  address       TEXT,
+  is_primary    BOOLEAN NOT NULL DEFAULT false,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_contacts_user ON hr_contacts (user_id);
+
+-- One line per change to the job or pay: start, promotion, transfer, pay rise...
+CREATE TABLE IF NOT EXISTS hr_job_history (
+  id                 SERIAL PRIMARY KEY,
+  user_id            INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind               TEXT NOT NULL,                  -- start | promotion | transfer | pay_change | title_change | confirmation | demotion | other
+  effective_date     DATE NOT NULL,
+  job_title          TEXT,
+  department_id      INTEGER REFERENCES departments(id) ON DELETE SET NULL,
+  manager_user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  salary_annual      NUMERIC(14,2),                  -- J$ a year
+  hourly_rate        NUMERIC(10,2),                  -- J$ an hour
+  reason             TEXT,
+  applied_to_payroll BOOLEAN NOT NULL DEFAULT false,
+  by_user            INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at         TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_job_history_user ON hr_job_history (user_id, effective_date);
+
+-- Warnings, discipline and commendations.
+CREATE TABLE IF NOT EXISTS hr_cases (
+  id                 SERIAL PRIMARY KEY,
+  user_id            INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind               TEXT NOT NULL,                  -- counselling | verbal_warning | written_warning | final_warning | suspension | dismissal | commendation
+  incident_date      DATE,
+  summary            TEXT NOT NULL,
+  details            TEXT,
+  action             TEXT,                           -- what was decided / improvement expected
+  expires_on         DATE,                           -- a warning stops counting after this
+  status             TEXT NOT NULL DEFAULT 'open',   -- open | closed | appealed | withdrawn
+  employee_response  TEXT,
+  acknowledged_at    TIMESTAMPTZ,
+  document_id        INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  issued_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at         TIMESTAMPTZ DEFAULT NOW(),
+  closed_at          TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_hr_cases_user ON hr_cases (user_id);
+
+CREATE TABLE IF NOT EXISTS hr_reviews (
+  id                 SERIAL PRIMARY KEY,
+  user_id            INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind               TEXT NOT NULL DEFAULT 'annual', -- probation | annual | midyear | other
+  period_from        DATE,
+  period_to          DATE,
+  due_on             DATE,
+  reviewer_id        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  status             TEXT NOT NULL DEFAULT 'draft',  -- draft | done | acknowledged
+  ratings            JSONB NOT NULL DEFAULT '[]'::jsonb,  -- [{key, label, score 1-5, comment}]
+  overall            SMALLINT,
+  strengths          TEXT,
+  improve            TEXT,
+  comments           TEXT,
+  employee_comments  TEXT,
+  outcome            TEXT,                           -- probation: confirm | extend | end
+  completed_at       TIMESTAMPTZ,
+  acknowledged_at    TIMESTAMPTZ,
+  created_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at         TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_reviews_user ON hr_reviews (user_id);
+CREATE TABLE IF NOT EXISTS hr_goals (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  review_id   INTEGER REFERENCES hr_reviews(id) ON DELETE SET NULL,
+  title       TEXT NOT NULL,
+  measure     TEXT,                                  -- how we know it is done
+  due_on      DATE,
+  status      TEXT NOT NULL DEFAULT 'open',          -- open | done | dropped
+  progress    SMALLINT NOT NULL DEFAULT 0,           -- 0-100
+  note        TEXT,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_goals_user ON hr_goals (user_id);
+
+-- Days added to or taken off the yearly allowance (carried over, long service...).
+-- The allowance itself is set in Payroll (per person or the shop setting); days
+-- taken come from Attendance > Leave.
+CREATE TABLE IF NOT EXISTS hr_leave_adjustments (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  year        INTEGER NOT NULL,
+  kind        TEXT NOT NULL DEFAULT 'vacation',      -- vacation | sick
+  days        NUMERIC(5,2) NOT NULL,
+  reason      TEXT,
+  by_user     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_leave_adj_user ON hr_leave_adjustments (user_id, year);
+
+CREATE TABLE IF NOT EXISTS hr_exits (
+  id              SERIAL PRIMARY KEY,
+  user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL DEFAULT 'resignation',  -- resignation | termination | redundancy | end_of_contract | retirement | other
+  notice_date     DATE,
+  last_day        DATE NOT NULL,
+  reason          TEXT,
+  rehire          BOOLEAN,                              -- would we take them back
+  exit_interview  TEXT,
+  status          TEXT NOT NULL DEFAULT 'open',         -- open | done | cancelled
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  completed_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  completed_at    TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_hr_exits_user ON hr_exits (user_id);
+
+-- Checklists: onboarding a new starter, offboarding a leaver.
+CREATE TABLE IF NOT EXISTS hr_tasks (
+  id           SERIAL PRIMARY KEY,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind         TEXT NOT NULL DEFAULT 'onboarding',    -- onboarding | offboarding | other
+  exit_id      INTEGER REFERENCES hr_exits(id) ON DELETE CASCADE,
+  title        TEXT NOT NULL,
+  link         TEXT,                                  -- the screen where it is done
+  due_on       DATE,
+  assignee_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  sort         INTEGER NOT NULL DEFAULT 0,
+  done_at      TIMESTAMPTZ,
+  done_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  note         TEXT,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_tasks_user ON hr_tasks (user_id, kind);
+
+-- Every HR and hiring decision: who, when, what, and why.
+CREATE TABLE IF NOT EXISTS hr_audit (
+  id              BIGSERIAL PRIMARY KEY,
+  user_id         INTEGER REFERENCES users(id) ON DELETE SET NULL,           -- the employee, if any
+  application_id  INTEGER REFERENCES job_applications(id) ON DELETE SET NULL,
+  entity          TEXT NOT NULL,                     -- profile | contact | job | case | review | goal | leave | exit | task | requisition | job_post | application | interview | score | reference | offer | hire
+  entity_id       INTEGER,
+  action          TEXT NOT NULL,
+  detail          TEXT,
+  by_user         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  at              TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_audit_user ON hr_audit (user_id, at);
+CREATE INDEX IF NOT EXISTS idx_hr_audit_app ON hr_audit (application_id, at);
+
+-- =============================================================================
+--  Hiring, end to end (careers.js): requisition and approval, posting,
+--  applications, screening, shortlist, interviews with panels and
+--  scorecards, comparison, references, offer and acceptance, hire.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS job_requisitions (
+  id                SERIAL PRIMARY KEY,
+  title             TEXT NOT NULL,
+  department        TEXT,
+  kind              TEXT NOT NULL DEFAULT 'full_time',
+  openings          INTEGER NOT NULL DEFAULT 1,
+  reason            TEXT NOT NULL DEFAULT 'new',        -- new | replacement | temporary
+  replaces_user_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  salary_min        NUMERIC(14,2),                      -- J$ a year
+  salary_max        NUMERIC(14,2),
+  start_by          DATE,
+  justification     TEXT,
+  hiring_manager_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  status            TEXT NOT NULL DEFAULT 'draft',      -- draft | submitted | approved | rejected | cancelled | filled
+  requested_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  submitted_at      TIMESTAMPTZ,
+  decided_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  decided_at        TIMESTAMPTZ,
+  decision_note     TEXT,
+  created_at        TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS requisition_id INTEGER REFERENCES job_requisitions(id) ON DELETE SET NULL;
+ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS hiring_manager_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS scorecard JSONB NOT NULL DEFAULT '[]'::jsonb;   -- [{key, label}] interview criteria
+
+ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS screen_result TEXT;       -- pass | maybe | fail
+ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS screen_notes TEXT;
+ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS screened_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS screened_at TIMESTAMPTZ;
+ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS reject_reason TEXT;
+
+CREATE TABLE IF NOT EXISTS hr_interviews (
+  id              SERIAL PRIMARY KEY,
+  application_id  INTEGER NOT NULL REFERENCES job_applications(id) ON DELETE CASCADE,
+  round           INTEGER NOT NULL DEFAULT 1,
+  mode            TEXT NOT NULL DEFAULT 'in_person',   -- in_person | phone | video
+  starts_at       TIMESTAMPTZ NOT NULL,
+  minutes         INTEGER NOT NULL DEFAULT 45,
+  location        TEXT,
+  status          TEXT NOT NULL DEFAULT 'scheduled',   -- scheduled | done | cancelled | no_show
+  event_id        INTEGER REFERENCES team_events(id) ON DELETE SET NULL,
+  notes           TEXT,
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_interviews_app ON hr_interviews (application_id);
+CREATE TABLE IF NOT EXISTS hr_interview_panel (
+  interview_id  INTEGER NOT NULL REFERENCES hr_interviews(id) ON DELETE CASCADE,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY (interview_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS hr_interview_scores (
+  id            SERIAL PRIMARY KEY,
+  interview_id  INTEGER NOT NULL REFERENCES hr_interviews(id) ON DELETE CASCADE,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  scores        JSONB NOT NULL DEFAULT '[]'::jsonb,    -- [{key, label, score 1-5, comment}]
+  overall       SMALLINT,
+  recommend     TEXT,                                  -- strong_yes | yes | no | strong_no
+  strengths     TEXT,
+  concerns      TEXT,
+  submitted_at  TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (interview_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS hr_references (
+  id              SERIAL PRIMARY KEY,
+  application_id  INTEGER NOT NULL REFERENCES job_applications(id) ON DELETE CASCADE,
+  referee_name    TEXT NOT NULL,
+  relationship    TEXT,
+  company         TEXT,
+  phone           TEXT,
+  email           TEXT,
+  status          TEXT NOT NULL DEFAULT 'pending',     -- pending | asked | done | unreachable
+  asked_at        TIMESTAMPTZ,
+  done_at         TIMESTAMPTZ,
+  summary         TEXT,                                -- what they said
+  rating          TEXT,                                -- good | mixed | poor
+  would_rehire    BOOLEAN,
+  by_user         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_references_app ON hr_references (application_id);
+CREATE TABLE IF NOT EXISTS hr_offers (
+  id               SERIAL PRIMARY KEY,
+  application_id   INTEGER NOT NULL REFERENCES job_applications(id) ON DELETE CASCADE,
+  job_title        TEXT NOT NULL,
+  department_id    INTEGER REFERENCES departments(id) ON DELETE SET NULL,
+  manager_user_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  start_date       DATE,
+  contract_type    TEXT NOT NULL DEFAULT 'permanent',
+  contract_end     DATE,
+  pay_type         TEXT NOT NULL DEFAULT 'salary',     -- salary | hourly
+  salary_annual    NUMERIC(14,2),
+  hourly_rate      NUMERIC(10,2),
+  frequency        TEXT NOT NULL DEFAULT 'monthly',    -- weekly | fortnightly | monthly
+  probation_months INTEGER NOT NULL DEFAULT 3,
+  hours            TEXT,
+  benefits         TEXT,
+  conditions       TEXT,
+  respond_by       DATE,
+  status           TEXT NOT NULL DEFAULT 'draft',      -- draft | pending_approval | approved | sent | accepted | declined | withdrawn
+  approved_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  approved_at      TIMESTAMPTZ,
+  sent_at          TIMESTAMPTZ,
+  token            TEXT UNIQUE,                        -- the candidate's private link
+  responded_at     TIMESTAMPTZ,
+  response_name    TEXT,                               -- the name they typed to accept
+  response_note    TEXT,
+  response_ip      TEXT,
+  document_id      INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  created_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_offers_app ON hr_offers (application_id);
+
+-- =============================================================================
+--  People & HR, part 2: interviewers on jobs, more employee fields (as in
+--  the QuickBooks employee list), employment contracts, and documents sent
+--  to staff for signature (hr.js; signed by the staff member in My HR file
+--  or from a one-time link, sealed like signed invoices, filed in the
+--  Document centre).
+-- =============================================================================
+ALTER TABLE job_requisitions ADD COLUMN IF NOT EXISTS interviewer_ids INTEGER[] NOT NULL DEFAULT '{}';
+ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS interviewer_ids INTEGER[] NOT NULL DEFAULT '{}';
+
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS gender TEXT;
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS employee_type TEXT NOT NULL DEFAULT 'regular';   -- regular | officer | owner | statutory
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS mobile TEXT;
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS release_date DATE;
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS qb_name TEXT;                                   -- the name in QuickBooks, for later imports
+
+CREATE TABLE IF NOT EXISTS hr_contracts (
+  id               SERIAL PRIMARY KEY,
+  user_id          INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind             TEXT NOT NULL DEFAULT 'employment',  -- employment | fixed_term | amendment | confidentiality | other
+  title            TEXT NOT NULL,
+  job_title        TEXT,
+  start_date       DATE,
+  end_date         DATE,
+  pay_type         TEXT NOT NULL DEFAULT 'salary',
+  salary_annual    NUMERIC(14,2),
+  hourly_rate      NUMERIC(10,2),
+  frequency        TEXT NOT NULL DEFAULT 'monthly',
+  hours            TEXT,
+  probation_months INTEGER NOT NULL DEFAULT 0,
+  notice_weeks     INTEGER NOT NULL DEFAULT 2,
+  vacation_days    NUMERIC(5,2),
+  terms            TEXT,                                -- anything else, in plain words
+  status           TEXT NOT NULL DEFAULT 'draft',       -- draft | sent | signed | declined | ended | cancelled
+  signature_id     INTEGER,
+  document_id      INTEGER REFERENCES documents(id) ON DELETE SET NULL,   -- the signed copy
+  created_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_contracts_user ON hr_contracts (user_id);
+
+-- One document sent to one staff member to sign (an "envelope").
+CREATE TABLE IF NOT EXISTS hr_signatures (
+  id                  SERIAL PRIMARY KEY,
+  user_id             INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title               TEXT NOT NULL,
+  kind                TEXT NOT NULL DEFAULT 'other',      -- contract | letter | policy | other
+  contract_id         INTEGER REFERENCES hr_contracts(id) ON DELETE SET NULL,
+  case_id             INTEGER REFERENCES hr_cases(id) ON DELETE SET NULL,
+  source_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL,  -- a file from the Document centre
+  html                TEXT,                               -- or the page itself (a contract written here)
+  content_sha256      TEXT NOT NULL,                      -- what is signed
+  message             TEXT,
+  sent_to             TEXT,
+  sent_by             INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  sent_at             TIMESTAMPTZ DEFAULT NOW(),
+  expires_at          TIMESTAMPTZ NOT NULL,
+  token_sha256        TEXT UNIQUE,                        -- the emailed link (only its hash is kept)
+  code_sha256         TEXT,                               -- access code given separately, if asked for
+  code_tries          INTEGER NOT NULL DEFAULT 0,
+  viewed_at           TIMESTAMPTZ,
+  status              TEXT NOT NULL DEFAULT 'sent',       -- sent | signed | declined | cancelled
+  signed_at           TIMESTAMPTZ,
+  method              TEXT,                               -- in_app | link
+  signer_name         TEXT,
+  image               TEXT,                               -- the drawn signature (PNG data URL)
+  ip                  TEXT,
+  user_agent          TEXT,
+  seal                TEXT,                               -- HMAC over what was signed and by whom
+  signed_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  decline_reason      TEXT,
+  cancelled_at        TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_hr_signatures_user ON hr_signatures (user_id, status);
+
+-- =============================================================================
+--  FRANCHISE (franchise.js, franchise.html, franchisee.html)
+--  Enquiries and leads, qualification and application, NDA, disclosure
+--  document, franchise agreement and signing, territories, franchisees,
+--  opening checklist, monthly sales reports, royalty and fee invoices (raised
+--  as A/R invoices), field audits, renewals, transfers and terminations.
+--  Templates live in the Document centre (documents, category 'template').
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS fr_settings (
+  key         TEXT PRIMARY KEY,
+  value       TEXT,
+  updated_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Which Document centre template is which franchise document, and whether a
+-- Jamaican attorney has reviewed it (until then every copy carries the notice).
+CREATE TABLE IF NOT EXISTS fr_templates (
+  key          TEXT PRIMARY KEY,                -- nda | fdd | agreement | manual | ...
+  document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  reviewed_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reviewed_at  TIMESTAMPTZ,
+  reviewer     TEXT,                            -- the attorney / firm
+  updated_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS fr_territories (
+  id           SERIAL PRIMARY KEY,
+  code         TEXT NOT NULL UNIQUE,
+  name         TEXT NOT NULL,
+  description  TEXT,                            -- boundaries, parishes, towns
+  population   INTEGER,
+  exclusive    BOOLEAN NOT NULL DEFAULT true,
+  status       TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'reserved', 'sold', 'company')),
+  notes        TEXT,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS fr_franchisees (
+  id                  SERIAL PRIMARY KEY,
+  number              TEXT UNIQUE,              -- FR-001
+  lead_id             INTEGER,
+  legal_name          TEXT NOT NULL,
+  trading_name        TEXT,
+  principal           TEXT,
+  email               TEXT,
+  phone               TEXT,
+  address             TEXT,
+  trn                 TEXT,
+  territory_id        INTEGER REFERENCES fr_territories(id) ON DELETE SET NULL,
+  customer_id         INTEGER REFERENCES users(id) ON DELETE SET NULL,   -- their account in Receivables
+  status              TEXT NOT NULL DEFAULT 'onboarding' CHECK (status IN ('onboarding', 'open', 'suspended', 'terminated', 'expired', 'transferred')),
+  signed_on           DATE,
+  opened_on           DATE,
+  term_start          DATE,
+  term_end            DATE,
+  term_years          INTEGER,
+  initial_fee         NUMERIC(14,2),
+  royalty_pct         NUMERIC(6,3),
+  marketing_pct       NUMERIC(6,3),
+  tech_fee            NUMERIC(14,2),
+  min_royalty         NUMERIC(14,2),
+  renewal_fee         NUMERIC(14,2),
+  transfer_fee        NUMERIC(14,2),
+  portal_token_sha256 TEXT UNIQUE,              -- the franchisee's own link (only its hash is kept)
+  transferred_to_id   INTEGER REFERENCES fr_franchisees(id) ON DELETE SET NULL,
+  ended_on            DATE,
+  end_reason          TEXT,
+  notes               TEXT,
+  created_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at          TIMESTAMPTZ DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS fr_leads (
+  id               SERIAL PRIMARY KEY,
+  name             TEXT NOT NULL,
+  company          TEXT,
+  email            TEXT,
+  phone            TEXT,
+  address          TEXT,
+  parish           TEXT,
+  area_wanted      TEXT,
+  territory_id     INTEGER REFERENCES fr_territories(id) ON DELETE SET NULL,
+  source           TEXT,                        -- website | walk-in | referral | expo | ...
+  capital          NUMERIC(16,2),
+  net_worth        NUMERIC(16,2),
+  experience       TEXT,
+  timeline         TEXT,
+  message          TEXT,
+  notes            TEXT,
+  stage            TEXT NOT NULL DEFAULT 'enquiry' CHECK (stage IN ('enquiry', 'qualified', 'nda', 'disclosed', 'application', 'approved', 'agreement', 'signed', 'declined', 'withdrawn')),
+  score            INTEGER,
+  qualification    JSONB,                       -- {checks: {...}, score}
+  application      JSONB,                       -- the application form answers
+  applied_at       TIMESTAMPTZ,
+  nda_signed_at    TIMESTAMPTZ,
+  fdd_received_at  TIMESTAMPTZ,
+  decided_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  decided_at       TIMESTAMPTZ,
+  decline_reason   TEXT,
+  owner_id         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  franchisee_id    INTEGER REFERENCES fr_franchisees(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fr_leads_stage ON fr_leads (stage, created_at);
+
+-- A franchise document made from a template and sent for signing (an envelope).
+CREATE TABLE IF NOT EXISTS fr_documents (
+  id                  SERIAL PRIMARY KEY,
+  lead_id             INTEGER REFERENCES fr_leads(id) ON DELETE CASCADE,
+  franchisee_id       INTEGER REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  kind                TEXT NOT NULL,            -- template key: nda | fdd | agreement | manual | renewal | ...
+  title               TEXT NOT NULL,
+  template_doc_id     INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  form_values         JSONB,
+  html                TEXT NOT NULL,
+  content_sha256      TEXT NOT NULL,            -- what is signed
+  needs_signature     BOOLEAN NOT NULL DEFAULT true,
+  status              TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'sent', 'signed', 'countersigned', 'declined', 'cancelled', 'filed')),
+  sent_to             TEXT,
+  sent_by             INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  sent_at             TIMESTAMPTZ,
+  token_sha256        TEXT UNIQUE,              -- the signing link (only its hash is kept)
+  expires_at          TIMESTAMPTZ,
+  viewed_at           TIMESTAMPTZ,
+  method              TEXT,                     -- in_person | link
+  signer_name         TEXT,
+  signer_email        TEXT,
+  image               TEXT,                     -- drawn signature (PNG data URL)
+  ip                  TEXT,
+  user_agent          TEXT,
+  witnessed_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  signed_at           TIMESTAMPTZ,
+  seal                TEXT,                     -- HMAC over what was signed and by whom
+  counter_name        TEXT,                     -- signed for the franchisor
+  counter_image       TEXT,
+  counter_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  counter_at          TIMESTAMPTZ,
+  counter_seal        TEXT,
+  signed_document_id  INTEGER REFERENCES documents(id) ON DELETE SET NULL,  -- the signed copy in the Document centre
+  decline_reason      TEXT,
+  created_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at          TIMESTAMPTZ DEFAULT NOW(),
+  CHECK (lead_id IS NOT NULL OR franchisee_id IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS idx_fr_documents_lead ON fr_documents (lead_id);
+CREATE INDEX IF NOT EXISTS idx_fr_documents_fr ON fr_documents (franchisee_id);
+
+CREATE TABLE IF NOT EXISTS fr_tasks (
+  id             SERIAL PRIMARY KEY,
+  franchisee_id  INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  phase          TEXT NOT NULL DEFAULT 'setup',   -- setup | site | fitout | training | launch
+  title          TEXT NOT NULL,
+  due_on         DATE,
+  done_at        TIMESTAMPTZ,
+  done_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  note           TEXT,
+  sort           INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_fr_tasks_fr ON fr_tasks (franchisee_id, sort);
+
+-- The franchisee's monthly sales report (period = the first of the month).
+CREATE TABLE IF NOT EXISTS fr_reports (
+  id              SERIAL PRIMARY KEY,
+  franchisee_id   INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  period          DATE NOT NULL,
+  gross_sales     NUMERIC(16,2) NOT NULL DEFAULT 0 CHECK (gross_sales >= 0),
+  refunds         NUMERIC(16,2) NOT NULL DEFAULT 0 CHECK (refunds >= 0),
+  gct_collected   NUMERIC(16,2) NOT NULL DEFAULT 0 CHECK (gct_collected >= 0),
+  net_sales       NUMERIC(16,2) NOT NULL DEFAULT 0,
+  transactions    INTEGER,
+  local_marketing NUMERIC(14,2),
+  notes           TEXT,
+  source          TEXT NOT NULL DEFAULT 'staff',  -- staff | portal
+  submitted_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  submitted_at    TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (franchisee_id, period)
+);
+
+-- What a franchisee is charged. Monthly fees are unique per period, so a month
+-- cannot be billed twice; each charge points at the A/R invoice that bills it.
+CREATE TABLE IF NOT EXISTS fr_charges (
+  id             SERIAL PRIMARY KEY,
+  franchisee_id  INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL CHECK (kind IN ('initial', 'royalty', 'marketing', 'tech', 'renewal', 'transfer', 'training', 'audit', 'late', 'other')),
+  period         DATE,
+  description    TEXT,
+  base           NUMERIC(16,2),                 -- net sales the percentage was taken of
+  rate           NUMERIC(6,3),
+  amount         NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+  gct            NUMERIC(14,2) NOT NULL DEFAULT 0,
+  ar_invoice_id  INTEGER REFERENCES ar_invoices(id) ON DELETE SET NULL,
+  report_id      INTEGER REFERENCES fr_reports(id) ON DELETE SET NULL,
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fr_charges_period ON fr_charges (franchisee_id, kind, period) WHERE kind IN ('royalty', 'marketing', 'tech');
+CREATE INDEX IF NOT EXISTS idx_fr_charges_fr ON fr_charges (franchisee_id, created_at);
+
+CREATE TABLE IF NOT EXISTS fr_audits (
+  id             SERIAL PRIMARY KEY,
+  franchisee_id  INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL DEFAULT 'routine' CHECK (kind IN ('pre_opening', 'routine', 'mystery_shop', 'follow_up')),
+  audit_date     DATE NOT NULL,
+  auditor_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  items          JSONB NOT NULL DEFAULT '[]',   -- [{section, item, score: 0|1|2|null, note}]
+  score_pct      NUMERIC(5,1),
+  result         TEXT CHECK (result IN ('pass', 'conditional', 'fail')),
+  findings       TEXT,
+  actions        TEXT,
+  follow_up_on   DATE,
+  closed_at      TIMESTAMPTZ,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fr_audits_fr ON fr_audits (franchisee_id, audit_date);
+
+-- Renewals, transfers, notices of default, suspensions and terminations.
+CREATE TABLE IF NOT EXISTS fr_actions (
+  id              SERIAL PRIMARY KEY,
+  franchisee_id   INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL CHECK (kind IN ('renewal', 'transfer', 'default', 'suspension', 'termination')),
+  status          TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done', 'cured', 'cancelled')),
+  effective_date  DATE,
+  cure_by         DATE,
+  details         JSONB NOT NULL DEFAULT '{}',
+  document_id     INTEGER REFERENCES fr_documents(id) ON DELETE SET NULL,
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  closed_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  closed_at       TIMESTAMPTZ,
+  close_note      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_fr_actions_fr ON fr_actions (franchisee_id, created_at);
+
+CREATE TABLE IF NOT EXISTS fr_log (
+  id             SERIAL PRIMARY KEY,
+  lead_id        INTEGER REFERENCES fr_leads(id) ON DELETE CASCADE,
+  franchisee_id  INTEGER REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  action         TEXT NOT NULL,
+  detail         TEXT,
+  by_user        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  at             TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fr_log_fr ON fr_log (franchisee_id, at);
+CREATE INDEX IF NOT EXISTS idx_fr_log_lead ON fr_log (lead_id, at);
+
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('4600', 'Franchise Fees and Royalties',        'income',    'Franchise Fees and Royalties',        'INC',    'franchise_income'),
+  ('2170', 'Franchise Brand Fund',                'liability', 'Franchise Brand Fund',                'OCLIAB', 'franchise_fund')
+ON CONFLICT DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- Staff menus (menus.js): the "All modules" screen set up per person.
+-- layout: a manager's kanban board for this person, [{title, items:[link]}];
+-- NULL means the standard menu for their role. favourites: their own starred
+-- modules, in their order. Neither can show a module their permissions do
+-- not allow; the server filters both on every read.
+CREATE TABLE IF NOT EXISTS user_module_menus (
+  user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  layout      JSONB,
+  favourites  JSONB NOT NULL DEFAULT '[]',
+  updated_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- =============================================================================
+--  FRANCHISE STORE NETWORK (franchise-network.js; franchise.html "Store network")
+--  The parts-retail model: franchised, affiliate (independent dealer-member)
+--  and company-owned stores, supplied by distribution centres, with hub stores
+--  that serve nearby spoke stores the same day; commercial (garage and fleet)
+--  accounts on delivery routes, pro price tiers, loyalty, purchasing
+--  commitments and rebates, the co-op advertising fund, required systems,
+--  staff certification and the store scorecard. Safe to re-run.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS fr_dcs (
+  id             SERIAL PRIMARY KEY,
+  code           TEXT NOT NULL UNIQUE,
+  name           TEXT NOT NULL,
+  address        TEXT,
+  parish         TEXT,
+  manager        TEXT,
+  phone          TEXT,
+  cutoff_time    TEXT NOT NULL DEFAULT '14:00',   -- orders in by this time leave on today's run
+  delivery_days  TEXT NOT NULL DEFAULT 'Mon-Sat',
+  runs_per_day   INTEGER NOT NULL DEFAULT 1,
+  active         BOOLEAN NOT NULL DEFAULT true,
+  notes          TEXT,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS fr_formats (
+  key              TEXT PRIMARY KEY,
+  name             TEXT NOT NULL,
+  description      TEXT,
+  sq_ft_min        INTEGER,
+  sq_ft_max        INTEGER,
+  sku_target       INTEGER,
+  staff            INTEGER,
+  investment_low   NUMERIC(16,2),
+  investment_high  NUMERIC(16,2),
+  sort             INTEGER NOT NULL DEFAULT 100
+);
+INSERT INTO fr_formats (key, name, description, sq_ft_min, sq_ft_max, sku_target, staff, investment_low, investment_high, sort) VALUES
+  ('hub',      'Hub store',          'A large store carrying deep stock (about three times a standard store) that sends parts to the spoke stores around it the same day.', 6000, 10000, 30000, 12, 60000000, 95000000, 10),
+  ('standard', 'Standard store',     'The usual neighbourhood parts store: walk-in DIY customers and a commercial counter with one or two delivery vehicles.', 3500, 6000, 15000, 7, 30000000, 55000000, 20),
+  ('express',  'Express store',      'A small store in a town centre or plaza: fast-moving lines only, everything else from the hub or the distribution centre the same day.', 1500, 3500, 6000, 4, 15000000, 28000000, 30),
+  ('counter',  'Commercial counter', 'A trade counter serving garages and fleets only, mostly by delivery. No retail floor.', 1500, 4000, 8000, 5, 18000000, 32000000, 40)
+ON CONFLICT (key) DO NOTHING;
+
+ALTER TABLE fr_franchisees ADD COLUMN IF NOT EXISTS store_type   TEXT NOT NULL DEFAULT 'franchise' CHECK (store_type IN ('franchise', 'affiliate', 'company'));
+ALTER TABLE fr_franchisees ADD COLUMN IF NOT EXISTS format_key   TEXT REFERENCES fr_formats(key) ON DELETE SET NULL;
+ALTER TABLE fr_franchisees ADD COLUMN IF NOT EXISTS network_role TEXT NOT NULL DEFAULT 'standalone' CHECK (network_role IN ('hub', 'spoke', 'standalone'));
+ALTER TABLE fr_franchisees ADD COLUMN IF NOT EXISTS dc_id        INTEGER REFERENCES fr_dcs(id) ON DELETE SET NULL;
+ALTER TABLE fr_franchisees ADD COLUMN IF NOT EXISTS hub_id       INTEGER REFERENCES fr_franchisees(id) ON DELETE SET NULL;
+ALTER TABLE fr_franchisees ADD COLUMN IF NOT EXISTS sq_ft        INTEGER;
+ALTER TABLE fr_franchisees ADD COLUMN IF NOT EXISTS member_fee   NUMERIC(14,2);   -- affiliate: monthly membership fee
+ALTER TABLE fr_franchisees ADD COLUMN IF NOT EXISTS commit_pct   NUMERIC(6,3);    -- share of purchases to come through the DC
+ALTER TABLE fr_franchisees ADD COLUMN IF NOT EXISTS coop_pct     NUMERIC(6,3);    -- co-op advertising accrual on DC purchases
+ALTER TABLE fr_leads       ADD COLUMN IF NOT EXISTS programme    TEXT NOT NULL DEFAULT 'franchise' CHECK (programme IN ('franchise', 'affiliate'));
+ALTER TABLE fr_leads       ADD COLUMN IF NOT EXISTS current_store TEXT;           -- affiliate: the shop they run today
+
+ALTER TABLE fr_territories ADD COLUMN IF NOT EXISTS vehicles       INTEGER;       -- registered vehicles in the area
+ALTER TABLE fr_territories ADD COLUMN IF NOT EXISTS garages        INTEGER;       -- garages and fleets that could buy on account
+ALTER TABLE fr_territories ADD COLUMN IF NOT EXISTS dc_id          INTEGER REFERENCES fr_dcs(id) ON DELETE SET NULL;
+ALTER TABLE fr_territories ADD COLUMN IF NOT EXISTS dc_minutes     INTEGER;       -- drive time from the DC
+ALTER TABLE fr_territories ADD COLUMN IF NOT EXISTS planned_format TEXT REFERENCES fr_formats(key) ON DELETE SET NULL;
+ALTER TABLE fr_territories ADD COLUMN IF NOT EXISTS planned_type   TEXT CHECK (planned_type IN ('franchise', 'affiliate', 'company'));
+ALTER TABLE fr_territories ADD COLUMN IF NOT EXISTS priority       INTEGER;       -- 1 = open next
+
+-- The monthly report, with the figures the scorecard needs.
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS diy_sales          NUMERIC(16,2);   -- walk-in retail, net
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS commercial_sales   NUMERIC(16,2);   -- garages, fleets, trade accounts, net
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS cogs               NUMERIC(16,2);   -- cost of the goods sold
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS inventory_value    NUMERIC(16,2);   -- stock at cost at month end
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS shrink             NUMERIC(16,2);   -- stock lost (count differences, damage, theft) at cost
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS purchases_total    NUMERIC(16,2);   -- all stock bought in the month, from anyone
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS loyalty_issued     INTEGER;         -- loyalty points given
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS loyalty_redeemed   INTEGER;         -- loyalty points taken off bills
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS loyalty_members    INTEGER;         -- members signed up in the month
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS deliveries         INTEGER;         -- commercial deliveries made
+ALTER TABLE fr_reports ADD COLUMN IF NOT EXISTS delivery_minutes   NUMERIC(8,1);    -- average order-to-door time
+
+ALTER TABLE fr_charges DROP CONSTRAINT IF EXISTS fr_charges_kind_check;
+ALTER TABLE fr_charges ADD CONSTRAINT fr_charges_kind_check CHECK (kind IN ('initial', 'royalty', 'marketing', 'tech', 'renewal', 'transfer', 'training', 'audit', 'late', 'other', 'member', 'loyalty', 'supply'));
+DROP INDEX IF EXISTS uq_fr_charges_period;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fr_charges_month ON fr_charges (franchisee_id, kind, period) WHERE kind IN ('royalty', 'marketing', 'tech', 'member', 'loyalty');
+
+-- The network parts catalogue, with what each part fits.
+CREATE TABLE IF NOT EXISTS fr_catalogue (
+  id              SERIAL PRIMARY KEY,
+  sku             TEXT NOT NULL UNIQUE,
+  part_number     TEXT,
+  brand           TEXT,
+  description     TEXT NOT NULL,
+  category        TEXT,
+  interchange     TEXT,                          -- other makers' numbers for the same part
+  dealer_cost     NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (dealer_cost >= 0),  -- what a store pays the DC
+  list_price      NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (list_price >= 0),   -- suggested retail
+  core_charge     NUMERIC(14,2) NOT NULL DEFAULT 0,
+  warranty_months INTEGER,
+  stocking        TEXT NOT NULL DEFAULT 'store' CHECK (stocking IN ('store', 'hub', 'dc')),  -- every store / hubs / DC only
+  product_id      INTEGER,                       -- the till product it came from, if imported
+  active          BOOLEAN NOT NULL DEFAULT true,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fr_catalogue_text ON fr_catalogue (lower(description));
+CREATE INDEX IF NOT EXISTS idx_fr_catalogue_product ON fr_catalogue (product_id);
+CREATE TABLE IF NOT EXISTS fr_fitment (
+  id            SERIAL PRIMARY KEY,
+  catalogue_id  INTEGER NOT NULL REFERENCES fr_catalogue(id) ON DELETE CASCADE,
+  make          TEXT NOT NULL,
+  model         TEXT,
+  year_from     INTEGER,
+  year_to       INTEGER,
+  engine        TEXT,
+  note          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_fr_fitment_part ON fr_fitment (catalogue_id);
+CREATE INDEX IF NOT EXISTS idx_fr_fitment_make ON fr_fitment (lower(make), lower(model));
+-- Stock at each DC and store, for parts availability and replenishment.
+CREATE TABLE IF NOT EXISTS fr_stock (
+  id             SERIAL PRIMARY KEY,
+  catalogue_id   INTEGER NOT NULL REFERENCES fr_catalogue(id) ON DELETE CASCADE,
+  dc_id          INTEGER REFERENCES fr_dcs(id) ON DELETE CASCADE,
+  franchisee_id  INTEGER REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  on_hand        INTEGER NOT NULL DEFAULT 0,
+  min_qty        INTEGER,
+  max_qty        INTEGER,
+  updated_at     TIMESTAMPTZ DEFAULT NOW(),
+  CHECK ((dc_id IS NULL) <> (franchisee_id IS NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fr_stock_dc    ON fr_stock (dc_id, catalogue_id) WHERE dc_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fr_stock_store ON fr_stock (franchisee_id, catalogue_id) WHERE franchisee_id IS NOT NULL;
+
+-- Orders from a store to its DC (stock and special orders) or its hub (same-day "hot shot").
+CREATE TABLE IF NOT EXISTS fr_supply_orders (
+  id              SERIAL PRIMARY KEY,
+  number          TEXT UNIQUE,                  -- SO-00001
+  franchisee_id   INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL DEFAULT 'stock' CHECK (kind IN ('stock', 'special', 'hot')),
+  dc_id           INTEGER REFERENCES fr_dcs(id) ON DELETE SET NULL,
+  hub_id          INTEGER REFERENCES fr_franchisees(id) ON DELETE SET NULL,   -- set when a hub fills it
+  status          TEXT NOT NULL DEFAULT 'submitted' CHECK (status IN ('submitted', 'shipped', 'received', 'cancelled')),
+  needed_by       DATE,
+  notes           TEXT,
+  source          TEXT NOT NULL DEFAULT 'staff',  -- staff | portal | replenish
+  total_cost      NUMERIC(16,2) NOT NULL DEFAULT 0,
+  ar_invoice_id   INTEGER REFERENCES ar_invoices(id) ON DELETE SET NULL,
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  shipped_at      TIMESTAMPTZ,
+  shipped_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  received_at     TIMESTAMPTZ,
+  receive_note    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_fr_supply_fr ON fr_supply_orders (franchisee_id, created_at);
+CREATE TABLE IF NOT EXISTS fr_supply_lines (
+  id            SERIAL PRIMARY KEY,
+  order_id      INTEGER NOT NULL REFERENCES fr_supply_orders(id) ON DELETE CASCADE,
+  catalogue_id  INTEGER NOT NULL REFERENCES fr_catalogue(id),
+  qty           INTEGER NOT NULL CHECK (qty > 0),
+  qty_shipped   INTEGER,
+  qty_received  INTEGER,
+  unit_cost     NUMERIC(14,2) NOT NULL DEFAULT 0
+);
+
+-- Price tiers: retail, loyalty members and the pro (commercial) levels.
+CREATE TABLE IF NOT EXISTS fr_price_tiers (
+  id            SERIAL PRIMARY KEY,
+  code          TEXT NOT NULL UNIQUE,
+  name          TEXT NOT NULL,
+  kind          TEXT NOT NULL DEFAULT 'commercial' CHECK (kind IN ('retail', 'loyalty', 'commercial')),
+  discount_pct  NUMERIC(6,3) NOT NULL DEFAULT 0 CHECK (discount_pct >= 0 AND discount_pct < 100),
+  floor_pct     NUMERIC(6,3) NOT NULL DEFAULT 10,   -- never below dealer cost plus this margin
+  min_monthly   NUMERIC(14,2),                       -- spend a month to qualify
+  description   TEXT,
+  sort          INTEGER NOT NULL DEFAULT 100
+);
+INSERT INTO fr_price_tiers (code, name, kind, discount_pct, floor_pct, min_monthly, description, sort) VALUES
+  ('RETAIL', 'Retail (list price)',       'retail',     0,  10, NULL,    'Walk-in customers.', 10),
+  ('LOYAL',  'Loyalty member',            'loyalty',    5,  10, NULL,    'Signed-up loyalty members, on top of their points.', 20),
+  ('PRO1',   'Pro 1: garage',             'commercial', 12, 10, 150000,  'Independent garages and mechanics buying on account.', 30),
+  ('PRO2',   'Pro 2: fleet',              'commercial', 18, 8,  600000,  'Fleets, taxi and bus operators, larger garages.', 40),
+  ('PRO3',   'Pro 3: key account',        'commercial', 24, 6,  2000000, 'National fleets, government and dealer groups, by agreement.', 50)
+ON CONFLICT (code) DO NOTHING;
+
+-- Delivery routes run by a store's commercial team.
+CREATE TABLE IF NOT EXISTS fr_routes (
+  id             SERIAL PRIMARY KEY,
+  franchisee_id  INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  name           TEXT NOT NULL,
+  driver         TEXT,
+  vehicle        TEXT,
+  runs           TEXT,                          -- '8:30, 11:00, 14:00'
+  promise_minutes INTEGER,                      -- order-to-door promise
+  active         BOOLEAN NOT NULL DEFAULT true,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+-- Commercial (do-it-for-me) customers: garages, fleets and trade accounts.
+CREATE TABLE IF NOT EXISTS fr_commercial_accounts (
+  id             SERIAL PRIMARY KEY,
+  franchisee_id  INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  name           TEXT NOT NULL,
+  kind           TEXT NOT NULL DEFAULT 'garage' CHECK (kind IN ('garage', 'fleet', 'dealer', 'government', 'body_shop', 'other')),
+  contact        TEXT,
+  phone          TEXT,
+  email          TEXT,
+  address        TEXT,
+  trn            TEXT,
+  tier_id        INTEGER REFERENCES fr_price_tiers(id) ON DELETE SET NULL,
+  credit_limit   NUMERIC(14,2),
+  terms_days     INTEGER NOT NULL DEFAULT 30,
+  route_id       INTEGER REFERENCES fr_routes(id) ON DELETE SET NULL,
+  stop_order     INTEGER,
+  monthly_target NUMERIC(14,2),
+  bays           INTEGER,                        -- service bays (garages)
+  status         TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('prospect', 'active', 'on_hold', 'closed')),
+  opened_on      DATE,
+  notes          TEXT,
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fr_commercial_fr ON fr_commercial_accounts (franchisee_id, status);
+
+-- Purchasing rebates: the share of a quarter's DC purchases paid back to a store.
+CREATE TABLE IF NOT EXISTS fr_rebate_tiers (
+  id           SERIAL PRIMARY KEY,
+  min_quarter  NUMERIC(16,2) NOT NULL CHECK (min_quarter >= 0),   -- DC purchases in the quarter
+  rebate_pct   NUMERIC(6,3) NOT NULL CHECK (rebate_pct >= 0 AND rebate_pct <= 20)
+);
+INSERT INTO fr_rebate_tiers (min_quarter, rebate_pct)
+  SELECT * FROM (VALUES (3000000::numeric, 1::numeric), (7500000, 2), (15000000, 3), (30000000, 4)) v
+  WHERE NOT EXISTS (SELECT 1 FROM fr_rebate_tiers);
+-- Money the franchisor owes a store: rebates, approved co-op claims, loyalty points redeemed.
+CREATE TABLE IF NOT EXISTS fr_credits (
+  id             SERIAL PRIMARY KEY,
+  franchisee_id  INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL CHECK (kind IN ('rebate', 'coop', 'loyalty', 'other')),
+  period         TEXT,                          -- '2026-Q3', '2026-10'
+  description    TEXT,
+  amount         NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+  status         TEXT NOT NULL DEFAULT 'owed' CHECK (status IN ('owed', 'settled', 'cancelled')),
+  settled_how    TEXT,                          -- cheque, bank transfer, set against invoices
+  settled_ref    TEXT,
+  settled_at     TIMESTAMPTZ,
+  settled_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  source_id      INTEGER,                       -- the co-op claim
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fr_credits_period ON fr_credits (franchisee_id, kind, period) WHERE kind IN ('rebate', 'loyalty') AND status <> 'cancelled';
+-- Co-op advertising: a store spends on approved local advertising and claims part of it back.
+CREATE TABLE IF NOT EXISTS fr_coop_claims (
+  id             SERIAL PRIMARY KEY,
+  franchisee_id  INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  description    TEXT NOT NULL,
+  media          TEXT,                          -- radio, print, social, sponsorship, signage, event
+  spend_date     DATE NOT NULL,
+  spend          NUMERIC(14,2) NOT NULL CHECK (spend > 0),
+  claimed        NUMERIC(14,2) NOT NULL CHECK (claimed > 0),
+  proof          TEXT,                          -- invoice number, link, what was attached
+  status         TEXT NOT NULL DEFAULT 'submitted' CHECK (status IN ('submitted', 'approved', 'declined')),
+  approved       NUMERIC(14,2),
+  decided_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  decided_at     TIMESTAMPTZ,
+  decision_note  TEXT,
+  source         TEXT NOT NULL DEFAULT 'staff',
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Required systems at each store.
+CREATE TABLE IF NOT EXISTS fr_store_systems (
+  franchisee_id  INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  system_key     TEXT NOT NULL,
+  status         TEXT NOT NULL DEFAULT 'missing' CHECK (status IN ('missing', 'installed', 'verified', 'not_needed')),
+  detail         TEXT,                          -- version, serial, provider
+  checked_at     TIMESTAMPTZ,
+  checked_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  PRIMARY KEY (franchisee_id, system_key)
+);
+
+-- Training and certification (parts specialist levels, commercial sales, and so on).
+CREATE TABLE IF NOT EXISTS fr_cert_programs (
+  code            TEXT PRIMARY KEY,
+  name            TEXT NOT NULL,
+  description     TEXT,
+  for_role        TEXT,
+  valid_months    INTEGER NOT NULL DEFAULT 24,
+  required_per_store INTEGER NOT NULL DEFAULT 0,  -- certified people each store must have
+  lesson_key      TEXT,                           -- the till training lesson behind it
+  pass_pct        INTEGER NOT NULL DEFAULT 80,
+  sort            INTEGER NOT NULL DEFAULT 100,
+  active          BOOLEAN NOT NULL DEFAULT true
+);
+INSERT INTO fr_cert_programs (code, name, description, for_role, valid_months, required_per_store, lesson_key, pass_pct, sort) VALUES
+  ('PS1', 'Parts specialist level 1', 'Counter basics: the catalogue, fitment by make, model, year and engine, cores and warranty, the till.', 'Counter staff', 24, 2, 'franchise-network', 80, 10),
+  ('PS2', 'Parts specialist level 2', 'Advanced diagnosis help, brakes, steering and suspension, cooling, charging and starting systems.', 'Senior counter staff', 24, 1, NULL, 80, 20),
+  ('CSR', 'Commercial sales',          'Opening and growing garage and fleet accounts, pro pricing, delivery promises, credit control.', 'Commercial staff', 24, 1, 'franchise-commercial', 80, 30),
+  ('BAT', 'Battery and electrical',    'Testing, charging, fitting and recycling batteries safely; alternators and starters.', 'Counter staff', 24, 1, NULL, 80, 40),
+  ('DRV', 'Delivery driver safety',    'Defensive driving, loading, proof of delivery, cash and parts security on the road.', 'Drivers', 12, 0, NULL, 80, 50),
+  ('HAZ', 'Hazardous materials',       'Oils, fluids, batteries and chemicals: storage, spills, recycling and the safety sheets.', 'Everyone', 24, 1, NULL, 80, 60),
+  ('MGR', 'Store manager',             'Running the store to the manual: people, stock, cash, the scorecard and the audit.', 'Managers', 36, 1, 'franchise', 80, 70)
+ON CONFLICT (code) DO NOTHING;
+CREATE TABLE IF NOT EXISTS fr_staff_certs (
+  id              SERIAL PRIMARY KEY,
+  franchisee_id   INTEGER NOT NULL REFERENCES fr_franchisees(id) ON DELETE CASCADE,
+  person          TEXT NOT NULL,
+  role            TEXT,
+  program_code    TEXT NOT NULL REFERENCES fr_cert_programs(code),
+  earned_on       DATE NOT NULL,
+  expires_on      DATE,
+  score           INTEGER,
+  certificate_no  TEXT,
+  revoked_at      TIMESTAMPTZ,
+  created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fr_staff_certs_fr ON fr_staff_certs (franchisee_id, program_code);
+
+INSERT INTO gl_accounts (code, name, type, qb_name, qb_type, system_key) VALUES
+  ('4610', 'Franchise Supply Sales',  'income',    'Franchise Supply Sales',  'INC',    'franchise_supply'),
+  ('2175', 'Franchise Loyalty Fund',  'liability', 'Franchise Loyalty Fund',  'OCLIAB', 'franchise_loyalty')
+ON CONFLICT DO NOTHING;
+
+-- =============================================================================
+--  People & HR, part 3: the employee centre, as in the QuickBooks Employee
+--  Center (Jamaica: TRN, NIS, NHT and TAJ). Personal and employment details,
+--  manager-defined fields, notes and to do's with reminders, a photo,
+--  inactive / released / rehired. Pay stays in Payroll (linked, not copied).
+-- =============================================================================
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS salutation            TEXT;          -- Mr / Mrs / Ms / Miss / Dr
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS legal_name            TEXT;          -- as on the TRN card, for TAJ and NIS
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS preferred_name        TEXT;          -- what they are called at work
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS marital_status        TEXT;          -- single | married | common_law | divorced | widowed
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS town                  TEXT;
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS adjusted_service_date DATE;          -- service counted from (after a break or a rehire)
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS job_description       TEXT;
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS rehire_eligible       BOOLEAN;       -- blank: not decided
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS release_reason        TEXT;
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS inactive              BOOLEAN NOT NULL DEFAULT false;   -- off the active list, not released (long leave)
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS inactive_reason       TEXT;
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS leave_accrual         TEXT NOT NULL DEFAULT 'year';     -- year (all on 1 January) | monthly (a twelfth each month worked)
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS photo                 BYTEA;         -- small JPEG
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS photo_at              TIMESTAMPTZ;
+
+-- Additional info: fields a manager defines (QuickBooks "Define fields").
+CREATE TABLE IF NOT EXISTS hr_custom_fields (
+  id          SERIAL PRIMARY KEY,
+  label       TEXT NOT NULL,
+  kind        TEXT NOT NULL DEFAULT 'text' CHECK (kind IN ('text', 'number', 'date', 'list', 'yesno')),
+  options     TEXT[] NOT NULL DEFAULT '{}',          -- the choices for a list
+  sort        INTEGER NOT NULL DEFAULT 100,
+  is_active   BOOLEAN NOT NULL DEFAULT true,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS hr_custom_values (
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  field_id    INTEGER NOT NULL REFERENCES hr_custom_fields(id) ON DELETE CASCADE,
+  value       TEXT,
+  updated_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at  TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (user_id, field_id)
+);
+
+-- Notes and To Do's on an employee. A to do can remind someone (a notice) at a time.
+CREATE TABLE IF NOT EXISTS hr_notes (
+  id           SERIAL PRIMARY KEY,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind         TEXT NOT NULL DEFAULT 'note' CHECK (kind IN ('note', 'todo')),
+  todo_type    TEXT,                                  -- call | meeting | email | task | follow_up
+  priority     TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high')),
+  body         TEXT NOT NULL,
+  due_on       DATE,
+  remind_at    TIMESTAMPTZ,
+  reminded_at  TIMESTAMPTZ,
+  assignee_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  pinned       BOOLEAN NOT NULL DEFAULT false,
+  done_at      TIMESTAMPTZ,
+  done_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_notes_user ON hr_notes (user_id, kind);
+CREATE INDEX IF NOT EXISTS idx_hr_notes_remind ON hr_notes (remind_at) WHERE kind = 'todo' AND done_at IS NULL AND reminded_at IS NULL;
