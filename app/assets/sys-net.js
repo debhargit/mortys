@@ -63,13 +63,13 @@
     var online = terms.filter(function (t) { return t.online; }).length;
     var selling = terms.filter(function (t) { return t.online && t.conn && t.conn.mode === 'offline'; }).length;
     var waiting = terms.reduce(function (n, t) { return n + (t.offline_pending || 0); }, 0);
-    var refused = off.filter(function (o) { return o.status === 'failed'; }).length;
+    var refused = off.filter(function (o) { return o.status === 'held' || o.status === 'failed'; }).length;
     var used = conns.reduce(function (n, k) { return n + k.connections; }, 0);
     var html = '<div class="tiles">' +
       '<div class="tile"><span class="k">Terminals connected</span><b>' + online + ' / ' + terms.length + '</b></div>' +
       '<div class="tile"><span class="k">Database connections</span><b>' + used + (s.max_connections ? ' / ' + s.max_connections : '') + '</b></div>' +
       '<div class="tile' + (waiting ? ' bad' : '') + '"><span class="k">Offline sales waiting</span><b>' + waiting + '</b></div>' +
-      '<div class="tile' + (refused ? ' bad' : '') + '"><span class="k">Offline sales refused</span><b>' + refused + '</b></div>' +
+      '<div class="tile' + (refused ? ' bad' : '') + '"><span class="k">Offline sales held for you</span><b>' + refused + '</b></div>' +
       (selling ? '<div class="tile bad"><span class="k">Selling offline now</span><b>' + selling + '</b></div>' : '') + '</div>';
 
     html += '<div class="card"><h2>🗄 Database server</h2><p class="sub">The shop’s PostgreSQL, which every terminal connects to. Refreshed every 15 seconds.</p>' + grid([
@@ -109,30 +109,52 @@
         return '<tr><td class="mono">' + esc(k.address) + (known ? '' : ' <span class="pill warn">unknown</span>') + '</td><td>' + esc(k.app || '—') + '</td><td>' + esc(k.db_user || '') + '</td><td class="n">' + k.connections + '</td><td class="n">' + k.busy + '</td><td>' + (k.address === 'this computer' ? '—' : k.ssl ? 'yes' : '<span style="color:var(--red)">no</span>') + '</td><td>' + dt(k.since) + '</td><td>' + ago(k.last_activity) + '</td></tr>';
       }).join('') : '<tr><td colspan="8" class="empty">The database did not list its connections.</td></tr>') + '</tbody></table></div></div>';
 
-    html += '<div class="card"><h2>🧾 Sales rung while the server was down</h2><p class="sub">Each terminal sends these by itself when the server answers again. One the server refuses (for example a permission the cashier does not have) waits here: post it under your own name, or set it aside with a reason.</p>' +
+    // The holding area: what terminals uploaded, what the checks found, and
+    // what a manager decided.
+    var rv = d.review || {};
+    var ST = { received: ['warn', 'waiting to be checked'], checking: ['warn', 'checked, posting'], posting: ['warn', 'posting'], held: ['bad', 'held for you'], failed: ['bad', 'refused by the sale route'], posted: ['ok', 'recorded'], rejected: ['', 'rejected'], set_aside: ['', 'rejected'] };
+    var waitingYou = off.filter(function (o) { return o.status === 'held' || o.status === 'failed'; }).length;
+    html += '<div class="card"><h2>🧾 Sales rung while the server was down' + (waitingYou ? ' <span class="pill bad">' + waitingYou + ' for you</span>' : '') + '</h2>' +
+      '<p class="sub">When the server is back, each terminal uploads its offline sales here. They are not recorded yet: the shop’s server checks every one first. It looks for tampering (each sale is signed by its terminal and chained to the one before), injection (SQL, script or hidden characters, fields a sale should not have), and checks the products, prices, totals, GCT, payment and times again. A clean sale is recorded at once; anything else is held here for you to approve or reject.</p>' +
+      '<div class="controls" style="align-items:center"><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="rvAll"' + (rv.all ? ' checked' : '') + '> Hold every offline sale for a manager</label>' +
+      '<div><label for="rvOver">Hold sales over (0 = no limit)</label><input id="rvOver" inputmode="decimal" value="' + (rv.over || 0) + '" style="width:120px"></div><button id="rvSave">Save</button></div>' +
       '<div class="scroll"><table><thead><tr><th>Offline receipt</th><th>Terminal</th><th>Cashier</th><th>Rung</th><th class="n">Total</th><th>Now</th><th>Recorded as</th><th></th></tr></thead><tbody>' +
       (off.length ? off.map(function (o) {
-        var st = { posted: '<span class="pill ok">sent</span>', failed: '<span class="pill bad">refused</span>', posting: '<span class="pill warn">sending</span>', set_aside: '<span class="pill">set aside</span>' }[o.status] || esc(o.status);
+        var s = ST[o.status] || ['', o.status];
+        var finds = (o.findings || []);
         var diff = o.posted != null && Math.abs(o.posted - o.total) >= 0.01 ? ' <span class="pill warn" title="The server worked the total out at ' + money(o.posted) + '">now ' + money(o.posted) + '</span>' : '';
-        return '<tr><td class="mono">' + esc(o.offline_receipt) + '</td><td>' + esc(o.terminal_name || '') + '</td><td>' + esc(o.cashier_name || '') + '</td><td>' + dt(o.rung_at) + '</td><td class="n">' + money(o.total) + diff + '</td><td>' + st + (o.error ? '<div style="font-size:12px;color:var(--red);max-width:280px">' + esc(o.error) + '</div>' : '') + '</td><td>' + esc(o.receipt_number || '') + '</td><td>' +
-          (o.status === 'failed' ? '<button data-post="' + o.id + '">Post it as me</button> <button data-aside="' + o.id + '">Set aside</button>' : '') + '</td></tr>';
+        var open = o.status === 'held' || o.status === 'failed';
+        return '<tr><td class="mono">' + esc(o.offline_receipt) + '</td><td>' + esc(o.terminal_name || '') + '</td><td>' + esc(o.cashier_name || '') + '</td><td>' + dt(o.rung_at) + '</td><td class="n">' + money(o.total) + diff + '</td>' +
+          '<td><span class="pill ' + s[0] + '">' + s[1] + '</span>' +
+          (finds.length ? '<ul style="margin:4px 0 0 16px;padding:0;font-size:12px;max-width:380px">' + finds.map(function (f) { return '<li style="color:' + (f.level === 'block' ? 'var(--red)' : 'var(--warn)') + '">' + (f.level === 'block' ? '⛔ ' : '⚠ ') + esc(f.text) + '</li>'; }).join('') + '</ul>' : '') +
+          (o.error && o.status === 'failed' ? '<div style="font-size:12px;color:var(--red);max-width:380px">' + esc(o.error) + '</div>' : '') +
+          (o.decided_by_name ? '<div style="font-size:12px;color:var(--muted)">' + esc(o.decided_by_name) + ', ' + dt(o.decided_at) + (o.decision_note ? ': ' + esc(o.decision_note) : '') + '</div>' : '') + '</td>' +
+          '<td>' + esc(o.receipt_number || '') + '</td><td style="white-space:nowrap">' +
+          (open ? '<button data-lines="' + o.id + '">Lines</button> <button data-dec="approve" data-id="' + o.id + '" data-block="' + (finds.some(function (f) { return f.level === 'block'; }) ? 1 : 0) + '">Approve</button> <button data-dec="post" data-id="' + o.id + '" data-block="' + (finds.some(function (f) { return f.level === 'block'; }) ? 1 : 0) + '">Post as me</button> <button data-dec="reject" data-id="' + o.id + '">Reject</button>' : '') + '</td></tr>';
       }).join('') : '<tr><td colspan="8" class="empty">No sales have been rung offline.</td></tr>') + '</tbody></table></div></div>';
 
     el.innerHTML = html;
-    Array.prototype.forEach.call(el.querySelectorAll('[data-post]'), function (b) {
+    var byId = {}; off.forEach(function (o) { byId[o.id] = o; });
+    el.querySelector('#rvSave').onclick = function () {
+      api('/api/sys/offline-review', 'POST', { all: el.querySelector('#rvAll').checked, over: Number(el.querySelector('#rvOver').value) || 0 }).then(function () { toast('Saved'); terminals(el); }).catch(fail);
+    };
+    Array.prototype.forEach.call(el.querySelectorAll('[data-lines]'), function (b) {
       b.onclick = function () {
-        vasConfirm('Post this sale now under your own name? Your permissions decide whether it goes through.', { ok: 'Post it' }).then(function (ok) {
-          if (!ok) return;
-          api('/api/sys/offline-sales/' + b.dataset.post + '/post', 'POST', {}).then(function (r) { toast('Recorded as ' + (r.receipt_number || ('sale ' + r.sale_id))); terminals(el); }).catch(fail);
-        });
+        var o = byId[b.dataset.lines], items = (o.body && o.body.items) || [];
+        modal('<h2>' + esc(o.offline_receipt) + ' as the terminal sent it</h2><table><thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Discount</th></tr></thead><tbody>' +
+          items.map(function (it) { return '<tr><td>' + esc(it.description || it.product_img) + (it.price_manual ? ' <span class="pill warn">price by hand</span>' : '') + '</td><td class="n">' + esc(it.qty) + '</td><td class="n">' + money(it.unit_price_usd) + '</td><td class="n">' + money(it.discount_usd) + '</td></tr>'; }).join('') +
+          '</tbody></table><p class="sub">Paid by ' + esc(o.body && o.body.payment_method) + (o.body && o.body.customer_name ? ' · customer ' + esc(o.body.customer_name) : '') + '</p><div class="controls"><button id="x">Close</button></div>');
+        document.getElementById('x').onclick = close;
       };
     });
-    Array.prototype.forEach.call(el.querySelectorAll('[data-aside]'), function (b) {
+    Array.prototype.forEach.call(el.querySelectorAll('[data-dec]'), function (b) {
       b.onclick = function () {
-        vasPrompt('Why set this sale aside? It will not be recorded.', '', { title: 'Set aside', ok: 'Set aside', placeholder: 'Reason' }).then(function (w) {
-          if (w == null || !w.trim()) return;
-          api('/api/sys/offline-sales/' + b.dataset.aside + '/set-aside', 'POST', { reason: w.trim() }).then(function () { toast('Set aside'); terminals(el); }).catch(fail);
-        });
+        var how = b.dataset.dec, id = b.dataset.id, blocked = b.dataset.block === '1';
+        var go = function (note) { api('/api/sys/offline-sales/' + id + '/' + how, 'POST', { note: note }).then(function (r) { toast(how === 'reject' ? 'Rejected' : 'Recorded as ' + (r.receipt_number || ('sale ' + r.sale_id))); terminals(el); }).catch(fail); };
+        if (how === 'reject') return vasPrompt('Why reject this sale? It will not be recorded.', '', { title: 'Reject', ok: 'Reject', placeholder: 'Reason' }).then(function (w) { if (w != null && w.trim()) go(w.trim()); });
+        var who = how === 'post' ? 'under your own name (your permissions decide)' : 'under the cashier who rang it';
+        if (blocked) return vasPrompt('This sale failed the tampering or injection checks. Say why it is safe to record it ' + who + '.', '', { title: 'Record a blocked sale', ok: 'Record it', placeholder: 'Why it is safe' }).then(function (w) { if (w != null && w.trim()) go(w.trim()); });
+        vasConfirm('Record this sale now ' + who + '?', { ok: 'Record it' }).then(function (ok) { if (ok) go(''); });
       };
     });
   }

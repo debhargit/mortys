@@ -29,8 +29,8 @@
         var c = s.counts || {};
         var link = '<a href="/offline-till.html" style="color:inherit;text-decoration:underline;margin-left:10px">Open the offline till →</a>';
         if (!s.db_up) show('⚠ The shop’s server is not answering. Keep selling on this terminal’s offline till; the sales go to the server when it is back.' + link, '#b91c1c', '#fff');
-        else if (c.failed) show(c.failed + ' sale(s) rung offline were refused by the server and need a manager.' + link, '#fef3c7', '#78350f');
-        else if (c.pending) show('Sending ' + c.pending + ' sale(s) rung while the server was down…' + link, '#fef3c7', '#78350f');
+        else if (c.held) show(c.held + ' sale(s) rung offline were held by the server’s checks for a manager (System management → Terminals).' + link, '#fef3c7', '#78350f');
+        else if (c.pending || c.checking) show('Sales rung while the server was down are being sent and checked: ' + ((c.pending || 0) + (c.checking || 0)) + ' to go.' + link, '#fef3c7', '#78350f');
         else hide();
       })
       .catch(function () { /* this terminal's own program is down: the browser says so */ });

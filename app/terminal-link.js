@@ -14,14 +14,18 @@
 //               receipt details, in data/offline/snapshot.json
 //    sale       /offline-till.html rings a sale against that copy; it is kept
 //               in data/offline/queue.json with an offline receipt number
-//               (OFF-<terminal>-<n>), and the receipt prints at once
-//    send       when the database answers again each kept sale goes through the
-//               ordinary sale route (posSaleHandler: totals, GCT, stock, GL)
-//               under the cashier who rang it, dated when it was rung.
-//               offline_sales on the server makes this safe to repeat: a sale
-//               is recorded there before it is posted and checked first.
-//               A sale the server refuses stays on the list with the reason,
-//               for "Try again" here or "Post it as me" in System management.
+//               (OFF-<terminal>-<n>), signed with the key the server gave this
+//               terminal and chained to the sale before it, and the receipt
+//               prints at once
+//    upload     when the database answers again each kept sale is uploaded to
+//               offline_sales as 'received' -- a holding area -- and nothing
+//               else: the terminal never posts a sale itself
+//    check      the shop's server checks each one there (offline-check.js:
+//               tampering, injection, prices, totals, times). A clean sale goes
+//               through the ordinary sale route (posSaleHandler: totals, GCT,
+//               stock, GL) under the cashier who rang it, dated when it was
+//               rung; anything found holds it for a manager in System
+//               management -> Terminals to approve or reject.
 //
 //  Every terminal also reports how it is connected (terminals.conn) on its
 //  heartbeat, so Settings and System management can show each one's database
@@ -39,11 +43,11 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const check = require('./offline-check');
 
 const SNAPSHOT_EVERY_MS = 10 * 60 * 1000;
 const PROBE_EVERY_MS = 5000;
 const REPORT_EVERY_MS = 15000;
-const AUTO_TRIES = 3;
 const METHODS = ['cash', 'card', 'bank', 'cheque'];
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -53,7 +57,7 @@ function register(app, d) {
   // the database about every request, so nothing here waits on a dead server.
   // posSaleHandler and storeTax are defined further down server.js: getters.
   const { query, requireAdmin, requireManager, userCan, userPermState, getShopSettings, probeDb, terminal, machineName, appVersion } = d;
-  const storeTax = { config: (...a) => d.storeTax().config(...a), compute: (...a) => d.storeTax().compute(...a) };
+  const storeTax = { config: (...a) => d.storeTax().config(...a), compute: (...a) => d.storeTax().compute(...a), ratesFor: (...a) => d.storeTax().ratesFor(...a) };
   const posSaleHandler = (...a) => d.posSaleHandler()(...a);
   const DIR = d.dataDir || path.join(__dirname, '..', 'data', 'offline');
   const SNAP = path.join(DIR, 'snapshot.json');
@@ -69,9 +73,16 @@ function register(app, d) {
   function writeJson(f, v) { const t = f + '.tmp'; fs.writeFileSync(t, JSON.stringify(v)); fs.renameSync(t, f); }
   function saveQueue() { writeJson(QUEUE, queue); }
   function indexSnap(s) { const m = new Map(); if (s && s.products) for (const p of s.products) m.set(p.img, p); return m; }
+  // pending: not sent yet; checking: with the server, being checked; held:
+  // waiting for a manager there; sent/rejected: finished. failed = held, for
+  // older pages that ask for it.
   function counts() {
-    const c = { pending: 0, failed: 0, sent: 0 };
-    for (const s of queue.sales) { if (s.status === 'sent' || s.status === 'set_aside') c.sent++; else if (s.status === 'failed') c.failed++; else c.pending++; }
+    const c = { pending: 0, checking: 0, held: 0, sent: 0, rejected: 0 };
+    for (const s of queue.sales) {
+      if (s.status === 'sent') c.sent++; else if (s.status === 'rejected') c.rejected++;
+      else if (s.status === 'uploaded') c.checking++; else if (s.status === 'held') c.held++; else c.pending++;
+    }
+    c.failed = c.held;
     return c;
   }
   function fail(res, e) { const s = e.status || 500; if (s >= 500) console.error('[terminal-link]', e); res.status(s).json({ error: e.message }); }
@@ -100,7 +111,17 @@ function register(app, d) {
       staff.push({ id: u.id, name: u.name || u.email, discount: can('pos.line_discount'), price: can('pos.price_override') });
     }
     const shop = await getShopSettings();
+    // The key this terminal signs offline sales with (offline-check.js). The
+    // server keeps it in terminals.offline_key and checks every signature.
+    await ensure();
+    const t = terminal() || {};
+    let key = snap && snap.key;
+    if (t.id) {
+      const { rows } = await query('UPDATE terminals SET offline_key = COALESCE(offline_key, $2) WHERE id = $1 RETURNING offline_key', [t.id, crypto.randomBytes(32).toString('hex')]);
+      if (rows[0]) key = rows[0].offline_key;
+    }
     const s = {
+      key,
       at: new Date().toISOString(),
       terminal: { id: (terminal() || {}).id || null, name: machineName() },
       tax: { enabled: cfg.enabled, default_class: cfg.default_class, default_rate: cfg.default_rate, classes: cfg.classes, categories: cfg.categories, freight_taxable: cfg.freight_taxable, freight: cfg.freight },
@@ -110,7 +131,7 @@ function register(app, d) {
     writeJson(SNAP, s);
     snap = s; byImg = indexSnap(s);
     // Sales rung offline since have already left the shelf.
-    for (const q of queue.sales) if (q.status === 'pending' || q.status === 'failed') for (const it of q.body.items) { const p = byImg.get(it.product_img); if (p) p.stock -= Number(it.qty) || 0; }
+    for (const q of queue.sales) if (q.status === 'pending' || q.status === 'uploaded' || q.status === 'held') for (const it of q.body.items) { const p = byImg.get(it.product_img); if (p) p.stock -= Number(it.qty) || 0; }
     return s;
   }
 
@@ -124,7 +145,7 @@ function register(app, d) {
       STATE.dbMs = Date.now() - t0;
       if (STATE.dbUp === false) { STATE.lastUpAt = now; console.log('[offline] the database answers again -- sending sales kept on this terminal'); }
       STATE.dbUp = true; STATE.downSince = null;
-      if (queue.sales.some((s) => s.status === 'pending' || (s.status === 'failed' && (s.tries || 0) < AUTO_TRIES))) sync().catch((e) => console.error('[offline] send', e.message));
+      if (queue.sales.some((s) => s.status === 'pending' || s.status === 'uploaded' || s.status === 'held')) sync().catch((e) => console.error('[offline] send', e.message));
     } else {
       if (STATE.dbUp !== false) { STATE.downSince = now; STATE.lastDownAt = now; console.warn('[offline] the database is not answering -- this terminal can keep selling on /offline-till.html'); }
       STATE.dbUp = false; STATE.dbMs = null;
@@ -132,21 +153,89 @@ function register(app, d) {
   }
 
   // --------------------------------------------------------------- send --
+  // The terminal only uploads: each kept sale goes to offline_sales as
+  // 'received', the holding area, and is posted by checkWaiting() below once
+  // offline-check.js has looked it over.
   let ensured = false;
   async function ensure() {
     if (ensured) return;
     try {
       await query(`CREATE TABLE IF NOT EXISTS offline_sales (
         id SERIAL PRIMARY KEY, uid TEXT NOT NULL UNIQUE, terminal_id INTEGER, terminal_name TEXT, offline_receipt TEXT,
-        cashier_id INTEGER, cashier_name TEXT, rung_at TIMESTAMPTZ NOT NULL, total_usd NUMERIC(12,2), status TEXT NOT NULL DEFAULT 'posting',
+        cashier_id INTEGER, cashier_name TEXT, rung_at TIMESTAMPTZ NOT NULL, total_usd NUMERIC(12,2), status TEXT NOT NULL DEFAULT 'received',
         sale_id INTEGER, receipt_number TEXT, posted_total_usd NUMERIC(12,2), error TEXT, body JSONB, attempts INTEGER NOT NULL DEFAULT 0,
         synced_at TIMESTAMPTZ, posted_by INTEGER, created_at TIMESTAMPTZ DEFAULT NOW())`);
-    } catch (_) { /* a till without schema rights: schema.sql makes it on the server */ }
+      for (const c of ['seq INTEGER', 'sig TEXT', 'record JSONB', 'findings JSONB', 'uploaded_by_terminal INTEGER', 'checked_at TIMESTAMPTZ',
+        'decided_by INTEGER', 'decided_at TIMESTAMPTZ', 'decision_note TEXT'])
+        await query('ALTER TABLE offline_sales ADD COLUMN IF NOT EXISTS ' + c);
+      for (const c of ['offline_key TEXT', 'offline_seq INTEGER NOT NULL DEFAULT 0', 'offline_head TEXT'])
+        await query('ALTER TABLE terminals ADD COLUMN IF NOT EXISTS ' + c);
+    } catch (_) { /* a till without schema rights: schema.sql makes them on the server */ }
     ensured = true;
   }
 
-  // posSaleHandler with the cashier who rang the sale. It re-checks their
-  // permissions and works out totals, GCT and stock as for any sale.
+  // What leaves the terminal: the signed sale, without this terminal's own
+  // bookkeeping.
+  const LOCAL = new Set(['status', 'tries', 'error', 'sent_at', 'sale_id', 'receipt_number', 'posted', 'findings']);
+  const sendable = (rec) => Object.fromEntries(Object.entries(rec).filter(([k]) => !LOCAL.has(k)));
+
+  async function upload(rec) {
+    await ensure();
+    const me = terminal() || {};
+    await query(
+      `INSERT INTO offline_sales (uid, terminal_id, terminal_name, offline_receipt, cashier_id, cashier_name, rung_at, total_usd, status, body, record, seq, sig, uploaded_by_terminal)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'received',$9,$10,$11,$12,$13)
+       ON CONFLICT (uid) DO NOTHING`,
+      [rec.uid, rec.terminal_id, rec.terminal_name, rec.receipt, rec.user_id, rec.user_name, rec.at, rec.total,
+       JSON.stringify(rec.body), JSON.stringify(sendable(rec)), rec.seq || null, rec.sig || null, me.id || null]);
+  }
+
+  // What the server made of the uploaded ones.
+  const FROM_SERVER = { posted: 'sent', held: 'held', failed: 'held', rejected: 'rejected', set_aside: 'rejected', received: 'uploaded', posting: 'uploaded' };
+  async function pullStatus() {
+    const mine = queue.sales.filter((s) => s.status === 'uploaded' || s.status === 'held');
+    if (!mine.length) return;
+    const { rows } = await query(`SELECT uid, status, sale_id, receipt_number, posted_total_usd::float AS posted, error, findings FROM offline_sales WHERE uid = ANY($1)`, [mine.map((s) => s.uid)]);
+    const byUid = new Map(rows.map((r) => [r.uid, r]));
+    let changed = false;
+    for (const rec of mine) {
+      const r = byUid.get(rec.uid);
+      if (!r) { rec.status = 'pending'; changed = true; continue; }   // never arrived: send again
+      const st = FROM_SERVER[r.status] || 'uploaded';
+      const why = r.error || (Array.isArray(r.findings) && r.findings.length ? r.findings.map((x) => x.text).join(' · ') : null);
+      if (st !== rec.status || why !== rec.error) {
+        Object.assign(rec, { status: st, error: st === 'sent' ? null : why, sale_id: r.sale_id, receipt_number: r.receipt_number, posted: r.posted });
+        if (st === 'sent' || st === 'rejected') rec.sent_at = new Date().toISOString();
+        changed = true;
+      }
+    }
+    if (changed) saveQueue();
+  }
+
+  async function sync() {
+    if (STATE.syncing || !STATE.dbUp) return;
+    STATE.syncing = true;
+    try {
+      for (const rec of queue.sales) {
+        if (rec.status !== 'pending') continue;
+        try { await upload(rec); } catch (e) { rec.error = e.message; saveQueue(); break; }   // the database went again
+        rec.status = 'uploaded'; rec.tries = (rec.tries || 0) + 1; rec.error = null;
+        saveQueue();
+      }
+      await pullStatus();
+      STATE.lastSyncAt = new Date();
+      // Keep a fortnight of finished sales for reprints; the server has them all.
+      const cut = Date.now() - 14 * 86400000;
+      const before = queue.sales.length;
+      queue.sales = queue.sales.filter((s) => (s.status !== 'sent' && s.status !== 'rejected') || new Date(s.sent_at || s.at).getTime() > cut);
+      if (queue.sales.length !== before) saveQueue();
+    } finally { STATE.syncing = false; }
+  }
+
+  // ------------------------------------------------- checking, then posting --
+  // posSaleHandler with the cashier who rang the sale (or the manager who
+  // approves it as their own). It re-checks permissions and works out totals,
+  // GCT and stock as for any sale.
   function postSale(body, userId) {
     return new Promise((resolve) => {
       const req = { body, session: { userId, discountOk: true }, headers: {}, get: () => undefined, ip: '127.0.0.1', offlineReplay: true };
@@ -155,67 +244,104 @@ function register(app, d) {
     });
   }
 
-  // One kept sale, safe to repeat: the server's offline_sales row says whether
-  // it already went through, including from a send that died half-way.
-  async function sendOne(rec, userId, postedBy) {
-    await ensure();
-    const { rows: had } = await query('SELECT status, sale_id, receipt_number, posted_total_usd::float AS posted FROM offline_sales WHERE uid = $1', [rec.uid]);
-    if (had[0] && had[0].status === 'posted') return { ok: true, sale_id: had[0].sale_id, receipt_number: had[0].receipt_number, posted: had[0].posted };
-    if (had[0] && had[0].status === 'posting') {
-      const { rows: s } = await query(`SELECT id, receipt_number, total_usd::float AS total FROM pos_sales WHERE notes LIKE $1 ORDER BY id LIMIT 1`, ['%' + rec.uid + '%']);
-      if (s[0]) {
-        await query(`UPDATE offline_sales SET status='posted', sale_id=$2, receipt_number=$3, posted_total_usd=$4, error=NULL, synced_at=NOW() WHERE uid=$1`, [rec.uid, s[0].id, s[0].receipt_number, s[0].total]);
-        return { ok: true, sale_id: s[0].id, receipt_number: s[0].receipt_number, posted: s[0].total };
-      }
-    }
-    await query(
-      `INSERT INTO offline_sales (uid, terminal_id, terminal_name, offline_receipt, cashier_id, cashier_name, rung_at, total_usd, status, body, attempts)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'posting',$9,1)
-       ON CONFLICT (uid) DO UPDATE SET status='posting', attempts=offline_sales.attempts+1, error=NULL`,
-      [rec.uid, rec.terminal_id, rec.terminal_name, rec.receipt, rec.user_id, rec.user_name, rec.at, rec.total, JSON.stringify(rec.body)]);
-    const r = await postSale(rec.body, userId || rec.user_id);
+  // Posts one checked sale; 'posting' first, so a post that dies half-way is
+  // found again (by the uid in its note) instead of posted twice.
+  async function postRow(row, asUser, by, note) {
+    const { rowCount } = await query(`UPDATE offline_sales SET status='posting', attempts=attempts+1 WHERE id=$1 AND status IN ('received','checking','held','failed')`, [row.id]);
+    if (!rowCount) return { ok: false, error: 'This sale is no longer waiting.' };
+    const r = await postSale(row.body, asUser);
     if (r.status >= 400 || !r.body || !r.body.ok) {
       const error = (r.body && r.body.error) || ('HTTP ' + r.status);
-      await query(`UPDATE offline_sales SET status='failed', error=$2 WHERE uid=$1`, [rec.uid, error]);
+      await query(`UPDATE offline_sales SET status='failed', error=$2 WHERE id=$1`, [row.id, error]);
       return { ok: false, error };
     }
     // Dated when it was rung, not when the server came back.
-    await query('UPDATE pos_sales SET created_at = $2 WHERE id = $1', [r.body.id, rec.at]);
-    await query(`UPDATE offline_sales SET status='posted', sale_id=$2, receipt_number=$3, posted_total_usd=$4, error=NULL, synced_at=NOW(), posted_by=$5 WHERE uid=$1`,
-      [rec.uid, r.body.id, r.body.receipt_number, r.body.total_usd, postedBy || null]);
-    return { ok: true, sale_id: r.body.id, receipt_number: r.body.receipt_number, posted: r.body.total_usd };
+    await query('UPDATE pos_sales SET created_at = $2 WHERE id = $1', [r.body.id, row.rung_at]);
+    await query(`UPDATE offline_sales SET status='posted', sale_id=$2, receipt_number=$3, posted_total_usd=$4, error=NULL, synced_at=NOW(),
+                        posted_by=$5, decided_by=COALESCE($5, decided_by), decided_at=CASE WHEN $5::int IS NULL THEN decided_at ELSE NOW() END,
+                        decision_note=COALESCE($6, decision_note) WHERE id=$1`,
+      [row.id, r.body.id, r.body.receipt_number, r.body.total_usd, by || null, note || null]);
+    return { ok: true, sale_id: r.body.id, receipt_number: r.body.receipt_number };
   }
 
-  async function sync(force) {
-    if (STATE.syncing || !STATE.dbUp) return;
-    STATE.syncing = true;
+  async function setting(key, dflt) {
+    try { const { rows } = await query('SELECT value FROM app_settings WHERE key = $1', [key]); return rows[0] ? rows[0].value : dflt; } catch (_) { return dflt; }
+  }
+
+  // Everything offline-check.scan needs about one sale, from the server.
+  async function scanRow(row) {
+    const rec = row.record || {};
+    const { rows: tr } = await query('SELECT * FROM terminals WHERE id = $1', [row.terminal_id]);
+    const { rows: ur } = await query('SELECT id, disabled, is_admin FROM users WHERE id = $1', [row.cashier_id]);
+    let cashier = { exists: false };
+    if (ur[0]) {
+      const { full, perms } = await userPermState(ur[0].id);
+      cashier = { exists: true, disabled: !!ur[0].disabled || !ur[0].is_admin, can: (k) => full || perms[k] !== false };
+    }
+    const imgs = ((row.body && Array.isArray(row.body.items)) ? row.body.items : []).map((it) => String((it && it.product_img) || ''));
+    const { rows: pr } = await query('SELECT img, name, price_usd::float AS price, is_active FROM products WHERE img = ANY($1)', [imgs]);
+    const taxCfg = await storeTax.config(query);
+    const taxRates = await storeTax.ratesFor(query, imgs, taxCfg);
+    const findings = check.scan(row, {
+      terminal: tr[0], uploader: row.uploaded_by_terminal, cashier, products: new Map(pr.map((p) => [p.img, p])),
+      taxCfg, taxRates, compute: storeTax.compute, reviewOver: Number(await setting('offline_review_over', '0')) || 0,
+    });
+    // Straight after a sale that was changed on the terminal, the chain breaks
+    // because of that sale, not this one: say so, as a warning.
+    const ci = findings.findIndex((x) => x.code === 'chain');
+    if (ci >= 0 && Number.isInteger(rec.seq) && rec.seq > 1 && !findings.some((x) => x.code === 'signature')) {
+      const { rows: pv } = await query('SELECT offline_receipt, findings FROM offline_sales WHERE terminal_id = $1 AND seq = $2', [row.terminal_id, rec.seq - 1]);
+      if (pv[0] && (pv[0].findings || []).some((x) => x.code === 'signature'))
+        findings[ci] = { level: 'review', code: 'chain-after', text: 'It comes straight after ' + pv[0].offline_receipt + ', which was changed on the terminal; this sale’s own signature is good.' };
+    }
+    if (!findings.length && (await setting('offline_review_all', 'off')) === 'on')
+      findings.push({ level: 'review', code: 'policy', text: 'Every offline sale waits for a manager (System management → Terminals).' });
+    // The chain moves on with every sale that claims the next place, so the
+    // one after it is judged against it.
+    if (tr[0] && Number.isInteger(rec.seq) && rec.seq > (Number(tr[0].offline_seq) || 0))
+      await query('UPDATE terminals SET offline_seq = $2, offline_head = $3 WHERE id = $1', [tr[0].id, rec.seq, check.chainHash(rec)]);
+    return findings;
+  }
+
+  // The shop's server (the database host) checks what has come in; another
+  // terminal does only if sales have waited two minutes, in case it is off.
+  // One at a time across the shop (advisory lock), in each terminal's order.
+  let checking = false;
+  async function checkWaiting() {
+    if (checking || !STATE.dbUp) return;
+    checking = true;
+    let client = null;
     try {
-      for (const rec of queue.sales) {
-        if (rec.status === 'sent' || rec.status === 'set_aside') continue;
-        if (rec.status === 'failed' && !force && (rec.tries || 0) >= AUTO_TRIES) {
-          // Someone may have posted it from System management since.
-          try {
-            const { rows } = await query(`SELECT status, sale_id, receipt_number, posted_total_usd::float AS posted FROM offline_sales WHERE uid=$1`, [rec.uid]);
-            if (rows[0] && rows[0].status === 'posted') { Object.assign(rec, { status: 'sent', sale_id: rows[0].sale_id, receipt_number: rows[0].receipt_number, posted: rows[0].posted, error: null, sent_at: new Date().toISOString() }); saveQueue(); }
-            else if (rows[0] && rows[0].status === 'set_aside') { Object.assign(rec, { status: 'set_aside', sent_at: new Date().toISOString() }); saveQueue(); }
-          } catch (_) {}
-          continue;
-        }
-        let out;
-        try { out = await sendOne(rec); } catch (e) { out = { ok: false, error: e.message, transient: true }; }
-        rec.tries = (rec.tries || 0) + 1;
-        if (out.ok) Object.assign(rec, { status: 'sent', sale_id: out.sale_id, receipt_number: out.receipt_number, posted: out.posted, error: null, sent_at: new Date().toISOString() });
-        else { rec.status = 'failed'; rec.error = out.error; }
-        saveQueue();
-        if (out.transient) break;   // the database went again
+      await ensure();
+      const { rows: w } = await query(`SELECT COUNT(*)::int AS n, MIN(created_at) AS oldest FROM offline_sales WHERE status IN ('received','posting')`);
+      if (!w[0] || !w[0].n) return;
+      if (!(terminal() || {}).is_db_host && Date.now() - new Date(w[0].oldest).getTime() < 120000) return;
+      client = await d.getPool().connect();
+      await client.query('BEGIN');
+      const { rows: [lock] } = await client.query('SELECT pg_try_advisory_xact_lock(74120931) AS ok');
+      if (!lock.ok) return;
+      // A post that died half-way: posted after all, or back to a person.
+      const { rows: stuck } = await query(`SELECT * FROM offline_sales WHERE status = 'posting' AND created_at < NOW() - INTERVAL '2 minutes'`);
+      for (const o of stuck) {
+        const { rows: s } = await query(`SELECT id, receipt_number, total_usd::float AS total FROM pos_sales WHERE notes LIKE $1 ORDER BY id LIMIT 1`, ['%' + o.uid + '%']);
+        if (s[0]) await query(`UPDATE offline_sales SET status='posted', sale_id=$2, receipt_number=$3, posted_total_usd=$4, synced_at=NOW() WHERE id=$1`, [o.id, s[0].id, s[0].receipt_number, s[0].total]);
+        else await query(`UPDATE offline_sales SET status='held', findings=COALESCE(findings,'[]'::jsonb) || $2::jsonb WHERE id=$1`, [o.id, JSON.stringify([{ level: 'review', code: 'interrupted', text: 'Posting was interrupted; check it is not already on the system, then approve.' }])]);
       }
-      STATE.lastSyncAt = new Date();
-      // Keep a fortnight of sent sales for reprints; the server has them all.
-      const cut = Date.now() - 14 * 86400000;
-      const before = queue.sales.length;
-      queue.sales = queue.sales.filter((s) => (s.status !== 'sent' && s.status !== 'set_aside') || new Date(s.sent_at || s.at).getTime() > cut);
-      if (queue.sales.length !== before) saveQueue();
-    } finally { STATE.syncing = false; }
+      const { rows } = await query(`SELECT * FROM offline_sales WHERE status = 'received' ORDER BY terminal_id, seq NULLS FIRST, id LIMIT 50`);
+      for (const row of rows) {
+        let findings;
+        try { findings = await scanRow(row); } catch (e) { findings = [{ level: 'review', code: 'error', text: 'Could not be checked: ' + e.message }]; }
+        await query(`UPDATE offline_sales SET findings=$2::jsonb, checked_at=NOW(), status=$3 WHERE id=$1`, [row.id, JSON.stringify(findings), findings.length ? 'held' : 'checking']);
+        if (findings.length) { console.warn('[offline] held ' + row.offline_receipt + ' for a manager: ' + findings.map((f) => f.code).join(', ')); continue; }
+        const out = await postRow(row, row.cashier_id, null, null);
+        if (!out.ok) console.warn('[offline] ' + row.offline_receipt + ' was clean but the sale route refused it: ' + out.error);
+      }
+    } catch (e) {
+      console.error('[offline] check', e.message);
+    } finally {
+      if (client) { await client.query('COMMIT').catch(() => {}); client.release(); }
+      checking = false;
+    }
   }
 
   // ------------------------------------------------------ what we report --
@@ -233,7 +359,7 @@ function register(app, d) {
       app: { version: appVersion, http_port: d.port, https_port: d.port + 1, pid: process.pid, node: process.version, started_at: STATE.startedAt.toISOString(), uptime_s: Math.round(process.uptime()) },
       os: { platform: os.platform(), release: os.release(), hostname: os.hostname(), cpus: os.cpus().length, mem_gb: r2(os.totalmem() / 1073741824), free_gb: r2(os.freemem() / 1073741824) },
       ips,
-      offline: { pending: c.pending, failed: c.failed, snapshot_at: snap && snap.at, snapshot_products: snap ? snap.products.length : 0, last_down_at: STATE.lastDownAt, last_up_at: STATE.lastUpAt, last_sync_at: STATE.lastSyncAt },
+      offline: { pending: c.pending + c.checking, failed: c.held, snapshot_at: snap && snap.at, snapshot_products: snap ? snap.products.length : 0, last_down_at: STATE.lastDownAt, last_up_at: STATE.lastUpAt, last_sync_at: STATE.lastSyncAt },
       reported_at: new Date().toISOString(),
     };
   }
@@ -250,7 +376,7 @@ function register(app, d) {
       } catch (_) { colsOk = true; }
     }
     const c = counts();
-    try { await query('UPDATE terminals SET conn=$2::jsonb, offline_pending=$3, offline_failed=$4 WHERE id=$1', [t.id, JSON.stringify(connInfo()), c.pending, c.failed]); } catch (_) {}
+    try { await query('UPDATE terminals SET conn=$2::jsonb, offline_pending=$3, offline_failed=$4 WHERE id=$1', [t.id, JSON.stringify(connInfo()), c.pending + c.checking, c.held]); } catch (_) {}
   }
 
   // ------------------------------------------------------ offline routes --
@@ -361,6 +487,10 @@ function register(app, d) {
           cashier_id: u.id,
         },
       };
+      // Signed, and chained to the sale before it (offline-check.js).
+      Object.assign(rec, { seq: queue.seq, prev: queue.head || '', down_since: STATE.downSince ? STATE.downSince.toISOString() : null });
+      rec.sig = snap.key ? check.sign(snap.key, rec) : null;
+      queue.head = check.chainHash(rec);
       queue.sales.push(rec);
       saveQueue();
       for (const l of t.lines) l.p.stock -= l.qty;
@@ -406,35 +536,55 @@ function register(app, d) {
                         (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') AS max_connections,
                         pg_postmaster_start_time() AS started_at, host(inet_server_addr()) AS address, inet_server_port() AS port`).catch(() => ({ rows: [{}] })),
           query(`SELECT o.id, o.uid, o.terminal_id, o.terminal_name, o.offline_receipt, o.cashier_name, o.rung_at, o.total_usd::float AS total,
-                        o.status, o.sale_id, o.receipt_number, o.posted_total_usd::float AS posted, o.error, o.attempts, o.synced_at
-                   FROM offline_sales o ORDER BY (o.status = 'failed') DESC, o.rung_at DESC LIMIT 200`).catch(() => ({ rows: [] })),
+                        o.status, o.sale_id, o.receipt_number, o.posted_total_usd::float AS posted, o.error, o.attempts, o.synced_at,
+                        o.findings, o.checked_at, o.decided_at, o.decision_note, d.name AS decided_by_name, o.body
+                   FROM offline_sales o LEFT JOIN users d ON d.id = o.decided_by
+                  ORDER BY (o.status IN ('held','failed','received','posting','checking')) DESC, o.rung_at DESC LIMIT 200`).catch(() => ({ rows: [] })),
         ]);
-        res.json({ terminals: terms, connections: conns, server: srv[0] || {}, offline_sales: off, this_terminal_id: (terminal() || {}).id, here: connInfo() });
+        for (const t of terms) delete t.offline_key;   // the signing key never leaves the server
+        const review = { all: (await setting('offline_review_all', 'off')) === 'on', over: Number(await setting('offline_review_over', '0')) || 0 };
+        res.json({ terminals: terms, connections: conns, server: srv[0] || {}, offline_sales: off, review, this_terminal_id: (terminal() || {}).id, here: connInfo() });
       } catch (e) { fail(res, e); }
     });
 
-    // A sale the server refused when its terminal sent it: post it under the
-    // manager's own name (their permissions decide), or set it aside.
-    app.post('/api/sys/offline-sales/:id/post', requireManager, async (req, res) => {
+    // A sale the check held, or the sale route refused. Approve posts it under
+    // the cashier who rang it; "post as me" under the manager (their own
+    // permissions decide); reject keeps it off the books. Blocked findings
+    // (tampering, injection) need a note saying why it is safe.
+    async function decide(req, res, how) {
       try {
         await ensure();
         const { rows } = await query('SELECT * FROM offline_sales WHERE id = $1', [parseInt(req.params.id, 10) || 0]);
         const o = rows[0];
         if (!o) throw bad(404, 'Not found');
         if (o.status === 'posted') return res.json({ ok: true, already: true, sale_id: o.sale_id });
-        const rec = { uid: o.uid, terminal_id: o.terminal_id, terminal_name: o.terminal_name, receipt: o.offline_receipt, user_id: o.cashier_id, user_name: o.cashier_name, at: o.rung_at, total: o.total_usd, body: o.body };
-        const out = await sendOne(rec, req.session.userId, req.session.userId);
+        const note = String((req.body || {}).note || (req.body || {}).reason || '').trim().slice(0, 500);
+        if (how === 'reject') {
+          if (!note) throw bad(400, 'Give a reason');
+          const { rowCount } = await query(`UPDATE offline_sales SET status='rejected', decided_by=$2, decided_at=NOW(), decision_note=$3 WHERE id=$1 AND status IN ('received','held','failed')`, [o.id, req.session.userId, note]);
+          if (!rowCount) throw bad(409, 'This sale is being checked or posted right now; try again in a moment.');
+          return res.json({ ok: true });
+        }
+        if (!['held', 'failed'].includes(o.status)) throw bad(409, 'Only a held or refused sale can be approved (this one is ' + o.status + ').');
+        const blocked = (o.findings || []).some((f) => f.level === 'block');
+        if (blocked && !note) throw bad(400, 'This sale failed the tampering or injection checks. Say why it is safe to post.');
+        const out = await postRow(o, how === 'mine' ? req.session.userId : o.cashier_id, req.session.userId, note || (how === 'mine' ? 'Posted as the manager' : 'Approved'));
         if (!out.ok) throw bad(400, out.error);
         res.json({ ok: true, sale_id: out.sale_id, receipt_number: out.receipt_number });
       } catch (e) { fail(res, e); }
-    });
-    app.post('/api/sys/offline-sales/:id/set-aside', requireManager, async (req, res) => {
+    }
+    app.post('/api/sys/offline-sales/:id/approve', requireManager, (req, res) => decide(req, res, 'cashier'));
+    app.post('/api/sys/offline-sales/:id/post', requireManager, (req, res) => decide(req, res, 'mine'));
+    app.post('/api/sys/offline-sales/:id/reject', requireManager, (req, res) => decide(req, res, 'reject'));
+    app.post('/api/sys/offline-sales/:id/set-aside', requireManager, (req, res) => decide(req, res, 'reject'));
+
+    // Hold every offline sale for a manager, and/or any over an amount.
+    app.post('/api/sys/offline-review', requireManager, async (req, res) => {
       try {
-        const why = String((req.body || {}).reason || '').trim();
-        if (!why) throw bad(400, 'Give a reason');
-        const { rowCount } = await query(`UPDATE offline_sales SET status='set_aside', error=COALESCE(error,'') || ' · set aside: ' || $2, posted_by=$3 WHERE id=$1 AND status <> 'posted'`,
-          [parseInt(req.params.id, 10) || 0, why.slice(0, 300), req.session.userId]);
-        if (!rowCount) throw bad(404, 'Not found, or already posted');
+        const b = req.body || {};
+        const put = (k, v) => query(`INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`, [k, v]);
+        if (b.all != null) await put('offline_review_all', b.all ? 'on' : 'off');
+        if (b.over != null) await put('offline_review_over', String(Math.max(0, Number(b.over) || 0)));
         res.json({ ok: true });
       } catch (e) { fail(res, e); }
     });
@@ -445,6 +595,7 @@ function register(app, d) {
   probe();
   setInterval(probe, PROBE_EVERY_MS).unref();
   setInterval(report, REPORT_EVERY_MS).unref();
+  setInterval(() => { checkWaiting(); }, 10000).unref();
   const snapTick = () => { if (STATE.dbUp) takeSnapshot().catch((e) => console.warn('[offline] snapshot:', e.message)); };
   setTimeout(snapTick, 20000).unref();
   setInterval(snapTick, SNAPSHOT_EVERY_MS).unref();

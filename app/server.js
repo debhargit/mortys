@@ -882,7 +882,7 @@ app.use((req, _res, next) => {
 const terminalLink = require('./terminal-link').register(app, {
   query, requireAdmin, requireManager, userCan, userPermState, getShopSettings,
   posSaleHandler: () => posSaleHandler, storeTax: () => storeTax,
-  terminal: () => TERMINAL, machineName, appVersion: APP_VERSION, port: PORT,
+  terminal: () => TERMINAL, machineName, appVersion: APP_VERSION, port: PORT, getPool: () => pool,
   // The same target the pool uses (applyDbConfig), on a short fuse of its own.
   probeDb: async () => {
     const cfg = buildPoolConfig(loadDbConfig().local) || { connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/visionautosolutions' };
@@ -1874,6 +1874,7 @@ app.get('/api/admin/terminals', requireManager, async (req, res) => {
          LEFT JOIN users u ON u.id = t.approved_by
         ORDER BY t.is_db_host DESC, t.last_seen DESC`
     );
+    for (const r of rows) delete r.offline_key;   // offline signing key (terminal-link.js): server only
     res.json({
       ok: true,
       terminals: rows,
@@ -1950,6 +1951,7 @@ app.patch('/api/admin/terminals/:id', requireManager, async (req, res) => {
     if (b.note !== undefined)  await query('UPDATE terminals SET note=$2 WHERE id=$1', [id, String(b.note).trim() || null]);
 
     const out = await query('SELECT * FROM terminals WHERE id = $1', [id]);
+    if (out.rows[0]) delete out.rows[0].offline_key;
     res.json({ ok: true, terminal: out.rows[0] });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });

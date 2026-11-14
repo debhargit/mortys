@@ -1621,9 +1621,9 @@ ALTER TABLE terminals ADD COLUMN IF NOT EXISTS offline_pending INTEGER NOT NULL 
 ALTER TABLE terminals ADD COLUMN IF NOT EXISTS offline_failed  INTEGER NOT NULL DEFAULT 0;
 
 -- Sales a terminal rang on /offline-till.html while the database was down.
--- Written before each is posted through the ordinary sale route, so sending
--- again after a break never posts a sale twice (uid). 'failed' ones wait for
--- "Post it as me" or "Set aside" in System management -> Terminals.
+-- Uploaded to this holding area, checked by the shop's server, then posted
+-- through the ordinary sale route; uid means sending again never posts a sale
+-- twice. Held and refused ones wait in System management -> Terminals.
 CREATE TABLE IF NOT EXISTS offline_sales (
   id               SERIAL PRIMARY KEY,
   uid              TEXT NOT NULL UNIQUE,
@@ -1634,7 +1634,7 @@ CREATE TABLE IF NOT EXISTS offline_sales (
   cashier_name     TEXT,
   rung_at          TIMESTAMPTZ NOT NULL,
   total_usd        NUMERIC(12,2),
-  status           TEXT NOT NULL DEFAULT 'posting',   -- posting | posted | failed | set_aside
+  status           TEXT NOT NULL DEFAULT 'received',  -- received, checking, held, posting, posted, failed, rejected
   sale_id          INTEGER,
   receipt_number   TEXT,
   posted_total_usd NUMERIC(12,2),
@@ -1646,6 +1646,27 @@ CREATE TABLE IF NOT EXISTS offline_sales (
   created_at       TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_offline_sales_status ON offline_sales (status, rung_at DESC);
+
+-- The holding area: a terminal uploads each offline sale as 'received' and the
+-- shop's server checks it (offline-check.js) before it is posted: signature and
+-- chain for tampering, SQL / script / control characters for injection, then
+-- products, prices, totals, payment and times. received -> posted, or held for
+-- a manager (findings) -> approved and posted, or rejected.
+ALTER TABLE offline_sales ADD COLUMN IF NOT EXISTS seq                  INTEGER;   -- place in that terminal's chain
+ALTER TABLE offline_sales ADD COLUMN IF NOT EXISTS sig                  TEXT;      -- HMAC with terminals.offline_key
+ALTER TABLE offline_sales ADD COLUMN IF NOT EXISTS record               JSONB;     -- the signed sale as the terminal kept it
+ALTER TABLE offline_sales ADD COLUMN IF NOT EXISTS findings             JSONB;     -- [{level: block|review, code, text}]
+ALTER TABLE offline_sales ADD COLUMN IF NOT EXISTS uploaded_by_terminal INTEGER;
+ALTER TABLE offline_sales ADD COLUMN IF NOT EXISTS checked_at           TIMESTAMPTZ;
+ALTER TABLE offline_sales ADD COLUMN IF NOT EXISTS decided_by           INTEGER;
+ALTER TABLE offline_sales ADD COLUMN IF NOT EXISTS decided_at           TIMESTAMPTZ;
+ALTER TABLE offline_sales ADD COLUMN IF NOT EXISTS decision_note        TEXT;
+ALTER TABLE offline_sales ALTER COLUMN status SET DEFAULT 'received';
+-- Each terminal's signing key (never sent to a browser), and where its chain
+-- of offline sales has reached.
+ALTER TABLE terminals ADD COLUMN IF NOT EXISTS offline_key  TEXT;
+ALTER TABLE terminals ADD COLUMN IF NOT EXISTS offline_seq  INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE terminals ADD COLUMN IF NOT EXISTS offline_head TEXT;
 
 -- Small key/value bag for app-wide switches that are not shop-branding
 -- settings (which live in shop_settings).

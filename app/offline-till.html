@@ -44,7 +44,7 @@
   .err{color:var(--bad);font-weight:600;min-height:1.2em;margin:6px 0}
   .empty{color:var(--muted);padding:14px 4px;text-align:center}
   .kept .s{display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line);font-size:13.5px} .kept .s .w{flex:1}
-  .st{font-size:11.5px;font-weight:800;text-transform:uppercase;padding:2px 7px;border-radius:4px} .st.pending{background:#fef3c7;color:#92400e} .st.sent{background:#dcfce7;color:#166534} .st.failed{background:#fee2e2;color:#991b1b} .st.set_aside{background:#e5e7eb;color:#374151}
+  .st{font-size:11.5px;font-weight:800;text-transform:uppercase;padding:2px 7px;border-radius:4px} .st.pending{background:#fef3c7;color:#92400e} .st.sent{background:#dcfce7;color:#166534} .st.uploaded{background:#e0f2fe;color:#075985} .st.held{background:#fee2e2;color:#991b1b} .st.rejected{background:#e5e7eb;color:#374151}
   #modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:16px;z-index:9} #modal.show{display:flex}
   #modal .box{background:var(--card);border-radius:12px;padding:18px;max-width:420px;width:100%;max-height:90vh;overflow:auto}
   #receipt{font:13px/1.35 ui-monospace,Consolas,monospace;color:#000;background:#fff;padding:10px;border:1px dashed #ccc}
@@ -101,20 +101,22 @@
     return api('/api/offline/state').then(function (s) {
       st = s;
       var c = s.counts || {};
-      var waiting = (c.pending || 0) + (c.failed || 0);
+      var waiting = (c.pending || 0) + (c.checking || 0) + (c.held || 0);
       var pill = $('#pill'), bar = $('#bar');
       if (!s.db_up) { pill.className = 'pill off'; pill.textContent = 'Server down: selling offline'; }
-      else if (waiting) { pill.className = 'pill send'; pill.textContent = s.syncing ? 'Sending kept sales…' : waiting + ' sale(s) to send'; }
+      else if (c.pending) { pill.className = 'pill send'; pill.textContent = s.syncing ? 'Sending kept sales…' : c.pending + ' sale(s) to send'; }
+      else if (c.checking || c.held) { pill.className = 'pill send'; pill.textContent = (c.checking ? c.checking + ' being checked' : '') + (c.checking && c.held ? ' · ' : '') + (c.held ? c.held + ' held for a manager' : ''); }
       else { pill.className = 'pill on'; pill.textContent = 'Server answering'; }
       if (!s.db_up) { bar.className = 'off'; bar.innerHTML = '<b>The shop’s server is not answering.</b> Keep selling here: each sale is kept on this computer and goes to the server by itself when it is back. Cash, card, bank transfer and cheque only.' + (s.down_since ? ' Down since ' + new Date(s.down_since).toLocaleTimeString() + '.' : ''); }
-      else if (!waiting) { bar.className = 'on'; bar.innerHTML = 'The server is answering and every sale has been sent. <a href="/admin.html">Go back to the till</a>.'; }
+      else if (!waiting) { bar.className = 'on'; bar.innerHTML = 'The server is answering and every sale has been checked and recorded. <a href="/admin.html">Go back to the till</a>.'; }
+      else if (!c.pending) { bar.className = 'on'; bar.innerHTML = 'The server is answering. Sales rung here are with it now: it checks each one before recording it, and a manager deals with any it holds. <a href="/admin.html">Go back to the till</a>.'; }
       else bar.className = '';
       $('#who').textContent = s.me ? '👤 ' + s.me.name : '';
       $('#term').textContent = '🖥 ' + (s.terminal || '');
       $('#snapInfo').textContent = s.snapshot ? 'Catalogue copy: ' + s.snapshot.products.toLocaleString() + ' items, taken ' + new Date(s.snapshot.at).toLocaleString() + '.' : 'This terminal has no catalogue copy yet.';
-      $('#send').disabled = !s.db_up || !waiting;
+      $('#send').disabled = !s.db_up || !c.pending;
       if (!s.me) { $('#err').textContent = s.snapshot ? 'Nobody is signed in on this terminal, so it cannot sell offline. Sign in on the till once the server is back.' : 'This terminal has no copy of the catalogue yet, so it cannot sell offline.'; $('#done').disabled = true; }
-      $('#kc').textContent = (c.pending || 0) + ' waiting · ' + (c.failed || 0) + ' refused · ' + (c.sent || 0) + ' sent';
+      $('#kc').textContent = (c.pending || 0) + ' to send · ' + (c.checking || 0) + ' being checked · ' + (c.held || 0) + ' held · ' + (c.sent || 0) + ' recorded';
       return s;
     }).catch(function (e) { $('#pill').textContent = 'This computer’s till program is not answering'; $('#err').textContent = e.message; });
   }
@@ -122,7 +124,7 @@
     if (!st || !st.me) return;
     api('/api/offline/sales').then(function (d) {
       $('#kept').innerHTML = d.sales.length ? d.sales.map(function (s, i) {
-        return '<div class="s"><span class="st ' + s.status + '">' + (s.status === 'set_aside' ? 'set aside' : s.status) + '</span><span class="w"><b>' + esc(s.receipt) + '</b> · ' + new Date(s.at).toLocaleString() + ' · ' + esc(s.user_name) + ' · ' + s.lines.length + ' item(s)' +
+        return '<div class="s"><span class="st ' + s.status + '">' + ({ pending: 'to send', uploaded: 'being checked', held: 'held for a manager', sent: 'recorded', rejected: 'rejected' }[s.status] || s.status) + '</span><span class="w"><b>' + esc(s.receipt) + '</b> · ' + new Date(s.at).toLocaleString() + ' · ' + esc(s.user_name) + ' · ' + s.lines.length + ' item(s)' +
           (s.receipt_number ? ' · now <b>' + esc(s.receipt_number) + '</b>' : '') + (s.error ? '<br><span style="color:var(--bad)">' + esc(s.error) + '</span>' : '') + '</span><b>' + money(s.total) + '</b><button data-i="' + i + '">Reprint</button></div>';
       }).join('') : '<div class="empty">None yet.</div>';
       Array.prototype.forEach.call(document.querySelectorAll('#kept button'), function (b) { b.onclick = function () { receipt(d.sales[+b.dataset.i]); }; });
@@ -224,7 +226,7 @@
 
   draw();
   state().then(kept);
-  setInterval(function () { state().then(function (s) { if (s && s.counts && s.counts.sent) kept(); }); }, 8000);
+  setInterval(function () { state().then(kept); }, 8000);
 })();
 </script>
 </body>
