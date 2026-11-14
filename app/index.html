@@ -307,7 +307,8 @@ header.site .nav{gap:18px;padding:12px 0}
     linear-gradient(115deg,#0a0a0c 0%,#141619 48%,#1d0b0d 100%)}
 .vh::before{content:"";position:absolute;top:-20%;bottom:-20%;right:34%;width:70px;background:linear-gradient(180deg,var(--yellow),#ff9f00);transform:skewX(-18deg);opacity:.9;box-shadow:0 0 40px rgba(255,203,5,.45)}
 .vh::after{content:"";position:absolute;top:-20%;bottom:-20%;right:calc(34% - 46px);width:18px;background:var(--red);transform:skewX(-18deg)}
-.vh-grid{position:relative;z-index:1;display:grid;grid-template-columns:minmax(0,1.08fr) minmax(0,.92fr);gap:28px;align-items:center;padding-top:12px;padding-bottom:24px}
+.vh-grid{position:relative;z-index:1;display:grid;grid-template-columns:minmax(0,1.08fr) minmax(0,.92fr);gap:28px;align-items:center;padding-top:4px;padding-bottom:24px}
+.vh-copy{align-self:start}
 .vh-eyebrow{display:inline-block;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);color:#ffe27a;padding:6px 12px;border-radius:999px;font-size:.74rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;margin-bottom:10px}
 .vh h1{font-family:'Bebas Neue',sans-serif;font-weight:400;font-size:3.4rem;line-height:.98;letter-spacing:.01em;margin:0 0 14px}
 .vh h1 em{font-style:normal;color:var(--yellow);display:block}
@@ -372,7 +373,7 @@ header.site .nav{gap:18px;padding:12px 0}
 }
 @media(max-width:880px){
   .vh::before,.vh::after{display:none}
-  .vh-grid{grid-template-columns:1fr;padding-top:12px;padding-bottom:20px}
+  .vh-grid{grid-template-columns:1fr;padding-top:6px;padding-bottom:20px}
   .vh-art{display:none}
   .vh h1{font-size:2.5rem}
   .vh-lead{font-size:.95rem}
