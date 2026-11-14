@@ -554,6 +554,7 @@
     <div id="dbDownBanner" style="display:none;text-align:left;background:#fef3c7;border:1px solid #f59e0b;color:#7c2d12;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13.5px;line-height:1.55">
       <b style="display:block;margin-bottom:4px">The database is not running</b>
       <span id="dbDownDetail">Nobody can sign in until it starts. This is not a password problem.</span>
+      <a href="/offline-till.html" style="display:block;margin-top:6px;font-weight:700;color:inherit">Keep selling on this terminal’s offline till →</a>
     </div>
     <div class="err" id="signinErr"></div>
     <label>Email</label>
@@ -21704,6 +21705,9 @@ function fmtSeen(iso, online){
   return '<span style="color:var(--muted)">' + Math.floor(mins/1440) + ' d ago</span>';
 }
 function terminalRows(list, thisId){
+  return terminalRowsBody(list, thisId) + '<div style="margin-top:8px;font-size:12px"><a href="/system.html#terminals">Connection details, the database server’s connections and sales rung offline → System management → Terminals</a></div>';
+}
+function terminalRowsBody(list, thisId){
   if (!list.length) return '<div style="color:var(--muted);font-size:12.5px">No terminals registered yet.</div>';
   var badge = { approved:['#dcfce7','#166534','allowed'], pending:['#fef3c7','#92400e','waiting'], blocked:['#fee2e2','#b91c1c','blocked'] };
   return '<div style="display:grid;gap:8px">' + list.map(function(t){
@@ -21723,6 +21727,8 @@ function terminalRows(list, thisId){
         (t.hostname ? esc(t.hostname) + ' · ' : '') +
         (t.app_version ? 'v' + esc(t.app_version) : '') +
         (t.approved_by_name ? ' · allowed by ' + esc(t.approved_by_name) : '') +
+        (t.conn && t.conn.link ? ' · database: ' + esc(t.conn.link) + (t.conn.db_ms != null ? ' ' + t.conn.db_ms + ' ms' : '') + (t.conn.mode === 'offline' ? ' · <b style="color:#b91c1c">selling offline</b>' : '') : '') +
+        ((t.offline_pending || t.offline_failed) ? ' · <b style="color:#b45309">' + (t.offline_pending || 0) + ' offline sale(s) waiting, ' + (t.offline_failed || 0) + ' refused</b>' : '') +
       '</div>' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">' +
         (t.status !== 'approved' ? '<button type="button" class="btn ok trmBtn" data-act="approved" data-id="' + t.id + '" style="font-size:11.5px;padding:5px 10px">✓ Allow</button>' : '') +
@@ -23034,5 +23040,6 @@ document.addEventListener('DOMContentLoaded', async function(){
 })();
 </script>
 <script src="/assets/print-share.js?v=20261106"></script>
+<script src="/assets/offline-watch.js?v=20261113" defer></script>
 </body>
 </html>

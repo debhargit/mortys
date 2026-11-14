@@ -33,6 +33,8 @@ import mountStoreOps from './_routes/storeops.js'; // departments, store locatio
 import mountGl from './_routes/gl.js'; // general ledger: chart, journal, reports, exports (migration 0064)
 import mountAi from './_routes/ai.js'; // customer chat, answered by staff (migration 0066)
 import { isTillHistoryRead, fromTill, tillPageRedirect, demoRoute } from './_lib/till_gateway.js'; // full-history reads from the till
+import mountSiteMgmt from './_routes/sitemgmt.js'; // System management -> Website on the till (migration 0068)
+import { trackPage } from './_lib/visits.js';     // every page a visitor opens
 
 const app = new Hono();
 
@@ -61,6 +63,7 @@ mountAdminMisc(app);
 mountStoreOps(app);
 mountGl(app);
 mountAi(app);
+mountSiteMgmt(app);
 
 // admin.html's checkDbUp() shows a "database is not running" banner unless this
 // reports db:'up', so it must actually probe D1 (a one-row read). D1 has no
@@ -104,10 +107,10 @@ export const onRequest = async (context) => {
   }
   // The till's screens on sample data (/demo/...).
   const demo = demoRoute(context.request, pathname);
-  if (demo) return demo;
+  if (demo) return trackPage(context, await demo);
   // Payables, banking and the other till-only screens open on the till (or a
   // "till offline" page when it does not answer, or the demo in demo mode).
   const toTill = await tillPageRedirect(context.request, context.env, pathname);
-  if (toTill) return toTill;
-  return context.next();
+  if (toTill) return trackPage(context, toTill);
+  return trackPage(context, await context.next());
 };

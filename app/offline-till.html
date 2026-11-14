@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Offline till · Vision Auto Solutions</title>
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<!--
+  The till when the shop's server is down (terminal-link.js). Everything is on
+  this page so it opens even when the rest of the program cannot: it sells from
+  this terminal's own copy of the catalogue, keeps each sale on this computer,
+  prints the receipt, and sends the sales to the server when it answers again.
+-->
+<style>
+  :root{--ink:#111827;--muted:#6b7280;--line:#e5e7eb;--card:#fff;--bg:#f3f4f6;--brand:#b91c1c;--ok:#15803d;--warn:#b45309;--bad:#b91c1c}
+  @media (prefers-color-scheme: dark){:root{--ink:#e5e7eb;--muted:#9ca3af;--line:#374151;--card:#1f2937;--bg:#111827}}
+  *{box-sizing:border-box} body{margin:0;font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--ink)}
+  header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 16px;background:#111827;color:#fff}
+  header h1{font-size:18px;margin:0} header .sp{flex:1} header a{color:#fff}
+  .pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12.5px;font-weight:700}
+  .pill.off{background:#fee2e2;color:#991b1b} .pill.on{background:#dcfce7;color:#166534} .pill.send{background:#fef3c7;color:#92400e}
+  #bar{padding:10px 16px;font-size:14px;display:none} #bar.off{display:block;background:#fef2f2;color:#7f1d1d;border-bottom:1px solid #fecaca} #bar.on{display:block;background:#f0fdf4;color:#14532d;border-bottom:1px solid #bbf7d0}
+  main{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(320px,1fr);gap:14px;padding:14px 16px;max-width:1400px;margin:0 auto}
+  @media (max-width:900px){main{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+  h2{font-size:15px;margin:0 0 10px}
+  input,select,button{font:inherit;color:inherit} input,select{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:9px 10px;width:100%}
+  button{border:1px solid var(--line);background:var(--card);border-radius:8px;padding:9px 14px;cursor:pointer}
+  button.primary{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:700} button:disabled{opacity:.5;cursor:default}
+  #q{font-size:18px;padding:12px}
+  .res{max-height:52vh;overflow:auto;margin-top:8px}
+  .r{display:flex;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid var(--line);cursor:pointer} .r:hover{background:rgba(185,28,28,.06)}
+  .r .n{flex:1;min-width:0} .r .n b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap} .r .n span{font-size:12.5px;color:var(--muted)}
+  .r .p{font-weight:700;white-space:nowrap}
+  table{width:100%;border-collapse:collapse} th,td{text-align:left;padding:6px 4px;border-bottom:1px solid var(--line);vertical-align:middle} th{font-size:12px;color:var(--muted);font-weight:600}
+  td.num,th.num{text-align:right;white-space:nowrap}
+  .ln{border-bottom:1px solid var(--line);padding:8px 0} .ln .top{display:flex;gap:10px;align-items:baseline} .ln .top b{flex:1;min-width:0} .ln .top .lt{font-weight:800;white-space:nowrap}
+  .ln .sub{font-size:12px;color:var(--muted)} .ln .ctl{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px;font-size:13px;color:var(--muted)}
+  .ln .ctl input{padding:5px 7px} .ln .ctl .x{margin-left:auto;padding:4px 10px}
+  .qty{display:flex;align-items:center;gap:4px} .qty button{padding:3px 10px} .qty input{width:56px;text-align:center}
+  .tot{display:grid;grid-template-columns:1fr auto;gap:3px 12px;margin:10px 0;font-size:15px} .tot .big{font-size:24px;font-weight:800}
+  .meth{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:8px 0} .meth button.on{background:#111827;color:#fff;border-color:#111827}
+  .g2{display:grid;grid-template-columns:1fr 1fr;gap:8px} label{display:block;font-size:12px;color:var(--muted);margin:6px 0 2px}
+  .err{color:var(--bad);font-weight:600;min-height:1.2em;margin:6px 0}
+  .empty{color:var(--muted);padding:14px 4px;text-align:center}
+  .kept .s{display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line);font-size:13.5px} .kept .s .w{flex:1}
+  .st{font-size:11.5px;font-weight:800;text-transform:uppercase;padding:2px 7px;border-radius:4px} .st.pending{background:#fef3c7;color:#92400e} .st.sent{background:#dcfce7;color:#166534} .st.failed{background:#fee2e2;color:#991b1b} .st.set_aside{background:#e5e7eb;color:#374151}
+  #modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:16px;z-index:9} #modal.show{display:flex}
+  #modal .box{background:var(--card);border-radius:12px;padding:18px;max-width:420px;width:100%;max-height:90vh;overflow:auto}
+  #receipt{font:13px/1.35 ui-monospace,Consolas,monospace;color:#000;background:#fff;padding:10px;border:1px dashed #ccc}
+  #receipt .c{text-align:center} #receipt .rw{display:flex;justify-content:space-between;gap:8px} #receipt hr{border:0;border-top:1px dashed #000}
+  @media print{body *{visibility:hidden} #receipt,#receipt *{visibility:visible} #receipt{position:absolute;left:0;top:0;width:72mm;border:0;padding:0}}
+</style>
+</head>
+<body>
+<header>
+  <h1>🧾 Offline till</h1><span id="pill" class="pill off">Checking…</span>
+  <span class="sp"></span><span id="who"></span><span id="term" style="opacity:.75"></span><a href="/admin.html">Back to the till</a>
+</header>
+<div id="bar"></div>
+<main>
+  <section class="card">
+    <h2>Find an item</h2>
+    <input id="q" placeholder="Scan a barcode, or type a part number or name" autocomplete="off" autofocus>
+    <div class="res" id="res"><div class="empty">Results show here.</div></div>
+    <div style="font-size:12.5px;color:var(--muted);margin-top:8px" id="snapInfo"></div>
+  </section>
+  <section class="card">
+    <h2>Sale</h2>
+    <div id="cart"></div>
+    <div class="tot"><span>Subtotal</span><span id="tSub">0.00</span><span>Discount</span><span id="tDisc">0.00</span><span>GCT</span><span id="tTax">0.00</span><span class="big">Total</span><span class="big" id="tTot">0.00</span></div>
+    <div class="g2"><div><label for="cName">Customer (optional)</label><input id="cName"></div><div><label for="cPhone">Phone (optional)</label><input id="cPhone"></div></div>
+    <label>Payment</label>
+    <div class="meth" id="meth"><button data-m="cash" class="on">Cash</button><button data-m="card">Card</button><button data-m="bank">Bank</button><button data-m="cheque">Cheque</button></div>
+    <div class="g2"><div id="tendWrap"><label for="tend">Cash given</label><input id="tend" inputmode="decimal"></div><div><label for="ref">Reference (card slip, cheque no.)</label><input id="ref"></div></div>
+    <div id="change" style="margin-top:6px;font-weight:700"></div>
+    <div class="err" id="err"></div>
+    <div style="display:flex;gap:8px"><button class="primary" id="done" style="flex:1;padding:12px">Complete sale</button><button id="clear">Clear</button></div>
+  </section>
+  <section class="card kept" style="grid-column:1/-1">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><h2 style="margin:0;flex:1">Sales kept on this computer</h2><span id="kc" style="color:var(--muted);font-size:13px"></span><button id="send">Send now</button></div>
+    <div id="kept"><div class="empty">None yet.</div></div>
+  </section>
+</main>
+<div id="modal"><div class="box"><div id="receipt"></div><div style="display:flex;gap:8px;margin-top:12px"><button class="primary" id="print" style="flex:1">Print receipt</button><button id="next">New sale</button></div></div></div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s) { return document.querySelector(s); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var money = function (n) { return (Number(n) || 0).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+  var st = null, cart = [], totals = null, method = 'cash', uid = newUid(), busy = false;
+
+  function newUid() { return (crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + '-' + Math.random().toString(36).slice(2))); }
+  function api(url, body) {
+    return fetch(url, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body) } : { credentials: 'same-origin' })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status)); return j; }); });
+  }
+
+  function state() {
+    return api('/api/offline/state').then(function (s) {
+      st = s;
+      var c = s.counts || {};
+      var waiting = (c.pending || 0) + (c.failed || 0);
+      var pill = $('#pill'), bar = $('#bar');
+      if (!s.db_up) { pill.className = 'pill off'; pill.textContent = 'Server down: selling offline'; }
+      else if (waiting) { pill.className = 'pill send'; pill.textContent = s.syncing ? 'Sending kept sales…' : waiting + ' sale(s) to send'; }
+      else { pill.className = 'pill on'; pill.textContent = 'Server answering'; }
+      if (!s.db_up) { bar.className = 'off'; bar.innerHTML = '<b>The shop’s server is not answering.</b> Keep selling here: each sale is kept on this computer and goes to the server by itself when it is back. Cash, card, bank transfer and cheque only.' + (s.down_since ? ' Down since ' + new Date(s.down_since).toLocaleTimeString() + '.' : ''); }
+      else if (!waiting) { bar.className = 'on'; bar.innerHTML = 'The server is answering and every sale has been sent. <a href="/admin.html">Go back to the till</a>.'; }
+      else bar.className = '';
+      $('#who').textContent = s.me ? '👤 ' + s.me.name : '';
+      $('#term').textContent = '🖥 ' + (s.terminal || '');
+      $('#snapInfo').textContent = s.snapshot ? 'Catalogue copy: ' + s.snapshot.products.toLocaleString() + ' items, taken ' + new Date(s.snapshot.at).toLocaleString() + '.' : 'This terminal has no catalogue copy yet.';
+      $('#send').disabled = !s.db_up || !waiting;
+      if (!s.me) { $('#err').textContent = s.snapshot ? 'Nobody is signed in on this terminal, so it cannot sell offline. Sign in on the till once the server is back.' : 'This terminal has no copy of the catalogue yet, so it cannot sell offline.'; $('#done').disabled = true; }
+      $('#kc').textContent = (c.pending || 0) + ' waiting · ' + (c.failed || 0) + ' refused · ' + (c.sent || 0) + ' sent';
+      return s;
+    }).catch(function (e) { $('#pill').textContent = 'This computer’s till program is not answering'; $('#err').textContent = e.message; });
+  }
+  function kept() {
+    if (!st || !st.me) return;
+    api('/api/offline/sales').then(function (d) {
+      $('#kept').innerHTML = d.sales.length ? d.sales.map(function (s, i) {
+        return '<div class="s"><span class="st ' + s.status + '">' + (s.status === 'set_aside' ? 'set aside' : s.status) + '</span><span class="w"><b>' + esc(s.receipt) + '</b> · ' + new Date(s.at).toLocaleString() + ' · ' + esc(s.user_name) + ' · ' + s.lines.length + ' item(s)' +
+          (s.receipt_number ? ' · now <b>' + esc(s.receipt_number) + '</b>' : '') + (s.error ? '<br><span style="color:var(--bad)">' + esc(s.error) + '</span>' : '') + '</span><b>' + money(s.total) + '</b><button data-i="' + i + '">Reprint</button></div>';
+      }).join('') : '<div class="empty">None yet.</div>';
+      Array.prototype.forEach.call(document.querySelectorAll('#kept button'), function (b) { b.onclick = function () { receipt(d.sales[+b.dataset.i]); }; });
+    }).catch(function () {});
+  }
+
+  var timer = null;
+  $('#q').addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(search, 180); });
+  $('#q').addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault(); clearTimeout(timer);
+    search().then(function (d) { if (d && d.items.length && (d.exact || d.items.length === 1)) { add(d.items[0]); $('#q').value = ''; $('#res').innerHTML = ''; } });
+  });
+  function search() {
+    var q = $('#q').value.trim();
+    if (!q) { $('#res').innerHTML = ''; return Promise.resolve(null); }
+    return api('/api/offline/search?q=' + encodeURIComponent(q)).then(function (d) {
+      $('#res').innerHTML = d.items.length ? d.items.map(function (p, i) {
+        return '<div class="r" data-i="' + i + '"><div class="n"><b>' + esc(p.name) + '</b><span>' + esc([p.sku, p.make_model, p.category].filter(Boolean).join(' · ')) + ' · ' + (p.stock > 0 ? p.stock + ' in stock' : 'none in stock') + '</span></div><span class="p">' + money(p.price) + '</span></div>';
+      }).join('') + (d.more ? '<div class="empty">More match: type more of the name.</div>' : '') : '<div class="empty">Nothing in this terminal’s copy matches.</div>';
+      Array.prototype.forEach.call(document.querySelectorAll('#res .r'), function (r) { r.onclick = function () { add(d.items[+r.dataset.i]); $('#q').focus(); }; });
+      return d;
+    }).catch(function (e) { $('#res').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+
+  function add(p) {
+    var line = cart.find(function (l) { return l.img === p.img; });
+    if (line) line.qty += 1; else cart.push({ img: p.img, name: p.name, sku: p.sku, qty: 1, price: p.price, list: p.price, discount: 0 });
+    draw();
+  }
+  function draw() {
+    var can = st && st.me ? st.me : {};
+    $('#cart').innerHTML = cart.length ? cart.map(function (l, i) {
+      return '<div class="ln"><div class="top"><b>' + esc(l.name) + '</b><span class="lt">' + money(l.qty * l.price - (l.discount || 0)) + '</span></div><div class="sub">' + esc(l.sku || '') + '</div>' +
+        '<div class="ctl"><span class="qty"><button data-m="' + i + '" aria-label="One less">−</button><input data-q="' + i + '" value="' + l.qty + '" inputmode="decimal" aria-label="Quantity"><button data-p="' + i + '" aria-label="One more">+</button></span>' +
+        '<span>× ' + (can.price ? '<input data-r="' + i + '" value="' + l.price.toFixed(2) + '" inputmode="decimal" style="width:96px;text-align:right" aria-label="Price">' : money(l.price)) + '</span>' +
+        (can.discount ? '<span>less <input data-d="' + i + '" value="' + (l.discount || '') + '" inputmode="decimal" placeholder="0.00" style="width:80px;text-align:right" aria-label="Discount"></span>' : '') +
+        '<button class="x" data-x="' + i + '" title="Remove">✕</button></div></div>';
+    }).join('') : '<div class="empty">Scan or search to add items.</div>';
+    var on = function (sel, ev, fn) { Array.prototype.forEach.call(document.querySelectorAll('#cart ' + sel), function (el) { el.addEventListener(ev, fn); }); };
+    on('[data-m]', 'click', function () { var l = cart[+this.dataset.m]; l.qty = Math.max(1, l.qty - 1); draw(); });
+    on('[data-p]', 'click', function () { cart[+this.dataset.p].qty += 1; draw(); });
+    on('[data-x]', 'click', function () { cart.splice(+this.dataset.x, 1); draw(); });
+    on('[data-q]', 'change', function () { var v = Number(this.value); cart[+this.dataset.q].qty = v > 0 ? v : 1; draw(); });
+    on('[data-r]', 'change', function () { var v = Number(this.value); if (v >= 0) cart[+this.dataset.r].price = Math.round(v * 100) / 100; draw(); });
+    on('[data-d]', 'change', function () { var v = Number(this.value); cart[+this.dataset.d].discount = v > 0 ? Math.round(v * 100) / 100 : 0; draw(); });
+    quote();
+  }
+  function body() {
+    return { uid: uid, items: cart.map(function (l) { return { img: l.img, qty: l.qty, price: l.price, discount: l.discount }; }),
+      customer_name: $('#cName').value.trim(), customer_phone: $('#cPhone').value.trim(),
+      payment: { method: method, tendered: method === 'cash' ? $('#tend').value : null, reference: $('#ref').value.trim() } };
+  }
+  function quote() {
+    $('#err').textContent = '';
+    if (!cart.length) { totals = null; ['#tSub', '#tDisc', '#tTax', '#tTot'].forEach(function (s) { $(s).textContent = '0.00'; }); change(); return; }
+    api('/api/offline/quote', body()).then(function (t) {
+      totals = t; $('#tSub').textContent = money(t.subtotal); $('#tDisc').textContent = money(t.discount); $('#tTax').textContent = money(t.tax); $('#tTot').textContent = money(t.total); change();
+    }).catch(function (e) { totals = null; $('#err').textContent = e.message; });
+  }
+  function change() {
+    var t = totals ? totals.total : 0, g = Number($('#tend').value);
+    $('#change').textContent = method === 'cash' && totals && $('#tend').value !== '' ? (g >= t ? 'Change: ' + money(g - t) : 'Short by ' + money(t - g)) : '';
+  }
+  $('#tend').addEventListener('input', change);
+  Array.prototype.forEach.call(document.querySelectorAll('#meth button'), function (b) {
+    b.onclick = function () { method = b.dataset.m; Array.prototype.forEach.call(document.querySelectorAll('#meth button'), function (x) { x.classList.toggle('on', x === b); }); $('#tendWrap').style.visibility = method === 'cash' ? 'visible' : 'hidden'; change(); };
+  });
+
+  $('#done').onclick = function () {
+    if (busy || !cart.length) return;
+    busy = true; $('#done').disabled = true;
+    api('/api/offline/sale', body()).then(function (d) {
+      receipt(d.sale);
+      cart = []; uid = newUid(); $('#cName').value = ''; $('#cPhone').value = ''; $('#tend').value = ''; $('#ref').value = '';
+      draw(); state().then(kept);
+    }).catch(function (e) { $('#err').textContent = e.message; })
+      .then(function () { busy = false; $('#done').disabled = !(st && st.me); });
+  };
+  $('#clear').onclick = function () { cart = []; uid = newUid(); draw(); };
+  $('#send').onclick = function () { $('#send').disabled = true; api('/api/offline/send', {}).catch(function (e) { alert(e.message); }).then(function () { state().then(kept); }); };
+
+  var METHOD = { cash: 'Cash', card: 'Card', bank: 'Bank transfer', cheque: 'Cheque' };
+  function receipt(s) {
+    var shop = (st && st.snapshot && st.snapshot.shop) || {};
+    $('#receipt').innerHTML =
+      '<div class="c"><b>' + esc(shop.name || 'Vision Auto Solutions') + '</b><br>' + esc(shop.address || '') + '<br>' + esc(shop.phone || '') + '</div><hr>' +
+      '<div class="rw"><span>Receipt</span><b>' + esc(s.receipt) + '</b></div>' + (s.receipt_number ? '<div class="rw"><span>Recorded as</span><b>' + esc(s.receipt_number) + '</b></div>' : '') +
+      '<div class="rw"><span>' + new Date(s.at).toLocaleString() + '</span><span>' + esc(s.user_name) + '</span></div>' + (s.customer_name ? '<div>Customer: ' + esc(s.customer_name) + '</div>' : '') + '<hr>' +
+      s.lines.map(function (l) { return '<div>' + esc(l.name) + '</div><div class="rw"><span>' + l.qty + ' × ' + money(l.price) + (l.disc ? ' − ' + money(l.disc) : '') + '</span><span>' + money(l.net) + '</span></div>'; }).join('') + '<hr>' +
+      '<div class="rw"><span>Subtotal</span><span>' + money(s.subtotal) + '</span></div>' + (s.discount ? '<div class="rw"><span>Discount</span><span>−' + money(s.discount) + '</span></div>' : '') +
+      '<div class="rw"><span>GCT</span><span>' + money(s.tax) + '</span></div><div class="rw"><b>TOTAL</b><b>' + money(s.total) + '</b></div>' +
+      '<div class="rw"><span>' + (METHOD[s.method] || s.method) + (s.reference ? ' ' + esc(s.reference) : '') + '</span><span>' + money(s.tendered) + '</span></div>' + (s.change > 0 ? '<div class="rw"><span>Change</span><span>' + money(s.change) + '</span></div>' : '') +
+      '<hr><div class="c">' + esc(shop.notice || '') + '</div><div class="c" style="margin-top:4px">Rung while offline; it is recorded with the shop when the server is back.</div>';
+    $('#modal').classList.add('show');
+  }
+  $('#print').onclick = function () { window.print(); };
+  $('#next').onclick = function () { $('#modal').classList.remove('show'); $('#q').focus(); };
+
+  draw();
+  state().then(kept);
+  setInterval(function () { state().then(function (s) { if (s && s.counts && s.counts.sent) kept(); }); }, 8000);
+})();
+</script>
+</body>
+</html>

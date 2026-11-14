@@ -175,7 +175,10 @@ function saveDbConfig(cfg) {
 }
 function buildPoolConfig(c) {
   if (!c || !c.host) return null;
-  const cfg = { host: c.host, port: parseInt(c.port, 10) || 5432, database: c.database, user: c.user, password: c.password, max: 10 };
+  // application_name: the server's connection list (System management ->
+  // Terminals) says which computer each connection comes from.
+  const cfg = { host: c.host, port: parseInt(c.port, 10) || 5432, database: c.database, user: c.user, password: c.password, max: 10,
+    application_name: ('Vision ' + os.hostname()).slice(0, 63) };
   const mode = String(c.sslmode || '').trim().toLowerCase();
   if (mode && mode !== 'disable') {
     if (c.ca) {
@@ -871,6 +874,28 @@ app.use(
 app.use((req, _res, next) => {
   if (req.secure) req.sessionOptions.secure = true;
   next();
+});
+
+// Terminals: keep selling on /offline-till.html when the database stops
+// answering, and report each terminal's connection (terminal-link.js). Here,
+// ahead of the middleware below that asks the database about every request.
+const terminalLink = require('./terminal-link').register(app, {
+  query, requireAdmin, requireManager, userCan, userPermState, getShopSettings,
+  posSaleHandler: () => posSaleHandler, storeTax: () => storeTax,
+  terminal: () => TERMINAL, machineName, appVersion: APP_VERSION, port: PORT,
+  // The same target the pool uses (applyDbConfig), on a short fuse of its own.
+  probeDb: async () => {
+    const cfg = buildPoolConfig(loadDbConfig().local) || { connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/visionautosolutions' };
+    const c = new (require('pg').Client)(Object.assign({}, cfg, { connectionTimeoutMillis: 3000, query_timeout: 3000 }));
+    try { await c.connect(); await c.query('SELECT 1'); } finally { c.end().catch(() => {}); }
+  },
+  dbTarget: () => {
+    let l = loadDbConfig().local;
+    if (!l || !l.host) {
+      try { const u = new URL(process.env.DATABASE_URL || 'postgresql://postgres@localhost:5432/visionautosolutions'); l = { host: u.hostname, port: u.port || 5432, database: u.pathname.slice(1), user: decodeURIComponent(u.username) }; } catch (_) { l = {}; }
+    }
+    return { host: l.host, port: l.port, database: l.database, user: l.user, ssl: !!(l.sslmode && l.sslmode !== 'disable'), pinned: !!l.ca, loopback: isLoopbackDbHost() };
+  },
 });
 
 // -----------------------------------------------------------------------------
@@ -6874,6 +6899,13 @@ storeTax.register(app, { query, getPool: () => pool, requireAdmin, requireManage
 // Cashier: stations, POS orders paid at a cashier, drawer shifts (cashier.js).
 // Must stay above app.post('/api/admin/pos/sale'): it guards that route.
 require('./cashier').register(app, { query, requireAdmin, requireCap, userCan, bcrypt, posSaleHandler, getPool: () => pool, arOpenSql: AR_OPEN_SQL });
+// Every terminal's connection, and sales rung offline (terminal-link.js).
+terminalLink.mountSys();
+// The website's visitors and accounts, managed from System management (site-manage.js).
+require('./site-manage').register(app, {
+  query, requireAdmin, requireManager, userCan, secret: () => GATEWAY_SECRET,
+  origin: () => String(SERVER_CFG.website_origin || process.env.PUBLIC_BASE_URL || 'https://visionautosolutions.com').replace(/\/+$/, ''),
+});
 // Stock counts: bin counts, blind, recount, photos, approval, ABC cycle (counts.js).
 // upload is assigned at boot, so it is looked up per request.
 require('./counts').register(app, {

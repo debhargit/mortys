@@ -1613,6 +1613,40 @@ CREATE TABLE IF NOT EXISTS terminals (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_terminals_uid ON terminals (terminal_uid) WHERE terminal_uid IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_terminals_last_seen ON terminals (last_seen DESC);
 
+-- How each terminal is connected, reported on its heartbeat (terminal-link.js):
+-- database link and speed, addresses, version, and sales it rang while the
+-- server was down that are still waiting to be sent.
+ALTER TABLE terminals ADD COLUMN IF NOT EXISTS conn            JSONB;
+ALTER TABLE terminals ADD COLUMN IF NOT EXISTS offline_pending INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE terminals ADD COLUMN IF NOT EXISTS offline_failed  INTEGER NOT NULL DEFAULT 0;
+
+-- Sales a terminal rang on /offline-till.html while the database was down.
+-- Written before each is posted through the ordinary sale route, so sending
+-- again after a break never posts a sale twice (uid). 'failed' ones wait for
+-- "Post it as me" or "Set aside" in System management -> Terminals.
+CREATE TABLE IF NOT EXISTS offline_sales (
+  id               SERIAL PRIMARY KEY,
+  uid              TEXT NOT NULL UNIQUE,
+  terminal_id      INTEGER,
+  terminal_name    TEXT,
+  offline_receipt  TEXT,
+  cashier_id       INTEGER,
+  cashier_name     TEXT,
+  rung_at          TIMESTAMPTZ NOT NULL,
+  total_usd        NUMERIC(12,2),
+  status           TEXT NOT NULL DEFAULT 'posting',   -- posting | posted | failed | set_aside
+  sale_id          INTEGER,
+  receipt_number   TEXT,
+  posted_total_usd NUMERIC(12,2),
+  error            TEXT,
+  body             JSONB,
+  attempts         INTEGER NOT NULL DEFAULT 0,
+  synced_at        TIMESTAMPTZ,
+  posted_by        INTEGER,
+  created_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_offline_sales_status ON offline_sales (status, rung_at DESC);
+
 -- Small key/value bag for app-wide switches that are not shop-branding
 -- settings (which live in shop_settings).
 CREATE TABLE IF NOT EXISTS app_settings (

@@ -50,6 +50,7 @@
 <script src="/assets/shared-resources-ui.js?v=20261106"></script>
 <script src="/assets/device-access-ui.js?v=20261106"></script>
 <script src="/assets/remote-help.js?v=20261105"></script>
+<script src="/assets/sys-net.js?v=20261113b"></script>
 <script>
 (function () {
   'use strict';
@@ -84,6 +85,8 @@
       if (m.support) t.push(['assets', 'Equipment'], ['changes', 'Change log'], ['health', 'System health']);
       if (m.security) t.push(['devices', 'Device access'], ['threats', 'Threats'], ['security', 'Security'], ['incidents', 'Incidents'], ['risks', 'Risks']);
       if (m.network) t.push(['network', 'Network']);
+      if (m.support || m.network || m.security) t.push(['terminals', 'Terminals']);
+      if (m.security || m.audit) t.push(['website', 'Website']);
       if (m.audit) t.push(['audit', 'Audit trail'], ['exceptions', 'Audit exceptions'], ['access', 'Access reviews']);
       if (!t.length) { $('#out').innerHTML = '<div class="card empty">Your account has no system-management or IT-help access.</div>'; return; }
       $('#tabs').innerHTML = t.map(function (x) { return '<button data-t="' + x[0] + '">' + x[1] + '</button>'; }).join('');
@@ -94,8 +97,8 @@
   }
   function mark() { all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); }); history.replaceState(null, '', '#' + tab); }
   function show() {
-    mark(); if (window.SharedRes) SharedRes.stop(); if (window.RemoteHelp) RemoteHelp.stop(); $('#out').innerHTML = '<div class="empty">Loading…</div>';
-    ({ home: home, help: help, assets: assets, changes: changes, health: health, security: security, incidents: incidents, audit: auditTrail, exceptions: exceptionsTab, access: access, threats: threats, risks: risks, network: network, devices: function () { DeviceAccess.show($('#out')); }, remote: function () { RemoteHelp.show($('#out'), { ticketId: show.ticketId }); show.ticketId = undefined; }, shared: function () { SharedRes.show($('#out'), { hash: 'shared' }); } }[tab] || home)();
+    mark(); if (window.SharedRes) SharedRes.stop(); if (window.RemoteHelp) RemoteHelp.stop(); if (window.SysNet) SysNet.stop(); $('#out').innerHTML = '<div class="empty">Loading…</div>';
+    ({ home: home, help: help, assets: assets, changes: changes, health: health, security: security, incidents: incidents, audit: auditTrail, exceptions: exceptionsTab, access: access, threats: threats, risks: risks, network: network, devices: function () { DeviceAccess.show($('#out')); }, remote: function () { RemoteHelp.show($('#out'), { ticketId: show.ticketId }); show.ticketId = undefined; }, shared: function () { SharedRes.show($('#out'), { hash: 'shared' }); }, terminals: function () { SysNet.terminals($('#out')); }, website: function () { SysNet.website($('#out')); } }[tab] || home)();
   }
 
   // ------------------------------------------------------------ overview --
