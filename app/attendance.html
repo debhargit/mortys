@@ -32,13 +32,14 @@
   .badge-card{width:320px;border:2px solid #0b1b2b;border-radius:12px;padding:14px;text-align:center;background:#fff;color:#0b1b2b}
   @media print{ body *{visibility:hidden} .badge-card, .badge-card *{visibility:visible} .badge-card{position:absolute;left:0;top:0} }
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
-<header><h1>Attendance</h1><nav><a href="/clock.html" target="_blank" rel="noopener">Time clock ↗</a><a href="/my-time.html">My time</a><a href="/admin.html">Admin</a></nav></header>
+<header><h1>Attendance</h1><nav><a href="/clock.html" target="_blank" rel="noopener">Time clock ↗</a><a href="/roster.html">Roster</a><a href="/my-time.html">My time</a><a href="/admin.html">Admin</a></nav></header>
 <main>
   <div class="tabs" id="tabs"><button data-t="now" class="on">Who's in</button><button data-t="today">Today</button><button data-t="late">Lateness</button><button data-t="log">Clock-in log</button><button data-t="req">Requests</button><button data-t="ts">Timesheets</button><button data-t="staff">Staff &amp; shifts</button><button data-t="leave">Leave &amp; holidays</button><button data-t="sph">Sales per hour</button><button data-t="set">Settings</button></div>
   <div id="out"><div class="empty">Loading…</div></div>
@@ -100,9 +101,9 @@
             '<td><span class="pill ' + (r.status === 'approved' ? 'ok' : r.status === 'pending' ? 'warn' : 'bad') + '">' + esc(r.status) + '</span>' + (r.decided_by_name ? '<br><small>' + esc(r.decided_by_name) + ' (' + esc(r.decided_via) + ')</small>' : '') + '</td>' +
             '<td style="white-space:nowrap">' + (r.status === 'pending' ? '<button class="sm primary" data-ap="' + r.id + '">Approve</button> <button class="sm" data-rj="' + r.id + '">Reject</button>' : '') + '</td></tr>';
         }).join('') : '<tr><td colspan="6" class="empty">No requests.</td></tr>') + '</tbody></table></div></div>';
-      var go = function (id, d) { var note = d === 'reject' ? prompt('Note to them (optional)') : ''; if (note === null) return; api('/api/clock/requests/' + id + '/decide', 'POST', { decision: d, note: note }).then(function (r) { toast(r.status); reqs(); }).catch(function (e) { toast(e.message); }); };
-      all('[data-ap]').forEach(function (b) { b.onclick = function () { go(b.getAttribute('data-ap'), 'approve'); }; });
-      all('[data-rj]').forEach(function (b) { b.onclick = function () { go(b.getAttribute('data-rj'), 'reject'); }; });
+      var go = async function (id, d) { var note = d === 'reject' ? (await vasPrompt('Note to them (optional)')) : ''; if (note === null) return; api('/api/clock/requests/' + id + '/decide', 'POST', { decision: d, note: note }).then(function (r) { toast(r.status); reqs(); }).catch(function (e) { toast(e.message); }); };
+      all('[data-ap]').forEach(function (b) { b.onclick = async function () { await go(b.getAttribute('data-ap'), 'approve'); }; });
+      all('[data-rj]').forEach(function (b) { b.onclick = async function () { await go(b.getAttribute('data-rj'), 'reject'); }; });
     });
   }
 
@@ -171,8 +172,8 @@
         api('/api/clock/staff/' + s.id + '/shifts', 'PUT', { shifts: shifts }),
       ]).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); });
     };
-    $('#pBadge').onclick = function () {
-      if (!confirm('Make a new badge for ' + s.name + '? Their old badge stops working.')) return;
+    $('#pBadge').onclick = async function () {
+      if (!(await vasConfirm('Make a new badge for ' + s.name + '? Their old badge stops working.'))) return;
       api('/api/clock/staff/' + s.id + '/badge', 'POST').then(function (r) {
         var qr = qrcode(0, 'M'); qr.addData(r.code); qr.make();
         $('#pKeys').innerHTML = '<div class="badge-card"><div style="font-weight:800;font-size:16px">Morty\'s Auto Parts</div><div style="font-size:20px;margin:6px 0">' + esc(r.name) + '</div>' + qr.createSvgTag(4, 2) + '<svg id="bc"></svg><div style="font-size:11px">Staff badge · clock in only</div></div><p><button id="prt">Print badge</button> <small class="sub">The code is shown only now.</small></p>';
@@ -182,9 +183,9 @@
     };
     var b64u = function (buf) { return btoa(String.fromCharCode.apply(null, new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
     var fromB64u = function (x) { x = x.replace(/-/g, '+').replace(/_/g, '/'); while (x.length % 4) x += '='; return Uint8Array.from(atob(x), function (c) { return c.charCodeAt(0); }); };
-    $('#pKey').onclick = function () {
+    $('#pKey').onclick = async function () {
       if (!window.PublicKeyCredential) return toast('This browser or device cannot do fingerprint / face here');
-      var label = prompt('Name this device (e.g. "Front till" or "Anthony\'s phone")', ''); if (label === null) return;
+      var label = await vasPrompt('Name this device (e.g. "Front till" or "Anthony\'s phone")', ''); if (label === null) return;
       api('/api/clock/passkeys/register-options', 'POST', { user_id: s.id }).then(function (o) {
         return navigator.credentials.create({ publicKey: { challenge: fromB64u(o.challenge), rp: o.rp, user: { id: fromB64u(o.user.id), name: o.user.name, displayName: o.user.displayName },
           pubKeyCredParams: o.pubKeyCredParams, timeout: o.timeout, attestation: 'none', authenticatorSelection: o.authenticatorSelection, excludeCredentials: o.excludeCredentials.map(function (c) { return { type: 'public-key', id: fromB64u(c.id) }; }) } });
@@ -237,8 +238,8 @@
         navigator.geolocation.getCurrentPosition(function (p) { $('#sLa').value = p.coords.latitude.toFixed(6); $('#sLn').value = p.coords.longitude.toFixed(6); toast('Accurate to about ' + Math.round(p.coords.accuracy) + ' m. Save to keep it.'); },
           function (e) { toast(e.code === 1 ? 'Location was refused for this page' : 'Location is not available here (it needs https or this computer)'); }, { enableHighAccuracy: true, timeout: 15000 });
       };
-      $('#sSave').onclick = function () {
-        if ($('#sE').checked && !s.enforce && !confirm('Switch on the rule? Staff not clocked in will not be able to take payments.')) return;
+      $('#sSave').onclick = async function () {
+        if ($('#sE').checked && !s.enforce && !(await vasConfirm('Switch on the rule? Staff not clocked in will not be able to take payments.'))) return;
         api('/api/clock/settings', 'PUT', { enforce: $('#sE').checked, exempt: $('#sX').value, photo: $('#sP').checked, early: $('#s1').value, late: $('#s2').value, grace: $('#s3').value, paid_break: $('#s4').value, shop_ips: $('#sI').value,
           late_count: $('#sLc').value, late_warn: $('#sLw').value, leave: $('#sLv').value, location: $('#sLo').value, shop_lat: $('#sLa').value.trim(), shop_lng: $('#sLn').value.trim(), radius: $('#sRa').value })
           .then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); });
@@ -281,9 +282,9 @@
         }).join('') : '<tr><td colspan="9" class="empty">Nobody was late, left early, was absent or was clocked out automatically in ' + esc(monthLabel(d.month)) + '.</td></tr>') + '</tbody></table></div></div>';
       $('#lm').onchange = function () { lateMonth = this.value || lateMonth; late(); };
       all('[data-ld]').forEach(function (b) { b.onclick = function () { var r = $('#ld' + b.getAttribute('data-ld')); r.style.display = r.style.display ? '' : 'none'; }; });
-      all('[data-ex]').forEach(function (b) { b.onclick = function () { var why = prompt('Why is this late day excused? (it stops counting towards a letter)'); if (!why) return; api('/api/clock/attendance/' + b.getAttribute('data-ex') + '/excuse', 'POST', { reason: why }).then(function () { toast('Excused'); late(); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-ex]').forEach(function (b) { b.onclick = async function () { var why = await vasPrompt('Why is this late day excused? (it stops counting towards a letter)'); if (!why) return; api('/api/clock/attendance/' + b.getAttribute('data-ex') + '/excuse', 'POST', { reason: why }).then(function () { toast('Excused'); late(); }).catch(function (e) { toast(e.message); }); }; });
       all('[data-un]').forEach(function (b) { b.onclick = function () { api('/api/clock/attendance/' + b.getAttribute('data-un') + '/excuse', 'POST', { undo: true }).then(function () { toast('Counts again'); late(); }).catch(function (e) { toast(e.message); }); }; });
-      all('[data-li]').forEach(function (b) { b.onclick = function () { if (!confirm('Issue a lateness letter now for ' + monthLabel(d.month) + '? It goes to them, to their staff file, and you are recorded as issuing it.')) return; api('/api/clock/lateness/issue', 'POST', { user_id: b.getAttribute('data-li'), month: d.month }).then(function () { toast('Letter issued'); late(); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-li]').forEach(function (b) { b.onclick = async function () { if (!(await vasConfirm('Issue a lateness letter now for ' + monthLabel(d.month) + '? It goes to them, to their staff file, and you are recorded as issuing it.'))) return; api('/api/clock/lateness/issue', 'POST', { user_id: b.getAttribute('data-li'), month: d.month }).then(function () { toast('Letter issued'); late(); }).catch(function (e) { toast(e.message); }); }; });
       all('[data-lw]').forEach(function (a) { a.onclick = function (e) { e.preventDefault(); letter(+a.getAttribute('data-lw')); }; });
     });
   }
@@ -297,7 +298,7 @@
       if (r.html) $('#lf').srcdoc = r.html;
       $('#lx').onclick = close;
       if ($('#lp')) $('#lp').onclick = function () { try { $('#lf').contentWindow.print(); } catch (_) { toast('Could not print here'); } };
-      if ($('#lwd')) $('#lwd').onclick = function () { var why = prompt('Why is the letter withdrawn? (they are told)'); if (!why) return; api('/api/clock/warnings/' + id + '/withdraw', 'POST', { reason: why }).then(function () { toast('Withdrawn'); close(); late(); }).catch(function (e) { toast(e.message); }); };
+      if ($('#lwd')) $('#lwd').onclick = async function () { var why = await vasPrompt('Why is the letter withdrawn? (they are told)'); if (!why) return; api('/api/clock/warnings/' + id + '/withdraw', 'POST', { reason: why }).then(function () { toast('Withdrawn'); close(); late(); }).catch(function (e) { toast(e.message); }); };
     }).catch(function (e) { toast(e.message); });
   }
 

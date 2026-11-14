@@ -90,6 +90,13 @@ const CFG = Object.assign({
   machineName: '',
 }, readJson(path.join(APP_DIR, 'portable.json'), {}));
 
+// SECURITY CHECK 2026-11-13: protected install (Protect-Mortys-Database.ps1). The database
+// then runs as its own Windows service under its own account, and this
+// supervisor runs as the app's service. Here we only make sure that service is
+// started; we never start or stop PostgreSQL ourselves.
+const PROTECTED = readJson(path.join(ROOT_DIR, 'protected.json'), null);
+const DB_SERVICE = PROTECTED && PROTECTED.dbService ? String(PROTECTED.dbService) : '';
+
 // ------------------------------------------------------------ lock/status --
 function readLock() { return readJson(LOCK_FILE, null); }
 function pidAlive(pid) {
@@ -522,6 +529,14 @@ async function startBundledPostgres() {
         ', then start Morty\'s Auto Parts again.');
     return 'foreign';
   }
+  if (DB_SERVICE) {
+    log('postgres: runs as the Windows service ' + DB_SERVICE + ' - asking Windows to start it');
+    const r = spawnSync('sc.exe', ['start', DB_SERVICE], { windowsHide: true, encoding: 'utf8' });
+    log('sc start ' + DB_SERVICE + ' exit=' + r.status);
+    const up = await waitForTcp('127.0.0.1', CFG.pgPort, 60000);
+    log('postgres listening=' + up);
+    return up;
+  }
   if (!pgInitialised() && !initPostgres()) return false;
   // Before pg_ctl start, so the setting is in place when it reads the config.
   await ensurePostgresTls();
@@ -548,6 +563,7 @@ async function startBundledPostgres() {
 }
 
 function stopBundledPostgres() {
+  if (DB_SERVICE) return;   // the database service keeps running; Windows owns it
   if (!hasBundledPostgres() || !pgInitialised()) return;
   const r = pgCtl(['-D', PGDATA_DIR, '-m', 'fast', '-w', '-t', '30', 'stop']);
   log('pg_ctl stop exit=' + r.status);

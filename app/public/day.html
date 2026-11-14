@@ -1,0 +1,710 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day plan · Morty's Auto Parts</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; --blue:#2563eb; --gold:#b7791f;
+         --shift:#e2e8f0; --act:#bfdbfe; --act-done:#bbf7d0; --act-run:#fde68a; --act-skip:#e5e7eb; --dev:#fde7c2; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; --blue:#60a5fa; --gold:#f6ad55;
+         --shift:#243142; --act:#1e3a5f; --act-done:#14532d; --act-run:#713f12; --act-skip:#2b3644; --dev:#4a3413; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0} header nav{margin-left:auto;display:flex;gap:14px;font-size:13px;flex-wrap:wrap} header a{color:#fff;opacity:.85}
+  main{max-width:1350px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  input,select,button,textarea{font:inherit;padding:6px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  textarea{width:100%;min-height:60px}
+  button{cursor:pointer;background:var(--card)} button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600} button.sm{padding:3px 9px;font-size:12.5px}
+  button.ok{background:var(--ok);border-color:var(--ok);color:#fff}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 12px} .tabs button{border-radius:999px;padding:6px 13px;font-size:13px} .tabs button.on{background:var(--navy);border-color:var(--navy);color:#fff}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px} .grow{flex:1}
+  table{width:100%;border-collapse:collapse} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .scroll{overflow-x:auto}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip);white-space:nowrap}
+  .pill.ok{background:#16a34a22;color:var(--ok)} .pill.bad{background:#d6282822;color:var(--red)} .pill.warn{background:#f59e0b22;color:var(--warn)} .pill.info{background:#2563eb1f;color:var(--blue)}
+  .modal{position:fixed;inset:0;background:rgba(10,15,25,.55);display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow:auto;z-index:40} .modal .card{max-width:560px;width:100%}
+  .empty{color:var(--muted);text-align:center;padding:20px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60;max-width:90vw;white-space:pre-line}
+  label.f{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px} .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+  @media (max-width:640px){ .row2,.row3{grid-template-columns:1fr} }
+  /* devotion banner */
+  .dev{background:linear-gradient(135deg,#fff7e6,#fdecc8);border:1px solid #f3d9a4;border-radius:14px;padding:16px 18px;margin-bottom:12px;color:#3b2a0a}
+  @media (prefers-color-scheme: dark){ .dev{background:linear-gradient(135deg,#2b2111,#3a2a10);border-color:#5b4320;color:#f6e7c8} }
+  .dev h2{margin:0 0 4px;font-size:18px} .dev .when{font-size:12.5px;opacity:.8} .dev blockquote{margin:10px 0;font-size:16px;font-style:italic;line-height:1.5} .dev .ref{font-weight:700;font-style:normal;font-size:13px}
+  .dev p{margin:6px 0} .dev .pray{font-weight:600}
+  /* timeline */
+  .tl{position:relative;min-width:980px}
+  .tl .hours{display:grid;margin-left:190px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--line)}
+  .tl .hours div{border-left:1px solid var(--line);padding:2px 4px}
+  .tl .row{display:flex;border-bottom:1px solid var(--line);min-height:60px}
+  .tl .who{width:190px;flex:none;padding:6px 8px;font-size:13px;border-right:1px solid var(--line)} .tl .who small{display:block;color:var(--muted);font-size:11.5px}
+  .tl .lane{position:relative;flex:1;background-image:repeating-linear-gradient(90deg,transparent 0,transparent calc(100%/var(--h) - 1px),var(--line) calc(100%/var(--h) - 1px),var(--line) calc(100%/var(--h)))}
+  .tl .bar{position:absolute;border-radius:6px;font-size:11.5px;padding:2px 5px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer}
+  .tl .shift{top:4px;bottom:4px;background:var(--shift);cursor:default;color:var(--muted);display:flex;align-items:flex-end;justify-content:flex-end;font-size:10.5px}
+  .tl .act{top:17px;height:22px;background:var(--act);border:1px solid #93c5fd;color:var(--ink)} .tl .act.done{background:var(--act-done);border-color:#86efac} .tl .act.in_progress{background:var(--act-run);border-color:#fcd34d} .tl .act.skipped{background:var(--act-skip);text-decoration:line-through;color:var(--muted)}
+  .tl .devb{top:17px;height:22px;background:var(--dev);border:1px solid #f3c27a;color:#7a4b00}
+  .tl .mark{position:absolute;top:0;bottom:0;width:2px} .tl .mark.in{background:var(--ok)} .tl .mark.out{background:var(--muted)} .tl .mark span{position:absolute;top:1px;left:3px;font-size:10px;white-space:nowrap}
+  .tl .brk{position:absolute;bottom:1px;height:5px;background:repeating-linear-gradient(45deg,var(--warn) 0 3px,transparent 3px 6px);border-radius:3px}
+  .tl .now{position:absolute;top:0;bottom:0;width:2px;background:var(--red);z-index:3}
+  .tl .sale{position:absolute;bottom:2px;font-size:10px;color:var(--ok)}
+  .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:8px} .legend i{display:inline-block;width:14px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+  /* my day */
+  .act-row{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)} .act-row .t{min-width:96px;font-variant-numeric:tabular-nums;color:var(--muted);font-size:13px}
+  .act-row .main{flex:1} .act-row .main b{display:block} .act-row .main small{color:var(--muted)}
+  .act-row.done .main b{text-decoration:line-through;opacity:.7}
+  .mic{border-radius:999px;padding:8px 14px;font-weight:600} .mic.on{background:var(--red);color:#fff;border-color:var(--red);animation:pulse 1.2s infinite}
+  @keyframes pulse{50%{box-shadow:0 0 0 6px #d6282833}}
+  .score{display:inline-block;min-width:44px;text-align:center;font-weight:700;border-radius:8px;padding:2px 6px}
+  .s-hi{background:#16a34a22;color:var(--ok)} .s-mid{background:#f59e0b22;color:var(--warn)} .s-lo{background:#d6282822;color:var(--red)}
+  .tl .wk{position:absolute;top:42px;height:9px;border-radius:2px;opacity:.9;cursor:help}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px} @media (max-width:760px){ .kpis{grid-template-columns:1fr 1fr} }
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px} .kpi b{display:block;font-size:22px;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap} .kpi span{color:var(--muted);font-size:12.5px} .kpi small{display:block;color:var(--muted);font-size:11.5px}
+  .controls button.on{background:var(--navy);border-color:var(--navy);color:#fff}
+  .btnlink{display:inline-block;padding:3px 9px;font-size:12.5px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);text-decoration:none}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
+  .duty-row{display:flex;gap:6px;margin:5px 0;flex-wrap:wrap} .duty-row .grow{min-width:160px}
+  svg text{font-family:inherit}
+  .cmt{border:1px solid var(--line);border-left:4px solid var(--blue);border-radius:10px;padding:8px 12px;margin:8px 0;background:var(--bg)} .cmt-prayer{border-left-color:#b7791f} .cmt-praise{border-left-color:var(--ok)}
+  .cmt-h{display:flex;gap:8px;align-items:center;flex-wrap:wrap} .cmt-h small{color:var(--muted)} .cmt-x{margin-left:auto} .cmt-b{margin-top:4px;white-space:pre-wrap}
+  .cmt-new{margin-top:10px} .cmt-new select{margin-bottom:6px}
+  .tl .closed{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(135deg,transparent 0 6px,var(--line) 6px 7px);opacity:.7;pointer-events:none}
+  .tl .act.fill{background:transparent;border-style:dashed;color:var(--muted)} .tl .act.fill.in_progress,.tl .act.fill.done{color:var(--ink)} .tl .act.lunch{background:var(--chip);border-color:var(--line);color:var(--muted)}
+  .hours-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:6px 14px;margin-bottom:8px} .hrow{display:flex;gap:6px;align-items:center} .hrow label{min-width:62px}
+  .cov{background:#f59e0b1f;color:var(--warn);border-radius:8px;padding:6px 10px;font-size:13px;margin:0 0 10px}
+  .meter{height:8px;background:var(--chip);border-radius:6px;overflow:hidden;min-width:80px} .meter i{display:block;height:100%;background:var(--ok)}
+</style>
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
+</head>
+<body>
+<header><h1>🗓 Day plan</h1><nav><a href="/team.html#calendar">Calendar</a><a href="/roster.html">Roster</a><a href="/my-time.html">My time</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"></div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var tm = function (t) { return t ? new Date(t).toLocaleTimeString('en-JM', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Jamaica' }) : ''; };
+  var hm = function (t) { return t ? new Date(new Date(t).getTime() - 5 * 3600000).toISOString().slice(11, 16) : ''; };
+  var DN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], MN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  var addDays = function (d, n) { return new Date(new Date(d + 'T12:00:00Z').getTime() + n * 86400000).toISOString().slice(0, 10); };
+  var nice = function (d) { var x = new Date(d + 'T12:00:00Z'); return DN[x.getUTCDay()] + ' ' + x.getUTCDate() + ' ' + MN[x.getUTCMonth()]; };
+  var mins = function (m) { m = Math.round(m || 0); return m >= 60 ? Math.floor(m / 60) + 'h ' + (m % 60 ? (m % 60) + 'm' : '') : m + 'm'; };
+  var cfg = null, tab = 'me', day = null, timer = null;
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 4000); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); }
+        return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; });
+      });
+  }
+  function modal(h) { $('#modal').innerHTML = '<div class="modal"><div class="card">' + h + '</div></div>'; $('.modal').addEventListener('mousedown', function (e) { if (e.target.classList.contains('modal')) close(); }); }
+  function close() { $('#modal').innerHTML = ''; }
+  function scoreCls(s) { return s == null ? '' : s >= 80 ? 's-hi' : s >= 55 ? 's-mid' : 's-lo'; }
+  function catOpts(sel) { return Object.keys(cfg.categories).filter(function (k) { return k !== 'devotion'; }).map(function (k) { return '<option value="' + k + '"' + (k === sel ? ' selected' : '') + '>' + esc(cfg.categories[k]) + '</option>'; }).join(''); }
+  function staffOpts(sel) { return cfg.staff.map(function (s) { return '<option value="' + s.id + '"' + (s.id === sel ? ' selected' : '') + '>' + esc(s.name) + (s.department ? ' — ' + esc(s.department) : '') + '</option>'; }).join(''); }
+  function dayBar(cb) {
+    return '<button class="sm" id="dp">◀</button><input type="date" id="dd" value="' + esc(day) + '"><button class="sm" id="dn">▶</button>' + (day !== cfg.today ? '<button class="sm" id="dt">Today</button>' : '');
+  }
+  function wireDay(fn) {
+    $('#dd').onchange = function () { day = this.value || cfg.today; fn(); };
+    $('#dp').onclick = function () { day = addDays(day, -1); fn(); };
+    $('#dn').onclick = function () { day = addDays(day, 1); fn(); };
+    if ($('#dt')) $('#dt').onclick = function () { day = cfg.today; fn(); };
+  }
+
+  // ------------------------------------------------------------- voice --
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  function micButton() { return '<button class="mic" id="mic" title="Say: add stock count at 2 pm for 1 hour · start stock count · done stock count">🎤 Speak</button><input id="vtxt" placeholder="…or type: add stock count at 2 pm" style="min-width:240px"><button class="sm" id="vgo">Go</button>'; }
+  function wireVoice(after) {
+    var send = function (text) {
+      if (!text) return;
+      api('/api/dayplan/voice', 'POST', { text: text, day: day }).then(function (r) {
+        toast('🎤 "' + r.heard + '"\n' + (r.did === 'added' ? 'Added: ' + r.title + (r.start ? ' at ' + r.start : '') + (r.user_id !== cfg.me.id ? ' for ' + r.user_name : '') + (r.day !== day ? ' (' + nice(r.day) + ')' : '') : r.did === 'started' ? '▶ Started: ' + r.title : r.did === 'skipped' ? 'Skipped: ' + r.title : '✓ Done: ' + r.title));
+        $('#vtxt').value = ''; after();
+      }).catch(function (e) { toast('🎤 "' + text + '"\n' + e.message); });
+    };
+    $('#vgo').onclick = function () { send($('#vtxt').value.trim()); };
+    $('#vtxt').onkeydown = function (e) { if (e.key === 'Enter') send(this.value.trim()); };
+    var b = $('#mic');
+    if (!SR) { b.disabled = true; b.title = 'Voice needs Chrome or Edge'; return; }
+    b.onclick = function () {
+      var r = new SR(); r.lang = 'en-JM'; r.interimResults = false; r.maxAlternatives = 1;
+      b.classList.add('on'); b.textContent = '🎤 Listening…';
+      r.onresult = function (e) { var t = e.results[0][0].transcript; $('#vtxt').value = t; send(t); };
+      r.onerror = function (e) { toast('Voice: ' + (e.error === 'not-allowed' ? 'allow the microphone for this site' : e.error)); };
+      r.onend = function () { b.classList.remove('on'); b.textContent = '🎤 Speak'; };
+      try { r.start(); } catch (_) {}
+    };
+  }
+
+  // ----------------------------------------------------------- devotion --
+  function devotionCard(d, compact) {
+    if (!d || d.mode === 'off') return compact ? '' : '<div class="card empty">No devotion on ' + esc(nice(d.day)) + '.</div>';
+    var empty = d.mode === 'manual' && !d.scripture_ref && !d.reflection;
+    return '<div class="dev"><div class="when">🙏 Start your day with God · ' + esc(tm(d.starts_at)) + ' – ' + esc(tm(d.ends_at)) + (d.location ? ' · ' + esc(d.location) : '') + (d.leader_name ? ' · led by ' + esc(d.leader_name) : '') + ' · ' + (d.mode === 'system' ? 'today\'s word' : 'manual') + '</div>' +
+      '<h2>' + esc(d.title || 'Devotion') + '</h2>' +
+      (empty ? '<p><i>The words for today have not been added yet' + (d.leader_name ? ' by ' + esc(d.leader_name) : '') + '.</i></p>' :
+        (d.scripture_text ? '<blockquote>“' + esc(d.scripture_text) + '” <span class="ref">— ' + esc(d.scripture_ref || '') + '</span></blockquote>' : (d.scripture_ref ? '<p class="ref">' + esc(d.scripture_ref) + '</p>' : '')) +
+        (d.reflection && !compact ? '<p>' + esc(d.reflection) + '</p>' : '') + (d.prayer && !compact ? '<p class="pray">🙏 ' + esc(d.prayer) + '</p>' : '')) +
+      (compact ? '<p><a href="#devotion" data-go="devotion">Read and join ›</a></p>' : '') + '</div>';
+  }
+  function devotion() {
+    return api('/api/dayplan/devotion?day=' + day).then(function (d) {
+      var on = d.mode !== 'off', isToday = d.day === cfg.today, mine = d.joined.filter(function (j) { return j.user_id === d.me; })[0];
+      var KIND = { comment: ['💬', 'Comment'], prayer: ['🙏', 'Prayer request'], praise: ['🎉', 'Praise report'] };
+      var signBox = !on ? '' : mine ? '<span class="pill ok">✓ Signed in ' + esc(tm(mine.at)) + (mine.late ? ' (after it ended)' : '') + '</span>'
+        : isToday ? '<input id="snote" placeholder="A word to share (optional)" style="min-width:220px"><button class="ok" id="join">✍ Sign in</button>' : '';
+      var sheet = '';
+      if (on && d.sheet) {
+        var inN = d.sheet.filter(function (x) { return x.signed_in; }).length;
+        sheet = '<div class="card"><h2>✍ Sign-in sheet <span class="pill' + (inN === d.sheet.length && inN ? ' ok' : '') + '">' + inN + ' of ' + d.sheet.length + ' signed in</span></h2><p class="sub">Everyone on the roster for ' + esc(nice(d.day)) + ' (all staff on a day the shop is closed). Staff sign themselves in from 30 minutes before the devotion' + (d.can_mark ? '; you can sign in anyone who was there' : '') + '.</p>' +
+          '<div class="scroll"><table><thead><tr><th>Staff</th><th>Shift</th><th>Signed in</th><th>Note</th><th></th></tr></thead><tbody>' +
+          d.sheet.map(function (x) {
+            return '<tr><td><b>' + esc(x.name) + '</b>' + (x.department ? '<br><small style="color:var(--muted)">' + esc(x.department) + '</small>' : '') + '</td><td>' + esc(x.shift || '') + '</td>' +
+              '<td>' + (x.signed_in ? '<span class="pill ok">✓ ' + esc(tm(x.signed_in)) + '</span>' + (x.how === 'marked' ? ' <small style="color:var(--muted)">signed in by a manager</small>' : '') + (x.late ? ' <span class="pill warn">after it ended</span>' : '') : (d.day <= cfg.today && new Date(d.ends_at) < new Date() ? '<span class="pill bad">not signed in</span>' : '<span class="pill">not yet</span>')) + '</td>' +
+              '<td>' + esc(x.note || '') + '</td><td style="white-space:nowrap">' + (d.can_mark ? (x.signed_in ? '<button class="sm" data-unmark="' + x.user_id + '" title="Take off the sheet">✕</button>' : '<button class="sm" data-mark="' + x.user_id + '">✍ Sign in</button>') : '') + '</td></tr>';
+          }).join('') + '</tbody></table></div></div>';
+      } else if (on) {
+        sheet = '<div class="card"><h2>✍ Signed in (' + d.joined.length + ')</h2>' + (d.joined.length ? '<p>' + d.joined.map(function (j) { return '<span class="pill ok">' + esc(j.name) + ' · ' + esc(tm(j.at)) + '</span>'; }).join(' ') + '</p>' : '<p class="sub">Nobody yet.</p>') + '</div>';
+      }
+      var comments = !on ? '' : '<div class="card"><h2>💬 Comments, prayer requests and praise</h2>' +
+        (d.comments.length ? d.comments.map(function (c) {
+          return '<div class="cmt cmt-' + c.kind + '"><div class="cmt-h"><b>' + KIND[c.kind][0] + ' ' + esc(c.name) + '</b> <span class="pill">' + esc(KIND[c.kind][1]) + '</span> <small>' + esc(tm(c.at)) + '</small>' + (c.can_remove ? '<button class="sm cmt-x" data-rmc="' + c.id + '" title="Remove">✕</button>' : '') + '</div><div class="cmt-b">' + esc(c.body) + '</div></div>';
+        }).join('') : '<p class="sub">Nothing yet. Share what today\'s word meant to you, ask for prayer, or give God thanks for something.</p>') +
+        (d.day <= cfg.today ? '<div class="cmt-new"><select id="ck"><option value="comment">💬 Comment</option><option value="prayer">🙏 Prayer request</option><option value="praise">🎉 Praise report</option></select><textarea id="cb" maxlength="1000" placeholder="Write here…"></textarea><div class="controls" style="margin:6px 0 0"><span class="sub" style="margin:0">Everyone at work can read this.</span><span class="grow"></span><button class="primary" id="cpost">Post</button></div></div>' : '') + '</div>';
+      $('#out').innerHTML = '<div class="controls">' + dayBar() + '<span class="grow"></span>' + signBox + (d.can_edit ? '<button id="edev">Edit this day</button>' : '') + '</div>' +
+        devotionCard(d) + sheet + comments;
+      wireDay(devotion);
+      if ($('#join')) $('#join').onclick = function () { api('/api/dayplan/devotion/join', 'POST', { day: day, note: $('#snote').value }).then(function (r) { toast((r.late ? 'Signed in (after the devotion ended)' : 'Signed in. God bless your day 🙏') + (r.clock ? '\n' + r.clock.message : '')); devotion(); }).catch(function (e) { toast(e.message); }); };
+      all('[data-mark]').forEach(function (b) { b.onclick = function () { api('/api/dayplan/devotion/join', 'POST', { day: day, user_id: Number(b.getAttribute('data-mark')) }).then(devotion).catch(function (e) { toast(e.message); }); }; });
+      all('[data-unmark]').forEach(function (b) { b.onclick = async function () { if (await vasConfirm('Take this person off the sign-in sheet?')) api('/api/dayplan/devotion/join', 'POST', { day: day, user_id: Number(b.getAttribute('data-unmark')), remove: true }).then(devotion).catch(function (e) { toast(e.message); }); }; });
+      all('[data-rmc]').forEach(function (b) { b.onclick = async function () { if (await vasConfirm('Remove this?')) api('/api/dayplan/devotion/comments/' + b.getAttribute('data-rmc'), 'DELETE').then(devotion).catch(function (e) { toast(e.message); }); }; });
+      if ($('#cpost')) $('#cpost').onclick = function () { api('/api/dayplan/devotion/comments', 'POST', { day: day, kind: $('#ck').value, body: $('#cb').value }).then(function () { toast('Posted'); devotion(); }).catch(function (e) { toast(e.message); }); };
+      if ($('#edev')) $('#edev').onclick = function () { editDevotion(d); };
+    });
+  }
+  function editDevotion(d) {
+    var mgr = cfg.can_manage, sug = d.suggested || {};
+    modal('<h2>Devotion · ' + esc(nice(d.day)) + '</h2>' +
+      (mgr ? '<label class="f">How</label><select id="dm"><option value="system"' + (d.mode === 'system' ? ' selected' : '') + '>System: today\'s word is picked for you</option><option value="manual"' + (d.mode === 'manual' ? ' selected' : '') + '>Manual: a leader and our own words</option><option value="off"' + (d.mode === 'off' ? ' selected' : '') + '>No devotion this day</option></select>' +
+        '<div class="row3"><div><label class="f">Starts</label><input type="time" id="ds" value="' + esc(d.start) + '"></div><div><label class="f">Minutes</label><input type="number" id="dmin" value="' + esc(d.minutes) + '" min="5" max="120"></div><div><label class="f">Leader</label><select id="dl"><option value="">—</option>' + staffOpts(d.leader_user_id) + '</select></div></div>' : '') +
+      '<div id="dwords"><label class="f">Title</label><input id="dt1" style="width:100%" value="' + esc(d.mode === 'manual' ? d.title || '' : '') + '" placeholder="' + esc(sug.title || d.title || '') + '">' +
+      '<div class="row2"><div><label class="f">Scripture</label><input id="dref" value="' + esc(d.mode === 'manual' ? d.scripture_ref || '' : '') + '" placeholder="' + esc(sug.scripture_ref || 'Psalm 118:24') + '"></div><div><label class="f">Where</label><input id="dloc" value="' + esc(d.location || '') + '"></div></div>' +
+      '<label class="f">Verse</label><textarea id="dtext">' + esc(d.mode === 'manual' ? d.scripture_text || '' : '') + '</textarea><label class="f">Word for today</label><textarea id="dref2">' + esc(d.mode === 'manual' ? d.reflection || '' : '') + '</textarea><label class="f">Prayer</label><textarea id="dpr">' + esc(d.mode === 'manual' ? d.prayer || '' : '') + '</textarea></div>' +
+      '<div class="controls" style="margin-top:12px"><button class="primary" id="dsave">Save</button><button id="dcan">Cancel</button>' + (mgr && d.custom ? '<span class="grow"></span><button id="dreset">Back to the usual</button>' : '') + '</div>');
+    var sync = function () { if ($('#dm')) $('#dwords').style.display = $('#dm').value === 'manual' ? '' : 'none'; };
+    if ($('#dm')) { $('#dm').onchange = sync; sync(); }
+    $('#dcan').onclick = close;
+    if ($('#dreset')) $('#dreset').onclick = function () { api('/api/dayplan/devotion/' + d.day, 'DELETE').then(function () { close(); devotion(); }); };
+    $('#dsave').onclick = function () {
+      var b = { title: $('#dt1').value, scripture_ref: $('#dref').value, scripture_text: $('#dtext').value, reflection: $('#dref2').value, prayer: $('#dpr').value, location: $('#dloc').value };
+      if (mgr) { b.mode = $('#dm').value; b.start = $('#ds').value; b.minutes = $('#dmin').value; b.leader_user_id = $('#dl').value; }
+      api('/api/dayplan/devotion/' + d.day, 'PUT', b).then(function () { close(); toast('Saved'); devotion(); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  // -------------------------------------------------------------- my day --
+  function me() {
+    return Promise.all([api('/api/dayplan/day?mine=1&day=' + day), api('/api/dayplan/work?mine=1&day=' + day).catch(function () { return { blocks: [] }; })]).then(function (res) {
+      var d = res[0], W = res[1];
+      var workMin = 0, iv = W.blocks.map(function (b) { return [new Date(b.start).getTime(), new Date(b.end).getTime()]; }).sort(function (a, b) { return a[0] - b[0]; }), cur = null;
+      iv.forEach(function (x) { if (cur && x[0] <= cur[1]) cur[1] = Math.max(cur[1], x[1]); else { if (cur) workMin += (cur[1] - cur[0]) / 60000; cur = x.slice(); } }); if (cur) workMin += (cur[1] - cur[0]) / 60000;
+      var p = d.people[0] || { activities: [], plan: {}, performance: {} };
+      var f = p.performance || {};
+      var row = function (a) {
+        var when = a.planned_start ? hm(a.planned_start) + '–' + hm(a.planned_end) : 'Any time';
+        var btns = a.status === 'planned' ? '<button class="sm" data-a="start" data-id="' + a.id + '">▶ Start</button> <button class="sm ok" data-a="done" data-id="' + a.id + '">✓ Done</button>'
+          : a.status === 'in_progress' ? '<button class="sm ok" data-a="done" data-id="' + a.id + '">✓ Done</button>' : '<button class="sm" data-a="reopen" data-id="' + a.id + '">Undo</button>';
+        var st = a.status === 'done' ? '<span class="pill ok">done ' + esc(tm(a.actual_end)) + '</span>' : a.status === 'in_progress' ? '<span class="pill warn">started ' + esc(tm(a.actual_start)) + '</span>' : a.status === 'skipped' ? '<span class="pill">skipped</span>' : '';
+        return '<div class="act-row ' + a.status + '"><div class="t">' + esc(when) + '</div><div class="main"><b>' + esc(a.title) + '</b><small>' + esc(cfg.categories[a.category] || a.category) + (a.source !== 'manual' ? ' · ' + esc(a.source === 'google' ? 'Google Calendar' : a.source === 'template' ? 'daily schedule' : a.source) : '') + (a.created_by && a.created_by !== cfg.me.id ? ' · from ' + esc(a.created_by_name || '') : '') + (a.notes ? ' · ' + esc(a.notes) : '') + '</small></div>' + st +
+          '<div style="white-space:nowrap">' + btns + ' <button class="sm" data-e="' + a.id + '" title="Change">✎</button></div></div>';
+      };
+      $('#out').innerHTML = '<div class="controls">' + dayBar() + '<span class="grow"></span>' + micButton() + '<button class="primary" id="add">+ Activity</button></div>' +
+        devotionCard(d.devotion, true) +
+        '<div class="card"><h2>My day · ' + esc(nice(d.day)) + ' <span class="pill">' + esc(p.plan.kind === 'shift' ? 'Shift ' + p.plan.start + '–' + p.plan.end : (p.plan.label || 'Not rostered')) + '</span>' +
+          (p.clocked_in ? '<span class="pill ok">Clocked in ' + esc(tm(p.clocked_in)) + '</span>' : (p.plan.kind === 'shift' && d.day === d.today ? '<span class="pill bad">Not clocked in</span>' : '')) +
+          (f.score != null ? '<span class="score ' + scoreCls(f.score) + '">' + f.score + '</span>' : '') + '</h2>' +
+          '<p class="sub">' + (f.planned ? f.done + ' of ' + f.planned + ' done' + (f.planned_min ? ' · planned ' + mins(f.planned_min) + ', spent ' + mins(f.actual_min) : '') : 'Nothing planned yet. Add an activity, say one, or import your Google Calendar.') + (p.sales.count ? ' · ' + p.sales.count + ' sales' : '') + '</p>' +
+          (p.activities.length ? p.activities.map(row).join('') : '') + '</div>' +
+        (W.blocks.length ? '<div class="card"><h2>⚙ Work logged · ' + mins(workMin) + '</h2><p class="sub">From what you did in the system: sales, orders, picks, deliveries, receiving, counts and activities you started.</p>' + W.blocks.map(function (b) {
+          return '<div class="act-row"><div class="t">' + esc(hm(b.start) + '–' + hm(b.end)) + '</div><div class="main"><b><i class="dot" style="background:' + b.color + '"></i>' + esc(b.title) + '</b>' + (b.n > 1 ? '<small>' + esc(b.items.slice(0, 6).join(' · ') + (b.n > 6 ? ' …' : '')) + '</small>' : '') + '</div></div>';
+        }).join('') + '</div>' : '');
+      wireDay(me); wireVoice(me);
+      $('#add').onclick = function () { actForm(null, cfg.me.id); };
+      all('[data-a]').forEach(function (b) { b.onclick = function () { api('/api/dayplan/activities/' + b.getAttribute('data-id') + '/' + b.getAttribute('data-a'), 'POST', {}).then(me).catch(function (e) { toast(e.message); }); }; });
+      all('[data-e]').forEach(function (b) { b.onclick = function () { actForm(p.activities.filter(function (a) { return String(a.id) === b.getAttribute('data-e'); })[0], cfg.me.id, me); }; });
+      all('[data-go]').forEach(function (a) { a.onclick = function (e) { e.preventDefault(); setTab(a.getAttribute('data-go')); }; });
+    });
+  }
+  function actForm(a, userId, after) {
+    after = after || go;
+    var multi = !a && cfg.can_manage;
+    modal('<h2>' + (a ? 'Change activity' : 'New activity') + '</h2>' +
+      '<label class="f">What</label><input id="at" style="width:100%" maxlength="140" value="' + esc(a ? a.title : '') + '" placeholder="Stock count, clean the shop, call suppliers…">' +
+      '<div class="row3"><div><label class="f">Kind</label><select id="ac">' + catOpts(a ? a.category : 'work') + '</select></div><div><label class="f">From</label><input type="time" id="as" value="' + esc(a ? hm(a.planned_start) : '') + '"></div><div><label class="f">To</label><input type="time" id="ae" value="' + esc(a ? hm(a.planned_end) : '') + '"></div></div>' +
+      (multi ? '<label class="f">For (hold Ctrl to pick several)</label><select id="au" multiple size="6" style="width:100%">' + staffOpts(userId) + '</select>' : '') +
+      '<label class="f">Notes</label><input id="an" style="width:100%" value="' + esc(a ? a.notes || '' : '') + '">' +
+      '<div class="controls" style="margin-top:12px"><button class="primary" id="asave">Save</button><button id="acan">Cancel</button><span class="grow"></span>' + (a ? '<button id="askip">Skip</button><button id="adel">Delete</button>' : '') + '</div>');
+    $('#acan').onclick = close;
+    if (a) {
+      $('#adel').onclick = async function () { if (await vasConfirm('Delete this activity?')) api('/api/dayplan/activities/' + a.id, 'DELETE').then(function () { close(); after(); }); };
+      $('#askip').onclick = function () { api('/api/dayplan/activities/' + a.id + '/skip', 'POST', {}).then(function () { close(); after(); }); };
+    }
+    $('#asave').onclick = function () {
+      var b = { title: $('#at').value, category: $('#ac').value, start: $('#as').value, end: $('#ae').value, notes: $('#an').value, day: day };
+      if (multi) b.user_ids = all('#au option').filter(function (o) { return o.selected; }).map(function (o) { return Number(o.value); });
+      else b.user_id = userId;
+      (a ? api('/api/dayplan/activities/' + a.id, 'PUT', b) : api('/api/dayplan/activities', 'POST', b)).then(function () { close(); toast('Saved'); after(); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  // --------------------------------------------------- staff schedule --
+  var H0 = 6, H1 = 20;
+  function pos(t, d) { var x = (new Date(t).getTime() - new Date(d + 'T' + String(H0).padStart(2, '0') + ':00:00-05:00').getTime()) / 3600000; return Math.max(0, Math.min(100, x / (H1 - H0) * 100)); }
+  function posHM(h, d) { return pos(d + 'T' + h + ':00-05:00', d); }
+  function schedule() {
+    return Promise.all([api('/api/dayplan/day?day=' + day), api('/api/dayplan/work?day=' + day).catch(function () { return { blocks: [], kinds: {} }; }), api('/api/dayplan/productive?day=' + day).catch(function () { return { people: [] }; })]).then(function (res) {
+      var d = res[0], W = res[1], PR = res[2], used = {};
+      W.blocks.forEach(function (b) { used[b.kind] = 1; });
+      // the timeline covers the opening hours and every shift, with an hour either side
+      var lo = 24, hi = 0, hr = function (t) { var x = t.split(':'); return Number(x[0]) + Number(x[1]) / 60; };
+      if (d.hours && d.hours.open) { lo = hr(d.hours.opens); hi = hr(d.hours.closes); }
+      d.people.forEach(function (p) { if (p.plan.kind === 'shift') { lo = Math.min(lo, hr(p.plan.start)); hi = Math.max(hi, hr(p.plan.end) <= hr(p.plan.start) ? 24 : hr(p.plan.end)); } });
+      if (d.devotion && d.devotion.mode !== 'off') lo = Math.min(lo, hr(d.devotion.start));
+      if (lo > hi) { lo = 6; hi = 20; }
+      H0 = Math.max(0, Math.floor(lo) - 1); H1 = Math.min(24, Math.ceil(hi) + 1); if (H1 - H0 < 8) H1 = Math.min(24, H0 + 8);
+      var hrs = []; for (var h = H0; h < H1; h++) hrs.push(h);
+      var shade = '';
+      if (d.hours && d.hours.open) { var oa = posHM(d.hours.opens, d.day), ca = posHM(d.hours.closes, d.day); shade = '<div class="closed" style="left:0;width:' + oa + '%"></div><div class="closed" style="left:' + ca + '%;right:0"></div>'; }
+      else shade = '<div class="closed" style="left:0;right:0"></div>';
+      var depts = []; d.people.forEach(function (p) { if (depts.indexOf(p.department) < 0) depts.push(p.department); });
+      var dev = d.devotion;
+      var lane = function (p) {
+        var out = shade;
+        if (p.plan.kind === 'shift') { var a = posHM(p.plan.start, d.day), b = posHM(p.plan.end, d.day); out += '<div class="bar shift" style="left:' + a + '%;width:' + Math.max(1, b - a) + '%">' + esc(p.plan.start + '–' + p.plan.end + (p.plan.post ? ' · ' + p.plan.post : '')) + '</div>'; }
+        else out += '<div class="bar shift" style="left:0;right:0;opacity:.45;background:transparent">' + esc(p.plan.label || 'Not working') + '</div>';
+        if (dev && dev.mode !== 'off' && p.plan.kind === 'shift') { var x = pos(dev.starts_at, d.day), y = pos(dev.ends_at, d.day); out += '<div class="bar devb" style="left:' + x + '%;width:' + Math.max(1.2, y - x) + '%" title="Devotion' + (p.devotion ? ': signed in' : '') + '">🙏' + (p.devotion ? '✓' : '') + '</div>'; }
+        p.activities.forEach(function (a) {
+          if (!a.planned_start && !a.actual_start) return;
+          var s = a.actual_start && a.status !== 'planned' ? a.actual_start : a.planned_start, e = a.actual_end || (a.status === 'in_progress' ? (a.planned_end && a.planned_end > d.now ? a.planned_end : d.now) : a.planned_end || s);
+          var l = pos(s, d.day), w = Math.max(1.5, pos(e, d.day) - l);
+          out += '<div class="bar act ' + a.status + (a.source === 'fill' ? ' fill' : '') + (a.category === 'break' ? ' lunch' : '') + '" data-act="' + a.id + '" style="left:' + l + '%;width:' + w + '%" title="' + esc(a.title + ' · planned ' + hm(a.planned_start) + '–' + hm(a.planned_end) + (a.actual_start ? ' · actual ' + hm(a.actual_start) + '–' + (hm(a.actual_end) || 'now') : '') + ' · ' + a.status) + '">' + (a.status === 'done' ? '✓ ' : a.status === 'in_progress' ? '▶ ' : '') + esc(a.title) + '</div>';
+        });
+        p.track.forEach(function (t) {
+          if (t.kind === 'clock_in' || t.kind === 'clock_out') out += '<div class="mark ' + (t.kind === 'clock_in' ? 'in' : 'out') + '" style="left:' + pos(t.at, d.day) + '%" title="' + esc(t.label + ' ' + tm(t.at)) + '"><span>' + (t.kind === 'clock_in' ? 'in ' : 'out ') + esc(hm(t.at)) + '</span></div>';
+          if (t.kind === 'break') { var bl = pos(t.at, d.day); out += '<div class="brk" style="left:' + bl + '%;width:' + Math.max(0.8, pos(t.end || d.now, d.day) - bl) + '%" title="' + esc(t.label) + '"></div>'; }
+        });
+        out += workStrip(W.blocks.filter(function (b) { return b.user_id === p.user_id; }), d.day);
+        return out;
+      };
+      var nowLine = d.day === d.today ? '<div class="now" style="left:calc(190px + (100% - 190px) * ' + (pos(d.now, d.day) / 100) + ')"></div>' : '';
+      $('#out').innerHTML = '<div class="controls">' + dayBar() + '<span class="grow"></span>' + (cfg.can_manage ? '<button id="fill" title="Every free stretch of each shift gets something: get ready to open, their usual work, lunch, close up">🧩 Fill the day from opening hours</button><button id="mk">⚙ Create the day\'s schedule</button><button class="primary" id="add">+ Activity</button>' : '') + '</div>' +
+        devotionCard(dev, true) +
+        '<div class="card"><h2>Staff schedule · ' + esc(nice(d.day)) + ' <span class="pill' + (d.hours && d.hours.open ? ' info' : ' warn') + '">🏪 ' + esc(d.hours ? d.hours.label : '') + '</span></h2>' +
+        ((d.coverage || []).length ? '<p class="cov">⚠ Open with nobody rostered: ' + d.coverage.map(function (g) { return '<b>' + esc(g.who === 'Nobody' ? 'the whole shop' : g.who) + '</b> ' + esc(g.from + '–' + g.to); }).join(' · ') + '</p>' : '') + '<p class="sub">Everyone on the roster, their shift, the devotion and their activities. Clock-ins, breaks and the work they do (the thin coloured strip: sales, picks, deliveries…) appear as it happens. Hover a strip to see the transactions.</p>' +
+        '<div class="scroll"><div class="tl" style="--h:' + (H1 - H0) + '">' + nowLine +
+        '<div class="hours" style="grid-template-columns:repeat(' + (H1 - H0) + ',1fr)">' + hrs.map(function (h) { return '<div>' + (h > 12 ? h - 12 : h) + (h < 12 ? 'am' : 'pm') + '</div>'; }).join('') + '</div>' +
+        depts.map(function (dp) {
+          return '<div class="row" style="min-height:0;background:var(--chip)"><div class="who" style="font-size:11.5px;font-weight:700;text-transform:uppercase;color:var(--muted)">' + esc(dp) + '</div><div class="lane" style="background:none"></div></div>' +
+            d.people.filter(function (p) { return p.department === dp; }).map(function (p) {
+              var f = p.performance, pr = PR.people.filter(function (x) { return x.user_id === p.user_id; })[0];
+              return '<div class="row"><div class="who"><b>' + esc(p.name) + '</b><small>' + (p.clocked_in ? '🟢 in ' + esc(tm(p.clocked_in)) : p.plan.kind === 'shift' ? (d.day <= d.today ? '⚪ not in' : 'rostered') : esc(p.plan.label || 'off')) +
+                (f.planned ? ' · ' + f.done + '/' + f.planned + ' done' : '') + (f.score != null ? ' · <span class="score ' + scoreCls(f.score) + '" style="padding:0 4px">' + f.score + '</span>' : '') + (pr && pr.productive_min ? '<br>⚙ ' + hh(pr.productive_min) + 'h work logged' : '') + '</small></div><div class="lane" data-u="' + p.user_id + '">' + lane(p) + '</div></div>';
+            }).join('');
+        }).join('') + '</div></div>' +
+        '<div class="legend"><span><i style="background:var(--shift)"></i>Shift</span><span><i style="background:var(--dev)"></i>Devotion</span><span><i style="background:var(--act)"></i>Planned</span><span><i style="background:var(--act-run)"></i>In progress</span><span><i style="background:var(--act-done)"></i>Done</span><span><i style="background:var(--ok);width:3px"></i>Clock in</span><span><i style="background:repeating-linear-gradient(45deg,var(--warn) 0 3px,transparent 3px 6px)"></i>Break</span>' + kindLegend(W.kinds, used) + '</div></div>';
+      wireDay(schedule);
+      all('[data-go]').forEach(function (a) { a.onclick = function (e) { e.preventDefault(); setTab(a.getAttribute('data-go')); }; });
+      if ($('#fill')) $('#fill').onclick = function () { api('/api/dayplan/fill', 'POST', { day: day }).then(function (r) { toast(r.hours.open ? 'Filled ' + r.people + ' people\'s day (' + r.filled + ' blocks) for ' + r.hours.label.toLowerCase() : r.hours.label + ' — filled ' + r.filled + ' blocks for anyone rostered'); schedule(); }).catch(function (e) { toast(e.message); }); };
+      if ($('#mk')) $('#mk').onclick = function () { api('/api/dayplan/schedule', 'POST', { day: day }).then(function (r) { toast(r.made + ' activities added for ' + r.working + ' people on the roster'); schedule(); }).catch(function (e) { toast(e.message); }); };
+      if ($('#add')) $('#add').onclick = function () { actForm(null, null, schedule); };
+      all('[data-act]').forEach(function (b) {
+        b.onclick = function (e) {
+          e.stopPropagation();
+          var a = null; d.people.forEach(function (p) { p.activities.forEach(function (x) { if (String(x.id) === b.getAttribute('data-act')) a = x; }); });
+          if (a && cfg.can_manage) actForm(a, a.user_id, schedule);
+        };
+      });
+      clearInterval(timer);
+      if (d.day === d.today) timer = setInterval(function () { if (tab === 'schedule' && !$('.modal')) schedule().catch(function () {}); }, 60000);
+    });
+  }
+
+  // -------------------------------------------------------- performance --
+  function perf() {
+    return api('/api/dayplan/day?day=' + day).then(function (d) {
+      var P = d.people.filter(function (p) { return p.plan.kind === 'shift' || p.activities.length || p.clocked_in; });
+      P.sort(function (a, b) { return (b.performance.score == null ? -1 : b.performance.score) - (a.performance.score == null ? -1 : a.performance.score); });
+      var tot = P.reduce(function (t, p) { var f = p.performance; t.planned += f.planned; t.done += f.done; t.sales += f.sales_count; t.dev += f.devotion ? 1 : 0; t.devdue += f.devotion != null ? 1 : 0; return t; }, { planned: 0, done: 0, sales: 0, dev: 0, devdue: 0 });
+      $('#out').innerHTML = '<div class="controls">' + dayBar() + '</div>' +
+        '<div class="card"><h2>Performance · ' + esc(nice(d.day)) + '</h2><p class="sub">Work done compared with the plan. Score out of 100: activities done 50, started on time 15, hours worked against rostered (less for coming in late) 25, devotion 10. Parts that don\'t apply to someone are left out.' + (d.day === d.today ? ' Today counts what was due by now.' : '') + '</p>' +
+        '<p><b>' + tot.done + '</b> of <b>' + tot.planned + '</b> activities done · <b>' + tot.sales + '</b> sales · devotion <b>' + tot.dev + '</b> of ' + tot.devdue + '</p>' +
+        '<div class="scroll"><table><thead><tr><th>Staff</th><th>Shift</th><th>In</th><th class="n">Done / due</th><th>Completion</th><th class="n">Planned time</th><th class="n">Time spent</th><th class="n">On time</th><th class="n">Worked / rostered</th><th>Devotion</th><th class="n">Sales</th><th class="n">Score</th></tr></thead><tbody>' +
+        (P.length ? P.map(function (p) {
+          var f = p.performance;
+          return '<tr><td><b>' + esc(p.name) + '</b><br><small style="color:var(--muted)">' + esc(p.department) + '</small></td><td>' + esc(p.plan.kind === 'shift' ? p.plan.start + '–' + p.plan.end : p.plan.label || '') + '</td>' +
+            '<td>' + (p.clocked_in ? esc(tm(p.clocked_in)) + (f.late_min ? ' <span class="pill warn">late ' + f.late_min + 'm</span>' : '') : (p.plan.kind === 'shift' && d.day <= d.today ? '<span class="pill bad">not in</span>' : '')) + '</td>' +
+            '<td class="n">' + f.done + ' / ' + f.due + (f.in_progress ? ' <small>(' + f.in_progress + ' going)</small>' : '') + '</td>' +
+            '<td>' + (f.completion != null ? '<div class="meter"><i style="width:' + f.completion + '%"></i></div><small>' + f.completion + '%</small>' : '<small style="color:var(--muted)">nothing due</small>') + '</td>' +
+            '<td class="n">' + (f.planned_min ? mins(f.planned_min) : '–') + '</td><td class="n">' + (f.actual_min ? mins(f.actual_min) : '–') + '</td><td class="n">' + (f.timed ? f.on_time + ' / ' + f.timed : '–') + '</td>' +
+            '<td class="n">' + (f.rostered_min ? mins(f.worked_min) + ' / ' + mins(f.rostered_min) : mins(f.worked_min)) + '</td>' +
+            '<td>' + (f.devotion == null ? '' : f.devotion ? '<span class="pill ok">✓</span>' : '<span class="pill">—</span>') + '</td>' +
+            '<td class="n">' + (f.sales_count ? f.sales_count + '<br><small>J$' + Number(f.sales_value).toLocaleString('en-JM', { maximumFractionDigits: 0 }) + '</small>' : '–') + '</td>' +
+            '<td class="n">' + (f.score != null ? '<span class="score ' + scoreCls(f.score) + '">' + f.score + '</span>' : '–') + '</td></tr>';
+        }).join('') : '<tr><td colspan="12" class="empty">Nobody rostered.</td></tr>') + '</tbody></table></div></div>';
+      wireDay(perf);
+    });
+  }
+
+  // ------------------------------------------------------------ set up --
+  function setup() {
+    return Promise.all([cfg.can_manage ? api('/api/dayplan/templates') : Promise.resolve(null), api('/api/dayplan/feeds'), api('/api/dayplan/config'), cfg.can_manage ? api('/api/dayplan/worklog/settings') : Promise.resolve(null)]).then(function (r) {
+      var T = r[0], F = r[1].feeds, s = r[2].settings, WS = r[3] && r[3].settings; cfg.settings = s;
+      var dayBoxes = function (sel, id) { return '<div class="controls" id="' + id + '">' + DN.map(function (n, i) { return '<label><input type="checkbox" value="' + i + '"' + (sel.indexOf(i) >= 0 ? ' checked' : '') + '> ' + n + '</label>'; }).join('') + '</div>'; };
+      var h = '';
+      if (cfg.can_manage) {
+        h += '<div class="card"><h2>🙏 Devotion</h2><p class="sub">It goes on everyone\'s team calendar. Staff on the roster are told before it starts and when it starts.</p>' +
+          '<div class="row3"><div><label class="f">Devotion</label><select id="sm"><option value="system"' + (s.devotion_mode === 'system' ? ' selected' : '') + '>System: today\'s word is picked</option><option value="manual"' + (s.devotion_mode === 'manual' ? ' selected' : '') + '>Manual: leader writes it</option><option value="off"' + (s.devotion_mode === 'off' ? ' selected' : '') + '>Off</option></select></div>' +
+          '<div><label class="f">Starts</label><input type="time" id="st" value="' + esc(s.devotion_time) + '"></div><div><label class="f">Minutes</label><input type="number" id="smin" value="' + esc(s.devotion_minutes) + '"></div></div>' +
+          '<div class="row3"><div><label class="f">Remind (minutes before)</label><input type="number" id="srem" value="' + esc(s.devotion_remind) + '"></div><div><label class="f">Where</label><input id="sloc" value="' + esc(s.devotion_location) + '"></div><div></div></div>' +
+          '<label class="f">Days</label>' + dayBoxes(s.days || [], 'sdays') +
+          '<h2 style="margin-top:14px">🏪 Opening hours</h2><p class="sub">The staff schedule is laid out on these hours, and "Fill the day" fills every shift around them. Public holidays are closed.</p><div class="hours-grid">' +
+            DN.map(function (n, i) { var v = String(s['hours_' + i] || 'closed'), m = /^(\d\d:\d\d)-(\d\d:\d\d)$/.exec(v);
+              return '<div class="hrow"><label><input type="checkbox" data-hopen="' + i + '"' + (m ? ' checked' : '') + '> ' + n + '</label><input type="time" data-ho="' + i + '" value="' + (m ? m[1] : '08:00') + '"><span>to</span><input type="time" data-hc="' + i + '" value="' + (m ? m[2] : '17:00') + '"></div>'; }).join('') + '</div>' +
+          '<div class="controls"><label><input type="checkbox" id="sfill"' + (s.fill_auto === 'on' ? ' checked' : '') + '> Fill everyone\'s day from the opening hours at 5 am</label><label><input type="checkbox" id="sflunch"' + (s.fill_lunch === 'on' ? ' checked' : '') + '> Put lunch in the middle of each shift</label></div>' +
+          '<h2 style="margin-top:14px">⏰ Alerts</h2><div class="row3"><div><label class="f">Tell staff not clocked in after (min)</label><input type="number" id="sgr" value="' + esc(s.missing_grace) + '"></div><div><label class="f">Remind before an activity (min)</label><input type="number" id="sar" value="' + esc(s.activity_remind) + '"></div><div><label class="f">&nbsp;</label><label><input type="checkbox" id="smg"' + (s.missing_tell_managers === 'on' ? ' checked' : '') + '> Tell managers too</label><br><label><input type="checkbox" id="sauto"' + (s.auto_schedule === 'on' ? ' checked' : '') + '> Make the schedule automatically at 5 am</label></div></div>' +
+          '<div class="controls" style="margin-top:10px"><button class="primary" id="ssave">Save settings</button></div></div>';
+        var wn = function (k, l) { return '<div><label class="f">' + l + '</label><input type="number" data-ws="' + k + '" value="' + esc(WS[k]) + '"></div>'; };
+        h += '<div class="card"><h2>⏱ Work log</h2><p class="sub">Each transaction is put on the person\'s calendar as work. A pick or a delivery runs from start to finish; a sale or a count is a few minutes before the moment it was saved. Set those minutes here.</p>' +
+          '<div class="row3">' + wn('sale_min', 'Minutes per sale') + wn('order_min', 'Per order taken') + wn('quote_min', 'Per quote') + '</div>' +
+          '<div class="row3">' + wn('pick_min', 'Per pick (when no start time)') + wn('pack_min', 'Per order packed') + wn('handover_min', 'Per pickup handed over') + '</div>' +
+          '<div class="row3">' + wn('receive_min', 'Per stock receipt') + wn('count_min', 'Per bin counted') + wn('transfer_min', 'Per stock transfer') + '</div>' +
+          '<div class="row3"><div><label class="f">Longest open job (hours)</label><input type="number" data-ws="max_open_hours" value="' + esc(WS.max_open_hours) + '"></div><div><label class="f">&nbsp;</label><label><input type="checkbox" id="wsauto"' + (WS.auto_track === 'on' ? ' checked' : '') + '> Start a planned activity by itself when matching work turns up</label></div><div><label class="f">&nbsp;</label><label><input type="checkbox" id="wsdn"' + (WS.duties_notify === 'on' ? ' checked' : '') + '> Send everyone their duties at 5 am</label></div></div>' +
+          '<div class="controls" style="margin-top:10px"><button class="primary" id="wssave">Save work log settings</button></div></div>';
+        h += '<div class="card"><h2>📋 Daily activities (templates)</h2><p class="sub">These go onto the day\'s schedule for the people on the roster: one person, a department, or everyone.</p><div class="scroll"><table><thead><tr><th>Time</th><th>Activity</th><th>Who</th><th>Days</th><th></th></tr></thead><tbody>' +
+          (T.templates.length ? T.templates.map(function (t) {
+            return '<tr' + (t.active ? '' : ' style="opacity:.5"') + '><td>' + esc(t.start) + ' · ' + mins(t.minutes) + '</td><td><b>' + esc(t.title) + '</b><br><small>' + esc(cfg.categories[t.category] || '') + '</small></td><td>' + esc(t.everyone ? 'Everyone rostered' : t.department ? 'Dept: ' + t.department : t.job_title ? 'Job: ' + t.job_title : t.user_name || '') + (t.is_duty ? ' <span class="pill info">duty</span>' : '') + '</td><td>' + t.weekdays.map(function (w) { return DN[w]; }).join(' ') + '</td><td><button class="sm" data-tpl="' + t.id + '">✎</button></td></tr>';
+          }).join('') : '<tr><td colspan="5" class="empty">No daily activities yet.</td></tr>') + '</tbody></table></div><div class="controls" style="margin-top:8px"><button id="tadd">+ Daily activity</button></div></div>';
+      }
+      h += '<div class="card"><h2>📥 Import from Google Calendar</h2><p class="sub">In Google Calendar open Settings › your calendar › <b>Secret address in iCal format</b>, copy it and paste it here. It is checked every hour. Or download your calendar as an .ics file and choose it.</p>' +
+        (cfg.can_manage ? '<label class="f">Into whose day</label><select id="iu">' + staffOpts(cfg.me.id) + '</select>' : '') +
+        '<label class="f">iCal address</label><input id="iurl" style="width:100%" placeholder="https://calendar.google.com/calendar/ical/…/private-…/basic.ics">' +
+        '<div class="controls" style="margin-top:8px"><button class="primary" id="igo">Import and keep in step</button><span>or</span><input type="file" id="ifile" accept=".ics,text/calendar"></div>' +
+        (F.length ? '<table><thead><tr><th>Whose</th><th>Calendar</th><th>Last checked</th><th></th></tr></thead><tbody>' + F.map(function (f) { return '<tr><td>' + esc(f.name) + '</td><td>' + esc(f.label) + '<br><small>' + esc(f.url) + '</small></td><td>' + (f.last_sync ? esc(new Date(f.last_sync).toLocaleString('en-JM', { timeZone: 'America/Jamaica' })) : '') + (f.last_error ? '<br><span class="pill bad">' + esc(f.last_error) + '</span>' : f.last_count != null ? ' · ' + f.last_count + ' items' : '') + '</td><td><button class="sm" data-fd="' + f.id + '">Remove</button></td></tr>'; }).join('') + '</tbody></table>' : '') + '</div>';
+      $('#out').innerHTML = h;
+      if ($('#ssave')) $('#ssave').onclick = function () {
+        api('/api/dayplan/settings', 'PUT', { devotion_mode: $('#sm').value, devotion_time: $('#st').value, devotion_minutes: $('#smin').value, devotion_remind: $('#srem').value, devotion_location: $('#sloc').value,
+          hours: (function () { var h = {}; for (var i = 0; i < 7; i++) h[i] = $('[data-hopen="' + i + '"]').checked ? { opens: $('[data-ho="' + i + '"]').value, closes: $('[data-hc="' + i + '"]').value } : 'closed'; return h; })(), fill_auto: $('#sfill').checked, fill_lunch: $('#sflunch').checked,
+          devotion_days: all('#sdays input:checked').map(function (x) { return Number(x.value); }), missing_grace: $('#sgr').value, activity_remind: $('#sar').value, missing_tell_managers: $('#smg').checked, auto_schedule: $('#sauto').checked })
+          .then(function () { toast('Saved. The devotion is on the team calendar.'); }).catch(function (e) { toast(e.message); });
+      };
+      if ($('#wssave')) $('#wssave').onclick = function () {
+        var b = { auto_track: $('#wsauto').checked, duties_notify: $('#wsdn').checked }; all('[data-ws]').forEach(function (el) { b[el.getAttribute('data-ws')] = el.value; });
+        api('/api/dayplan/worklog/settings', 'PUT', b).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); });
+      };
+      cfg.jobTitles = T ? T.job_titles || [] : [];
+      if ($('#tadd')) $('#tadd').onclick = function () { tplForm(null, T.departments); };
+      all('[data-tpl]').forEach(function (b) { b.onclick = function () { tplForm(T.templates.filter(function (t) { return String(t.id) === b.getAttribute('data-tpl'); })[0], T.departments); }; });
+      var who = function () { return $('#iu') ? Number($('#iu').value) : cfg.me.id; };
+      $('#igo').onclick = function () { var u = $('#iurl').value.trim(); if (!u) return toast('Paste the iCal address'); api('/api/dayplan/import', 'POST', { url: u, user_id: who() }).then(function (r) { toast('Imported: ' + r.added + ' new, ' + r.updated + ' updated'); setup(); }).catch(function (e) { toast(e.message); }); };
+      $('#ifile').onchange = function () {
+        var f = this.files[0]; if (!f) return; var rd = new FileReader();
+        rd.onload = function () { api('/api/dayplan/import', 'POST', { ics: rd.result, user_id: who() }).then(function (r) { toast('Imported: ' + r.added + ' new, ' + r.updated + ' updated (next 30 days)'); }).catch(function (e) { toast(e.message); }); };
+        rd.readAsText(f);
+      };
+      all('[data-fd]').forEach(function (b) { b.onclick = function () { api('/api/dayplan/feeds/' + b.getAttribute('data-fd'), 'DELETE').then(setup); }; });
+    });
+  }
+  function tplForm(t, depts) {
+    var who = t ? (t.everyone ? 'everyone' : t.department_id ? 'department' : t.job_title ? 'job_title' : 'person') : 'everyone';
+    modal('<h2>' + (t ? 'Daily activity' : 'New daily activity') + '</h2><label class="f">What</label><input id="tt" style="width:100%" value="' + esc(t ? t.title : '') + '" placeholder="Open the shop, sweep and clean, stock check…">' +
+      '<div class="row3"><div><label class="f">Kind</label><select id="tc">' + catOpts(t ? t.category : 'work') + '</select></div><div><label class="f">Starts</label><input type="time" id="ts" value="' + esc(t ? t.start : '08:00') + '"></div><div><label class="f">Minutes</label><input type="number" id="tm" value="' + esc(t ? t.minutes : 30) + '"></div></div>' +
+      '<label class="f">Who</label><select id="tw"><option value="everyone">Everyone on the roster</option><option value="department">A department</option><option value="job_title">Everyone with a job title</option><option value="person">One person</option></select>' +
+      '<select id="tj" style="margin-top:6px">' + (cfg.jobTitles || []).map(function (j) { return '<option' + (t && t.job_title === j ? ' selected' : '') + '>' + esc(j) + '</option>'; }).join('') + '</select>' +
+      '<select id="td" style="margin-top:6px">' + depts.map(function (d) { return '<option value="' + d.id + '"' + (t && t.department_id === d.id ? ' selected' : '') + '>' + esc(d.name) + '</option>'; }).join('') + '</select>' +
+      '<select id="tu" style="margin-top:6px">' + staffOpts(t ? t.user_id : null) + '</select>' +
+      '<label class="f">Days</label><div class="controls" id="tdays">' + DN.map(function (n, i) { return '<label><input type="checkbox" value="' + i + '"' + ((t ? t.weekdays : [1, 2, 3, 4, 5, 6]).indexOf(i) >= 0 ? ' checked' : '') + '> ' + n + '</label>'; }).join('') + '</div>' +
+      '<label class="f">Notes</label><input id="tn" style="width:100%" value="' + esc(t ? t.notes || '' : '') + '">' + (t ? '<label><input type="checkbox" id="ta"' + (t.active ? ' checked' : '') + '> Active</label>' : '') +
+      '<div class="controls" style="margin-top:12px"><button class="primary" id="tsave">Save</button><button id="tcan">Cancel</button><span class="grow"></span>' + (t ? '<button id="tdel">Delete</button>' : '') + '</div>');
+    $('#tw').value = who;
+    var sync = function () { $('#td').style.display = $('#tw').value === 'department' ? '' : 'none'; $('#tu').style.display = $('#tw').value === 'person' ? '' : 'none'; $('#tj').style.display = $('#tw').value === 'job_title' ? '' : 'none'; };
+    $('#tw').onchange = sync; sync();
+    $('#tcan').onclick = close;
+    if ($('#tdel')) $('#tdel').onclick = async function () { if (await vasConfirm('Delete this daily activity? Days already made keep it.')) api('/api/dayplan/templates/' + t.id, 'DELETE').then(function () { close(); setup(); }); };
+    $('#tsave').onclick = function () {
+      var b = { title: $('#tt').value, category: $('#tc').value, start: $('#ts').value, minutes: $('#tm').value, who: $('#tw').value, department_id: $('#td').value, user_id: $('#tu').value, job_title: $('#tj').value,
+        weekdays: all('#tdays input:checked').map(function (x) { return Number(x.value); }), notes: $('#tn').value, active: $('#ta') ? $('#ta').checked : true };
+      (t ? api('/api/dayplan/templates/' + t.id, 'PUT', b) : api('/api/dayplan/templates', 'POST', b)).then(function () { close(); toast('Saved'); setup(); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  // ---------------------------------------------------- work done (log) --
+  var KIND_COLOR = { sale: '#16a34a', order: '#22c55e', quote: '#84cc16', pick: '#f59e0b', pack: '#d97706', handover: '#eab308', delivery: '#2563eb', receiving: '#9333ea', count: '#a855f7', transfer: '#c084fc', activity: '#0ea5e9', labour: '#64748b' };
+  var hh = function (m) { return (Math.round((m || 0) / 6) / 10).toFixed(1); };
+  function workStrip(blocks, dd) {
+    return (blocks || []).map(function (b) {
+      var l = pos(b.start, dd), w = Math.max(0.6, pos(b.end, dd) - l);
+      return '<div class="wk" style="left:' + l + '%;width:' + w + '%;background:' + b.color + '" title="' + esc(hm(b.start) + '–' + hm(b.end) + ' · ' + b.title + (b.n > 1 ? '\n' + b.items.slice(0, 8).join('\n') + (b.n > 8 ? '\n…' : '') : '')) + '"></div>';
+    }).join('');
+  }
+  function kindLegend(kinds, only) {
+    return Object.keys(kinds).filter(function (k) { return !only || only[k]; }).map(function (k) { return '<span><i style="background:' + kinds[k].color + '"></i>' + esc(kinds[k].label) + '</span>'; }).join('');
+  }
+
+  // --------------------------------------------------- charts (SVG) --
+  function svgEl(w, h, inner) { return '<svg viewBox="0 0 ' + w + ' ' + h + '" width="100%" style="max-width:' + w + 'px;display:block" role="img">' + inner + '</svg>'; }
+  // One bar per person: work by kind, stacked; the clocked-in time as an outline behind.
+  function personChart(P, kinds) {
+    if (!P.length) return '<div class="empty">No work logged.</div>';
+    var W = 760, L = 150, R = 70, row = 26, H = P.length * row + 26;
+    var max = Math.max.apply(null, P.map(function (p) { return Math.max(p.productive_min, p.clocked_min); }).concat([60]));
+    var sx = function (m) { return (W - L - R) * m / max; };
+    var out = '';
+    var step = max > 3000 ? 600 : max > 1200 ? 240 : max > 480 ? 120 : 60;
+    for (var g = 0; g <= max; g += step) out += '<line x1="' + (L + sx(g)) + '" x2="' + (L + sx(g)) + '" y1="0" y2="' + (H - 18) + '" stroke="currentColor" stroke-opacity=".12"/><text x="' + (L + sx(g)) + '" y="' + (H - 4) + '" font-size="10" text-anchor="middle" fill="currentColor" fill-opacity=".6">' + (g / 60) + 'h</text>';
+    P.forEach(function (p, i) {
+      var y = i * row + 4;
+      out += '<text x="' + (L - 8) + '" y="' + (y + 13) + '" font-size="12" text-anchor="end" fill="currentColor">' + (i === 0 && p.productive_min ? '🏆 ' : '') + esc(p.name.length > 20 ? p.name.slice(0, 19) + '…' : p.name) + '</text>';
+      if (p.clocked_min) out += '<rect x="' + L + '" y="' + (y - 1) + '" width="' + sx(p.clocked_min) + '" height="18" rx="3" fill="none" stroke="currentColor" stroke-opacity=".35" stroke-dasharray="3 2"><title>Clocked in ' + esc(mins(p.clocked_min)) + '</title></rect>';
+      var x = L;
+      Object.keys(kinds).forEach(function (k) {
+        var v = (p.by_kind || {})[k]; if (!v) return;
+        out += '<rect x="' + x + '" y="' + (y + 1) + '" width="' + Math.max(0.5, sx(v)) + '" height="14" fill="' + kinds[k].color + '"><title>' + esc(p.name + ' · ' + kinds[k].label + ': ' + mins(v)) + '</title></rect>';
+        x += sx(v);
+      });
+      out += '<text x="' + (L + sx(Math.max(p.productive_min, p.clocked_min)) + 6) + '" y="' + (y + 13) + '" font-size="11.5" font-weight="600" fill="currentColor">' + hh(p.productive_min) + 'h</text>';
+    });
+    return svgEl(W, H, out);
+  }
+  // Productive hours each day, stacked by kind; a dot for hours clocked in.
+  function dayChart(D, kinds) {
+    var W = 760, H = 220, L = 34, B = 34, T = 10;
+    var max = Math.max.apply(null, D.map(function (d) { return Math.max(d.productive_min, d.clocked_min); }).concat([60]));
+    var bw = (W - L - 8) / D.length, sy = function (m) { return (H - B - T) * m / max; };
+    var out = '';
+    var step = max > 6000 ? 1200 : max > 2400 ? 600 : max > 900 ? 240 : 60;
+    for (var g = 0; g <= max; g += step) out += '<line x1="' + L + '" x2="' + W + '" y1="' + (H - B - sy(g)) + '" y2="' + (H - B - sy(g)) + '" stroke="currentColor" stroke-opacity=".12"/><text x="' + (L - 4) + '" y="' + (H - B - sy(g) + 3) + '" font-size="10" text-anchor="end" fill="currentColor" fill-opacity=".6">' + (g / 60) + 'h</text>';
+    D.forEach(function (d, i) {
+      var x = L + i * bw + bw * 0.15, w = bw * 0.7, y = H - B;
+      Object.keys(kinds).forEach(function (k) { var v = (d.by_kind || {})[k]; if (!v) return; var h = sy(v); y -= h; out += '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" fill="' + kinds[k].color + '"><title>' + esc(nice(d.day) + ' · ' + kinds[k].label + ': ' + mins(v)) + '</title></rect>'; });
+      if (d.clocked_min) out += '<circle cx="' + (x + w / 2) + '" cy="' + (H - B - sy(d.clocked_min)) + '" r="3.5" fill="none" stroke="currentColor" stroke-width="1.5"><title>Clocked in ' + esc(mins(d.clocked_min)) + '</title></circle>';
+      if (D.length <= 16 || i % Math.ceil(D.length / 16) === 0) out += '<text x="' + (x + w / 2) + '" y="' + (H - B + 14) + '" font-size="10" text-anchor="middle" fill="currentColor" fill-opacity=".7">' + esc(D.length > 7 ? d.day.slice(8) : nice(d.day).slice(0, 6)) + '</text>';
+      if (d.productive_min && D.length <= 14) out += '<text x="' + (x + w / 2) + '" y="' + (H - B - sy(d.productive_min) - 4) + '" font-size="10" text-anchor="middle" fill="currentColor">' + hh(d.productive_min) + '</text>';
+    });
+    return svgEl(W, H, out);
+  }
+  // When in the day the work happens.
+  function hourChart(byHour) {
+    var W = 760, H = 150, L = 8, B = 22, h0 = 6, h1 = 21;
+    var vals = byHour.slice(h0, h1), max = Math.max.apply(null, vals.concat([30]));
+    var bw = (W - L * 2) / vals.length, out = '';
+    vals.forEach(function (v, i) {
+      var h = (H - B - 8) * v / max, x = L + i * bw + 3;
+      out += '<rect x="' + x + '" y="' + (H - B - h) + '" width="' + (bw - 6) + '" height="' + h + '" rx="2" fill="var(--blue)"><title>' + (h0 + i) + ':00 – ' + (h0 + i + 1) + ':00 · ' + mins(v) + ' of work</title></rect>' +
+        '<text x="' + (x + (bw - 6) / 2) + '" y="' + (H - 6) + '" font-size="10" text-anchor="middle" fill="currentColor" fill-opacity=".7">' + (((h0 + i) % 12) || 12) + ((h0 + i) < 12 ? 'a' : 'p') + '</text>';
+    });
+    return svgEl(W, H, out);
+  }
+
+  var wr = null;
+  function presetRange(k) {
+    var t = cfg.today, wd = new Date(t + 'T12:00:00Z').getUTCDay();
+    if (k === 'today') return [t, t];
+    if (k === 'yesterday') return [addDays(t, -1), addDays(t, -1)];
+    if (k === 'week') return [addDays(t, -((wd + 6) % 7)), t];
+    if (k === 'last7') return [addDays(t, -6), t];
+    if (k === 'month') return [t.slice(0, 8) + '01', t];
+    if (k === 'last30') return [addDays(t, -29), t];
+    return null;
+  }
+  function work() {
+    if (!wr) wr = { from: day, to: day, preset: day === cfg.today ? 'today' : '' };
+    return api('/api/dayplan/productive?from=' + wr.from + '&to=' + wr.to).then(function (r) {
+      var T = r.totals, P = r.people, kinds = r.kinds, used = {};
+      P.forEach(function (p) { Object.keys(p.by_kind).forEach(function (k) { used[k] = 1; }); });
+      var one = r.from === r.to;
+      var presets = [['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'This week'], ['last7', 'Last 7 days'], ['month', 'This month'], ['last30', 'Last 30 days']];
+      var kpi = function (v, l, s) { return '<div class="kpi"><b>' + v + '</b><span>' + esc(l) + '</span>' + (s ? '<small>' + s + '</small>' : '') + '</div>'; };
+      $('#out').innerHTML = '<div class="controls">' + presets.map(function (p) { return '<button class="sm' + (wr.preset === p[0] ? ' on' : '') + '" data-pr="' + p[0] + '">' + p[1] + '</button>'; }).join('') +
+        '<input type="date" id="wf" value="' + esc(r.from) + '"> to <input type="date" id="wt" value="' + esc(r.to) + '"><span class="grow"></span><a class="btnlink" id="wcsv" href="/api/dayplan/productive?format=csv&from=' + r.from + '&to=' + r.to + '" download>⬇ Download (Excel CSV)</a></div>' +
+        '<div class="kpis">' + kpi(hh(T.productive_min) + 'h', 'productive hours', T.people + ' people · ' + T.transactions + ' transactions') + kpi(hh(T.clocked_min) + 'h', 'clocked in', T.utilisation != null ? T.utilisation + '% of it busy' : '') +
+          kpi(hh(T.on_plan_min) + 'h', 'on plan', hh(T.unplanned_min) + 'h not on the plan') + kpi(T.top ? esc(T.top.name) : '–', 'put in the most', T.top ? hh(T.top.productive_min) + 'h productive' : '') + '</div>' +
+        '<div class="card"><h2>Who put in the most · ' + esc(one ? nice(r.from) : nice(r.from) + ' – ' + nice(r.to)) + '</h2><p class="sub">Productive time is the time each person was doing a transaction: ringing a sale, taking an order, picking, packing, out on a delivery, receiving, counting, or on a planned activity they started. Overlaps count once. The dashed outline is the time they were clocked in.</p>' +
+          personChart(P, kinds) + '<div class="legend">' + kindLegend(kinds, used) + '<span><i style="border:1px dashed currentColor;background:none"></i>Clocked in</span></div></div>' +
+        (one ? '' : '<div class="card"><h2>Productive hours by day</h2>' + dayChart(r.days, kinds) + '<div class="legend">' + kindLegend(kinds, used) + '<span>○ clocked in</span></div></div>') +
+        '<div class="card"><h2>When the work happens</h2><p class="sub">Minutes of work in each hour of the day' + (one ? '' : ', all days together') + '. Quiet hours are where duties can be planned.</p>' + hourChart(r.by_hour) + '</div>' +
+        '<div class="card"><h2>By person</h2><div class="scroll"><table><thead><tr><th>#</th><th>Staff</th><th class="n">Productive</th><th class="n">Clocked in</th><th>Busy</th><th class="n">On plan</th><th class="n">Not planned</th><th class="n">Transactions</th><th>What they did</th>' + (one ? '' : '<th class="n">Days</th>') + '</tr></thead><tbody>' +
+        (P.length ? P.map(function (p, i) {
+          var u = p.utilisation;
+          return '<tr data-pp="' + p.user_id + '" style="cursor:pointer"><td>' + (i + 1) + '</td><td><b>' + esc(p.name) + '</b><br><small style="color:var(--muted)">' + esc(p.department) + '</small></td><td class="n"><b>' + hh(p.productive_min) + 'h</b></td><td class="n">' + hh(p.clocked_min) + 'h</td>' +
+            '<td>' + (u != null ? '<div class="meter"><i style="width:' + u + '%;background:' + (u >= 60 ? 'var(--ok)' : u >= 35 ? 'var(--warn)' : 'var(--red)') + '"></i></div><small>' + u + '%</small>' : '<small style="color:var(--muted)">not clocked in</small>') + '</td>' +
+            '<td class="n">' + hh(p.on_plan_min) + 'h</td><td class="n">' + hh(p.unplanned_min) + 'h</td><td class="n">' + p.transactions + '</td>' +
+            '<td>' + Object.keys(p.by_kind).sort(function (a, b) { return p.by_kind[b] - p.by_kind[a]; }).map(function (k) { return '<span class="pill" style="background:' + kinds[k].color + '22">' + esc(kinds[k].label) + ' ' + mins(p.by_kind[k]) + '</span>'; }).join(' ') + '</td>' + (one ? '' : '<td class="n">' + p.days_worked + '</td>') + '</tr>';
+        }).join('') : '<tr><td colspan="10" class="empty">No work logged' + (one ? ' on this day' : ' in these days') + '.</td></tr>') + '</tbody></table></div><p class="sub" style="margin-top:8px">Tap a person to see their work against the plan.</p></div>';
+      all('[data-pr]').forEach(function (b) { b.onclick = function () { var x = presetRange(b.getAttribute('data-pr')); wr = { from: x[0], to: x[1], preset: b.getAttribute('data-pr') }; work(); }; });
+      $('#wf').onchange = $('#wt').onchange = function () { wr = { from: $('#wf').value || cfg.today, to: $('#wt').value || cfg.today, preset: '' }; work(); };
+      all('[data-pp]').forEach(function (tr) { tr.onclick = function () { personWork(r, Number(tr.getAttribute('data-pp'))); }; });
+    });
+  }
+  function personWork(r, userId) {
+    var rows = r.rows.filter(function (x) { return x.user_id === userId; });
+    var p = r.people.filter(function (x) { return x.user_id === userId; })[0] || { name: '' };
+    var one = r.from === r.to;
+    Promise.resolve(one ? api('/api/dayplan/work?day=' + r.from + '&user_id=' + userId) : null).then(function (w) {
+      modal('<h2>' + esc(p.name) + ' · ' + esc(one ? nice(r.from) : nice(r.from) + ' – ' + nice(r.to)) + '</h2>' +
+        rows.map(function (x) {
+          return '<div style="margin:10px 0 4px"><b>' + esc(nice(x.day)) + '</b> · ' + hh(x.productive_min) + 'h productive of ' + hh(x.clocked_min) + 'h clocked' + (x.first ? ' · ' + esc(tm(x.first)) + '–' + esc(tm(x.last)) : '') + '</div>' +
+            (x.activities.length ? '<table><thead><tr><th>Planned</th><th>Activity</th><th class="n">Work in its time</th><th>Covered</th></tr></thead><tbody>' + x.activities.map(function (a) {
+              return '<tr><td>' + esc(hm(a.start) + '–' + hm(a.end)) + '</td><td>' + esc(a.title) + ' <small class="pill">' + esc(a.status.replace('_', ' ')) + '</small></td><td class="n">' + mins(a.work_min) + (a.transactions ? '<br><small>' + a.transactions + ' transactions</small>' : '') + '</td><td><div class="meter"><i style="width:' + a.coverage + '%"></i></div><small>' + a.coverage + '%</small></td></tr>';
+            }).join('') + '</tbody></table>' : '<p class="sub">Nothing was planned. All work is "not planned".</p>');
+        }).join('') +
+        (w && w.blocks.length ? '<h2 style="margin-top:14px">Work logged</h2><div style="max-height:300px;overflow:auto">' + w.blocks.map(function (b) {
+          return '<div class="act-row"><div class="t">' + esc(hm(b.start) + '–' + hm(b.end)) + '</div><div class="main"><b><i class="dot" style="background:' + b.color + '"></i>' + esc(b.title) + '</b>' + (b.n > 1 ? '<small>' + esc(b.items.slice(0, 6).join(' · ') + (b.n > 6 ? ' …' : '')) + '</small>' : '') + '</div></div>';
+        }).join('') + '</div>' : '') +
+        '<div class="controls" style="margin-top:12px"><button id="pwc">Close</button></div>');
+      $('#pwc').onclick = close;
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // ------------------------------------------------------------ duties --
+  function duties() {
+    return api('/api/dayplan/duties').then(function (r) {
+      $('#out').innerHTML = '<div class="controls"><span class="sub" style="margin:0">Each person\'s duties go onto their calendar every working day (from the roster) and are sent to them in the morning.</span><span class="grow"></span><button class="primary" id="dsend">📤 Send today\'s duties now</button></div>' +
+        '<div class="card"><h2>Duties by person</h2><p class="sub">Start from the job description on their HR record, give each duty a time, and save. Duties set for a job title apply to everyone with that title.</p><div class="scroll"><table><thead><tr><th>Staff</th><th>Job title</th><th>Duties on the calendar</th><th></th></tr></thead><tbody>' +
+        r.people.map(function (p) {
+          return '<tr><td><b>' + esc(p.name) + '</b><br><small style="color:var(--muted)">' + esc(p.department || '') + (p.shift ? ' · today ' + esc(p.shift.start + '–' + p.shift.end) : '') + '</small></td><td>' + esc(p.job_title || '—') + (p.job_description ? '<br><small style="color:var(--muted)">' + esc(p.suggested.length) + ' duties in the job description</small>' : '') + '</td>' +
+            '<td>' + (p.duties.length ? p.duties.map(function (d) { return '<span class="pill' + (d.is_duty ? ' info' : '') + '" title="' + esc(d.from) + '">' + esc(d.start + ' ' + d.title) + '</span>'; }).join(' ') : '<small style="color:var(--muted)">none yet</small>') + '</td>' +
+            '<td style="white-space:nowrap"><button class="sm" data-dp="' + p.user_id + '">✎ Duties</button>' + (p.job_title ? ' <button class="sm" data-dj="' + p.user_id + '" title="For everyone with this job title">✎ All ' + esc(p.job_title) + '</button>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div></div>';
+      $('#dsend').onclick = function () { api('/api/dayplan/duties/send', 'POST', { day: cfg.today }).then(function (x) { toast(x.made + ' new duties on calendars · sent to ' + x.sent + ' people'); }).catch(function (e) { toast(e.message); }); };
+      all('[data-dp]').forEach(function (b) { b.onclick = function () { dutyForm(r.people.filter(function (p) { return String(p.user_id) === b.getAttribute('data-dp'); })[0], false); }; });
+      all('[data-dj]').forEach(function (b) { b.onclick = function () { dutyForm(r.people.filter(function (p) { return String(p.user_id) === b.getAttribute('data-dj'); })[0], true); }; });
+    });
+  }
+  function dutyForm(p, byTitle) {
+    var mine = p.duties.filter(function (d) { return d.is_duty && (byTitle ? d.from === 'job title' : d.from === 'person'); });
+    var toM = function (t) { var a = t.split(':'); return a[0] * 60 + Number(a[1]); }, toT = function (m) { m = Math.max(0, Math.min(1439, Math.round(m / 15) * 15)); return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
+    // Spread the job description over the shift when there are no duties yet.
+    var spread = function () {
+      var s = p.shift ? toM(p.shift.start) : 480, e = p.shift ? toM(p.shift.end) : 1020; if (e <= s) e = s + 480;
+      s += 30; var n = Math.max(1, p.suggested.length), each = Math.max(15, Math.floor((e - s) / n / 15) * 15);
+      return p.suggested.map(function (d, i) { return { title: d.title, category: d.category, start: toT(s + i * each), minutes: each }; });
+    };
+    var list = mine.length ? mine.map(function (d) { return { title: d.title, category: d.category, start: d.start, minutes: d.minutes }; }) : spread();
+    var wd = mine.length ? mine[0].weekdays : [1, 2, 3, 4, 5, 6];
+    var draw = function () {
+      $('#dl').innerHTML = list.map(function (d, i) {
+        return '<div class="duty-row"><input type="time" data-k="start" data-i="' + i + '" value="' + esc(d.start) + '"><input type="number" data-k="minutes" data-i="' + i + '" value="' + esc(d.minutes) + '" title="minutes" style="width:70px"><input data-k="title" data-i="' + i + '" value="' + esc(d.title) + '" class="grow"><select data-k="category" data-i="' + i + '">' + catOpts(d.category) + '</select><button class="sm" data-rm="' + i + '">✕</button></div>';
+      }).join('') || '<p class="sub">No duties. Add one below.</p>';
+      all('#dl [data-k]').forEach(function (el) { el.onchange = function () { list[Number(el.getAttribute('data-i'))][el.getAttribute('data-k')] = el.value; }; });
+      all('#dl [data-rm]').forEach(function (b) { b.onclick = function () { list.splice(Number(b.getAttribute('data-rm')), 1); draw(); }; });
+    };
+    modal('<h2>Duties · ' + esc(byTitle ? 'everyone who is ' + p.job_title : p.name) + '</h2>' +
+      (p.job_description ? '<details' + (mine.length ? '' : ' open') + '><summary class="sub" style="cursor:pointer">Job description on the HR record</summary><pre style="white-space:pre-wrap;font:inherit;font-size:12.5px;background:var(--chip);padding:8px;border-radius:8px">' + esc(p.job_description) + '</pre></details>' : '<p class="sub">No job description on the HR record. Type the duties here.</p>') +
+      '<div id="dl"></div><div class="controls" style="margin-top:6px"><button class="sm" id="dadd">+ Duty</button>' + (p.suggested.length ? '<button class="sm" id="dfill">↺ From the job description</button>' : '') + '</div>' +
+      '<label class="f">Days</label><div class="controls" id="ddays">' + DN.map(function (n, i) { return '<label><input type="checkbox" value="' + i + '"' + (wd.indexOf(i) >= 0 ? ' checked' : '') + '> ' + n + '</label>'; }).join('') + '</div>' +
+      '<p class="sub">They go on the calendar only on days the person is on the roster.</p><div class="controls"><button class="primary" id="dsave">Save duties</button><button id="dcan">Cancel</button></div>');
+    draw();
+    $('#dadd').onclick = function () { var last = list[list.length - 1]; list.push({ title: '', category: 'work', start: last ? toT(toM(last.start) + Number(last.minutes || 30)) : (p.shift ? p.shift.start : '08:00'), minutes: 30 }); draw(); };
+    if ($('#dfill')) $('#dfill').onclick = function () { list = spread(); draw(); };
+    $('#dcan').onclick = close;
+    $('#dsave').onclick = function () {
+      var b = { duties: list, weekdays: all('#ddays input:checked').map(function (x) { return Number(x.value); }) };
+      if (byTitle) b.job_title = p.job_title; else b.user_id = p.user_id;
+      api('/api/dayplan/duties', 'PUT', b).then(function (x) { close(); toast(x.saved + ' duties saved. Press "Send today\'s duties now" to put them on today\'s calendars.'); duties(); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+
+  // --------------------------------------------------------- clock-ins --
+  // Every start of work next to the time clock: devotion, till, driver shift, first and last transaction.
+  function links() {
+    return api('/api/clocklink/day?day=' + day).then(function (r) {
+      var T = r.totals, S = r.settings;
+      var kpi = function (v, l, s) { return '<div class="kpi"><b>' + v + '</b><span>' + esc(l) + '</span>' + (s ? '<small>' + s + '</small>' : '') + '</div>'; };
+      var span = function (a, b, open) { return esc(hm(a)) + '–' + (b ? esc(hm(b)) : '<span class="pill ' + (open || 'info') + '">still on</span>'); };
+      var how = { pin: 'PIN', password: 'password', badge: 'badge', biometric: 'fingerprint', session: 'signed in', auto: 'automatic', manager: 'manager' };
+      var src = { till: 'the till', drive: 'the driver shift', devotion: 'devotion' };
+      var row = function (p) {
+        var bad = p.flags.filter(function (f) { return f.level !== 'info'; }).length;
+        var linked = p.links.filter(function (l) { return l.action === 'in' && l.result === 'ok'; })[0];
+        var clock = p.clock.length ? p.clock.map(function (c) { return span(c.in, c.out, 'ok') + ' <small style="color:var(--muted)">' + esc(how[c.how_in] || c.how_in || '') + (c.auto_out ? ' · out automatically' : '') + (c.mode === 'remote' ? ' · remote' : '') + (c.overtime ? ' · overtime' : '') + '</small>'; }).join('<br>') +
+          (linked ? '<br><small class="pill info">🔗 by ' + esc(src[linked.source] || linked.source) + '</small>' : '') : (p.exempt ? '<small style="color:var(--muted)">does not clock</small>' : '<span class="pill bad">not clocked in</span>');
+        var refused = p.links.filter(function (l) { return l.action === 'in' && l.result === 'refused'; });
+        if (refused.length && !p.clock.length) clock += '<br><small style="color:var(--muted)">' + esc(refused[0].message) + '</small>';
+        var plan = !p.plan ? '–' : p.plan.kind === 'shift' ? esc(p.plan.start + '–' + p.plan.end) : '<small style="color:var(--muted)">' + esc(p.plan.label || p.plan.kind) + '</small>';
+        return '<tr><td><b>' + esc(p.name) + '</b>' + (p.department ? '<br><small style="color:var(--muted)">' + esc(p.department) + '</small>' : '') + '</td><td>' + plan + '</td><td>' + clock + '</td>' +
+          '<td>' + (p.devotion ? esc(hm(p.devotion.at)) + (p.devotion.how === 'marked' ? ' <small style="color:var(--muted)">marked</small>' : '') : (r.devotion ? '<small style="color:var(--muted)">–</small>' : '<small style="color:var(--muted)">none today</small>')) + '</td>' +
+          '<td>' + (p.till.length ? p.till.map(function (x) { return span(x.start, x.end, 'warn') + (x.station ? ' <small style="color:var(--muted)">' + esc(x.station) + '</small>' : ''); }).join('<br>') : '–') + '</td>' +
+          '<td>' + (p.drive.length ? p.drive.map(function (x) { return span(x.start, x.end, 'warn') + (x.vehicle ? ' <small style="color:var(--muted)">' + esc(x.vehicle) + '</small>' : ''); }).join('<br>') : '–') + '</td>' +
+          '<td>' + (p.work ? esc(hm(p.work.first)) + '–' + esc(hm(p.work.last)) + '<br><small style="color:var(--muted)">' + p.work.count + (p.work.count === 1 ? ' transaction' : ' transactions') + '</small>' : '–') + '</td>' +
+          '<td>' + (p.flags.length ? p.flags.map(function (f) { return '<span class="pill ' + f.level + '" style="white-space:normal">' + esc(f.text) + '</span>'; }).join('<br>') : '<span class="pill ok">✓ all agree</span>') + '</td></tr>';
+      };
+      var setBox = function (k) { return '<label style="display:block;margin:4px 0"><input type="checkbox" data-cl="' + k + '"' + (S[k] === 'on' ? ' checked' : '') + '> ' + esc(r.labels[k]) + '</label>'; };
+      $('#out').innerHTML = '<div class="controls">' + dayBar() + '<span class="grow"></span><a class="btnlink" href="/my-time.html">⏱ Time clock</a></div>' +
+        (r.can_see_all ? '<div class="kpis">' + kpi(T.clocked_in, 'clocked in', T.people + ' at work or rostered') + kpi(T.agree, 'all agree', 'clock-in matches everything else') +
+          kpi(T.problems, 'need fixing', T.warnings + ' more with a warning') + kpi(T.linked, 'clocked in by starting work', 'till, driver shift or devotion') + '</div>' : '') +
+        '<div class="card"><h2>' + (r.can_see_all ? 'Clock-ins · ' : 'My clock-ins · ') + esc(nice(r.day)) + '</h2><p class="sub">The time clock is the one record. Opening a till, starting a driver shift or signing in to devotion clocks the person in if they have not already. Each row puts the clock-in next to everything else that shows when they started and stopped, and flags where they do not agree' + (S.clocklink_tolerance ? ' (more than ' + esc(S.clocklink_tolerance) + ' minutes apart)' : '') + '.</p>' +
+          '<div class="scroll"><table><thead><tr><th>Staff</th><th>Rostered</th><th>Time clock</th><th>Devotion</th><th>Till</th><th>Driver</th><th>Transactions</th><th>Check</th></tr></thead><tbody>' +
+          (r.people.length ? r.people.map(row).join('') : '<tr><td colspan="8" class="empty">Nobody rostered or at work on this day.</td></tr>') + '</tbody></table></div></div>' +
+        (r.can_manage ? '<div class="card"><h2>🔗 What clocks people in</h2>' + ['clocklink_till', 'clocklink_drive', 'clocklink_devotion', 'clocklink_out_ends_drive', 'clocklink_block'].map(setBox).join('') +
+          '<div class="controls" style="margin-top:8px"><label>' + esc(r.labels.clocklink_tolerance) + ' <input type="number" id="cltol" min="0" max="120" style="width:70px" value="' + esc(S.clocklink_tolerance) + '"></label><button class="primary sm" id="clsave">Save</button></div>' +
+          '<p class="sub" style="margin-top:8px">The usual time-clock rules still apply: on a shop device (or allowed remote), and inside the shift. Outside the shift the person is told to clock in on My time and give the reason, and the till, drive or devotion goes ahead unless the last box is ticked.</p></div>' : '');
+      wireDay(links);
+      if ($('#clsave')) $('#clsave').onclick = function () {
+        var b = { clocklink_tolerance: $('#cltol').value };
+        all('[data-cl]').forEach(function (x) { b[x.getAttribute('data-cl')] = x.checked ? 'on' : 'off'; });
+        api('/api/clocklink/settings', 'PUT', b).then(function () { toast('Saved'); links(); }).catch(function (e) { toast(e.message); });
+      };
+    });
+  }
+
+  // ------------------------------------------------------------- tabs --
+  function drawTabs() {
+    var t = [['me', '🙋 My day'], ['devotion', '🙏 Devotion']];
+    if (cfg.can_see_all) t.splice(0, 0, ['schedule', '👥 Staff schedule']), t.push(['perf', '📈 Performance']);
+    t.push(['work', cfg.can_see_all ? '⏱ Productive hours' : '⏱ My work']);
+    t.push(['links', cfg.can_see_all ? '🔗 Clock-ins' : '🔗 My clock-ins']);
+    if (cfg.can_manage) t.push(['duties', '📋 Duties']);
+    t.push(['setup', cfg.can_manage ? '⚙ Set up & import' : '📥 Import calendar']);
+    $('#tabs').innerHTML = t.map(function (x) { return '<button data-t="' + x[0] + '">' + esc(x[1]) + '</button>'; }).join('');
+    all('#tabs button').forEach(function (b) { b.onclick = function () { setTab(b.getAttribute('data-t')); }; });
+  }
+  function setTab(t) { tab = t; try { localStorage.setItem('vision.dayTab', tab); } catch (_) {} history.replaceState(null, '', '#' + tab); go(); }
+  function go() {
+    clearInterval(timer);
+    all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); });
+    var f = { schedule: schedule, me: me, devotion: devotion, perf: perf, setup: setup, work: work, duties: duties, links: links }[tab] || me;
+    f().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  api('/api/dayplan/config').then(function (c) {
+    cfg = c; day = c.today;
+    try { tab = localStorage.getItem('vision.dayTab') || (c.can_see_all ? 'schedule' : 'me'); } catch (_) {}
+    var h = /^#(schedule|me|devotion|perf|setup|work|duties|links)(?:=(\d{4}-\d{2}-\d{2}))?/.exec(location.hash); if (h) { tab = h[1]; if (h[2]) day = h[2]; }
+    if (!c.can_see_all && (tab === 'schedule' || tab === 'perf')) tab = 'me';
+    if (!c.can_manage && tab === 'duties') tab = 'me';
+    drawTabs(); go();
+  }).catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+})();
+</script>
+</body>
+</html>

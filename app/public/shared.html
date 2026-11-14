@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shared resources · Morty's Auto Parts</title>
+<link rel="stylesheet" href="/assets/books.css">
+<style>
+  header{background:#111827}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px 12px}
+  .grid label{display:block;font-size:12px;color:var(--muted);margin-bottom:2px} .grid input,.grid select{width:100%}
+  .mono{font-family:ui-monospace,Consolas,monospace}
+  table td{vertical-align:middle}
+  @media (max-width:700px){ table{display:block;overflow-x:auto} }
+</style>
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
+</head>
+<body>
+<header><h1>🗂 Shared resources</h1><nav><a href="/system.html">System management</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<script src="/assets/books-common.js?v=20261019"></script>
+<script src="/assets/shared-resources-ui.js?v=20261106"></script>
+<script>SharedRes.show(document.getElementById('out'));</script>
+</body>
+</html>

@@ -332,7 +332,7 @@ function register(app, deps) {
   // ------------------------------------------- warnings and discipline --
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   function caseLetter(u, c, byName) {
-    return '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(CASE_LABEL[c.kind]) + '</title><style>body{font:14px/1.6 Arial,sans-serif;max-width:680px;margin:30px auto;color:#111}h1{font-size:20px}th{text-align:left;padding:4px 12px 4px 0;vertical-align:top}.sig{margin-top:40px}</style></head><body>' +
+    return '<!doctype html><html><head><meta charset="utf-8"><link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml"><link rel="icon" href="/favicon.ico?v=vision2" sizes="any"><link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2"><title>' + esc(CASE_LABEL[c.kind]) + '</title><style>body{font:14px/1.6 Arial,sans-serif;max-width:680px;margin:30px auto;color:#111}h1{font-size:20px}th{text-align:left;padding:4px 12px 4px 0;vertical-align:top}.sig{margin-top:40px}</style></head><body>' +
       '<p><b>Morty\'s Auto Parts Ltd</b><br>51 Red Hills Road, Kingston</p><h1>' + esc(CASE_LABEL[c.kind]) + '</h1>' +
       '<table><tr><th>To</th><td>' + esc(u.name || u.email) + '</td></tr><tr><th>Date</th><td>' + esc(today()) + '</td></tr>' + (c.incident_date ? '<tr><th>About</th><td>' + esc(c.incident_date) + '</td></tr>' : '') + '</table>' +
       '<p><b>' + esc(c.summary) + '</b></p>' + (c.details ? '<p>' + esc(c.details).replace(/\n/g, '<br>') + '</p>' : '') +

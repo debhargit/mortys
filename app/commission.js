@@ -4,18 +4,20 @@
 //  Mounted by server.js:  require('./commission').register(app, deps)
 //  Routes under /api/comm. Capabilities: comm.view (everyone's commission),
 //  comm.rules (rules), comm.approve (splits, adjustments, statements, payout).
-//  Every rep can see their own earnings at /api/comm/me.
+//  Every rep can see their own earnings at /api/comm/me; comm.rules also
+//  sets each rep's own rate (PUT /api/comm/reps/:id/rate).
 //
 //  From the moment it is switched on, each sale line is worked out ONCE and
 //  stored in commission_entries, so a later rate change never rewrites what
 //  someone was already owed (the old report recalculates history).
 //
 //  Which rate, first that applies:
-//    a rule for this part;
-//    the part's own commission override (products.commission_type);
-//    the best-fitting other rule (supplier > category > every part; a rule
-//      for this rep beats one for every rep; higher priority first);
-//    the rep's default % (mechanics.commission_pct). No rate = nothing.
+//    the part's own commission setting on its inventory record
+//      (products.commission_type: a %, a flat J$ per unit, or none);
+//    the rep's own rate (mechanics.commission_pct);
+//    only for a rep with no rate of their own, the best-fitting rule
+//      (part > supplier > category > every part; a rule for this rep beats
+//      one for every rep; higher priority first). No rate = nothing.
 //  Basis: % of the line (ex GCT), % of the margin (line less cost at sale),
 //  or a flat J$ per unit. Tiers pick the rate from the rep's net sales so far
 //  this month. A split sale shares each line by the reps' percentages.
@@ -33,7 +35,7 @@ const TZ = 'America/Jamaica';
 const SPEC = { product: 4, supplier: 3, category: 2, all: 1 };
 
 function register(app, deps) {
-  const { query, getPool, requireAdmin, requireCap } = deps;
+  const { query, getPool, requireAdmin, requireCap, userCan } = deps;
   const can = (k) => [requireAdmin, requireCap(k)];
   const n = (v) => (v == null ? 0 : Number(v));
   const r2 = (v) => Math.round(n(v) * 100) / 100;
@@ -103,13 +105,14 @@ function register(app, deps) {
             AND s2.created_at >= date_trunc('month', $2::timestamptz AT TIME ZONE '${TZ}') AT TIME ZONE '${TZ}' AND s2.created_at < $2`, [rep.rep_id, sale.created_at]);
       const mtd = n(mt[0].v);
       for (const l of lines) {
-        const rule = pickRule(rules, l, rep.rep_id, sale.day);
+        // The item's own setting, else the rep's own rate; rules only for a rep with no rate.
+        const rule = n(m[0].commission_pct) > 0 ? null : pickRule(rules, l, rep.rep_id, sale.day);
         let basis, rate, ruleName;
-        if (rule && !(rule.scope !== 'product' && l.commission_type)) { basis = rule.basis; rate = tierRate(rule, mtd); ruleName = rule.name; }
-        else if (l.commission_type === 'none') continue;
+        if (l.commission_type === 'none') continue;
         else if (l.commission_type === 'amount') { basis = 'flat'; rate = n(l.commission_value); ruleName = 'part override'; }
         else if (l.commission_type === 'percent') { basis = 'sale'; rate = n(l.commission_value); ruleName = 'part override'; }
         else if (n(m[0].commission_pct) > 0) { basis = 'sale'; rate = n(m[0].commission_pct); ruleName = 'rep default'; }
+        else if (rule) { basis = rule.basis; rate = tierRate(rule, mtd); ruleName = rule.name; }
         else continue;
         const basisAmt = basis === 'margin' ? n(l.total) - n(l.qty) * n(l.cost) : basis === 'flat' ? n(l.qty) : n(l.total);
         const amount = r2((basis === 'flat' ? basisAmt * rate : basisAmt * rate / 100) * n(rep.share_pct) / 100);
@@ -129,7 +132,7 @@ function register(app, deps) {
   async function sweep() {
     if (busy) return { busy: true };
     busy = true;
-    const out = { sales: 0, entries: 0, collected: 0, lapsed: 0, voided: 0, clawbacks: 0 };
+    const out = { sales: 0, entries: 0, collected: 0, lapsed: 0, voided: 0, clawbacks: 0, restored: 0 };
     try {
       const start = await setting('comm_start_at', null);
       if (!start) return { not_started: true };
@@ -172,6 +175,19 @@ function register(app, deps) {
            JOIN commission_entries e ON e.sale_item_id = i.id AND e.kind = 'earned' AND e.status <> 'void'
           WHERE r.created_at >= $1
          ON CONFLICT DO NOTHING`, [start])).rowCount;
+      // 5. A return that was voided gives the commission back: a clawback not
+      //    yet on a statement is cancelled; one already settled (on a statement,
+      //    approved or paid) is put right with an adjustment on the next one.
+      out.restored = (await query(
+        `UPDATE commission_entries e SET status = 'void', note = CONCAT_WS(' · ', e.note, 'return voided')
+           FROM pos_sale_returns_all r WHERE e.return_id = r.id AND r.voided_at IS NOT NULL AND e.kind = 'clawback_return' AND e.status IN ('pending', 'earned')`)).rowCount;
+      out.restored += (await query(
+        `INSERT INTO commission_entries (rep_id, sale_id, sale_item_id, return_id, kind, basis, basis_amount, rate, share_pct, amount, rule_name, status, earned_at, note)
+         SELECT e.rep_id, e.sale_id, e.sale_item_id, e.return_id, 'adjust', e.basis, -e.basis_amount, e.rate, e.share_pct, -e.amount, e.rule_name, 'earned', r.voided_at,
+                'return ' || r.return_number || ' voided after its clawback was settled'
+           FROM commission_entries e JOIN pos_sale_returns_all r ON r.id = e.return_id
+          WHERE r.voided_at IS NOT NULL AND e.kind = 'clawback_return' AND e.status IN ('on_statement', 'approved', 'paid')
+            AND NOT EXISTS (SELECT 1 FROM commission_entries a WHERE a.kind = 'adjust' AND a.return_id = e.return_id AND a.sale_item_id = e.sale_item_id AND a.rep_id = e.rep_id)`)).rowCount;
     } finally { busy = false; lastRun = { at: new Date().toISOString(), ...out }; }
     return out;
   }
@@ -255,6 +271,14 @@ function register(app, deps) {
       res.json({ rule: rows[0], note: 'Applies to sales from now on; commission already worked out is not changed.' });
     } catch (e) { fail(res, e); }
   });
+  // Commission already worked out keeps the rule's name (commission_entries.rule_name).
+  app.delete('/api/comm/rules/:id', ...can('comm.rules'), async (req, res) => {
+    try {
+      const { rows } = await query(`DELETE FROM commission_rules WHERE id = $1 RETURNING id, name`, [parseInt(req.params.id, 10) || 0]);
+      if (!rows.length) throw httpError(404, 'Rule not found');
+      res.json({ ok: true, deleted: rows[0], note: 'Commission already worked out with it is not changed.' });
+    } catch (e) { fail(res, e); }
+  });
 
   // ---------------------------------------------------------- earnings --
   const dateArg = (s) => (/^\d{4}-\d{2}-\d{2}$/.test(s || '') ? s : null);
@@ -302,15 +326,58 @@ function register(app, deps) {
     } catch (e) { fail(res, e); }
   });
 
-  // A rep's own commission (any staff member linked to a rep record).
+  // A rep's own commission (any staff member linked to a rep record): what
+  // they built up in the chosen dates and this month, what is still owed to
+  // them, what was paid, and the rates that apply to them. `can` tells the
+  // page which manager tabs to show.
   app.get('/api/comm/me', requireAdmin, async (req, res) => {
     try {
-      const { rows: m } = await query(`SELECT id, name FROM mechanics WHERE user_id = $1 AND is_active LIMIT 1`, [req.session.userId]);
-      if (!m.length) return res.json({ rep: null });
-      const from = dateArg(req.query.from) || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
-      const to = dateArg(req.query.to) || new Date().toISOString().slice(0, 10);
-      const { rows: st } = await query(`SELECT number, period_to, total, status, approved_at, paid_at FROM commission_statements WHERE rep_id = $1 ORDER BY id DESC LIMIT 24`, [m[0].id]);
-      res.json({ rep: m[0], summary: (await summary(from, to, m[0].id))[0] || null, entries: await entries(from, to, m[0].id, null), statements: st });
+      const can = {};
+      for (const k of ['view', 'rules', 'approve']) can[k] = userCan ? await userCan(req, 'comm.' + k) : true;
+      const { rows: m } = await query(`SELECT id, name, commission_pct::float AS commission_pct FROM mechanics WHERE user_id = $1 AND is_active LIMIT 1`, [req.session.userId]);
+      if (!m.length) return res.json({ rep: null, can });
+      const rep = m[0];
+      const { rows: d } = await query(`SELECT to_char(NOW() AT TIME ZONE '${TZ}', 'YYYY-MM-DD') AS today, to_char(date_trunc('month', NOW() AT TIME ZONE '${TZ}'), 'YYYY-MM-DD') AS month`);
+      const today = d[0].today, month = d[0].month;
+      const from = dateArg(req.query.from) || month, to = dateArg(req.query.to) || today;
+      const started = await setting('comm_start_at', null);
+      const { rows: st } = await query(`SELECT number, period_to, total, status, approved_at, paid_at FROM commission_statements WHERE rep_id = $1 ORDER BY id DESC LIMIT 24`, [rep.id]);
+      const { rows: tot } = await query(
+        `SELECT COALESCE(SUM(amount) FILTER (WHERE status IN ('earned', 'on_statement', 'approved')), 0) AS unpaid,
+                COALESCE(SUM(amount) FILTER (WHERE status = 'pending'), 0) AS waiting,
+                COALESCE(SUM(amount) FILTER (WHERE status = 'paid'), 0) AS paid
+           FROM commission_entries WHERE rep_id = $1`, [rep.id]);
+      const { rows: paid } = await query(`SELECT created_at, amount_usd::float AS amount, notes FROM commission_payouts WHERE mechanic_id = $1 ORDER BY id DESC LIMIT 24`, [rep.id]);
+      const { rows: rules } = await query(
+        `SELECT name, scope, scope_value, basis, rate::float AS rate, tiers, rep_id IS NOT NULL AS just_you FROM commission_rules
+          WHERE is_active AND (rep_id IS NULL OR rep_id = $1) AND (ends_on IS NULL OR ends_on >= CURRENT_DATE) ORDER BY rep_id IS NOT NULL DESC, priority DESC, id`, [rep.id]);
+      // Own sales in the dates, from the receipts: shown before tracking is
+      // switched on too, with what the rep's own rate would come to.
+      const { rows: sales } = await query(
+        `SELECT COUNT(DISTINCT s.id)::int AS receipts, COALESCE(SUM(i.total_usd), 0) AS total
+           FROM pos_sales s JOIN pos_sale_items i ON i.sale_id = s.id
+          WHERE s.sales_rep_id = $3 AND NOT COALESCE(s.voided, false) AND COALESCE(s.receipt_number, '') NOT LIKE 'CN%' AND ${RANGE('s.created_at')}`, [from, to, rep.id]).catch((e) => { console.warn('[comm] own sales', e.message); return { rows: [{ receipts: 0, total: 0 }] }; });
+      res.json({
+        rep, can, started: !!started, from, to, month,
+        summary: (await summary(from, to, rep.id))[0] || null,
+        this_month: (await summary(month, today, rep.id))[0] || null,
+        totals: { unpaid: r2(tot[0].unpaid), waiting: r2(tot[0].waiting), paid: r2(tot[0].paid) },
+        sales: { receipts: sales[0].receipts, total: r2(sales[0].total), estimate: started ? null : r2(n(sales[0].total) * n(rep.commission_pct) / 100) },
+        rules, payouts: paid.map((p) => ({ ...p, amount: r2(p.amount) })),
+        entries: await entries(from, to, rep.id, null), statements: st,
+      });
+    } catch (e) { fail(res, e); }
+  });
+
+  // Each rep's own rate: used on a sale line when no rule applies.
+  app.put('/api/comm/reps/:id/rate', ...can('comm.rules'), async (req, res) => {
+    try {
+      const v = (req.body || {}).commission_pct;
+      const rate = v === '' || v == null ? null : Number(v);
+      if (rate != null && !(rate >= 0 && rate <= 100)) throw httpError(400, 'The rate must be from 0 to 100%');
+      const { rows } = await query(`UPDATE mechanics SET commission_pct = $2 WHERE id = $1 RETURNING id, name, commission_pct::float AS commission_pct`, [parseInt(req.params.id, 10), rate]);
+      if (!rows.length) throw httpError(404, 'Rep not found');
+      res.json({ rep: rows[0], note: 'Applies to sales from now on; commission already worked out is not changed.' });
     } catch (e) { fail(res, e); }
   });
 

@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chase quotes · Morty's Auto Parts</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --bad:#b91c1c; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --ok:#22c55e; --bad:#f87171; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0} header nav{margin-left:auto;display:flex;gap:14px;font-size:13px} header a{color:#fff;opacity:.85}
+  main{max-width:900px;margin:0 auto;padding:14px 16px 70px}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+  .tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  .tile .k{font-size:12px;color:var(--muted)} .tile .v{font-size:21px;font-weight:700}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:10px}
+  .top{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .who{font-weight:700;font-size:16px} .sub{color:var(--muted);font-size:13.5px;margin-top:1px}
+  .tot{font-size:19px;font-weight:800;white-space:nowrap}
+  .chips{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+  .chip{font-size:12px;border-radius:999px;padding:1px 9px;background:var(--chip);color:var(--muted)}
+  .chip.exp{background:#fee2e2;color:#991b1b} .chip.age{background:var(--chip)}
+  .items{margin-top:8px;font-size:13.5px;color:var(--ink)}
+  .act{margin-top:11px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  a.btn,button{font:inherit;cursor:pointer;border:1px solid var(--line);border-radius:9px;padding:8px 13px;background:var(--card);color:var(--ink);text-decoration:none;display:inline-block}
+  a.call{background:var(--navy);border-color:var(--navy);color:#fff} a.wa{background:#25d366;border-color:#25d366;color:#063b22;font-weight:700}
+  button.won{color:var(--ok);border-color:var(--ok)} button.lost{color:var(--bad);border-color:var(--bad)}
+  .msg{font-size:13px;color:var(--muted)} .done{opacity:.55}
+  .empty{text-align:center;color:var(--muted);padding:40px 10px}
+  .muted{color:var(--muted)}
+</style>
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
+</head>
+<body>
+<header>
+  <h1>Chase quotes</h1>
+  <nav><a href="/scorecard.html">Scorecard</a><a href="/report-planning.html">Planning</a><a href="/admin.html">Admin</a></nav>
+</header>
+<main>
+  <div class="tiles" id="tiles"></div>
+  <p class="muted" id="hint" style="margin:0 0 10px">Open quotes that never became sales, biggest first. Call or message the customer, then log what happened. A quote comes back in a week if there's no answer, and drops off once it's won or lost.</p>
+  <div id="list"></div>
+</main>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  var jm = function (v) { return (Number(v)<0?'-':'') + 'J$' + Math.round(Math.abs(Number(v)||0)).toLocaleString('en-US'); };
+  function digits(p){ return String(p||'').replace(/[^0-9]/g,''); }
+  function waNum(p){ var d = digits(p); if(!d) return ''; if(d.length===10) d='1'+d; if(d.length===7) d='1876'+d; return d; }
+  function api(url, opts){ opts=opts||{}; opts.credentials='same-origin'; if(opts.body){ opts.headers={'Content-Type':'application/json','Accept':'application/json'}; opts.body=JSON.stringify(opts.body); }
+    return fetch(url,opts).then(function(r){ return r.json().then(function(j){ if(!r.ok) throw new Error(j.error||r.statusText); return j; }); }); }
+
+  function loadStats(){
+    api('/api/quotes/chase/stats').then(function(s){
+      $('tiles').innerHTML =
+        '<div class="tile"><div class="k">Open quotes</div><div class="v">' + (s.open||0) + '</div></div>' +
+        '<div class="tile"><div class="k">Value on the table</div><div class="v">' + jm(s.open_value) + '</div></div>' +
+        '<div class="tile"><div class="k">Past their date</div><div class="v">' + (s.expired||0) + '</div></div>';
+    }).catch(function(){});
+  }
+
+  function itemsLine(j){
+    try { var a = typeof j === 'string' ? JSON.parse(j) : j; if(!Array.isArray(a)||!a.length) return '';
+      return a.slice(0,4).map(function(it){ return (it.qty?it.qty+'× ':'') + esc(it.name||it.description||'item'); }).join(', ') + (a.length>4?' …':''); } catch(e){ return ''; }
+  }
+
+  function card(q){
+    var el = document.createElement('div'); el.className='card'; el.dataset.id=q.id;
+    var phone = q.customer_phone || '';
+    var exp = q.expired ? '<span class="chip exp">Past ' + (q.valid_until? new Date(q.valid_until).toLocaleDateString('en-JM',{month:'short',day:'numeric'}) : 'date') + '</span>' : '';
+    var lastc = q.last_outcome ? '<span class="chip">last: ' + esc(q.last_outcome.replace('_',' ')) + '</span>' : '';
+    var wa = waNum(phone);
+    el.innerHTML =
+      '<div class="top"><div><div class="who">' + esc(q.customer_name || 'No name on quote') + '</div>' +
+        '<div class="sub">' + (phone ? esc(phone) + ' · ' : 'no phone · ') + esc(q.vehicle_info||'') + ' · ' + esc(q.quote_number||'') + '</div></div>' +
+        '<div class="tot">' + jm(q.total) + '</div></div>' +
+      '<div class="chips"><span class="chip age">' + q.age_days + ' days old</span>' + exp + lastc +
+        (q.contacts ? '<span class="chip">' + q.contacts + ' contact' + (q.contacts>1?'s':'') + '</span>' : '') + '</div>' +
+      (itemsLine(q.items_json) ? '<div class="items">' + itemsLine(q.items_json) + '</div>' : '') +
+      '<div class="act">' +
+        (phone ? '<a class="btn call" href="tel:' + esc(phone) + '">Call</a>' : '') +
+        (wa ? '<a class="btn wa" target="_blank" rel="noopener" href="https://wa.me/' + wa + '?text=' + encodeURIComponent('Hi, following up on your quote ' + (q.quote_number||'') + ' from Morty\'s Auto Parts.') + '">WhatsApp</a>' : '') +
+        '<button data-o="no_answer">No answer</button>' +
+        '<button data-o="won" class="won">Won ✓</button>' +
+        '<button data-o="lost" class="lost">Lost</button>' +
+        '<span class="msg"></span>' +
+      '</div>';
+    el.addEventListener('click', async function(e){
+      var b = e.target.closest('button[data-o]'); if(!b) return;
+      var msg = el.querySelector('.msg');
+      var note = '';
+      if (b.dataset.o === 'lost') { note = (await vasPrompt('Why lost? (optional)', '')) || ''; }
+      el.querySelectorAll('button').forEach(function(x){ x.disabled=true; });
+      msg.textContent='Saving…';
+      api('/api/quotes/chase/' + q.id + '/log', { method:'POST', body:{ outcome:b.dataset.o, note:note } }).then(function(){
+        el.classList.add('done'); msg.textContent = b.dataset.o==='won'?'Marked won ✓':b.dataset.o==='lost'?'Marked lost':'Logged — back in a week';
+        setTimeout(function(){ el.remove(); if(!$('list').children.length) load(); }, 900); loadStats();
+      }).catch(function(err){ el.querySelectorAll('button').forEach(function(x){ x.disabled=false; }); msg.textContent=err.message; });
+    });
+    return el;
+  }
+
+  function load(){
+    api('/api/quotes/chase').then(function(r){
+      if (!r.quotes.length) { $('list').innerHTML = '<div class="empty">Nothing to chase right now. 🎉</div>'; return; }
+      $('list').innerHTML=''; r.quotes.forEach(function(q){ $('list').appendChild(card(q)); });
+    }).catch(function(e){ $('list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+
+  loadStats(); load();
+})();
+</script>
+</body>
+</html>

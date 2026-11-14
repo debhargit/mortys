@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Work roster · Morty's Auto Parts</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7;
+         --c-shift:#ffffff; --c-changed:#2563eb; --c-leave:#fef3c7; --c-away:#ede9fe; --c-hol:#e0f2fe; --c-off:#f3f4f6; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b;
+         --c-shift:#16202b; --c-changed:#60a5fa; --c-leave:#3a2f12; --c-away:#2b2442; --c-hol:#12303f; --c-off:#121a23; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0} header nav{margin-left:auto;display:flex;gap:14px;font-size:13px} header a{color:#fff;opacity:.85}
+  main{max-width:1350px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  input,select,button,textarea{font:inherit;padding:6px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  button{cursor:pointer;background:var(--card)} button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600} button.sm{padding:3px 9px;font-size:12.5px}
+  button:disabled{opacity:.5;cursor:default}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 12px} .tabs button{border-radius:999px;padding:6px 13px;font-size:13px} .tabs button.on{background:var(--navy);border-color:var(--navy);color:#fff}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px} .controls .grow{flex:1}
+  table{width:100%;border-collapse:collapse} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .scroll{overflow-x:auto}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip);white-space:nowrap}
+  .pill.ok{background:#16a34a22;color:var(--ok)} .pill.bad{background:#d6282822;color:var(--red)} .pill.warn{background:#f59e0b22;color:var(--warn)} .pill.info{background:#2563eb1f;color:var(--c-changed)} .pill.away{background:#7c3aed1f;color:#7c3aed}
+  .modal{position:fixed;inset:0;background:rgba(10,15,25,.55);display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow:auto;z-index:40} .modal .card{max-width:560px;width:100%}
+  .empty{color:var(--muted);text-align:center;padding:20px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60;max-width:90vw;white-space:pre-line}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px}
+  .tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  .tile b{display:block;font-size:24px;font-variant-numeric:tabular-nums} .tile span{font-size:12px;color:var(--muted)}
+  .tile.bad b{color:var(--red)} .tile.ok b{color:var(--ok)} .tile.warn b{color:var(--warn)}
+  .sec{font-size:13px;font-weight:700;margin:14px 0 6px;display:flex;align-items:center;gap:8px} .sec .dot{width:9px;height:9px;border-radius:50%}
+  .grid{border-collapse:separate;border-spacing:0;min-width:900px}
+  .grid th,.grid td{border-bottom:1px solid var(--line);border-right:1px solid var(--line)}
+  .grid td.who,.grid th.who{position:sticky;left:0;background:var(--card);z-index:2;min-width:170px}
+  .grid th.today{background:#d6282812}
+  .grid tr.dept td{background:var(--chip);font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+  .cell{min-width:112px;font-size:12.5px;padding:5px 6px;cursor:default}
+  .plan .cell{cursor:pointer} .plan .cell:hover{outline:2px solid var(--c-changed);outline-offset:-2px}
+  .cell.k-shift{background:var(--c-shift)} .cell.k-leave{background:var(--c-leave)} .cell.k-away{background:var(--c-away)} .cell.k-holiday{background:var(--c-hol)} .cell.k-off,.cell.k-none{background:var(--c-off);color:var(--muted)}
+  .cell.changed{box-shadow:inset 3px 0 0 var(--c-changed)}
+  .cell .t{font-weight:600;font-variant-numeric:tabular-nums} .cell .p{color:var(--muted);font-size:11.5px}
+  .cell .st{font-size:11px;margin-top:2px}
+  .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:8px} .legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:4px;vertical-align:-2px;border:1px solid var(--line)}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px} label.f{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px}
+  .seg{display:flex;gap:4px;flex-wrap:wrap} .seg button.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .days{display:flex;gap:6px;flex-wrap:wrap;font-size:13px} .days label{display:flex;gap:4px;align-items:center}
+  .warnbox{padding:8px 10px;border-radius:8px;font-size:13px;margin:8px 0;background:#f59e0b18;border-left:3px solid var(--warn)}
+  @media (max-width:640px){ .row2{grid-template-columns:1fr} }
+  @media print{ header,.tabs,.controls button,.noprint{display:none!important} body{background:#fff;color:#000} .card{border:0;padding:0} .grid{min-width:0} .cell{min-width:0} }
+</style>
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
+</head>
+<body>
+<header><h1>🗓 Work roster</h1><nav><a href="/attendance.html">Attendance</a><a href="/day.html">Day plan</a><a href="/my-time.html">My time</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="tabs" id="tabs"></div>
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+<div id="modal"></div>
+<div class="toast" id="toast"></div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var tm = function (t) { return t ? new Date(t).toLocaleTimeString('en-JM', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Jamaica' }) : ''; };
+  var DN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var MN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  var addDays = function (d, n) { return new Date(new Date(d + 'T12:00:00Z').getTime() + n * 86400000).toISOString().slice(0, 10); };
+  var wd = function (d) { return new Date(d + 'T12:00:00Z').getUTCDay(); };
+  var nice = function (d) { return DN[wd(d)] + ' ' + Number(d.slice(8)) + ' ' + MN[Number(d.slice(5, 7)) - 1]; };
+  var cfg = null, tab = 'today', day = null, week = null, absFrom = null, absTo = null, timer = null;
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 3600); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); }
+        return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; });
+      });
+  }
+  function modal(h) { $('#modal').innerHTML = '<div class="modal"><div class="card">' + h + '</div></div>'; $('.modal').addEventListener('mousedown', function (e) { if (e.target.classList.contains('modal')) close(); }); }
+  function close() { $('#modal').innerHTML = ''; }
+  var STATUS = {
+    in: ['ok', 'At work'], break: ['warn', 'On break'], gone: ['', 'Gone home'], missing: ['bad', 'Missing'], absent: ['bad', 'Absent'],
+    due: ['', 'Due in'], planned: ['', 'Planned'], away: ['away', 'Away'], off: ['', 'Off']
+  };
+  function pill(st) { var s = STATUS[st] || ['', st]; return '<span class="pill ' + s[0] + '">' + esc(s[1]) + '</span>'; }
+  function planText(p) {
+    if (!p) return '';
+    if (p.kind === 'shift') return p.start + '–' + p.end + (p.post ? ' · ' + p.post : '');
+    return p.label || p.kind;
+  }
+
+  // ------------------------------------------------------------- tabs --
+  function drawTabs() {
+    var t = [];
+    if (cfg.can_view) t.push(['today', 'Who\'s at work'], ['week', cfg.can_plan ? 'Plan the roster' : 'Week roster'], ['abs', 'Absences']);
+    t.push(['me', 'My roster']);
+    if (cfg.can_view) t.push(['log', 'Changes']);
+    $('#tabs').innerHTML = t.map(function (x) { return '<button data-t="' + x[0] + '"' + (x[0] === tab ? ' class="on"' : '') + '>' + esc(x[1]) + '</button>'; }).join('');
+    all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); try { localStorage.setItem('vision.rosterTab', tab); } catch (_) {} history.replaceState(null, '', '#' + tab); go(); }; });
+  }
+  function go() {
+    clearInterval(timer);
+    all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); });
+    var f = { today: board, week: weekView, abs: absences, me: mine, log: changes }[tab] || mine;
+    f().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+
+  // ------------------------------------------------------------ board --
+  function board() {
+    return api('/api/roster/board' + (day ? '?day=' + day : '')).then(function (d) {
+      day = d.day;
+      var s = d.summary, P = d.people;
+      var tiles = d.is_today
+        ? [['Should be in now', s.should_be_in_now, ''], ['At work', s.at_work, 'ok'], ['Missing', s.missing, s.missing ? 'bad' : ''], ['Came in late', s.late, s.late ? 'warn' : ''], ['Away / on leave', s.away, ''], ['In, not rostered', s.unplanned, s.unplanned ? 'warn' : '']]
+        : [['Rostered', s.rostered, ''], [d.day < d.today ? 'Came in' : 'At work', d.day < d.today ? P.filter(function (x) { return x.first_in; }).length : s.at_work, 'ok'], [d.day < d.today ? 'Absent' : 'Missing', s.missing, s.missing ? 'bad' : ''], ['Late', s.late, s.late ? 'warn' : ''], ['Away / on leave', s.away, '']];
+      var groups = [
+        ['Missing — should be here', '#d62828', P.filter(function (x) { return x.status === 'missing' || x.status === 'absent'; })],
+        ['At work', '#16a34a', P.filter(function (x) { return x.status === 'in' || x.status === 'break'; })],
+        [d.is_today ? 'Due in later' : d.day > d.today ? 'Rostered' : 'Due', '#6b7280', P.filter(function (x) { return x.status === 'due' || x.status === 'planned'; })],
+        ['Finished for the day', '#6b7280', P.filter(function (x) { return x.status === 'gone'; })],
+        ['Away — and why', '#7c3aed', P.filter(function (x) { return x.status === 'away'; })],
+        ['Not working', '#9ca3af', P.filter(function (x) { return x.status === 'off'; })]
+      ];
+      var table = function (rows, offList) {
+        return '<div class="scroll"><table><thead><tr><th>Name</th><th>Department</th><th>' + (offList ? 'Why' : 'Rostered') + '</th><th>Status</th><th>In</th><th>Out</th><th>Notes</th></tr></thead><tbody>' + rows.map(function (r) {
+          var why = r.plan.kind === 'shift' ? planText(r.plan) : '<b>' + esc(r.plan.label || '') + '</b>' + (r.plan.note ? '<br><small>' + esc(r.plan.note) + '</small>' : '') + (r.plan.leave_from && r.plan.leave_from !== r.plan.leave_to ? '<br><small>' + esc(nice(r.plan.leave_from)) + ' – ' + esc(nice(r.plan.leave_to)) + '</small>' : '');
+          return '<tr><td><b>' + esc(r.name) + '</b></td><td>' + esc(r.department) + '</td><td>' + (r.plan.kind === 'shift' ? esc(why) + (r.plan.source === 'roster' ? ' <span class="pill info">changed</span>' : '') : why) + '</td><td>' + pill(r.status) + (r.unplanned ? ' <span class="pill warn">not rostered</span>' : '') + '</td>' +
+            '<td>' + esc(tm(r.first_in)) + '</td><td>' + esc(tm(r.last_out)) + '</td><td>' + esc(r.notes.join(', ')) + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+      };
+      $('#out').innerHTML =
+        '<div class="controls"><button class="sm" id="dp">◀</button><input type="date" id="dd" value="' + esc(d.day) + '"><button class="sm" id="dn">▶</button>' + (d.is_today ? '' : '<button class="sm" id="dt">Today</button>') +
+        '<span class="grow"></span><span class="sub" style="margin:0">' + (d.is_today ? 'Live — updates every minute. Late after ' + d.late_minutes + ' min.' : esc(nice(d.day))) + '</span></div>' +
+        '<div class="tiles">' + tiles.map(function (t) { return '<div class="tile ' + t[2] + '"><b>' + t[1] + '</b><span>' + esc(t[0]) + '</span></div>'; }).join('') + '</div>' +
+        '<div class="card">' + groups.map(function (g, i) {
+          if (!g[2].length) return i === 0 && (d.is_today || d.day < d.today) ? '<div class="sec"><span class="dot" style="background:#16a34a"></span>Nobody missing</div>' : '';
+          return '<div class="sec"><span class="dot" style="background:' + g[1] + '"></span>' + esc(g[0]) + ' (' + g[2].length + ')</div>' + table(g[2], i >= 4);
+        }).join('') + (P.length ? '' : '<div class="empty">No staff yet.</div>') + '</div>';
+      $('#dd').onchange = function () { day = this.value || null; board(); };
+      $('#dp').onclick = function () { day = addDays(day, -1); board(); };
+      $('#dn').onclick = function () { day = addDays(day, 1); board(); };
+      if ($('#dt')) $('#dt').onclick = function () { day = null; board(); };
+      clearInterval(timer);
+      if (d.is_today) timer = setInterval(function () { if (tab === 'today' && !$('.modal')) board().catch(function () {}); }, 60000);
+    });
+  }
+
+  // ------------------------------------------------------------- week --
+  function weekView() {
+    return api('/api/roster/week' + (week ? '?start=' + week : '')).then(function (d) {
+      week = d.start;
+      var plan = cfg.can_plan, depts = [];
+      d.rows.forEach(function (r) { if (depts.indexOf(r.department) < 0) depts.push(r.department); });
+      var cell = function (r, c) {
+        var cls = 'cell k-' + c.kind + (c.source === 'roster' ? ' changed' : ''), body;
+        if (c.kind === 'shift') body = '<div class="t">' + esc(c.start + '–' + c.end) + '</div>' + (c.post ? '<div class="p">' + esc(c.post) + '</div>' : '') + (c.label ? '<div class="p">' + esc(c.label) + '</div>' : '');
+        else body = '<div>' + esc(c.label || '') + '</div>' + (c.note ? '<div class="p">' + esc(c.note) + '</div>' : '');
+        if (c.clash) body += '<div class="p" style="color:var(--warn)">⚠ ' + esc(c.clash) + '</div>';
+        if (c.status && c.day <= d.today) {
+          var st = c.status === 'in' || c.status === 'break' || c.status === 'gone' ? (c.late ? '<span class="pill warn">late ' + c.late + 'm</span>' : '<span class="pill ok">✓ came in</span>') : (c.status === 'absent' || c.status === 'missing') ? '<span class="pill bad">✗ ' + (c.status === 'missing' ? 'missing' : 'absent') + '</span>' : '';
+          if (c.unplanned) st = '<span class="pill warn">came in</span>';
+          if (st) body += '<div class="st">' + st + '</div>';
+        }
+        return '<td class="' + cls + '" data-u="' + r.user_id + '" data-d="' + c.day + '">' + body + '</td>';
+      };
+      var head = '<tr><th class="who">Staff</th>' + d.days.map(function (x) { return '<th class="' + (x === d.today ? 'today' : '') + '">' + esc(nice(x)) + '</th>'; }).join('') + '<th class="n">Hours</th></tr>';
+      var body = depts.map(function (dp) {
+        var rs = d.rows.filter(function (r) { return r.department === dp; });
+        return '<tr class="dept"><td class="who">' + esc(dp) + '</td><td colspan="8"></td></tr>' + rs.map(function (r) {
+          return '<tr><td class="who"><b>' + esc(r.name) + '</b></td>' + r.cells.map(function (c) { return cell(r, c); }).join('') + '<td class="n">' + r.hours + '</td></tr>';
+        }).join('');
+      }).join('');
+      var foot = '<tr><td class="who"><b>Working</b></td>' + d.cover.map(function (c) {
+        var by = Object.keys(c.by_department).map(function (k) { return esc(k) + ' ' + c.by_department[k]; }).join('<br>');
+        return '<td class="cell"><b>' + c.working + '</b>' + (c.away ? ' <span class="p">· ' + c.away + ' away</span>' : '') + (by ? '<div class="p">' + by + '</div>' : '') + '</td>';
+      }).join('') + '<td class="n"><b>' + Math.round(d.rows.reduce(function (t, r) { return t + r.hours; }, 0) * 10) / 10 + '</b></td></tr>';
+      $('#out').innerHTML =
+        '<div class="controls"><button class="sm" id="wp">◀</button><b>Week of ' + esc(nice(d.start)) + ' – ' + esc(nice(d.end)) + '</b><button class="sm" id="wn">▶</button><button class="sm" id="wt">This week</button><span class="grow"></span>' +
+        (plan ? '<button class="sm" id="wcopy">Copy last week\'s changes</button><button class="sm" id="wclear">Back to the usual pattern</button><button class="sm" id="wleave">+ Leave</button><button class="sm" id="wsend">Send to staff</button>' : '') +
+        '<button class="sm" onclick="window.print()">Print</button></div>' +
+        '<div class="card"><p class="sub noprint">' + (plan ? 'Click a day to set a shift, a day off or a planned absence. ' : '') + 'Days come from each person\'s usual weekly shifts (set in Attendance › Staff &amp; shifts) unless changed here. Leave always wins.</p>' +
+        '<div class="scroll"><table class="grid' + (plan ? ' plan' : '') + '"><thead>' + head + '</thead><tbody>' + (body || '<tr><td colspan="9" class="empty">No staff yet.</td></tr>') + '</tbody><tfoot>' + foot + '</tfoot></table></div>' +
+        '<div class="legend"><span><i style="background:var(--c-shift)"></i>Usual shift</span><span><i style="background:var(--c-shift);box-shadow:inset 3px 0 0 var(--c-changed)"></i>Changed on the roster</span><span><i style="background:var(--c-leave)"></i>Leave</span><span><i style="background:var(--c-away)"></i>Planned absence</span><span><i style="background:var(--c-hol)"></i>Holiday</span><span><i style="background:var(--c-off)"></i>Off</span></div></div>';
+      $('#wp').onclick = function () { week = addDays(week, -7); weekView(); };
+      $('#wn').onclick = function () { week = addDays(week, 7); weekView(); };
+      $('#wt').onclick = function () { week = null; weekView(); };
+      if (plan) {
+        all('.grid td[data-u]').forEach(function (td) {
+          td.onclick = function () {
+            var r = d.rows.filter(function (x) { return String(x.user_id) === td.getAttribute('data-u'); })[0];
+            var c = r.cells.filter(function (x) { return x.day === td.getAttribute('data-d'); })[0];
+            editCell(r, c, d);
+          };
+        });
+        $('#wcopy').onclick = async function () {
+          if (!(await vasConfirm('Copy the shifts and days off that were changed in the week of ' + nice(addDays(week, -7)) + ' onto this week? Days already changed this week stay as they are.'))) return;
+          api('/api/roster/copy-week', 'POST', { from: addDays(week, -7), to: week }).then(function (r) { toast(r.copied + ' days copied' + (r.kept ? ', ' + r.kept + ' kept as they were' : '')); weekView(); }).catch(function (e) { toast(e.message); });
+        };
+        $('#wclear').onclick = async function () {
+          if (!(await vasConfirm('Put everyone back on their usual weekly shifts for this week? Changes made on the roster are taken off. Planned absences (training etc.) are kept; leave is not touched.'))) return;
+          api('/api/roster/clear-week', 'POST', { start: week, keep_away: true }).then(function (r) { toast(r.removed + ' changes taken off'); weekView(); }).catch(function (e) { toast(e.message); });
+        };
+        $('#wsend').onclick = async function () {
+          if (!(await vasConfirm('Send each person their roster for this week as a team notice?'))) return;
+          api('/api/roster/send-week', 'POST', { start: week }).then(function (r) { toast('Sent to ' + r.sent + ' people'); }).catch(function (e) { toast(e.message); });
+        };
+        $('#wleave').onclick = function () { leaveForm(null, week); };
+      }
+    });
+  }
+
+  function editCell(r, c, d) {
+    var k = c.source === 'roster' ? c.kind : c.kind === 'shift' ? 'shift' : c.kind === 'leave' ? 'leave' : 'shift';
+    var dflt = c.kind === 'shift' ? c : { start: '08:00', end: '17:00', break: 60 };
+    var reasons = Object.keys(cfg.reasons).map(function (x) { return '<option value="' + x + '"' + (c.reason === x ? ' selected' : '') + '>' + esc(cfg.reasons[x]) + '</option>'; }).join('');
+    var dayBoxes = d.days.map(function (x) { return '<label><input type="checkbox" value="' + x + '"' + (x === c.day ? ' checked' : '') + '>' + DN[wd(x)] + '</label>'; }).join('');
+    modal('<h2>' + esc(r.name) + ' · ' + esc(nice(c.day)) + '</h2><p class="sub">Now: <b>' + esc(planText(c)) + '</b>' + (c.source === 'roster' ? ' (changed on the roster)' : c.source === 'pattern' ? ' (usual weekly shift)' : '') + '</p>' +
+      (c.kind === 'leave' ? '<div class="warnbox">' + esc(r.name) + ' is on ' + esc((c.label || 'leave').toLowerCase()) + (c.leave_from ? ' from ' + esc(nice(c.leave_from)) + ' to ' + esc(nice(c.leave_to)) : '') + '. Leave wins over anything set here. <button class="sm" id="rmleave">Cancel this leave</button></div>' : '') +
+      '<div class="seg" id="seg"><button data-k="shift">Shift</button><button data-k="off">Day off</button><button data-k="away">Away (planned)</button><button data-k="leave">Leave</button></div>' +
+      '<div id="f-shift"><div class="row2"><div><label class="f">Start</label><input type="time" id="es" value="' + esc(dflt.start) + '"></div><div><label class="f">End</label><input type="time" id="ee" value="' + esc(dflt.end) + '"></div></div>' +
+      '<div class="row2"><div><label class="f">Unpaid break (minutes)</label><input type="number" id="eb" min="0" max="240" value="' + esc(dflt.break == null ? 60 : dflt.break) + '"></div><div><label class="f">Where / what (optional)</label><input id="ep" maxlength="60" placeholder="Till 2, Counter, Warehouse" value="' + esc(c.post || '') + '"></div></div></div>' +
+      '<div id="f-away"><label class="f">Why</label><select id="er">' + reasons + '</select></div>' +
+      '<div id="f-leave"><div class="row2"><div><label class="f">Kind</label><select id="lk">' + Object.keys(cfg.leave_kinds).map(function (x) { return '<option value="' + x + '">' + esc(cfg.leave_kinds[x]) + '</option>'; }).join('') + '</select></div><div></div></div>' +
+      '<div class="row2"><div><label class="f">From</label><input type="date" id="lf" value="' + esc(c.day) + '"></div><div><label class="f">To</label><input type="date" id="lt" value="' + esc(c.day) + '"></div></div><p class="sub">Leave goes on the same list as Attendance › Leave &amp; holidays and counts in payroll and leave balances.</p></div>' +
+      '<div id="f-note"><label class="f">Note (optional)</label><input id="en" maxlength="200" style="width:100%" value="' + esc(c.source === 'roster' ? c.note || '' : '') + '"></div>' +
+      '<div id="f-days"><label class="f">Same for these days this week</label><div class="days">' + dayBoxes + '</div></div>' +
+      '<div class="controls" style="margin-top:14px"><button class="primary" id="esave">Save</button><button id="ecancel">Cancel</button><span class="grow"></span>' + (c.source === 'roster' ? '<button id="ereset">Back to usual</button>' : '') + '</div>');
+    function seg(kk) {
+      k = kk;
+      all('#seg button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-k') === k); });
+      $('#f-shift').style.display = k === 'shift' ? '' : 'none';
+      $('#f-away').style.display = k === 'away' ? '' : 'none';
+      $('#f-leave').style.display = k === 'leave' ? '' : 'none';
+      $('#f-days').style.display = k === 'leave' ? 'none' : '';
+    }
+    all('#seg button').forEach(function (b) { b.onclick = function () { seg(b.getAttribute('data-k')); }; });
+    seg(k === 'none' || k === 'holiday' ? 'shift' : k);
+    $('#ecancel').onclick = close;
+    if ($('#rmleave')) $('#rmleave').onclick = async function () {
+      if (!(await vasConfirm('Cancel this leave (all of its days)?'))) return;
+      api('/api/roster/leave/' + c.leave_id, 'DELETE').then(function () { close(); toast('Leave cancelled'); weekView(); }).catch(function (e) { toast(e.message); });
+    };
+    if ($('#ereset')) $('#ereset').onclick = function () {
+      api('/api/roster/entry?user_id=' + r.user_id + '&day=' + c.day, 'DELETE').then(function () { close(); toast('Back to the usual shift'); weekView(); }).catch(function (e) { toast(e.message); });
+    };
+    $('#esave').onclick = function () {
+      var note = $('#en').value;
+      if (k === 'leave') {
+        return api('/api/roster/leave', 'POST', { user_id: r.user_id, kind: $('#lk').value, from: $('#lf').value, to: $('#lt').value, note: note })
+          .then(function () { close(); toast('Leave added'); weekView(); }).catch(function (e) { toast(e.message); });
+      }
+      var days = all('#f-days input:checked').map(function (x) { return x.value; });
+      if (!days.length) return toast('Tick at least one day');
+      api('/api/roster/entry', 'PUT', { user_id: r.user_id, days: days, kind: k, start: $('#es').value, end: $('#ee').value, break: $('#eb').value, post: $('#ep').value, reason: $('#er').value, note: note })
+        .then(function (x) { close(); toast('Saved' + (x.clashes.length ? '\n⚠ ' + x.clashes.length + ' day(s) are on leave — leave wins' : '')); weekView(); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  function leaveForm(uid, from) {
+    modal('<h2>Add leave</h2><label class="f">Who</label><select id="lu">' + cfg.staff.map(function (s) { return '<option value="' + s.id + '"' + (s.id === uid ? ' selected' : '') + '>' + esc(s.name) + (s.department ? ' — ' + esc(s.department) : '') + '</option>'; }).join('') + '</select>' +
+      '<div class="row2"><div><label class="f">Kind</label><select id="lk">' + Object.keys(cfg.leave_kinds).map(function (x) { return '<option value="' + x + '">' + esc(cfg.leave_kinds[x]) + '</option>'; }).join('') + '</select></div><div></div></div>' +
+      '<div class="row2"><div><label class="f">From</label><input type="date" id="lf" value="' + esc(from || cfg.today) + '"></div><div><label class="f">To</label><input type="date" id="lt" value="' + esc(from || cfg.today) + '"></div></div>' +
+      '<label class="f">Note (optional)</label><input id="ln" maxlength="200" style="width:100%">' +
+      '<div class="controls" style="margin-top:14px"><button class="primary" id="lsave">Add leave</button><button id="lcancel">Cancel</button></div>');
+    $('#lcancel').onclick = close;
+    $('#lsave').onclick = function () {
+      api('/api/roster/leave', 'POST', { user_id: Number($('#lu').value), kind: $('#lk').value, from: $('#lf').value, to: $('#lt').value, note: $('#ln').value })
+        .then(function () { close(); toast('Leave added'); go(); }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  // -------------------------------------------------------- absences --
+  function absences() {
+    var q = '?from=' + (absFrom || '') + '&to=' + (absTo || '');
+    return api('/api/roster/absences' + (absFrom ? q : '')).then(function (d) {
+      absFrom = d.from; absTo = d.to;
+      var kindPill = function (a) { return a.kind === 'leave' ? '<span class="pill warn">Leave</span>' : a.kind === 'away' ? '<span class="pill away">Planned</span>' : '<span class="pill bad">No reason</span>'; };
+      $('#out').innerHTML = '<div class="controls">From <input type="date" id="af" value="' + esc(d.from) + '"> to <input type="date" id="at" value="' + esc(d.to) + '"><span class="grow"></span>' + (cfg.can_plan ? '<button class="sm" id="aleave">+ Leave</button>' : '') + '</div>' +
+        '<div class="card"><h2>Who is away, and why</h2><p class="sub">Leave, planned absences from the roster, and days someone was rostered but did not come in with no reason given.</p><div class="scroll"><table><thead><tr><th>Who</th><th>Department</th><th>From</th><th>To</th><th class="n">Days</th><th>Type</th><th>Why</th><th></th></tr></thead><tbody>' +
+        (d.absences.length ? d.absences.map(function (a) {
+          return '<tr><td><b>' + esc(a.name) + '</b></td><td>' + esc(a.department) + '</td><td>' + esc(nice(a.from)) + '</td><td>' + esc(nice(a.to)) + '</td><td class="n">' + a.days + '</td><td>' + kindPill(a) + '</td><td>' + esc(a.label) + (a.note ? '<br><small>' + esc(a.note) + '</small>' : '') + '</td>' +
+            '<td>' + (cfg.can_plan && a.leave_id ? '<button class="sm" data-rm="' + a.leave_id + '">Cancel leave</button>' : '') + '</td></tr>';
+        }).join('') : '<tr><td colspan="8" class="empty">Nobody away in these dates.</td></tr>') + '</tbody></table></div>' +
+        (d.holidays.length ? '<p class="sub" style="margin-top:10px">Holidays: ' + d.holidays.map(function (h) { return esc(nice(h.day)) + ' ' + esc(h.name); }).join(' · ') + '</p>' : '') + '</div>';
+      $('#af').onchange = function () { absFrom = this.value; absences(); };
+      $('#at').onchange = function () { absTo = this.value; absences(); };
+      if ($('#aleave')) $('#aleave').onclick = function () { leaveForm(null, null); };
+      all('[data-rm]').forEach(function (b) { b.onclick = async function () { if (!(await vasConfirm('Cancel this leave?'))) return; api('/api/roster/leave/' + b.getAttribute('data-rm'), 'DELETE').then(function () { toast('Leave cancelled'); absences(); }).catch(function (e) { toast(e.message); }); }; });
+    });
+  }
+
+  // -------------------------------------------------------------- me --
+  function mine() {
+    return api('/api/roster/me').then(function (d) {
+      $('#out').innerHTML = '<div class="card"><h2>My roster</h2><p class="sub">This week and the next two. Ask your manager about changes.</p><table><thead><tr><th>Day</th><th>Working</th><th></th></tr></thead><tbody>' + d.days.map(function (x) {
+        var past = x.day < d.today;
+        return '<tr style="' + (past ? 'opacity:.55' : '') + (x.day === d.today ? ';font-weight:700' : '') + '"><td>' + esc(nice(x.day)) + (x.day === d.today ? ' <span class="pill info">today</span>' : '') + '</td><td>' +
+          (x.kind === 'shift' ? esc(x.start + ' – ' + x.end) + (x.break ? ' <small>(' + x.break + ' min break)</small>' : '') + (x.post ? ' · ' + esc(x.post) : '') : '<span class="pill ' + (x.kind === 'leave' ? 'warn' : x.kind === 'away' ? 'away' : '') + '">' + esc(x.label || 'Off') + '</span>') +
+          '</td><td>' + (x.note ? '<small>' + esc(x.note) + '</small>' : '') + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+    });
+  }
+
+  // ---------------------------------------------------------- changes --
+  function changes() {
+    return api('/api/roster/log').then(function (d) {
+      var desc = function (x) { if (!x) return ''; if (x.kind === 'shift') return x.start + '–' + x.end; if (x.kind === 'away') return 'away (' + (cfg.reasons[x.reason] || x.reason) + ')'; if (x.kind === 'off') return 'day off'; if (x.kind && x.from) return (cfg.leave_kinds[x.kind] || x.kind) + ' ' + x.from + ' – ' + x.to; if (x.removed != null) return x.removed + ' changes'; if (x.people != null) return x.people + ' people'; return x.kind || x.f ? (cfg.leave_kinds[x.kind] || '') + ' ' + (x.f || '') + ' – ' + (x.t || '') : ''; };
+      var A = { add: 'Set', change: 'Changed', reset: 'Back to usual', 'clear-week': 'Week cleared', leave: 'Leave added', 'leave-removed': 'Leave cancelled', sent: 'Sent to staff' };
+      $('#out').innerHTML = '<div class="card"><h2>Roster changes</h2><div class="scroll"><table><thead><tr><th>When</th><th>By</th><th>What</th><th>Who</th><th>Day</th><th>Before</th><th>After</th></tr></thead><tbody>' +
+        (d.log.length ? d.log.map(function (l) {
+          return '<tr><td>' + esc(new Date(l.at).toLocaleString('en-JM', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Jamaica' })) + '</td><td>' + esc(l.by_name || '') + '</td><td>' + esc(A[l.action] || l.action) + '</td><td>' + esc(l.who || '') + '</td><td>' + esc(l.day ? nice(l.day) : '') + '</td><td>' + esc(desc(l.before)) + '</td><td>' + esc(desc(l.after)) + '</td></tr>';
+        }).join('') : '<tr><td colspan="7" class="empty">No changes yet.</td></tr>') + '</tbody></table></div></div>';
+    });
+  }
+
+  api('/api/roster/config').then(function (c) {
+    cfg = c;
+    try { tab = localStorage.getItem('vision.rosterTab') || 'today'; } catch (_) {}
+    var h = /^#(today|week|abs|me|log)$/.exec(location.hash); if (h) tab = h[1];
+    if (!cfg.can_view) tab = 'me';
+    drawTabs(); go();
+  }).catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+})();
+</script>
+</body>
+</html>

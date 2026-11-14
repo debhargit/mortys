@@ -35,10 +35,11 @@
   .toast{position:fixed;bottom:70px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60;max-width:90vw}
   .badge{background:var(--red);color:#fff;border-radius:999px;padding:0 6px;font-size:11px;margin-left:3px}
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b"></script>
 </head>
 <body>
 <header><h1>Morty's Auto · Rep portal</h1><span class="who" id="who"></span><button id="out" style="display:none">Sign out</button></header>
@@ -160,7 +161,7 @@
       var need = function () { if (!$('#cust').value) { toast('Choose the customer'); return false; } return true; };
       $('#mkQuote').onclick = function () { if (!need()) return; api('/api/rep/quotes', 'POST', body()).then(function (r) { cart = []; saveCart(); toast('Quote ' + r.quote_number + ' saved: ' + J(r.total_usd)); tab = 'pipe'; show(); }).catch(function (e) { toast(e.message); }); };
       $('#mkQuoteSend').onclick = function () { if (!need()) return; var cid = $('#cust').value; api('/api/rep/quotes', 'POST', body()).then(function (r) { cart = []; saveCart(); sendLink({ kind: 'quote', target: r.id, title: 'Quote ' + r.quote_number, customer_id: cid, message: 'Here is your quote (' + J(r.total_usd) + '). Tap to see it and accept it.' }); }).catch(function (e) { toast(e.message); }); };
-      $('#mkOrder').onclick = function () { if (!need()) return; if (!confirm('Send this order to the shop? The customer pays at the shop.')) return; api('/api/rep/orders', 'POST', body()).then(function (r) { cart = []; saveCart(); toast(r.message); tab = 'pipe'; show(); }).catch(function (e) { toast(e.message); }); };
+      $('#mkOrder').onclick = async function () { if (!need()) return; if (!(await vasConfirm('Send this order to the shop? The customer pays at the shop.'))) return; api('/api/rep/orders', 'POST', body()).then(function (r) { cart = []; saveCart(); toast(r.message); tab = 'pipe'; show(); }).catch(function (e) { toast(e.message); }); };
     });
   }
 
@@ -184,7 +185,7 @@
         '<div class="card"><h2>Orders at the shop</h2>' + (d.orders.length ? d.orders.map(function (o) { return '<div class="item"><div>ORD-' + o.id + ' ' + pill(o.status) + '<br><small>' + esc(o.customer_name || '') + ' · ' + esc(day(o.created_at)) + (o.status === 'pending' && o.expires_at ? ' · waits until ' + esc(day(o.expires_at)) : '') + '</small></div><b>' + J(o.total_usd) + '</b></div>'; }).join('') : '<div class="empty">No orders.</div>') + '</div>' +
         '<div class="card"><h2>Links you sent</h2>' + (links.length ? links.map(function (l) { return '<div class="item"><div>' + esc(l.title || l.kind) + (l.converted_at ? ' <span class="pill ok">accepted</span>' : l.expired ? ' <span class="pill">expired</span>' : '') + '<br><small>' + esc(l.customer || l.sent_to || '') + ' · ' + esc(day(l.created_at)) + '</small></div><small>' + l.opens + ' open' + (l.opens === 1 ? '' : 's') + '</small></div>'; }).join('') : '<div class="empty">None sent.</div>') + '</div>' +
         '<div class="card"><h2>Sales</h2>' + (d.sales.length ? d.sales.map(function (s) { return '<div class="item"><div>' + esc(s.receipt_number) + '<br><small>' + esc(s.customer_name || '') + ' · ' + esc(day(s.created_at)) + '</small></div><b>' + J(s.total_usd) + '</b></div>'; }).join('') : '<div class="empty">No sales yet.</div>') + '</div>';
-      all('[data-qo]').forEach(function (b) { b.onclick = function () { if (!confirm('Send this quote to the shop as an order?')) return; api('/api/rep/quotes/' + b.getAttribute('data-qo') + '/order', 'POST').then(function () { toast('Order sent'); pipe(); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-qo]').forEach(function (b) { b.onclick = async function () { if (!(await vasConfirm('Send this quote to the shop as an order?'))) return; api('/api/rep/quotes/' + b.getAttribute('data-qo') + '/order', 'POST').then(function () { toast('Order sent'); pipe(); }).catch(function (e) { toast(e.message); }); }; });
       all('[data-ql]').forEach(function (b) { b.onclick = function () { sendLink({ kind: 'quote', target: b.getAttribute('data-ql'), title: 'Quote ' + b.getAttribute('data-qn'), message: 'Here is your quote. Tap to see it and accept it.' }); }; });
     });
   }

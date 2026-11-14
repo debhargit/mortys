@@ -22,6 +22,7 @@
 
 const crypto = require('crypto');
 const pins = require('./pins');
+const DT = require('./dept-types');   // department TYPES + billing/stock/customer rules
 const TZ = 'America/Jamaica';
 const KINDS = ['item_added', 'item_removed', 'qty_changed', 'price_changed', 'discount_changed', 'cart_cleared', 'hold_recalled', 'dept_blocked'];
 
@@ -36,6 +37,10 @@ function register(app, deps) {
     const { rows } = await query('SELECT value FROM warehouse_settings WHERE key = $1', [key]);
     return rows.length && rows[0].value != null ? rows[0].value : dflt;
   }
+  // Department rules column (types and rules, 2026-11-05). Self-creating, like
+  // the other modules, so it needs no separate migration step.
+  // departments.rules is added by schema.sql (department types, 2026-11-05).
+  // Not run here: DDL at startup can deadlock the boot-time schema apply.
   const hashKey = (k) => crypto.createHash('sha256').update(String(k)).digest('hex');
   async function stationOf(req) {
     const key = req.get('x-station-key');
@@ -96,6 +101,125 @@ function register(app, deps) {
   app.use('/api/admin/pos/sale', requireAdmin, guard);
   app.use('/api/admin/pos/order', requireAdmin, guard);
 
+  // ------------------------------------- department rules at sale time --
+  // Phase 2 of department types (2026-11-05). Only when "Sell only your
+  // department" (dept_enforce) is on, and only for the department the till is
+  // working in (the POS department picker; General / All = no rules). Owners
+  // and managers are held to the rules too, but can clear a refusal with
+  // their own PIN like anyone else (POST /api/dept/rule-override), which is
+  // logged in the terminal journal. Checks what the server can see on the
+  // sale: customer, payments, quantities, serials, stock, minimum, discount,
+  // deposit. Price basis, GCT rate and service charge are applied by the till
+  // and the sale route (Phase 3).
+  const PAY_MAP = { cash: 'cash', card: 'card', bank: 'transfer', cheque: 'cheque', account: 'account' };   // sale method -> rule option
+  async function currentDept(req) {
+    if ((await setting('dept_enforce', 'off')) !== 'on') return null;
+    const c = await deptChoice(req);
+    if (!c.current || c.current.kind === 'general') return null;
+    return { id: c.current.id, name: c.current.name, kind: c.current.kind, rules: DT.effective(c.current.kind, c.current.rules) };
+  }
+  async function ruleProblems(req, d) {
+    const b = req.body || {}, R = d.rules, out = [];
+    const items = Array.isArray(b.items) ? b.items : [];
+    // customer
+    let walkinId = -1;
+    try { const w = await query(`SELECT id FROM users WHERE email = 'walkin@mortysautoparts.local' LIMIT 1`); if (w.rows[0]) walkinId = w.rows[0].id; } catch (_) {}
+    const cid = b.customer_id ? Number(b.customer_id) : null;
+    const named = cid && cid !== walkinId;
+    let cust = null;
+    if (named) {
+      const { rows } = await query(`SELECT id, name, phone, tax_id, national_id, customer_type, price_tier FROM users WHERE id = $1`, [cid]).catch(() => ({ rows: [] }));
+      cust = rows[0] || null;
+    }
+    const C = R.customer;
+    if (!C.walkin_allowed && !named) out.push('pick a named customer (no walk-in sales)');
+    if (C.phone_required && !String(b.customer_phone || (cust && cust.phone) || '').trim()) out.push("the customer's phone number");
+    if (C.trn_required && !(cust && String(cust.tax_id || '').trim())) out.push("the customer's TRN (on their account)");
+    if (C.id_required && !(cust && String(cust.national_id || '').trim())) out.push("the customer's photo ID number (on their account)");
+    if (C.vehicle_required && !String(b.vehicle_info || '').trim()) out.push('the vehicle (plate or VIN)');
+    if (C.trade_account_required && !(cust && ['trade', 'fleet', 'dealer'].includes(String(cust.customer_type || cust.price_tier || '').toLowerCase()))) out.push('a trade account customer');
+    // payments
+    const pays = Array.isArray(b.payments) && b.payments.length ? b.payments : (b.payment_method ? [{ method: b.payment_method, amount_usd: null }] : []);
+    const bad = [...new Set(pays.map((x) => x.method).filter((m) => PAY_MAP[m] && !R.billing.payments.includes(PAY_MAP[m])))];
+    if (bad.length) out.push('a payment method this department takes (not ' + bad.join(', ') + ')');
+    // lines
+    const qtyBy = {};
+    items.forEach((it) => { if (it.product_img) qtyBy[it.product_img] = (qtyBy[it.product_img] || 0) + Number(it.qty || 0); });
+    if (R.billing.min_line_qty > 0 && items.some((it) => Number(it.qty || 0) < R.billing.min_line_qty)) out.push('at least ' + R.billing.min_line_qty + ' of each line');
+    if (R.stock.unique_items && items.some((it) => Number(it.qty || 0) > 1)) out.push('one of each item (each is one-off)');
+    if (R.stock.serial_required && items.some((it) => !String(it.serial_number || '').trim())) out.push('a serial / VIN on every line');
+    if (R.stock.track && !R.stock.allow_negative) {
+      const imgs = Object.keys(qtyBy);
+      if (imgs.length) {
+        const { rows } = await query(`SELECT img, name, COALESCE(stock_count, 0)::int AS stock FROM products WHERE img = ANY($1)`, [imgs]).catch(() => ({ rows: [] }));
+        const short = rows.filter((r) => r.stock < qtyBy[r.img]);
+        if (short.length) out.push('enough stock (' + short.map((r) => r.name + ': ' + r.stock + ' on hand').join('; ') + ')');
+      }
+    }
+    // money
+    const gross = items.reduce((t, it) => t + Number(it.unit_price_usd || 0) * Number(it.qty || 0), 0);
+    const disc = items.reduce((t, it) => t + Math.max(0, Number(it.discount_usd || 0)), 0) + Math.max(0, Number(b.discount_usd || 0));
+    const net = Math.max(0, gross - disc);
+    if (R.billing.min_sale > 0 && net < R.billing.min_sale) out.push('a sale of at least J$' + R.billing.min_sale.toLocaleString('en-JM') + ' (this one is J$' + net.toFixed(2) + ')');
+    if (gross > 0 && disc > 0 && (disc / gross) * 100 > R.billing.max_discount_pct + 0.001) out.push('a discount of no more than ' + R.billing.max_discount_pct + '% (this one is ' + ((disc / gross) * 100).toFixed(1) + '%)');
+    if (R.billing.deposit_pct > 0) {
+      const onAcct = pays.filter((x) => x.method === 'account');
+      if (onAcct.length && onAcct.every((x) => x.amount_usd != null && x.amount_usd !== '')) {
+        const paidNow = net - onAcct.reduce((t, x) => t + Number(x.amount_usd || 0), 0);
+        if (paidNow + 0.005 < net * R.billing.deposit_pct / 100) out.push('a deposit of at least ' + R.billing.deposit_pct + '% paid now (J$' + (net * R.billing.deposit_pct / 100).toFixed(2) + ')');
+      } else if (onAcct.length) out.push('a deposit of at least ' + R.billing.deposit_pct + '% paid now (put the balance on account as a set amount)');
+    }
+    return out;
+  }
+  async function rulesGuard(req, res, next) {
+    try {
+      if (req.method !== 'POST' || !(req.path === '/' || req.path === '')) return next();
+      const d = await currentDept(req);
+      if (!d) return next();
+      const probs = await ruleProblems(req, d);
+      if (!probs.length) return next();
+      const ok = req.session.deptRuleOk;
+      if (ok && ok.dept === d.id && ok.until > Date.now() && ok.sig === JSON.stringify(probs)) { if (req.body.dry_run !== true) delete req.session.deptRuleOk; return next(); }
+      if (req.body.dry_run !== true) {
+        const u = await me(req), st = await stationOf(req);
+        await query(`INSERT INTO pos_events (user_id, user_name, station_id, kind, name, note) VALUES ($1,$2,$3,'dept_blocked',$4,$5)`,
+          [u && u.id, u && u.name, st && st.id, d.name + ' rules', 'Sale refused: needs ' + probs.join('; ')]).catch(() => {});
+      }
+      res.status(403).json({ error: d.name + ' needs ' + probs.join('; ') + '. A manager can approve with their PIN.', department_rules: { department: d.name, problems: probs } });
+    } catch (e) { fail(res, e); }
+  }
+  app.use('/api/admin/pos/sale', requireAdmin, rulesGuard);
+  app.use('/api/admin/pos/order', requireAdmin, rulesGuard);
+
+  // A manager clears the current refusal with their PIN. Body {pin, items,...}
+  // = the same sale body; the approval covers exactly those problems, for this
+  // department, once, within 10 minutes.
+  app.post('/api/dept/rule-override', requireAdmin, async (req, res) => {
+    try {
+      const key = 'r' + req.session.userId;
+      const t = PIN_TRIES.get(key) || { n: 0, first: Date.now() };
+      if (Date.now() - t.first > 10 * 60000) { t.n = 0; t.first = Date.now(); }
+      if (t.n >= 5) throw httpError(429, 'Too many wrong PINs. Wait a few minutes.');
+      const d = await currentDept(req);
+      if (!d) return res.json({ ok: true, nothing: true });
+      const probs = await ruleProblems(req, d);
+      if (!probs.length) return res.json({ ok: true, nothing: true });
+      const pin = String((req.body || {}).pin || '').trim();
+      if (!/^\d{4,8}$/.test(pin)) throw httpError(400, 'Enter the manager PIN');
+      const picked = pins.pickedId(req.body);
+      const { rows: staff } = await query(`SELECT id, name, admin_role, pin_hash FROM users WHERE pin_hash IS NOT NULL AND is_staff AND NOT disabled` + (picked ? ' AND id = $1' : ''), picked ? [picked] : []);
+      const hit = await pins.pick(staff, pin);
+      if (!hit) { t.n++; PIN_TRIES.set(key, t); throw httpError(401, 'PIN not recognised'); }
+      if (!(await roleCanManage(hit.admin_role))) { t.n++; PIN_TRIES.set(key, t); throw httpError(403, (hit.name || 'That person') + ' cannot approve this: a manager is needed.'); }
+      PIN_TRIES.delete(key);
+      req.session.deptRuleOk = { dept: d.id, sig: JSON.stringify(probs), by: hit.id, until: Date.now() + 10 * 60000 };
+      const u = await me(req), st = await stationOf(req);
+      await query(`INSERT INTO pos_events (user_id, user_name, station_id, terminal, kind, name, approved_by, note) VALUES ($1,$2,$3,$4,'dept_override',$5,$6,$7)`,
+        [u.id, u.name, st && st.id, String(req.get('x-terminal') || '').slice(0, 80) || null, d.name + ' rules', hit.id, 'Approved by ' + hit.name + ': ' + probs.join('; ')]);
+      res.json({ ok: true, id: hit.id, name: hit.name, user: { id: hit.id, name: hit.name }, approved: probs });
+    } catch (e) { fail(res, e); }
+  });
+
   // ------------------------------------------- current department (POS) --
   // The department shown next to the cart. Owners and managers may pick any
   // active department, or GENERAL: sell from every department as one stock and
@@ -106,13 +230,13 @@ function register(app, deps) {
     const manager = !!(u && (await roleCanManage(u.admin_role)));
     let options = [];
     if (manager) {
-      ({ rows: options } = await query(`SELECT id, code, name, kind FROM departments WHERE is_active ORDER BY (kind = 'general') DESC, sort, name`));
+      ({ rows: options } = await query(`SELECT id, code, name, kind, rules FROM departments WHERE is_active ORDER BY (kind = 'general') DESC, sort, name`));
     } else if (u) {
-      ({ rows: options } = await query(`SELECT d.id, d.code, d.name, d.kind FROM user_departments ud JOIN departments d ON d.id = ud.department_id
+      ({ rows: options } = await query(`SELECT d.id, d.code, d.name, d.kind, d.rules FROM user_departments ud JOIN departments d ON d.id = ud.department_id
           WHERE ud.user_id = $1 AND d.is_active AND d.kind <> 'general' ORDER BY d.sort, d.name`, [u.id]));
       if (!options.length) {
         const st = await stationOf(req);
-        if (st) ({ rows: options } = await query(`SELECT d.id, d.code, d.name, d.kind FROM station_departments sd JOIN departments d ON d.id = sd.department_id
+        if (st) ({ rows: options } = await query(`SELECT d.id, d.code, d.name, d.kind, d.rules FROM station_departments sd JOIN departments d ON d.id = sd.department_id
             WHERE sd.station_id = $1 AND d.is_active AND d.kind <> 'general' ORDER BY d.sort, d.name`, [st.id]));
       }
     }
@@ -128,7 +252,9 @@ function register(app, deps) {
       const c = await deptChoice(req);
       res.json({ enforce: !!a.enforce, restricted: !!a.restricted, categories: a.categories ? [...a.categories] : null, departments: a.departments || [], source: a.source || null,
         current: c.current || { id: null, code: null, name: 'All departments', kind: 'all' },
-        options: c.options, general: req.session.posDeptGeneral === true, can_choose_collector: req.session.posDeptGeneral === true });
+        rules: DT.effective(c.current ? c.current.kind : 'parts', c.current ? c.current.rules : {}),
+        type: (DT.TYPES.find((t) => t.key === (c.current && c.current.kind)) || { label: null }).label,
+        options: c.options.map((o) => ({ id: o.id, code: o.code, name: o.name, kind: o.kind })), general: req.session.posDeptGeneral === true, can_choose_collector: req.session.posDeptGeneral === true });
     } catch (e) { fail(res, e); }
   });
 
@@ -140,7 +266,7 @@ function register(app, deps) {
       if (id && !c0.options.some((d) => d.id === id)) throw httpError(403, 'You cannot work in that department.');
       req.session.posDeptId = id;
       const c = await deptChoice(req);
-      res.json({ ok: true, current: c.current, general: req.session.posDeptGeneral === true });
+      res.json({ ok: true, current: c.current, rules: DT.effective(c.current ? c.current.kind : 'parts', c.current ? c.current.rules : {}), general: req.session.posDeptGeneral === true });
     } catch (e) { fail(res, e); }
   });
 
@@ -190,8 +316,20 @@ function register(app, deps) {
       res.json({ departments: rows, categories: cats, staff, stations, locations, settings: s });
     } catch (e) { fail(res, e); }
   });
+  // The type list and the rule fields, for the setup screen and the till.
+  app.get('/api/dept/types', requireAdmin, (req, res) => res.json(DT.catalogue()));
+  // Effective rules for one department (type defaults + its overrides).
+  app.get('/api/dept/:id(\\d+)/rules', requireAdmin, async (req, res) => {
+    try {
+      const { rows } = await query('SELECT id, name, kind, rules FROM departments WHERE id = $1', [req.params.id]);
+      if (!rows.length) throw httpError(404, 'Department not found');
+      res.json({ department: { id: rows[0].id, name: rows[0].name, kind: rows[0].kind }, defaults: DT.defaults(rows[0].kind), overrides: DT.cleanRules(rows[0].rules), rules: DT.effective(rows[0].kind, rows[0].rules) });
+    } catch (e) { fail(res, e); }
+  });
   function cleanDept(b) {
     const out = {};
+    if (b.kind !== undefined) { if (!DT.isType(b.kind)) throw httpError(400, 'Pick a department type'); out.kind = b.kind; }
+    if (b.rules !== undefined) out.rules = DT.cleanRules(b.rules);   // stored as the diff from the type in the routes below
     if (b.name !== undefined) { out.name = String(b.name || '').trim().slice(0, 60); if (!out.name) throw httpError(400, 'Name the department'); }
     if (b.code !== undefined) { out.code = String(b.code || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 20); if (!out.code) throw httpError(400, 'Give it a short code'); }
     if (b.categories !== undefined) out.categories = (Array.isArray(b.categories) ? b.categories : []).map((c) => String(c).toLowerCase().trim()).filter(Boolean).slice(0, 100);
@@ -204,21 +342,51 @@ function register(app, deps) {
       const d = cleanDept(Object.assign({ code: (req.body || {}).code || (req.body || {}).name }, req.body || {}));
       if (!d.name) throw httpError(400, 'Name the department');
       const { rows } = await query(
-        `INSERT INTO departments (code, name, categories, location_id)
-         VALUES ($1,$2,$3, COALESCE($4, (SELECT id FROM store_locations WHERE is_default LIMIT 1))) RETURNING *`,
-        [d.code, d.name, d.categories || [], d.location_id || null]);
+        `INSERT INTO departments (code, name, categories, location_id, kind, rules)
+         VALUES ($1,$2,$3, COALESCE($4, (SELECT id FROM store_locations WHERE is_default LIMIT 1)), $5, $6) RETURNING *`,
+        [d.code, d.name, d.categories || [], d.location_id || null, d.kind || 'parts', JSON.stringify(DT.diffRules(d.kind || 'parts', d.rules || {}))]);
       res.json({ department: rows[0] });
     } catch (e) { if (e.code === '23505') e = httpError(409, 'That code is already used'); fail(res, e); }
   });
   app.patch('/api/dept/:id', ...can('dept.manage'), async (req, res) => {
     try {
       const d = cleanDept(req.body || {});
+      if (d.rules !== undefined || d.kind !== undefined) {
+        const { rows: cur } = await query('SELECT kind, rules FROM departments WHERE id = $1', [req.params.id]);
+        if (!cur.length) throw httpError(404, 'Department not found');
+        if (cur[0].kind === 'general' && d.kind && d.kind !== 'general') throw httpError(400, 'The General department stays General');
+        const kind = d.kind || cur[0].kind;
+        // Changing the type alone resets the rules to the new type's defaults.
+        d.rules = JSON.stringify(DT.diffRules(kind, d.rules !== undefined ? d.rules : (d.kind && d.kind !== cur[0].kind ? {} : cur[0].rules)));
+      }
       const keys = Object.keys(d);
       if (!keys.length) throw httpError(400, 'Nothing to change');
       const { rows } = await query(`UPDATE departments SET ${keys.map((k, i) => k + ' = $' + (i + 2)).join(', ')} WHERE id = $1 RETURNING *`, [req.params.id, ...keys.map((k) => d[k])]);
       if (!rows.length) throw httpError(404, 'Department not found');
       res.json({ department: rows[0] });
     } catch (e) { if (e.code === '23505') e = httpError(409, 'That code is already used'); fail(res, e); }
+  });
+  // Remove a department. Never used -> deleted. Has staff, tills, HR records or
+  // till history -> switched off instead, so nothing that points at it breaks.
+  app.delete('/api/dept/:id(\\d+)', ...can('dept.manage'), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { rows } = await query('SELECT id, name, kind FROM departments WHERE id = $1', [id]);
+      if (!rows.length) throw httpError(404, 'Department not found');
+      if (rows[0].kind === 'general') throw httpError(400, 'The General department cannot be removed');
+      const used = [];
+      const count = async (label, sql) => { try { const r = await query(sql, [id]); if (r.rows[0] && Number(r.rows[0].n) > 0) used.push(label); } catch (_) { /* table may not exist on this install */ } };
+      await count('staff', 'SELECT COUNT(*) n FROM user_departments WHERE department_id = $1');
+      await count('tills', 'SELECT COUNT(*) n FROM station_departments WHERE department_id = $1');
+      await count('HR records', 'SELECT (SELECT COUNT(*) FROM hr_employees WHERE department_id = $1) + (SELECT COUNT(*) FROM hr_job_history WHERE department_id = $1) + (SELECT COUNT(*) FROM hr_offers WHERE department_id = $1) AS n');
+      await count('requisitions', 'SELECT COUNT(*) n FROM dept_requisitions WHERE from_department = (SELECT name FROM departments WHERE id = $1) OR to_department = (SELECT name FROM departments WHERE id = $1)');
+      if (used.length) {
+        await query('UPDATE departments SET is_active = false WHERE id = $1', [id]);
+        return res.json({ ok: true, removed: false, deactivated: true, reason: 'It has ' + used.join(', ') + ', so it was switched off instead. Switch it back on any time.' });
+      }
+      await query('DELETE FROM departments WHERE id = $1', [id]);
+      res.json({ ok: true, removed: true });
+    } catch (e) { fail(res, e); }
   });
   async function setMembers(table, col, deptId, ids) {
     const clean = [...new Set((Array.isArray(ids) ? ids : []).map((x) => parseInt(x, 10)).filter(Boolean))];
@@ -295,7 +463,7 @@ function register(app, deps) {
              FROM pos_sales ps LEFT JOIN users u ON u.id = ps.voided_by WHERE ps.voided AND ps.voided_at IS NOT NULL AND ${RANGE('ps.voided_at')}
            UNION ALL
            SELECT r.created_at, 'refund', r.processed_by, u.name, NULL, r.return_number, s.receipt_number, NULL, NULL, NULL, r.refund_total_usd, r.refund_method || COALESCE(': ' || r.reason, '')
-             FROM pos_sale_returns r JOIN pos_sales s ON s.id = r.sale_id LEFT JOIN users u ON u.id = r.processed_by WHERE ${RANGE('r.created_at')}
+             FROM pos_sale_returns r LEFT JOIN pos_sales s ON s.id = r.sale_id LEFT JOIN users u ON u.id = r.processed_by WHERE ${RANGE('r.created_at')}
            UNION ALL
            SELECT m.created_at, 'drawer_' || m.kind, m.by_user, u.name, st.name, 'Shift ' || m.session_id, NULL, NULL, NULL, NULL, m.amount, m.reason
              FROM till_movements m JOIN till_sessions t ON t.id = m.session_id LEFT JOIN pos_stations st ON st.id = t.station_id LEFT JOIN users u ON u.id = m.by_user WHERE ${RANGE('m.created_at')}
@@ -333,7 +501,7 @@ function register(app, deps) {
       out.refunds = (await query(
         `SELECT r.id, r.return_number AS ref, r.created_at AS at, u.name AS by_name, s.receipt_number, s.cashier_name, r.refund_total_usd AS amount, r.refund_method, r.reason,
                 (r.processed_by = s.cashier_id) AS own_sale, (r.created_at::date = s.created_at::date) AS same_day
-           FROM pos_sale_returns r JOIN pos_sales s ON s.id = r.sale_id LEFT JOIN users u ON u.id = r.processed_by
+           FROM pos_sale_returns r LEFT JOIN pos_sales s ON s.id = r.sale_id LEFT JOIN users u ON u.id = r.processed_by
           WHERE ${RANGE('r.created_at')} AND (r.refund_total_usd >= $3 OR (r.processed_by = s.cashier_id AND r.refund_method = 'cash'))
           ORDER BY r.refund_total_usd DESC LIMIT 200`, [...P, big])).rows;
       out.discounts = (await query(

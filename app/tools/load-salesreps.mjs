@@ -22,6 +22,11 @@
 
 import { pool, fmt, ensureLegacySchema } from './lib/db.mjs';
 
+// --new-only (the import page): add reps the system does not have; never
+// rename or switch off an existing one (reps made in the new system, and anyone
+// missing from a cut-short INVDETAI, stay as they are).
+const NEW_ONLY = process.argv.includes('--new-only');
+
 const db = pool(2);
 const c = await db.connect();
 try {
@@ -107,7 +112,7 @@ try {
   // hourly_rate_usd is NOT NULL with no default; 0 is the honest value for a
   // counter rep who is not billed out by the hour, and is what
   // syncStaffProfile() inserts too.
-  const upd = await c.query(`
+  const upd = NEW_ONLY ? { rowCount: 0 } : await c.query(`
     UPDATE mechanics m
        SET name = r.name, email = r.email, phone = r.phone,
            role = 'advisor', is_active = true, notes = r.notes
@@ -119,7 +124,7 @@ try {
       FROM _r r
      WHERE NOT EXISTS (SELECT 1 FROM mechanics m WHERE m.user_id = r.user_id)`);
 
-  const off = await c.query(`
+  const off = NEW_ONLY ? { rowCount: 0 } : await c.query(`
     UPDATE mechanics SET is_active = false
      WHERE is_active AND role = 'advisor'
        AND user_id IS NOT NULL
@@ -133,6 +138,7 @@ try {
            count(*) FILTER (WHERE user_id IS NOT NULL)::int              AS linked
       FROM mechanics`);
   console.log(`\ninserted ${fmt(ins.rowCount)} reps  |  updated ${fmt(upd.rowCount)}  |  deactivated ${fmt(off.rowCount)}`);
+  if (NEW_ONLY) console.log('@@result ' + JSON.stringify({ step: 'salesreps', added: ins.rowCount }));
   console.log(`mechanics now: ${fmt(t.total)}  (active ${fmt(t.active)}, linked to a user ${fmt(t.linked)})`);
 
   const { rows: leaders } = await c.query(`

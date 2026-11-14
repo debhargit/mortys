@@ -161,6 +161,36 @@ function register(app, deps) {
     } catch (e) { fail(res, e); }
   });
 
+  // A rep's own lost sales: what they recorded in the period, newest first,
+  // with a total per day. Needs only "Record lost sales", not the planning report.
+  app.get('/api/plan/my-lost-sales', ...can('sales.lost_record'), async (req, res) => {
+    try {
+      const p = await period(req.query);
+      const me = req.session.userId;
+      const { rows } = await query(
+        `SELECT l.id, l.created_at, COALESCE(p.sku, '') AS sku, COALESCE(p.name, l.description) AS name, l.description AS asked_for,
+                l.vehicle, l.qty, COALESCE(l.unit_price, p.price_usd, 0) AS unit_price, l.reason, l.channel, l.competitor,
+                l.customer_name, l.customer_phone, l.follow_up, l.followed_up_at, l.note,
+                (l.created_at > NOW() - INTERVAL '24 hours') AS can_remove
+           FROM lost_sales l LEFT JOIN products p ON p.img = l.product_img
+          WHERE l.recorded_by = $3 AND l.created_at >= $1 AND l.created_at < $2
+          ORDER BY l.created_at DESC LIMIT 1000`, [p.t0, p.t1, me]);
+      const { rows: byDay } = await query(
+        `SELECT to_char((l.created_at AT TIME ZONE '${TZ}')::date, 'YYYY-MM-DD') AS day, COUNT(*)::int AS lines, COALESCE(SUM(l.qty), 0)::int AS units,
+                COALESCE(SUM(l.qty * COALESCE(l.unit_price, p.price_usd, 0)), 0) AS value
+           FROM lost_sales l LEFT JOIN products p ON p.img = l.product_img
+          WHERE l.recorded_by = $3 AND l.created_at >= $1 AND l.created_at < $2
+          GROUP BY 1 ORDER BY 1 DESC`, [p.t0, p.t1, me]);
+      const { rows: u } = await query('SELECT name FROM users WHERE id = $1', [me]);
+      const out = rows.map((r) => ({ ...r, value: r2(n(r.qty) * n(r.unit_price)) }));
+      res.json({
+        period: { from: p.from, to: p.to }, me: u.length ? u[0].name : '',
+        summary: { lines: out.length, units: out.reduce((a, r) => a + n(r.qty), 0), value: r2(out.reduce((a, r) => a + r.value, 0)) },
+        by_day: byDay.map((r) => ({ ...r, value: r2(r.value) })), rows: out,
+      });
+    } catch (e) { fail(res, e); }
+  });
+
   // Customers waiting on a part, the ones whose part is now on the shelf first.
   app.get('/api/plan/follow-ups', ...can('sales.lost_record'), async (req, res) => {
     try {

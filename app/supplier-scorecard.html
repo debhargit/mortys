@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Supplier scorecard · Morty's Auto Parts</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --bad:#b91c1c; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --ok:#22c55e; --bad:#f87171; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0}
+  header nav{margin-left:auto;display:flex;gap:14px;font-size:13px}
+  header a{color:#fff;opacity:.85}
+  main{max-width:1180px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;overflow-x:auto}
+  .card h2{font-size:15px;margin:0 0 6px}
+  .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
+  .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  input,select,button{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  input[type=number]{width:110px}
+  button{cursor:pointer;background:var(--card)}
+  button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600}
+  button.sm{padding:3px 8px;font-size:12.5px}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 12px}
+  .tabs button{border-radius:999px;padding:6px 13px;font-size:13px}
+  .tabs button.on{background:var(--navy);border-color:var(--navy);color:#fff}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:12px}
+  .tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  .tile .k{font-size:12px;color:var(--muted)} .tile .v{font-size:20px;font-weight:700}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  td.n,th.n{text-align:right;white-space:nowrap}
+  tr.click{cursor:pointer} tr.click:hover td{background:var(--chip)}
+  .up{color:var(--bad)} .down{color:var(--ok)} .good{color:var(--ok)} .bad{color:var(--bad)}
+  .muted{color:var(--muted)} .err{color:var(--bad)}
+  #sugg{position:relative} #sugg div{padding:6px 8px;border-bottom:1px solid var(--line);cursor:pointer} #sugg div:hover{background:var(--chip)}
+</style>
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
+</head>
+<body>
+<header>
+  <h1>Suppliers</h1>
+  <nav><a href="/scorecard.html">Scorecard</a><a href="/report-planning.html">Planning</a><a href="/admin.html">Admin</a></nav>
+</header>
+<main>
+  <div class="tabs"><button data-tab="score" class="on">Supplier scorecard</button><button data-tab="calc">Import or buy local</button></div>
+
+  <section id="score">
+    <div class="controls" style="margin-bottom:10px"><div><label for="m">Period</label><select id="m"><option value="3">Last 3 months</option><option value="6">Last 6 months</option><option value="12" selected>Last 12 months</option><option value="24">Last 24 months</option></select></div><span id="msg" class="muted"></span></div>
+    <div id="tiles" class="tiles"></div>
+    <div class="card">
+      <table><thead><tr><th>Supplier</th><th class="n">Spend</th><th class="n">Share</th><th class="n">Price change</th><th class="n">Cheapest on</th><th class="n">Overpaid</th><th class="n">Fill rate</th><th class="n">Lead days</th></tr></thead><tbody id="rows"></tbody></table>
+      <p class="muted" style="margin:8px 0 0">Price change: same parts from this supplier against the period before. Cheapest on: share of parts we also bought elsewhere where this supplier was lowest. Overpaid: against the lowest price we paid anyone for the same part. Fill rate and lead days fill in as orders are received in the app.</p>
+    </div>
+    <div class="card" id="det" style="display:none">
+      <h2 id="detTitle"></h2>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:14px">
+        <div><b>Bought cheaper elsewhere</b><table><thead><tr><th>Part</th><th class="n">Qty</th><th class="n">Paid</th><th class="n">Best</th><th>From</th><th class="n">Extra</th></tr></thead><tbody id="dOver"></tbody></table></div>
+        <div><b>Biggest price rises</b><table><thead><tr><th>Part</th><th class="n">Qty</th><th class="n">Before</th><th class="n">Now</th><th class="n">Change</th></tr></thead><tbody id="dRise"></tbody></table></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="calc" style="display:none">
+    <div class="card">
+      <h2>Shipment costs</h2>
+      <div class="controls">
+        <div><label for="fx">US$ rate (J$)</label><input id="fx" type="number" step="0.01"></div>
+        <div><label for="freight_usd">Freight US$</label><input id="freight_usd" type="number" min="0" value="0"></div>
+        <div><label for="insurance_pct">Insurance %</label><input id="insurance_pct" type="number" step="0.1"></div>
+        <div><label for="duty_pct">Import duty %</label><input id="duty_pct" type="number" step="0.1"></div>
+        <div><label for="caf_pct">Customs admin fee %</label><input id="caf_pct" type="number" step="0.1"></div>
+        <div><label for="env_levy_pct">Environmental levy %</label><input id="env_levy_pct" type="number" step="0.1"></div>
+        <div><label for="scf_pct">Standard compliance fee %</label><input id="scf_pct" type="number" step="0.1"></div>
+        <div><label for="broker_jmd">Broker J$</label><input id="broker_jmd" type="number" min="0"></div>
+        <div><label for="local_delivery_jmd">Wharf to shop J$</label><input id="local_delivery_jmd" type="number" min="0"></div>
+      </div>
+      <p class="muted" style="margin:8px 0 0" id="fxNote">Rates are a starting point: confirm duty for each part with your customs broker. GCT paid at the border is left out because you claim it back.</p>
+    </div>
+    <div class="card">
+      <h2>Parts</h2>
+      <div class="controls"><div style="flex:1;min-width:240px"><label for="q">Find a part</label><input id="q" style="width:100%" placeholder="e.g. disc pad, strut, 10W-30"><div id="sugg"></div></div></div>
+      <table style="margin-top:8px"><thead><tr><th>Part</th><th class="n">Local cost J$</th><th class="n">Sold, 12 months</th><th class="n">Overseas price US$</th><th class="n">Qty to import</th><th></th></tr></thead><tbody id="lines"></tbody></table>
+      <div class="controls" style="margin-top:10px"><button id="go" class="primary">Work it out</button><span id="cmsg" class="muted"></span></div>
+    </div>
+    <div class="card" id="res" style="display:none">
+      <h2>Result</h2>
+      <div id="resTiles" class="tiles"></div>
+      <table><thead><tr><th>Part</th><th class="n">Landed J$/unit</th><th class="n">Local J$/unit</th><th class="n">Saving</th><th class="n">Margin now</th><th class="n">Margin imported</th><th class="n">Saving a year</th></tr></thead><tbody id="resRows"></tbody></table>
+    </div>
+  </section>
+</main>
+<script>
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const jm = (v) => (Number(v) < 0 ? '-' : '') + 'J$' + Math.round(Math.abs(Number(v) || 0)).toLocaleString('en-US');
+  const pc = (v, cls) => (v == null ? '<span class="muted">—</span>' : '<span class="' + (cls ? (v > 0 ? 'up' : v < 0 ? 'down' : '') : '') + '">' + (v > 0 && cls ? '+' : '') + v + '%</span>');
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.statusText); return j; }));
+  }
+  document.querySelector('.tabs').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-tab]'); if (!b) return;
+    document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('on', x === b));
+    $('score').style.display = b.dataset.tab === 'score' ? '' : 'none'; $('calc').style.display = b.dataset.tab === 'calc' ? '' : 'none';
+  });
+
+  let SUP = [];
+  function loadScore() {
+    $('msg').textContent = 'Loading…'; $('det').style.display = 'none';
+    api('/api/supscore?months=' + $('m').value).then((r) => {
+      SUP = r.suppliers; $('msg').textContent = SUP.length + ' suppliers';
+      $('tiles').innerHTML =
+        '<div class="tile"><div class="k">Bought</div><div class="v">' + jm(r.total_spend) + '</div></div>' +
+        '<div class="tile"><div class="k">Top 10 suppliers\' share</div><div class="v">' + (r.top10_share == null ? '—' : r.top10_share + '%') + '</div></div>' +
+        '<div class="tile"><div class="k">Paid above the best price we got elsewhere</div><div class="v">' + jm(r.overpaid_total) + '</div></div>';
+      $('rows').innerHTML = SUP.map((s, i) => '<tr class="click" data-i="' + i + '"><td><b>' + esc(s.name) + '</b></td><td class="n">' + jm(s.spend) + '</td><td class="n">' + (s.share_pct == null ? '' : s.share_pct + '%') + '</td>' +
+        '<td class="n">' + pc(s.price_change_pct, true) + '</td><td class="n">' + (s.cheapest_pct == null ? '<span class="muted">—</span>' : s.cheapest_pct + '% <span class="muted">of ' + s.shared_parts + '</span>') + '</td>' +
+        '<td class="n">' + (s.overpaid ? jm(s.overpaid) : '') + '</td><td class="n">' + (s.fill_rate == null ? '<span class="muted">—</span>' : s.fill_rate + '%') + '</td>' +
+        '<td class="n">' + (s.lead_days == null ? '<span class="muted">' + (s.stated_lead_days ? s.stated_lead_days + ' stated' : '—') + '</span>' : s.lead_days) + '</td></tr>').join('');
+    }).catch((e) => { $('msg').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; });
+  }
+  $('m').onchange = loadScore;
+  $('rows').addEventListener('click', (e) => {
+    const tr = e.target.closest('[data-i]'); if (!tr) return;
+    const s = SUP[Number(tr.dataset.i)];
+    $('detTitle').textContent = s.name; $('det').style.display = ''; $('dOver').innerHTML = $('dRise').innerHTML = '<tr><td colspan="6" class="muted">Loading…</td></tr>';
+    api('/api/supscore/supplier/' + s.id + '?months=' + $('m').value).then((d) => {
+      $('dOver').innerHTML = d.overpaid.length ? d.overpaid.map((x) => '<tr><td>' + esc(x.description) + '</td><td class="n">' + x.qty + '</td><td class="n">' + jm(x.cost) + '</td><td class="n">' + jm(x.best_cost) + '</td><td>' + esc(x.best_supplier) + '</td><td class="n">' + jm(x.overpaid) + '</td></tr>').join('') : '<tr><td colspan="6" class="muted">None</td></tr>';
+      $('dRise').innerHTML = d.price_rises.length ? d.price_rises.map((x) => '<tr><td>' + esc(x.description) + '</td><td class="n">' + x.qty + '</td><td class="n">' + jm(x.prev_cost) + '</td><td class="n">' + jm(x.cost) + '</td><td class="n">' + pc(x.change_pct, true) + '</td></tr>').join('') : '<tr><td colspan="5" class="muted">None</td></tr>';
+      $('det').scrollIntoView({ behavior: 'smooth' });
+    }).catch((err) => { $('dOver').innerHTML = '<tr><td class="err">' + esc(err.message) + '</td></tr>'; });
+  });
+
+  // ------------------------------------------------ import calculator --
+  const FIELDS = ['fx', 'freight_usd', 'insurance_pct', 'duty_pct', 'caf_pct', 'env_levy_pct', 'scf_pct', 'broker_jmd', 'local_delivery_jmd'];
+  let LINES = [], t = null;
+  api('/api/supscore/import/defaults').then((d) => {
+    FIELDS.forEach((k) => { if (k === 'fx') { if (d.fx && d.fx.rate) $('fx').value = d.fx.rate; } else if (d[k] != null) $(k).value = d[k]; });
+    if (d.fx && d.fx.rate_date) $('fxNote').textContent = 'US$ rate from Bank of Jamaica, ' + String(d.fx.rate_date).slice(0, 10) + '. ' + $('fxNote').textContent;
+  }).catch(() => {});
+  function paintLines() {
+    $('lines').innerHTML = LINES.length ? LINES.map((l, i) => '<tr><td>' + esc(l.name) + '<br><span class="muted">' + esc(l.sku || '') + '</span></td><td class="n">' + jm(l.cost) + '</td><td class="n">' + l.sold_12m + '</td>' +
+      '<td class="n"><input type="number" step="0.01" min="0" data-i="' + i + '" data-k="fob_usd" value="' + (l.fob_usd || '') + '"></td>' +
+      '<td class="n"><input type="number" min="1" data-i="' + i + '" data-k="qty" value="' + (l.qty || '') + '"></td>' +
+      '<td><button class="sm" data-del="' + i + '">Remove</button></td></tr>').join('') : '<tr><td colspan="6" class="muted">Find a part above to add it.</td></tr>';
+  }
+  paintLines();
+  $('lines').addEventListener('input', (e) => { const x = e.target; if (x.dataset.k) LINES[Number(x.dataset.i)][x.dataset.k] = Number(x.value); });
+  $('lines').addEventListener('click', (e) => { const b = e.target.closest('[data-del]'); if (b) { LINES.splice(Number(b.dataset.del), 1); paintLines(); } });
+  $('q').addEventListener('input', () => {
+    clearTimeout(t); const q = $('q').value.trim(); if (q.length < 2) { $('sugg').innerHTML = ''; return; }
+    t = setTimeout(() => api('/api/supscore/import/parts?q=' + encodeURIComponent(q)).then((r) => {
+      $('sugg').innerHTML = r.parts.map((p, i) => '<div data-p="' + i + '">' + esc(p.name) + ' <span class="muted">' + esc(p.sku || '') + ' · cost ' + jm(p.cost) + ' · sold ' + p.sold_12m + '</span></div>').join('');
+      $('sugg').onclick = (ev) => { const d = ev.target.closest('[data-p]'); if (!d) return; const p = r.parts[Number(d.dataset.p)];
+        if (!LINES.some((l) => l.id === p.id)) LINES.push(Object.assign({}, p, { qty: Math.max(10, Math.round(p.sold_12m / 2)) || 10 }));
+        $('sugg').innerHTML = ''; $('q').value = ''; paintLines(); };
+    }).catch(() => {}), 250);
+  });
+  $('go').onclick = () => {
+    const body = { lines: LINES.map((l) => ({ product_id: l.id, fob_usd: l.fob_usd, qty: l.qty })) };
+    FIELDS.forEach((k) => { body[k] = $(k).value; });
+    $('cmsg').textContent = 'Working…';
+    api('/api/supscore/import/calc', 'POST', body).then((r) => {
+      $('cmsg').textContent = ''; $('res').style.display = '';
+      const sh = r.shipment;
+      $('resTiles').innerHTML = '<div class="tile"><div class="k">Landed cost of this shipment</div><div class="v">' + jm(sh.landed) + '</div></div>' +
+        '<div class="tile"><div class="k">Same parts bought locally</div><div class="v">' + jm(sh.local) + '</div></div>' +
+        '<div class="tile"><div class="k">' + (sh.saving >= 0 ? 'Saving' : 'Extra cost') + ' on this shipment</div><div class="v ' + (sh.saving >= 0 ? 'good' : 'bad') + '">' + jm(Math.abs(sh.saving)) + '</div></div>' +
+        '<div class="tile"><div class="k">At last year\'s sales, a year</div><div class="v ' + (sh.yearly_saving >= 0 ? 'good' : 'bad') + '">' + jm(sh.yearly_saving) + '</div></div>';
+      $('resRows').innerHTML = r.lines.map((l) => '<tr><td>' + esc(l.name) + '</td><td class="n">' + jm(l.landed_unit) + '</td><td class="n">' + (l.local_unit ? jm(l.local_unit) : '—') + '</td>' +
+        '<td class="n ' + ((l.saving_pct || 0) >= 0 ? 'good' : 'bad') + '">' + (l.saving_pct == null ? '—' : l.saving_pct + '%') + '</td><td class="n">' + (l.margin_now_pct == null ? '—' : l.margin_now_pct + '%') + '</td>' +
+        '<td class="n">' + (l.margin_import_pct == null ? '—' : l.margin_import_pct + '%') + '</td><td class="n">' + (l.yearly_saving == null ? '—' : jm(l.yearly_saving)) + '</td></tr>').join('');
+    }).catch((e) => { $('cmsg').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; });
+  };
+  loadScore();
+})();
+</script>
+</body>
+</html>

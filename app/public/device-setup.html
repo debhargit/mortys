@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Set up this device · Morty's</title>
+<link rel="manifest" href="/device.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Morty's">
+<meta name="theme-color" content="#0b1b2b">
+<style>
+  :root{--bg:#0b1b2b;--card:#10263b;--ink:#e6e9ee;--muted:#94a3b8;--line:#22405e;--accent:#2563eb;--ok:#16a34a;--warn:#f59e0b;--bad:#dc2626}
+  *{box-sizing:border-box} body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;padding:16px;padding-top:max(16px,env(safe-area-inset-top))}
+  main{max-width:560px;margin:0 auto} h1{font-size:22px;margin:8px 0 6px} p{color:var(--muted);line-height:1.55;margin:0 0 10px;font-size:15px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin:14px 0}
+  .big{font:700 24px ui-monospace,Menlo,Consolas,monospace;letter-spacing:2px;color:#fff;background:rgba(255,255,255,.07);border-radius:10px;padding:10px 12px;text-align:center;word-break:break-all}
+  label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px} input{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:#0f2438;color:#fff;font-size:16px}
+  button,.btn{display:inline-block;width:100%;margin-top:12px;padding:13px 16px;border:0;border-radius:10px;background:var(--accent);color:#fff;font-size:16px;font-weight:600;text-align:center;text-decoration:none;cursor:pointer}
+  .pill{display:inline-block;padding:3px 10px;border-radius:99px;font-size:13px;font-weight:600} .ok{background:rgba(22,163,74,.2);color:#86efac} .wait{background:rgba(245,158,11,.18);color:#fcd34d} .bad{background:rgba(220,38,38,.2);color:#fca5a5}
+  ol{padding-left:20px;margin:6px 0;color:var(--ink);line-height:1.6;font-size:15px} small{color:var(--muted)}
+  .row{display:flex;justify-content:space-between;gap:10px;align-items:center;margin:6px 0}
+</style>
+</head>
+<body>
+<main>
+  <div style="font-size:40px">📱</div>
+  <h1>Set up this device for Morty's admin</h1>
+  <p>Works on iPhone, iPad, Mac, Android and Windows. Owners and managers can only use Morty's on a device the shop has approved; cashiers and other staff do not need this.</p>
+  <div id="out"><div class="card"><p>Checking this device…</p></div></div>
+  <div class="card" id="home"></div>
+</main>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s) { return document.querySelector(s); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var ua = navigator.userAgent || '';
+  var isIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  var isAndroid = /Android/.test(ua);
+  var isMac = !isIOS && /Macintosh/.test(ua);
+  var standalone = window.navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+  var platform = isIOS ? (/iPad/.test(ua) || navigator.maxTouchPoints > 1 && !/iPhone/.test(ua) ? 'iPad' : 'iPhone') : isAndroid ? 'Android' : isMac ? 'Mac' : /Windows/.test(ua) ? 'Windows' : 'Device';
+  var timer = null;
+
+  function newRegId() {
+    var abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', b = new Uint8Array(12), s = '';
+    (window.crypto || window.msCrypto).getRandomValues(b);
+    for (var i = 0; i < 12; i++) s += abc[b[i] % abc.length];
+    return 'VT-' + s.slice(0, 4) + '-' + s.slice(4, 8) + '-' + s.slice(8);
+  }
+  function api(url, body) {
+    return fetch(url, { method: body ? 'POST' : 'GET', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; }); });
+  }
+
+  function homeHelp() {
+    var steps;
+    if (isIOS) steps = '<ol><li>Open this page in <b>Safari</b>.</li><li>Tap the <b>Share</b> button (square with an arrow).</li><li>Tap <b>Add to Home Screen</b>, then <b>Add</b>.</li><li>Open <b>Morty\'s</b> from the home screen and register there too if it asks (iPhone keeps home-screen apps separate from Safari).</li></ol>';
+    else if (isAndroid) steps = '<ol><li>Open this page in <b>Chrome</b>.</li><li>Tap the <b>⋮</b> menu.</li><li>Tap <b>Install app</b> or <b>Add to Home screen</b>.</li><li>Open <b>Morty\'s</b> from the home screen.</li></ol>';
+    else if (isMac) steps = '<ol><li><b>Safari</b>: File › <b>Add to Dock</b>. <b>Chrome</b>: ⋮ › Cast, save and share › <b>Install page as app</b>.</li><li>Open Morty\'s from the Dock.</li></ol>';
+    else steps = '<ol><li>For a shop till, use the <b>Morty\'s Terminal</b> installer instead (System management › Device access).</li><li>Or in Edge/Chrome: ⋯ › Apps › <b>Install this site as an app</b>.</li></ol>';
+    $('#home').innerHTML = '<h2 style="margin:0 0 6px;font-size:17px">Add a Morty\'s icon to this ' + esc(platform) + '</h2>' + (standalone ? '<p>You are using the Morty\'s icon now. ✓</p>' : steps);
+  }
+
+  function render(d) {
+    clearTimeout(timer);
+    var html;
+    if (d.server_pc) {
+      html = '<div class="card"><p>This is the <b>server PC</b>. It is always allowed.</p><a class="btn" href="/admin.html">Open Morty\'s</a></div>';
+    } else if (!d.code) {
+      html = '<div class="card"><p>This device is not registered yet. Give it a name so a manager can recognise it, then tap Register.</p>' +
+        '<label for="nm">Name of this device</label><input id="nm" maxlength="60" value="' + esc(platform === 'Device' ? '' : platform) + '" placeholder="e.g. Deb\'s iPhone">' +
+        '<button id="reg">Register this device</button><p id="msg" style="margin-top:10px"></p></div>';
+    } else {
+      var st = d.status === 'approved' ? '<span class="pill ok">approved</span>' : d.status === 'blocked' ? '<span class="pill bad">blocked</span>' : '<span class="pill wait">waiting for approval</span>';
+      html = '<div class="card"><div class="row"><b>' + esc(d.name || platform) + '</b>' + st + '</div>' +
+        (d.reg_id ? '<label>Registration ID</label><div class="big">' + esc(d.reg_id) + '</div>' : '') +
+        '<label>Device code</label><div class="big">' + esc(d.code) + '</div>' +
+        (d.status === 'approved' ? '<a class="btn" href="/admin.html">Open Morty\'s admin</a>'
+          : d.status === 'blocked' ? '<p style="margin-top:10px">An administrator has blocked this device.</p>'
+          : '<p style="margin-top:10px">Ask an owner or manager to approve it in <b>System management › Device access</b> (type the registration ID or the device code). This page updates by itself.</p>') +
+        (d.mode === 'off' ? '<p><small>The shop has not switched the device lock on yet, so this device works already.</small></p>' : '') + '</div>';
+      if (d.status === 'pending') timer = setTimeout(load, 5000);
+      if (d.status === 'approved' && standalone && /app=1/.test(location.search)) { location.replace('/admin.html'); return; }
+    }
+    $('#out').innerHTML = html;
+    if ($('#reg')) $('#reg').onclick = function () {
+      var b = this; b.disabled = true; $('#msg').textContent = 'Registering…';
+      api('/api/device/register', { reg_id: newRegId(), browser: true, name: $('#nm').value || platform, hostname: platform + (standalone ? ' (home-screen app)' : ' (browser)') })
+        .then(load).catch(function (e) { b.disabled = false; $('#msg').textContent = e.message; });
+    };
+  }
+  function load() { api('/api/device/status').then(render).catch(function (e) { $('#out').innerHTML = '<div class="card"><p>' + esc(e.message) + '</p></div>'; }); }
+  homeHelp(); load();
+})();
+</script>
+</body>
+</html>

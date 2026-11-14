@@ -1,3 +1,5 @@
+// The program's own message windows (assets/vas-ui.js), for a page that has not loaded them itself.
+(function(){ if (window.VasUI || document.querySelector('script[src^="/assets/vas-ui.js"]')) return; var s = document.createElement('script'); s.src = '/assets/vas-ui.js?v=20261110b'; (document.head || document.documentElement).appendChild(s); })();
 // =============================================================================
 //  warehouse.html add-on: Count tab (Phase 4 stock counts).
 //  Counters count bins blind (scan bin, scan parts, finish); approvers review
@@ -99,7 +101,7 @@
       '<button class="primary" data-ca="finish">Finish bin</button></div></div>';
   }
 
-  document.addEventListener('click', function (e) {
+  document.addEventListener('click', async function (e) {
     var t = e.target.closest('[data-ca]'); if (!t || t.tagName === 'INPUT') return;
     var a = t.getAttribute('data-ca'), id = t.getAttribute('data-id');
     if (a === 'open') openCount(id);
@@ -113,18 +115,18 @@
         .then(function (d) { C.dueSel = {}; toast('Count started'); openCount(d.id); }).catch(function (er) { toast(er.message, true); });
     }
     if (a === 'finish') {
-      if (!confirm('Finish bin ' + C.bin.code + '? Anything not scanned counts as none.')) return;
+      if (!(await vasConfirm('Finish bin ' + C.bin.code + '? Anything not scanned counts as none.'))) return;
       api('/api/cnt/counts/' + C.count.count.id + '/bins/' + C.bin.id + '/finish', { method: 'POST', body: {} })
         .then(function (d) { toast(d.message, d.status === 'recount'); C.view = 'count'; openCount(C.count.count.id); }).catch(function (er) { toast(er.message, true); });
     }
     if (a === 'sendBack') api('/api/cnt/counts/' + C.count.count.id + '/bins/' + id + '/recount', { method: 'POST', body: {} }).then(function () { toast('Sent back for recount'); openCount(C.count.count.id); }).catch(function (er) { toast(er.message, true); });
     if (a === 'post') {
-      if (!confirm('Post the stock adjustments from ' + C.count.count.number + '?')) return;
+      if (!(await vasConfirm('Post the stock adjustments from ' + C.count.count.number + '?'))) return;
       api('/api/cnt/counts/' + C.count.count.id + '/post', { method: 'POST', body: {} }).then(function (d) {
         toast('Posted: ' + d.changed + ' part(s) adjusted, ' + (d.units > 0 ? '+' : '') + d.units + ' units, ' + J(d.value)); openCount(C.count.count.id);
       }).catch(function (er) { toast(er.message, true); });
     }
-    if (a === 'cancel') { var why = prompt('Cancel this count? Reason:'); if (!why) return; api('/api/cnt/counts/' + C.count.count.id + '/cancel', { method: 'POST', body: { reason: why } }).then(function () { C.view = 'list'; loadList(); }).catch(function (er) { toast(er.message, true); }); }
+    if (a === 'cancel') { var why = await vasPrompt('Cancel this count? Reason:'); if (!why) return; api('/api/cnt/counts/' + C.count.count.id + '/cancel', { method: 'POST', body: { reason: why } }).then(function () { C.view = 'list'; loadList(); }).catch(function (er) { toast(er.message, true); }); }
   });
   document.addEventListener('change', function (e) {
     var t = e.target;

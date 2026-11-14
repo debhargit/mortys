@@ -75,7 +75,7 @@ ok(r._status === 200, 'a store format can be added');
 const mk = async (b) => (await admin('POST', '/api/franchise/franchisees', b)).id;
 const hub = await mk({ legal_name: 'Hub Parts ' + stamp + ' Ltd', trading_name: 'Morty\'s Auto Parts Half Way Tree', email: 'hub.' + stamp + '@example.test', store_type: 'franchise' });
 const spoke = await mk({ legal_name: 'Spoke Motors ' + stamp + ' Ltd', trading_name: 'Spoke Motors', email: 'spoke.' + stamp + '@example.test', store_type: 'affiliate' });
-const co = await mk({ legal_name: 'Morty\'s Auto Parts (company) ' + stamp, trading_name: 'Vision Portmore', store_type: 'company' });
+const co = await mk({ legal_name: 'Morty\'s Auto Parts (company) ' + stamp, trading_name: 'Morty\'s Portmore', store_type: 'company' });
 ok(hub && spoke && co, 'a franchised, an affiliate and a company-owned store added');
 let F = await admin('GET', `/api/franchise/franchisees/${spoke}`);
 const C = await admin('GET', `/api/franchise/franchisees/${co}`);

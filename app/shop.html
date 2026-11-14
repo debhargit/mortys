@@ -1002,10 +1002,11 @@
   .veh-bar small{color:#6b5a2e;font-size:12px;flex-basis:100%}
 </style>
 <script src="assets/vehicles.js"></script>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b"></script>
 </head>
 <body>
 
@@ -2064,9 +2065,26 @@ document.addEventListener('DOMContentLoaded', function(){
     '<text x="60" y="82" font-family="system-ui,sans-serif" font-size="8" fill="#9aa4b0" text-anchor="middle">No photo</text>' +
     '</svg>'
   );
-  function photoOf(img){
-    if (!img) return NO_PHOTO;
-    return /\.(jpg|jpeg|png|webp|gif|svg|avif)$/i.test(img) ? encodeURI(img) : NO_PHOTO;
+  // A photo for each category, shown on parts with no real photo yet so the shop
+  // never shows a blank card. Swapped for the real part photo the moment one is
+  // uploaded. Files live in app/img/ (served at /img/).
+  var CATEGORY_IMG = {
+    engine: 'img/engine-filters-kingston-jamaica.jpg',
+    suspension: 'img/suspension-kingston-jamaica.webp',
+    brakes: 'img/brakes-kingston-jamaica.jpg',
+    fluids: 'img/oils-fluids-kingston-jamaica.jpg',
+    electrical: 'img/car-battery-kingston.jpg',
+    wheels: 'img/tires-kingston-jamaica.jpg',
+    accessories: 'img/vision-auto-parts-kingston.png',   // assorted parts — generic stand-in for accessories
+    body: 'img/headlights-kingston-jamaica.webp'
+  };
+  // img code -> category, filled as parts load (see absorb()), so photoOf can
+  // find the right category picture from just the img code.
+  var CAT_BY_IMG = {};
+  function photoOf(img, cat){
+    if (!img) return CATEGORY_IMG[cat] || NO_PHOTO;
+    if (/\.(jpg|jpeg|png|webp|gif|svg|avif)$/i.test(img)) return encodeURI(img);
+    return CATEGORY_IMG[cat || CAT_BY_IMG[img]] || NO_PHOTO;
   }
 
   // Real per-part stock, filled in from /api/products. Anything not covered by
@@ -3125,11 +3143,11 @@ document.addEventListener('DOMContentLoaded', function(){
     if (n) n.textContent = keys.length;
     if (tray){ if (keys.length >= 2) tray.classList.add('show'); else tray.classList.remove('show'); }
   }
-  window.toggleCompare = function(img, on){
+  window.toggleCompare = async function(img, on){
     if (on){
       var keys = Object.keys(window._foxdCmp);
       if (keys.length >= 4){
-        alert('You can compare up to 4 parts at a time.');
+        await vasAlert('You can compare up to 4 parts at a time.');
         var chk = document.querySelector('[data-cmp="'+img.replace(/"/g,'\\"')+'"]');
         if (chk) chk.checked = false;
         return;
@@ -3358,7 +3376,7 @@ document.addEventListener('DOMContentLoaded', function(){
         var vb = document.getElementById('vehBox'); if (vb) vb.open = false;
         saveCart(); render(currentFilter); renderCart();
         if (window._foxdRenderFeatured) window._foxdRenderFeatured();
-        alert('Quote request #' + quoteId + ' sent. Our parts desk will check availability and call you back with pricing.');
+        await vasAlert('Quote request #' + quoteId + ' sent. Our parts desk will check availability and call you back with pricing.');
       }
       return;
     }
@@ -3661,7 +3679,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
     window._foxdSubmitReview = async function(){
       var rating = parseInt(ratingInput.value, 10);
-      if (!rating){ alert('Please pick a star rating first.'); return; }
+      if (!rating){ await vasAlert('Please pick a star rating first.'); return; }
       var body = {
         name: document.getElementById('reviewName').value.trim(),
         city: document.getElementById('reviewCity').value.trim() || null,
@@ -3669,7 +3687,7 @@ document.addEventListener('DOMContentLoaded', function(){
         rating: rating,
         body: document.getElementById('reviewBody').value.trim(),
       };
-      if (!body.name || !body.body){ alert('Please fill in your name and review.'); return; }
+      if (!body.name || !body.body){ await vasAlert('Please fill in your name and review.'); return; }
       var btn = document.getElementById('reviewSubmit');
       btn.disabled = true; btn.textContent = 'Sending…';
       try {
@@ -3952,8 +3970,8 @@ document.addEventListener('DOMContentLoaded', function(){
       if (window._foxdRefreshPoints) window._foxdRefreshPoints();
     };
     window._foxdRefreshUI = refreshUI;
-    window._foxdSocial = function(provider){
-      var name = prompt(provider + ' demo — enter a display name to continue:');
+    window._foxdSocial = async function(provider){
+      var name = await vasPrompt(provider + ' demo — enter a display name to continue:');
       if (!name) return;
       var user = { email: name.toLowerCase().replace(/\s+/g,'.') + '@' + provider.toLowerCase() + '.com', name: name, via: provider };
       try { localStorage.setItem('mh_user', JSON.stringify(user)); } catch(e){}
@@ -4348,16 +4366,16 @@ document.addEventListener('DOMContentLoaded', function(){
         var r = await (window._foxdApi || fetch)(path, { method:'POST', body: body });
         if (r && r.user) user = r.user; else if (r && r.json) { var d = await r.json(); user = d && d.user; }
       } catch(e){
-        alert('Sign-in failed: ' + (e.message || 'check your email/password and try again'));
+        await vasAlert('Sign-in failed: ' + (e.message || 'check your email/password and try again'));
         return;
       }
-      if (!user) { alert('Sign-in failed — no user returned.'); return; }
+      if (!user) { await vasAlert('Sign-in failed — no user returned.'); return; }
       try { localStorage.setItem('mh_user', JSON.stringify(user)); } catch(e){}
       close(); refreshUI();
       if (window._foxdRefreshPoints) window._foxdRefreshPoints();
     };
-    window._foxdSocial = function(provider){
-      var name = prompt(provider + ' demo — enter a display name to continue:');
+    window._foxdSocial = async function(provider){
+      var name = await vasPrompt(provider + ' demo — enter a display name to continue:');
       if (!name) return;
       var user = { email: name.toLowerCase().replace(/\s+/g,'.') + '@' + provider.toLowerCase() + '.com', name: name, via: provider };
       try { localStorage.setItem('mh_user', JSON.stringify(user)); } catch(e){}
@@ -4468,6 +4486,7 @@ document.addEventListener('DOMContentLoaded', function(){
         if (!(priceVal > 0) && !(data && data.prices_visible === false)) return null;
         prices[img] = priceVal;
         liveStock[img] = isArr ? r[6] : r.stock_count;
+        CAT_BY_IMG[img] = VALID_CATS[cat] ? cat : 'accessories';
         return {
           n: name,
           m: make,

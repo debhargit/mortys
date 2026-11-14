@@ -108,10 +108,11 @@
     .band{break-inside:avoid;padding:14pt 16pt} .chap.s{break-before:auto}
   }
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
 <header><h1>Training</h1><nav><a href="/admin.html">Admin</a></nav></header>
@@ -364,10 +365,10 @@
         sec('📝', 'Questions', 'Choose one answer each', q.questions.map(function (x, i) { return '<div class="q"><b class="qh"><span class="qn">' + (i + 1) + '</span>' + esc(x.question) + '</b>' + x.choices.map(function (c, j) { return '<label><input type="radio" name="q' + x.id + '" value="' + j + '"> ' + esc(c) + '</label>'; }).join('') + '</div>'; }).join('') +
           '<div class="controls"><button class="primary" id="sb">Hand in</button><button id="cx">Cancel</button></div>', lk[1]);
       $('#cx').onclick = function () { lesson(key); };
-      $('#sb').onclick = function () {
+      $('#sb').onclick = async function () {
         var answers = {}, missing = 0;
         q.questions.forEach(function (x) { var c = $('input[name="q' + x.id + '"]:checked'); if (c) answers[x.id] = +c.value; else missing++; });
-        if (missing && !confirm(missing + ' question(s) not answered. Hand in anyway?')) return;
+        if (missing && !(await vasConfirm(missing + ' question(s) not answered. Hand in anyway?'))) return;
         api('/api/training/attempts/' + q.attempt, 'POST', { answers: answers }).then(function (r) {
           $('#out').innerHTML = band({ icon: r.passed ? '🏆' : '📖', color: r.passed ? '#15803d' : '#b45309', kicker: 'Quiz result · ' + q.title, title: (r.passed ? 'Passed' : 'Not passed yet') + ': ' + r.score + '%',
               text: r.passed ? 'Well done. The pass lasts a year.' : 'Read the lesson again, then retake the quiz.',
@@ -521,9 +522,9 @@
     $('#pAdd').onclick = function () { recordForm(p, null, again); };
     $('#pAsg').onclick = function () { assignForm([p.person.id], p.person.name, again); };
     all('[data-redit]').forEach(function (b) { b.onclick = function () { recordForm(p, p.records.find(function (r) { return String(r.id) === b.getAttribute('data-redit'); }), again); }; });
-    all('[data-rdel]').forEach(function (b) { b.onclick = function () { if (confirm('Delete this training record?')) api('/api/training/records/' + b.getAttribute('data-rdel'), 'DELETE').then(function () { toast('Deleted'); again(); }).catch(function (e) { toast(e.message); }); }; });
+    all('[data-rdel]').forEach(function (b) { b.onclick = async function () { if (await vasConfirm('Delete this training record?')) api('/api/training/records/' + b.getAttribute('data-rdel'), 'DELETE').then(function () { toast('Deleted'); again(); }).catch(function (e) { toast(e.message); }); }; });
     all('[data-adone]').forEach(function (b) { b.onclick = function () { api('/api/training/assignments/' + b.getAttribute('data-adone') + '/done', 'POST').then(function () { toast('Marked done'); again(); }).catch(function (e) { toast(e.message); }); }; });
-    all('[data-acan]').forEach(function (b) { b.onclick = function () { if (confirm('Cancel this assignment?')) api('/api/training/assignments/' + b.getAttribute('data-acan'), 'DELETE').then(function () { toast('Cancelled'); again(); }).catch(function (e) { toast(e.message); }); }; });
+    all('[data-acan]').forEach(function (b) { b.onclick = async function () { if (await vasConfirm('Cancel this assignment?')) api('/api/training/assignments/' + b.getAttribute('data-acan'), 'DELETE').then(function () { toast('Cancelled'); again(); }).catch(function (e) { toast(e.message); }); }; });
   }
   function myRecord() {
     return api('/api/training/me/record').then(function (p) { $('#out').innerHTML = profileHtml(p, false); wireProfile(p, false); });

@@ -1,0 +1,1046 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1b2b">
+<title>Warranty · Morty's Auto Parts</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#15803d; --bad:#b91c1c; --warn:#b45309; --chip:#eef2f7; --soft:#f8fafc; --blue:#1d4ed8; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --soft:#111a24; --ok:#22c55e; --bad:#f87171; --warn:#f59e0b; --blue:#60a5fa; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:max(10px,env(safe-area-inset-top)) 16px 0;position:sticky;top:0;z-index:5}
+  header .top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-bottom:8px}
+  header a.back{color:#fff;text-decoration:none;font-size:20px;opacity:.85}
+  header h1{font-size:17px;margin:0;flex:1;min-width:160px}
+  header .who{font-size:12.5px;opacity:.8}
+  nav.tabs{display:flex;gap:2px;overflow-x:auto}
+  nav.tabs a{color:#cbd5e1;text-decoration:none;padding:8px 14px;border-radius:8px 8px 0 0;font-weight:600;font-size:14px;white-space:nowrap}
+  nav.tabs a.on{background:var(--bg);color:var(--ink)}
+  nav.tabs b{font-size:11px;background:#d62828;color:#fff;border-radius:999px;padding:0 6px;margin-left:4px}
+  button,.btn{font:inherit;cursor:pointer;border:1px solid var(--line);border-radius:9px;padding:8px 14px;background:var(--card);color:var(--ink);font-weight:600;text-decoration:none;display:inline-block}
+  button:disabled{opacity:.5;cursor:default}
+  .primary{background:var(--red)!important;border-color:var(--red)!important;color:#fff!important}
+  .go{background:var(--ok)!important;border-color:var(--ok)!important;color:#fff!important}
+  .navy{background:var(--navy)!important;border-color:var(--navy)!important;color:#fff!important}
+  .ghost{background:transparent}
+  .sm{padding:5px 10px;font-size:13px}
+  header button{border-color:rgba(255,255,255,.25)}
+  input,select,textarea{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);width:100%;min-width:0}
+  input[type=checkbox],input[type=radio]{width:auto}
+  textarea{resize:vertical}
+  label.l{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;margin:0 0 3px}
+  .wrap{display:grid;grid-template-columns:minmax(300px,380px) 1fr;gap:14px;padding:14px;max-width:1500px;margin:0 auto}
+  .wrap.one{grid-template-columns:1fr}
+  @media (max-width:900px){ .wrap{grid-template-columns:1fr} .wrap.detail .listpane{display:none} .wrap.two:not(.detail) .mainpane{display:none} }
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px}
+  .listpane .card{overflow:hidden}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;padding:10px}
+  .chips button{padding:5px 10px;font-size:12.5px;border-radius:999px;background:var(--chip);border-color:transparent}
+  .chips button.on{background:var(--navy);color:#fff}
+  .chips b{font-size:11px;opacity:.75;margin-left:3px}
+  .search{padding:0 10px 10px;display:flex;gap:6px}
+  .crow{display:grid;grid-template-columns:44px 1fr auto;gap:2px 10px;padding:10px 12px;border-top:1px solid var(--line);cursor:pointer;align-items:center}
+  .crow:hover{background:var(--soft)} .crow.on{background:#fff7ed} @media (prefers-color-scheme: dark){ .crow.on{background:#2a2116} }
+  .crow .n{font-weight:700} .crow .s{font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .thumb{width:44px;height:44px;border-radius:8px;object-fit:cover;background:var(--chip);display:flex;align-items:center;justify-content:center;font-size:20px}
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:999px;text-transform:uppercase;letter-spacing:.4px;background:var(--chip);color:var(--ink);white-space:nowrap}
+  .pill.open{background:#fef3c7;color:#92400e} .pill.repair{background:#dbeafe;color:#1e3a8a} .pill.replace{background:#dcfce7;color:#166534}
+  .pill.refund{background:#ede9fe;color:#5b21b6} .pill.denied{background:#fee2e2;color:#991b1b} .pill.closed{background:#e5e7eb;color:#374151}
+  .pill.active{background:#dcfce7;color:#166534} .pill.expiring{background:#fef3c7;color:#92400e} .pill.expired{background:#fee2e2;color:#991b1b}
+  .empty{padding:30px 14px;text-align:center;color:var(--muted)}
+  .mainpane{min-width:0}
+  .paper{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .ph{background:var(--navy);color:#fff;padding:14px 18px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  .ph .t{flex:1;min-width:200px} .ph .t b{font-size:18px;letter-spacing:.5px} .ph .t div{font-size:12.5px;opacity:.85}
+  .sec{padding:14px 18px;border-top:1px solid var(--line)}
+  .sec h3{margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px 16px}
+  @media (max-width:640px){ .grid2,.grid3{grid-template-columns:1fr} }
+  .kv{display:grid;grid-template-columns:120px 1fr;gap:4px 10px;font-size:14px}
+  .kv span{color:var(--muted)}
+  .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .note{font-size:12.5px;color:var(--muted)}
+  .box{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .banner{padding:12px 14px;border-radius:10px;font-size:14px;margin-bottom:10px}
+  .banner b{font-size:16px}
+  .banner.warn{background:#fef3c7;color:#92400e} .banner.bad{background:#fee2e2;color:#991b1b} .banner.ok{background:#dcfce7;color:#166534} .banner.info{background:#dbeafe;color:#1e3a8a}
+  .bar{position:relative;height:14px;border-radius:7px;background:var(--chip);overflow:hidden;margin:8px 0 4px}
+  .bar i{position:absolute;top:0;bottom:0;left:0;background:var(--blue);opacity:.85}
+  .bar .seg{position:absolute;top:0;bottom:0}
+  .bar .now{position:absolute;top:-3px;bottom:-3px;width:3px;background:var(--ink);border-radius:2px}
+  .barlab{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted)}
+  .photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}
+  .photos figure{margin:0;position:relative;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--chip)}
+  .photos img{width:100%;height:120px;object-fit:cover;display:block;cursor:zoom-in}
+  .photos figcaption{font-size:11px;padding:3px 6px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .photos .x{position:absolute;top:4px;right:4px;padding:1px 7px;font-size:12px;border-radius:999px;background:rgba(0,0,0,.6);color:#fff;border:0}
+  .addph{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+  .addph label.btn{position:relative;overflow:hidden}
+  .addph input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer}
+  table.t{width:100%;border-collapse:collapse;font-size:14px}
+  table.t th{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);text-align:left;padding:6px 8px;border-bottom:2px solid var(--line);white-space:nowrap}
+  table.t td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+  table.t tr.click{cursor:pointer} table.t tr.click:hover td{background:var(--soft)}
+  .r{text-align:right} .nowrap{white-space:nowrap}
+  .tablewrap{overflow-x:auto}
+  @media (max-width:760px){
+    table.t.stack thead{display:none}
+    table.t.stack tr{display:block;padding:8px 0;border-bottom:1px solid var(--line)}
+    table.t.stack td{display:flex;justify-content:space-between;gap:10px;border:0;padding:3px 6px}
+    table.t.stack td::before{content:attr(data-h);color:var(--muted);font-size:12px}
+  }
+  .lines .ln{display:grid;grid-template-columns:52px 1fr auto;gap:4px 12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-top:8px;cursor:pointer;background:var(--card);align-items:center}
+  .lines .ln:hover{border-color:var(--navy)} .lines .ln.on{border-color:var(--navy);box-shadow:0 0 0 1px var(--navy) inset}
+  .lines .ln .s{font-size:12.5px;color:var(--muted)}
+  .covtag{font-weight:800;font-size:13px;text-align:right;white-space:nowrap}
+  .steps .st{display:grid;grid-template-columns:1fr 1fr 40px;gap:8px;margin-top:6px;align-items:end}
+  .prev{display:flex;gap:4px;align-items:flex-end;height:110px;margin-top:8px}
+  .prev div{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;font-size:10.5px;color:var(--muted)}
+  .prev i{display:block;width:100%;border-radius:4px 4px 0 0;background:#16a34a}
+  .prev i.p{background:#d97706} .prev i.x{background:#dc2626}
+  .plan{padding:12px 14px;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr auto;gap:4px 10px}
+  .plan:first-child{border-top:0}
+  dialog{border:0;border-radius:14px;padding:0;max-width:640px;width:calc(100% - 24px);background:var(--card);color:var(--ink)}
+  dialog::backdrop{background:rgba(0,0,0,.45)}
+  dialog .dh{padding:14px 18px;border-bottom:1px solid var(--line);font-weight:800}
+  dialog .db{padding:14px 18px;max-height:70vh;overflow:auto} dialog .df{padding:12px 18px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+  .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#111827;color:#fff;padding:10px 16px;border-radius:10px;z-index:50;display:none;max-width:90vw;font-size:14px}
+  .toast.bad{background:#b91c1c}
+  #camWrap{display:none;margin:8px 0} #camWrap.on{display:block} #cam{max-width:420px;border-radius:10px;overflow:hidden}
+  .viewer{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:60;display:none;align-items:center;justify-content:center;padding:20px}
+  .viewer.on{display:flex} .viewer img{max-width:100%;max-height:100%;border-radius:8px}
+  .print-only{display:none}
+  .terms{white-space:pre-wrap;font:14px/1.55 Georgia,"Times New Roman",serif;max-height:300px;overflow:auto;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--soft)}
+  .pad{position:relative;border:2px dashed #94a3b8;border-radius:12px;background:#fff;height:180px;touch-action:none}
+  .pad canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair}
+  .pad .hint{position:absolute;left:14px;bottom:8px;color:#94a3b8;font-size:12.5px;pointer-events:none}
+  .pad .xl{position:absolute;left:14px;right:14px;bottom:30px;border-bottom:1px solid #cbd5e1;pointer-events:none}
+  .sigimg{max-width:280px;max-height:110px;background:#fff;border:1px solid var(--line);border-radius:8px;display:block;margin:6px 0}
+  .pill.waiting{background:#fef3c7;color:#92400e} .pill.signed{background:#dcfce7;color:#166534} .pill.uploaded{background:#dbeafe;color:#1e3a8a} .pill.void{background:#e5e7eb;color:#374151}
+  .qr{background:#fff;padding:8px;border-radius:10px;display:inline-block;border:1px solid var(--line)} .qr svg,.qr img{display:block;width:200px;height:200px}
+  dialog.wide{max-width:780px}
+  @media print{
+    @page{margin:12mm}
+    body{background:#fff;color:#000;font-size:12.5px}
+    header,.listpane,.actions,.noprint,.toast,dialog,.addph{display:none!important}
+    .wrap{display:block;padding:0}
+    .mainpane{display:block!important}
+    .paper{border:1px solid #999;border-radius:0}
+    .ph{background:#fff!important;color:#000!important;border-bottom:2px solid #000}
+    .print-only{display:block}
+    .sec{padding:8px 12px}
+    .photos img{height:150px}
+  }
+</style>
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
+</head>
+<body>
+<header>
+  <div class="top">
+    <a class="back noprint" id="backLink" href="/admin.html" title="Back office">‹</a>
+    <h1>🛡 Warranty</h1>
+    <span class="who" id="who"></span>
+    <button class="primary" id="newBtn">+ New claim</button>
+    <button class="ghost" id="popBtn" style="color:#fff;display:none" title="Open in its own window">↗ Own window</button>
+  </div>
+  <nav class="tabs" id="tabs">
+    <a href="#claims" data-v="claims">Claims<b id="openCount" style="display:none"></b></a>
+    <a href="#register" data-v="register">Sold under warranty</a>
+    <a href="#rules" data-v="rules">Warranty rules</a>
+  </nav>
+</header>
+<div class="wrap" id="wrap"></div>
+
+<dialog id="dlg"><form method="dialog" id="dlgForm"><div class="dh" id="dlgTitle"></div><div class="db" id="dlgBody"></div><div class="df" id="dlgFoot"></div></form></dialog>
+<div class="toast" id="toast"></div>
+<div class="viewer" id="viewer"><img id="viewerImg" alt=""></div>
+
+<script src="/assets/vendor/html5-qrcode.min.js"></script>
+<script src="/assets/vendor/qrcode-generator.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function api(url, opts){
+    opts = opts || {}; opts.credentials = 'same-origin';
+    if (opts.json !== undefined) { opts.method = opts.method || 'POST'; opts.headers = { 'Content-Type': 'application/json' }; opts.body = JSON.stringify(opts.json); delete opts.json; }
+    return fetch(url, opts).then(function(r){
+      return r.text().then(function(t){ var j = {}; try { j = t ? JSON.parse(t) : {}; } catch (e) { j = { error: t }; }
+        if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; });
+    });
+  }
+  function money(n){ if (n == null || n === '') return '—'; return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function fdate(d){ if (!d) return '—'; var x = new Date(String(d).length === 10 ? d + 'T12:00:00' : d); return isNaN(x) ? d : x.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); }
+  function wcNo(id){ return 'WC-' + String(id).padStart(5, '0'); }
+  var T; function toast(m, bad){ var t = $('toast'); t.textContent = m; t.className = 'toast' + (bad ? ' bad' : ''); t.style.display = 'block'; clearTimeout(T); T = setTimeout(function(){ t.style.display = 'none'; }, 4200); }
+  var STATUS = { open: 'Open', repair: 'Repair', replace: 'Replaced', refund: 'Refunded', denied: 'Turned down', closed: 'Closed' };
+  var ID_TYPES = ['National ID', "Driver's licence", 'Passport', 'TRN', 'Other'];
+  var DISPOSITIONS = ['back to supplier', 'back to maker', 'scrap', 'keep for testing', 'returned to customer'];
+  var MAKER = { to_send: 'To send to maker', sent: 'Sent to maker', approved: 'Maker approved', rejected: 'Maker turned down', credited: 'Maker credited us' };
+  function opts(list, sel, blank){ return (blank != null ? '<option value="">' + blank + '</option>' : '') + list.map(function(x){ var v = Array.isArray(x) ? x[0] : x, l = Array.isArray(x) ? x[1] : x; return '<option value="' + esc(v) + '"' + (v === sel ? ' selected' : '') + '>' + esc(l) + '</option>'; }).join(''); }
+  // What a plan asks for before a claim is settled, in words.
+  function needsText(t){ if (!t) return ''; var a = [];
+    if (t.needs_id) a.push('customer ID'); if (t.needs_serial) a.push('serial no.'); if (t.needs_model) a.push('model no.'); if (t.needs_photo) a.push('photo'); if (t.return_old) a.push('old part back'); if (t.needs_signature) a.push('signed agreement');
+    return a.join(', '); }
+  var embedded = window.top !== window;
+  if (embedded) { $('backLink').style.display = 'none'; $('popBtn').style.display = ''; }
+  $('popBtn').onclick = function(){ window.open('/warranty.html' + location.hash, '_blank', 'noopener'); };
+
+  // ---- the rule maths, the same as warranty.js on the server ----------------
+  var DAY = 86400000;
+  function ymd(d){ return d ? new Date(d).toISOString().slice(0, 10) : null; }
+  function cleanTiers(t){
+    return (Array.isArray(t) ? t : []).map(function(x){ return { upto_pct: Math.max(0, Math.min(100, Number(x.upto_pct))), pays_pct: Math.max(0, Math.min(100, Number(x.pays_pct))) }; })
+      .filter(function(x){ return isFinite(x.upto_pct) && isFinite(x.pays_pct) && x.upto_pct > 0; }).sort(function(a, b){ return a.upto_pct - b.upto_pct; });
+  }
+  function payAt(terms, usedPct, usedDays){
+    if (usedPct > 100) return 100;
+    if (terms.method === 'prorated') return usedDays <= (Number(terms.free_days) || 0) ? 0 : Math.min(100, Math.round(usedPct));
+    if (terms.method === 'tiered') { var t = cleanTiers(terms.tiers).find(function(x){ return usedPct <= x.upto_pct; }); return t ? t.pays_pct : 100; }
+    return 0;
+  }
+  function coverText(c){
+    if (!c || !c.known) return c && c.none ? 'No warranty on this part' : 'Cover not known';
+    if (c.expired) return 'Warranty ended ' + fdate(c.until);
+    if (c.pays_pct === 0) return 'Free replacement';
+    if (c.pays_pct >= 100) return 'Not covered';
+    return (100 - c.pays_pct) + '% off a replacement';
+  }
+  function coverClass(c){ return !c || !c.known ? 'info' : c.expired || c.pays_pct >= 100 ? 'bad' : c.pays_pct > 0 ? 'warn' : 'ok'; }
+  function coverColor(c){ var k = coverClass(c); return k === 'ok' ? 'var(--ok)' : k === 'warn' ? 'var(--warn)' : k === 'bad' ? 'var(--bad)' : 'var(--muted)'; }
+  // The period as a bar: green where it is free, amber where the customer pays part, a marker at today.
+  function periodBar(terms, c){
+    if (!c || !c.known) return '';
+    var segs = [], prev = 0, steps = [];
+    if (terms.method === 'tiered') steps = cleanTiers(terms.tiers);
+    else if (terms.method === 'prorated') { var f = Math.round((Number(terms.free_days) || 0) / c.period_days * 100); steps = [{ upto_pct: Math.min(100, f), pays_pct: 0 }, { upto_pct: 100, pays_pct: 50 }]; }
+    else steps = [{ upto_pct: 100, pays_pct: 0 }];
+    steps.forEach(function(s){ if (s.upto_pct > prev) { segs.push('<span class="seg" style="left:' + prev + '%;width:' + (s.upto_pct - prev) + '%;background:' + (s.pays_pct === 0 ? '#16a34a' : s.pays_pct >= 100 ? '#dc2626' : '#d97706') + ';opacity:.55"></span>'); prev = s.upto_pct; } });
+    if (prev < 100) segs.push('<span class="seg" style="left:' + prev + '%;width:' + (100 - prev) + '%;background:#dc2626;opacity:.55"></span>');
+    return '<div class="bar">' + segs.join('') + '<span class="now" style="left:calc(' + Math.min(100, c.used_pct) + '% - 1px)"></span></div>' +
+      '<div class="barlab"><span>Sold ' + fdate(c.sold_on) + '</span><span>Day ' + c.used_days + ' of ' + c.period_days + ' (' + c.used_pct + '%)</span><span>Ends ' + fdate(c.until) + '</span></div>';
+  }
+
+  // ---- state + routing ---------------------------------------------------------
+  var meta = { plans: [], categories: [], counts: [] };
+  var st = { view: 'claims', status: 'open', mine: false, q: '', claimId: null, claims: [], regFilter: 'active', regQ: '' };
+  function route(){
+    var h = (location.hash || '#claims').slice(1), parts = h.split('/');
+    st.view = parts[0] || 'claims';
+    [].forEach.call(document.querySelectorAll('#tabs a'), function(a){ a.classList.toggle('on', a.dataset.v === (st.view === 'claim' || st.view === 'new' ? 'claims' : st.view)); });
+    if (st.view === 'claim') { st.claimId = parseInt(parts[1], 10); return showClaims(); }
+    if (st.view === 'new') return showNew(parts[1] ? parseInt(parts[1], 10) : null);
+    if (st.view === 'register') return showRegister();
+    if (st.view === 'rules') return showRules();
+    st.claimId = null; showClaims();
+  }
+  window.addEventListener('hashchange', route);
+  $('newBtn').onclick = function(){ location.hash = '#new'; };
+  function loadMeta(){
+    return api('/api/admin/warranty/meta').then(function(m){
+      meta = m;
+      var open = (m.counts.find(function(x){ return x.status === 'open'; }) || {}).n || 0;
+      $('openCount').textContent = open; $('openCount').style.display = open ? '' : 'none';
+    });
+  }
+
+  // ================================================================== claims ==
+  function showClaims(){
+    var w = $('wrap'); w.className = 'wrap two' + (st.claimId ? ' detail' : '');
+    if (!$('clist')) {
+      w.innerHTML = '<div class="listpane"><div class="card"><div class="chips" id="chips"></div>' +
+        '<div class="search"><input id="cq" placeholder="Search claim no., part, serial, customer, receipt"></div><div id="clist"><div class="empty">Loading…</div></div></div></div>' +
+        '<div class="mainpane" id="main"></div>';
+      $('cq').value = st.q;
+      var tq; $('cq').oninput = function(){ clearTimeout(tq); var v = this.value; tq = setTimeout(function(){ st.q = v; loadClaims(); }, 250); };
+    }
+    loadClaims();
+    if (st.claimId) loadClaim(st.claimId); else $('main').innerHTML = '<div class="card empty">Choose a claim on the left, or tap <b>+ New claim</b>.</div>';
+  }
+  function chips(){
+    var counts = {}; (meta.counts || []).forEach(function(x){ counts[x.status] = x.n; });
+    var all = Object.keys(counts).reduce(function(a, k){ return a + counts[k]; }, 0);
+    $('chips').innerHTML = [['', 'All', all]].concat(Object.keys(STATUS).map(function(k){ return [k, STATUS[k], counts[k] || 0]; })).map(function(x){
+      return '<button type="button" data-s="' + x[0] + '" class="' + (st.status === x[0] ? 'on' : '') + '">' + x[1] + (x[2] ? '<b>' + x[2] + '</b>' : '') + '</button>';
+    }).join('') + '<button type="button" data-mine="1" class="' + (st.mine ? 'on' : '') + '" title="Claims assigned to me">👤 Mine</button>';
+    $('chips').onclick = function(e){ var b = e.target.closest('button'); if (!b) return; if (b.dataset.mine) st.mine = !st.mine; else st.status = b.dataset.s; loadClaims(); };
+  }
+  function loadClaims(){
+    chips();
+    return api('/api/admin/warranty/claims?status=' + st.status + (st.mine ? '&mine=1' : '') + '&q=' + encodeURIComponent(st.q)).then(function(r){
+      st.claims = r.claims;
+      $('clist').innerHTML = r.claims.length ? r.claims.map(function(c){
+        return '<div class="crow' + (c.id === st.claimId ? ' on' : '') + '" data-id="' + c.id + '">' +
+          (c.first_photo ? '<img class="thumb" src="' + esc(c.first_photo) + '" alt="">' : '<span class="thumb">🛡</span>') +
+          '<div style="min-width:0"><div class="n">' + wcNo(c.id) + ' · ' + esc(c.product_name || c.product_img || 'Part') + '</div>' +
+          '<div class="s">' + esc(c.customer_name || 'No name') + (c.receipt_number ? ' · ' + esc(c.receipt_number) : '') + ' · ' + fdate(c.opened_at) + (c.photos ? ' · 📷 ' + c.photos : '') + (c.maker_status ? ' · 🏭 ' + esc(MAKER[c.maker_status] || c.maker_status) : '') + (c.assigned_name ? ' · → ' + esc(c.assigned_name) : '') + '</div></div>' +
+          '<div style="text-align:right"><span class="pill ' + c.status + '">' + STATUS[c.status] + '</span>' +
+          (c.customer_pays_usd != null && c.status !== 'denied' ? '<div class="s" style="margin-top:3px">' + (Number(c.pays_pct) === 0 ? 'free' : 'pays ' + money(c.customer_pays_usd)) + '</div>' : '') + '</div></div>';
+      }).join('') : '<div class="empty">' + (st.q ? 'No claims match.' : 'No claims here.') + '</div>';
+      $('clist').onclick = function(e){ var row = e.target.closest('.crow'); if (row) location.hash = '#claim/' + row.dataset.id; };
+    }).catch(function(e){ $('clist').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+
+  function loadClaim(id){
+    $('main').innerHTML = '<div class="card empty">Loading…</div>';
+    return api('/api/admin/warranty/claims/' + id).then(function(r){ renderClaim(r.claim, r.can_resolve); })
+      .catch(function(e){ $('main').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+  }
+  function renderClaim(c, canResolve){
+    var terms = c.terms || null, cov = c.cover, line = c.line || {};
+    var stock = c.stock_count;
+    var repl = c.replacement || null;
+    var unmet = (c.requirements || []).filter(function(x){ return !x.met; }).map(function(x){ return x.label; });
+    var banner = !terms ? '<div class="banner info">This claim was opened before warranty rules, so there is no cover worked out. Set the figures below by hand.</div>'
+      : '<div class="banner ' + coverClass(cov) + '"><b>' + esc(coverText(cov)) + '</b>' +
+        (cov && cov.known && !cov.expired && cov.pays_pct > 0 && cov.pays_pct < 100 ? ' · customer pays ' + cov.pays_pct + '% of the replacement' : '') +
+        (cov && cov.known ? '<div style="font-size:13px;margin-top:3px">On the day of the claim: day ' + cov.used_days + ' of ' + cov.period_days + ' (' + cov.used_pct + '% of the warranty used).</div>' : '<div style="font-size:13px;margin-top:3px">No sale date, so the part of the period used is not known.</div>') + '</div>';
+    var h = '<div class="paper">' +
+      '<div class="ph"><div class="t"><b>' + wcNo(c.id) + '</b><div>Opened ' + fdate(c.opened_at) + ' by ' + esc(c.opened_by_name || '—') + (c.resolved_at ? ' · ' + STATUS[c.status] + ' ' + fdate(c.resolved_at) + ' by ' + esc(c.resolved_by_name || '—') : '') + '</div></div>' +
+        '<span class="pill ' + c.status + '" style="font-size:13px">' + STATUS[c.status] + '</span>' +
+        '<button type="button" class="ghost sm noprint" style="color:#fff" id="backList">‹ List</button></div>' +
+      '<div class="sec">' + banner +
+        '<div class="actions noprint" style="margin-top:2px"><label class="note" for="asgSel">Assigned to</label><select id="asgSel" style="max-width:220px">' + opts(staffOpts(), c.assigned_to ? String(c.assigned_to) : '', 'Nobody yet') + '</select>' +
+          '<span style="flex:1"></span><button type="button" class="sm navy" id="msgBtn">✉ Message the customer</button></div>' +
+        '<div class="print-only">Assigned to: ' + esc(c.assigned_name || '—') + '</div></div>' +
+      '<div class="sec"><div class="grid2">' +
+        '<div><h3>The part (inventory item)</h3><div class="kv">' +
+          '<span>Part</span><b>' + esc(c.product_name || c.product_img || '—') + '</b>' +
+          '<span>Item code</span><div>' + esc(c.sku || c.product_img || '—') + '</div>' +
+          (c.serial ? '<span>Serial</span><div><code>' + esc(c.serial) + '</code></div>' : '') +
+          (c.model_number ? '<span>Model no.</span><div><code>' + esc(c.model_number) + '</code></div>' : '') +
+          '<span>Qty claimed</span><div>' + (c.qty || 1) + '</div>' +
+          '<span>In stock</span><div style="font-weight:700;color:' + (stock > 0 ? 'var(--ok)' : 'var(--bad)') + '">' + (stock == null ? '—' : stock + (c.bin_location ? ' · bin ' + esc(c.bin_location) : '')) + (stock === 0 ? ' — order one in' : '') + '</div>' +
+          (line.supplier_name ? '<span>Supplier</span><div>' + esc(line.supplier_name) + '</div>' : '') +
+        '</div></div>' +
+        '<div><h3>The sale</h3><div class="kv">' +
+          (c.receipt_number ? '<span>Receipt</span><b>' + esc(c.receipt_number) + '</b>' : '<span>Receipt</span><div class="note">No sale linked' + (c.sold_on ? ' (bought ' + fdate(c.sold_on) + ', customer says)' : '') + '</div>') +
+          (c.sold_on ? '<span>Sold</span><div>' + fdate(c.sold_on) + '</div>' : '') +
+          (line.unit_price_usd != null ? '<span>Paid</span><div>' + money(line.qty ? line.line_total_usd / line.qty : line.unit_price_usd) + ' each' + (line.qty > 1 ? ' (' + line.qty + ' bought)' : '') + '</div>' : '') +
+          '<span>Customer</span><div>' + esc(c.customer_name || '—') + (c.customer_phone ? '<br><a href="tel:' + esc(c.customer_phone) + '">' + esc(c.customer_phone) + '</a>' : '') + '</div>' +
+          '<span>Email</span><div>' + (c.customer_email ? '<a href="mailto:' + esc(c.customer_email) + '">' + esc(c.customer_email) + '</a>' : '<span class="note">none</span>') + ' <button type="button" class="sm ghost noprint" id="emEdit" style="padding:1px 8px">' + (c.customer_email ? 'Change' : 'Add') + '</button></div>' +
+          (c.vehicle ? '<span>Vehicle</span><div>' + esc(c.vehicle) + '</div>' : '') +
+          (c.other_claims && c.other_claims.length ? '<span>Other claims</span><div>' + c.other_claims.map(function(o){ return '<a href="#claim/' + o.id + '">' + wcNo(o.id) + '</a> ' + STATUS[o.status]; }).join(', ') + '</div>' : '') +
+        '</div></div>' +
+      '</div></div>' +
+      (terms ? '<div class="sec"><h3>Warranty rule · ' + esc(terms.name || 'Standard') + (terms.borrowed ? ' <span class="note">(sold before rules; uses the part\'s plan today)</span>' : '') + '</h3>' +
+        '<div style="font-size:14px">' + esc(cov ? cov.rule : '') + '</div>' + periodBar(terms, cov) +
+        '<div class="note" style="margin-top:6px">' + (terms.price_basis === 'original' ? 'Priced on what the customer paid.' : 'Priced on today\'s shelf price.') +
+        (terms.labour_covered ? ' Fitting labour is covered.' : ' Fitting labour is not covered.') + (terms.max_claims ? ' Up to ' + terms.max_claims + ' claim(s) per item.' : '') + (terms.maker_warranty ? ' Under the maker\'s warranty' + (terms.maker_name ? ' (' + esc(terms.maker_name) + ')' : '') + '.' : '') + '</div></div>' : '') +
+      agreementHtml(c) +
+      '<div class="sec"><h3>Fault reported</h3><div style="white-space:pre-wrap">' + esc(c.fault || '—') + '</div></div>' +
+      checksHtml(c) + makerHtml(c) + messagesHtml(c) +
+      '<div class="sec"><h3>Photos and scans (' + c.photos.length + ')</h3>' +
+        (c.photos.length ? '<div class="photos">' + c.photos.map(function(p){
+          return '<figure><img src="' + esc(p.url) + '" data-full="' + esc(p.url) + '" alt="">' + '<figcaption>' + esc(p.kind === 'scan' ? '📄 Scan' : p.kind === 'receipt' ? '🧾 Receipt' : '📷 Photo') + (p.caption ? ' · ' + esc(p.caption) : '') + ' · ' + esc(p.by_name || '') + '</figcaption>' +
+            '<button type="button" class="x noprint" data-del="' + p.id + '" title="Remove">✕</button></figure>';
+        }).join('') + '</div>' : '<div class="note">No pictures yet. Take a photo of the faulty part, scan the receipt or the supplier\'s report.</div>') +
+        photoAdder() +
+      '</div>' +
+      '<div class="sec"><h3>Settle the claim</h3>' +
+        '<div class="grid3">' +
+          '<div><label class="l">Replacement part</label><div style="display:flex;gap:6px"><input id="rpName" value="' + esc(repl ? (repl.sku || repl.img) + ' · ' + repl.name : 'Same part') + '" readonly><button type="button" class="sm" id="rpPick"' + (canResolve ? '' : ' disabled') + '>Change</button></div>' +
+            (repl ? '<div class="note">' + (repl.stock_count > 0 ? repl.stock_count + ' in stock' : 'none in stock') + '</div>' : '') + '</div>' +
+          '<div><label class="l">Qty</label><input id="rpQty" type="number" min="1" value="' + (c.qty || 1) + '"' + (canResolve ? '' : ' disabled') + '></div>' +
+          '<div><label class="l">Replacement price</label><input id="rpPrice" type="number" step="0.01" value="' + (c.replacement_price_usd != null ? c.replacement_price_usd : '') + '"' + (canResolve ? '' : ' disabled') + '></div>' +
+        '</div>' +
+        '<div class="box" style="margin-top:10px;display:flex;gap:18px;flex-wrap:wrap;align-items:center">' +
+          '<div>Shop covers<br><b style="font-size:20px;color:var(--ok)" id="rpCovered">' + money(c.covered_usd) + '</b></div>' +
+          '<div>Customer pays' + (c.pays_pct != null ? ' (' + c.pays_pct + '%)' : '') + '<br><b style="font-size:20px" id="rpPays">' + money(c.customer_pays_usd) + '</b></div>' +
+          (canResolve ? '<div style="flex:1;min-width:180px"><label class="l">Change what the customer pays</label><div style="display:flex;gap:6px"><input id="rpPaysIn" type="number" step="0.01" placeholder="' + (c.customer_pays_usd != null ? c.customer_pays_usd : '') + '"><button type="button" class="sm" id="rpSave">Save</button></div></div>' : '') +
+        '</div>' +
+        '<div class="note" style="margin-top:6px">Ring the replacement up at the till with the customer\'s share (give the rest as a line discount, note "' + wcNo(c.id) + '"), then put that receipt number here. A refund goes through Returns on the original receipt, where the warranty share is worked out the same way.</div>' +
+        '<div class="grid2" style="margin-top:10px">' +
+          '<div><label class="l">Replacement sale receipt</label><input id="rpReceipt" value="' + esc(c.replacement_sale ? c.replacement_sale.receipt_number : '') + '" placeholder="e.g. R-000123"' + (canResolve ? '' : ' disabled') + '></div>' +
+          '<div><label class="l">Note (why, what was done)</label><input id="rsNote" value="' + esc(c.resolution_note || '') + '"' + (canResolve ? '' : ' disabled') + '></div>' +
+        '</div>' +
+        (unmet.length ? '<div class="banner warn" style="margin-top:10px">Before it can be repaired, replaced or refunded: ' + esc(unmet.join(', ')) + '.</div>' : '') +
+        (canResolve ? '<label class="note noprint" style="display:block;margin-top:10px"><input type="checkbox" id="tellCust" checked> Tell the customer when I settle it' + (c.customer_email || c.customer_phone ? '' : ' (no email or phone on the claim yet)') + '</label>' +
+          '<div class="actions" style="margin-top:8px">' +
+          '<button type="button" class="go" data-st="replace">✓ Replaced</button>' +
+          '<button type="button" class="navy" data-st="repair">Repaired</button>' +
+          '<button type="button" data-st="refund">Refunded</button>' +
+          '<button type="button" class="primary" data-st="denied">Turn down</button>' +
+          '<button type="button" data-st="closed">Close</button>' +
+          (c.status !== 'open' ? '<button type="button" class="ghost" data-st="open">Reopen</button>' : '') +
+          '<span style="flex:1"></span><button type="button" class="ghost" id="prBtn">🖨 Print</button></div>'
+          : '<div class="banner info" style="margin-top:10px">A manager (or anyone allowed to process refunds) settles the claim.</div><div class="actions"><button type="button" class="ghost" id="prBtn">🖨 Print</button></div>') +
+      '</div>' +
+      '<div class="sec print-only"><div style="display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:20px"><div style="border-top:1px solid #000;padding-top:3px">Customer signature</div><div style="border-top:1px solid #000;padding-top:3px">For the shop</div></div></div>' +
+    '</div>';
+    $('main').innerHTML = h;
+    $('backList').onclick = function(){ location.hash = '#claims'; };
+    $('prBtn').onclick = function(){ window.print(); };
+    wirePhotoAdder(function(files, kind){ return uploadPhotos(c.id, files, kind).then(function(){ loadClaim(c.id); loadClaims(); }); });
+    [].forEach.call(document.querySelectorAll('.photos img'), function(im){ im.onclick = function(){ $('viewerImg').src = im.dataset.full; $('viewer').classList.add('on'); }; });
+    [].forEach.call(document.querySelectorAll('.photos [data-del]'), function(b){ b.onclick = async function(){
+      if (!(await vasConfirm('Remove this picture from the claim?'))) return;
+      api('/api/admin/warranty/claims/' + c.id + '/photos/' + b.dataset.del, { method: 'DELETE' }).then(function(){ loadClaim(c.id); }).catch(function(e){ toast(e.message, true); });
+    }; });
+    var patch = function(body, msg){ return api('/api/admin/warranty/claims/' + c.id, { method: 'PATCH', json: body }).then(function(){ toast(msg); loadClaims(); loadClaim(c.id); }).catch(function(e){ toast(e.message, true); }); };
+    $('emEdit').onclick = function(){
+      dialog('Customer email', '<label class="l">Email</label><input id="emIn" type="email" value="' + esc(c.customer_email || '') + '" placeholder="name@example.com">',
+        [{ label: 'Save', cls: 'primary', go: function(){ return patch({ customer_email: $('emIn').value.trim() }, 'Email saved.'); } }]);
+    };
+    wireChecks(c, patch);
+    $('asgSel').onchange = function(){ var v = this.value; patch({ assigned_to: v || null }, v ? 'Assigned to ' + this.options[this.selectedIndex].text + '; they have been told.' : 'Unassigned.'); };
+    $('msgBtn').onclick = function(){ messageDialog(c); };
+    $('agBtn').onclick = function(){ openAgreement({ sale_item_id: c.sale_item_id, claim_id: c.id, customer_email: c.customer_email }, function(){ loadClaim(c.id); }); };
+    if (!canResolve) return;
+    var save = function(body, msg){ return api('/api/admin/warranty/claims/' + c.id, { method: 'PATCH', json: body }).then(function(){ toast(msg); return loadMeta().then(function(){ loadClaims(); loadClaim(c.id); }); }).catch(function(e){ toast(e.message, true); }); };
+    $('rpQty').onchange = function(){ save({ qty: this.value }, 'Qty changed; figures worked out again.'); };
+    $('rpPrice').onchange = function(){ save({ replacement_price_usd: this.value }, 'Price changed.'); };
+    $('rpSave').onclick = function(){ var v = $('rpPaysIn').value; if (v === '') return toast('Type what the customer pays', true); save({ customer_pays_usd: v }, 'Saved.'); };
+    $('rpPick').onclick = function(){ pickProduct('Replacement part', function(p){ save({ replacement_img: p.img, replacement_price_usd: '' }, 'Replacement part set to ' + (p.sku || p.name) + '.'); }); };
+    [].forEach.call(document.querySelectorAll('[data-st]'), function(b){ b.onclick = function(){
+      var body = { status: b.dataset.st, resolution_note: $('rsNote').value.trim(), tell_customer: $('tellCust').checked };
+      var rec = $('rpReceipt').value.trim();
+      if (rec !== (c.replacement_sale ? c.replacement_sale.receipt_number : '')) body.replacement_receipt = rec;
+      if (b.dataset.st === 'denied' && !body.resolution_note) { $('rsNote').focus(); return toast('Say why the claim is turned down (in the note).', true); }
+      save(body, STATUS[b.dataset.st] + '.');
+    }; });
+  }
+  function staffOpts(){ return (meta.staff || []).map(function(u){ return [String(u.id), u.name]; }); }
+  var OUT = { sent: ['✓ sent', 'var(--ok)'], 'not set up': ['not sent: not set up', 'var(--warn)'], skipped: ['not sent', 'var(--muted)'], failed: ['failed', 'var(--bad)'] };
+  var EVW = { opened: 'Claim opened', assigned: 'Assigned', replace: 'Replaced', repair: 'Repaired', refund: 'Refunded', denied: 'Turned down', closed: 'Closed', maker: 'Maker update', message: 'Message' };
+  function messagesHtml(c){
+    var m = c.messages || [];
+    return '<div class="sec"><h3>Messages sent (' + m.length + ')</h3>' + (m.length ? '<div class="tablewrap"><table class="t stack"><thead><tr><th>When</th><th>Why</th><th>To</th><th>By</th><th>What</th><th>Result</th></tr></thead><tbody>' +
+      m.map(function(x){ var o = OUT[x.outcome] || [x.outcome, 'var(--muted)'];
+        return '<tr><td data-h="When" class="nowrap">' + fdate(x.created_at) + ' ' + new Date(x.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) + '</td>' +
+          '<td data-h="Why">' + esc(EVW[x.event] || x.event) + '</td>' +
+          '<td data-h="To">' + (x.audience === 'customer' ? '👤 Customer' : x.audience === 'company' ? '🏢 Company' : '👥 Staff') + ' · ' + (x.channel === 'sms' ? 'SMS' : x.channel === 'notice' ? 'bell' : 'email') + (x.sent_to ? '<br><span class="note">' + esc(x.sent_to) + '</span>' : '') + '</td>' +
+          '<td data-h="By">' + esc(x.by_name || 'system') + '</td>' +
+          '<td data-h="What" style="max-width:320px"><b>' + esc(x.subject || '') + '</b>' + (x.body ? '<div class="note" style="white-space:pre-wrap;max-height:3.2em;overflow:hidden">' + esc(x.body) + '</div>' : '') + '</td>' +
+          '<td data-h="Result" style="color:' + o[1] + ';font-weight:700">' + esc(o[0]) + (x.error ? '<div class="note" style="font-weight:400">' + esc(x.error) + '</div>' : '') + '</td></tr>';
+      }).join('') + '</tbody></table></div>' : '<div class="note">Nothing sent yet.</div>') + '</div>';
+  }
+  function messageDialog(c){
+    var no = wcNo(c.id), first = String(c.customer_name || '').split(' ')[0] || 'there';
+    dialog('Message ' + (c.customer_name || 'the customer'),
+      '<div class="note" style="margin-bottom:8px">' + (c.customer_email ? '✉ ' + esc(c.customer_email) : 'No email on the claim') + ' · ' + (c.customer_phone ? '📱 ' + esc(c.customer_phone) : 'no phone') + '</div>' +
+      '<label class="l">Subject (email)</label><input id="mSub" value="About your warranty claim ' + no + '">' +
+      '<label class="l" style="margin-top:8px">Message</label><textarea id="mTxt" rows="5">Hi ' + esc(first) + ', </textarea>' +
+      '<div style="display:flex;gap:16px;margin-top:8px"><label><input type="checkbox" id="mEm"' + (c.customer_email ? ' checked' : ' disabled') + '> Email</label><label><input type="checkbox" id="mSms"' + (c.customer_phone ? '' : ' disabled') + '> SMS</label></div>',
+      [{ label: 'Send', cls: 'primary', go: function(){
+        var ch = []; if ($('mEm').checked) ch.push('email'); if ($('mSms').checked) ch.push('sms');
+        return api('/api/admin/warranty/claims/' + c.id + '/message', { json: { subject: $('mSub').value, text: $('mTxt').value, channels: ch } }).then(function(r){
+          var bad = r.results.filter(function(x){ return x.outcome !== 'sent'; });
+          toast(bad.length ? 'Not sent: ' + bad.map(function(x){ return x.error || x.outcome; }).join('; ') : 'Sent.', !!bad.length); loadClaim(c.id);
+        });
+      } }]);
+  }
+  // ---- the plan's checks: ID, serial, model, old part back -------------------------
+  function checksHtml(c){
+    var t = c.terms || {}, req = c.requirements || [];
+    var showOld = t.return_old || c.old_returned;
+    if (!req.length && !showOld) return '';
+    var tick = function(k){ var r = req.find(function(x){ return x.key === k; }); return r ? (r.met ? '<b style="color:var(--ok)">✓</b> ' : '<b style="color:var(--bad)">•</b> ') : ''; };
+    var h = '<div class="sec"><h3>Checks this plan needs</h3><div class="grid2">';
+    if (t.needs_id || c.id_number) h += '<div class="box">' + tick('id') + '<b>Customer ID</b>' +
+      (c.id_number ? '<div style="margin-top:4px">' + esc(c.id_type || 'ID') + ' <code>' + esc(c.id_number) + '</code><div class="note">Checked by ' + esc(c.id_checked_by_name || '—') + ' · ' + fdate(c.id_checked_at) + '</div></div>' : '') +
+      '<div class="noprint" style="display:flex;gap:6px;margin-top:6px"><select id="ckIdType" style="max-width:150px">' + opts(ID_TYPES, c.id_type || 'National ID') + '</select><input id="ckIdNo" placeholder="ID number seen" value="' + esc(c.id_number || '') + '"><button type="button" class="sm" id="ckIdGo">Save</button></div></div>';
+    if (t.needs_serial || t.needs_model) h += '<div class="box">' + tick('serial') + (t.needs_model ? tick('model') : '') + '<b>' + (t.needs_serial && t.needs_model ? 'Serial and model numbers' : t.needs_model ? 'Model number' : 'Serial number') + '</b>' +
+      '<div class="noprint" style="display:grid;grid-template-columns:1fr 1fr auto;gap:6px;margin-top:6px">' +
+        '<input id="ckSerial" placeholder="Serial no." value="' + esc(c.serial || '') + '"><input id="ckModel" placeholder="Model no." value="' + esc(c.model_number || '') + '"><button type="button" class="sm" id="ckNumGo">Save</button></div>' +
+      '<div class="note">Read them off the old part (or its label photo).</div></div>';
+    if (showOld) h += '<div class="box">' + tick('old') + '<b>Old part</b> ' + (t.return_old ? '<span class="note">must come back</span>' : '') +
+      (c.old_returned ? '<div style="margin-top:4px;color:var(--ok);font-weight:700">Handed back ' + fdate(c.old_returned_at) + ' · ' + esc(c.old_returned_by_name || '') + '</div>' : '<div class="note" style="margin-top:4px">Not handed back yet.</div>') +
+      '<div class="noprint" style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">' + (c.old_returned ? '<button type="button" class="sm ghost" id="ckOldNo">Undo</button>' : '<button type="button" class="sm go" id="ckOldYes">✓ Old part received</button>') +
+        '<select id="ckDisp" style="max-width:200px">' + opts(DISPOSITIONS, c.old_disposition, 'What happens to it…') + '</select></div></div>';
+    return h + '</div></div>';
+  }
+  function makerHtml(c){
+    var t = c.terms || {};
+    if (!t.maker_warranty && !c.maker_status && !c.maker_name) return '';
+    return '<div class="sec"><h3>Maker\'s warranty</h3><div class="grid3">' +
+      '<div><label class="l">Maker / brand</label><input id="mkName" value="' + esc(c.maker_name || t.maker_name || '') + '"></div>' +
+      '<div><label class="l">Their claim / RMA no.</label><input id="mkNo" value="' + esc(c.maker_claim_no || '') + '"></div>' +
+      '<div><label class="l">Where it is</label><select id="mkSt">' + opts(Object.keys(MAKER).map(function(k){ return [k, MAKER[k]]; }), c.maker_status, '—') + '</select></div>' +
+      '<div style="grid-column:1/-1"><label class="l">Note</label><div style="display:flex;gap:6px"><input id="mkNote" value="' + esc(c.maker_note || '') + '" placeholder="e.g. sent with DHL 12 Nov, credit note expected"><button type="button" class="sm noprint" id="mkGo">Save</button></div></div>' +
+    '</div><div class="note" style="margin-top:6px">The part is covered by its maker: send the old part and paperwork to them, and track the credit here.</div></div>';
+  }
+  function wireChecks(c, patch){
+    var on = function(id, fn){ var el = $(id); if (el) el.onclick = fn; };
+    on('ckIdGo', function(){ var n = $('ckIdNo').value.trim(); if (!n) return toast('Type the ID number you checked', true); patch({ id_type: $('ckIdType').value, id_number: n }, 'ID recorded.'); });
+    on('ckNumGo', function(){ patch({ serial: $('ckSerial').value.trim(), model_number: $('ckModel').value.trim() }, 'Saved.'); });
+    on('ckOldYes', function(){ patch({ old_returned: true, old_disposition: $('ckDisp').value || null }, 'Old part received.'); });
+    on('ckOldNo', function(){ patch({ old_returned: false }, 'Marked as not received.'); });
+    var d = $('ckDisp'); if (d) d.onchange = function(){ patch({ old_disposition: d.value || null }, 'Saved.'); };
+    on('mkGo', function(){ patch({ maker_name: $('mkName').value.trim(), maker_claim_no: $('mkNo').value.trim(), maker_status: $('mkSt').value, maker_note: $('mkNote').value.trim() }, 'Maker details saved.'); });
+    var ms = $('mkSt'); if (ms) ms.onchange = function(){ patch({ maker_status: ms.value }, 'Saved.'); };
+  }
+  $('viewer').onclick = function(){ $('viewer').classList.remove('on'); };
+
+  // ---- photos: camera, scan, files ----------------------------------------------
+  function photoAdder(){
+    return '<div class="addph noprint">' +
+      '<label class="btn navy">📷 Take photo<input type="file" accept="image/*" capture="environment" data-kind="photo"></label>' +
+      '<label class="btn">📄 Scan a document<input type="file" accept="image/*" capture="environment" data-kind="scan"></label>' +
+      '<label class="btn">🖼 Upload pictures<input type="file" accept="image/*" multiple data-kind="photo"></label>' +
+      '<span class="note" id="phMsg"></span></div>';
+  }
+  function wirePhotoAdder(onFiles){
+    [].forEach.call(document.querySelectorAll('.addph input[type=file]'), function(inp){
+      inp.onchange = function(){
+        var files = [].slice.call(inp.files || []); inp.value = '';
+        if (!files.length) return;
+        var m = $('phMsg'); if (m) m.textContent = 'Uploading ' + files.length + '…';
+        Promise.resolve(onFiles(files, inp.dataset.kind)).then(function(){ if (m) m.textContent = ''; }).catch(function(e){ if (m) m.textContent = ''; toast(e.message, true); });
+      };
+    });
+  }
+  // Phone pictures are big: shrink to 1600px JPEG before sending (scans keep more detail).
+  function shrink(file, kind){
+    return new Promise(function(resolve){
+      if (!/^image\/(jpe?g|png|webp)$/i.test(file.type) || file.size < 400000) return resolve(file);
+      var max = kind === 'scan' ? 2400 : 1600, img = new Image(), url = URL.createObjectURL(file);
+      img.onload = function(){
+        var s = Math.min(1, max / Math.max(img.width, img.height)), cv = document.createElement('canvas');
+        cv.width = Math.round(img.width * s); cv.height = Math.round(img.height * s);
+        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height); URL.revokeObjectURL(url);
+        cv.toBlob(function(b){ resolve(b ? new File([b], (file.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' }) : file); }, 'image/jpeg', 0.85);
+      };
+      img.onerror = function(){ URL.revokeObjectURL(url); resolve(file); };
+      img.src = url;
+    });
+  }
+  function uploadPhotos(claimId, files, kind){
+    return Promise.all(files.map(function(f){ return shrink(f, kind); })).then(function(fs){
+      var fd = new FormData(); fd.append('kind', kind || 'photo');
+      fs.forEach(function(f){ fd.append('photos', f, f.name || 'photo.jpg'); });
+      return api('/api/admin/warranty/claims/' + claimId + '/photos', { method: 'POST', body: fd });
+    });
+  }
+
+  // ---- product picker ------------------------------------------------------------
+  function dialog(title, body, buttons, wide){
+    $('dlg').classList.toggle('wide', !!wide);
+    $('dlgTitle').textContent = title; $('dlgBody').innerHTML = body;
+    $('dlgFoot').innerHTML = '<button value="cancel" class="ghost">Close</button>' + (buttons || []).map(function(b, i){ return '<button type="button" class="' + (b.cls || '') + '" data-i="' + i + '">' + b.label + '</button>'; }).join('');
+    (buttons || []).forEach(function(b, i){ $('dlgFoot').querySelector('[data-i="' + i + '"]').onclick = function(){ Promise.resolve(b.go()).then(function(close){ if (close !== false) $('dlg').close(); }).catch(function(e){ toast(e.message, true); }); }; });
+    if (!$('dlg').open) $('dlg').showModal();
+  }
+  function pickProduct(title, onPick){
+    dialog(title, '<input id="ppQ" placeholder="Item code, name, barcode, supplier part no." autofocus><div id="ppList" style="margin-top:8px"></div>');
+    var tq, run = function(){ api('/api/admin/warranty/products?q=' + encodeURIComponent($('ppQ').value)).then(function(r){
+      $('ppList').innerHTML = r.products.slice(0, 60).map(function(p, i){
+        return '<div class="crow" data-i="' + i + '" style="grid-template-columns:1fr auto"><div style="min-width:0"><div class="n">' + esc(p.sku || p.img) + ' · ' + esc(p.name) + '</div><div class="s">' + esc(p.category || '') + ' · ' + (p.stock_count > 0 ? p.stock_count + ' in stock' : 'none in stock') + (p.warranty_days ? ' · ' + p.warranty_days + ' day warranty' : '') + '</div></div><b>' + money(p.price_usd) + '</b></div>';
+      }).join('') || '<div class="empty">Nothing found.</div>';
+      $('ppList').onclick = function(e){ var row = e.target.closest('.crow'); if (!row) return; $('dlg').close(); onPick(r.products[+row.dataset.i]); };
+    }); };
+    $('ppQ').oninput = function(){ clearTimeout(tq); tq = setTimeout(run, 250); };
+    run();
+  }
+
+  // ================================================================ new claim ==
+  var nc = null;
+  function showNew(saleItemId){
+    var w = $('wrap'); w.className = 'wrap one';
+    nc = { line: null, product: null, files: [] };
+    w.innerHTML = '<div class="paper" style="max-width:980px;margin:0 auto;width:100%">' +
+      '<div class="ph"><div class="t"><b>New warranty claim</b><div>Find the sale, check the cover, add photos.</div></div><button type="button" class="ghost sm" style="color:#fff" id="ncCancel">Cancel</button></div>' +
+      '<div class="sec"><h3>1 · Find what was sold</h3>' +
+        '<div style="display:flex;gap:6px"><input id="ncQ" placeholder="Receipt no., serial, customer phone or name, item code" autocomplete="off"><button type="button" id="ncCam" title="Scan a receipt or part barcode with the camera">📷</button></div>' +
+        '<div id="camWrap"><div id="cam"></div></div>' +
+        '<div class="note" style="margin-top:4px">A barcode scanner works here too: scan the receipt or the part, it types it in.</div>' +
+        '<div class="lines" id="ncLines"></div>' +
+        '<div style="margin-top:10px"><button type="button" class="ghost sm" id="ncNoRec">No receipt? Pick the part from inventory</button></div>' +
+        '<div id="ncNoRecBox" style="display:none" class="box"></div>' +
+      '</div>' +
+      '<div class="sec" id="ncCover" style="display:none"></div>' +
+      '<div class="sec"><h3>2 · The claim</h3><div class="grid2">' +
+        '<div><label class="l">Customer name</label><input id="ncName"></div>' +
+        '<div><label class="l">Phone</label><input id="ncPhone" type="tel"></div>' +
+        '<div><label class="l">Email</label><input id="ncEmail" type="email" placeholder="for updates on the claim"></div>' +
+        '<div><label class="l">Vehicle</label><input id="ncVeh" placeholder="e.g. 2015 Toyota Axio"></div>' +
+        '<div><label class="l">Qty</label><input id="ncQty" type="number" min="1" value="1"></div>' +
+        '<div style="grid-column:1/-1" id="ncNeeds"></div>' +
+        '<div style="grid-column:1/-1"><label class="l">What is wrong</label><textarea id="ncFault" rows="3" placeholder="What the customer says, what you see, when it started"></textarea></div>' +
+      '</div></div>' +
+      '<div class="sec"><h3>3 · Photos and scans</h3><div class="photos" id="ncPh"></div>' + photoAdder() + '</div>' +
+      '<div class="sec"><div class="actions"><label class="note">Assign to <select id="ncAsg" style="width:auto;display:inline-block;padding:5px 8px">' + opts(staffOpts(), '', 'Automatic (plan / default)') + '</select></label>' +
+        '<label class="note"><input type="checkbox" id="ncTell" checked> Tell the customer</label>' +
+        '<button type="button" class="primary" id="ncGo">Open the claim</button><label class="note" id="ncOverBox" style="display:none"><input type="checkbox" id="ncOver"> claim anyway</label><span class="note" id="ncMsg"></span></div></div>' +
+    '</div>';
+    $('ncCancel').onclick = function(){ stopCam(); location.hash = '#claims'; };
+    var tq; $('ncQ').oninput = function(){ clearTimeout(tq); tq = setTimeout(findLines, 300); };
+    $('ncQ').onkeydown = function(e){ if (e.key === 'Enter') { e.preventDefault(); clearTimeout(tq); findLines(); } };
+    $('ncCam').onclick = function(){ camOn ? stopCam() : startCam(function(code){ $('ncQ').value = code; findLines(); }); };
+    $('ncNoRec').onclick = function(){ pickProduct('Which part?', function(p){ nc.line = null; nc.product = p; noReceipt(); }); };
+    wirePhotoAdder(function(files, kind){ files.forEach(function(f){ nc.files.push({ f: f, kind: kind, url: URL.createObjectURL(f) }); }); drawQueued(); });
+    $('ncGo').onclick = openClaim;
+    if (saleItemId) api('/api/admin/warranty/sale-items/' + saleItemId).then(function(r){ pickLine(r.line); }).catch(function(e){ toast(e.message, true); });
+    else $('ncQ').focus();
+  }
+  function drawQueued(){
+    $('ncPh').innerHTML = nc.files.map(function(x, i){ return '<figure><img src="' + x.url + '" alt=""><figcaption>' + (x.kind === 'scan' ? '📄 Scan' : '📷 Photo') + '</figcaption><button type="button" class="x" data-rm="' + i + '">✕</button></figure>'; }).join('');
+    [].forEach.call($('ncPh').querySelectorAll('[data-rm]'), function(b){ b.onclick = function(){ nc.files.splice(+b.dataset.rm, 1); drawQueued(); }; });
+  }
+  function covTag(l){ return '<div class="covtag" style="color:' + coverColor(l.cover) + '">' + esc(coverText(l.cover)) + (l.cover && l.cover.known && !l.cover.expired && l.customer_pays_usd > 0 ? '<div class="s" style="font-weight:600">pays ' + money(l.customer_pays_usd) + '</div>' : '') + '</div>'; }
+  function findLines(){
+    var q = $('ncQ').value.trim();
+    if (q.length < 2) { $('ncLines').innerHTML = ''; return; }
+    api('/api/admin/warranty/find?q=' + encodeURIComponent(q)).then(function(r){
+      nc.found = r.lines;
+      $('ncLines').innerHTML = r.lines.length ? r.lines.map(function(l, i){
+        return '<div class="ln' + (nc.line && nc.line.sale_item_id === l.sale_item_id ? ' on' : '') + '" data-i="' + i + '">' +
+          (l.photo_url ? '<img class="thumb" style="width:52px;height:52px" src="' + esc(l.photo_url) + '" alt="">' : '<span class="thumb" style="width:52px;height:52px">⚙</span>') +
+          '<div style="min-width:0"><b>' + esc(l.product_name || l.description) + '</b>' + (l.serial_number ? ' <code style="font-size:12px">S/N ' + esc(l.serial_number) + '</code>' : '') +
+          '<div class="s">' + esc(l.receipt_number || '') + ' · ' + fdate(l.sold_on) + ' · ' + esc(l.customer_name || 'Walk-in') + (l.customer_phone ? ' · ' + esc(l.customer_phone) : '') + ' · qty ' + l.qty + (l.returned_qty ? ' (' + l.returned_qty + ' returned)' : '') + (l.claims ? ' · ' + l.claims + ' claim(s) before' : '') + '</div></div>' +
+          covTag(l) + '</div>';
+      }).join('') : '<div class="empty">Nothing sold matches "' + esc(q) + '".</div>';
+      $('ncLines').onclick = function(e){ var row = e.target.closest('.ln'); if (row) pickLine(nc.found[+row.dataset.i]); };
+    }).catch(function(e){ toast(e.message, true); });
+  }
+  function pickLine(l){
+    nc.line = l; nc.product = null; $('ncNoRecBox').style.display = 'none';
+    [].forEach.call(document.querySelectorAll('#ncLines .ln'), function(x){ x.classList.toggle('on', nc.found && nc.found[+x.dataset.i] && nc.found[+x.dataset.i].sale_item_id === l.sale_item_id); });
+    if (!nc.found || !nc.found.some(function(x){ return x.sale_item_id === l.sale_item_id; })) { nc.found = [l]; $('ncLines').innerHTML = ''; }
+    if (!$('ncName').value) $('ncName').value = l.customer_name || '';
+    if (!$('ncPhone').value) $('ncPhone').value = l.customer_phone || '';
+    if (!$('ncVeh').value) $('ncVeh').value = l.vehicle_info || '';
+    if (!$('ncEmail').value) $('ncEmail').value = l.customer_email || '';
+    drawNeeds(l.terms, l.serial_number);
+    drawCover(l, l.terms, l.cover, { receipt: l.receipt_number, sold: l.sold_on, paid: l.qty ? l.line_total_usd / l.qty : l.unit_price_usd });
+    $('ncOverBox').style.display = l.claims_used_up ? '' : 'none';
+  }
+  function noReceipt(){
+    var p = nc.product, box = $('ncNoRecBox'); box.style.display = '';
+    [].forEach.call(document.querySelectorAll('#ncLines .ln'), function(x){ x.classList.remove('on'); });
+    box.innerHTML = '<b>' + esc(p.sku || p.img) + ' · ' + esc(p.name) + '</b><div class="grid2" style="margin-top:8px"><div><label class="l">Bought on (customer says)</label><input id="ncSold" type="date" max="' + meta.today + '"></div><div class="note" style="align-self:end">The sale date sets how much of the warranty is used.</div></div>';
+    var go = function(){ api('/api/admin/warranty/product-cover?img=' + encodeURIComponent(p.img) + '&sold_on=' + ($('ncSold').value || '')).then(function(r){ nc.product = Object.assign(p, r.product); drawCover(r.product, r.product.terms, r.product.cover, { sold: $('ncSold').value }); drawNeeds(r.product.terms, ''); }); };
+    $('ncSold').onchange = go; go();
+  }
+  function drawNeeds(t, serial){
+    t = t || {}; var h = '';
+    if (t.needs_id) h += '<div class="grid2"><div><label class="l">ID type (plan needs ID)</label><select id="ncIdType">' + opts(ID_TYPES, 'National ID') + '</select></div><div><label class="l">ID number seen</label><input id="ncIdNo"></div></div>';
+    if (t.needs_serial || t.needs_model) h += '<div class="grid2" style="margin-top:8px">' +
+      '<div><label class="l">Serial no.' + (t.needs_serial ? ' (plan needs it)' : '') + '</label><input id="ncSerial" value="' + esc(serial || '') + '"></div>' +
+      '<div><label class="l">Model no.' + (t.needs_model ? ' (plan needs it)' : '') + '</label><input id="ncModel"></div></div>';
+    var notes = [];
+    if (t.return_old) notes.push('The old part must come back before the claim is settled.'); else if (t.method) notes.push('The old part does not need to come back.');
+    if (t.maker_warranty) notes.push('Covered by the maker' + (t.maker_name ? ' (' + t.maker_name + ')' : '') + ': the claim will be tracked with them.');
+    if (notes.length) h += '<div class="banner info" style="margin-top:8px;margin-bottom:0">' + notes.map(esc).join(' ') + '</div>';
+    $('ncNeeds').innerHTML = h;
+  }
+  function drawCover(x, terms, cov, sale){
+    var el = $('ncCover'); el.style.display = '';
+    el.innerHTML = '<h3>Cover · ' + esc(terms ? terms.name : '') + '</h3>' +
+      '<div class="banner ' + coverClass(cov) + '"><b>' + esc(coverText(cov)) + '</b>' +
+        (cov && cov.known && !cov.expired ? '<div style="font-size:13.5px;margin-top:4px">Replacement ' + money(x.replacement_price_usd) + ' · shop covers <b>' + money(x.covered_usd) + '</b> · customer pays <b>' + money(x.customer_pays_usd) + '</b></div>' : '') + '</div>' +
+      '<div style="font-size:14px">' + esc(cov ? cov.rule : '') + '</div>' + (terms ? periodBar(terms, cov) : '') +
+      '<div class="kv" style="margin-top:10px">' +
+        '<span>Part</span><div><b>' + esc(x.product_name || x.description || x.name) + '</b> · ' + esc(x.sku || x.product_img || x.img || '') + '</div>' +
+        '<span>In stock</span><div style="font-weight:700;color:' + (x.stock_count > 0 ? 'var(--ok)' : 'var(--bad)') + '">' + (x.stock_count == null ? '—' : x.stock_count + (x.bin_location ? ' · bin ' + esc(x.bin_location) : '')) + '</div>' +
+        (sale.receipt ? '<span>Receipt</span><div>' + esc(sale.receipt) + ' · sold ' + fdate(sale.sold) + ' · paid ' + money(sale.paid) + '</div>' : '') +
+      '</div>' + (terms && terms.needs_photo ? '<div class="banner warn" style="margin-top:10px">This plan needs a photo of the part before the claim is settled.</div>' : '');
+  }
+  function openClaim(){
+    var m = $('ncMsg');
+    if (!nc.line && !nc.product) return toast('Find the sale (or pick the part) first.', true);
+    if (!$('ncFault').value.trim()) { $('ncFault').focus(); return toast('Say what is wrong.', true); }
+    var body = { fault: $('ncFault').value.trim(), customer_name: $('ncName').value.trim(), customer_phone: $('ncPhone').value.trim(), customer_email: $('ncEmail').value.trim(), vehicle: $('ncVeh').value.trim(), qty: $('ncQty').value, override: $('ncOver').checked };
+    if ($('ncIdNo') && $('ncIdNo').value.trim()) { body.id_type = $('ncIdType').value; body.id_number = $('ncIdNo').value.trim(); }
+    if ($('ncSerial') && $('ncSerial').value.trim()) body.serial = $('ncSerial').value.trim();
+    if ($('ncAsg').value) body.assigned_to = $('ncAsg').value;
+    body.tell_customer = $('ncTell').checked;
+    if ($('ncModel') && $('ncModel').value.trim()) body.model_number = $('ncModel').value.trim();
+    if (nc.line) body.sale_item_id = nc.line.sale_item_id; else { body.product_img = nc.product.img; body.sold_on = ($('ncSold') && $('ncSold').value) || null; }
+    $('ncGo').disabled = true; m.textContent = 'Opening…';
+    api('/api/admin/warranty/claims', { json: body }).then(function(r){
+      var up = nc.files.length ? Promise.all([['photo'], ['scan']].map(function(k){ var fs = nc.files.filter(function(x){ return x.kind === k[0]; }).map(function(x){ return x.f; }); return fs.length ? uploadPhotos(r.id, fs, k[0]) : null; })) : Promise.resolve();
+      return up.then(function(){ toast(wcNo(r.id) + ' opened.'); stopCam(); return loadMeta(); }).then(function(){ st.status = 'open'; location.hash = '#claim/' + r.id; },
+        function(e){ toast('Claim opened, but a picture did not upload: ' + e.message, true); location.hash = '#claim/' + r.id; });
+    }).catch(function(e){ $('ncGo').disabled = false; m.textContent = ''; toast(e.message, true); if (/claim anyway/.test(e.message)) $('ncOverBox').style.display = ''; });
+  }
+
+  // ---- camera barcode scan ------------------------------------------------------
+  var cam = null, camOn = false;
+  function startCam(onCode){
+    if (!window.isSecureContext) return toast('The camera scanner needs the secure (https) address of the system. A USB scanner works anywhere.', true);
+    if (!window.Html5Qrcode) return toast('Camera scanner did not load', true);
+    $('camWrap').classList.add('on');
+    cam = cam || new Html5Qrcode('cam', { verbose: false });
+    cam.start({ facingMode: 'environment' }, { fps: 10, qrbox: function(w, h){ return { width: Math.floor(w * 0.85), height: Math.floor(Math.min(h, w) * 0.45) }; } },
+      function(text){ stopCam(); onCode(text.replace(/^(ITEM|SKU|RCPT):/i, '')); }, function(){})
+      .then(function(){ camOn = true; $('ncCam').textContent = '✖'; })
+      .catch(function(e){ $('camWrap').classList.remove('on'); toast('Camera: ' + (e && e.message ? e.message : e), true); });
+  }
+  function stopCam(){ if (!cam || !camOn) return; cam.stop().catch(function(){}).then(function(){ camOn = false; var b = $('ncCam'); if (b) b.textContent = '📷'; var w = $('camWrap'); if (w) w.classList.remove('on'); }); }
+
+  // =============================================================== register ==
+  function showRegister(){
+    var w = $('wrap'); w.className = 'wrap one';
+    w.innerHTML = '<div class="card"><div class="chips" id="rchips"></div><div class="search"><input id="rq" placeholder="Search receipt, serial, customer, phone, part"></div><div class="tablewrap" id="rlist"><div class="empty">Loading…</div></div></div>';
+    var f = [['active', 'Under warranty'], ['expiring', 'Ending in 30 days'], ['expired', 'Ended'], ['claimed', 'Has an open claim']];
+    $('rchips').innerHTML = f.map(function(x){ return '<button type="button" data-f="' + x[0] + '" class="' + (st.regFilter === x[0] ? 'on' : '') + '">' + x[1] + '</button>'; }).join('');
+    $('rchips').onclick = function(e){ var b = e.target.closest('button'); if (!b) return; st.regFilter = b.dataset.f; showRegister(); };
+    $('rq').value = st.regQ;
+    var tq; $('rq').oninput = function(){ clearTimeout(tq); var v = this.value; tq = setTimeout(function(){ st.regQ = v; loadReg(); }, 300); };
+    loadReg();
+  }
+  function loadReg(){
+    api('/api/admin/warranty/register?filter=' + st.regFilter + '&q=' + encodeURIComponent(st.regQ)).then(function(r){
+      $('rlist').innerHTML = r.register.length ? '<table class="t stack"><thead><tr><th>Part</th><th>Receipt</th><th>Sold</th><th>Customer</th><th>Rule</th><th>Used</th><th>Cover today</th><th>Ends</th><th>Agreement</th><th></th></tr></thead><tbody>' +
+        r.register.map(function(x){
+          return '<tr><td data-h="Part"><b>' + esc(x.product_name || x.product_img) + '</b>' + (x.serial ? '<br><code style="font-size:12px">' + esc(x.serial) + '</code>' : '') + '</td>' +
+            '<td data-h="Receipt">' + esc(x.receipt_number || '—') + '</td><td data-h="Sold" class="nowrap">' + fdate(x.sold_on) + '</td>' +
+            '<td data-h="Customer">' + esc(x.customer_name || '—') + (x.customer_phone ? '<br><span class="note">' + esc(x.customer_phone) + '</span>' : '') + '</td>' +
+            '<td data-h="Rule">' + esc(x.plan_name || 'Standard') + '</td>' +
+            '<td data-h="Used" class="nowrap">' + (x.cover && x.cover.known ? Math.min(100, x.cover.used_pct) + '%' : '—') + '</td>' +
+            '<td data-h="Cover today" style="font-weight:700;color:' + coverColor(x.cover) + '">' + esc(coverText(x.cover)) + '</td>' +
+            '<td data-h="Ends" class="nowrap"><span class="pill ' + x.warranty_state + '">' + fdate(x.warranty_until) + '</span></td>' +
+            '<td data-h="Agreement" class="nowrap"><button type="button" class="sm' + (x.agreement_status ? ' ghost' : '') + '" data-ag="' + x.ref_id + '">' + (x.agreement_status ? '<span class="pill ' + x.agreement_status + '">' + AGS[x.agreement_status] + '</span>' : '📝 Sign') + '</button></td>' +
+            '<td>' + (x.has_open_claim ? '<span class="note">claim open</span>' : '<button type="button" class="sm" data-claim="' + x.ref_id + '">Claim</button>') + '</td></tr>';
+        }).join('') + '</tbody></table>' : '<div class="empty">Nothing here.</div>';
+      [].forEach.call($('rlist').querySelectorAll('[data-claim]'), function(b){ b.onclick = function(){ location.hash = '#new/' + b.dataset.claim; }; });
+      [].forEach.call($('rlist').querySelectorAll('[data-ag]'), function(b){ b.onclick = function(){ openAgreement({ sale_item_id: +b.dataset.ag }, loadReg); }; });
+    }).catch(function(e){ $('rlist').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+
+  // ================================================================== rules ==
+  function planName(id){ var p = meta.plans.find(function(x){ return x.id === id; }); return p ? p.name : ''; }
+  function planOpts(sel, none){ return '<option value="">' + (none || '—') + '</option>' + meta.plans.filter(function(p){ return p.active || p.id === sel; }).map(function(p){ return '<option value="' + p.id + '"' + (p.id === sel ? ' selected' : '') + '>' + esc(p.name) + (p.is_default ? ' (default)' : '') + '</option>'; }).join(''); }
+  function showRules(){
+    var w = $('wrap'); w.className = 'wrap one';
+    var can = meta.can_rules;
+    w.innerHTML =
+      '<div class="grid2" style="align-items:start">' +
+      '<div class="card"><div style="padding:12px 14px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line)"><b style="flex:1">Warranty plans</b>' + (can ? '<button type="button" class="primary sm" id="plNew">+ New plan</button>' : '') + '</div>' +
+        '<div>' + (meta.plans.length ? meta.plans.map(function(p){
+          return '<div class="plan" style="' + (p.active ? '' : 'opacity:.55') + '"><div><b>' + esc(p.name) + '</b> ' + (p.is_default ? '<span class="pill active">Default</span> ' : '') + (p.active ? '' : '<span class="pill closed">Off</span>') +
+            '<div style="font-size:13.5px;margin-top:2px">' + esc(p.rule) + '</div>' +
+            '<div class="note">' + (p.period_days ? p.period_days + ' days unless the part says otherwise' : 'Period from each part\'s warranty days') + ' · ' + (p.price_basis === 'original' ? 'priced on what they paid' : 'priced on today\'s price') +
+            ' · ' + p.categories + ' categor' + (p.categories === 1 ? 'y' : 'ies') + ' · ' + p.products + ' part(s) set directly</div>' +
+            ((needsText(p) || p.maker_warranty) ? '<div class="note" style="color:var(--ink)">' + (needsText(p) ? 'Needs: ' + esc(needsText(p)) : '') + (p.maker_warranty ? (needsText(p) ? ' · ' : '') + '🏭 maker\'s warranty' + (p.maker_name ? ' (' + esc(p.maker_name) + ')' : '') : '') + '</div>' : '') + '</div>' +
+            (can ? '<div><button type="button" class="sm" data-edit="' + p.id + '">Edit</button></div>' : '<div></div>') + '</div>';
+        }).join('') : '<div class="empty">No plans yet.</div>') + '</div>' +
+        '<div class="note" style="padding:10px 14px;border-top:1px solid var(--line)">A part uses its own plan, else its category\'s plan, else the default. Each sale keeps the plan it was sold under, so changing a plan only affects sales from now on.</div></div>' +
+      '<div class="card"><div style="padding:12px 14px;border-bottom:1px solid var(--line)"><b>Plans by category</b></div><div class="tablewrap" style="max-height:520px;overflow:auto"><table class="t"><thead><tr><th>Category</th><th class="r">Parts</th><th class="r">With days</th><th>Plan</th><th>Set days</th></tr></thead><tbody>' +
+        meta.categories.map(function(c, i){
+          return '<tr><td>' + esc(c.category) + '</td><td class="r">' + c.products + '</td><td class="r">' + c.with_days + '</td>' +
+            '<td><select data-cat="' + i + '"' + (can ? '' : ' disabled') + ' style="min-width:150px">' + planOpts(c.plan_id, 'Default') + '</select></td>' +
+            '<td><div style="display:flex;gap:4px"><input type="number" min="0" placeholder="days" data-cd="' + i + '" style="width:80px"' + (can ? '' : ' disabled') + '><button type="button" class="sm" data-cdgo="' + i + '"' + (can ? '' : ' disabled') + '>Set</button></div></td></tr>';
+        }).join('') + '</tbody></table></div></div>' +
+      '</div>' +
+      '<div class="card" style="margin-top:14px" id="ntCard"><div class="empty">Loading notifications…</div></div>' +
+      '<div class="card" style="margin-top:14px" id="agCard"><div class="empty">Loading the agreement wording…</div></div>' +
+      '<div class="card" style="margin-top:14px"><div style="padding:12px 14px;border-bottom:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap;align-items:center"><b style="flex:1;min-width:160px">Plans on single parts</b>' +
+        '<input id="ppq" placeholder="Search parts" style="max-width:260px"><select id="ppcat" style="max-width:200px"><option value="">All categories</option>' + meta.categories.map(function(c){ return '<option>' + esc(c.category) + '</option>'; }).join('') + '</select></div>' +
+        '<div style="padding:8px 14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center" class="note">Ticked: <select id="bkPlan" style="max-width:220px"' + (can ? '' : ' disabled') + '>' + planOpts(null, 'Use category / default') + '</select><button type="button" class="sm" id="bkPlanGo"' + (can ? '' : ' disabled') + '>Set plan</button>' +
+          '<input id="bkDays" type="number" min="0" placeholder="days" style="width:90px"' + (can ? '' : ' disabled') + '><button type="button" class="sm" id="bkDaysGo"' + (can ? '' : ' disabled') + '>Set days</button></div>' +
+        '<div class="tablewrap" id="pplist"></div></div>' +
+      (can ? '' : '<div class="banner info" style="margin-top:12px">Only managers change warranty rules.</div>');
+    if (can) {
+      $('plNew').onclick = function(){ editPlan(null); };
+      [].forEach.call(w.querySelectorAll('[data-edit]'), function(b){ b.onclick = function(){ editPlan(meta.plans.find(function(p){ return p.id === +b.dataset.edit; })); }; });
+      [].forEach.call(w.querySelectorAll('[data-cat]'), function(s){ s.onchange = function(){ var c = meta.categories[+s.dataset.cat];
+        api('/api/admin/warranty/categories', { method: 'PUT', json: { category: c.category, plan_id: s.value || null } }).then(function(){ toast(c.category + ': ' + (s.value ? planName(+s.value) : 'default plan')); return loadMeta(); }).catch(function(e){ toast(e.message, true); }); }; });
+      [].forEach.call(w.querySelectorAll('[data-cdgo]'), function(b){ b.onclick = async function(){ var c = meta.categories[+b.dataset.cdgo], d = w.querySelector('[data-cd="' + b.dataset.cdgo + '"]').value;
+        if (d === '') return toast('Type the days (0 = no warranty)', true);
+        if (!(await vasConfirm('Set ' + d + ' warranty days on all ' + c.products + ' parts in ' + c.category + '?'))) return;
+        api('/api/admin/warranty/categories', { method: 'PUT', json: { category: c.category, plan_id: c.plan_id, days: d } }).then(function(){ toast(c.category + ': ' + d + ' days'); return loadMeta().then(showRules); }).catch(function(e){ toast(e.message, true); }); }; });
+    }
+    var tq; $('ppq').oninput = function(){ clearTimeout(tq); tq = setTimeout(loadPP, 250); };
+    $('ppcat').onchange = loadPP;
+    var bulk = function(body, msg){ var imgs = [].map.call(document.querySelectorAll('#pplist [data-tick]:checked'), function(x){ return x.dataset.tick; });
+      if (!imgs.length) return toast('Tick some parts first', true);
+      body.imgs = imgs; api('/api/admin/warranty/products', { method: 'PUT', json: body }).then(function(r){ toast(msg + ' on ' + r.updated + ' part(s)'); loadPP(); loadMeta(); }).catch(function(e){ toast(e.message, true); }); };
+    if (can) {
+      $('bkPlanGo').onclick = function(){ bulk({ plan_id: $('bkPlan').value || null }, 'Plan set'); };
+      $('bkDaysGo').onclick = function(){ if ($('bkDays').value === '') return toast('Type the days', true); bulk({ days: $('bkDays').value }, 'Days set'); };
+    }
+    loadPP(); loadNotify(); loadAgreeSettings();
+  }
+  // ---- who gets told ---------------------------------------------------------------
+  function loadNotify(){
+    var can = meta.can_rules;
+    api('/api/admin/warranty/notify-settings').then(function(r){
+      var s = r.settings, dis = can ? '' : ' disabled';
+      var evs = [['opened', 'Claim opened'], ['replace', 'Replaced'], ['repair', 'Repaired'], ['refund', 'Refunded'], ['denied', 'Turned down'], ['closed', 'Closed'], ['maker', 'Maker updates']];
+      var ck = function(name, list, k, label){ return '<label style="margin-right:12px;white-space:nowrap;display:inline-block"><input type="checkbox" data-' + name + '="' + k + '"' + ((list || []).indexOf(k) >= 0 ? ' checked' : '') + dis + '> ' + label + '</label>'; };
+      var h3 = function(x){ return '<h3 style="margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)">' + x + '</h3>'; };
+      $('ntCard').innerHTML = '<div style="padding:12px 14px;border-bottom:1px solid var(--line)"><b>Who gets told</b></div><div class="grid2" style="padding:12px 14px">' +
+        '<div>' + h3('👤 The customer') +
+          '<label style="margin-right:14px"><input type="checkbox" id="ntCe"' + (s.customer_email ? ' checked' : '') + dis + '> by email</label>' +
+          '<label><input type="checkbox" id="ntCs"' + (s.customer_sms ? ' checked' : '') + dis + '> by SMS</label>' +
+          '<div class="note" style="margin:8px 0 4px">When:</div>' + evs.filter(function(e){ return e[0] !== 'maker'; }).map(function(e){ return ck('ce', s.customer_events, e[0], e[1]); }).join('') +
+          '<div class="note" style="margin-top:8px">' + (r.email_ready ? '✓ Email is set up.' : '⚠ Email (SMTP) is not set up on this server yet: emails are logged on the claim but not sent.') + ' ' + (r.sms_ready ? '✓ SMS is set up.' : '⚠ SMS (Twilio) is not set up yet.') + '</div></div>' +
+        '<div>' + h3('🏢 The company') +
+          '<label class="l">Company email (comma between several)</label><input id="ntCo" placeholder="' + esc(r.shop_email || 'e.g. warranty@yourshop.com') + '" value="' + esc(s.company_email || '') + '"' + dis + '>' +
+          (r.shop_email ? '<div class="note">Blank uses the shop email, ' + esc(r.shop_email) + '.</div>' : '') +
+          '<label class="l" style="margin-top:8px">New claims go to (unless the plan says someone else)</label><select id="ntDef"' + dis + '>' + opts(r.staff.map(function(u){ return [String(u.id), u.name]; }), s.default_assign_to ? String(s.default_assign_to) : '', 'Nobody') + '</select>' +
+          '<label class="l" style="margin-top:8px">Also tell (under the bell)</label><div style="max-height:130px;overflow:auto;padding:8px" class="box">' + r.staff.map(function(u){ return '<label style="display:block"><input type="checkbox" data-stu="' + u.id + '"' + ((s.staff || []).indexOf(u.id) >= 0 ? ' checked' : '') + dis + '> ' + esc(u.name) + (u.admin_role ? ' <span class="note">' + esc(u.admin_role) + '</span>' : '') + '</label>'; }).join('') + '</div>' +
+          '<div class="note" style="margin:8px 0 4px">When:</div>' + evs.map(function(e){ return ck('co', s.company_events, e[0], e[1]); }).join('') +
+          '<div class="note" style="margin-top:6px">Whoever a claim is assigned to is told when it is given to them, and on every change above.</div></div>' +
+        '</div>' + (can ? '<div style="padding:0 14px 12px"><button type="button" class="primary sm" id="ntSave">Save who gets told</button></div>' : '');
+      if (!can) return;
+      $('ntSave').onclick = function(){
+        var pick = function(sel){ return [].filter.call(document.querySelectorAll(sel), function(x){ return x.checked; }); };
+        api('/api/admin/warranty/notify-settings', { method: 'PUT', json: {
+          customer_email: $('ntCe').checked, customer_sms: $('ntCs').checked, company_email: $('ntCo').value.trim(), default_assign_to: $('ntDef').value || null,
+          customer_events: pick('[data-ce]').map(function(x){ return x.dataset.ce; }), company_events: pick('[data-co]').map(function(x){ return x.dataset.co; }),
+          staff: pick('[data-stu]').map(function(x){ return +x.dataset.stu; }) } }).then(function(){ toast('Saved.'); }).catch(function(e){ toast(e.message, true); });
+      };
+    }).catch(function(e){ $('ntCard').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+  function loadPP(){
+    var can = meta.can_rules;
+    api('/api/admin/warranty/products?q=' + encodeURIComponent($('ppq').value) + '&category=' + encodeURIComponent($('ppcat').value)).then(function(r){
+      $('pplist').innerHTML = r.products.length ? '<table class="t stack"><thead><tr><th><input type="checkbox" id="tickAll"></th><th>Item code</th><th>Part</th><th>Category</th><th class="r">Days</th><th>Own plan</th><th>Uses</th></tr></thead><tbody>' +
+        r.products.map(function(p, i){
+          var pid = p.warranty_plan_id || p.category_plan_id || (meta.plans.find(function(x){ return x.is_default && x.active; }) || {}).id;
+          var pl = meta.plans.find(function(x){ return x.id === pid; }) || {};
+          var days = p.warranty_days || pl.period_days;
+          var uses = (pl.name || 'Full replacement') + (p.warranty_plan_id ? '' : p.category_plan_id ? ' (category)' : ' (default)') + (days ? ' · ' + days + ' days' : '');
+          return '<tr><td><input type="checkbox" data-tick="' + esc(p.img) + '"></td><td data-h="Item code">' + esc(p.sku || p.img) + '</td><td data-h="Part">' + esc(p.name) + '</td><td data-h="Category">' + esc(p.category) + '</td>' +
+            '<td data-h="Days" class="r">' + (p.warranty_days || (days ? '<span class="note">' + days + ' (plan)</span>' : '<span class="note">none</span>')) + '</td>' +
+            '<td data-h="Own plan"><select data-pp="' + i + '"' + (can ? '' : ' disabled') + ' style="min-width:140px">' + planOpts(p.warranty_plan_id, '—') + '</select></td><td data-h="Uses" class="note">' + esc(days ? uses : 'no warranty (no days set)') + '</td></tr>';
+        }).join('') + '</tbody></table>' + (r.products.length >= 200 ? '<div class="note" style="padding:8px 14px">First 200 shown. Search or pick a category to narrow it.</div>' : '') : '<div class="empty">No parts match.</div>';
+      var ta = $('tickAll'); if (ta) ta.onchange = function(){ [].forEach.call(document.querySelectorAll('#pplist [data-tick]'), function(x){ x.checked = ta.checked; }); };
+      [].forEach.call(document.querySelectorAll('#pplist [data-pp]'), function(s){ s.onchange = function(){ var p = r.products[+s.dataset.pp];
+        api('/api/admin/warranty/products', { method: 'PUT', json: { img: p.img, plan_id: s.value || null } }).then(function(){ toast((p.sku || p.name) + ': ' + (s.value ? planName(+s.value) : 'category / default')); loadPP(); loadMeta(); }).catch(function(e){ toast(e.message, true); }); }; });
+    });
+  }
+  function editPlan(p){
+    p = p || { name: '', method: 'full', period_days: null, free_days: 0, tiers: [{ upto_pct: 50, pays_pct: 0 }, { upto_pct: 100, pays_pct: 50 }], price_basis: 'current', remedy: 'replace', labour_covered: false, max_claims: null, needs_photo: false, is_default: false, active: true, notes: '' };
+    var tiers = (p.tiers && p.tiers.length ? p.tiers : [{ upto_pct: 50, pays_pct: 0 }, { upto_pct: 100, pays_pct: 50 }]).map(function(x){ return { upto_pct: x.upto_pct, pays_pct: x.pays_pct }; });
+    var radio = function(v, label, sub){ return '<label class="box" style="display:flex;gap:8px;align-items:flex-start;margin-top:6px;cursor:pointer;padding:9px"><input type="radio" name="plM" value="' + v + '"' + (p.method === v ? ' checked' : '') + ' style="margin-top:4px"><span><b>' + label + '</b><br><span class="note">' + sub + '</span></span></label>'; };
+    dialog(p.id ? 'Edit plan' : 'New warranty plan',
+      '<label class="l">Name</label><input id="plName" value="' + esc(p.name) + '" placeholder="e.g. Batteries 12 months, half then 50% off">' +
+      '<div style="margin-top:10px"><label class="l">How the cover works</label>' +
+        radio('full', 'Full replacement', 'Free replacement for the whole period.') +
+        radio('prorated', 'Prorated', 'Free for the first days below, then the customer pays the share of the period already used.') +
+        radio('tiered', 'Steps', 'Set what the customer pays in each part of the period, e.g. free in the first half, 50% off in the second half.') + '</div>' +
+      '<div class="grid2" style="margin-top:10px"><div><label class="l">Period (days)</label><input id="plDays" type="number" min="0" value="' + (p.period_days || '') + '" placeholder="from the part"><div class="note">Blank: use each part\'s warranty days.</div></div>' +
+        '<div id="plFreeBox"><label class="l">Free for the first (days)</label><input id="plFree" type="number" min="0" value="' + (p.free_days || 0) + '"></div></div>' +
+      '<div id="plSteps" class="steps" style="margin-top:10px"></div>' +
+      '<div style="margin-top:12px"><label class="l">What the customer pays through the period</label><div class="prev" id="plPrev"></div><div class="note" id="plRule" style="margin-top:4px"></div></div>' +
+      '<div class="grid2" style="margin-top:12px">' +
+        '<div><label class="l">Price the share on</label><select id="plBasis"><option value="current"' + (p.price_basis !== 'original' ? ' selected' : '') + '>Today\'s shelf price</option><option value="original"' + (p.price_basis === 'original' ? ' selected' : '') + '>What the customer paid</option></select></div>' +
+        '<div><label class="l">Remedy</label><select id="plRemedy"><option value="replace">Replace</option><option value="refund">Refund</option><option value="either">Replace or refund</option></select></div>' +
+        '<div><label class="l">Claims allowed per item</label><input id="plMax" type="number" min="0" value="' + (p.max_claims || '') + '" placeholder="no limit"></div>' +
+        '<div style="display:flex;flex-direction:column;gap:6px;justify-content:end">' +
+          '<label><input type="checkbox" id="plLab"' + (p.labour_covered ? ' checked' : '') + '> Fitting labour covered</label>' +
+          '</div>' +
+      '</div>' +
+      '<div style="margin-top:12px"><label class="l">Before a claim is settled, it needs</label><div class="grid2">' +
+        '<label><input type="checkbox" id="plNeedId"' + (p.needs_id ? ' checked' : '') + '> Customer ID checked (ID, licence, passport, TRN)</label>' +
+        '<label><input type="checkbox" id="plNeedSerial"' + (p.needs_serial ? ' checked' : '') + '> Serial number</label>' +
+        '<label><input type="checkbox" id="plNeedModel"' + (p.needs_model ? ' checked' : '') + '> Model number</label>' +
+        '<label><input type="checkbox" id="plRetOld"' + (p.return_old ? ' checked' : '') + '> The old part handed back</label>' +
+        '<label><input type="checkbox" id="plPhoto"' + (p.needs_photo ? ' checked' : '') + '> A photo of the part</label>' +
+        '<label><input type="checkbox" id="plSign"' + (p.needs_signature ? ' checked' : '') + '> The warranty agreement signed</label>' +
+      '</div></div>' +
+      '<div class="box" style="margin-top:10px"><b>Warranty agreement</b> <span class="note">what the customer signs for a part under this plan</span>' +
+        '<label class="l" style="margin-top:8px">Wording for this plan (blank: the shop\'s standard wording)</label><textarea id="plAgText" rows="5" placeholder="Leave blank to use the standard wording (Warranty rules › Warranty agreement)">' + esc(p.agreement_text || '') + '</textarea>' +
+        '<div class="note">Fill-ins: {customer} {part} {serial} {receipt} {sold_on} {until} {period} {rule} {needs} …</div>' +
+        '<label class="l" style="margin-top:8px">The plan\'s own document (PDF or picture: your printed form, the maker\'s leaflet)</label>' +
+        (p.id ? '<div class="actions">' + (p.agreement_file ? '<a class="btn sm" href="' + esc(p.agreement_file) + '" target="_blank" rel="noopener">📄 ' + esc(p.agreement_file_name || 'Document') + '</a><button type="button" class="sm ghost" id="plDocDel">Remove</button>' : '<span class="note">None yet.</span>') +
+          '<label class="btn sm" style="position:relative;overflow:hidden">⬆ Upload<input type="file" id="plDoc" accept="application/pdf,image/*" style="position:absolute;inset:0;opacity:0;cursor:pointer"></label></div>'
+          : '<div class="note">Save the plan first, then upload its document.</div>') +
+      '</div>' +
+      '<div class="box" style="margin-top:10px"><label><input type="checkbox" id="plMaker"' + (p.maker_warranty ? ' checked' : '') + '> <b>Manufacturer\'s warranty</b> — the maker covers it; track the claim with them</label>' +
+        '<input id="plMakerName" style="margin-top:6px" placeholder="Maker / brand, e.g. Bosch, Denso" value="' + esc(p.maker_name || '') + '"></div>' +
+      '<label class="l" style="margin-top:10px">Send new claims under this plan to</label><select id="plAsg">' + opts(staffOpts(), p.assign_to ? String(p.assign_to) : '', 'The default person (Notifications)') + '</select>' +
+      '<label class="l" style="margin-top:10px">Notes (printed on the claim)</label><input id="plNotes" value="' + esc(p.notes || '') + '">' +
+      '<div style="margin-top:10px;display:flex;gap:16px;flex-wrap:wrap"><label><input type="checkbox" id="plDef"' + (p.is_default ? ' checked' : '') + '> Default plan (parts with no plan of their own or their category\'s)</label><label><input type="checkbox" id="plOn"' + (p.active !== false ? ' checked' : '') + '> In use</label></div>',
+      [{ label: 'Save plan', cls: 'primary', go: function(){
+        var body = read();
+        if (!body.name) { toast('Give it a name', true); return false; }
+        return api('/api/admin/warranty/plans' + (p.id ? '/' + p.id : ''), { method: p.id ? 'PUT' : 'POST', json: body }).then(function(){ toast('Plan saved.'); return loadMeta().then(showRules); });
+      } }]);
+    $('plRemedy').value = p.remedy || 'replace';
+    if (p.id && $('plDoc')) {
+      $('plDoc').onchange = function(){ var f = this.files[0]; if (!f) return; var fd = new FormData(); fd.append('file', f);
+        api('/api/admin/warranty/plans/' + p.id + '/agreement-file', { method: 'POST', body: fd }).then(function(){ toast('Document added to the plan.'); return loadMeta(); })
+          .then(function(){ $('dlg').close(); editPlan(meta.plans.find(function(x){ return x.id === p.id; })); }).catch(function(e){ toast(e.message, true); }); };
+      if ($('plDocDel')) $('plDocDel').onclick = async function(){ if (!(await vasConfirm('Take the document off this plan? Agreements already made keep their copy.'))) return;
+        api('/api/admin/warranty/plans/' + p.id + '/agreement-file', { method: 'DELETE' }).then(function(){ return loadMeta(); })
+          .then(function(){ $('dlg').close(); editPlan(meta.plans.find(function(x){ return x.id === p.id; })); }).catch(function(e){ toast(e.message, true); }); };
+    }
+    function read(){
+      return { name: $('plName').value.trim(), method: (document.querySelector('[name=plM]:checked') || {}).value || 'full', period_days: $('plDays').value, free_days: $('plFree').value,
+        tiers: tiers, price_basis: $('plBasis').value, remedy: $('plRemedy').value, max_claims: $('plMax').value, labour_covered: $('plLab').checked, needs_photo: $('plPhoto').checked,
+        notes: $('plNotes').value.trim(), is_default: $('plDef').checked, active: $('plOn').checked,
+        needs_id: $('plNeedId').checked, needs_serial: $('plNeedSerial').checked, needs_model: $('plNeedModel').checked, return_old: $('plRetOld').checked,
+        maker_warranty: $('plMaker').checked, maker_name: $('plMakerName').value.trim(), assign_to: $('plAsg').value || null,
+        needs_signature: $('plSign').checked, agreement_text: $('plAgText').value.trim() };
+    }
+    function steps(){
+      var m = read().method;
+      $('plFreeBox').style.visibility = m === 'prorated' ? '' : 'hidden';
+      $('plSteps').style.display = m === 'tiered' ? '' : 'none';
+      $('plSteps').innerHTML = '<label class="l">Steps</label>' + tiers.map(function(t, i){
+        return '<div class="st"><div><span class="note">Up to (% of period)</span><input type="number" min="1" max="100" value="' + t.upto_pct + '" data-tu="' + i + '"></div>' +
+          '<div><span class="note">Customer pays (% of replacement)</span><input type="number" min="0" max="100" value="' + t.pays_pct + '" data-tp="' + i + '"></div>' +
+          '<button type="button" class="sm ghost" data-trm="' + i + '" title="Remove">✕</button></div>';
+      }).join('') + '<button type="button" class="sm" id="plAdd" style="margin-top:6px">+ Add a step</button>';
+      [].forEach.call($('plSteps').querySelectorAll('[data-tu]'), function(x){ x.oninput = function(){ tiers[+x.dataset.tu].upto_pct = +x.value; preview(); }; });
+      [].forEach.call($('plSteps').querySelectorAll('[data-tp]'), function(x){ x.oninput = function(){ tiers[+x.dataset.tp].pays_pct = +x.value; preview(); }; });
+      [].forEach.call($('plSteps').querySelectorAll('[data-trm]'), function(x){ x.onclick = function(){ tiers.splice(+x.dataset.trm, 1); steps(); }; });
+      $('plAdd').onclick = function(){ var last = tiers.length ? tiers[tiers.length - 1].upto_pct : 0; tiers.push({ upto_pct: Math.min(100, last + 25), pays_pct: 50 }); steps(); };
+      preview();
+    }
+    function preview(){
+      var b = read(), days = parseInt(b.period_days, 10) || 365;
+      var pts = [5, 15, 25, 35, 45, 55, 65, 75, 85, 95, 100];
+      $('plPrev').innerHTML = pts.map(function(pct){
+        var pays = payAt(b, pct, Math.round(days * pct / 100));
+        var cls = pays === 0 ? '' : pays >= 100 ? 'x' : 'p';
+        return '<div title="' + pct + '% through: customer pays ' + pays + '%"><span>' + pays + '%</span><i class="' + cls + '" style="height:' + Math.max(3, 100 - pays) * 0.8 + 'px"></i><span>' + pct + '%</span></div>';
+      }).join('');
+      api('/api/admin/warranty/preview', { json: Object.assign({}, b, { period_days: days }) }).then(function(r){ $('plRule').textContent = r.rule + '. Bars: how much the shop covers; the number on top is what the customer pays.'; }).catch(function(){});
+    }
+    [].forEach.call(document.querySelectorAll('[name=plM]'), function(x){ x.onchange = steps; });
+    $('plDays').oninput = preview; $('plFree').oninput = preview;
+    steps();
+  }
+
+  // ============================================================ agreements ==
+  // WARRANTY-AGREE: the agreement for a sold part (or a claim): sign on this
+  // screen, on the customer's phone (QR code / email link), or upload the
+  // signed paper copy.
+  var AGS = { waiting: 'Not signed', signed: 'Signed', uploaded: 'Paper copy', void: 'Cancelled' };
+  function agreementHtml(c){
+    var list = (c.agreements || []).filter(function(a){ return a.status !== 'void'; });
+    var a = list[0];
+    var need = c.terms && c.terms.needs_signature;
+    return '<div class="sec"><h3>Warranty agreement' + (need ? ' · the plan needs it signed' : '') + '</h3><div class="actions">' +
+      (a ? '<span class="pill ' + a.status + '">' + AGS[a.status] + '</span>' + (a.signed_name ? ' <span>' + esc(a.signed_name) + (a.signed_at ? ', ' + fdate(a.signed_at) + (a.signed_via === 'link' ? ' on their phone' : ' at the counter') : '') + '</span>' : '')
+        : '<span class="note">' + (need ? '⚠ Not made yet. The claim cannot be settled until it is signed.' : 'None yet.') + '</span>') +
+      '<span style="flex:1"></span><button type="button" class="sm navy noprint" id="agBtn">📝 ' + (a ? 'Open the agreement' : 'Make and sign') + '</button></div></div>';
+  }
+  function sigPad(canvas){
+    var ctx = canvas.getContext('2d'), down = false, has = false, last = null;
+    function size(){ var r = canvas.getBoundingClientRect(), d = window.devicePixelRatio || 1; canvas.width = Math.round(r.width * d); canvas.height = Math.round(r.height * d);
+      ctx.setTransform(d, 0, 0, d, 0, 0); ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#0b1b2b'; ctx.fillStyle = '#0b1b2b'; has = false; }
+    size();
+    function pt(e){ var r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+    canvas.addEventListener('pointerdown', function(e){ down = true; last = pt(e); try { canvas.setPointerCapture(e.pointerId); } catch (x) {} ctx.beginPath(); ctx.arc(last.x, last.y, 1.2, 0, 7); ctx.fill(); has = true; e.preventDefault(); });
+    canvas.addEventListener('pointermove', function(e){ if (!down) return; var p = pt(e); ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last = p; has = true; e.preventDefault(); });
+    ['pointerup', 'pointercancel'].forEach(function(n){ canvas.addEventListener(n, function(){ down = false; }); });
+    return { clear: size, empty: function(){ return !has; }, png: function(){ return canvas.toDataURL('image/png'); } };
+  }
+  function qrSvg(text){
+    if (typeof qrcode !== 'function') return '';
+    try { var q = qrcode(0, 'M'); q.addData(text); q.make(); return '<div class="qr">' + q.createSvgTag(5, 2) + '</div>'; } catch (e) { return ''; }
+  }
+  // Make (or fetch) the agreement for a sold part / claim, then show it.
+  function openAgreement(src, after){
+    api('/api/admin/warranty/agreements', { json: src }).then(function(r){ agView(r.agreement.id, after); }).catch(function(e){ toast(e.message, true); });
+  }
+  function agView(id, after){
+    api('/api/admin/warranty/agreements/' + id).then(function(r){
+      var a = r.agreement, base = r.base, signed = a.status === 'signed';
+      var who = signed ? '<div class="box" style="margin-top:10px"><b>Signed by ' + esc(a.signed_name) + '</b> · ' + esc(a.signed_local || '') + ' · ' + (a.signed_via === 'link' ? 'on their own phone' : 'at the counter' + (a.witness_name ? ', with ' + esc(a.witness_name) : '')) +
+          '<img class="sigimg" src="' + esc(a.signature_url) + '" alt="signature"><div class="note" style="word-break:break-all">Fingerprint: ' + esc(a.doc_hash) + '</div></div>' : '';
+      var paper = a.file_url ? '<div class="box" style="margin-top:10px">📎 Signed paper copy: <a href="' + esc(a.file_url) + '" target="_blank" rel="noopener">' + esc(a.file_name || 'open') + '</a>' + (a.file_by_name ? ' <span class="note">added by ' + esc(a.file_by_name) + '</span>' : '') + '</div>' : '';
+      var hist = (a.history || []).slice().reverse().map(function(h){ return '<div class="note">' + esc(new Date(h.at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) + ' · ' + esc(h.what) + (h.to ? ' (' + esc(h.to) + ')' : '') + '</div>'; }).join('');
+      var body = '<div class="actions" style="margin-bottom:8px"><span class="pill ' + a.status + '">' + AGS[a.status] + '</span><b>WA-' + String(a.id).padStart(5, '0') + '</b><span class="note">' + esc(a.customer_name || '') + (a.customer_email ? ' · ' + esc(a.customer_email) : '') + '</span></div>' +
+        '<div class="terms">' + esc(a.body) + '</div>' +
+        (a.doc_url ? '<div style="margin-top:8px"><a href="' + esc(a.doc_url) + '" target="_blank" rel="noopener">📄 ' + esc(a.doc_name || 'The plan\'s document') + '</a></div>' : '') +
+        who + paper +
+        (a.status === 'void' ? '<div class="banner info" style="margin-top:10px">Cancelled: ' + esc(a.void_reason || '') + '</div>' : '') +
+        (hist ? '<details style="margin-top:10px"><summary class="note">History</summary>' + hist + '</details>' : '');
+      var b = [{ label: '🖨 Print', go: function(){ window.open('/api/admin/warranty/agreements/' + a.id + '/copy', '_blank', 'noopener'); return false; } }];
+      if (a.status !== 'void') {
+        if (!signed) {
+          b.push({ label: '📎 Upload signed copy', go: function(){ agUpload(a, after); return false; } });
+          b.push({ label: '📱 Sign on their phone', cls: 'navy', go: function(){ agLink(a, base, after); return false; } });
+          b.push({ label: '✍ Sign here', cls: 'go', go: function(){ agSign(a, after); return false; } });
+        } else {
+          b.push({ label: '✉ Email them a copy', go: async function(){ return api('/api/admin/warranty/agreements/' + a.id + '/email-copy', { json: { email: a.customer_email || (await vasPrompt('Customer email')) || '' } })
+            .then(function(x){ toast(x.email.outcome === 'sent' ? 'Copy emailed.' : 'Not sent: ' + (x.email.error || x.email.outcome), x.email.outcome !== 'sent'); return false; }); } });
+          if (!a.file_url) b.push({ label: '📎 Add paper copy', go: function(){ agUpload(a, after); return false; } });
+        }
+        b.unshift({ label: 'Cancel it', cls: 'ghost', go: async function(){ var why = await vasPrompt('Why is this agreement being cancelled? (wrong customer, wrong part…)'); if (!why) return false;
+          return api('/api/admin/warranty/agreements/' + a.id + '/void', { json: { reason: why } }).then(function(){ toast('Agreement cancelled.'); if (after) after(); }); } });
+      }
+      dialog('Warranty agreement · ' + (a.title || '').replace(/^Warranty agreement · /, ''), body, b, true);
+    }).catch(function(e){ toast(e.message, true); });
+  }
+  function agSign(a, after){
+    dialog('Sign: ' + (a.customer_name || 'customer'),
+      '<div class="note" style="margin-bottom:6px">Hand the screen to the customer. They read the terms, type their name and sign.</div>' +
+      '<div class="terms" style="max-height:200px">' + esc(a.body) + '</div>' +
+      '<label class="l" style="margin-top:10px">Customer\'s full name</label><input id="sgName" value="' + esc(a.customer_name || '') + '" autocomplete="off">' +
+      '<label class="l" style="margin-top:10px">Signature</label><div class="pad"><canvas id="sgPad"></canvas><div class="xl"></div><div class="hint">✍ Sign above the line</div></div>' +
+      '<div class="actions" style="margin-top:6px"><label style="flex:1"><input type="checkbox" id="sgOk"> I have read the warranty terms and I accept them.</label><button type="button" class="sm ghost" id="sgClr">Clear</button></div>' +
+      (a.customer_email ? '<label class="note"><input type="checkbox" id="sgMail" checked> Email a signed copy to ' + esc(a.customer_email) + '</label>' : ''),
+      [{ label: '‹ Back', cls: 'ghost', go: function(){ agView(a.id, after); return false; } },
+       { label: '✓ Sign the agreement', cls: 'go', go: function(){
+        if ($('sgName').value.trim().length < 2) { toast('Type the customer\'s full name', true); return false; }
+        if (pad.empty()) { toast('Sign in the box first', true); return false; }
+        if (!$('sgOk').checked) { toast('Tick the box to say the terms were read and accepted', true); return false; }
+        return api('/api/admin/warranty/agreements/' + a.id + '/sign', { json: { name: $('sgName').value.trim(), signature: pad.png(), agree: true, email_copy: $('sgMail') ? $('sgMail').checked : false } })
+          .then(function(){ toast('Signed.'); if (after) after(); agView(a.id, after); return false; });
+      } }], true);
+    var pad = sigPad($('sgPad'));
+    $('sgClr').onclick = pad.clear;
+  }
+  function agLink(a, base, after){
+    api('/api/admin/warranty/agreements/' + a.id + '/link', { json: {} }).then(function(r){
+      var lan = /^http:\/\/(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|[a-z0-9\-]+(:\d+)?$)/i.test(base);
+      dialog('Sign on their own phone',
+        '<div class="grid2" style="align-items:start"><div style="text-align:center">' + qrSvg(r.url) + '<div class="note" style="margin-top:6px">The customer scans this with their phone camera.</div></div>' +
+        '<div><label class="l">Or send the link by email</label><input id="lkMail" type="email" value="' + esc(a.customer_email || '') + '" placeholder="name@example.com">' +
+          '<button type="button" class="sm navy" id="lkSend" style="margin-top:6px">✉ Email the link</button>' +
+          '<label class="l" style="margin-top:12px">The link</label><input id="lkUrl" value="' + esc(r.url) + '" readonly><button type="button" class="sm" id="lkCopy" style="margin-top:6px">Copy</button>' +
+          '<div class="note" style="margin-top:8px">Works for ' + r.expires_days + ' days, once. Making a new link stops this one.</div>' +
+          (lan ? '<div class="banner warn" style="margin-top:8px;margin-bottom:0;font-size:13px">This link uses the shop\'s own network address, so it only opens on a phone on the shop Wi-Fi. A manager can set the public web address in Warranty rules › Warranty agreement.</div>' : '') +
+        '</div></div>',
+        [{ label: '‹ Back', cls: 'ghost', go: function(){ agView(a.id, after); return false; } },
+         { label: 'Check if signed', go: function(){ return api('/api/admin/warranty/agreements/' + a.id).then(function(x){ if (x.agreement.status === 'signed') { toast('Signed by ' + x.agreement.signed_name + '.'); if (after) after(); agView(a.id, after); } else toast('Not signed yet.'); return false; }); } }], true);
+      $('lkCopy').onclick = function(){ $('lkUrl').select(); try { navigator.clipboard.writeText(r.url); } catch (e) { document.execCommand('copy'); } toast('Link copied.'); };
+      $('lkSend').onclick = function(){ var em = $('lkMail').value.trim(); if (!em) return toast('Type the customer\'s email', true);
+        api('/api/admin/warranty/agreements/' + a.id + '/link', { json: { send_email: true, email: em } }).then(function(x){
+          $('lkUrl').value = x.url; var q = document.querySelector('#dlgBody .qr'); if (q) q.outerHTML = qrSvg(x.url);
+          toast(x.email && x.email.outcome === 'sent' ? 'Link emailed to ' + em + '.' : 'Not emailed: ' + ((x.email && x.email.error) || 'email not set up') + '. Show them the QR code instead.', !(x.email && x.email.outcome === 'sent'));
+        }).catch(function(e){ toast(e.message, true); }); };
+    }).catch(function(e){ toast(e.message, true); });
+  }
+  function agUpload(a, after){
+    dialog('Upload the signed paper copy',
+      '<div class="note">Print the agreement (🖨 Print), have the customer sign it, then scan it or take a photo of each page. A PDF works too.</div>' +
+      '<label class="l" style="margin-top:10px">Signed by</label><input id="upName" value="' + esc(a.signed_name || a.customer_name || '') + '">' +
+      '<div class="addph"><label class="btn">📷 Take a photo<input type="file" id="upCam" accept="image/*" capture="environment"></label><label class="btn">📄 Pick a file (PDF / picture)<input type="file" id="upFile" accept="application/pdf,image/*"></label></div>',
+      [{ label: '‹ Back', cls: 'ghost', go: function(){ agView(a.id, after); return false; } }], true);
+    var send = function(f){ if (!f) return; var fd = new FormData(); fd.append('file', f); fd.append('signed_name', $('upName').value.trim());
+      api('/api/admin/warranty/agreements/' + a.id + '/file', { method: 'POST', body: fd }).then(function(){ toast('Signed copy saved.'); if (after) after(); agView(a.id, after); }).catch(function(e){ toast(e.message, true); }); };
+    $('upCam').onchange = function(){ send(this.files[0]); };
+    $('upFile').onchange = function(){ send(this.files[0]); };
+  }
+  // ---- the standard wording + the address links use (Warranty rules) ------------
+  function loadAgreeSettings(){
+    var can = meta.can_rules;
+    api('/api/admin/warranty/agreement-settings').then(function(r){
+      var s = r.settings, dis = can ? '' : ' disabled';
+      $('agCard').innerHTML = '<div style="padding:12px 14px;border-bottom:1px solid var(--line)"><b>Warranty agreement</b> <span class="note">the standard wording customers sign; a plan can have its own</span></div>' +
+        '<div style="padding:12px 14px"><textarea id="agText" rows="14" style="font:13.5px/1.5 Georgia,serif"' + dis + '>' + esc(s.text || r.default_text) + '</textarea>' +
+        '<div class="note" style="margin-top:4px">Fill-ins: ' + r.placeholders.map(function(x){ return '{' + x + '}'; }).join(' ') + '. A line whose fill-ins are all empty (say no serial number) is left out.</div>' +
+        '<div class="grid2" style="margin-top:10px"><div><label class="l">Web address for signing links</label><input id="agBase" value="' + esc(s.public_base || '') + '" placeholder="e.g. https://till.mortsautoparts.com"' + dis + '>' +
+          '<div class="note">Blank: the address this screen is open on. Use the public address so links open on the customer\'s own phone data.</div></div>' +
+        '<div class="note" style="align-self:end">Already-made agreements keep the wording they were made with.</div></div></div>' +
+        (can ? '<div style="padding:0 14px 12px" class="actions"><button type="button" class="primary sm" id="agSave">Save the wording</button><button type="button" class="sm ghost" id="agReset">Back to the standard wording</button></div>' : '');
+      if (!can) return;
+      $('agSave').onclick = function(){ api('/api/admin/warranty/agreement-settings', { method: 'PUT', json: { text: $('agText').value, public_base: $('agBase').value.trim() } }).then(function(){ toast('Saved.'); }).catch(function(e){ toast(e.message, true); }); };
+      $('agReset').onclick = function(){ $('agText').value = r.default_text; };
+    }).catch(function(e){ $('agCard').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+
+  // ---- start ----------------------------------------------------------------------
+  api('/api/me').then(function(d){ var u = d && (d.user || d); if (u && u.name) $('who').textContent = u.name; }).catch(function(){});
+  loadMeta().then(route).catch(function(e){ $('wrap').innerHTML = '<div class="card empty" style="grid-column:1/-1">' + esc(e.message) + (/sign in/i.test(e.message) ? ' <a href="/admin.html">Sign in</a>' : '') + '</div>'; });
+})();
+</script>
+</body>
+</html>

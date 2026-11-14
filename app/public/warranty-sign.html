@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#0b1b2b">
+<title>Sign your warranty</title>
+<style>
+  :root{ --navy:#0b1b2b; --red:#d62828; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#15803d; --bad:#b91c1c; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --ok:#22c55e; --bad:#f87171; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:max(14px,env(safe-area-inset-top)) 16px 14px}
+  header b{font-size:17px;display:block} header span{font-size:13px;opacity:.8}
+  main{max-width:760px;margin:0 auto;padding:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+  .terms{white-space:pre-wrap;font:15px/1.6 Georgia,"Times New Roman",serif;max-height:55vh;overflow:auto;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+  label.l{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;margin:12px 0 4px}
+  input[type=text]{font:inherit;width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink)}
+  .pad{position:relative;border:2px dashed #94a3b8;border-radius:12px;background:#fff;height:190px;touch-action:none}
+  .pad canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair}
+  .pad .hint{position:absolute;left:14px;bottom:10px;color:#94a3b8;font-size:13px;pointer-events:none}
+  .pad .x{position:absolute;left:14px;right:14px;bottom:34px;border-bottom:1px solid #cbd5e1;pointer-events:none}
+  button{font:600 16px system-ui,sans-serif;border-radius:10px;padding:12px 18px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+  button.go{background:var(--ok);border-color:var(--ok);color:#fff;width:100%;margin-top:14px;font-size:17px}
+  button:disabled{opacity:.5}
+  .row{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-top:8px}
+  .agree{display:flex;gap:10px;align-items:flex-start;margin-top:14px;font-size:15px}
+  .agree input{width:22px;height:22px;margin-top:2px;flex:none}
+  .msg{padding:12px 14px;border-radius:10px;margin-bottom:14px}
+  .msg.bad{background:#fee2e2;color:#991b1b} .msg.ok{background:#dcfce7;color:#166534}
+  .note{font-size:13px;color:var(--muted)}
+  .done img{max-width:280px;background:#fff;border-radius:8px;border:1px solid var(--line);display:block;margin:8px 0}
+  .fp{font:11px ui-monospace,Consolas,monospace;word-break:break-all;color:var(--muted)}
+  a{color:#2563eb}
+</style>
+</head>
+<body>
+<header><b id="shop">Warranty agreement</b><span id="sub">Read it, then sign at the bottom</span></header>
+<main id="main"><div class="card">Loading…</div></main>
+<script>
+(function(){
+  'use strict';
+  var $ = function(id){ return document.getElementById(id); };
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function when(d){ var x = new Date(d); return isNaN(x) ? '' : x.toLocaleString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+  var token = (location.hash || '').slice(1);
+  var api = '/api/warranty-sign/' + encodeURIComponent(token);
+  function fail(m){ $('main').innerHTML = '<div class="msg bad">' + esc(m) + '</div>'; }
+  if (!token) return fail('This link is not complete. Open the whole link from your email or scan the code again.');
+
+  function pad(canvas){
+    var ctx = canvas.getContext('2d'), down = false, has = false, last = null;
+    function size(){ var r = canvas.getBoundingClientRect(), d = window.devicePixelRatio || 1; canvas.width = Math.round(r.width * d); canvas.height = Math.round(r.height * d);
+      ctx.setTransform(d, 0, 0, d, 0, 0); ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#0b1b2b'; ctx.fillStyle = '#0b1b2b'; has = false; }
+    size();
+    function pt(e){ var r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+    canvas.addEventListener('pointerdown', function(e){ down = true; last = pt(e); try { canvas.setPointerCapture(e.pointerId); } catch (x) {} ctx.beginPath(); ctx.arc(last.x, last.y, 1.2, 0, 7); ctx.fill(); has = true; e.preventDefault(); });
+    canvas.addEventListener('pointermove', function(e){ if (!down) return; var p = pt(e); ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last = p; has = true; e.preventDefault(); });
+    ['pointerup', 'pointercancel'].forEach(function(n){ canvas.addEventListener(n, function(){ down = false; }); });
+    return { clear: size, empty: function(){ return !has; }, png: function(){ return canvas.toDataURL('image/png'); } };
+  }
+
+  function signed(d){
+    $('sub').textContent = 'Signed. Thank you.';
+    window.scrollTo(0, 0);
+    $('main').innerHTML = '<div class="msg ok"><b>Signed.</b> ' + (d.emailed ? 'A copy has been emailed to you.' : 'Keep this page or save a copy.') + '</div>' +
+      '<div class="card done"><b>' + esc(d.no || '') + '</b> · ' + esc(d.title || '') +
+      (d.signature_url ? '<img src="' + esc(d.signature_url) + '" alt="your signature">' : '') +
+      '<div>Signed by <b>' + esc(d.signed_name) + '</b>, ' + esc(when(d.signed_at)) + '</div>' +
+      (d.doc_hash ? '<div class="fp" style="margin-top:8px">Fingerprint: ' + esc(d.doc_hash) + '</div>' : '') +
+      '<div class="row" style="justify-content:flex-start;margin-top:14px"><a href="' + api + '/copy" target="_blank" rel="noopener"><button type="button">🖨 Save or print a copy</button></a></div></div>' +
+      (d.body ? '<div class="card"><div class="terms">' + esc(d.body) + '</div></div>' : '');
+  }
+
+  fetch(api, { credentials: 'omit' }).then(function(r){ return r.json().then(function(j){ if (!r.ok) throw new Error(j.error || 'Something went wrong'); return j; }); }).then(function(d){
+    $('shop').textContent = d.shop.name; document.title = 'Sign your warranty · ' + d.shop.name;
+    if (d.status === 'signed') return signed(d);
+    $('main').innerHTML =
+      '<div class="card"><b style="font-size:17px">' + esc(d.title) + '</b><div class="note">' + esc(d.no) + (d.shop.phone ? ' · Questions? Call ' + esc(d.shop.phone) : '') + '</div>' +
+        '<div class="terms" style="margin-top:12px">' + esc(d.body) + '</div>' +
+        (d.doc_url ? '<p style="margin:10px 0 0"><a href="' + esc(d.doc_url) + '" target="_blank" rel="noopener">📄 ' + esc(d.doc_name || 'The warranty document') + '</a></p>' : '') + '</div>' +
+      '<div class="card"><label class="l" for="nm">Your full name</label><input type="text" id="nm" autocomplete="name" value="' + esc(d.customer_name || '') + '">' +
+        '<label class="l">Sign here with your finger</label><div class="pad"><canvas id="cv"></canvas><div class="x"></div><div class="hint">✍ Sign above the line</div></div>' +
+        '<div class="row"><span class="note">Signing here counts as your signature on this agreement.</span><button type="button" id="clr">Clear</button></div>' +
+        '<label class="agree"><input type="checkbox" id="ok"> <span>I have read the warranty terms above and I accept them.</span></label>' +
+        '<button type="button" class="go" id="go">Sign the agreement</button><div id="err"></div></div>';
+    var p = pad($('cv'));
+    $('clr').onclick = p.clear;
+    window.addEventListener('resize', function(){ if (p.empty()) p.clear(); });
+    $('go').onclick = function(){
+      var name = $('nm').value.trim();
+      var err = function(m){ $('err').innerHTML = '<div class="msg bad" style="margin:12px 0 0">' + esc(m) + '</div>'; };
+      if (name.length < 2) return err('Type your full name.');
+      if (p.empty()) return err('Sign in the box first.');
+      if (!$('ok').checked) return err('Tick the box to say you accept the terms.');
+      $('go').disabled = true; $('go').textContent = 'Signing…';
+      fetch(api, { method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name, signature: p.png(), agree: true }) })
+        .then(function(r){ return r.json().then(function(j){ if (!r.ok) throw new Error(j.error || 'Something went wrong'); return j; }); })
+        .then(function(j){ signed(Object.assign({}, d, j, { signature_url: null })); return fetch(api).then(function(r){ return r.json(); }).then(function(x){ if (x && x.status === 'signed') signed(Object.assign(x, { emailed: j.emailed })); }).catch(function(){}); })
+        .catch(function(e){ $('go').disabled = false; $('go').textContent = 'Sign the agreement'; err(e.message); });
+    };
+  }).catch(function(e){ fail(e.message); });
+})();
+</script>
+</body>
+</html>

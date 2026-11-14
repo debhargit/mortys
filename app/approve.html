@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Approve your service · Morty's Auto Parts</title>
+<style>
+  :root{--red:#d62828;--navy:#0b1b2b;--ink:#1f2937;--muted:#6b7280;--line:#e5e7eb;--ok:#15803d;--warn:#b45309;--bad:#b91c1c}
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#f3f4f6;color:var(--ink);margin:0;padding:16px;font-size:15px}
+  .wrap{max-width:560px;margin:0 auto}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:14px;box-shadow:0 2px 10px rgba(0,0,0,.04)}
+  h1{font-size:19px;margin:0 0 2px;color:var(--navy)}
+  .sub{color:var(--muted);font-size:13px}
+  .veh{font-weight:700;margin-top:8px}
+  .item{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px}
+  .item.flag-fail{border-left:4px solid var(--bad)}
+  .item.flag-attention{border-left:4px solid var(--warn)}
+  .item.flag-ok{border-left:4px solid var(--ok)}
+  .item .cat{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+  .item .name{font-weight:700;font-size:15px}
+  .item .notes{color:var(--muted);font-size:13px;margin-top:3px}
+  .item .price{font-size:17px;font-weight:800;color:var(--navy);margin-top:6px}
+  .choices{display:flex;gap:8px;margin-top:10px}
+  .choices button{flex:1;padding:11px;border-radius:8px;border:1.5px solid var(--line);background:#fff;font-weight:700;font-size:14px;cursor:pointer;color:var(--ink)}
+  .choices button.approve.sel{background:var(--ok);border-color:var(--ok);color:#fff}
+  .choices button.decline.sel{background:var(--bad);border-color:var(--bad);color:#fff}
+  .okbadge{display:inline-block;font-size:12px;color:var(--ok);font-weight:700}
+  .submit{width:100%;padding:14px;border:0;border-radius:10px;background:var(--red);color:#fff;font-weight:800;font-size:16px;cursor:pointer}
+  .summary{display:flex;justify-content:space-between;font-size:15px;font-weight:700;margin:6px 0}
+  .terms{font-size:11px;color:var(--muted);line-height:1.6;margin-top:10px;border-top:1px solid var(--line);padding-top:10px}
+  .err{background:#fee2e2;color:#991b1b;padding:14px 16px;border-radius:10px}
+  .done{background:#dcfce7;color:#166534;padding:16px;border-radius:10px;text-align:center;font-weight:700}
+  .gate input{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;font-size:16px;margin:8px 0}
+</style>
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<script src="/assets/vas-ui.js?v=20261110b"></script>
+</head>
+<body>
+<div class="wrap" id="app"><div class="card">Loading…</div></div>
+<script>
+var INSP=null, ITEMS=[], SHOP={}, CHOICE={}, PHOTOS=[];
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function money(n){return '$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function qp(k){return new URLSearchParams(location.search).get(k);}
+async function load(){
+  var insp=qp('insp'), phone=qp('phone')||'';
+  if(!insp){ render_err('This link is missing its inspection reference.'); return; }
+  try{
+    var r=await fetch('/api/inspection/'+encodeURIComponent(insp)+(phone?'?phone='+encodeURIComponent(phone):''));
+    var d=await r.json();
+    if(!r.ok) throw new Error(d.error||'Could not load');
+    INSP=d.inspection; ITEMS=d.items||[]; SHOP=d.shop||{}; PHOTOS=d.photos||[];
+    render();
+  }catch(e){ render_err(e.message); }
+}
+function render_err(m){ document.getElementById('app').innerHTML='<div class="card err">'+esc(m)+'</div>'; }
+function flagged(it){ return it.status==='attention'||it.status==='fail'; }
+function render(){
+  var veh=[INSP.vehicle_year,INSP.vehicle_make,INSP.vehicle_model].filter(Boolean).join(' ');
+  var flags=ITEMS.filter(flagged), oks=ITEMS.filter(function(it){return it.status==='pass'||it.status==='ok';});
+  var h='<div class="card"><h1>'+esc(SHOP.name||'Morty\'s Auto Parts')+'</h1>'+
+    '<div class="sub">Vehicle inspection — please review and approve</div>'+
+    '<div class="veh">'+esc(veh||'Your vehicle')+(INSP.mileage?' · '+Number(INSP.mileage).toLocaleString()+' km':'')+'</div></div>';
+  if(!flags.length){
+    h+='<div class="card"><div class="okbadge">✓ No issues found.</div><p class="sub">Everything checked out. No action needed.</p></div>';
+  } else {
+    h+='<div class="card"><div class="sub" style="margin-bottom:10px">Tap <b>Approve</b> or <b>Decline</b> for each recommended item.</div>';
+    flags.forEach(function(it){
+      CHOICE[it.id]=CHOICE[it.id]||(it.approval||null);
+      h+='<div class="item flag-'+esc(it.status)+'">'+
+        '<div class="cat">'+esc(it.category)+'</div>'+
+        '<div class="name">'+esc(it.item)+(it.status==='fail'?' ⚠':'')+'</div>'+
+        (it.notes?'<div class="notes">'+esc(it.notes)+'</div>':'')+
+        (function(){var ph=PHOTOS.filter(function(p){return String(p.inspection_item_id)===String(it.id);});return ph.length?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin:6px 0">'+ph.map(function(p){return '<a href="'+esc(p.photo_path)+'" target="_blank"><img src="'+esc(p.photo_path)+'" style="width:76px;height:76px;object-fit:cover;border-radius:8px" alt=""/></a>';}).join('')+'</div>':'';})()+
+        (it.est_price_usd!=null?'<div class="price">'+money(it.est_price_usd)+'</div>':'<div class="notes">Price to be confirmed</div>')+
+        '<div class="choices">'+
+          '<button class="approve'+(CHOICE[it.id]==='approved'?' sel':'')+'" data-id="'+it.id+'" data-v="approved">Approve</button>'+
+          '<button class="decline'+(CHOICE[it.id]==='declined'?' sel':'')+'" data-id="'+it.id+'" data-v="declined">Decline</button>'+
+        '</div></div>';
+    });
+    h+='<div class="summary"><span>Approved total</span><span id="apTotal">'+money(0)+'</span></div>';
+    if(SHOP.service_terms) h+='<div class="terms">'+esc(SHOP.service_terms)+'</div>';
+    h+='<button class="submit" id="send">Submit my decisions</button></div>';
+  }
+  if(oks.length){
+    h+='<div class="card"><div class="sub"><b>Also checked (OK):</b> '+oks.map(function(it){return esc(it.item);}).join(', ')+'</div></div>';
+  }
+  document.getElementById('app').innerHTML=h;
+  document.querySelectorAll('.choices button').forEach(function(b){
+    b.addEventListener('click',function(){ CHOICE[b.getAttribute('data-id')]=b.getAttribute('data-v'); render(); recalc(); });
+  });
+  var send=document.getElementById('send'); if(send) send.addEventListener('click',submit);
+  recalc();
+}
+function recalc(){
+  var t=0; ITEMS.forEach(function(it){ if(CHOICE[it.id]==='approved') t+=Number(it.est_price_usd||0); });
+  var el=document.getElementById('apTotal'); if(el) el.textContent=money(t);
+}
+async function submit(){
+  var items=Object.keys(CHOICE).filter(function(k){return CHOICE[k];}).map(function(k){return {id:Number(k),approval:CHOICE[k]};});
+  if(!items.length){ await vasAlert('Please approve or decline at least one item.'); return; }
+  var btn=document.getElementById('send'); btn.disabled=true; btn.textContent='Sending…';
+  try{
+    var r=await fetch('/api/inspection/'+encodeURIComponent(qp('insp'))+'/respond',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:qp('phone')||'',items:items})});
+    var d=await r.json();
+    if(!r.ok) throw new Error(d.error||'Could not submit');
+    document.getElementById('app').innerHTML='<div class="card done">✓ Thank you! Your decisions have been sent to '+esc(SHOP.name||'the shop')+'.<br/><span style="font-weight:400;font-size:13px">We will contact you to schedule the approved work.</span></div>';
+  }catch(e){ btn.disabled=false; btn.textContent='Submit my decisions'; await vasAlert(e.message); }
+}
+load();
+</script>
+</body>
+</html>

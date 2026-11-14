@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trade accounts · Morty's Auto Parts</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --bad:#b91c1c; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --ok:#22c55e; --bad:#f87171; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0}
+  header nav{margin-left:auto;display:flex;gap:14px;font-size:13px}
+  header a{color:#fff;opacity:.85}
+  main{max-width:1180px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
+  .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  input,select,button,textarea{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  button{cursor:pointer;background:var(--card)}
+  button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600}
+  button.sm{padding:4px 9px;font-size:12.5px}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 12px}
+  .tabs button{border-radius:999px;padding:6px 13px;font-size:13px}
+  .tabs button.on{background:var(--navy);border-color:var(--navy);color:#fff}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px}
+  .tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;cursor:pointer}
+  .tile .k{font-size:12px;color:var(--muted)} .tile .v{font-size:20px;font-weight:700}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  td.n,th.n{text-align:right;white-space:nowrap}
+  .chip{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;background:var(--chip)}
+  .st-dormant{color:var(--bad)} .st-declining{color:var(--warn)} .st-growing{color:var(--ok)}
+  .muted{color:var(--muted)} .err{color:var(--bad)}
+  dialog{border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);max-width:520px;width:94vw}
+  dialog .row{margin-bottom:8px} dialog label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  dialog select,dialog input,dialog textarea{width:100%}
+  @media (max-width:760px){ .hide-sm{display:none} }
+</style>
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
+</head>
+<body>
+<header>
+  <h1>Trade accounts</h1>
+  <nav><a href="/scorecard.html">Scorecard</a><a href="/receivables.html">Receivables</a><a href="/admin.html">Admin</a></nav>
+</header>
+<main>
+  <div class="tabs"><button data-tab="calls" class="on">Call list</button><button data-tab="all">All accounts</button><button data-tab="apps">Applications <span id="appN"></span></button></div>
+  <div id="tiles" class="tiles"></div>
+  <div class="card">
+    <div class="controls" style="margin-bottom:10px">
+      <div><label for="rep">Rep</label><select id="rep"></select></div>
+      <div id="stWrap" style="display:none"><label for="st">Status</label><select id="st"><option value="">All</option><option value="dormant">Dormant</option><option value="declining">Declining</option><option value="growing">Growing</option><option value="new">New</option><option value="steady">Steady</option></select></div>
+      <span id="msg" class="muted"></span>
+    </div>
+    <table>
+      <thead id="head"></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</main>
+
+<dialog id="adlg">
+  <form method="dialog">
+    <h3 style="margin:0 0 4px" id="aTitle"></h3>
+    <div id="aBody" class="muted" style="font-size:13px;margin-bottom:10px"></div>
+    <div class="row"><label for="aCust">Customer account</label><select id="aCust"></select></div>
+    <div class="row"><label for="aTier">Price tier</label><select id="aTier"><option value="trade">Trade</option><option value="fleet">Fleet</option><option value="dealer">Dealer</option><option value="retail">Retail</option></select></div>
+    <div class="row"><label for="aLimit">Credit limit J$ (0 = cash account)</label><input id="aLimit" type="number" min="0" step="5000"></div>
+    <div class="row"><label for="aTerms">Terms (days)</label><input id="aTerms" type="number" min="1" max="120" value="30"></div>
+    <div class="row"><label for="aRep">Rep</label><select id="aRep"></select></div>
+    <div class="row"><label for="aNote">Note (references checked, reasons)</label><textarea id="aNote" rows="2"></textarea></div>
+    <label style="display:flex;gap:6px;align-items:center;color:var(--ink)"><input type="checkbox" id="aTell" checked style="width:auto"> Tell the applicant</label>
+    <div class="controls" style="justify-content:flex-end;margin-top:10px"><button value="cancel" formnovalidate>Close</button><button id="aDecline">Decline</button><button id="aApprove" class="primary">Approve</button></div>
+    <p id="aErr" class="err"></p>
+  </form>
+</dialog>
+
+<dialog id="dlg">
+  <form method="dialog" id="frm">
+    <h3 style="margin:0 0 4px" id="dTitle"></h3>
+    <p class="muted" style="margin:0 0 10px" id="dSub"></p>
+    <div class="row"><label for="kind">How</label><select id="kind"><option value="call">Call</option><option value="visit">Visit</option><option value="whatsapp">WhatsApp</option><option value="email">Email</option></select></div>
+    <div class="row"><label for="outcome">Outcome</label><select id="outcome">
+      <option value="ordered">Ordered</option><option value="will_order">Will order</option><option value="no_answer">No answer</option>
+      <option value="price">Price is the issue</option><option value="complaint">Complaint</option><option value="not_interested">Not interested</option><option value="other">Other</option></select></div>
+    <div class="row"><label for="next">Follow up on</label><input type="date" id="next"></div>
+    <div class="row"><label for="note">Note</label><textarea id="note" rows="3"></textarea></div>
+    <div id="hist" class="muted" style="font-size:12.5px;max-height:140px;overflow:auto;margin-bottom:8px"></div>
+    <div class="controls" style="justify-content:flex-end"><button value="cancel" formnovalidate>Cancel</button><button id="saveC" class="primary" value="default">Save</button></div>
+    <p id="dErr" class="err"></p>
+  </form>
+</dialog>
+
+<script>
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const jm = (v) => 'J$' + Math.round(Number(v) || 0).toLocaleString('en-US');
+  const day = (v) => (v ? String(v).slice(0, 10) : '');
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.statusText); return j; }));
+  }
+  let TAB = 'calls', ROWS = [], REPS = [], CUR = null, repLoaded = false;
+  const NAMES = { dormant: 'Dormant', declining: 'Declining', growing: 'Growing', new: 'New', steady: 'Steady' };
+
+  function fillReps(reps, sel) {
+    REPS = reps;
+    $('rep').innerHTML = '<option value="">Everyone</option><option value="none">No rep</option>' + reps.map((r) => '<option value="' + r.id + '">' + esc(r.name) + '</option>').join('');
+    $('rep').value = sel || '';
+  }
+  let APPS = [], APP = null;
+  function loadApps() {
+    api('/api/trade/applications?status=' + ($('st').value && ['new','approved','declined'].includes($('st').value) ? $('st').value : 'new')).then((r) => {
+      APPS = r.applications; $('appN').textContent = r.new_count ? '(' + r.new_count + ')' : ''; $('msg').textContent = APPS.length + ' applications';
+      $('tiles').innerHTML = '<div class="muted" style="grid-column:1/-1">Share this link with garages and fleets: <b>' + esc(location.origin) + '/trade-apply.html</b></div>';
+      $('head').innerHTML = '<tr><th>Business</th><th>Contact</th><th class="n">Spend a month</th><th>Credit</th><th class="hide-sm">Applied</th><th></th></tr>';
+      $('rows').innerHTML = APPS.length ? APPS.map((a, i) =>
+        '<tr><td><b>' + esc(a.business_name) + '</b><br><span class="muted">' + esc(a.business_type) + (a.parish ? ' · ' + esc(a.parish) : '') + (a.years_trading != null ? ' · ' + a.years_trading + ' yrs' : '') + '</span></td>' +
+        '<td>' + esc(a.contact_name) + '<br><span class="muted">' + esc(a.phone) + (a.email ? ' · ' + esc(a.email) : '') + '</span></td>' +
+        '<td class="n">' + (a.monthly_spend ? jm(a.monthly_spend) : '') + '</td>' +
+        '<td>' + (a.wants_credit ? 'Wants ' + (a.credit_requested ? jm(a.credit_requested) : 'credit') : 'Cash') + (a.status !== 'new' ? '<br><span class="muted">' + esc(a.status) + (a.credit_limit ? ' ' + jm(a.credit_limit) : '') + '</span>' : '') + '</td>' +
+        '<td class="hide-sm muted">' + day(a.created_at) + '</td>' +
+        '<td>' + (a.status === 'new' ? '<button class="sm" data-app="' + i + '">Review</button>' : '') + '</td></tr>').join('') : '<tr><td colspan="6" class="muted">No applications.</td></tr>';
+    }).catch((e) => { $('msg').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; });
+  }
+  function load() {
+    $('msg').textContent = 'Loading…';
+    if (TAB === 'apps') return loadApps();
+    if (TAB === 'calls') {
+      api('/api/trade/call-list' + (repLoaded ? '?rep=' + encodeURIComponent($('rep').value) : '')).then((r) => {
+        if (!repLoaded) { fillReps(r.reps, r.rep); repLoaded = true; }
+        ROWS = r.calls; $('msg').textContent = r.total + ' to contact';
+        $('tiles').innerHTML = '';
+        $('head').innerHTML = '<tr><th>Account</th><th>Why</th><th class="n">Last year</th><th class="n hide-sm">Last 90 days</th><th class="n hide-sm">Owes</th><th class="hide-sm">Last contact</th><th></th></tr>';
+        $('rows').innerHTML = ROWS.length ? ROWS.map((a, i) =>
+          '<tr><td><b>' + esc(a.name) + '</b><br><span class="muted">' + esc(a.phone || '') + (a.rep_name ? ' · ' + esc(a.rep_name) : '') + '</span></td>' +
+          '<td>' + esc(a.reason) + '</td><td class="n">' + jm(a.last365) + '</td><td class="n hide-sm">' + jm(a.last90) + '</td>' +
+          '<td class="n hide-sm">' + (a.overdue > 0 ? '<span class="err">' + jm(a.overdue) + ' overdue</span>' : a.open > 0 ? jm(a.open) : '') + '</td>' +
+          '<td class="hide-sm muted">' + (a.last_contact ? day(a.last_contact) + ' ' + esc(a.last_outcome || '') : 'never') + '</td>' +
+          '<td><button class="sm" data-i="' + i + '">Log contact</button></td></tr>').join('') : '<tr><td colspan="7" class="muted">Nobody to call right now.</td></tr>';
+      }).catch((e) => { $('msg').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; });
+    } else {
+      const q = new URLSearchParams(); if ($('st').value) q.set('status', $('st').value); if ($('rep').value) q.set('rep', $('rep').value);
+      api('/api/trade/accounts?' + q).then((r) => {
+        ROWS = r.accounts; $('msg').textContent = r.total + ' accounts';
+        $('tiles').innerHTML = ['dormant', 'declining', 'growing', 'new', 'steady'].map((k) => { const s = r.summary[k] || { n: 0, last365: 0, at_risk: 0 };
+          return '<div class="tile" data-st="' + k + '"><div class="k">' + NAMES[k] + '</div><div class="v">' + s.n + '</div><div class="k">' + jm(s.last365) + ' last year' + (s.at_risk ? ', ' + jm(s.at_risk) + ' a quarter at risk' : '') + '</div></div>'; }).join('');
+        $('head').innerHTML = '<tr><th>Account</th><th>Status</th><th class="n">Last year</th><th class="n">Last 90</th><th class="n hide-sm">90 before</th><th class="n hide-sm">Days since</th><th class="hide-sm">Rep</th><th></th></tr>';
+        $('rows').innerHTML = ROWS.map((a, i) =>
+          '<tr><td><b>' + esc(a.name) + '</b><br><span class="muted">' + esc(a.price_tier) + (a.account_number ? ' · ' + esc(a.account_number) : '') + '</span></td>' +
+          '<td><span class="chip st-' + a.status + '">' + NAMES[a.status] + '</span>' + (a.change_pct != null ? '<br><span class="muted">' + (a.change_pct > 0 ? '+' : '') + a.change_pct + '%</span>' : '') + '</td>' +
+          '<td class="n">' + jm(a.last365) + '</td><td class="n">' + jm(a.last90) + '</td><td class="n hide-sm">' + jm(a.prev90) + '</td><td class="n hide-sm">' + (a.days_since == null ? '' : a.days_since) + '</td>' +
+          '<td class="hide-sm"><select data-rep="' + a.id + '"><option value="">—</option>' + REPS.map((r) => '<option value="' + r.id + '"' + (String(r.id) === String(a.sales_rep_id) ? ' selected' : '') + '>' + esc(r.name) + '</option>').join('') + '</select></td>' +
+          '<td><button class="sm" data-i="' + i + '">Log contact</button></td></tr>').join('');
+      }).catch((e) => { $('msg').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; });
+    }
+  }
+  document.querySelector('.tabs').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-tab]'); if (!b) return;
+    TAB = b.dataset.tab; document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('on', x === b));
+    $('stWrap').style.display = TAB === 'calls' ? 'none' : '';
+    $('st').innerHTML = TAB === 'apps' ? '<option value="new">New</option><option value="approved">Approved</option><option value="declined">Declined</option>'
+      : '<option value="">All</option><option value="dormant">Dormant</option><option value="declining">Declining</option><option value="growing">Growing</option><option value="new">New</option><option value="steady">Steady</option>';
+    load();
+  });
+  $('tiles').addEventListener('click', (e) => { const t = e.target.closest('[data-st]'); if (t) { $('st').value = t.dataset.st; load(); } });
+  $('rep').onchange = load; $('st').onchange = load;
+  $('rows').addEventListener('change', (e) => {
+    const s = e.target.closest('[data-rep]'); if (!s) return;
+    api('/api/trade/accounts/' + s.dataset.rep + '/rep', 'PUT', { rep_id: s.value || null }).catch(async (err) => await vasAlert(err.message));
+  });
+  $('rows').addEventListener('click', (e) => {
+    const ab = e.target.closest('[data-app]');
+    if (ab) {
+      APP = APPS[Number(ab.dataset.app)];
+      $('aTitle').textContent = APP.business_name; $('aErr').textContent = ''; $('aNote').value = '';
+      $('aBody').innerHTML = esc(APP.contact_name) + ' · ' + esc(APP.phone) + (APP.trn ? ' · TRN ' + esc(APP.trn) : '') + (APP.address ? '<br>' + esc(APP.address) : '') +
+        (APP.references_text ? '<br><b>References:</b> ' + esc(APP.references_text) : '') + (APP.notes ? '<br><b>Notes:</b> ' + esc(APP.notes) : '');
+      $('aCust').innerHTML = '<option value="">Open a new account</option>' + (APP.matches || []).map((m) => '<option value="' + m.id + '">Use existing: ' + esc(m.name) + (m.account_number ? ' (' + esc(m.account_number) + ')' : '') + '</option>').join('');
+      if ((APP.matches || []).length) $('aCust').value = String(APP.matches[0].id);
+      $('aTier').value = APP.business_type === 'fleet' ? 'fleet' : APP.business_type === 'dealer' ? 'dealer' : 'trade';
+      $('aLimit').value = APP.wants_credit && APP.credit_requested ? APP.credit_requested : 0;
+      $('aRep').innerHTML = '<option value="">—</option>' + REPS.map((r) => '<option value="' + r.id + '">' + esc(r.name) + '</option>').join('');
+      $('adlg').showModal(); return;
+    }
+    const b = e.target.closest('[data-i]'); if (!b) return;
+    CUR = ROWS[Number(b.dataset.i)];
+    $('dTitle').textContent = CUR.name; $('dSub').textContent = (CUR.phone || '') + ' · last bought ' + (CUR.days_since == null ? 'never' : CUR.days_since + ' days ago');
+    $('note').value = ''; $('next').value = ''; $('dErr').textContent = ''; $('hist').textContent = 'Loading history…';
+    api('/api/trade/contacts/' + CUR.id).then((r) => {
+      $('hist').innerHTML = r.contacts.length ? r.contacts.map((c) => day(c.created_at) + ' · ' + esc(c.kind) + ' · ' + esc(c.outcome) + (c.rep_name ? ' · ' + esc(c.rep_name) : '') + (c.note ? '<br>' + esc(c.note) : '')).join('<hr style="border:0;border-top:1px solid var(--line)">') : 'No contacts yet.';
+    }).catch(() => { $('hist').textContent = ''; });
+    $('dlg').showModal();
+  });
+  $('saveC').addEventListener('click', (e) => {
+    e.preventDefault();
+    api('/api/trade/contacts', 'POST', { customer_id: CUR.id, kind: $('kind').value, outcome: $('outcome').value, next_date: $('next').value || null, note: $('note').value, rep_id: $('rep').value && $('rep').value !== 'none' ? Number($('rep').value) : null })
+      .then(() => { $('dlg').close(); load(); }).catch((err) => { $('dErr').textContent = err.message; });
+  });
+  function decide(kind) {
+    const body = kind === 'approve'
+      ? { customer_id: $('aCust').value ? Number($('aCust').value) : null, price_tier: $('aTier').value, credit_limit: Number($('aLimit').value) || 0, terms_days: Number($('aTerms').value) || 30, rep_id: $('aRep').value ? Number($('aRep').value) : null, note: $('aNote').value, notify: $('aTell').checked }
+      : { note: $('aNote').value, notify: $('aTell').checked };
+    api('/api/trade/applications/' + APP.id + '/' + kind, 'POST', body).then(() => { $('adlg').close(); load(); }).catch((err) => { $('aErr').textContent = err.message; });
+  }
+  $('aApprove').addEventListener('click', (e) => { e.preventDefault(); decide('approve'); });
+  $('aDecline').addEventListener('click', async (e) => { e.preventDefault(); if (await vasConfirm('Decline this application?')) decide('decline'); });
+  api('/api/trade/applications').then((r) => { $('appN').textContent = r.new_count ? '(' + r.new_count + ')' : ''; }).catch(() => {});
+  load();
+})();
+</script>
+</body>
+</html>

@@ -43,6 +43,12 @@ import { categorise } from './_categorise.mjs';
 
 const REPLACE = process.argv.includes('--replace');
 const DEACTIVATE_MISSING = process.argv.includes('--deactivate-missing');
+// --new-only (the import page): add parts the system does not have, and on the
+// ones it does only bring across what the legacy program still owns -- stock on
+// hand, cost, selling and list price, minimum level and bin. Names, categories,
+// fitment and suppliers edited in the new system are left alone, and nothing is
+// retired.
+const NEW_ONLY = process.argv.includes('--new-only');
 
 // UNIT is free text: EA, EA., EACH, 1EA, SET, SET 4, PR/FT, PAIR...
 function uom(v) {
@@ -162,6 +168,43 @@ try {
       return '(' + COLS.map((_, k) => `$${b + k + 1}`).join(',') + ')';
     });
     await c.query(`INSERT INTO _p (${COLS.join(',')}) VALUES ${tuples.join(',')}`, vals);
+  }
+
+  if (NEW_ONLY) {
+    const added = await c.query(`
+      INSERT INTO products (
+        img, sku, name, make_model, category, condition, bin_location, stock_count,
+        low_threshold, min_stock, cost_usd, price_usd, list_price_usd, markup_pct,
+        stock_uom, purchase_uom, units_per_purchase, supplier_id, is_active)
+      SELECT p.img, p.img, p.name, p.make_model, p.category, 'NEW', p.bin_location, p.stock_count,
+             p.min_stock, p.min_stock, p.cost_usd, p.price_usd, p.list_price_usd, p.markup_pct,
+             p.uom, p.uom, 1, s.id, true
+        FROM _p p
+        LEFT JOIN suppliers s ON lower(btrim(s.name)) = lower(p.supplier_name)
+       WHERE NOT EXISTS (SELECT 1 FROM products x WHERE x.img = p.img)
+      ON CONFLICT (img) DO NOTHING`);
+    const changed = await c.query(`
+      UPDATE products x SET
+        stock_count    = p.stock_count,
+        cost_usd       = coalesce(p.cost_usd, x.cost_usd),
+        price_usd      = coalesce(p.price_usd, x.price_usd),
+        list_price_usd = coalesce(p.list_price_usd, x.list_price_usd),
+        min_stock      = p.min_stock,
+        low_threshold  = p.min_stock,
+        bin_location   = coalesce(p.bin_location, x.bin_location),
+        updated_at     = now()
+        FROM _p p
+       WHERE x.img = p.img
+         AND (x.stock_count IS DISTINCT FROM p.stock_count
+              OR (p.cost_usd IS NOT NULL AND x.cost_usd IS DISTINCT FROM p.cost_usd)
+              OR (p.price_usd IS NOT NULL AND x.price_usd IS DISTINCT FROM p.price_usd)
+              OR (p.list_price_usd IS NOT NULL AND x.list_price_usd IS DISTINCT FROM p.list_price_usd)
+              OR x.min_stock IS DISTINCT FROM p.min_stock
+              OR (p.bin_location IS NOT NULL AND x.bin_location IS DISTINCT FROM p.bin_location))`);
+    await c.query('COMMIT');
+    console.log(`\nnew parts added: ${fmt(added.rowCount)}  |  parts updated (stock, cost, price, minimum, bin): ${fmt(changed.rowCount)}`);
+    console.log('@@result ' + JSON.stringify({ step: 'inventry', added: added.rowCount, updated: changed.rowCount }));
+    process.exit(0);
   }
 
   const res = await c.query(`

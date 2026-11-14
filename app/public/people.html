@@ -47,10 +47,11 @@
   .steps{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 12px} .steps span{font-size:12.5px;padding:3px 10px;border-radius:999px;background:var(--chip);color:var(--muted)} .steps span.on{background:var(--red);color:#fff} .steps span.done{color:var(--ok)}
   @media print{ header,.tabs,.controls,button,.side{display:none!important} .card{border:0} .centre{display:block} }
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
 <header><h1>People &amp; HR</h1><nav><a href="/attendance.html">Attendance</a><a href="/payroll.html">Payroll</a><a href="/training.html">Training</a><a href="/documents.html">Documents</a><a href="/hiring.html">Hiring</a><a href="/admin.html#tab=staff">Users &amp; Staff</a><a href="/admin.html">Admin</a></nav></header>
@@ -465,7 +466,7 @@
           api('/api/people/staff/' + uid + '/job', 'POST', { kind: $('#jK').value, effective_date: $('#jE').value, job_title: $('#jT').value, department_id: $('#jD').value, manager_user_id: $('#jM').value, salary_annual: $('#jS').value, hourly_rate: $('#jH').value, reason: $('#jR').value, apply_payroll: $('#jP').checked })
             .then(function (r) { reopen(f, r.payroll_updated ? 'Recorded, and Payroll updated' : 'Recorded'); }).catch(fail);
         };
-        all('[data-jdel]', el).forEach(function (b) { b.onclick = function () { if (confirm('Remove this line? Use it only for a mistake. Pay already passed on to Payroll is not changed back.')) api('/api/people/staff/' + uid + '/job/' + b.getAttribute('data-jdel'), 'DELETE').then(function () { reopen(f, 'Removed'); }).catch(fail); }; });
+        all('[data-jdel]', el).forEach(function (b) { b.onclick = async function () { if (await vasConfirm('Remove this line? Use it only for a mistake. Pay already passed on to Payroll is not changed back.')) api('/api/people/staff/' + uid + '/job/' + b.getAttribute('data-jdel'), 'DELETE').then(function () { reopen(f, 'Removed'); }).catch(fail); }; });
       },
       conduct: function () {
         el.innerHTML = (p.status === 'probation' ? '<div class="warn"><b>On probation</b>' + (p.probation_end ? ' until ' + esc(day(p.probation_end)) : '') + '. Best done with an end-of-probation review (Reviews &amp; goals), or here: ' +
@@ -481,14 +482,14 @@
               '<br><small>' + esc(c.issued_by_name || '') + (c.document_number ? ' · letter ' + esc(c.document_number) : '') + (c.acknowledged_at ? ' · received by them ' + esc(day(c.acknowledged_at)) : ' · not yet acknowledged') + (c.employee_response ? ' · their reply: “' + esc(c.employee_response) + '”' : '') + '</small>' +
               '<div style="margin-top:4px">' + (c.document_id ? '<button class="sm" data-csign="' + c.id + '">✍ Send to sign</button> ' : '') + (c.status === 'open' ? '<button class="sm" data-cst="' + c.id + ':closed">Close</button> <button class="sm" data-cst="' + c.id + ':appealed">Appealed</button> <button class="sm" data-cst="' + c.id + ':withdrawn">Withdraw</button>' : '<button class="sm" data-cst="' + c.id + ':open">Reopen</button>') + '</div></div>';
           }).join('') : '<p class="sub">Nothing recorded.</p>');
-        if ($('#prOk')) $('#prOk').onclick = function () { var n = prompt('A note for the file (optional)', 'Probation passed'); if (n === null) return; api('/api/people/staff/' + uid + '/probation', 'POST', { outcome: 'confirm', note: n }).then(function () { reopen(f, 'Confirmed in post'); }).catch(fail); };
-        if ($('#prExt')) $('#prExt').onclick = function () { var u2 = prompt('Extend probation to (YYYY-MM-DD)', ''); if (!u2) return; api('/api/people/staff/' + uid + '/probation', 'POST', { outcome: 'extend', until: u2, note: prompt('Why?', '') || '' }).then(function () { reopen(f, 'Probation extended'); }).catch(fail); };
+        if ($('#prOk')) $('#prOk').onclick = async function () { var n = await vasPrompt('A note for the file (optional)', 'Probation passed'); if (n === null) return; api('/api/people/staff/' + uid + '/probation', 'POST', { outcome: 'confirm', note: n }).then(function () { reopen(f, 'Confirmed in post'); }).catch(fail); };
+        if ($('#prExt')) $('#prExt').onclick = async function () { var u2 = await vasPrompt('Extend probation to (YYYY-MM-DD)', ''); if (!u2) return; api('/api/people/staff/' + uid + '/probation', 'POST', { outcome: 'extend', until: u2, note: (await vasPrompt('Why?', '')) || '' }).then(function () { reopen(f, 'Probation extended'); }).catch(fail); };
         $('#cGo').onclick = function () {
           api('/api/people/staff/' + uid + '/cases', 'POST', { kind: $('#cK').value, incident_date: $('#cD').value, expires_on: $('#cE').value, summary: $('#cS').value, details: $('#cDt').value, action: $('#cA').value, file_letter: $('#cL').checked, tell: $('#cT').checked })
             .then(function (r) { reopen(f, r.document ? 'Recorded; letter filed as ' + r.document.number : 'Recorded'); }).catch(fail);
         };
         all('[data-csign]', el).forEach(function (b) { b.onclick = function () { sendToSign(f, { case_id: +b.getAttribute('data-csign'), kind: 'letter' }); }; });
-        all('[data-cst]', el).forEach(function (b) { b.onclick = function () { var x = b.getAttribute('data-cst').split(':'); api('/api/people/staff/' + uid + '/cases/' + x[0], 'PATCH', { status: x[1], note: prompt('Note (optional)', '') || '' }).then(function () { reopen(f, 'Updated'); }).catch(fail); }; });
+        all('[data-cst]', el).forEach(function (b) { b.onclick = async function () { var x = b.getAttribute('data-cst').split(':'); api('/api/people/staff/' + uid + '/cases/' + x[0], 'PATCH', { status: x[1], note: (await vasPrompt('Note (optional)', '')) || '' }).then(function () { reopen(f, 'Updated'); }).catch(fail); }; });
       },
       leave: function () {
         var l = f.leave || {};
@@ -525,7 +526,7 @@
         var putGoal = function (g, ch) { api('/api/people/staff/' + uid + '/goals/' + g.id, 'PUT', Object.assign({}, g, ch)).then(function () { reopen(f, 'Goal updated'); }).catch(fail); };
         all('[data-gp]', el).forEach(function (s) { s.onchange = function () { putGoal(goal(s.getAttribute('data-gp')), { progress: +s.value, status: +s.value === 100 ? 'done' : 'open' }); }; });
         all('[data-gs]', el).forEach(function (b) { b.onclick = function () { var x = b.getAttribute('data-gs').split(':'); putGoal(goal(x[0]), { status: x[1] }); }; });
-        all('[data-gdel]', el).forEach(function (b) { b.onclick = function () { if (confirm('Remove this goal?')) api('/api/people/staff/' + uid + '/goals/' + b.getAttribute('data-gdel'), 'DELETE').then(function () { reopen(f, 'Removed'); }).catch(fail); }; });
+        all('[data-gdel]', el).forEach(function (b) { b.onclick = async function () { if (await vasConfirm('Remove this goal?')) api('/api/people/staff/' + uid + '/goals/' + b.getAttribute('data-gdel'), 'DELETE').then(function () { reopen(f, 'Removed'); }).catch(fail); }; });
       },
       docs: function () {
         el.innerHTML = '<div class="empty">Loading…</div>';
@@ -550,7 +551,7 @@
         $('#tGo').onclick = function () { api('/api/people/staff/' + uid + '/tasks', 'POST', { title: $('#tT').value, due_on: $('#tD').value, assignee_id: $('#tA').value }).then(function () { reopen(f, 'Added'); }).catch(fail); };
         if ($('#tOn')) $('#tOn').onclick = function () { api('/api/people/staff/' + uid + '/tasks', 'POST', { template: 'onboarding', due_on: p.start_date }).then(function () { reopen(f, 'Checklist added'); }).catch(fail); };
         all('[data-tk]', el).forEach(function (c) { c.onchange = function () { api('/api/people/tasks/' + c.getAttribute('data-tk'), 'PATCH', { done: c.checked }).then(function () { reopen(f); }).catch(fail); }; });
-        all('[data-tdel]', el).forEach(function (b) { b.onclick = function () { if (confirm('Remove this item?')) api('/api/people/tasks/' + b.getAttribute('data-tdel'), 'DELETE').then(function () { reopen(f, 'Removed'); }).catch(fail); }; });
+        all('[data-tdel]', el).forEach(function (b) { b.onclick = async function () { if (await vasConfirm('Remove this item?')) api('/api/people/tasks/' + b.getAttribute('data-tdel'), 'DELETE').then(function () { reopen(f, 'Removed'); }).catch(fail); }; });
       },
       exit: function () {
         var x = f.exits.filter(function (e) { return e.status === 'open'; })[0];
@@ -569,10 +570,10 @@
           '<div class="controls" style="margin-top:8px"><button id="xSave">Save</button><button class="primary" id="xDone">Complete the exit</button><button id="xCancel">They are staying (cancel)</button></div>';
         var body = function () { return { last_day: $('#xL').value, reason: $('#xR').value, exit_interview: $('#xI').value, rehire: $('#xRh').value ? $('#xRh').value === 'yes' : null }; };
         $('#xSave').onclick = function () { api('/api/people/exits/' + x.id, 'PATCH', body()).then(function () { reopen(f, 'Saved'); }).catch(fail); };
-        $('#xCancel').onclick = function () { if (confirm('Cancel the exit? Unfinished leaving tasks are removed.')) api('/api/people/exits/' + x.id, 'PATCH', { cancel: true }).then(function () { reopen(f, 'Exit cancelled'); }).catch(fail); };
-        $('#xDone').onclick = function () {
-          if (left && !confirm(left + ' checklist item(s) are not ticked. Complete the exit anyway?')) return;
-          var arch = !u.is_archived && confirm('Also archive their login now? This signs them out, stops sign-in and removes their till PIN. Their history stays.\n\nOK = archive now, Cancel = leave the login for now');
+        $('#xCancel').onclick = async function () { if (await vasConfirm('Cancel the exit? Unfinished leaving tasks are removed.')) api('/api/people/exits/' + x.id, 'PATCH', { cancel: true }).then(function () { reopen(f, 'Exit cancelled'); }).catch(fail); };
+        $('#xDone').onclick = async function () {
+          if (left && !(await vasConfirm(left + ' checklist item(s) are not ticked. Complete the exit anyway?'))) return;
+          var arch = !u.is_archived && (await vasConfirm('Also archive their login now? This signs them out, stops sign-in and removes their till PIN. Their history stays.\n\nOK = archive now, Cancel = leave the login for now'));
           api('/api/people/exits/' + x.id, 'PATCH', Object.assign(body(), { complete: true })).then(function () {
             if (!arch) return reopen(f, 'Exit completed');
             return api('/api/admin/staff/' + uid, 'PATCH', { archived: true, left_on: $('#xL').value, archive_reason: EXITK[x.kind] + ($('#xR').value ? ' — ' + $('#xR').value.slice(0, 150) : '') })
@@ -608,7 +609,7 @@
     }
     $('#ctNew').onclick = function () { form(null); };
     all('[data-ce]', el).forEach(function (b) { b.onclick = function () { form(list.filter(function (c) { return String(c.id) === b.getAttribute('data-ce'); })[0]); }; });
-    all('[data-cd]', el).forEach(function (b) { b.onclick = function () { if (confirm('Remove this contact?')) api(base + '/' + b.getAttribute('data-cd'), 'DELETE').then(function () { done('Removed'); }).catch(fail); }; });
+    all('[data-cd]', el).forEach(function (b) { b.onclick = async function () { if (await vasConfirm('Remove this contact?')) api(base + '/' + b.getAttribute('data-cd'), 'DELETE').then(function () { done('Removed'); }).catch(fail); }; });
   }
   function reviewForm(f, r) {
     var draft = r.status === 'draft', uid = f.user.id;
@@ -632,10 +633,10 @@
       return b;
     };
     var put = function (b, msg) { api('/api/people/staff/' + uid + '/reviews/' + r.id, 'PUT', b).then(function () { close(2); reopen(f, msg); }).catch(function (e) { toast(e.message); }); };
-    if ($('#rvF')) $('#rvF').onclick = function () { if ($('#rvO') && $('#rvO').value === 'end' && !confirm('Not passed: after finishing, start their exit on the Leaving tab.')) return; put(body(true), 'Review finished; they are told'); };
+    if ($('#rvF')) $('#rvF').onclick = async function () { if ($('#rvO') && $('#rvO').value === 'end' && !(await vasConfirm('Not passed: after finishing, start their exit on the Leaving tab.'))) return; put(body(true), 'Review finished; they are told'); };
     if ($('#rvSave')) $('#rvSave').onclick = function () { put(body(false), 'Saved'); };
     if ($('#rvRe')) $('#rvRe').onclick = function () { put({ reopen: true }, 'Reopened'); };
-    if ($('#rvDel')) $('#rvDel').onclick = function () { if (confirm('Delete this review?')) api('/api/people/staff/' + uid + '/reviews/' + r.id, 'DELETE').then(function () { close(2); reopen(f, 'Deleted'); }).catch(function (e) { toast(e.message); }); };
+    if ($('#rvDel')) $('#rvDel').onclick = async function () { if (await vasConfirm('Delete this review?')) api('/api/people/staff/' + uid + '/reviews/' + r.id, 'DELETE').then(function () { close(2); reopen(f, 'Deleted'); }).catch(function (e) { toast(e.message); }); };
   }
 
   // ----------------------------------------------------------- add staff --
@@ -736,7 +737,7 @@
       $('#nnGo').onclick = function () { api('/api/people/staff/' + uid + '/notes', 'POST', { kind: 'note', body: $('#nnB').value, pinned: $('#nnP').checked }).then(function () { redo('Note added'); }).catch(bad); };
       all('[data-nd]', el).forEach(function (c) { c.onchange = function () { api('/api/people/notes/' + c.getAttribute('data-nd'), 'PATCH', { done: c.checked }).then(function () { redo(); }).catch(bad); }; });
       all('[data-np]', el).forEach(function (b) { b.onclick = function () { var x = b.getAttribute('data-np').split(':'); api('/api/people/notes/' + x[0], 'PATCH', { pinned: x[1] === '1' }).then(function () { redo(); }).catch(bad); }; });
-      all('[data-nx]', el).forEach(function (b) { b.onclick = function () { if (confirm('Remove this for good?')) api('/api/people/notes/' + b.getAttribute('data-nx'), 'DELETE').then(function () { redo('Removed'); }).catch(bad); }; });
+      all('[data-nx]', el).forEach(function (b) { b.onclick = async function () { if (await vasConfirm('Remove this for good?')) api('/api/people/notes/' + b.getAttribute('data-nx'), 'DELETE').then(function () { redo('Removed'); }).catch(bad); }; });
       all('[data-ne]', el).forEach(function (b) {
         b.onclick = function () {
           var x = d.notes.concat(d.todos).filter(function (y) { return String(y.id) === b.getAttribute('data-ne'); })[0];
@@ -861,7 +862,7 @@
       function send(dup) {
         var body = { personal: W.personal, contact: W.contact, employment: W.employment, payroll: A.run ? W.payroll : {}, emergency: W.emergency, custom: W.custom, onboarding: W.onboarding, confirm_duplicate: dup };
         api('/api/people/new-employee', 'POST', body).then(function (r) { close(); toast('Added. ' + r.next); LIST.state = 'active'; sel = r.id; staffList($('#view')).then(function () { openFile(r.id); }); })
-          .catch(function (e) { if (/already on the staff list/.test(e.message) && !dup) { if (confirm(e.message)) send(true); } else toast(e.message); });
+          .catch(async function (e) { if (/already on the staff list/.test(e.message) && !dup) { if (await vasConfirm(e.message)) send(true); } else toast(e.message); });
       }
       draw();
     }).catch(function (e) { toast(e.message); });
@@ -913,8 +914,8 @@
       $('#fX').onclick = function () { close(2); };
       $('#fGo').onclick = function () { api('/api/people/custom-fields', 'POST', { label: $('#fL').value, kind: $('#fK').value, options: $('#fO').value }).then(function () { redo('Field added'); }).catch(bad); };
       all('[data-fa]').forEach(function (b) { b.onclick = function () { var x = b.getAttribute('data-fa').split(':'); api('/api/people/custom-fields/' + x[0], 'PUT', { is_active: x[1] === '1' }).then(function () { redo(); }).catch(bad); }; });
-      all('[data-fe]').forEach(function (b) { b.onclick = function () { var x = r.fields.filter(function (y) { return String(y.id) === b.getAttribute('data-fe'); })[0]; var nm = prompt('New name', x.label); if (!nm) return; var o = x.kind === 'list' ? prompt('Choices (comma between)', (x.options || []).join(', ')) : null; api('/api/people/custom-fields/' + x.id, 'PUT', o != null ? { label: nm, options: o } : { label: nm }).then(function () { redo('Saved'); }).catch(bad); }; });
-      all('[data-fx]').forEach(function (b) { b.onclick = function () { if (confirm('Remove this field?')) api('/api/people/custom-fields/' + b.getAttribute('data-fx'), 'DELETE').then(function () { redo('Removed'); }).catch(bad); }; });
+      all('[data-fe]').forEach(function (b) { b.onclick = async function () { var x = r.fields.filter(function (y) { return String(y.id) === b.getAttribute('data-fe'); })[0]; var nm = await vasPrompt('New name', x.label); if (!nm) return; var o = x.kind === 'list' ? (await vasPrompt('Choices (comma between)', (x.options || []).join(', '))) : null; api('/api/people/custom-fields/' + x.id, 'PUT', o != null ? { label: nm, options: o } : { label: nm }).then(function () { redo('Saved'); }).catch(bad); }; });
+      all('[data-fx]').forEach(function (b) { b.onclick = async function () { if (await vasConfirm('Remove this field?')) api('/api/people/custom-fields/' + b.getAttribute('data-fx'), 'DELETE').then(function () { redo('Removed'); }).catch(bad); }; });
     }).catch(function (e) { toast(e.message); });
   }
 
@@ -1038,9 +1039,9 @@
       $('#ctNew').onclick = function () { contractForm(f, null); };
       all('[data-ced]', el).forEach(function (b) { b.onclick = function () { contractForm(f, byId(b.getAttribute('data-ced'))); }; });
       all('[data-csend]', el).forEach(function (b) { b.onclick = function () { sendToSign(f, { contract_id: +b.getAttribute('data-csend'), kind: 'contract' }); }; });
-      all('[data-cst2]', el).forEach(function (b) { b.onclick = function () {
+      all('[data-cst2]', el).forEach(function (b) { b.onclick = async function () {
         var x = b.getAttribute('data-cst2').split(':');
-        if (!confirm(x[1] === 'ended' ? 'Mark this contract ended?' : 'Cancel this contract? A link already sent stops working.')) return;
+        if (!(await vasConfirm(x[1] === 'ended' ? 'Mark this contract ended?' : 'Cancel this contract? A link already sent stops working.'))) return;
         api('/api/people/contracts/' + x[0] + '/status', 'POST', { status: x[1] }).then(function () { reopen(f, 'Done'); }).catch(function (e) { toast(e.message); });
       }; });
     }).catch(function (e) { el.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
@@ -1109,11 +1110,11 @@
             (s.status === 'sent' ? '<button class="sm" data-sgre="' + s.id + '">New link</button> <button class="sm" data-sgcan="' + s.id + '">Withdraw</button>' : '') + '</div></div>';
         }).join('') : '<p class="sub">Nothing sent yet.</p>');
       $('#sgDocB').onclick = function () { sendToSign(f, { document_number: '' }); };
-      all('[data-sgre]', el).forEach(function (b) { b.onclick = function () {
-        if (!confirm('Make a new link? The old link stops working.')) return;
+      all('[data-sgre]', el).forEach(function (b) { b.onclick = async function () {
+        if (!(await vasConfirm('Make a new link? The old link stops working.'))) return;
         api('/api/people/signatures/' + b.getAttribute('data-sgre') + '/resend', 'POST', {}).then(function (r) { reopen(f); r.expires_in_days = 14; r.sent_to = 'them'; showLink(r); }).catch(function (e) { toast(e.message); });
       }; });
-      all('[data-sgcan]', el).forEach(function (b) { b.onclick = function () { if (confirm('Withdraw it? The link stops working.')) api('/api/people/signatures/' + b.getAttribute('data-sgcan') + '/cancel', 'POST').then(function () { reopen(f, 'Withdrawn'); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-sgcan]', el).forEach(function (b) { b.onclick = async function () { if (await vasConfirm('Withdraw it? The link stops working.')) api('/api/people/signatures/' + b.getAttribute('data-sgcan') + '/cancel', 'POST').then(function () { reopen(f, 'Withdrawn'); }).catch(function (e) { toast(e.message); }); }; });
     }).catch(function (e) { el.innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
   }
   // My HR file: what I have to sign, and my signed copies.
@@ -1141,8 +1142,8 @@
       if (!pad || pad.empty()) return toast('Sign in the box first');
       api('/api/people/me/signatures/' + s.id + '/sign', 'POST', { name: $('#sbN').value, image: pad.png(), agree: $('#sbA').checked }).then(function () { close(); toast('Signed. Your copy is under Signed and other.'); after(); }).catch(function (e) { toast(e.message); });
     };
-    $('#sbNo').onclick = function () {
-      var why = prompt('Why are you not signing? HR will follow up.', '');
+    $('#sbNo').onclick = async function () {
+      var why = await vasPrompt('Why are you not signing? HR will follow up.', '');
       if (why) api('/api/people/me/signatures/' + s.id + '/decline', 'POST', { reason: why }).then(function () { close(); toast('HR has been told'); after(); }).catch(function (e) { toast(e.message); });
     };
   }

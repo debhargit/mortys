@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Import from the old system · Morty's Auto Parts</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0} header nav{margin-left:auto;display:flex;gap:14px;font-size:13px} header a{color:#fff;opacity:.85}
+  main{max-width:1150px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  input,select,button{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  button{cursor:pointer;background:var(--card)} button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600} button:disabled{opacity:.5;cursor:not-allowed}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px} .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  table{width:100%;border-collapse:collapse} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:600} td.n{text-align:right}
+  .scroll{overflow-x:auto}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;background:var(--chip);white-space:nowrap}
+  .pill.ok{background:#16a34a22;color:var(--ok)} .pill.bad{background:#d6282822;color:var(--red)} .pill.warn{background:#f59e0b22;color:var(--warn)}
+  .note{padding:8px 10px;border-radius:8px;font-size:13px;margin-bottom:8px} .note.warn{background:#f59e0b18;border-left:3px solid var(--warn)} .note.info{background:var(--chip)} .note.ok{background:#16a34a14;border-left:3px solid var(--ok)}
+  .log{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;color:var(--muted);white-space:pre-wrap;max-height:260px;overflow:auto;background:var(--bg);border-radius:8px;padding:8px}
+  .steps{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 10px} .steps span{font-size:12px;padding:2px 9px;border-radius:999px;background:var(--chip)} .steps span.on{background:var(--navy);color:#fff} .steps span.done{background:#16a34a22;color:var(--ok)}
+  ul.found{margin:6px 0 0;padding-left:18px} ul.found li{margin:3px 0}
+  .empty{color:var(--muted);text-align:center;padding:24px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60;max-width:90vw}
+</style>
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
+</head>
+<body>
+<header><h1>Import from the old system</h1><nav><a href="/system.html">System</a><a href="/admin.html">Admin</a></nav></header>
+<main>
+  <div class="card">
+    <h2>1. The export files</h2>
+    <p class="sub">Export from the old program as CSV: <b>INVENTRY</b> (stock), <b>INVOICE</b> (invoices), <b>INVDETAI</b> (items sold), <b>INVPAY</b> (payments) and <b>INVREC</b> (stock received). Any of the five can be imported on its own. Either put them in a folder on the till PC, or upload them from this computer.</p>
+    <div class="controls">
+      <div style="flex:1;min-width:260px"><label>Folder on the till PC</label><input id="dir" style="width:100%" placeholder="C:\MHsrc\vision\WORK"></div>
+      <button id="lookBtn">Look in this folder</button>
+      <div><label>Or upload the files</label><input id="files" type="file" accept=".csv" multiple></div>
+    </div>
+    <div id="upNote"></div>
+    <div id="found"></div>
+  </div>
+
+  <div class="card">
+    <h2>2. Check, then import</h2>
+    <p class="sub"><b>Check</b> reads the files and says what an import would change, without changing anything. <b>Import</b> then brings across only what is new: new parts, invoices, payments and stock received, and the stock on hand, cost and price of parts the old program has changed. Names, categories, groups and anything done in this system stay as they are, and the same files can be imported again without anything coming in twice. A large import takes several minutes; the till keeps working meanwhile.</p>
+    <div class="controls"><button id="checkBtn" disabled>Check</button><button class="primary" id="importBtn" disabled>Import</button></div>
+    <div id="run"></div>
+  </div>
+
+  <div class="card">
+    <h2>Earlier checks and imports</h2>
+    <div id="history"><div class="empty">Loading…</div></div>
+  </div>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var when = function (t) { return t ? new Date(t).toLocaleString('en-JM', { dateStyle: 'medium', timeStyle: 'short' }) : '–'; };
+  var n = function (v) { return Number(v || 0).toLocaleString('en-JM'); };
+  var J = function (v) { return 'J$' + Number(v || 0).toLocaleString('en-JM', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+  var mb = function (b) { return (b / 1048576).toFixed(1) + ' MB'; };
+  function toast(t) { var el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(function () { el.style.display = 'none'; }, 4000); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        if (r.status === 401) { location.href = '/admin.html'; throw new Error('Sign in required'); }
+        return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; });
+      });
+  }
+
+  var folder = '', lastCheck = null, poll = null;
+
+  // ------------------------------------------------------------ the files --
+  function look(dir) {
+    return api('/api/legacy-import/folder?dir=' + encodeURIComponent(dir || '')).then(function (d) {
+      folder = d.folder; $('#dir').value = d.folder;
+      var any = d.files.some(function (f) { return f.found; });
+      $('#found').innerHTML = '<ul class="found">' + d.files.map(function (f) {
+        return '<li><b>' + esc(f.name) + '</b> · ' + esc(f.what) + ': ' + (f.found
+          ? esc(f.file) + ', ' + mb(f.bytes) + ', saved ' + when(f.modified) + (f.looks_right ? '' : ' <span class="pill bad">not a legacy export</span>') + (f.columns !== 'standard' ? ' <small style="color:var(--muted)">(column names: ' + esc(f.columns) + ')</small>' : '')
+          : '<span style="color:var(--muted)">not in this folder</span>') + '</li>';
+      }).join('') + '</ul>';
+      $('#checkBtn').disabled = !any || !!poll;
+      $('#importBtn').disabled = true;
+      lastCheck = null;
+    }).catch(function (e) { $('#found').innerHTML = '<div class="note warn">' + esc(e.message) + '</div>'; $('#checkBtn').disabled = true; $('#importBtn').disabled = true; });
+  }
+  $('#lookBtn').onclick = function () { look($('#dir').value.trim()); };
+
+  // Upload in pieces of 16 MB (the till's public address refuses one large request).
+  var PIECE = 16 * 1048576;
+  $('#files').onchange = function () {
+    var list = Array.prototype.slice.call(this.files || []);
+    if (!list.length) return;
+    var batch = '', i = 0;
+    var note = $('#upNote');
+    $('#checkBtn').disabled = true; $('#importBtn').disabled = true;
+    function nextFile() {
+      if (i >= list.length) { note.innerHTML = '<div class="note ok">Uploaded ' + list.length + ' file(s).</div>'; return look(folder); }
+      var f = list[i], off = 0;
+      function piece() {
+        if (off >= f.size && off > 0) { i++; return nextFile(); }
+        note.innerHTML = '<div class="note info">Uploading ' + esc(f.name) + ': ' + Math.round(off / Math.max(f.size, 1) * 100) + '% (file ' + (i + 1) + ' of ' + list.length + ')</div>';
+        var chunk = f.slice(off, off + PIECE);
+        return fetch('/api/legacy-import/upload?name=' + encodeURIComponent(f.name) + '&offset=' + off + (batch ? '&batch=' + batch : ''),
+          { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/octet-stream' }, body: chunk })
+          .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); return j; }); })
+          .then(function (j) { batch = j.batch; folder = j.folder; off += chunk.size; if (!chunk.size) off = 1; return piece(); });
+      }
+      return piece();
+    }
+    Promise.resolve().then(nextFile).catch(function (e) { note.innerHTML = '<div class="note warn">Upload stopped: ' + esc(e.message) + '</div>'; });
+  };
+
+  // ---------------------------------------------------------- run + watch --
+  var STEPS = { stage: 'Reading the files', check: 'Comparing', suppliers: 'Suppliers', inventry: 'Stock', users: 'Customers and staff', salesreps: 'Sales reps',
+    invoices: 'Invoices', invdetai: 'Items sold', invpay: 'Payments', invrec: 'Stock received' };
+  function summary(c) {
+    if (!c) return '';
+    var L = [];
+    if (c.inventory) L.push('<tr><td><b>Stock</b></td><td>' + n(c.inventory.rows) + ' parts in the file. <b>' + n(c.inventory.new_parts) + ' new</b>. Stock on hand changed on ' + n(c.inventory.stock_changed) + ', cost on ' + n(c.inventory.cost_changed) + ', price on ' + n(c.inventory.price_changed) + '.</td></tr>');
+    if (c.invoices) L.push('<tr><td><b>Invoices</b></td><td>' + n(c.invoices.rows) + ' in the file. <b>' + n(c.invoices.new_invoices) + ' new</b>' + (c.invoices.new_invoices ? ', ' + esc(c.invoices.new_from) + ' to ' + esc(c.invoices.new_to) + ', ' + J(c.invoices.new_total) : '') + '. Older invoices with a new amount paid: ' + n(c.invoices.paid_since) + '.</td></tr>');
+    if (c.lines) L.push('<tr><td><b>Items sold</b></td><td>' + n(c.lines.rows) + ' lines, up to ' + esc(c.lines.last_date) + '. For invoices not in the system yet: ' + n(c.lines.for_new_invoices) + '.' + (c.lines.excel_limit ? '<div class="note warn" style="margin-top:6px"><b>This file stops at Excel’s limit of 1,048,575 rows</b>, so it was cut short when it was saved through Excel. Items sold after ' + esc(c.lines.last_date) + ' are missing from it. Export INVDETAI straight from the old program, not through Excel.</div>' : '') + '</td></tr>');
+    if (c.payments) L.push('<tr><td><b>Payments</b></td><td>' + n(c.payments.rows) + ' in the file, up to ' + esc(c.payments.last_date) + '. For invoices not in the system yet: ' + n(c.payments.for_new_invoices) + '. Older invoices with more payments: ' + n(c.payments.invoices_paid_since) + '.</td></tr>');
+    if (c.receipts) L.push('<tr><td><b>Stock received</b></td><td>' + n(c.receipts.rows) + ' rows, up to ' + esc(c.receipts.last_date) + '. <b>' + n(c.receipts.new_receipts) + ' new receipts</b> (' + n(c.receipts.new_lines) + ' lines).</td></tr>');
+    return '<table><tbody>' + L.join('') + '</tbody></table>';
+  }
+  function resultText(rs) {
+    var words = { inventry: 'parts added', invoices: 'invoices added', invdetai: 'item lines added', invpay: 'payments added', invrec: 'receipts added', users: 'customers and staff added', salesreps: 'sales reps added' };
+    return (rs || []).map(function (r) {
+      var s = n(r.added) + ' ' + (words[r.step] || r.step);
+      if (r.step === 'inventry') s += ', ' + n(r.updated) + ' parts updated';
+      if (r.step === 'invoices') s += ', ' + n(r.updated) + ' older invoices paid since';
+      return s;
+    }).join(' · ');
+  }
+  function show(run) {
+    var running = run.status === 'running';
+    var order = run.mode === 'import' ? ['stage', 'check', 'suppliers', 'inventry', 'users', 'salesreps', 'invoices', 'invdetai', 'invpay', 'invrec'] : ['stage', 'check'];
+    var at = order.indexOf(run.step);
+    var html = '<div class="steps">' + order.map(function (s, i) { return '<span class="' + (running ? (i < at ? 'done' : i === at ? 'on' : '') : (run.status === 'done' ? 'done' : '')) + '">' + STEPS[s] + '</span>'; }).join('') + '</div>';
+    if (running) html += '<div class="note info">' + (run.mode === 'import' ? 'Importing' : 'Checking') + '… ' + (STEPS[run.step] || '') + '. You can leave this page; it carries on.</div>';
+    if (run.status === 'failed' || run.status === 'interrupted') html += '<div class="note warn">' + (run.status === 'interrupted' ? 'Stopped when the till restarted.' : 'It stopped with a problem' + (run.error ? ': ' + esc(run.error) : '') + '.') + ' Nothing from the step that stopped was saved. The log below says where.</div>';
+    if (run.check_result) html += summary(run.check_result);
+    if (run.status === 'done') html += '<div class="note ok" style="margin-top:8px">' + (run.mode === 'import' ? '<b>Imported.</b> ' + esc(resultText(run.results) || 'Nothing new.') : '<b>Checked.</b> Nothing has been changed. Press Import to bring this across.') + '</div>';
+    if (run.log_tail) html += '<details' + (run.status === 'failed' ? ' open' : '') + '><summary style="cursor:pointer;color:var(--muted);font-size:12.5px">Details</summary><div class="log">' + esc(run.log_tail) + '</div></details>';
+    $('#run').innerHTML = html;
+  }
+  function watch(id) {
+    clearInterval(poll);
+    $('#checkBtn').disabled = true; $('#importBtn').disabled = true;
+    var tick = function () {
+      api('/api/legacy-import/runs/' + id).then(function (d) {
+        show(d.run);
+        if (d.run.status !== 'running') {
+          clearInterval(poll); poll = null;
+          $('#checkBtn').disabled = false;
+          lastCheck = d.run.mode === 'check' && d.run.status === 'done' ? d.run.folder : null;
+          $('#importBtn').disabled = !lastCheck;
+          history();
+        }
+      }).catch(function (e) { toast(e.message); });
+    };
+    poll = setInterval(tick, 2500); tick();
+  }
+  async function run(apply) {
+    if (apply && !(await vasConfirm('Import from these files now?\n\nOnly what is new comes across, and nothing already in the system is overwritten except stock on hand, cost and price from the old program.'))) return;
+    api('/api/legacy-import/run', 'POST', { folder: folder, apply: apply }).then(function (r) { watch(r.id); }).catch(function (e) { toast(e.message); });
+  }
+  $('#checkBtn').onclick = async function () { await run(false); };
+  $('#importBtn').onclick = async function () { await run(true); };
+
+  function history() {
+    return api('/api/legacy-import/status').then(function (d) {
+      if (d.running && !poll) watch(d.running.id);
+      $('#history').innerHTML = d.runs.length ? '<div class="scroll"><table><thead><tr><th>When</th><th>What</th><th>Folder</th><th>Files</th><th>By</th><th>Result</th></tr></thead><tbody>' + d.runs.map(function (r) {
+        var pill = r.status === 'done' ? '<span class="pill ok">done</span>' : r.status === 'running' ? '<span class="pill warn">running</span>' : '<span class="pill bad">' + esc(r.status) + '</span>';
+        return '<tr><td>' + when(r.started_at) + '</td><td>' + (r.mode === 'import' ? 'Import' : 'Check') + '</td><td><small>' + esc(r.folder) + '</small></td><td>' + esc((r.files || []).map(function (f) { return f.name; }).join(', ')) + '</td><td>' + esc(r.started_by || '') + '</td><td>' + pill +
+          (r.mode === 'import' && r.status === 'done' ? ' <small>' + esc(resultText(r.results)) + '</small>' : '') + ((r.warnings || []).length ? ' <span class="pill warn">a file was cut short</span>' : '') + '</td></tr>';
+      }).join('') + '</tbody></table></div>' : '<div class="empty">Nothing imported from here yet.</div>';
+      return d;
+    }).catch(function (e) { $('#history').innerHTML = '<div class="note warn">' + esc(e.message) + '</div>'; });
+  }
+
+  history().then(function (d) { if (d) look(d.folder); });
+})();
+</script>
+<script src="/assets/module-look.js?v=20261101" defer></script>
+</body>
+</html>

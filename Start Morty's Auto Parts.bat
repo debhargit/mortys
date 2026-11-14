@@ -20,8 +20,9 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 title Morty's Auto Parts
 
+rem Ports come from app\portable.json (appPort) and app\.env (HTTPS_PORT):
+rem live = 3057 / 3058, the development copy = 3156 / 3159. 3057 is MelthaHonda.
 set "PORT=3057"
-rem 3057 belongs to the MelthaHonda till on this PC; app\.env sets the same.
 set "HTTPS_PORT=3058"
 set "BOOT=%~dp0app\boot.js"
 set "CFG=%~dp0app\server-config.json"
@@ -44,6 +45,13 @@ set "NODE=%~dp0runtime\node.exe"
 if not exist "%NODE%" set "NODE=node"
 
 if not exist "%BOOT%" goto no_boot
+rem -- This copy's own ports (live or development) ----------------------------------
+"%NODE%" -e "try{var c=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8').replace(/^\uFEFF/,''));if(c.appPort)process.stdout.write(String(c.appPort))}catch(e){}" "%~dp0app\portable.json" > "%TEMP%\va_port.txt" 2>nul
+set /p PORT=<"%TEMP%\va_port.txt"
+del "%TEMP%\va_port.txt" >nul 2>&1
+if not defined PORT set "PORT=3057"
+for /f "tokens=1,* delims==" %%a in ('findstr /b /c:"HTTPS_PORT=" "%~dp0app\.env" 2^>nul') do set "HTTPS_PORT=%%b"
+if exist "%~dp0DEVELOPMENT-COPY.txt" title Morty's Auto Parts - DEVELOPMENT COPY (not the live till)
 where "%NODE%" >nul 2>&1
 if errorlevel 1 if /i "%NODE%"=="node" goto no_node
 

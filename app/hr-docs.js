@@ -141,7 +141,7 @@ function register(app, deps) {
       ['Sick leave', 'As the law requires, with a doctor’s certificate for more than two days in a row'],
       ['Notice', (c.notice_weeks ? c.notice_weeks + ' weeks' : 'As the law requires') + ' in writing by either side, or the longer notice the Employment (Termination and Redundancy Payments) Act requires for their years of service']].filter(Boolean)
       : [['Between', s.name], ['And', u.name || u.email], c.start_date ? ['From', longDate(c.start_date)] : null, c.end_date ? ['Until', longDate(c.end_date)] : null].filter(Boolean);
-    return '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(c.title) + '</title><style>body{font:14px/1.6 Arial,sans-serif;max-width:720px;margin:30px auto;color:#111;padding:0 12px}h1{font-size:20px}th{text-align:left;padding:4px 14px 4px 0;vertical-align:top;white-space:nowrap}td{padding:4px 0}</style></head><body>' +
+    return '<!doctype html><html><head><meta charset="utf-8"><link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml"><link rel="icon" href="/favicon.ico?v=vision2" sizes="any"><link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2"><title>' + esc(c.title) + '</title><style>body{font:14px/1.6 Arial,sans-serif;max-width:720px;margin:30px auto;color:#111;padding:0 12px}h1{font-size:20px}th{text-align:left;padding:4px 14px 4px 0;vertical-align:top;white-space:nowrap}td{padding:4px 0}</style></head><body>' +
       '<p><b>' + esc(s.name) + '</b><br>' + esc(s.address) + ' · ' + esc(s.phone) + '</p><h1>' + esc(c.title) + '</h1><table>' + rows.map((r) => '<tr><th>' + esc(r[0]) + '</th><td>' + esc(r[1]) + '</td></tr>').join('') + '</table>' +
       (emp ? '<h3>Duties and conduct</h3><p>The employee will do the work of the position and other reasonable duties asked of them, follow the company’s rules and policies, handle the company’s money, stock and customers’ information honestly and keep them confidential, during and after the employment.</p>' +
         '<h3>Deductions</h3><p>The company will take from pay the deductions the law requires, and any other deduction the employee agrees to in writing.</p>' : '') +
@@ -308,7 +308,7 @@ function register(app, deps) {
   function signedHtml(e, s) {
     const steps = [['Sent by', (e.sent_by_name || '') + ', ' + jaTime(e.sent_at) + (e.sent_to ? ', link to ' + e.sent_to : '')], e.viewed_at ? ['First opened', jaTime(e.viewed_at)] : null,
       ['Signed', jaTime(e.signed_at) + ' by ' + e.signer_name + (e.method === 'in_app' ? ', signed in to the staff system as ' + e.staff_name : ', from the private link') + (e.ip ? ', from ' + e.ip : '')]].filter(Boolean);
-    return '<!doctype html><html><head><meta charset="utf-8"><title>Signed: ' + esc(e.title) + '</title><style>body{font:14px/1.55 Arial,sans-serif;max-width:740px;margin:24px auto;color:#111;padding:0 12px}.box{border:1px solid #999;padding:12px;margin-top:18px}.box img{max-width:340px;height:auto;border-bottom:1px solid #333;display:block}.small{color:#555;font-size:11.5px;word-break:break-all}th{text-align:left;padding:3px 12px 3px 0;vertical-align:top;white-space:nowrap}</style></head><body>' +
+    return '<!doctype html><html><head><meta charset="utf-8"><link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml"><link rel="icon" href="/favicon.ico?v=vision2" sizes="any"><link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2"><title>Signed: ' + esc(e.title) + '</title><style>body{font:14px/1.55 Arial,sans-serif;max-width:740px;margin:24px auto;color:#111;padding:0 12px}.box{border:1px solid #999;padding:12px;margin-top:18px}.box img{max-width:340px;height:auto;border-bottom:1px solid #333;display:block}.small{color:#555;font-size:11.5px;word-break:break-all}th{text-align:left;padding:3px 12px 3px 0;vertical-align:top;white-space:nowrap}</style></head><body>' +
       '<p class="small">' + esc(s.name) + ' · signed document</p>' +
       (e.html ? '<div>' + e.html.replace(/^[\s\S]*?<body>/i, '').replace(/<\/body>[\s\S]*$/i, '') + '</div>'
         : '<h1 style="font-size:19px">' + esc(e.title) + '</h1><p>The document signed is ' + esc(e.source_number || '') + ' “' + esc(e.source_file || e.title) + '” in the Document centre. Its fingerprint (SHA-256) is below: the same file always gives the same fingerprint, so any change to it shows.</p>') +
@@ -634,7 +634,7 @@ function register(app, deps) {
   }
   function itemKind(type, label) {
     const s = (type + ' ' + label).toLowerCase();
-    if (/\b(paye|income tax|nis|nht|education tax|ed tax|heart|federal|state|medicare|social security|withholding|unemployment)\b/.test(s)) return { skip: 'A statutory tax: Vision payroll works it out by the TAJ rules' };
+    if (/\b(paye|income tax|nis|nht|education tax|ed tax|heart|federal|state|medicare|social security|withholding|unemployment)\b/.test(s)) return { skip: 'A statutory tax: Morty\'s payroll works it out by the TAJ rules' };
     if (/contribution|employer|company/.test(s)) return { kind: 'employer' };
     if (/deduction|loan|advance|union|insurance|garnish|repay|pension|savings/.test(s)) return { kind: 'deduction' };
     if (/salary|wage|hourly|overtime|bonus|commission|allowance|addition|holiday|vacation|sick|pay|tip|incentive/.test(s)) return { kind: 'earning' };

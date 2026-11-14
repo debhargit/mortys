@@ -30,15 +30,23 @@ const MODULES = {
   '/documents.html#forms': ['docs.upload'],
   '/accounting.html': ['acct.view'],
   '/budget.html': ['acct.budget', 'acct.view'],
+  '/assets.html': ['acct.view'],
+  '/assets.html#networth': ['acct.view'],
+  '/assets.html#shares': ['acct.view'],
+  '/budget.html#value': ['acct.view'],
   '/receivables.html': ['ar.manage'],
   '/payables.html': ['ap.manage'],
   '/banking.html': ['bank.manage'],
+  '/cards.html': ['cards.manage'],
   '/loans-rent.html': ['ar.manage', 'ap.manage'],
   '/report-balancing.html': ['reports.view'],
   '/people.html': ['hr.people'],
   '/payroll.html': ['payroll.view', 'payroll.run'],
+  '/payslip.html': null,
   '/clock.html': null,
   '/attendance.html': ['clock.approve', 'clock.manage'],
+  '/roster.html': null,
+  '/day.html': null,
   '/commission.html': null,
   '/training.html': null,
   '/hiring.html': ['hr.manage', 'hr.approve'],
@@ -52,18 +60,44 @@ const MODULES = {
   '/warehouse.html': ['warehouse.access'],
   '/stockcash.html': ['mkt.manage', 'stock.grade_returns'],
   '/report-planning.html': ['planning.view', 'sales.lost_record'],
+  '/scorecard.html': ['growth.view'],
+  '/replace-reminders.html': ['planning.view'],
+  '/trade-accounts.html': ['planning.view'],
+  '/supplier-scorecard.html': ['growth.view'],
+  '/overseas-compare.html': ['purchasing.create_po', 'growth.view'],
+  '/staff-photos.html': ['catalog.photos'],
+  '/petty-voucher.html': ['petty.voucher', 'petty.approve', 'cashier.access'],
+  '/quotes-chase.html': ['planning.view'],
+  '/owner-controls.html': ['growth.view', 'purchasing.approve_po'],
   '/terminal.html': ['tj.view', 'dept.manage'],
+  '/store-tax.html': ['inventory.bulk_change'],
+  '/inventory-bulk.html': ['inventory.bulk_change', 'inventory.edit_price'],
   '/deptstore.html': ['reports.view'],
   '/messages.html': ['notify.view'],
   '/ai.html': ['ai.manage'],
   '/': null,
   '/system.html': ['sys.audit', 'sys.security', 'sys.support', 'sys.network', 'support.raise'],
+  '/shared.html': null,
   '/security.html': ['sec.manage', 'audit.view'],
+  '/legacy-import.html': ['import.legacy'],
 };
 const MAX_GROUPS = 30, MAX_TITLE = 60, MAX_FAVS = 40;
 
 function register(app, { query, requireAdmin, requireCap, permState }) {
-  const manage = [requireAdmin, requireCap('menu.manage')];
+  // Setting up other people's menus is for the business's admins only: the
+  // Owner role, a role coded 'admin', or the built-in Admin account (Deb,
+  // 2026-11-05). Managers and granted permissions no longer open it.
+  async function isMenuAdmin(userId) {
+    const { rows } = await query(`SELECT admin_role, email FROM users WHERE id = $1 AND is_admin AND NOT COALESCE(disabled, false)`, [userId]);
+    if (!rows.length) return false;
+    const r = String(rows[0].admin_role || '').toLowerCase();
+    return r === 'owner' || r === 'admin' || String(rows[0].email || '').toLowerCase() === 'admin@mortysautoparts.com';
+  }
+  const adminOnly = async (req, res, next) => {
+    try { if (req.session && (await isMenuAdmin(req.session.userId))) return next(); } catch (_) {}
+    res.status(403).json({ error: 'Only an admin can set up staff menus.' });
+  };
+  const manage = [requireAdmin, adminOnly];
 
   // The links this person may see, in catalogue order.
   async function allowedFor(userId) {
@@ -123,7 +157,8 @@ function register(app, { query, requireAdmin, requireCap, permState }) {
   async function staffRow(id) {
     const { rows } = await query(
       `SELECT id, name, email, admin_role FROM users
-        WHERE id = $1 AND is_admin = true AND COALESCE(disabled, false) = false`, [id]);
+        WHERE id = $1 AND (is_admin = true OR COALESCE(is_staff, false) = true)
+          AND COALESCE(disabled, false) = false AND NOT COALESCE(is_archived, false)`, [id]);
     return rows[0] || null;
   }
 
@@ -137,7 +172,7 @@ function register(app, { query, requireAdmin, requireCap, permState }) {
 
   // ---- the signed-in person's own menu ------------------------------------
   app.get('/api/menu/me', requireAdmin, async (req, res) => {
-    try { res.json(Object.assign({ ok: true }, await menuOf(req.session.userId))); }
+    try { res.json(Object.assign({ ok: true, can_setup: await isMenuAdmin(req.session.userId) }, await menuOf(req.session.userId))); }
     catch (e) { res.status(500).json({ error: e.message }); }
   });
 
@@ -157,9 +192,10 @@ function register(app, { query, requireAdmin, requireCap, permState }) {
   app.get('/api/menu/staff', ...manage, async (_req, res) => {
     try {
       const { rows } = await query(
-        `SELECT u.id, u.name, u.email, u.admin_role, (m.layout IS NOT NULL) AS custom
+        `SELECT u.id, u.name, u.email, u.admin_role, (m.layout IS NOT NULL) AS custom, u.is_admin AS can_sign_in
            FROM users u LEFT JOIN user_module_menus m ON m.user_id = u.id
-          WHERE u.is_admin = true AND COALESCE(u.disabled, false) = false
+          WHERE (u.is_admin = true OR COALESCE(u.is_staff, false) = true)
+            AND COALESCE(u.disabled, false) = false AND NOT COALESCE(u.is_archived, false)
           ORDER BY lower(COALESCE(u.name, u.email))`);
       res.json({ staff: rows });
     } catch (e) { res.status(500).json({ error: e.message }); }

@@ -97,10 +97,10 @@ function register(app, deps) {
 
   async function log(row) {
     const { rows } = await query(
-      `INSERT INTO notifications (event, channel, to_addr, subject, body, status, reason, send_after, related_kind, related_id, customer_id, by_user)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8, NOW()),$9,$10,$11,$12) RETURNING *`,
+      `INSERT INTO notifications (event, channel, to_addr, subject, body, status, reason, send_after, related_kind, related_id, customer_id, by_user, body_html)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8, NOW()),$9,$10,$11,$12,$13) RETURNING *`,
       [row.event, row.channel, row.to_addr || null, row.subject || null, row.body || null, row.status, row.reason || null, row.send_after || null,
-       row.related_kind || null, row.related_id || null, row.customer_id || null, row.by_user || null]);
+       row.related_kind || null, row.related_id || null, row.customer_id || null, row.by_user || null, row.channel === 'email' ? row.html || null : null]);
     return rows[0];
   }
 
@@ -114,7 +114,7 @@ function register(app, deps) {
     try {
       let r;
       if (n.channel === 'sms') r = await sms.sendSMS({ to: n.to_addr, body: n.body });
-      else if (n.channel === 'email') r = await mailer.sendEmail({ to: n.to_addr, subject: n.subject || 'Message from us', text: n.body, html: htmlOf(n.body) });
+      else if (n.channel === 'email') r = await mailer.sendEmail({ to: n.to_addr, subject: n.subject || 'Message from us', text: n.body, html: n.body_html || htmlOf(n.body) });
       else throw new Error('Unknown channel');
       const st = r && r.stubbed ? 'stubbed' : 'sent';
       const { rows: u } = await query(`UPDATE notifications SET status = $2, sent_at = NOW(), reason = $3 WHERE id = $1 RETURNING *`,
@@ -307,10 +307,11 @@ function register(app, deps) {
   // receipt from the Loans & Rent page, billing.js) rather than a template.
   // Same log, quiet hours and delivery as send(); WhatsApp comes back as a
   // click-to-chat link. msg: { channel, to, subject, text, event, related_kind,
-  // related_id, customer_id, by_user }. Returns the notifications row.
+  // related_id, customer_id, by_user, html? }. html (email only) is sent as the
+  // email's layout, with text as the plain-text part. Returns the notifications row.
   async function message(msg) {
     const s = await settings();
-    const base = { event: msg.event || 'billing_document', channel: msg.channel, to_addr: String(msg.to || '').trim(), subject: msg.subject || null, body: msg.text,
+    const base = { event: msg.event || 'billing_document', channel: msg.channel, to_addr: String(msg.to || '').trim(), subject: msg.subject || null, body: msg.text, html: msg.html || null,
       related_kind: msg.related_kind, related_id: msg.related_id, customer_id: msg.customer_id, by_user: msg.by_user };
     if (!CHANNELS.includes(msg.channel)) throw httpError(400, 'Email, SMS or WhatsApp?');
     if (msg.channel === 'email' ? !validEmail(base.to_addr) : !validPhone(base.to_addr)) return log(Object.assign(base, { status: 'skipped', reason: msg.channel === 'email' ? 'No email address' : 'No phone number' }));

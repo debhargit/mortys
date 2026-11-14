@@ -1,8 +1,11 @@
+// The program's own message windows (assets/vas-ui.js), for a page that has not loaded them itself.
+(function(){ if (window.VasUI || document.querySelector('script[src^="/assets/vas-ui.js"]')) return; var s = document.createElement('script'); s.src = '/assets/vas-ui.js?v=20261110b'; (document.head || document.documentElement).appendChild(s); })();
 /* =============================================================================
    Morty's Auto Parts -- "Lost sale" quick entry (Phase 5)
 
    VisionLostSale.open({ q, product, channel, qty, unit_price, reason, customer, vehicle, onSaved })
    VisionLostSale.openMany({ lines, customer, vehicle, channel, onSaved })  -- a whole ticket
+   VisionLostSale.mine({ preset })  -- the signed-in rep's own lost sales (Shift+F6 on the till)
    A self-contained dialog for recording a part a customer asked for that we
    could not sell: search the catalogue or type what was asked, quantity,
    reason, optional customer phone for a call-back. Posts /api/plan/lost-sales.
@@ -75,7 +78,7 @@
       '<label for="vls-comp">Bought elsewhere / competitor (if known)</label><input id="vls-comp">' +
       '<label for="vls-note">Note</label><input id="vls-note">' +
       '<div class="err" id="vls-err" role="alert"></div>' +
-      '<div class="actions"><button type="button" id="vls-cancel">Cancel</button><button type="button" class="go" id="vls-save">Save lost sale</button></div></div>';
+      '<div class="actions"><button type="button" id="vls-mine" style="margin-right:auto" title="Shift+F6 on the till">My lost sales</button><button type="button" id="vls-cancel">Cancel</button><button type="button" class="go" id="vls-save">Save lost sale</button></div></div>';
     document.body.appendChild(back);
     var $ = function (id) { return back.querySelector('#' + id); };
     var picked = null, hits = [], sel = -1, seq = 0, timer = null;
@@ -86,6 +89,7 @@
     document.addEventListener('keydown', onKey, true);
     back.addEventListener('mousedown', function (e) { if (e.target === back) close(); });
     $('vls-cancel').onclick = close;
+    $('vls-mine').onclick = function () { close(); mine(); };
 
     function showPicked() {
       var box = $('vls-picked');
@@ -236,5 +240,86 @@
     return { close: close };
   }
 
-  window.VisionLostSale = { open: open, openMany: openMany };
+  // The signed-in rep's own lost sales for a day or a period, with a total per
+  // day. Reads /api/plan/my-lost-sales (needs only "Record lost sales").
+  var REASON_TXT = {}; REASONS.forEach(function (r) { REASON_TXT[r[0]] = r[1]; });
+  function ymd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  function mine(opts) {
+    opts = opts || {};
+    css();
+    if (!document.getElementById('vls-css-mine')) {
+      var st = document.createElement('style'); st.id = 'vls-css-mine';
+      st.textContent = '.vls.wide{max-width:860px}.vls .pre{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}.vls .pre button{padding:5px 11px;font-size:12.5px;border-radius:999px}.vls .pre button.on{background:#0f2a4a;border-color:#0f2a4a;color:#fff}' +
+        '.vls .kp{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}.vls .kp div{border:1px solid #d1d5db;border-radius:8px;padding:8px 10px}.vls .kp b{display:block;font-size:18px}.vls .kp span{font-size:11.5px;color:#6b7280}' +
+        '.vls table{width:100%;border-collapse:collapse;font-size:13px}.vls th,.vls td{text-align:left;padding:5px 6px;border-bottom:1px solid #e5e7eb;vertical-align:top}.vls td.n,.vls th.n{text-align:right;white-space:nowrap}.vls small{color:#6b7280}' +
+        '.vls .tw{max-height:46vh;overflow:auto;border:1px solid #e5e7eb;border-radius:8px}.vls h4{margin:12px 0 4px;font-size:13.5px}' +
+        '@media (prefers-color-scheme: dark){.vls th,.vls td,.vls .tw,.vls .kp div{border-color:#253241}}' +
+        '@media print{body>*:not(.vls-back){display:none!important}.vls-back{position:static;background:none;padding:0}.vls{box-shadow:none;max-width:none}.vls .noprint{display:none!important}.vls .tw{max-height:none;overflow:visible}}';
+      document.head.appendChild(st);
+    }
+    var back = document.createElement('div');
+    back.className = 'vls-back';
+    back.innerHTML =
+      '<div class="vls wide" role="dialog" aria-modal="true" aria-labelledby="vls-h">' +
+      '<h3 id="vls-h">My lost sales</h3><p class="sub" id="vlm-who">The lost sales you recorded.</p>' +
+      '<div class="pre noprint" id="vlm-pre"><button data-p="today" class="on">Today</button><button data-p="yday">Yesterday</button><button data-p="7">Last 7 days</button><button data-p="month">This month</button><button data-p="30">Last 30 days</button></div>' +
+      '<div class="row noprint"><div><label for="vlm-from">From</label><input type="date" id="vlm-from"></div><div><label for="vlm-to">To</label><input type="date" id="vlm-to"></div></div>' +
+      '<div id="vlm-out" style="margin-top:6px"><p class="sub">Loading…</p></div>' +
+      '<div class="err" id="vls-err" role="alert"></div>' +
+      '<div class="actions noprint"><button type="button" id="vlm-print">Print</button><button type="button" id="vlm-new">+ Record a lost sale</button><button type="button" class="go" id="vls-cancel">Close</button></div></div>';
+    document.body.appendChild(back);
+    var $ = function (id) { return back.querySelector('#' + id); };
+    function close() { document.removeEventListener('keydown', onKey, true); back.remove(); }
+    function onKey(e) { if (e.key === 'Escape') { e.stopPropagation(); close(); } }
+    document.addEventListener('keydown', onKey, true);
+    back.addEventListener('mousedown', function (e) { if (e.target === back) close(); });
+    $('vls-cancel').onclick = close;
+    $('vlm-print').onclick = function () { window.print(); };
+    $('vlm-new').onclick = function () { close(); open({ onSaved: function () { mine(); } }); };
+    function preset(p) {
+      var t = new Date(), f = new Date(t);
+      if (p === 'yday') { t.setDate(t.getDate() - 1); f = new Date(t); }
+      else if (p === 'month') f = new Date(t.getFullYear(), t.getMonth(), 1);
+      else if (p !== 'today') f.setDate(t.getDate() - (Number(p) - 1));
+      $('vlm-from').value = ymd(f); $('vlm-to').value = ymd(t);
+      Array.prototype.forEach.call(back.querySelectorAll('#vlm-pre button'), function (b) { b.classList.toggle('on', b.getAttribute('data-p') === p); });
+      load();
+    }
+    Array.prototype.forEach.call(back.querySelectorAll('#vlm-pre button'), function (b) { b.onclick = function () { preset(b.getAttribute('data-p')); }; });
+    $('vlm-from').onchange = $('vlm-to').onchange = function () { Array.prototype.forEach.call(back.querySelectorAll('#vlm-pre button'), function (b) { b.classList.remove('on'); }); load(); };
+    var seq = 0;
+    function load() {
+      var my = ++seq; $('vls-err').textContent = '';
+      req('/api/plan/my-lost-sales?from=' + $('vlm-from').value + '&to=' + $('vlm-to').value).then(function (r) {
+        if (my !== seq) return;
+        $('vlm-who').textContent = 'Lost sales recorded by ' + (r.me || 'you') + ', ' + r.period.from + (r.period.to !== r.period.from ? ' to ' + r.period.to : '') + '.';
+        var h = '<div class="kp"><div><span>Lines</span><b>' + r.summary.lines + '</b></div><div><span>Units</span><b>' + r.summary.units + '</b></div><div><span>Value</span><b>' + money(r.summary.value) + '</b></div></div>';
+        if (r.by_day.length > 1) {
+          h += '<h4>By day</h4><div class="tw"><table><thead><tr><th>Day</th><th class="n">Lines</th><th class="n">Units</th><th class="n">Value</th></tr></thead><tbody>' +
+            r.by_day.map(function (d) { return '<tr><td>' + esc(d.day) + '</td><td class="n">' + d.lines + '</td><td class="n">' + d.units + '</td><td class="n">' + money(d.value) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+        }
+        h += '<h4>Every line</h4><div class="tw"><table><thead><tr><th>When</th><th>Part</th><th class="n">Qty</th><th class="n">Value</th><th>Why</th><th>Customer</th><th class="noprint"></th></tr></thead><tbody>' +
+          (r.rows.length ? r.rows.map(function (x) {
+            return '<tr><td>' + esc(new Date(x.created_at).toLocaleString('en-JM', { dateStyle: 'short', timeStyle: 'short' })) + '</td>' +
+              '<td>' + (x.sku ? '<b>' + esc(x.sku) + '</b> ' : '') + esc(x.name) + (x.vehicle ? '<br><small>' + esc(x.vehicle) + '</small>' : '') + '</td>' +
+              '<td class="n">' + x.qty + '</td><td class="n">' + money(x.value) + '</td><td>' + esc(REASON_TXT[x.reason] || x.reason) + (x.note ? '<br><small>' + esc(x.note) + '</small>' : '') + '</td>' +
+              '<td>' + esc(x.customer_name || '') + (x.customer_phone ? '<br><small>' + esc(x.customer_phone) + (x.follow_up ? (x.followed_up_at ? ' · called' : ' · call back') : '') + '</small>' : '') + '</td>' +
+              '<td class="noprint">' + (x.can_remove ? '<button type="button" data-del="' + x.id + '" title="Remove a mistaken entry (within a day)" style="padding:2px 8px">✕</button>' : '') + '</td></tr>';
+          }).join('') : '<tr><td colspan="7"><small>No lost sales recorded by you in this period.</small></td></tr>') + '</tbody></table></div>';
+        $('vlm-out').innerHTML = h;
+        Array.prototype.forEach.call(back.querySelectorAll('[data-del]'), function (b) {
+          b.onclick = async function () {
+            if (!(await vasConfirm('Remove this lost-sale entry?'))) return;
+            fetch('/api/plan/lost-sales/' + b.getAttribute('data-del'), { method: 'DELETE', credentials: 'same-origin', headers: { Accept: 'application/json' } })
+              .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('Error ' + r.status)); }); })
+              .then(load).catch(function (e) { $('vls-err').textContent = e.message; });
+          };
+        });
+      }).catch(function (e) { if (my === seq) { $('vlm-out').innerHTML = ''; $('vls-err').textContent = e.message; } });
+    }
+    preset(opts.preset || 'today');
+    return { close: close };
+  }
+
+  window.VisionLostSale = { open: open, openMany: openMany, mine: mine };
 })();

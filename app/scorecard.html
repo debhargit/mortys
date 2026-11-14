@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Daily scorecard · Morty's Auto Parts</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --bad:#b91c1c; --warn:#b45309; --chip:#eef2f7; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --warn:#f59e0b; --ok:#22c55e; --bad:#f87171; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0}
+  header nav{margin-left:auto;display:flex;gap:14px;font-size:13px}
+  header a{color:#fff;opacity:.85}
+  main{max-width:1000px;margin:0 auto;padding:14px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 8px}
+  .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
+  .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  input,select,button{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  button{cursor:pointer;background:var(--card)}
+  button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+  .tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+  .tile .k{font-size:12px;color:var(--muted)}
+  .tile .v{font-size:22px;font-weight:700;margin:2px 0}
+  .tile .s{font-size:12.5px;color:var(--muted)}
+  .up{color:var(--ok)} .down{color:var(--bad)}
+  ul.alerts{margin:0;padding-left:18px} ul.alerts li{margin:3px 0;color:var(--warn)}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left}
+  td.n,th.n{text-align:right}
+  .muted{color:var(--muted)} .err{color:var(--bad)}
+  input[type=text]{min-width:240px}
+</style>
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
+</head>
+<body>
+<header>
+  <h1>Daily scorecard</h1>
+  <nav><a href="/report-planning.html">Planning</a><a href="/budget.html">Budget</a><a href="/admin.html">Admin</a></nav>
+</header>
+<main>
+  <div class="card controls">
+    <div><label for="d">Day</label><input type="date" id="d"></div>
+    <button id="load">Show</button>
+    <span id="msg" class="muted"></span>
+  </div>
+
+  <div id="tiles" class="tiles"></div>
+
+  <div class="card" id="alertsCard" style="margin-top:12px">
+    <h2>Needs attention</h2>
+    <ul class="alerts" id="alerts"></ul>
+  </div>
+
+  <div class="card">
+    <h2>Fast sellers out of stock</h2>
+    <p class="muted" style="margin:0 0 8px">Sold at least 3 times in the last 90 days, nothing on the shelf.</p>
+    <table><thead><tr><th>Part</th><th>SKU</th><th class="n">Sold, 90 days</th><th class="n">Sales, 90 days</th></tr></thead><tbody id="outs"></tbody></table>
+  </div>
+
+  <div class="card">
+    <h2>Send it to me every day</h2>
+    <div class="controls">
+      <div><label for="en">Daily send</label><select id="en"><option value="off">Off</option><option value="on">On</option></select></div>
+      <div><label for="at">Time (Jamaica)</label><input type="time" id="at"></div>
+      <div><label for="em">Email addresses</label><input type="text" id="em" placeholder="owner@example.com"></div>
+      <div><label for="ph">Phone numbers (SMS)</label><input type="text" id="ph" placeholder="876-555-1234"></div>
+      <button id="save">Save</button>
+      <button id="send" class="primary">Send now</button>
+    </div>
+    <p class="muted" id="smsg" style="margin:8px 0 0"></p>
+  </div>
+</main>
+<script>
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const jm = (v) => (Number(v) < 0 ? '-' : '') + 'J$' + Math.round(Math.abs(Number(v) || 0)).toLocaleString('en-US');
+  const pc = (v) => (v == null ? 'n/a' : v + '%');
+  const chg = (v) => (v == null ? '<span class="muted">no comparison</span>' : '<span class="' + (v >= 0 ? 'up' : 'down') + '">' + (v > 0 ? '+' : '') + v + '%</span>');
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.statusText); return j; }));
+  }
+  function tile(k, v, s) { return '<div class="tile"><div class="k">' + k + '</div><div class="v">' + v + '</div><div class="s">' + s + '</div></div>'; }
+  function load() {
+    $('msg').textContent = 'Loading…';
+    api('/api/scorecard' + ($('d').value ? '?date=' + $('d').value : '')).then((s) => {
+      $('d').value = s.date;
+      $('msg').textContent = s.label;
+      const w = s.watch;
+      $('tiles').innerHTML =
+        tile('Sales', jm(s.sales.net), s.sales.count + ' sales, avg ' + jm(s.sales.avg) + '<br>' + chg(s.sales.vs_last_year_pct) + ' on ' + esc(s.last_year_label)) +
+        tile('Month to date', jm(s.sales.mtd), chg(s.sales.mtd_vs_last_year_pct) + ' on ' + jm(s.sales.last_year_mtd) + ' last year') +
+        tile('Margin', pc(s.margin.gp_pct), jm(s.margin.gp) + ' gross profit' + (s.margin.cost_coverage_pct != null && s.margin.cost_coverage_pct < 90 ? '<br>cost known on ' + s.margin.cost_coverage_pct + '% of sales' : '')) +
+        tile('Returns and credit notes', jm(s.returns.amount), pc(s.returns.pct_of_gross) + ' of sales today, ' + pc(s.returns.mtd_pct_of_gross) + ' this month') +
+        tile('Known customers', pc(s.customers.named_pct), pc(s.customers.mtd_named_pct) + ' this month') +
+        tile('Paid other than cash', pc(s.payments.non_cash_pct), 'card, cheque, account') +
+        tile('Lost sales', String(w.lost_sales.n), jm(w.lost_sales.value) + ' turned away') +
+        tile('Overdue accounts', jm(w.overdue.amount), w.overdue.customers + ' customers, ' + jm(w.overdue.over_60) + ' over 60 days');
+      $('alerts').innerHTML = s.alerts.length ? s.alerts.map((a) => '<li>' + esc(a) + '</li>').join('') : '<li class="muted" style="color:var(--muted)">Nothing out of line.</li>';
+      $('outs').innerHTML = w.out_of_stock_top.length
+        ? w.out_of_stock_top.map((o) => '<tr><td>' + esc(o.name) + '</td><td>' + esc(o.sku) + '</td><td class="n">' + o.sold_90d + '</td><td class="n">' + jm(o.revenue_90d) + '</td></tr>').join('') +
+          (w.out_of_stock_fast_sellers > w.out_of_stock_top.length ? '<tr><td colspan="4" class="muted">… and ' + (w.out_of_stock_fast_sellers - w.out_of_stock_top.length) + ' more</td></tr>' : '')
+        : '<tr><td colspan="4" class="muted">None</td></tr>';
+    }).catch((e) => { $('msg').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; });
+  }
+  function loadSettings() {
+    api('/api/scorecard/settings').then((s) => {
+      $('en').value = s.scorecard_enabled; $('at').value = s.scorecard_send_at; $('em').value = s.scorecard_emails; $('ph').value = s.scorecard_phones;
+      $('smsg').textContent = s.scorecard_last_sent ? 'Last sent ' + s.scorecard_last_sent : '';
+    }).catch(() => {});
+  }
+  $('load').onclick = load;
+  $('save').onclick = () => api('/api/scorecard/settings', 'PUT', { scorecard_enabled: $('en').value, scorecard_send_at: $('at').value, scorecard_emails: $('em').value, scorecard_phones: $('ph').value })
+    .then(() => { $('smsg').textContent = 'Saved'; }).catch((e) => { $('smsg').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; });
+  $('send').onclick = () => { $('smsg').textContent = 'Sending…'; api('/api/scorecard/send', 'POST', { date: $('d').value })
+    .then((r) => { $('smsg').textContent = r.results.map((x) => x.channel + ' to ' + x.to + ': ' + x.status + (x.reason ? ' (' + x.reason + ')' : '')).join(' · '); })
+    .catch((e) => { $('smsg').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; }); };
+  load(); loadSettings();
+})();
+</script>
+</body>
+</html>

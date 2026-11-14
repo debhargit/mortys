@@ -46,10 +46,11 @@
   .qa{margin:4px 0 8px} .qa b{display:block;font-size:12.5px;color:var(--muted);font-weight:600}
   h4{margin:14px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
 <header><h1>Hiring</h1><nav><button class="sm" id="logBtn" data-hr>📜 Decisions</button><button class="sm" id="setBtn" data-hr>⚙ Emails &amp; settings</button><a href="/people.html">People &amp; HR</a><a href="/careers.html" target="_blank" rel="noopener" data-hr>Public careers page ↗</a><a href="/admin.html">Admin</a></nav></header>
@@ -153,7 +154,7 @@
       }; });
       all('[data-copy]').forEach(function (b) { b.onclick = function () {
         var link = jobLink(jobs[+b.getAttribute('data-copy')]);
-        (navigator.clipboard ? navigator.clipboard.writeText(link) : Promise.reject()).then(function () { toast('Link copied'); }, function () { prompt('Copy this link', link); });
+        (navigator.clipboard ? navigator.clipboard.writeText(link) : Promise.reject()).then(function () { toast('Link copied'); }, async function () { await vasPrompt('Copy this link', link); });
       }; });
     });
   }
@@ -279,8 +280,8 @@
       wirePipeline(mo, a, d);
       $('#amail').onclick = function () { compose(a, 'blank'); };
       if ($('#askDocs')) $('#askDocs').onclick = function () { compose(a, 'docs'); };
-      all('[data-rmdoc]', mo).forEach(function (b) { b.onclick = function () {
-        if (!confirm('Remove this document? The file is deleted.')) return;
+      all('[data-rmdoc]', mo).forEach(function (b) { b.onclick = async function () {
+        if (!(await vasConfirm('Remove this document? The file is deleted.'))) return;
         api('/api/hr/applications/' + a.id + '/documents/' + b.getAttribute('data-rmdoc'), 'DELETE').then(function () { toast('Removed'); openApp(a.id); loadBoard(); }).catch(function (e) { toast(e.message); });
       }; });
       $('#sdGo').onclick = function () {
@@ -290,14 +291,14 @@
         var fd = new FormData(); fd.append('label', $('#sdLabel').value.trim() || 'Document handed in'); fd.append('doc_other', f);
         api('/api/hr/applications/' + a.id + '/documents', 'POST', fd).then(function () { toast('Uploaded'); openApp(a.id); loadBoard(); }).catch(function (e) { toast(e.message); });
       };
-      $('#asave').onclick = function () {
+      $('#asave').onclick = async function () {
         // Sent as an exact moment, so the server's time zone cannot shift it.
         var body = { rating: $('#art').value, interview_at: $('#aiv').value ? new Date($('#aiv').value).toISOString() : null, note: $('#ano').value };
         var to = $('#ast') ? $('#ast').value : a.stage;
         if ($('#ast')) body.stage = to;
         // Not taken forward: the reason is kept for the record (not sent to them).
         if (to === 'rejected' && a.stage !== 'rejected') {
-          body.reason = prompt('Why is ' + a.name + ' not taken forward? (kept on file, not sent to them)', '');
+          body.reason = await vasPrompt('Why is ' + a.name + ' not taken forward? (kept on file, not sent to them)', '');
           if (!body.reason) return toast('Give a reason to reject');
         }
         api('/api/hr/applications/' + a.id, 'PATCH', body).then(function () {
@@ -307,15 +308,15 @@
           else close();
         }).catch(function (e) { toast(e.message); });
       };
-      if ($('#ahire')) $('#ahire').onclick = function () {
-        if (!confirm('Hire ' + a.name + '? A staff login is made for them, switched off until you set it up on the Staff screen.')) return;
-        api('/api/hr/applications/' + a.id + '/hire', 'POST').then(function (r) {
+      if ($('#ahire')) $('#ahire').onclick = async function () {
+        if (!(await vasConfirm('Hire ' + a.name + '? A staff login is made for them, switched off until you set it up on the Staff screen.'))) return;
+        api('/api/hr/applications/' + a.id + '/hire', 'POST').then(async function (r) {
           close(); loadBoard(); loadJobs(); loadReqs();
-          if (confirm('Hired. ' + r.next + '\n\nOpen their HR file now?')) location.href = '/people.html#staff=' + r.user_id;
+          if (await vasConfirm('Hired. ' + r.next + '\n\nOpen their HR file now?')) location.href = '/people.html#staff=' + r.user_id;
         }).catch(function (e) { toast(e.message); });
       };
-      $('#adel').onclick = function () {
-        if (!confirm('Delete this applicant\'s details, CV and documents now? This cannot be undone.')) return;
+      $('#adel').onclick = async function () {
+        if (!(await vasConfirm('Delete this applicant\'s details, CV and documents now? This cannot be undone.'))) return;
         api('/api/hr/applications/' + a.id, 'DELETE').then(function () { toast('Deleted'); close(); loadBoard(); loadJobs(); }).catch(function (e) { toast(e.message); });
       };
     }).catch(function (e) { toast(e.message); });
@@ -407,16 +408,16 @@
     var offer = function (b, k) { return d.offers.filter(function (o) { return String(o.id) === b.getAttribute(k); })[0]; };
     all('[data-ofed]', mo).forEach(function (b) { b.onclick = function () { offerForm(a, offer(b, 'data-ofed')); }; });
     all('[data-ofsub]', mo).forEach(function (b) { b.onclick = function () { api('/api/hr/offers/' + b.getAttribute('data-ofsub') + '/submit', 'POST').then(function () { re('Sent for approval'); }).catch(fail); }; });
-    all('[data-ofok]', mo).forEach(function (b) { b.onclick = function () { api('/api/hr/offers/' + b.getAttribute('data-ofok') + '/decide', 'POST', { decision: 'approve', note: prompt('Approval note (optional)', '') || '' }).then(function () { re('Offer approved'); }).catch(fail); }; });
-    all('[data-ofback]', mo).forEach(function (b) { b.onclick = function () { var n = prompt('What needs changing?', ''); if (!n) return; api('/api/hr/offers/' + b.getAttribute('data-ofback') + '/decide', 'POST', { decision: 'reject', note: n }).then(function () { re('Sent back'); }).catch(fail); }; });
+    all('[data-ofok]', mo).forEach(function (b) { b.onclick = async function () { api('/api/hr/offers/' + b.getAttribute('data-ofok') + '/decide', 'POST', { decision: 'approve', note: (await vasPrompt('Approval note (optional)', '')) || '' }).then(function () { re('Offer approved'); }).catch(fail); }; });
+    all('[data-ofback]', mo).forEach(function (b) { b.onclick = async function () { var n = await vasPrompt('What needs changing?', ''); if (!n) return; api('/api/hr/offers/' + b.getAttribute('data-ofback') + '/decide', 'POST', { decision: 'reject', note: n }).then(function () { re('Sent back'); }).catch(fail); }; });
     all('[data-ofsend]', mo).forEach(function (b) { b.onclick = function () { offerSend(a, b.getAttribute('data-ofsend')); }; });
-    all('[data-ofans]', mo).forEach(function (b) { b.onclick = function () {
-      var yes = confirm('Did ' + a.name + ' ACCEPT the offer?\n\nOK = accepted, Cancel = declined or not sure');
-      var n = prompt(yes ? 'How did they accept? (e.g. signed the letter in the office on Monday)' : 'If they declined, what did they say? (leave empty to cancel)', '');
+    all('[data-ofans]', mo).forEach(function (b) { b.onclick = async function () {
+      var yes = await vasConfirm('Did ' + a.name + ' ACCEPT the offer?\n\nOK = accepted, Cancel = declined or not sure');
+      var n = await vasPrompt(yes ? 'How did they accept? (e.g. signed the letter in the office on Monday)' : 'If they declined, what did they say? (leave empty to cancel)', '');
       if (!n) return;
       api('/api/hr/offers/' + b.getAttribute('data-ofans') + '/response', 'POST', { decision: yes ? 'accept' : 'decline', note: n }).then(function () { re(yes ? 'Acceptance recorded' : 'Recorded as declined'); }).catch(fail);
     }; });
-    all('[data-ofwd]', mo).forEach(function (b) { b.onclick = function () { var n = prompt('Why is the offer withdrawn?', ''); if (!n) return; api('/api/hr/offers/' + b.getAttribute('data-ofwd') + '/withdraw', 'POST', { reason: n }).then(function () { re('Offer withdrawn'); }).catch(fail); }; });
+    all('[data-ofwd]', mo).forEach(function (b) { b.onclick = async function () { var n = await vasPrompt('Why is the offer withdrawn?', ''); if (!n) return; api('/api/hr/offers/' + b.getAttribute('data-ofwd') + '/withdraw', 'POST', { reason: n }).then(function () { re('Offer withdrawn'); }).catch(fail); }; });
   }
   function interviewForm(a, iv, round) {
     var job = jobs.filter(function (x) { return x.id === a.job_id; })[0] || {};
@@ -438,14 +439,14 @@
       if (!$('#ivAt').value) return toast('Choose when');
       var body = Object.assign({ starts_at: new Date($('#ivAt').value).toISOString(), minutes: $('#ivMin').value, mode: $('#ivMode').value, round: $('#ivRound').value, location: $('#ivLoc').value, notes: $('#ivNotes').value,
         panel: all('.ivP').filter(function (c) { return c.checked; }).map(function (c) { return +c.value; }) }, extra || {});
-      api(iv ? '/api/hr/interviews/' + iv.id : '/api/hr/applications/' + a.id + '/interviews', iv ? 'PATCH' : 'POST', body).then(function () {
+      api(iv ? '/api/hr/interviews/' + iv.id : '/api/hr/applications/' + a.id + '/interviews', iv ? 'PATCH' : 'POST', body).then(async function () {
         close(2); toast(iv ? 'Interview updated; the panel is told' : 'Booked and on the panel’s calendar'); openApp(a.id); loadBoard();
         // Tell the candidate, from the interview template.
-        if (!extra && a.email && confirm('Email ' + a.name + ' the interview details?')) setTimeout(function () { compose(a, 'interview'); }, 300);
+        if (!extra && a.email && (await vasConfirm('Email ' + a.name + ' the interview details?'))) setTimeout(function () { compose(a, 'interview'); }, 300);
       }).catch(function (e) { toast(e.message); });
     }
     $('#ivGo').onclick = function () { save(null); };
-    if ($('#ivCancel')) $('#ivCancel').onclick = function () { if (confirm('Cancel this interview? The panel is told.')) save({ status: 'cancelled' }); };
+    if ($('#ivCancel')) $('#ivCancel').onclick = async function () { if (await vasConfirm('Cancel this interview? The panel is told.')) save({ status: 'cancelled' }); };
     if ($('#ivNo')) $('#ivNo').onclick = function () { save({ status: 'no_show' }); };
   }
   // The scorecard: one per panel member per interview.
@@ -490,7 +491,7 @@
       if (r.id) Object.assign(body, { status: $('#rfSt').value, rating: $('#rfRt').value, summary: $('#rfSum').value, would_rehire: $('#rfRh').value ? $('#rfRh').value === 'yes' : null });
       api(r.id ? '/api/hr/references/' + r.id : '/api/hr/applications/' + a.id + '/references', r.id ? 'PATCH' : 'POST', body).then(function () { close(2); toast('Saved'); openApp(a.id); }).catch(function (e) { toast(e.message); });
     };
-    if ($('#rfDel')) $('#rfDel').onclick = function () { if (confirm('Remove this referee?')) api('/api/hr/references/' + r.id, 'DELETE').then(function () { close(2); openApp(a.id); }).catch(function (e) { toast(e.message); }); };
+    if ($('#rfDel')) $('#rfDel').onclick = async function () { if (await vasConfirm('Remove this referee?')) api('/api/hr/references/' + r.id, 'DELETE').then(function () { close(2); openApp(a.id); }).catch(function (e) { toast(e.message); }); };
   }
   function refMail(a, rid) {
     api('/api/hr/references/' + rid + '/email-draft').then(function (d) {
@@ -533,7 +534,7 @@
       $('#emX').onclick = function () { close(2); };
       $('#emGo').onclick = function () {
         this.disabled = true;
-        api('/api/hr/offers/' + oid + '/send', 'POST', { subject: $('#emS').value, body: $('#emB').value }).then(function (r) { close(2); prompt(r.note + '\n\nTheir private offer link (to send by WhatsApp if needed):', r.link); openApp(a.id); })
+        api('/api/hr/offers/' + oid + '/send', 'POST', { subject: $('#emS').value, body: $('#emB').value }).then(async function (r) { close(2); await vasPrompt(r.note + '\n\nTheir private offer link (to send by WhatsApp if needed):', r.link); openApp(a.id); })
           .catch(function (e) { $('#emGo').disabled = false; toast(e.message); });
       };
     }).catch(function (e) { toast(e.message); });
@@ -555,10 +556,10 @@
         '<div class="controls" style="margin-top:8px"><button id="cmX">Close</button></div>');
       $('#cmX').onclick = function () { close(); };
       all('[data-open]', mo).forEach(function (b) { b.onclick = function () { openApp(b.getAttribute('data-open')); }; });
-      all('[data-choose]', mo).forEach(function (b) { b.onclick = function () {
-        var why = prompt('Why this candidate? (kept as the record of the decision)', '');
+      all('[data-choose]', mo).forEach(function (b) { b.onclick = async function () {
+        var why = await vasPrompt('Why this candidate? (kept as the record of the decision)', '');
         if (!why) return;
-        var offerNow = confirm('References already checked?\n\nOK = go straight to the offer, Cancel = check references first');
+        var offerNow = await vasConfirm('References already checked?\n\nOK = go straight to the offer, Cancel = check references first');
         api('/api/hr/applications/' + b.getAttribute('data-choose') + '/select', 'POST', { reason: why, to: offerNow ? 'offer' : 'references' }).then(function () { toast('Chosen'); compare(j); loadBoard(); }).catch(function (e) { toast(e.message); });
       }; });
     }).catch(function (e) { toast(e.message); });
@@ -586,9 +587,9 @@
       var done = function (m) { return function () { toast(m); loadReqs(); }; }, fail = function (e) { toast(e.message); };
       all('[data-red]').forEach(function (b) { b.onclick = function () { reqForm(byId(b, 'data-red')); }; });
       all('[data-rsub]').forEach(function (b) { b.onclick = function () { api('/api/hr/requisitions/' + b.getAttribute('data-rsub') + '/submit', 'POST').then(done('Sent for approval')).catch(fail); }; });
-      all('[data-rok]').forEach(function (b) { b.onclick = function () { api('/api/hr/requisitions/' + b.getAttribute('data-rok') + '/decide', 'POST', { decision: 'approve', note: prompt('Approval note (optional)', '') || '' }).then(done('Approved')).catch(fail); }; });
-      all('[data-rno]').forEach(function (b) { b.onclick = function () { var n = prompt('Why is it turned down?', ''); if (n) api('/api/hr/requisitions/' + b.getAttribute('data-rno') + '/decide', 'POST', { decision: 'reject', note: n }).then(done('Turned down')).catch(fail); }; });
-      all('[data-rcan]').forEach(function (b) { b.onclick = function () { if (confirm('Cancel this requisition?')) api('/api/hr/requisitions/' + b.getAttribute('data-rcan') + '/cancel', 'POST', { note: prompt('Why? (optional)', '') || '' }).then(done('Cancelled')).catch(fail); }; });
+      all('[data-rok]').forEach(function (b) { b.onclick = async function () { api('/api/hr/requisitions/' + b.getAttribute('data-rok') + '/decide', 'POST', { decision: 'approve', note: (await vasPrompt('Approval note (optional)', '')) || '' }).then(done('Approved')).catch(fail); }; });
+      all('[data-rno]').forEach(function (b) { b.onclick = async function () { var n = await vasPrompt('Why is it turned down?', ''); if (n) api('/api/hr/requisitions/' + b.getAttribute('data-rno') + '/decide', 'POST', { decision: 'reject', note: n }).then(done('Turned down')).catch(fail); }; });
+      all('[data-rcan]').forEach(function (b) { b.onclick = async function () { if (await vasConfirm('Cancel this requisition?')) api('/api/hr/requisitions/' + b.getAttribute('data-rcan') + '/cancel', 'POST', { note: (await vasPrompt('Why? (optional)', '')) || '' }).then(done('Cancelled')).catch(fail); }; });
       all('[data-rpost]').forEach(function (b) { b.onclick = function () { api('/api/hr/requisitions/' + b.getAttribute('data-rpost') + '/post', 'POST').then(function (r) { loadReqs(); loadJobs().then(function () { toast('Posting made: finish it and tick Open'); jobForm(r.job); }); }).catch(fail); }; });
     });
   }

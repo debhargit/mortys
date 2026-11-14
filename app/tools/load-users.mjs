@@ -55,6 +55,12 @@ function emailer(domain, taken) {
   };
 }
 
+// --new-only (the import page): add people the system does not have yet, and
+// put only those new staff in the Sales rep group. Existing people -- their
+// names, notes and groups, which may have been changed in the new system --
+// are left alone.
+const NEW_ONLY = process.argv.includes('--new-only');
+
 const db = pool(2);
 const c = await db.connect();
 try {
@@ -210,13 +216,13 @@ try {
            account_number, internal_notes, payment_terms_days,
            false, false           -- legacy records carry no marketing consent
       FROM _u
-    ON CONFLICT (email) DO UPDATE SET
+    ` + (NEW_ONLY ? `ON CONFLICT (email) DO NOTHING RETURNING id` : `ON CONFLICT (email) DO UPDATE SET
       name               = EXCLUDED.name,
       phone              = COALESCE(EXCLUDED.phone, users.phone),
       is_staff           = EXCLUDED.is_staff,
       customer_type      = COALESCE(EXCLUDED.customer_type, users.customer_type),
       internal_notes     = EXCLUDED.internal_notes,
-      payment_terms_days = COALESCE(EXCLUDED.payment_terms_days, users.payment_terms_days)`);
+      payment_terms_days = COALESCE(EXCLUDED.payment_terms_days, users.payment_terms_days)`));
 
   // Staff belong to the 'sales_rep' category; that is what makes them show up
   // as a rep in the POS and what load-salesreps.mjs mirrors into `mechanics`.
@@ -224,12 +230,14 @@ try {
     INSERT INTO user_category_members (user_id, category_id)
     SELECT u.id, (SELECT id FROM user_categories WHERE code = 'sales_rep')
       FROM users u JOIN _u s ON lower(s.email) = lower(u.email) AND s.is_staff
-     WHERE NOT EXISTS (
+     WHERE ` + (NEW_ONLY ? `u.id = ANY($1::int[]) AND ` : '') + `NOT EXISTS (
        SELECT 1 FROM user_category_members m
         WHERE m.user_id = u.id
-          AND m.category_id = (SELECT id FROM user_categories WHERE code = 'sales_rep'))`);
+          AND m.category_id = (SELECT id FROM user_categories WHERE code = 'sales_rep'))`,
+    NEW_ONLY ? [ins.rows.map((r) => r.id)] : []);
 
   await c.query('COMMIT');
+  if (NEW_ONLY) console.log('@@result ' + JSON.stringify({ step: 'users', added: ins.rowCount, to_sales_rep: cat.rowCount }));
 
   const { rows: [t] } = await c.query(`
     SELECT count(*)::int AS total,

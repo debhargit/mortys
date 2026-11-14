@@ -1,0 +1,714 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Buy overseas or local · Morty's Auto Parts</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#15803d; --okbg:#dcfce7; --bad:#b91c1c; --badbg:#fee2e2; --warn:#b45309; --warnbg:#fef3c7; --info:#1d4ed8; --infobg:#dbeafe; --chip:#eef2f7; --sel:#fffbeb; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --ok:#4ade80; --okbg:#14532d; --bad:#f87171; --badbg:#7f1d1d; --warn:#fbbf24; --warnbg:#713f12; --info:#93c5fd; --infobg:#1e3a8a; --sel:#221d12; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0}
+  header nav{margin-left:auto;display:flex;gap:14px;font-size:13px;flex-wrap:wrap}
+  header a{color:#fff;opacity:.85}
+  main{max-width:1400px;margin:0 auto;padding:14px 16px 40px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 8px}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+  .controls label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+  input,select,button{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  input[type=number]{width:96px}
+  input[type=checkbox]{width:18px;height:18px;accent-color:var(--red);vertical-align:middle}
+  button{cursor:pointer;background:var(--card)}
+  button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600}
+  button.sm{padding:3px 9px;font-size:12.5px}
+  button:disabled{opacity:.5;cursor:default}
+  .seg{display:inline-flex;background:var(--chip);border-radius:9px;padding:3px;gap:3px;flex-wrap:wrap}
+  .seg button{border:0;background:transparent;padding:6px 11px;border-radius:7px;font-size:13px}
+  .seg button.on{background:var(--card);box-shadow:0 1px 2px rgba(0,0,0,.15);font-weight:700}
+  .muted{color:var(--muted)} .err{color:var(--bad)} .small{font-size:12.5px}
+  .grid2{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:12px;align-items:start}
+  @media (max-width:900px){ .grid2{grid-template-columns:1fr} }
+  .formula{background:var(--chip);border-radius:8px;padding:8px 10px;font-size:13px;margin-top:10px}
+  .tablewrap{overflow-x:auto}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:6px 7px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:12px;color:var(--muted);font-weight:600;white-space:nowrap;position:sticky;top:0;background:var(--card)}
+  td.n,th.n{text-align:right;white-space:nowrap}
+  td input[type=number]{width:78px;padding:4px 6px;text-align:right}
+  td input.q{width:62px}
+  tr.off td{opacity:.45}
+  tr.open > td{background:var(--sel)}
+  .pname{font-weight:600;overflow-wrap:anywhere}
+  .meta{font-size:12px;color:var(--muted)}
+  .big{font-weight:700;font-size:14.5px}
+  .tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;font-weight:600;white-space:nowrap}
+  .t-over{background:var(--okbg);color:var(--ok)} .t-local{background:var(--infobg);color:var(--info)}
+  .t-check{background:var(--warnbg);color:var(--warn)} .t-none{background:var(--chip);color:var(--muted)} .t-bad{background:var(--badbg);color:var(--bad)}
+  .warnline{color:var(--warn);font-size:12px}
+  .detail td{background:var(--sel);padding:10px 14px}
+  .dgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px 22px}
+  .dgrid h3{font-size:13px;margin:0 0 4px}
+  .work{width:100%;border-collapse:collapse;font-size:13px}
+  .work td{border:0;padding:2px 0}
+  .work td:last-child{text-align:right;white-space:nowrap}
+  .work tr.sum td{border-top:1px solid var(--line);font-weight:700;padding-top:4px}
+  .totals{border-width:2px}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:10px}
+  .tile{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px 11px}
+  .tile .k{font-size:12px;color:var(--muted)} .tile .v{font-size:18px;font-weight:700} .tile .s{font-size:12px;color:var(--muted)}
+  .tile.hl{border-color:var(--ok)}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+  .bar .grow{flex:1}
+  #sugg{position:absolute;z-index:10;background:var(--card);border:1px solid var(--line);border-radius:8px;max-height:300px;overflow:auto;min-width:320px;box-shadow:0 6px 18px rgba(0,0,0,.15)}
+  #sugg div{padding:7px 9px;border-bottom:1px solid var(--line);cursor:pointer} #sugg div:hover{background:var(--chip)}
+  .empty{text-align:center;color:var(--muted);padding:30px 10px}
+  .verdict{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;margin-bottom:10px}
+  .verdict .big{font-size:20px}
+  .vbox{border-radius:10px;padding:10px 14px;font-weight:700;font-size:18px}
+  .cmp td,.cmp th{padding:6px 10px}
+  .cmp th{position:static}
+  .cmp td.best{background:var(--okbg);font-weight:700}
+  .pros{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px 22px;margin-top:10px}
+  .pros h3{font-size:14px;margin:0 0 4px}
+  .pros ul{margin:0;padding-left:18px} .pros li{margin:3px 0}
+  .best-opt{margin-top:12px;border:2px solid var(--ok);border-radius:10px;padding:10px 14px;background:var(--okbg)}
+  .best-opt.local{border-color:var(--info);background:var(--infobg)}
+  .best-opt.wait{border-color:var(--warn);background:var(--warnbg)}
+  dialog{border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);max-width:520px;width:calc(100% - 32px)}
+  dialog::backdrop{background:rgba(0,0,0,.4)}
+  @media print{
+    header nav,.noprint,button,.totals .bar{display:none!important}
+    .totals{position:static;box-shadow:none}
+    body{background:#fff;color:#000} .card{border:0;padding:0}
+    td input{border:0;background:transparent;width:auto}
+  }
+</style>
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
+</head>
+<body>
+<header>
+  <h1>Buy overseas or local</h1>
+  <nav><a href="/supplier-scorecard.html">Supplier scorecard</a><a href="/report-planning.html">Planning</a><a href="/admin.html">Admin</a></nav>
+</header>
+<main>
+  <div class="grid2 noprint">
+    <div class="card">
+      <h2>1. Choose the parts</h2>
+      <div class="seg" id="picks">
+        <button data-p="fast" class="on">Fast selling</button>
+        <button data-p="out">Out of stock</button>
+        <button data-p="low">Running low</button>
+        <button data-p="category">Category</button>
+        <button data-p="supplier">Supplier</button>
+        <button data-p="search">Search</button>
+        <button data-p="po">Purchase order</button>
+      </div>
+      <div class="controls" style="margin-top:10px">
+        <div id="fDays"><label for="days">Sales over</label><select id="days"><option value="30">Last 30 days</option><option value="60" selected>Last 60 days</option><option value="90">Last 90 days</option><option value="180">Last 6 months</option><option value="365">Last 12 months</option></select></div>
+        <div id="fCat" hidden><label for="cat">Category</label><select id="cat"></select></div>
+        <div id="fSup" hidden><label for="sup">Supplier</label><select id="sup"></select></div>
+        <div id="fPo" hidden><label for="poSel">Purchase order</label><select id="poSel" style="max-width:340px"></select> <input id="poQ" placeholder="Find PO or supplier" style="width:170px"></div>
+        <div id="fQ" hidden><label for="q">Part name, code or vehicle</label><input id="q" placeholder="e.g. brake pads civic" style="width:240px"></div>
+        <div><label for="limit">How many</label><select id="limit"><option>25</option><option selected>50</option><option>100</option><option>200</option><option>500</option></select></div>
+        <div><button class="primary" id="load">Show parts</button></div>
+        <div style="position:relative"><label for="add">Add one part to the list</label><input id="add" placeholder="Search to add" style="width:220px" autocomplete="off"><div id="sugg" hidden></div></div>
+      </div>
+      <p class="small muted" id="pickHelp" style="margin:8px 0 0"></p>
+    </div>
+    <div class="card">
+      <h2>2. Costs and rate</h2>
+      <div class="controls">
+        <div><label for="fx">BOJ US$ rate (J$)</label><input id="fx" type="number" step="0.01" min="1"></div>
+        <div><label for="duty">Customs duty %</label><input id="duty" type="number" step="0.5" min="0"></div>
+        <div><label for="ship">Shipping &amp; handling %</label><input id="ship" type="number" step="0.5" min="0"></div>
+        <div><label for="dutyOn">Duty charged on</label><select id="dutyOn"><option value="cif">Cost + shipping (CIF)</option><option value="cost">Cost only</option></select></div>
+        <div><label for="gctOn">Import GCT</label><select id="gctOn"><option value="false">Claimed back (leave out)</option><option value="true">Add it as a cost</option></select></div>
+        <div id="fGct"><label for="gct">Import GCT %</label><input id="gct" type="number" step="0.5" min="0"></div>
+        <div><label for="lead">Lead time (days)</label><input id="lead" type="number" step="1" min="0"></div>
+        <div><label for="cover">Order to cover (days after it lands)</label><input id="cover" type="number" step="1" min="0"></div>
+        <div><label for="fixed" title="Customs broker, port charges and delivery to the shop, for the whole shipment">Broker &amp; clearing per shipment J$</label><input id="fixed" type="number" step="100" min="0"></div>
+        <div><label for="minSave" title="Below this, the wait and risk of importing are not worth it">Import only if it saves at least %</label><input id="minSave" type="number" step="1" min="0"></div>
+      </div>
+      <div class="small muted" id="fxNote" style="margin-top:6px"></div>
+      <div class="controls" style="margin-top:10px">
+        <div><label for="mk">Markup for every line %</label><input id="mk" type="number" step="1" min="0"></div>
+        <div class="seg" id="mkq"><button data-m="30">30%</button><button data-m="35">35%</button><button data-m="40">40%</button><button data-m="45">45%</button><button data-m="50">50%</button></div>
+        <div><button id="saveDef" hidden>Save as my defaults</button> <span id="defMsg" class="small muted"></span></div>
+      </div>
+      <div class="formula" id="formula"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="bar noprint">
+      <div class="seg" id="views"><button data-v="all" class="on">All</button><button data-v="over">Better overseas</button><button data-v="local">Better local</button><button data-v="check">Needs a quote</button></div>
+      <label class="small"><input type="checkbox" id="tickAll" checked> Tick all</label>
+      <span class="grow"></span>
+      <label class="small" for="sort">Sort</label>
+      <select id="sort"><option value="sales">Best selling</option><option value="saving">Biggest saving overseas</option><option value="gap">Local markup lowest</option><option value="name">Name</option></select>
+      <button id="analyse" class="sm primary">Analyse this order</button>
+      <button id="csv" class="sm">Download CSV</button>
+      <button id="print" class="sm">Print</button>
+      <button id="po" class="sm" hidden>Draft overseas PO</button>
+    </div>
+    <div id="msg" class="small muted" style="margin-bottom:6px"></div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr>
+          <th></th><th>Part</th>
+          <th class="n" title="Shelf price before GCT">Selling price</th>
+          <th class="n" title="Last price from a local (J$) supplier, else the average cost">Local cost</th>
+          <th class="n">Markup %</th>
+          <th class="n" title="The most you can pay overseas per unit and still make this markup">Max US$ cost</th>
+          <th class="n" title="Overseas price that would cost the same landed as buying locally">Break-even US$</th>
+          <th class="n" title="A price you were quoted overseas (or the last one we paid)">Overseas quote US$</th>
+          <th class="n">Qty</th>
+          <th>Better to buy</th><th></th>
+        </tr></thead>
+        <tbody id="rows"><tr><td colspan="11" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card totals" id="totals"></div>
+  <div class="card" id="analysis" hidden></div>
+</main>
+
+<dialog id="poDlg">
+  <h2 style="margin-top:0;font-size:16px">Draft a purchase order overseas</h2>
+  <p class="small muted">One draft PO with the ticked lines. Each line's cost is the overseas quote if you typed one, otherwise the most you can pay (Max US$). You can change it on the PO before sending.</p>
+  <div class="controls"><div><label for="poSup">Overseas supplier (US$)</label><select id="poSup"></select></div></div>
+  <p id="poMsg" class="small"></p>
+  <div style="display:flex;gap:8px;justify-content:flex-end"><button id="poCancel">Cancel</button><button class="primary" id="poGo">Create draft PO</button></div>
+</dialog>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var all = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function api(url, method, body) {
+    return fetch(url, { method: method || 'GET', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) { if (r.status === 401) location.href = '/admin.html'; throw new Error(j.error || ('Error ' + r.status)); } return j; }); });
+  }
+  var num = function (v) { var n = Number(v); return isFinite(n) ? n : 0; };
+  function jm(v, dp) { if (v == null || !isFinite(v)) return '–'; dp = dp == null ? 2 : dp; return (v < 0 ? '-J$' : 'J$') + Math.abs(Number(v)).toLocaleString('en-JM', { minimumFractionDigits: dp, maximumFractionDigits: dp }); }
+  function us(v) { if (v == null || !isFinite(v)) return '–'; return 'US$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function pc(v) { return v == null || !isFinite(v) ? '–' : (Math.round(v * 10) / 10) + '%'; }
+  function dt(v) { return v ? String(v).slice(0, 10) : ''; }
+
+  var S = { setup: null, pick: 'fast', view: 'all', lines: [], open: {}, cfg: null };
+
+  // ------------------------------------------------------------ the maths --
+  // landed J$ per US$1 of overseas cost
+  function factor(c) {
+    var s = c.ship_pct / 100, d = c.duty_pct / 100, f = c.duty_on === 'cost' ? (1 + s + d) : (1 + s) * (1 + d);
+    if (c.import_gct_on) f *= 1 + c.import_gct_pct / 100;
+    return f;
+  }
+  // Every step of the landed cost for a US$ price (per unit).
+  function landed(usd, c) {
+    var R = c.fx, cost = usd * R, ship = cost * c.ship_pct / 100;
+    var dutyBase = c.duty_on === 'cost' ? cost : cost + ship, duty = dutyBase * c.duty_pct / 100;
+    var gct = c.import_gct_on ? (cost + ship + duty) * c.import_gct_pct / 100 : 0;
+    return { usd: usd, cost: cost, ship: ship, duty: duty, gct: gct, total: cost + ship + duty + gct };
+  }
+  function calc(l, c) {
+    var m = (l.markup != null ? l.markup : c.markup_pct) / 100;
+    var R = c.fx, F = factor(c), P = l.price > 0 ? l.price : null, L = l.local_cost > 0 ? l.local_cost : null;
+    var o = { m: m * 100, P: P, L: L, F: F };
+    o.maxLanded = P ? P / (1 + m) : null;
+    o.maxUsd = P && R ? o.maxLanded / (R * F) : null;
+    o.beUsd = L && R ? L / (R * F) : null;
+    o.localMarkup = P && L ? (P / L - 1) * 100 : null;
+    var q = l.quote > 0 ? l.quote : null, est = false;
+    if (!q && l.last_usd_cost > 0) { q = l.last_usd_cost; est = true; }
+    o.quote = q; o.quoteIsLast = est;
+    o.qLanded = q && R ? landed(q, c) : null;
+    o.qMarkup = o.qLanded && P ? (P / o.qLanded.total - 1) * 100 : null;
+    o.saveUnit = o.qLanded && L ? L - o.qLanded.total : null;
+    // Verdict
+    if (!P) { o.v = 'none'; o.vt = 'No selling price'; }
+    else if (o.qLanded && L) {
+      if (o.qLanded.total < L) { o.v = 'over'; o.vt = 'Overseas'; o.vs = 'saves ' + jm(o.saveUnit) + ' each' + (o.qMarkup < o.m ? ', but markup only ' + pc(o.qMarkup) : ''); }
+      else { o.v = 'local'; o.vt = 'Local'; o.vs = 'overseas costs ' + jm(-o.saveUnit) + ' more each'; }
+    } else if (o.qLanded) {
+      if (o.qMarkup >= o.m) { o.v = 'over'; o.vt = 'Overseas'; o.vs = 'makes ' + pc(o.qMarkup) + ' markup (no local price)'; }
+      else { o.v = 'bad'; o.vt = 'Too dear'; o.vs = 'only ' + pc(o.qMarkup) + ' markup'; }
+    } else if (!L) { o.v = 'check'; o.vt = 'Get a quote'; o.vs = 'no local cost; overseas pays under ' + us(o.maxUsd); }
+    else if (L <= o.maxLanded) { o.v = 'local'; o.vt = 'Local'; o.vs = 'local already makes ' + pc(o.localMarkup) + '; overseas only under ' + us(o.beUsd); }
+    else { o.v = 'check'; o.vt = 'Look overseas'; o.vs = 'local makes only ' + pc(o.localMarkup) + '; overseas pays under ' + us(o.maxUsd); }
+    // Lead time: does stock last until an overseas order lands?
+    var have = num(l.stock) + num(l.on_order);
+    o.daysLeft = l.per_day > 0 ? have / l.per_day : null;
+    o.bridge = l.per_day > 0 && o.daysLeft < c.lead_days ? Math.max(Math.ceil(l.per_day * c.lead_days - have), 0) : 0;
+    return o;
+  }
+  function suggestQty(l, c) {
+    var q = Math.ceil(l.per_day * (c.lead_days + c.cover_days) - num(l.stock) - num(l.on_order));
+    if (!(q > 0)) q = 0;
+    if (q > 0 && l.pack > 1) q = Math.ceil(q / l.pack) * l.pack;
+    return q;
+  }
+
+  // ----------------------------------------------------------- settings --
+  function readCfg() {
+    var d = S.setup.settings;
+    var v = function (id, dflt) { var x = $(id).value; return x === '' ? dflt : num(x); };
+    S.cfg = {
+      fx: v('fx', 0), duty_pct: v('duty', d.duty_pct), ship_pct: v('ship', d.ship_pct), duty_on: $('dutyOn').value,
+      import_gct_on: $('gctOn').value === 'true', import_gct_pct: v('gct', d.import_gct_pct),
+      lead_days: v('lead', d.lead_days), cover_days: v('cover', d.cover_days), markup_pct: v('mk', d.markup_pct),
+      fixed_jmd: v('fixed', d.fixed_jmd || 0), min_saving_pct: v('minSave', d.min_saving_pct == null ? 10 : d.min_saving_pct),
+    };
+    $('fGct').style.opacity = S.cfg.import_gct_on ? 1 : .5;
+    var c = S.cfg, F = factor(c);
+    $('formula').innerHTML = c.fx > 0
+      ? 'Each US$1 overseas lands at <b>' + jm(c.fx * F) + '</b> (rate ' + c.fx + ' × ' + (1 + c.ship_pct / 100).toFixed(2) + ' shipping ' +
+        (c.duty_on === 'cost' ? '+ ' + c.duty_pct + '% duty on cost' : '× ' + (1 + c.duty_pct / 100).toFixed(2) + ' duty on cost + shipping') +
+        (c.import_gct_on ? ' × ' + (1 + c.import_gct_pct / 100).toFixed(2) + ' GCT' : '') + ').<br>' +
+        '<b>Max US$ cost</b> = selling price ÷ ' + (1 + c.markup_pct / 100).toFixed(2) + ' markup ÷ ' + (c.fx * F).toFixed(2) + '. ' +
+        '<b>Break-even</b> = local cost ÷ ' + (c.fx * F).toFixed(2) + '.'
+      : '<span class="err">Enter the US$ exchange rate to work out the costs.</span>';
+  }
+  function fillCfg(s, fx) {
+    $('duty').value = s.duty_pct; $('ship').value = s.ship_pct; $('dutyOn').value = s.duty_on;
+    $('gctOn').value = String(!!s.import_gct_on); $('gct').value = s.import_gct_pct;
+    $('lead').value = s.lead_days; $('cover').value = s.cover_days; $('mk').value = s.markup_pct;
+    $('fixed').value = s.fixed_jmd || 0; $('minSave').value = s.min_saving_pct == null ? 10 : s.min_saving_pct;
+    $('days').value = String(s.fast_days);
+    if (!$('days').value) { var o = document.createElement('option'); o.value = s.fast_days; o.textContent = 'Last ' + s.fast_days + ' days'; $('days').appendChild(o); $('days').value = String(s.fast_days); }
+    if (fx && fx.rate) {
+      $('fx').value = fx.rate;
+      $('fxNote').textContent = 'Rate: ' + (fx.source === 'manual' ? 'entered by hand' : 'Bank of Jamaica ' + (fx.use || 'sell') + 'ing rate') + ' for ' + dt(fx.rate_date) +
+        (fx.buy && fx.sell ? ' (buy ' + fx.buy + ', sell ' + fx.sell + ')' : '') + '. Change it here to try another rate; it is not saved.';
+    } else $('fxNote').innerHTML = '<span class="err">No US$ rate on record yet. Type today\'s BOJ rate above (Purchasing settings can save it).</span>';
+  }
+
+  // ------------------------------------------------------------- loading --
+  var HELP = {
+    fast: 'Parts that sold the most in the period, best first.',
+    out: 'Parts with no stock that sold in the last 12 months, best sellers first.',
+    low: 'Parts whose stock (with what is on order) will run out before an overseas order could land, at the lead time set on the right.',
+    category: 'Every active part in one category.',
+    supplier: 'Every part we buy from one supplier: see which of them to switch overseas.',
+    search: 'Parts matching a name, code, vehicle or barcode.',
+    po: 'Run a purchase order through: its quantities and prices are loaded. A J$ order is the local price; a US$ order is the overseas quote. Type quotes for the other side, then press Analyse this order.',
+  };
+  function setPick(p) {
+    S.pick = p;
+    all('#picks button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-p') === p); });
+    $('fCat').hidden = p !== 'category'; $('fSup').hidden = p !== 'supplier'; $('fQ').hidden = p !== 'search'; $('fPo').hidden = p !== 'po'; $('fDays').hidden = false;
+    $('pickHelp').textContent = HELP[p];
+  }
+  function toLine(r) {
+    r.on = true; r.markup = null; r.quote = null; r.qtyEdited = false;
+    r.qty = suggestQty(r, S.cfg);
+    return r;
+  }
+  function load() {
+    readCfg();
+    var value = S.pick === 'category' ? $('cat').value : S.pick === 'supplier' ? $('sup').value : S.pick === 'search' ? $('q').value.trim() : S.pick === 'po' ? $('poSel').value : '';
+    if (S.pick === 'po' && !value) { $('msg').textContent = 'Choose a purchase order.'; return; }
+    if (S.pick === 'search' && value.length < 2) { $('msg').textContent = 'Type at least two letters to search.'; return; }
+    $('msg').textContent = 'Loading…';
+    var u = '/api/overseas/items?pick=' + S.pick + '&days=' + $('days').value + '&limit=' + $('limit').value + '&lead_days=' + S.cfg.lead_days + '&value=' + encodeURIComponent(value);
+    api(u).then(function (d) {
+      S.lines = d.lines.map(toLine); S.open = {}; S.days = d.days; S.po = d.po || null;
+      $('analysis').hidden = true;
+      var extra = '';
+      if (S.po) {
+        S.lines.forEach(function (l) {
+          l.qty = Math.round(l.po_qty || 0); l.qtyEdited = true;
+          if (l.po_unit_cost > 0 && S.po.currency === 'JMD') { l.local_cost = l.po_unit_cost; l.local_source = 'this_po'; }
+          else if (l.po_unit_cost > 0 && S.po.currency === 'USD') l.quote = l.po_unit_cost;
+        });
+        extra = ' ' + esc(S.po.po_number) + ' from ' + esc(S.po.supplier_name || 'no supplier') + ' (' + esc(S.po.currency) + ', ' + esc(S.po.status) + '). ' +
+          (S.po.currency === 'JMD' ? 'Its prices are the local cost; type overseas quotes to compare.' : S.po.currency === 'USD' ? 'Its prices are the overseas quotes, set against the local cost.' : 'Prices in ' + esc(S.po.currency) + ' are not compared.') +
+          (S.po.not_in_stock_list.length ? ' Not compared (not in the stock list): ' + S.po.not_in_stock_list.map(esc).join(', ') + '.' : '');
+      }
+      $('msg').innerHTML = d.lines.length + ' part' + (d.lines.length === 1 ? '' : 's') + '.' + extra + ' Sales are over the last ' + d.days + ' days. Click a part to see the working.';
+      render();
+      if (S.po) analyse();
+    }).catch(function (e) { $('msg').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; });
+  }
+
+  // ------------------------------------------------------------ rendering --
+  function visible() {
+    var c = S.cfg;
+    var rows = S.lines.map(function (l) { return { l: l, o: calc(l, c) }; });
+    if (S.view !== 'all') rows = rows.filter(function (r) { return S.view === 'over' ? r.o.v === 'over' : S.view === 'local' ? r.o.v === 'local' : (r.o.v === 'check' || r.o.v === 'bad'); });
+    var k = $('sort').value;
+    rows.sort(function (a, b) {
+      if (k === 'name') return String(a.l.name).localeCompare(String(b.l.name));
+      if (k === 'saving') return num(b.o.saveUnit) * Math.max(b.l.qty, 1) - num(a.o.saveUnit) * Math.max(a.l.qty, 1);
+      if (k === 'gap') return (a.o.localMarkup == null ? 1e9 : a.o.localMarkup) - (b.o.localMarkup == null ? 1e9 : b.o.localMarkup);
+      return b.l.sold_window - a.l.sold_window || b.l.sold_12m - a.l.sold_12m;
+    });
+    return rows;
+  }
+  function tag(o) {
+    var cls = { over: 't-over', local: 't-local', check: 't-check', none: 't-none', bad: 't-bad' }[o.v];
+    return '<span class="tag ' + cls + '">' + esc(o.vt) + '</span>' + (o.vs ? '<div class="meta">' + esc(o.vs) + '</div>' : '');
+  }
+  function detail(l, o) {
+    var c = S.cfg;
+    var w = function (rows) { return '<table class="work">' + rows.map(function (r) { return '<tr' + (r[2] ? ' class="sum"' : '') + '><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>'; }).join('') + '</table>'; };
+    var at = o.maxUsd ? landed(o.maxUsd, c) : null;
+    var h = '<div class="dgrid">';
+    h += '<div><h3>Most you can pay overseas at ' + pc(o.m) + ' markup</h3>' + (at ? w([
+      ['Selling price (before GCT)', jm(o.P)],
+      ['÷ ' + (1 + o.m / 100).toFixed(2) + ' for ' + pc(o.m) + ' markup = most it can land at', jm(o.maxLanded), 1],
+      ['US$ cost ' + us(o.maxUsd) + ' × ' + c.fx, jm(at.cost)],
+      ['+ shipping &amp; handling ' + c.ship_pct + '%', jm(at.ship)],
+      ['+ duty ' + c.duty_pct + '% on ' + (c.duty_on === 'cost' ? 'cost' : 'cost + shipping'), jm(at.duty)],
+    ].concat(c.import_gct_on ? [['+ import GCT ' + c.import_gct_pct + '%', jm(at.gct)]] : []).concat([
+      ['Landed cost', jm(at.total), 1],
+      ['Profit each at the selling price', jm(o.P - at.total)],
+    ])) : '<p class="muted">Needs a selling price and the exchange rate.</p>');
+    if (o.P && c.fx) {
+      h += '<div class="meta" style="margin-top:6px">At other markups: ' + [30, 35, 40, 45, 50].map(function (m) { return m + '% → ' + us(o.P / (1 + m / 100) / (c.fx * o.F)); }).join(' · ') + '</div>';
+    }
+    h += '</div>';
+    h += '<div><h3>Buying locally</h3>' + w([
+      ['Local cost', o.L ? jm(o.L) : 'none on record'],
+      ['From', l.local_source === 'this_po' ? 'this purchase order' : l.local_source === 'last_po' ? 'last local PO' + (l.local_supplier ? ', ' + esc(l.local_supplier) : '') + (l.local_at ? ', ' + dt(l.local_at) : '') : l.local_source === 'average' ? 'average cost in stock' : '–'],
+      ['Average cost in stock', l.avg_cost > 0 ? jm(l.avg_cost) : '–'],
+      ['Markup buying locally', pc(o.localMarkup)],
+      ['Overseas break-even (lands at the local cost)', us(o.beUsd), 1],
+    ]);
+    if (l.last_usd_cost > 0) h += '<div class="meta" style="margin-top:6px">Last paid overseas: ' + us(l.last_usd_cost) + (l.last_usd_supplier ? ' from ' + esc(l.last_usd_supplier) : '') + (l.last_usd_at ? ', ' + dt(l.last_usd_at) : '') + '</div>';
+    h += '</div>';
+    h += '<div><h3>' + (o.qLanded ? 'Overseas quote ' + us(o.quote) + (o.quoteIsLast ? ' (last price paid)' : '') : 'Stock and order') + '</h3>';
+    if (o.qLanded) h += w([
+      ['US$ ' + o.quote.toFixed(2) + ' × ' + c.fx, jm(o.qLanded.cost)],
+      ['+ shipping', jm(o.qLanded.ship)], ['+ duty', jm(o.qLanded.duty)],
+    ].concat(c.import_gct_on ? [['+ import GCT', jm(o.qLanded.gct)]] : []).concat([
+      ['Landed cost', jm(o.qLanded.total), 1], ['Markup at that cost', pc(o.qMarkup)],
+      ['Against local', o.saveUnit == null ? '–' : (o.saveUnit >= 0 ? 'saves ' + jm(o.saveUnit) : 'costs ' + jm(-o.saveUnit) + ' more')],
+    ]));
+    var sug = suggestQty(l, c);
+    h += w([
+      ['Sold, last ' + S.days + ' days / 12 months', l.sold_window + ' / ' + l.sold_12m],
+      ['Selling about', (Math.round(l.per_day * 300) / 10) + ' a month'],
+      ['In stock / on order', l.stock + ' / ' + l.on_order],
+      ['Lasts', o.daysLeft == null ? 'no recent sales' : Math.floor(o.daysLeft) + ' days'],
+      ['Suggested order (' + c.lead_days + ' days lead + ' + c.cover_days + ' days)', sug + (l.pack ? ' (packs of ' + l.pack + ')' : '')],
+    ]);
+    if (o.bridge > 0) h += '<div class="warnline" style="margin-top:6px">Stock runs out before an overseas order lands (' + c.lead_days + ' days). Buy about ' + o.bridge + ' locally to bridge the gap.</div>';
+    h += '</div></div>';
+    return h;
+  }
+  function render() {
+    readCfg();
+    if (!$('analysis').hidden) analyse(true);
+    var rows = visible(), c = S.cfg;
+    if (!S.lines.length) { $('rows').innerHTML = '<tr><td colspan="11" class="empty">No parts. Choose another list above.</td></tr>'; totals(); return; }
+    if (!rows.length) { $('rows').innerHTML = '<tr><td colspan="11" class="empty">No parts in this view.</td></tr>'; totals(); return; }
+    $('rows').innerHTML = rows.map(function (r) {
+      var l = r.l, o = r.o, id = l.id, open = !!S.open[id];
+      var meta = [l.sku, l.make_model, l.category].filter(Boolean).map(esc).join(' · ');
+      var stock = 'Sold ' + l.sold_window + ' in ' + S.days + 'd · stock ' + l.stock + (l.on_order ? ' · on order ' + l.on_order : '');
+      return '<tr data-id="' + id + '" class="' + (l.on ? '' : 'off') + (open ? ' open' : '') + '">' +
+        '<td><input type="checkbox" data-k="on"' + (l.on ? ' checked' : '') + ' aria-label="Include in the order"></td>' +
+        '<td style="min-width:220px;cursor:pointer" data-k="toggle"><div class="pname">' + esc(l.name) + '</div><div class="meta">' + meta + '</div><div class="meta">' + stock + '</div>' +
+          (o.bridge > 0 ? '<div class="warnline">' + (o.daysLeft < 1 ? 'Out of stock now' : 'Runs out in ' + Math.floor(o.daysLeft) + ' days') + ', before an overseas order lands</div>' : '') + '</td>' +
+        '<td class="n">' + jm(o.P) + '</td>' +
+        '<td class="n">' + (o.L ? jm(o.L) + '<div class="meta">' + pc(o.localMarkup) + ' markup</div>' : '<span class="muted">none</span>') + '</td>' +
+        '<td class="n"><input type="number" step="1" min="0" data-k="markup" value="' + (l.markup != null ? l.markup : '') + '" placeholder="' + c.markup_pct + '" aria-label="Markup %"></td>' +
+        '<td class="n"><span class="big">' + us(o.maxUsd) + '</span><div class="meta">lands ' + jm(o.maxLanded) + '</div></td>' +
+        '<td class="n">' + us(o.beUsd) + '</td>' +
+        '<td class="n"><input type="number" step="0.01" min="0" data-k="quote" value="' + (l.quote > 0 ? l.quote : '') + '" placeholder="' + (l.last_usd_cost > 0 ? l.last_usd_cost.toFixed(2) : 'US$') + '" aria-label="Overseas quote US$">' +
+          (o.qLanded ? '<div class="meta">lands ' + jm(o.qLanded.total) + '</div>' : '') + '</td>' +
+        '<td class="n"><input class="q" type="number" step="1" min="0" data-k="qty" value="' + l.qty + '" aria-label="Quantity"></td>' +
+        '<td style="min-width:170px">' + tag(o) + '</td>' +
+        '<td><button class="sm" data-k="toggle" aria-label="Show the working">' + (open ? '▾' : '▸') + '</button></td></tr>' +
+        (open ? '<tr class="detail"><td></td><td colspan="10">' + detail(l, o) + '</td></tr>' : '');
+    }).join('');
+    totals();
+  }
+
+  function totals() {
+    var c = S.cfg, t = { n: 0, qty: 0, maxUsd: 0, cost: 0, ship: 0, duty: 0, gct: 0, landed: 0, sales: 0, local: 0, localN: 0,
+      qUsd: 0, qLanded: 0, qLocal: 0, qN: 0, overN: 0, overUsd: 0, overSave: 0, localBetter: 0, checkN: 0, missing: 0, bridge: 0 };
+    S.lines.forEach(function (l) {
+      if (!l.on || !(l.qty > 0)) return;
+      var o = calc(l, c), q = l.qty;
+      if (!o.maxUsd) { t.missing++; return; }
+      var at = landed(o.maxUsd, c);
+      t.n++; t.qty += q; t.maxUsd += o.maxUsd * q; t.cost += at.cost * q; t.ship += at.ship * q; t.duty += at.duty * q; t.gct += at.gct * q; t.landed += at.total * q;
+      t.sales += o.P * q;
+      if (o.L) { t.local += o.L * q; t.localN++; }
+      if (o.qLanded) { t.qN++; t.qUsd += o.quote * q; t.qLanded += o.qLanded.total * q; }
+      if (o.v === 'over') { t.overN++; t.overUsd += o.quote * q; if (o.saveUnit != null) t.overSave += o.saveUnit * q; }
+      else if (o.v === 'local') t.localBetter++;
+      else t.checkN++;
+      if (o.bridge > 0) t.bridge++;
+    });
+    var mk = t.landed > 0 ? (t.sales / t.landed - 1) * 100 : null;
+    var tile = function (k, v, s, hl) { return '<div class="tile' + (hl ? ' hl' : '') + '"><div class="k">' + k + '</div><div class="v">' + v + '</div>' + (s ? '<div class="s">' + s + '</div>' : '') + '</div>'; };
+    var h = '<h2>Order total, ticked lines with a quantity</h2>';
+    if (!t.n) { $('totals').innerHTML = h + '<p class="muted">Tick some lines and give them a quantity to see what the order should cost.' + (t.missing ? ' ' + t.missing + ' ticked line(s) have no selling price.' : '') + '</p>'; return; }
+    h += '<div class="tiles">' +
+      tile('Most the order should cost overseas', us(t.maxUsd), t.n + ' lines, ' + t.qty + ' units, at ' + pc(mk) + ' overall markup', true) +
+      tile('That in J$ at ' + c.fx, jm(t.cost, 0), 'goods only') +
+      tile('Shipping &amp; handling', jm(t.ship, 0), c.ship_pct + '% of cost') +
+      tile('Customs duty', jm(t.duty, 0), c.duty_pct + '% on ' + (c.duty_on === 'cost' ? 'cost' : 'cost + shipping')) +
+      (c.import_gct_on ? tile('Import GCT', jm(t.gct, 0), c.import_gct_pct + '%') : '') +
+      tile('Landed cost', jm(t.landed, 0), 'arrives in about ' + c.lead_days + ' days') +
+      tile('Sells for', jm(t.sales, 0), 'profit ' + jm(t.sales - t.landed, 0)) +
+      tile('Same order bought locally', t.localN ? jm(t.local, 0) : '–', t.localN ? (t.localN < t.n ? t.localN + ' of ' + t.n + ' lines have a local cost' : 'markup ' + pc((t.sales / t.local - 1) * 100)) : 'no local costs') +
+      '</div>';
+    if (t.qN) {
+      h += '<div class="tiles" style="margin-top:10px">' +
+        tile('Overseas at the quotes', us(t.qUsd), t.qN + ' lines with a quote or last price, lands ' + jm(t.qLanded, 0)) +
+        tile('Better bought overseas', t.overN + ' lines', t.overN ? us(t.overUsd) + ' to order, saves ' + jm(t.overSave, 0) + ' against local' : '', t.overN > 0) +
+        tile('Better bought locally', t.localBetter + ' lines', '') +
+        tile('Need a quote to decide', t.checkN + ' lines', '') +
+        '</div>';
+    } else {
+      h += '<p class="small muted" style="margin:10px 0 0">' + t.localBetter + ' line(s) already make the markup buying locally. ' + t.checkN + ' line(s) do not: type the overseas price you are quoted in "Overseas quote US$" to see which are better bought overseas.</p>';
+    }
+    if (t.bridge) h += '<p class="warnline" style="margin:8px 0 0">' + t.bridge + ' line(s) will run out before an overseas order lands. Open them for how many to buy locally to bridge the ' + c.lead_days + ' days.</p>';
+    if (t.missing) h += '<p class="small muted" style="margin:6px 0 0">' + t.missing + ' ticked line(s) left out: no selling price.</p>';
+    $('totals').innerHTML = h;
+  }
+
+
+  // ------------------------------------------------------------ analysis --
+  // Local vs overseas for the ticked lines with a quantity: cost, markup,
+  // profit, what the wait costs, the risks, and the better option.
+  function analyse(quiet) {
+    var c = S.cfg, box = $('analysis');
+    var L = S.lines.filter(function (l) { return l.on && l.qty > 0 && l.price > 0; }).map(function (l) { return { l: l, o: calc(l, c) }; });
+    var title = S.po ? 'Analysis of ' + esc(S.po.po_number || 'the order') + (S.po.supplier_name ? ' (' + esc(S.po.supplier_name) + ')' : '') : 'Analysis of the ticked lines';
+    if (!L.length) { box.hidden = false; box.innerHTML = '<h2>' + title + '</h2><p class="muted">Tick some lines with a quantity first.</p>'; return; }
+    var sum = function (f) { return L.reduce(function (a, r) { return a + (f(r) || 0); }, 0); };
+    var sales = sum(function (r) { return r.o.P * r.l.qty; });
+    var withLocal = L.filter(function (r) { return r.o.L; });
+    var quoted = L.filter(function (r) { return r.o.qLanded; });
+    var both = L.filter(function (r) { return r.o.L && r.o.qLanded; });
+    var localAll = sum(function (r) { return r.o.L ? r.o.L * r.l.qty : 0; });
+    var fixed = c.fixed_jmd || 0, minS = c.min_saving_pct;
+    // Option totals over the lines where both prices are known.
+    var bLocal = both.reduce(function (a, r) { return a + r.o.L * r.l.qty; }, 0);
+    var bSales = both.reduce(function (a, r) { return a + r.o.P * r.l.qty; }, 0);
+    var bOver = both.reduce(function (a, r) { return a + r.o.qLanded.total * r.l.qty; }, 0) + (both.length ? fixed : 0);
+    var bOverUsd = both.reduce(function (a, r) { return a + r.o.quote * r.l.qty; }, 0);
+    var winners = both.filter(function (r) { return r.o.qLanded.total < r.o.L; });
+    var losers = both.filter(function (r) { return r.o.qLanded.total >= r.o.L; });
+    var splitOver = winners.reduce(function (a, r) { return a + r.o.qLanded.total * r.l.qty; }, 0) + (winners.length ? fixed : 0);
+    var splitLocalPart = losers.reduce(function (a, r) { return a + r.o.L * r.l.qty; }, 0);
+    var split = splitOver + splitLocalPart;
+    var splitUsd = winners.reduce(function (a, r) { return a + r.o.quote * r.l.qty; }, 0);
+    var opts = [{ k: 'local', name: 'All local', cost: bLocal }];
+    if (both.length) opts.push({ k: 'over', name: 'All overseas', cost: bOver, usd: bOverUsd });
+    if (winners.length && losers.length) opts.push({ k: 'split', name: 'Split the order', cost: split, usd: splitUsd });
+    var best = opts.reduce(function (a, o) { return o.cost < a.cost ? o : a; }, opts[0]);
+    var saving = bLocal - best.cost, savingPct = bLocal > 0 ? saving / bLocal * 100 : 0;
+    // Lead-time cost: sales lost while waiting, when stock runs out first.
+    var runOut = L.filter(function (r) { return r.o.bridge > 0; });
+    var lostUnits = function (r) { return Math.max(0, Math.min(r.l.per_day * c.lead_days - num(r.l.stock) - num(r.l.on_order), r.l.per_day * c.lead_days)); };
+    var lostSales = runOut.reduce(function (a, r) { return a + lostUnits(r) * r.o.P; }, 0);
+    var lostProfit = runOut.reduce(function (a, r) { return a + lostUnits(r) * (r.o.P - (r.o.L || r.o.maxLanded)); }, 0);
+    var usdForRisk = both.length ? (best.k === 'split' ? splitUsd : bOverUsd) : sum(function (r) { return r.o.maxUsd * r.l.qty; });
+    var fxRisk = usdForRisk * c.fx * 0.02 * factor(c);                       // a 2% rate move
+    var cifJ = (both.length ? both : L).reduce(function (a, r) { var u = r.o.qLanded ? r.o.quote : r.o.maxUsd; var x = landed(u, c); return a + (c.duty_on === 'cost' ? x.cost : x.cost + x.ship) * r.l.qty; }, 0);
+    var dutyRisk = cifJ * 0.10;                                               // duty 10 points higher
+    var cashUp = usdForRisk * c.fx * (1 + c.ship_pct / 100);
+    var mkLocal = withLocal.length ? (withLocal.reduce(function (a, r) { return a + r.o.P * r.l.qty; }, 0) / localAll - 1) * 100 : null;
+    var bestMk = both.length ? (bSales / best.cost - 1) * 100 : null;
+    var thinLocal = withLocal.filter(function (r) { return r.o.localMarkup < r.o.m; });
+
+    // Verdict
+    var v, vClass, why;
+    if (!both.length) {
+      v = 'Get overseas quotes first'; vClass = 'wait';
+      why = 'No line has both a local price and an overseas price yet, so there is nothing to set side by side. Ask overseas suppliers for prices: to beat local the order must come in under <b>' + us(sum(function (r) { return r.o.beUsd ? r.o.beUsd * r.l.qty : 0; })) + '</b>' + (fixed ? ' (less ' + jm(fixed / (c.fx * factor(c)), 0).replace('J$', 'US$') + ' for clearing)' : '') + ', and to make your markup under <b>' + us(sum(function (r) { return r.o.maxUsd * r.l.qty; })) + '</b>.';
+    } else if (best.k === 'local' || savingPct < minS) {
+      v = 'Buy locally'; vClass = 'local';
+      why = best.k === 'local' ? 'Overseas does not come in cheaper once shipping, duty' + (fixed ? ' and clearing' : '') + ' are added.'
+        : 'The best overseas option saves only ' + jm(saving, 0) + ' (' + pc(savingPct) + '), under your ' + minS + '% bar. That is not worth a ' + c.lead_days + '-day wait, paying up front and the rate and duty risk.';
+    } else if (best.k === 'split') {
+      v = 'Split the order'; vClass = '';
+      why = 'Buy ' + winners.length + ' line' + (winners.length === 1 ? '' : 's') + ' overseas (about ' + us(splitUsd) + ') and ' + losers.length + ' locally. This saves ' + jm(saving, 0) + ' (' + pc(savingPct) + ') against buying it all locally.';
+    } else {
+      v = 'Buy overseas'; vClass = '';
+      why = 'Overseas lands at ' + jm(best.cost, 0) + ' against ' + jm(bLocal, 0) + ' locally, saving ' + jm(saving, 0) + ' (' + pc(savingPct) + ').';
+    }
+    if (both.length && vClass !== 'local' && runOut.length) why += ' Buy about ' + runOut.reduce(function (a, r) { return a + r.o.bridge; }, 0) + ' units locally now to cover the ' + c.lead_days + ' days on the ' + runOut.length + ' line' + (runOut.length === 1 ? '' : 's') + ' that will run out first.';
+
+    var shown = vClass === 'local' ? 'local' : best.k;
+    // Side by side
+    var col = function (o) {
+      if (!o) return null;
+      var cost = o.cost, mk = bSales > 0 ? (bSales / cost - 1) * 100 : null;
+      return { name: o.name, k: o.k, usd: o.usd, cost: cost, mk: mk, profit: bSales - cost, days: o.k === 'local' ? 'now' : 'about ' + c.lead_days + ' days', cash: o.k === 'local' ? 'on supplier terms' : us(o.usd) + ' up front' };
+    };
+    var cols = opts.map(col);
+    var cell = function (cl, v) { return '<td class="n' + (cl.k === shown && both.length ? ' best' : '') + '">' + v + '</td>'; };
+    var cmp = both.length ? '<div class="tablewrap"><table class="cmp"><thead><tr><th>' + both.length + ' line' + (both.length === 1 ? '' : 's') + ' with both prices</th>' + cols.map(function (cl) { return '<th class="n">' + cl.name + (cl.k === shown ? ' ✓' : '') + '</th>'; }).join('') + '</tr></thead><tbody>' +
+      '<tr><td>Landed cost' + (fixed ? ' (incl. ' + jm(fixed, 0) + ' clearing)' : '') + '</td>' + cols.map(function (cl) { return cell(cl, jm(cl.cost, 0) + (cl.usd ? '<div class="meta">' + us(cl.usd) + ' to the supplier</div>' : '')); }).join('') + '</tr>' +
+      '<tr><td>Sells for</td>' + cols.map(function (cl) { return cell(cl, jm(bSales, 0)); }).join('') + '</tr>' +
+      '<tr><td>Profit</td>' + cols.map(function (cl) { return cell(cl, jm(cl.profit, 0)); }).join('') + '</tr>' +
+      '<tr><td>Markup</td>' + cols.map(function (cl) { return cell(cl, pc(cl.mk)); }).join('') + '</tr>' +
+      '<tr><td>Saving against all local</td>' + cols.map(function (cl) { return cell(cl, cl.k === 'local' ? '–' : jm(bLocal - cl.cost, 0) + ' (' + pc((bLocal - cl.cost) / bLocal * 100) + ')'); }).join('') + '</tr>' +
+      '<tr><td>Stock arrives</td>' + cols.map(function (cl) { return cell(cl, cl.days); }).join('') + '</tr>' +
+      '<tr><td>Paying for it</td>' + cols.map(function (cl) { return cell(cl, cl.cash); }).join('') + '</tr>' +
+      '</tbody></table></div>' : '';
+
+    var pros = [], cons = [], lpros = [];
+    if (both.length && winners.length) pros.push('Cheaper on ' + winners.length + ' of ' + both.length + ' lines: saves ' + jm(winners.reduce(function (a, r) { return a + (r.o.L - r.o.qLanded.total) * r.l.qty; }, 0) - fixed, 0) + (fixed ? ' after ' + jm(fixed, 0) + ' clearing' : '') + '.');
+    if (bestMk != null && mkLocal != null && bestMk > mkLocal + 0.5) pros.push('Better markup: ' + pc(bestMk) + ' against ' + pc(mkLocal) + ' buying locally, so ' + jm(saving, 0) + ' more profit on this order.');
+    if (thinLocal.length) pros.push(thinLocal.length + ' line' + (thinLocal.length === 1 ? '' : 's') + ' make less than your target markup at the local price (' + thinLocal.slice(0, 4).map(function (r) { return esc(r.l.name) + ' ' + pc(r.o.localMarkup); }).join(', ') + (thinLocal.length > 4 ? '…' : '') + '). Buying direct is how to get that margin back.');
+    pros.push('Buying from the source: more brands and grades to choose from, and a price that does not carry a local wholesaler\'s markup.');
+    if (runOut.length) cons.push(runOut.length + ' line' + (runOut.length === 1 ? '' : 's') + ' will run out before an overseas order lands in ' + c.lead_days + ' days. Without a local top-up that could lose about ' + jm(lostSales, 0) + ' in sales (' + jm(lostProfit, 0) + ' profit).');
+    cons.push('Cash up front: about ' + jm(cashUp, 0) + ' (' + us(usdForRisk) + ' plus shipping) is paid before the goods ship, and duty' + (c.import_gct_on ? ' and GCT' : '') + ' is due at the port. It is tied up for about ' + c.lead_days + ' days before anything sells.');
+    cons.push('Exchange rate: if the US$ rate moves 2% (to ' + (c.fx * 1.02).toFixed(2) + ') before you pay, this order costs about ' + jm(fxRisk, 0) + ' more.');
+    cons.push('Duty is an average (' + c.duty_pct + '%). Some parts are rated higher: 10 points more duty would add about ' + jm(dutyRisk, 0) + '.');
+    if (!c.import_gct_on) cons.push('Import GCT (' + c.import_gct_pct + '%) is left out because it is claimed back, but you pay it at the port first. That cash comes back later.');
+    if (!fixed) cons.push('Broker, port and delivery charges are not counted (set them under Costs and rate). On a small shipment they can wipe out the saving.');
+    cons.push('Returns and warranty are slower: a wrong or faulty part has to go back overseas, and there is no counter to walk it back to.');
+    lpros.push('Stock now, so no gap on the shelf.');
+    lpros.push('Usually on account or credit terms, with no US$ to find and no exposure to the rate or the duty rating.');
+    lpros.push('Easy returns and exchanges, and you can buy small quantities as you need them.');
+    if (S.po && S.po.currency === 'JMD' && both.length === 0) lpros.push('The prices on this order are what you pay locally now.');
+
+    var h = '<h2>' + title + '</h2>' +
+      '<div class="best-opt ' + vClass + '"><div style="font-size:12px;opacity:.8">The better option</div><div class="big" style="font-size:20px">' + v + '</div><div style="margin-top:4px;font-weight:400">' + why + '</div></div>' +
+      (cmp ? '<div style="margin-top:12px">' + cmp + '</div>' : '') +
+      (L.length > both.length && both.length ? '<p class="small muted">' + (L.length - both.length) + ' line' + (L.length - both.length === 1 ? '' : 's') + ' left out of the side by side: ' + (L.length - quoted.length) + ' without an overseas price, ' + (L.length - withLocal.length) + ' without a local cost.</p>' : '') +
+      '<div class="pros"><div><h3>Advantages of buying overseas</h3><ul>' + pros.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></div>' +
+      '<div><h3>Disadvantages of buying overseas</h3><ul>' + cons.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></div>' +
+      '<div><h3>Advantages of buying locally</h3><ul>' + lpros.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></div></div>' +
+      '<p class="small muted" style="margin:10px 0 0">Worked out at ' + c.fx + ' J$ to the US$, ' + c.duty_pct + '% duty on ' + (c.duty_on === 'cost' ? 'cost' : 'cost + shipping') + ', ' + c.ship_pct + '% shipping, ' + c.lead_days + '-day lead time. Overseas is only recommended when it saves at least ' + minS + '%. Lines use the quote you typed, else the last US$ price paid.</p>';
+    box.innerHTML = h; box.hidden = false;
+    S.analysis = { verdict: v, best: best.k, saving: saving, saving_pct: savingPct, both: both.length };
+  }
+
+  // -------------------------------------------------------------- events --
+  $('rows').addEventListener('click', function (e) {
+    var tr = e.target.closest('tr[data-id]'); if (!tr) return;
+    var el = e.target.closest('[data-k]'), k = el && el.getAttribute('data-k');
+    if (k === 'toggle') { var id = tr.getAttribute('data-id'); S.open[id] = !S.open[id]; render(); }
+  });
+  $('rows').addEventListener('change', function (e) {
+    var tr = e.target.closest('tr[data-id]'); if (!tr) return;
+    var l = S.lines.find(function (x) { return String(x.id) === tr.getAttribute('data-id'); }); if (!l) return;
+    var k = e.target.getAttribute('data-k'), v = e.target.value;
+    if (k === 'on') l.on = e.target.checked;
+    else if (k === 'markup') l.markup = v === '' ? null : Math.max(0, num(v));
+    else if (k === 'quote') l.quote = v === '' ? null : Math.max(0, num(v));
+    else if (k === 'qty') { l.qty = Math.max(0, Math.round(num(v))); l.qtyEdited = true; }
+    render();
+  });
+  all('#picks button').forEach(function (b) { b.onclick = function () { setPick(b.getAttribute('data-p')); if (['fast', 'out', 'low'].indexOf(S.pick) >= 0) load(); else if (S.pick === 'search') $('q').focus(); else if (S.pick === 'po') loadPos(''); }; });
+  $('load').onclick = load;
+  $('q').addEventListener('keydown', function (e) { if (e.key === 'Enter') load(); });
+  $('cat').onchange = load; $('sup').onchange = load; $('poSel').onchange = load;
+  var poT = null;
+  function loadPos(q) {
+    return api('/api/overseas/pos?q=' + encodeURIComponent(q || '')).then(function (d) {
+      $('poSel').innerHTML = d.pos.length ? '<option value="">Choose…</option>' + d.pos.map(function (p) {
+        return '<option value="' + p.id + '">' + esc(p.po_number || ('PO ' + p.id)) + ' · ' + esc(p.supplier_name || '–') + ' · ' + p.lines + ' lines · ' + (p.currency === 'USD' ? us(p.total) : jm(p.total, 0)) + ' · ' + dt(p.created_at) + ' · ' + esc(p.status) + '</option>';
+      }).join('') : '<option value="">No purchase orders found</option>';
+    });
+  }
+  $('poQ').addEventListener('input', function () { clearTimeout(poT); poT = setTimeout(function () { loadPos($('poQ').value.trim()); }, 300); });
+  $('analyse').onclick = function () { analyse(); $('analysis').scrollIntoView({ behavior: 'smooth' }); };
+  ['fixed', 'minSave'].forEach(function (id) { $(id).addEventListener('change', function () { render(); }); });
+  all('#views button').forEach(function (b) { b.onclick = function () { S.view = b.getAttribute('data-v'); all('#views button').forEach(function (x) { x.classList.toggle('on', x === b); }); render(); }; });
+  $('sort').onchange = render;
+  $('tickAll').onchange = function () { var on = $('tickAll').checked; visible().forEach(function (r) { r.l.on = on; }); render(); };
+  ['fx', 'duty', 'ship', 'dutyOn', 'gctOn', 'gct', 'mk'].forEach(function (id) { $(id).addEventListener('input', render); $(id).addEventListener('change', render); });
+  ['lead', 'cover'].forEach(function (id) {
+    $(id).addEventListener('change', function () { readCfg(); S.lines.forEach(function (l) { if (!l.qtyEdited) l.qty = suggestQty(l, S.cfg); }); render(); });
+  });
+  all('#mkq button').forEach(function (b) { b.onclick = async function () {
+    $('mk').value = b.getAttribute('data-m');
+    var had = S.lines.some(function (l) { return l.markup != null; });
+    if (had && (await vasConfirm('Use ' + b.getAttribute('data-m') + '% on every line, replacing the markups you changed by hand?'))) S.lines.forEach(function (l) { l.markup = null; });
+    render();
+  }; });
+  $('print').onclick = function () { window.print(); };
+  $('csv').onclick = function () {
+    var c = S.cfg, head = ['Code', 'Part', 'Vehicle', 'Category', 'Supplier', 'Sold (' + S.days + 'd)', 'Sold 12m', 'Stock', 'On order', 'Selling price J$', 'Local cost J$', 'Local markup %', 'Markup %', 'Max US$ cost', 'Max landed J$', 'Break-even US$', 'Quote US$', 'Quote landed J$', 'Qty', 'Order at max US$', 'Better to buy', 'Note', 'Ticked'];
+    var lines = visible().map(function (r) {
+      var l = r.l, o = r.o, f = function (v, dp) { return v == null || !isFinite(v) ? '' : v.toFixed(dp == null ? 2 : dp); };
+      return [l.sku, l.name, l.make_model, l.category, l.supplier_name, l.sold_window, l.sold_12m, l.stock, l.on_order, f(o.P), f(o.L), f(o.localMarkup, 1), f(o.m, 1), f(o.maxUsd), f(o.maxLanded), f(o.beUsd), f(o.quote), o.qLanded ? f(o.qLanded.total) : '', l.qty, o.maxUsd ? f(o.maxUsd * l.qty) : '', o.vt, o.vs || '', l.on ? 'yes' : 'no'];
+    });
+    var csv = [['Rate', c.fx, 'Duty %', c.duty_pct, 'Shipping %', c.ship_pct, 'Duty on', c.duty_on, 'Import GCT', c.import_gct_on ? c.import_gct_pct + '%' : 'claimed back']].concat([head], lines)
+      .map(function (r) { return r.map(function (v) { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(','); }).join('\r\n');
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'buy-overseas-or-local-' + new Date().toISOString().slice(0, 10) + '.csv'; a.click();
+  };
+  $('saveDef').onclick = function () {
+    readCfg(); var c = S.cfg;
+    api('/api/overseas/setup', 'PUT', { markup_pct: c.markup_pct, duty_pct: c.duty_pct, ship_pct: c.ship_pct, duty_on: c.duty_on, import_gct_on: c.import_gct_on, import_gct_pct: c.import_gct_pct, lead_days: c.lead_days, cover_days: c.cover_days, fast_days: num($('days').value), fixed_jmd: c.fixed_jmd, min_saving_pct: c.min_saving_pct })
+      .then(function (d) { S.setup.settings = d.settings; $('defMsg').textContent = 'Saved.'; setTimeout(function () { $('defMsg').textContent = ''; }, 2500); })
+      .catch(function (e) { $('defMsg').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; });
+  };
+
+  // Add one part
+  var st = null;
+  $('add').addEventListener('input', function () {
+    clearTimeout(st); var q = $('add').value.trim();
+    if (q.length < 2) { $('sugg').hidden = true; return; }
+    st = setTimeout(function () {
+      api('/api/overseas/items?pick=search&limit=12&days=' + $('days').value + '&value=' + encodeURIComponent(q)).then(function (d) {
+        $('sugg').innerHTML = d.lines.length ? d.lines.map(function (l, i) { return '<div data-i="' + i + '"><b>' + esc(l.name) + '</b><div class="meta">' + esc([l.sku, l.make_model].filter(Boolean).join(' · ')) + ' · ' + jm(l.price) + ' · stock ' + l.stock + '</div></div>'; }).join('') : '<div class="muted">No match</div>';
+        $('sugg').hidden = false;
+        all('#sugg [data-i]').forEach(function (el) { el.onclick = function () {
+          var l = d.lines[+el.getAttribute('data-i')];
+          S.days = S.days || d.days;
+          if (!S.lines.some(function (x) { return x.id === l.id; })) { l = toLine(l); if (!l.qty) l.qty = 1; S.lines.unshift(l); }
+          $('sugg').hidden = true; $('add').value = ''; render();
+        }; });
+      }).catch(function () {});
+    }, 250);
+  });
+  document.addEventListener('click', function (e) { if (!e.target.closest('#sugg') && e.target !== $('add')) $('sugg').hidden = true; });
+
+  // Draft PO
+  $('po').onclick = function () {
+    var usd = S.setup.suppliers.filter(function (s) { return s.currency === 'USD'; });
+    $('poSup').innerHTML = usd.length ? usd.map(function (s) { return '<option value="' + s.id + '">' + esc(s.name) + '</option>'; }).join('') : '<option value="">No US$ suppliers yet</option>';
+    $('poMsg').textContent = usd.length ? '' : 'Set a supplier\'s currency to US$ in Purchasing settings first.';
+    $('poGo').disabled = !usd.length;
+    $('poDlg').showModal();
+  };
+  $('poCancel').onclick = function () { $('poDlg').close(); };
+  $('poGo').onclick = function () {
+    var c = S.cfg, sup = +$('poSup').value;
+    var lines = S.lines.filter(function (l) { return l.on && l.qty > 0; }).map(function (l) { var o = calc(l, c); var cost = l.quote > 0 ? l.quote : o.maxUsd; return { img: l.img, qty: l.qty, supplier_id: sup, unit_cost: cost ? Math.floor(cost * 100) / 100 : null }; });
+    if (!lines.length) { $('poMsg').textContent = 'Tick at least one line with a quantity.'; return; }
+    $('poGo').disabled = true; $('poMsg').textContent = 'Creating…';
+    api('/api/inb/reorder/draft-pos', 'POST', { lines: lines }).then(function (d) {
+      var p = d.created && d.created[0];
+      $('poMsg').innerHTML = p ? 'Draft <b>' + esc(p.po_number) + '</b> created with ' + p.lines + ' lines. Open it under Purchasing › Purchase Orders.' : 'Done.';
+    }).catch(function (e) { $('poMsg').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; }).then(function () { $('poGo').disabled = false; });
+  };
+
+  // ---------------------------------------------------------------- start --
+  api('/api/overseas/setup').then(function (d) {
+    S.setup = d;
+    fillCfg(d.settings, d.fx);
+    $('cat').innerHTML = d.categories.map(function (c) { return '<option value="' + esc(c.category) + '">' + esc(c.category) + ' (' + c.n + ')</option>'; }).join('');
+    $('sup').innerHTML = d.suppliers.filter(function (s) { return s.products > 0; }).map(function (s) { return '<option value="' + s.id + '">' + esc(s.name) + (s.currency !== 'JMD' ? ' (' + s.currency + ')' : '') + ' · ' + s.products + '</option>'; }).join('');
+    $('saveDef').hidden = !d.can_settings; $('po').hidden = !d.can_po;
+    var h = (location.hash || '').replace('#', '');
+    var poM = /^po=(\d+)$/.exec(h);
+    setPick(poM ? 'po' : ['fast', 'out', 'low', 'category', 'supplier', 'search'].indexOf(h) >= 0 ? h : 'fast');
+    if (S.pick === 'po') { loadPos('').then(function () { if (poM) { if (!$('poSel').querySelector('option[value="' + poM[1] + '"]')) $('poSel').insertAdjacentHTML('beforeend', '<option value="' + poM[1] + '">PO ' + poM[1] + '</option>'); $('poSel').value = poM[1]; load(); } }); readCfg(); render(); }
+    else if (['category', 'supplier', 'search'].indexOf(S.pick) < 0) load(); else { readCfg(); render(); $('msg').textContent = 'Choose, then press Show parts.'; }
+  }).catch(function (e) { $('rows').innerHTML = '<tr><td colspan="11" class="empty err">' + esc(e.message) + '</td></tr>'; });
+})();
+</script>
+</body>
+</html>

@@ -1,3 +1,5 @@
+// The program's own message windows (assets/vas-ui.js), for a page that has not loaded them itself.
+(function(){ if (window.VasUI || document.querySelector('script[src^="/assets/vas-ui.js"]')) return; var s = document.createElement('script'); s.src = '/assets/vas-ui.js?v=20261110b'; (document.head || document.documentElement).appendChild(s); })();
 // =============================================================================
 //  warehouse.html add-on: Receive and Office tabs (Phase 2 inbound).
 //  Talks to /api/inb (inbound.js). Plugs into window.WH, which warehouse.html
@@ -327,7 +329,7 @@
   }
 
   // ============================================================ events ==
-  document.addEventListener('click', function (e) {
+  document.addEventListener('click', async function (e) {
     var t = e.target.closest('[data-ia]');
     if (!t) return;
     var a = t.getAttribute('data-ia'), id = t.getAttribute('data-id'), o = S.off, r = S.rcv;
@@ -341,7 +343,7 @@
           .catch(function (er) { toast(er.message, true); });
         break;
       case 'postR':
-        if (!confirm('Post ' + r.receipt.receipt_number + '? Stock, costs and chosen prices update now and cannot be undone here.')) return;
+        if (!(await vasConfirm('Post ' + r.receipt.receipt_number + '? Stock, costs and chosen prices update now and cannot be undone here.'))) return;
         api('/api/inb/receipts/' + r.receipt.id + '/post', { method: 'POST', body: { prices: r.choice } }).then(function (d) {
           r.receipt = d.receipt; r.preview = null;
           toast('Posted. Now add the batch labels.' + (d.warnings.length ? ' ' + d.warnings.join('; ') : ''), !!d.warnings.length);
@@ -349,7 +351,7 @@
         }).catch(function (er) { toast(er.message, true); });
         break;
       case 'voidR':
-        if (!confirm('Cancel this receipt? Nothing has been added to stock yet.')) return;
+        if (!(await vasConfirm('Cancel this receipt? Nothing has been added to stock yet.'))) return;
         api('/api/inb/receipts/' + r.receipt.id + '/void', { method: 'POST', body: {} }).then(function () { r.view = 'list'; r.receipt = null; loadReceiveList(); toast('Receipt cancelled'); })
           .catch(function (er) { toast(er.message, true); });
         break;
@@ -364,7 +366,7 @@
       case 'selAll': o.reorder.lines.forEach(function (l) { selLine(l.img, true); }); WH.render(); break;
       case 'draftPOs':
         var lines = Object.keys(o.sel).map(function (img) { var s = o.sel[img]; return { img: img, qty: s.qty, supplier_id: s.supplier_id, unit_cost: s.cost }; });
-        if (!confirm('Create draft purchase orders for ' + lines.length + ' part(s)?')) return;
+        if (!(await vasConfirm('Create draft purchase orders for ' + lines.length + ' part(s)?'))) return;
         api('/api/inb/reorder/draft-pos', { method: 'POST', body: { lines: lines } }).then(function (d) {
           o.created = d.created; toast(d.created.length + ' draft PO(s) created'); loadSub('reorder');
         }).catch(function (er) { toast(er.message, true); });
@@ -377,20 +379,20 @@
       case 'billSt': o.billStatus = t.getAttribute('data-st'); o.bills = null; loadSub('bills'); WH.render(); break;
       case 'billOk':
         var note = '';
-        if (t.getAttribute('data-within') !== '1') { note = prompt('The invoice does not match the goods received. Why approve it?') || ''; if (!note) return; }
+        if (t.getAttribute('data-within') !== '1') { note = (await vasPrompt('The invoice does not match the goods received. Why approve it?')) || ''; if (!note) return; }
         api('/api/inb/bills/' + id + '/confirm', { method: 'POST', body: { note: note } }).then(function (d) { toast('Approved: ' + jmd(d.bill.bill_amount_jmd) + ' due ' + day(d.bill.due_date)); loadSub('bills'); })
           .catch(function (er) { toast(er.message, true); });
         break;
       case 'billNo':
-        var why = prompt('What is wrong with this bill?'); if (!why) return;
+        var why = await vasPrompt('What is wrong with this bill?'); if (!why) return;
         api('/api/inb/bills/' + id + '/dispute', { method: 'POST', body: { note: why } }).then(function () { toast('Marked as disputed'); loadSub('bills'); }).catch(function (er) { toast(er.message, true); });
         break;
       case 'billReopen':
-        if (!confirm('Reopen this bill? It comes off the payables until approved again.')) return;
+        if (!(await vasConfirm('Reopen this bill? It comes off the payables until approved again.'))) return;
         api('/api/inb/bills/' + id + '/reopen', { method: 'POST', body: {} }).then(function () { toast('Reopened'); loadSub('bills'); }).catch(function (er) { toast(er.message, true); });
         break;
       case 'boCancel':
-        if (!confirm('Cancel what is still outstanding on this line?')) return;
+        if (!(await vasConfirm('Cancel what is still outstanding on this line?'))) return;
         api('/api/inb/backorders/' + id + '/cancel', { method: 'POST', body: {} }).then(function (d) { toast('Cancelled' + (d.po_status ? '; PO is now ' + d.po_status : '')); loadSub('backorders'); })
           .catch(function (er) { toast(er.message, true); });
         break;

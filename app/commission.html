@@ -34,10 +34,11 @@
   .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:9px 16px;border-radius:8px;display:none;z-index:60;max-width:90vw}
   @media print{ header,.tabs,.controls,.noprint{display:none!important} .modal{position:static;padding:0;background:none} body{background:#fff} }
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
 <header><h1>Commission</h1><nav><a href="/accounting.html">Accounting</a><a href="/admin.html">Admin</a></nav></header>
@@ -87,8 +88,8 @@
       st = s;
       if (!s.started) {
         $('#out').innerHTML = '<div class="card"><h2>Switch on commission tracking</h2><p class="sub">From the moment you switch it on, commission on every sale with a rep is worked out once and kept, so later rate changes never rewrite what someone was owed. Sales before then are not included (the old commission report still covers them).</p>' +
-          '<div class="note info">Set up the rules first (Rules tab), or give each rep a default % on the Mechanics screen. Reps are staff marked as sales reps.</div><button class="primary" id="startC">Switch on now</button></div>';
-        $('#startC').onclick = function () { if (!confirm('Start tracking commission from now?')) return; api('/api/comm/start', 'POST').then(function () { toast('Started'); sum(); }).catch(function (e) { toast(e.message); }); };
+          '<div class="note info">Set up the rules first (Rules tab), or give each rep their own rate (Rules tab, under the rules). Reps are the people in the Sales rep group.</div><button class="primary" id="startC">Switch on now</button></div>';
+        $('#startC').onclick = async function () { if (!(await vasConfirm('Start tracking commission from now?'))) return; api('/api/comm/start', 'POST').then(function () { toast('Started'); sum(); }).catch(function (e) { toast(e.message); }); };
         return;
       }
       return api('/api/comm/summary?from=' + p.from + '&to=' + p.to).then(function (d) {
@@ -115,13 +116,35 @@
       var d = r[1];
       var scopeVal = function (x) { return x.scope === 'all' ? 'every part' : x.scope === 'supplier' ? 'supplier: ' + ((d.suppliers.find(function (s) { return String(s.id) === String(x.scope_value); }) || {}).name || x.scope_value) : x.scope + ': ' + x.scope_value; };
       var rate = function (x) { return x.basis === 'flat' ? J(x.rate) + ' per unit' : Number(x.rate) + '% of ' + (x.basis === 'margin' ? 'margin' : 'sale'); };
-      $('#out').innerHTML = '<div class="card"><h2>Rules <button class="sm primary" id="newR">+ Rule</button></h2><p class="sub">Most specific wins: a part rule, then the part\'s own override, then supplier, category, every part; a rule for one rep beats one for all; higher priority first. With no rule, the rep\'s default % applies. Changes affect sales from now on.</p>' +
+      // Each rep's own rate comes first: it is what a sale earns unless the part has its own setting.
+      var repRates = '<div class="card"><h2>Each rep\'s own rate</h2><p class="sub">What each rep earns on their sales: this % of each line before GCT. Only a part\'s own commission setting (Inventory › edit the part › Commission) changes it: a different %, a flat J$ per unit, or no commission. A change counts from now on; commission already worked out stays. Someone becomes a rep when they are in the Sales rep group (Admin › Users › Groups); freelance reps\' rates are on the Freelance reps tab.</p>' +
+        '<div class="scroll"><table><thead><tr><th>Rep</th><th>Rate (% of each sale)</th><th></th></tr></thead><tbody>' +
+        ((st && st.reps.length) ? st.reps.map(function (m) {
+          return '<tr><td>' + esc(m.name) + '</td><td><input type="number" min="0" max="100" step="0.1" data-rate="' + m.id + '" value="' + (m.commission_pct != null ? Number(m.commission_pct) : '') + '" placeholder="none" style="width:100px"> %</td><td><button class="sm" data-ratesave="' + m.id + '">Save</button></td></tr>';
+        }).join('') : '<tr><td colspan="3" class="empty">No sales reps yet.</td></tr>') + '</tbody></table></div></div>';
+      $('#out').innerHTML = repRates + '<div class="card"><h2>Rules <button class="sm primary" id="newR">+ Rule</button></h2><p class="sub">Rules are only used for a rep with no rate of their own above (for example a rate for every such rep, or a higher rate once their sales this month pass an amount). A part\'s own commission setting still comes first. You do not need any rules: delete the ones you do not use. Changes affect sales from now on.</p>' +
         '<div class="scroll"><table><thead><tr><th>Rule</th><th>Applies to</th><th>Rep</th><th>Rate</th><th>Tiers</th><th class="n">Priority</th><th>Dates</th><th></th></tr></thead><tbody>' +
         (d.rules.length ? d.rules.map(function (x, i) {
           return '<tr><td><b>' + esc(x.name) + '</b>' + (x.is_active ? '' : ' <span class="pill">off</span>') + '</td><td>' + esc(scopeVal(x)) + '</td><td>' + esc(x.rep_name || 'every rep') + '</td><td>' + rate(x) + '</td>' +
             '<td><small>' + (Array.isArray(x.tiers) ? x.tiers.map(function (t) { return 'from ' + J(t.from) + ': ' + t.rate + (x.basis === 'flat' ? '' : '%'); }).join('<br>') : '') + '</small></td><td class="n">' + x.priority + '</td>' +
-            '<td><small>' + esc((x.starts_on || '').slice(0, 10)) + (x.ends_on ? ' to ' + esc(x.ends_on.slice(0, 10)) : '') + '</small></td><td><button class="sm" data-edit="' + i + '">Edit</button></td></tr>';
-        }).join('') : '<tr><td colspan="8" class="empty">No rules yet: reps earn their default % only.</td></tr>') + '</tbody></table></div></div>';
+            '<td><small>' + esc((x.starts_on || '').slice(0, 10)) + (x.ends_on ? ' to ' + esc(x.ends_on.slice(0, 10)) : '') + '</small></td><td style="white-space:nowrap"><button class="sm" data-edit="' + i + '">Edit</button> <button class="sm" data-del="' + i + '">Delete</button></td></tr>';
+        }).join('') : '<tr><td colspan="8" class="empty">No rules: each rep earns their own rate.</td></tr>') + '</tbody></table></div></div>';
+      all('[data-del]').forEach(function (b) {
+        b.onclick = async function () {
+          var x = d.rules[+b.getAttribute('data-del')];
+          if (!(await vasConfirm('Delete the rule "' + x.name + '"? Commission already worked out with it stays as it is.'))) return;
+          api('/api/comm/rules/' + x.id, 'DELETE').then(function () { toast('Rule deleted'); rules(); }).catch(function (e) { toast(e.message); });
+        };
+      });
+      all('[data-ratesave]').forEach(function (b) {
+        b.onclick = function () {
+          var id = b.getAttribute('data-ratesave'), v = $('[data-rate="' + id + '"]').value;
+          api('/api/comm/reps/' + id + '/rate', 'PUT', { commission_pct: v === '' ? null : Number(v) }).then(function (r) {
+            (st.reps.find(function (m) { return String(m.id) === id; }) || {}).commission_pct = r.rep.commission_pct;
+            toast('Saved: ' + r.rep.name + (r.rep.commission_pct != null ? ' earns ' + r.rep.commission_pct + '% from now on' : ' has no rate of their own'));
+          }).catch(function (e) { toast(e.message); });
+        };
+      });
       var form = function (x) {
         x = x || { scope: 'all', basis: 'sale', rate: 0, priority: 0, is_active: true, tiers: [] };
         modal('<h2>' + (x.id ? 'Edit rule' : 'New rule') + '</h2>' +
@@ -198,7 +221,7 @@
             '<td style="white-space:nowrap"><button class="sm" data-view="' + x.id + '">Open</button> ' + (x.status === 'draft' ? '<button class="sm primary" data-appr="' + x.id + '">Approve</button> <button class="sm" data-canc="' + x.id + '">Cancel</button>' : '') + (x.status === 'approved' ? '<button class="sm primary" data-pay="' + x.id + '">Pay</button>' : '') + '</td></tr>';
         }).join('') : '<tr><td colspan="7" class="empty">No statements yet.</td></tr>') + '</tbody></table></div></div>';
       $('#sMake').onclick = function () { api('/api/comm/statements', 'POST', { rep_id: $('#sRep').value, period_to: $('#sTo').value }).then(function () { toast('Statement made'); stmt(); }).catch(function (e) { toast(e.message); }); };
-      var act = function (sel, path, q) { all(sel).forEach(function (b) { b.onclick = function () { if (q && !confirm(q)) return; api('/api/comm/statements/' + b.getAttribute(sel.slice(1, -1)) + path, 'POST', {}).then(function () { toast('Done'); stmt(); }).catch(function (e) { toast(e.message); }); }; }); };
+      var act = function (sel, path, q) { all(sel).forEach(function (b) { b.onclick = async function () { if (q && !(await vasConfirm(q))) return; api('/api/comm/statements/' + b.getAttribute(sel.slice(1, -1)) + path, 'POST', {}).then(function () { toast('Done'); stmt(); }).catch(function (e) { toast(e.message); }); }; }); };
       act('[data-appr]', '/approve', 'Approve this statement? It goes in the books as commission owed.');
       act('[data-canc]', '/cancel', 'Cancel this draft? Its lines go back to earned.');
       act('[data-pay]', '/pay', 'Record this statement as paid in cash from the safe?');
@@ -229,7 +252,7 @@
         }).join('') : '<tr><td colspan="8" class="empty">No freelance reps yet.</td></tr>') + '</tbody></table></div></div>';
       var showInvite = function (url) { $('#rinv').innerHTML = '<div class="note warn">Send this link to the rep (WhatsApp or email). It works once, for 7 days:<br><input readonly id="invUrl" style="width:100%;margin-top:6px"></div>'; $('#invUrl').value = url; $('#invUrl').onclick = function () { this.select(); }; window.scrollTo(0, 0); };
       $('#radd').onclick = function () { api('/api/reps', 'POST', { name: $('#rn').value, email: $('#re').value, phone: $('#rp').value, commission_pct: $('#rc').value }).then(function (r) { repsTab().then(function () { showInvite(r.invite_url); }); }).catch(function (e) { toast(e.message); }); };
-      all('[data-inv]').forEach(function (b) { b.onclick = function () { if (!confirm('Make a new invite link? Their current 2-step sign-in stops working until they use it.')) return; api('/api/reps/' + b.getAttribute('data-inv') + '/invite', 'POST').then(function (r) { showInvite(r.invite_url); }).catch(function (e) { toast(e.message); }); }; });
+      all('[data-inv]').forEach(function (b) { b.onclick = async function () { if (!(await vasConfirm('Make a new invite link? Their current 2-step sign-in stops working until they use it.'))) return; api('/api/reps/' + b.getAttribute('data-inv') + '/invite', 'POST').then(function (r) { showInvite(r.invite_url); }).catch(function (e) { toast(e.message); }); }; });
       all('[data-act]').forEach(function (b) { b.onclick = function () { api('/api/reps/' + b.getAttribute('data-act'), 'PATCH', { is_active: b.getAttribute('data-on') === '1' }).then(function () { toast('Saved'); repsTab(); }).catch(function (e) { toast(e.message); }); }; });
       all('[data-pct]').forEach(function (i) { i.onchange = function () { api('/api/reps/' + i.getAttribute('data-pct'), 'PATCH', { commission_pct: i.value }).then(function () { toast('Saved'); }).catch(function (e) { toast(e.message); }); }; });
     });
@@ -263,11 +286,25 @@
 
   function me() {
     return api('/api/comm/me?from=' + p.from + '&to=' + p.to).then(function (d) {
-      if (!d.rep) { $('#out').innerHTML = '<div class="card empty">You are not set up as a sales rep.</div>'; return; }
-      var s = d.summary || {};
-      $('#out').innerHTML = '<div class="card"><h2>' + esc(d.rep.name) + '</h2>' + period('') + '<div class="kpis"><div class="kpi"><span>Your sales</span><b>' + J(s.sales) + '</b></div><div class="kpi"><span>Earned</span><b>' + J(s.earned) + '</b></div><div class="kpi"><span>Waiting for customer payment</span><b>' + J(s.pending) + '</b></div><div class="kpi"><span>Owed to you now</span><b>' + J(s.owed) + '</b></div></div></div>' +
-        '<div class="card"><h2>Statements</h2><table><tbody>' + (d.statements.length ? d.statements.map(function (x) { return '<tr><td>' + esc(x.number) + '</td><td>up to ' + esc(String(x.period_to).slice(0, 10)) + '</td><td class="n">' + J(x.total) + '</td><td>' + pill(x.status) + '</td></tr>'; }).join('') : '<tr><td class="empty">None yet.</td></tr>') + '</tbody></table></div>' +
-        '<div class="card"><h2>Lines</h2>' + entryTable(d.entries, false) + '</div>';
+      if (!d.rep) { $('#out').innerHTML = '<div class="card empty">You are not set up as a sales rep. A manager puts you in the Sales rep group (Admin › Users › Groups) and sets your rate.</div>'; return; }
+      var s = d.summary || {}, m = d.this_month || {}, t = d.totals || null, sales = d.sales || null;
+      var rate = function (x) { return x.basis === 'flat' ? J(x.rate) + ' per unit' : Number(x.rate) + '% of the ' + (x.basis === 'margin' ? 'profit' : 'sale'); };
+      var what = function (x) { return x.scope === 'all' ? 'every part' : x.scope === 'product' ? 'part ' + x.scope_value : x.scope === 'supplier' ? 'one supplier\'s parts' : x.scope_value; };
+      $('#out').innerHTML =
+        // An older server sends only the dates' summary: the cards below fall back to it.
+        '<div class="card"><h2>' + esc(d.rep.name) + '</h2>' +
+          (d.started === false ? '<div class="note warn">Commission tracking is not switched on yet, so nothing is counted for you yet. Below is what your rate would come to on your sales in these dates. Ask a manager to switch it on (Commission › Overview).</div>' : '') +
+          (t ? '<div class="kpis"><div class="kpi"><span>Built up this month</span><b>' + J(m.earned) + '</b></div><div class="kpi"><span>Owed to you now (not paid yet)</span><b>' + J(t.unpaid) + '</b></div><div class="kpi"><span>Waiting for the customer to pay</span><b>' + J(t.waiting) + '</b></div><div class="kpi"><span>Paid to you so far</span><b>' + J(t.paid) + '</b></div></div>' : '') +
+          '<p class="sub" style="margin-top:10px">' + (d.rep.commission_pct != null ? 'Your rate: <b>' + Number(d.rep.commission_pct) + '% of each sale</b> credited to you' : 'You have no rate of your own yet') + (d.rules && d.rules.length ? ', except where a rule below says otherwise.' : '.') + ' Sales are counted without GCT. Returns and voids take back what they earned.</p>' +
+          (d.rules && d.rules.length ? '<table><thead><tr><th>Rule</th><th>On</th><th>You earn</th></tr></thead><tbody>' + d.rules.map(function (x) { return '<tr><td>' + esc(x.name) + (x.just_you ? ' <span class="pill ok">just you</span>' : '') + '</td><td>' + esc(what(x)) + '</td><td>' + rate(x) + '</td></tr>'; }).join('') + '</tbody></table>' : '') +
+        '</div>' +
+        '<div class="card"><h2>Your sales and commission in these dates</h2>' + period('') +
+          '<div class="kpis"><div class="kpi"><span>Your sales' + (sales ? ' (' + sales.receipts + ' receipt' + (sales.receipts === 1 ? '' : 's') + ')' : '') + '</span><b>' + J(sales && d.started === false ? sales.total : s.sales) + '</b></div>' +
+            (d.started === false && sales ? '<div class="kpi"><span>Your rate would come to</span><b>' + J(sales.estimate) + '</b></div>'
+              : '<div class="kpi"><span>Earned</span><b>' + J(s.earned) + '</b></div><div class="kpi"><span>Waiting for the customer to pay</span><b>' + J(s.pending) + '</b></div><div class="kpi"><span>Taken back (returns, voids)</span><b>' + J(s.clawbacks) + '</b></div>') + '</div>' +
+          '<h2 style="margin-top:12px">Each sale</h2>' + entryTable(d.entries, false) + '</div>' +
+        '<div class="grid"><div class="card"><h2>Statements</h2><p class="sub">A manager puts what you earned on a statement, approves it, then pays it (or it goes on your payslip).</p><table><tbody>' + (d.statements.length ? d.statements.map(function (x) { return '<tr><td>' + esc(x.number) + '</td><td>up to ' + esc(String(x.period_to).slice(0, 10)) + '</td><td class="n">' + J(x.total) + '</td><td>' + pill(x.status) + '</td></tr>'; }).join('') : '<tr><td class="empty">None yet.</td></tr>') + '</tbody></table></div>' +
+          '<div class="card"><h2>Payments to you</h2><table><tbody>' + ((d.payouts || []).length ? d.payouts.map(function (x) { return '<tr><td>' + esc(day(x.created_at)) + '</td><td><small>' + esc(x.notes || '') + '</small></td><td class="n">' + J(x.amount) + '</td></tr>'; }).join('') : '<tr><td class="empty">None yet.</td></tr>') + '</tbody></table></div></div>';
       $('#pgo').onclick = function () { p.from = $('#pf').value; p.to = $('#pt').value; me(); };
     });
   }
@@ -278,7 +315,14 @@
     ({ sum: sum, rules: rules, entries: entries, split: split, stmt: stmt, me: me, reps: repsTab, links: linksTab }[tab] || sum)().catch(function (e) { $('#out').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
   }
   all('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); show(); }; });
-  show();
+  // Which tabs this person can use (an older server sends no `can`: all stay).
+  var MANAGER_TABS = ['sum', 'rules', 'entries', 'split', 'stmt'];
+  api('/api/comm/me').then(function (d) {
+    if (d.can && !d.can.view) {
+      MANAGER_TABS.forEach(function (k) { var b = $('#tabs [data-t="' + k + '"]'); if (b) b.style.display = 'none'; });
+      if (MANAGER_TABS.indexOf(tab) >= 0) tab = 'me';
+    } else if (d.can && d.rep === null && tab === 'me') tab = 'sum';
+  }).catch(function () {}).then(show);
 })();
 </script>
 <script src="/assets/staff-assist.js?v=20261020" defer></script>

@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1b2b">
+<title>Add part photos · Morty's Auto Parts</title>
+<link rel="manifest" href="/mobile.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ok:#16a34a; --bad:#b91c1c; --warn:#b45309; --chip:#eef2f7; --sel:#fff7ed; --bar:#e5e7eb; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --chip:#1f2b38; --ok:#22c55e; --bad:#f87171; --warn:#f59e0b; --sel:#2a2116; --bar:#253241; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:max(10px,env(safe-area-inset-top)) 14px 0;position:sticky;top:0;z-index:5}
+  header .top{display:flex;align-items:center;gap:10px}
+  header a.back{color:#fff;text-decoration:none;font-size:20px;opacity:.85}
+  header h1{font-size:17px;margin:0;flex:1}
+  header .stat{font-size:13px;opacity:.85;margin-top:2px}
+  .pbar{height:6px;border-radius:4px;background:rgba(255,255,255,.18);overflow:hidden;margin:6px 0 0}
+  .pbar i{display:block;height:100%;background:#22c55e}
+  .tabs{display:flex;gap:4px;margin-top:8px}
+  .tabs button{flex:1;background:transparent;border:0;border-bottom:3px solid transparent;color:#cbd5e1;border-radius:0;padding:8px 4px;font-weight:600}
+  .tabs button.on{color:#fff;border-bottom-color:var(--red)}
+  main{max-width:760px;margin:0 auto;padding:12px 12px 90px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .search{display:flex;gap:8px;margin-bottom:10px}
+  .search input{flex:1;min-width:0;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink)}
+  .seg{display:flex;background:var(--chip);border-radius:10px;padding:3px;gap:3px;margin-bottom:10px;overflow-x:auto}
+  .seg button{flex:1;border:0;background:transparent;padding:8px 8px;border-radius:8px;font-size:14px;white-space:nowrap;color:var(--ink)}
+  .seg button.on{background:var(--card);box-shadow:0 1px 2px rgba(0,0,0,.12);font-weight:700}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:10px}
+  .part{display:flex;gap:12px;align-items:flex-start}
+  .part.done{border-color:var(--ok)}
+  .part.sel{background:var(--sel);border-color:#fb923c}
+  .part .tick{width:22px;height:22px;margin-top:4px;flex:none;accent-color:var(--red)}
+  .thumb{width:84px;height:84px;border-radius:10px;object-fit:cover;background:var(--chip);flex:none}
+  .thumb.ph{display:grid;place-items:center;color:var(--muted);font-size:11px;text-align:center}
+  .info{flex:1;min-width:0}
+  .info h2{font-size:15px;margin:0 0 2px;overflow-wrap:anywhere}
+  .sub{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+  .meta{font-size:12.5px;color:var(--muted);margin-top:4px;display:flex;flex-wrap:wrap;gap:4px 10px}
+  .tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:999px;background:var(--chip);color:var(--ink)}
+  .tag.job{background:#dbeafe;color:#1e3a8a} .tag.mine{background:#fee2e2;color:#991b1b}
+  @media (prefers-color-scheme: dark){ .tag.job{background:#1e3a8a;color:#dbeafe} .tag.mine{background:#7f1d1d;color:#fee2e2} }
+  .act{margin-top:9px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  label.btn,button{font:inherit;cursor:pointer;border:1px solid var(--line);border-radius:10px;padding:9px 14px;background:var(--card);color:var(--ink)}
+  .primary{background:var(--red)!important;border-color:var(--red)!important;color:#fff!important;font-weight:700}
+  button.small,label.small{padding:5px 10px;font-size:13px}
+  button:disabled{opacity:.5;cursor:default}
+  input[type=file]{display:none}
+  .msg{font-size:13px} .msg.ok{color:var(--ok)} .msg.bad{color:var(--bad)} .muted{color:var(--muted)}
+  .empty{text-align:center;color:var(--muted);padding:40px 10px}
+  .more{display:block;width:100%;padding:12px;margin-top:4px}
+  .grp{display:flex;gap:12px;align-items:center;cursor:pointer}
+  .grp .gl{flex:1;min-width:0}
+  .grp b{display:block;overflow-wrap:anywhere}
+  .gbar{height:7px;border-radius:4px;background:var(--bar);overflow:hidden;margin-top:6px;display:flex}
+  .gbar i{display:block;height:100%}
+  .gbar .d{background:var(--ok)} .gbar .a{background:#3b82f6}
+  .big{font-size:20px;font-weight:800;min-width:46px;text-align:right}
+  .crumb{display:flex;align-items:center;gap:8px;margin:0 0 10px;flex-wrap:wrap}
+  .crumb button{padding:6px 10px}
+  .crumb b{flex:1;min-width:0;overflow-wrap:anywhere}
+  .bar2{position:fixed;left:0;right:0;bottom:0;background:var(--navy);color:#fff;padding:10px 14px max(10px,env(safe-area-inset-bottom));display:none;gap:10px;align-items:center;z-index:6}
+  .bar2.on{display:flex} .bar2 span{flex:1}
+  .jobs-strip{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:10px}
+  .jchip{flex:none;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:8px 10px;min-width:170px;text-align:left}
+  .jchip.on{border-color:var(--red);box-shadow:0 0 0 2px rgba(214,40,40,.2)}
+  .jchip small{display:block;color:var(--muted);font-size:12px}
+  .job h3{margin:0;font-size:16px;overflow-wrap:anywhere}
+  .over{color:var(--bad);font-weight:700}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line)} th{font-size:12px;color:var(--muted);font-weight:600}
+  td.n,th.n{text-align:right}
+  #camWrap{display:none;margin-bottom:10px;border-radius:12px;overflow:hidden;background:#000}
+  #camWrap.on{display:block}
+  dialog{border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--ink);width:min(440px,94vw);padding:16px}
+  dialog::backdrop{background:rgba(0,0,0,.45)}
+  dialog label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+  dialog select,dialog input[type=date],dialog input[type=number],dialog textarea{width:100%;font:inherit;padding:9px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
+  dialog .chk{display:flex;gap:8px;align-items:center;color:var(--ink);font-size:14px}
+  .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:80px;background:#111827;color:#fff;padding:10px 14px;border-radius:10px;font-size:14px;z-index:20;max-width:92vw;display:none}
+  .toast.bad{background:#7f1d1d}
+</style>
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
+</head>
+<body>
+<header>
+  <div class="top"><a class="back" href="/mobile.html" title="Back">‹</a><h1>📷 Add part photos</h1></div>
+  <div class="stat" id="stat">Loading…</div>
+  <div class="pbar"><i id="statBar" style="width:0"></i></div>
+  <div class="tabs"><button data-tab="take" class="on">Take photos</button><button data-tab="jobs">Photo jobs</button></div>
+</header>
+<main>
+  <section id="tabTake">
+    <div class="jobs-strip" id="myJobs"></div>
+    <div class="search">
+      <input id="q" placeholder="Search, or scan a part / bin barcode" autocomplete="off" enterkeyhint="search">
+      <button id="camBtn" title="Scan with the camera">📷</button>
+      <button id="clearq" title="Clear">✕</button>
+    </div>
+    <div id="camWrap"><div id="cam"></div></div>
+    <div class="seg" id="seg">
+      <button data-by="best" class="on">Best selling</button><button data-by="category">Category</button><button data-by="bin">Bin</button><button data-by="supplier">Supplier</button>
+    </div>
+    <div id="view"></div>
+    <button class="more" id="more" style="display:none">Load more</button>
+  </section>
+  <section id="tabJobs" style="display:none">
+    <div class="seg" id="jobSeg"><button data-st="open" class="on">Open</button><button data-st="done">Done</button><button data-st="all">All</button></div>
+    <div class="row" id="jobFilter" style="margin-bottom:10px;display:none"><select id="jobUser" style="flex:1;font:inherit;padding:8px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink)"></select></div>
+    <div id="jobs"></div>
+    <div id="people"></div>
+    <div id="tools"></div>
+  </section>
+</main>
+<div class="bar2" id="selBar"><span id="selTxt"></span><button class="small" id="selClear" style="background:transparent;color:#fff;border-color:#64748b">Clear</button><button class="small primary" id="selAssign">Assign…</button></div>
+<div class="toast" id="toast"></div>
+
+<dialog id="dlg">
+  <form method="dialog" id="dlgForm">
+    <b id="dlgTitle" style="font-size:17px">Give these photos to</b>
+    <div class="sub" id="dlgSub"></div>
+    <label for="dUser">Who takes the photos</label><select id="dUser" required></select>
+    <label for="dDue">Due date (optional)</label><input type="date" id="dDue">
+    <div id="dMaxWrap"><label for="dMax">How many parts (best sellers first; empty = all)</label><input type="number" id="dMax" min="1" placeholder="All"></div>
+    <label for="dNote">Note (optional)</label><textarea id="dNote" rows="2" placeholder="e.g. Clean the part first, white background"></textarea>
+    <label class="chk" id="dDayWrap"><input type="checkbox" id="dDay" checked> Put it on their day plan</label>
+    <div class="msg bad" id="dErr"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:14px"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary" id="dOk">Assign</button></div>
+  </form>
+</dialog>
+
+<script src="/assets/vendor/html5-qrcode.min.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function api(url, opts){ opts = opts || {}; opts.credentials='same-origin';
+    if (opts.json) { opts.method = opts.method || 'POST'; opts.headers = { 'Content-Type': 'application/json' }; opts.body = JSON.stringify(opts.json); delete opts.json; }
+    return fetch(url, opts).then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ if(!r.ok) throw new Error(j.error||r.statusText); return j; }); }); }
+  var tt;
+  function toast(m, bad){ var t=$('toast'); t.textContent=m; t.className='toast'+(bad?' bad':''); t.style.display='block'; clearTimeout(tt); tt=setTimeout(function(){ t.style.display='none'; }, 3500); }
+  function when(ts){ if(!ts) return ''; var d=new Date(ts); var s=(Date.now()-d.getTime())/1000; if(s<60) return 'just now'; if(s<3600) return Math.floor(s/60)+' min ago'; if(s<86400) return Math.floor(s/3600)+' h ago'; return d.toLocaleDateString(); }
+  var BY_NAME = { best:'Best selling', category:'Category', bin:'Bin', supplier:'Supplier' };
+  var BY_PLURAL = { best:'all sellers', category:'all categories', bin:'all bins', supplier:'all suppliers' };
+
+  var cfg = { can_assign:false, staff:[], dayplan:false, me:null };
+  var st = { tab:'take', by:'best', group:null, groupLabel:null, q:'', job:null, jobTitle:null, scan:null, status:'needed', offset:0, sel:{}, jobSt:'open', jobUser:'' };
+  var LIMIT = 40;
+
+  // ---------------------------------------------------------------- header --
+  function loadStats(){
+    api('/api/staff-photos/stats').then(function(s){
+      var pct = s.in_stock ? Math.round(100*s.with_photo/s.in_stock) : 0;
+      $('stat').textContent = s.with_photo.toLocaleString() + ' of ' + s.in_stock.toLocaleString() + ' in-stock parts have a photo (' + pct + '%) · ' + s.remaining.toLocaleString() + ' to go · ' + s.today + ' today';
+      $('statBar').style.width = pct + '%';
+    }).catch(function(){});
+  }
+
+  // ---------------------------------------------------------------- my jobs --
+  var myJobs = [];
+  function loadMyJobs(){
+    return api('/api/staff-photos/assignments?mine=1&status=open').then(function(r){
+      myJobs = r.jobs || [];
+      $('myJobs').innerHTML = myJobs.map(function(j){
+        return '<button class="jchip' + (st.job===j.id?' on':'') + '" data-job="' + j.id + '"><b>' + esc(j.title) + '</b><small>' + j.done + ' of ' + j.total + ' done' + (j.due_date ? ' · due ' + esc(j.due_date) : '') + (j.overdue ? ' · <span class="over">late</span>' : '') + '</small>' +
+          '<div class="gbar"><i class="d" style="width:' + j.pct + '%"></i></div></button>';
+      }).join('');
+      $('myJobs').style.display = myJobs.length ? 'flex' : 'none';
+    }).catch(function(){ $('myJobs').style.display='none'; });
+  }
+  $('myJobs').addEventListener('click', function(e){
+    var b = e.target.closest('[data-job]'); if(!b) return;
+    var id = Number(b.dataset.job);
+    if (st.job === id) { openJob(null); return; }
+    var j = myJobs.filter(function(x){ return x.id===id; })[0];
+    openJob(id, j && j.title);
+  });
+  function openJob(id, title){
+    st.job = id; st.jobTitle = title || null; st.group = null; st.scan = null; st.q=''; $('q').value=''; st.status = id ? 'all' : 'needed';
+    clearSel(); setTab('take'); loadMyJobs(); render();
+  }
+
+  // ---------------------------------------------------------------- view --
+  function render(){
+    if (st.scan) return renderParts();
+    if (st.job || st.group != null || st.q) return renderParts();
+    renderGroups();
+  }
+
+  function renderGroups(){
+    $('more').style.display='none';
+    $('view').innerHTML = '<div class="empty">Loading…</div>';
+    api('/api/staff-photos/groups?by=' + st.by).then(function(r){
+      if (!r.groups.length) { $('view').innerHTML = '<div class="empty">Every in-stock part has a photo. 🎉</div>'; return; }
+      var hint = st.by==='best' ? 'Best sellers first: the photos that sell the most parts.' : st.by==='bin' ? 'Walk one bin at a time. Scan a bin label to jump to it.' : 'Tap a group to see its parts.';
+      $('view').innerHTML = '<p class="muted" style="margin:0 0 10px;font-size:14px">' + hint + '</p>' + r.groups.map(function(g){
+        var done = g.total - g.needed, pd = g.total ? 100*done/g.total : 0, pa = g.total ? 100*g.assigned/g.total : 0;
+        return '<div class="card grp" data-g="' + esc(g.key) + '" data-l="' + esc(g.label) + '">' +
+          '<div class="gl"><b>' + esc(g.label) + '</b><span class="sub">' + g.needed + ' need a photo of ' + g.total + ' in stock' + (g.assigned ? ' · ' + g.assigned + ' given out' : '') + (g.sold_needed ? ' · ' + g.sold_needed.toLocaleString() + ' sold in 12m' : '') + '</span>' +
+          '<div class="gbar"><i class="d" style="width:' + pd + '%"></i><i class="a" style="width:' + pa + '%"></i></div></div>' +
+          '<div class="big">' + g.needed + '</div>' +
+          (cfg.can_assign && g.unassigned ? '<button class="small" data-assign="1">Assign…</button>' : '') +
+        '</div>';
+      }).join('');
+    }).catch(function(e){ $('view').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+  $('view').addEventListener('click', function(e){
+    var g = e.target.closest('.grp'); if (!g) return;
+    if (e.target.closest('[data-assign]')) { openAssign({ by: st.by, group: g.dataset.g, label: g.dataset.l }); return; }
+    st.group = g.dataset.g; st.groupLabel = g.dataset.l; st.status='needed'; render(); window.scrollTo(0,0);
+  });
+
+  function crumb(){
+    var title, back = (st.job || st.scan) ? '‹ Back' : '‹ ' + BY_PLURAL[st.by];
+    if (st.scan) title = 'Scanned: ' + esc(st.scan.sku || st.scan.name);
+    else if (st.job) title = '📋 ' + esc(st.jobTitle || ('Job ' + st.job));
+    else if (st.group != null) title = esc(BY_NAME[st.by]) + ': ' + esc(st.groupLabel || st.group);
+    else title = 'Search: “' + esc(st.q) + '”';
+    var html = '<div style="font-weight:700;font-size:17px;margin:0 0 6px;overflow-wrap:anywhere">' + title + '</div><div class="crumb"><button id="cBack">' + back + '</button><span style="flex:1"></span>';
+    if (!st.scan) html += '<select id="cStatus" style="font:inherit;padding:6px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)">' +
+      ['needed','done','all'].map(function(s){ return '<option value="' + s + '"' + (st.status===s?' selected':'') + '>' + {needed:'Needs a photo',done:'Has a photo',all:'All'}[s] + '</option>'; }).join('') + '</select>';
+    html += '</div>';
+    if (cfg.can_assign && !st.scan && !st.job) html += '<div class="row" style="margin:-4px 0 10px"><button class="small" id="cSelAll">Tick all shown</button>' +
+      (st.group != null ? '<button class="small" id="cAssignGroup">Assign whole group…</button>' : '<button class="small" id="cAssignSearch">Assign all that match…</button>') + '</div>';
+    return html;
+  }
+  function wireCrumb(){
+    $('cBack').onclick = function(){ st.group=null; st.job=null; st.scan=null; st.q=''; $('q').value=''; clearSel(); loadMyJobs(); render(); };
+    if ($('cStatus')) $('cStatus').onchange = function(){ st.status = this.value; renderParts(); };
+    if ($('cSelAll')) $('cSelAll').onclick = function(){ [].forEach.call(document.querySelectorAll('.part[data-img]'), function(el){ if (el.dataset.free==='1') { st.sel[el.dataset.img]=true; el.classList.add('sel'); var c=el.querySelector('.tick'); if(c) c.checked=true; } }); selBar(); };
+    if ($('cAssignGroup')) $('cAssignGroup').onclick = function(){ openAssign({ by: st.by, group: st.group, label: st.groupLabel }); };
+    if ($('cAssignSearch')) $('cAssignSearch').onclick = function(){ openAssign({ q: st.q, label: 'Search “' + st.q + '”' }); };
+  }
+
+  function partsUrl(){
+    var u = '/api/staff-photos/queue?limit=' + LIMIT + '&offset=' + st.offset + '&status=' + st.status;
+    if (st.job) u += '&assignment=' + st.job;
+    else if (st.group != null) u += '&by=' + st.by + '&group=' + encodeURIComponent(st.group);
+    if (st.q) u += '&q=' + encodeURIComponent(st.q);
+    if (!st.job && st.group == null && !st.q) u += '&by=' + st.by;
+    return u;
+  }
+  function renderParts(){
+    st.offset = 0;
+    $('view').innerHTML = crumb() + '<div id="list"><div class="empty">Loading…</div></div>';
+    wireCrumb();
+    if (st.scan) { $('list').innerHTML=''; $('list').appendChild(card(st.scan, true)); $('more').style.display='none'; return; }
+    loadMore(true);
+  }
+  function loadMore(reset){
+    $('more').style.display='none';
+    api(partsUrl()).then(function(r){
+      if (reset) $('list').innerHTML = '';
+      if (reset && !r.parts.length) { $('list').innerHTML = '<div class="empty">' + (st.status==='needed' ? (st.job ? 'Every part on this job has a photo. 🎉' : 'Nothing here needs a photo. 🎉') : 'No parts here.') + '</div>'; return; }
+      var lastBin = null;
+      r.parts.forEach(function(p){
+        if (st.by==='bin' && !st.job && st.group==null && p.bin !== lastBin) { lastBin = p.bin; }
+        $('list').appendChild(card(p));
+      });
+      st.offset += r.parts.length;
+      $('more').style.display = r.parts.length >= LIMIT ? 'block' : 'none';
+    }).catch(function(e){ if (reset) $('list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+  $('more').onclick = function(){ loadMore(false); };
+
+  function card(p, scanned){
+    var el = document.createElement('div');
+    var free = !p.assignment_id && !p.has_photo;
+    el.className = 'card part' + (p.has_photo ? ' done' : '') + (st.sel[p.img] ? ' sel' : '');
+    el.dataset.img = p.img; el.dataset.free = free ? '1' : '0';
+    var jobTag = p.assignment_id ? (p.assigned_to === cfg.me ? '<span class="tag mine">My job</span>' : '<span class="tag job">' + esc(p.assigned_to_name || 'Given out') + '</span>') : '';
+    el.innerHTML =
+      (cfg.can_assign && free && !scanned ? '<input type="checkbox" class="tick"' + (st.sel[p.img] ? ' checked' : '') + ' aria-label="Tick">' : '') +
+      (p.photo_url ? '<img class="thumb" src="' + esc(p.photo_url) + '" alt="">' : '<div class="thumb ph">No photo</div>') +
+      '<div class="info">' +
+        '<h2>' + esc(p.name) + '</h2>' +
+        '<div class="sub">' + (p.sku ? '<b>' + esc(p.sku) + '</b> · ' : '') + esc(p.make_model || '') + '</div>' +
+        '<div class="meta"><span>📦 ' + esc(p.bin) + '</span><span>🏷 ' + esc(p.category_group) + '</span><span>🏭 ' + esc(p.supplier) + '</span><span>' + (p.stock_count||0) + ' in stock</span><span>sold ' + (p.sold_12m||0) + ' in 12m' + (p.sell_rank ? ' (#' + p.sell_rank + ')' : '') + '</span>' + jobTag + '</div>' +
+        '<div class="act">' +
+          '<label class="btn ' + (p.has_photo ? 'small' : 'primary') + '">📷 ' + (p.has_photo ? 'Retake' : 'Take / choose photo') + '<input type="file" accept="image/*" capture="environment"></label>' +
+          (p.has_photo ? '<button class="small" data-clear="1">Remove photo</button>' : '') +
+          '<span class="msg"></span>' +
+        '</div>' +
+      '</div>';
+    var input = el.querySelector('input[type=file]'), msg = el.querySelector('.msg');
+    input.addEventListener('change', function(){
+      var f = input.files && input.files[0]; if(!f) return;
+      var fd = new FormData(); fd.append('product_img', p.img); if (p.assignment_id) fd.append('assignment_id', p.assignment_id); fd.append('photo', f);
+      msg.className='msg muted'; msg.textContent='Uploading…';
+      var th = el.querySelector('.thumb');
+      try { var url = URL.createObjectURL(f); var img = document.createElement('img'); img.className='thumb'; img.src=url; th.parentNode.replaceChild(img, th); } catch(_){}
+      api('/api/staff-photos/upload', { method:'POST', body: fd }).then(function(r){
+        el.classList.add('done'); el.dataset.free='0'; delete st.sel[p.img]; el.classList.remove('sel'); var c = el.querySelector('.tick'); if (c) c.remove(); selBar();
+        msg.className='msg ok'; msg.textContent='Saved as ' + r.file_name + ' ✓'; loadStats(); if (p.assignment_id) loadMyJobs();
+      }).catch(function(e){ msg.className='msg bad'; msg.textContent = e.message; });
+    });
+    var clr = el.querySelector('[data-clear]');
+    if (clr) clr.onclick = async function(){
+      if (!(await vasConfirm('Take this photo off the part? It goes back on the list.'))) return;
+      api('/api/staff-photos/clear', { json: { product_img: p.img } }).then(function(){ msg.className='msg ok'; msg.textContent='Removed'; el.classList.remove('done'); loadStats(); loadMyJobs(); }).catch(function(e){ msg.className='msg bad'; msg.textContent=e.message; });
+    };
+    var tick = el.querySelector('.tick');
+    if (tick) tick.onchange = function(){ if (tick.checked) st.sel[p.img]=true; else delete st.sel[p.img]; el.classList.toggle('sel', tick.checked); selBar(); };
+    return el;
+  }
+
+  // ---------------------------------------------------------------- selection --
+  function selBar(){ var n = Object.keys(st.sel).length; $('selBar').classList.toggle('on', n>0); $('selTxt').textContent = n + ' part' + (n===1?'':'s') + ' ticked'; }
+  function clearSel(){ st.sel = {}; [].forEach.call(document.querySelectorAll('.part.sel'), function(el){ el.classList.remove('sel'); var c=el.querySelector('.tick'); if(c) c.checked=false; }); selBar(); }
+  $('selClear').onclick = clearSel;
+  $('selAssign').onclick = function(){ var imgs = Object.keys(st.sel); openAssign({ imgs: imgs, label: imgs.length + ' ticked part' + (imgs.length===1?'':'s') }); };
+
+  // ---------------------------------------------------------------- assign --
+  var pending = null;
+  function openAssign(o){
+    pending = o;
+    $('dlgTitle').textContent = 'Give these photos to someone';
+    $('dlgSub').textContent = o.label || '';
+    $('dUser').innerHTML = '<option value="">Choose…</option>' + cfg.staff.map(function(s){ return '<option value="' + s.id + '">' + esc(s.name) + '</option>'; }).join('');
+    $('dDue').value=''; $('dNote').value=''; $('dMax').value=''; $('dErr').textContent='';
+    $('dMaxWrap').style.display = o.imgs ? 'none' : '';
+    $('dDayWrap').style.display = cfg.dayplan ? 'flex' : 'none';
+    $('dlg').showModal();
+  }
+  $('dlgForm').addEventListener('submit', function(e){
+    if (e.submitter && e.submitter.value === 'cancel') return;
+    e.preventDefault();
+    if (!$('dUser').value) { $('dErr').textContent = 'Choose who takes the photos'; return; }
+    var body = { user_id: Number($('dUser').value), due_date: $('dDue').value || null, note: $('dNote').value.trim() || null, dayplan: cfg.dayplan && $('dDay').checked };
+    if (pending.imgs) body.imgs = pending.imgs; else if (pending.q) body.q = pending.q; else { body.by = pending.by; body.group = pending.group; }
+    if (!pending.imgs && $('dMax').value) body.max = Number($('dMax').value);
+    $('dOk').disabled = true;
+    api('/api/staff-photos/assignments', { json: body }).then(function(r){
+      $('dlg').close(); clearSel();
+      toast('Given to ' + $('dUser').selectedOptions[0].textContent + ': ' + r.parts + ' part' + (r.parts===1?'':'s') + (r.skipped_already_assigned ? ' (' + r.skipped_already_assigned + ' already on another job)' : ''));
+      render(); loadMyJobs();
+    }).catch(function(e){ $('dErr').textContent = e.message; }).then(function(){ $('dOk').disabled = false; });
+  });
+
+  // ---------------------------------------------------------------- arrange / search --
+  $('seg').addEventListener('click', function(e){
+    var b = e.target.closest('button[data-by]'); if (!b) return;
+    st.by = b.dataset.by; st.group=null; st.job=null; st.scan=null; st.q=''; $('q').value=''; clearSel();
+    [].forEach.call($('seg').children, function(x){ x.classList.toggle('on', x===b); });
+    loadMyJobs(); render();
+  });
+  var t;
+  $('q').addEventListener('input', function(){ clearTimeout(t); t = setTimeout(function(){ st.q = $('q').value.trim(); st.scan=null; st.group=null; st.job=null; st.status='needed'; render(); }, 350); });
+  // A USB / Bluetooth scanner types the code and presses Enter.
+  $('q').addEventListener('keydown', function(e){ if (e.key === 'Enter') { e.preventDefault(); clearTimeout(t); var v = $('q').value.trim(); if (v) handleScan(v); } });
+  $('clearq').onclick = function(){ $('q').value=''; st.q=''; st.scan=null; st.group=null; render(); };
+
+  function handleScan(code){
+    api('/api/staff-photos/lookup?code=' + encodeURIComponent(code)).then(function(r){
+      if (r.type === 'product') { st.scan = r.part; st.q=''; $('q').value=''; render(); toast('Found ' + (r.part.sku || r.part.name)); }
+      else if (r.type === 'bin') {
+        st.scan=null; st.q=''; $('q').value=''; st.job=null; st.by='bin'; st.group=r.bin; st.groupLabel=r.bin; st.status='needed';
+        [].forEach.call($('seg').children, function(x){ x.classList.toggle('on', x.dataset.by==='bin'); });
+        render(); toast('Bin ' + r.bin);
+      }
+    }).catch(function(e){ st.q = code; st.scan=null; render(); toast(e.message + '. Showing a search instead.', true); });
+  }
+
+  // ---------------------------------------------------------------- camera scan --
+  var cam = null, camOn = false, lastCam = { text:'', at:0 };
+  $('camBtn').onclick = function(){ camOn ? stopCam() : startCam(); };
+  function startCam(){
+    if (!window.isSecureContext) { toast('The camera scanner needs the secure (https) address of the system.', true); return; }
+    if (!window.Html5Qrcode) { toast('Camera scanner did not load', true); return; }
+    $('camWrap').classList.add('on');
+    cam = cam || new Html5Qrcode('cam', { verbose:false });
+    cam.start({ facingMode:'environment' }, { fps:10, qrbox:function(w,h){ return { width:Math.floor(w*0.85), height:Math.floor(Math.min(h,w)*0.45) }; } },
+      function(text){ var now=Date.now(); if (text===lastCam.text && now-lastCam.at<2500) return; lastCam={text:text,at:now}; stopCam(); handleScan(text); }, function(){})
+      .then(function(){ camOn=true; $('camBtn').textContent='✖'; })
+      .catch(function(e){ $('camWrap').classList.remove('on'); toast('Camera: ' + (e && e.message ? e.message : e), true); });
+  }
+  function stopCam(){ if (!cam) return; cam.stop().catch(function(){}).then(function(){ camOn=false; $('camBtn').textContent='📷'; $('camWrap').classList.remove('on'); }); }
+
+  // ---------------------------------------------------------------- jobs tab --
+  function setTab(tab){
+    st.tab = tab;
+    [].forEach.call(document.querySelectorAll('.tabs button'), function(b){ b.classList.toggle('on', b.dataset.tab===tab); });
+    $('tabTake').style.display = tab==='take' ? '' : 'none';
+    $('tabJobs').style.display = tab==='jobs' ? '' : 'none';
+    if (tab==='jobs') { $('selBar').classList.remove('on'); loadJobs(); } else selBar();
+  }
+  document.querySelector('.tabs').addEventListener('click', function(e){ var b=e.target.closest('button[data-tab]'); if (b) { setTab(b.dataset.tab); history.replaceState(null,'', b.dataset.tab==='jobs' ? '#jobs' : '#'); } });
+  $('jobSeg').addEventListener('click', function(e){ var b=e.target.closest('button[data-st]'); if(!b) return; st.jobSt=b.dataset.st; [].forEach.call($('jobSeg').children, function(x){ x.classList.toggle('on', x===b); }); loadJobs(); });
+  $('jobUser').onchange = function(){ st.jobUser = this.value; loadJobs(); };
+
+  function loadJobs(){
+    $('jobs').innerHTML = '<div class="empty">Loading…</div>';
+    api('/api/staff-photos/assignments?status=' + st.jobSt + (st.jobUser ? '&user_id=' + st.jobUser : '')).then(function(r){
+      if (!r.jobs.length) $('jobs').innerHTML = '<div class="empty">' + (cfg.can_assign ? 'No photo jobs here. Open a group on Take photos and tap Assign.' : 'No photo jobs for you right now.') + '</div>';
+      else $('jobs').innerHTML = r.jobs.map(function(j){
+        var stTxt = j.status==='done' ? '<span style="color:var(--ok);font-weight:700">Done ✓</span> ' + when(j.completed_at) : j.status==='cancelled' ? '<span class="muted">Cancelled</span>' : (j.overdue ? '<span class="over">Late</span>' : '');
+        return '<div class="card job" data-id="' + j.id + '">' +
+          '<div class="row" style="justify-content:space-between"><h3>' + esc(j.title) + '</h3><span class="big" style="font-size:18px">' + j.pct + '%</span></div>' +
+          '<div class="sub">👤 ' + esc(j.assigned_to_name || '—') + (j.due_date ? ' · due ' + esc(j.due_date) : '') + ' · given by ' + esc(j.assigned_by_name || '—') + ' ' + when(j.created_at) + ' ' + stTxt + '</div>' +
+          '<div class="gbar" style="height:10px"><i class="d" style="width:' + j.pct + '%"></i></div>' +
+          '<div class="meta"><span><b>' + j.done + '</b> of ' + j.total + ' parts have a photo</span>' + (j.done_by_them !== j.done ? '<span>' + j.done_by_them + ' by ' + esc((j.assigned_to_name||'them').split(' ')[0]) + '</span>' : '') + (j.last_photo_at ? '<span>last photo ' + when(j.last_photo_at) + '</span>' : '') + '</div>' +
+          (j.note ? '<div class="sub" style="margin-top:4px">📝 ' + esc(j.note) + '</div>' : '') +
+          '<div class="act"><button class="small' + (j.status==='open' && j.assigned_to===cfg.me ? ' primary' : '') + '" data-open="1">Open the parts</button>' +
+          (cfg.can_assign && j.status==='open' ? '<button class="small" data-hand="1">Hand to / due…</button><button class="small" data-cancel="1">Cancel job</button>' : '') + '</div>' +
+        '</div>';
+      }).join('');
+      if (cfg.can_assign) renderPeople(r.people || []);
+      jobsCache = r.jobs;
+    }).catch(function(e){ $('jobs').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }
+  var jobsCache = [];
+  $('jobs').addEventListener('click', async function(e){
+    var c = e.target.closest('.job'); if (!c) return;
+    var id = Number(c.dataset.id), j = jobsCache.filter(function(x){ return x.id===id; })[0];
+    if (e.target.closest('[data-open]')) { openJob(id, j && j.title); history.replaceState(null,'', '#job=' + id); }
+    else if (e.target.closest('[data-cancel]')) { if (await vasConfirm('Cancel this photo job? Photos already taken stay on the parts.')) api('/api/staff-photos/assignments/' + id, { json: { action:'cancel' } }).then(function(){ toast('Job cancelled'); loadJobs(); }).catch(function(er){ toast(er.message, true); }); }
+    else if (e.target.closest('[data-hand]')) {
+      var who = await vasPrompt('Hand to whom? Type a name:\n' + cfg.staff.map(function(s){ return s.name; }).join(', '), j.assigned_to_name || '');
+      if (who === null) return;
+      var m = cfg.staff.filter(function(s){ return s.name.toLowerCase() === who.trim().toLowerCase(); })[0] || cfg.staff.filter(function(s){ return s.name.toLowerCase().indexOf(who.trim().toLowerCase()) === 0; })[0];
+      if (!m) { toast('No staff member called ' + who, true); return; }
+      var due = await vasPrompt('Due date (YYYY-MM-DD, empty for none)', j.due_date || '');
+      if (due === null) return;
+      api('/api/staff-photos/assignments/' + id, { json: { user_id: m.id, due_date: due.trim() || null } }).then(function(){ toast('Job is now with ' + m.name); loadJobs(); }).catch(function(er){ toast(er.message, true); });
+    }
+  });
+  function renderPeople(people){
+    $('people').innerHTML = '<div class="card"><b>Who is taking photos (last 7 days)</b>' + (people.length ? '<table><thead><tr><th>Person</th><th class="n">Today</th><th class="n">7 days</th><th class="n">Open jobs</th><th class="n">Left to do</th><th>Last photo</th></tr></thead><tbody>' +
+      people.map(function(p){ return '<tr><td>' + esc(p.name) + '</td><td class="n">' + p.today + '</td><td class="n">' + p.period + '</td><td class="n">' + p.open_jobs + '</td><td class="n">' + p.left_to_do + '</td><td class="muted">' + when(p.last_at) + '</td></tr>'; }).join('') + '</tbody></table>' : '<p class="muted">No photos taken yet.</p>') + '</div>';
+    $('tools').innerHTML = '<div class="card"><b>Name existing photos by item code</b><p class="sub" style="margin:4px 0 8px">New photos are saved under the part\'s item code (e.g. MD620738.jpg). This gives the photos already on the shop the same names. The old files stay, so nothing breaks.</p><button class="small" id="renameBtn">Rename existing photos</button> <span class="msg" id="renameMsg"></span></div>';
+    $('renameBtn').onclick = async function(){
+      if (!(await vasConfirm('Give every product photo its item code as its file name?'))) return;
+      $('renameBtn').disabled = true;
+      api('/api/staff-photos/rename-existing', { json: {} }).then(function(r){ $('renameMsg').className='msg ok'; $('renameMsg').textContent = r.renamed + ' renamed, ' + r.already_named + ' already named' + (r.file_missing ? ', ' + r.file_missing + ' file missing' : ''); })
+        .catch(function(e){ $('renameMsg').className='msg bad'; $('renameMsg').textContent = e.message; }).then(function(){ $('renameBtn').disabled = false; });
+    };
+  }
+
+  // ---------------------------------------------------------------- start --
+  api('/api/staff-photos/config').then(function(c){
+    cfg = c;
+    if (cfg.can_assign) {
+      $('jobFilter').style.display = 'flex';
+      $('jobUser').innerHTML = '<option value="">Everyone</option>' + cfg.staff.map(function(s){ return '<option value="' + s.id + '">' + esc(s.name) + '</option>'; }).join('');
+    }
+  }).catch(function(){}).then(function(){
+    loadStats();
+    var h = location.hash, m = /^#job=(\d+)/.exec(h);
+    loadMyJobs().then(function(){
+      if (m) { var j = myJobs.filter(function(x){ return x.id===Number(m[1]); })[0]; openJob(Number(m[1]), j && j.title); }
+      else if (h === '#jobs') { setTab('jobs'); render(); }
+      else render();
+    });
+  });
+})();
+</script>
+</body>
+</html>

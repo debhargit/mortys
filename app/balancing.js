@@ -137,7 +137,7 @@ function register(app, deps) {
            FROM (${SALES}) s JOIN sale_payments p ON p.sale_id = s.id GROUP BY 1, 2 ORDER BY 1, 4 DESC`, P);
       const { rows: acct } = await query(
         `SELECT lower(COALESCE(method, 'unknown')) AS method, COUNT(*)::int AS n, COALESCE(SUM(amount_usd), 0) AS amount
-           FROM account_payments WHERE created_at >= $1 AND created_at < $2 GROUP BY 1 ORDER BY 3 DESC`, P);
+           FROM account_payments WHERE method NOT IN ('writeoff', 'credit_note') AND created_at >= $1 AND created_at < $2 GROUP BY 1 ORDER BY 3 DESC`, P);
       const onSales = pay.filter((x) => !x.cn && x.method !== 'charge');
       const detail = onSales.reduce((s, x) => s + n(x.amount), 0);
       const chargeRows = pay.filter((x) => !x.cn && x.method === 'charge');

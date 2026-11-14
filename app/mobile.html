@@ -8,8 +8,8 @@
 <meta name="apple-mobile-web-app-title" content="Morty's Auto">
 <title>Morty's Auto Parts Mobile</title>
 <link rel="manifest" href="/mobile.webmanifest">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
 <style>
   :root{--red:#d61f2b}
   *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0a0a0c;color:#fff;min-height:100vh}
@@ -27,6 +27,7 @@
   .err{color:#fca5a5;margin-top:8px} details summary{color:#9ca3af;margin-top:12px}
   .who{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;color:#9ca3af;font-size:14px} .who a{color:#fca5a5}
 </style>
+<script src="/assets/vas-ui.js?v=20261110b"></script>
 </head>
 <body>
 <header><img src="/favicon.svg" alt=""><div><b>Morty's Auto Parts Mobile</b><small>Stock · deliveries · time clock · cashier</small></div></header>
@@ -48,15 +49,18 @@
     { href: '/warehouse.html#receive', ic: '🚛', name: 'Receive', sub: 'Goods in from suppliers', need: 'warehouse.access' },
     { href: '/driver.html', ic: '🚚', name: 'Driver', sub: 'My jobs, route, proof', need: 'fleet.drive', hot: true },
     { href: '/clock.html', ic: '⏱️', name: 'Clock in / out', sub: 'Start and end your day', need: null },
+    { href: '/payslip.html', ic: '💵', name: 'My pay', sub: 'Payslips, loans, savings, leave', need: null },
     { href: '/cashier.html', ic: '💵', name: 'Cashier', sub: 'Take payment', need: 'cashier.access' },
     { href: '/documents.html#forms', ic: '📝', name: 'Leave & forms', sub: 'Leave, requests', need: 'docs.view' },
     { href: '/dispatch.html', ic: '🗺️', name: 'Dispatch', sub: 'Assign jobs, live map', need: 'fleet.view' },
     { href: '/warehouse.html#scan', ic: '🔎', name: 'Find a part', sub: 'Where is it, how many', need: 'warehouse.access' },
+    { href: '/staff-photos.html', ic: '📷', name: 'Part photos', sub: 'Snap parts, scan to find, my photo jobs', need: 'catalog.photos' },
+    { href: '/warranty.html#new', ic: '🛡', name: 'Warranty claim', sub: 'Find the sale, photos, cover', need: 'pos.access' },
   ];
   function signIn(msg) {
     $('#main').innerHTML = '<div class="card"><b style="color:#fff;font-size:17px">Sign in</b><label>PIN</label><input id="pin" type="password" inputmode="numeric"><button id="pinGo">Sign in with PIN</button>' +
       '<details><summary>Email and password instead</summary><label>Email</label><input id="em" type="email" autocomplete="username"><label>Password</label><input id="pw" type="password" autocomplete="current-password"><button class="ghost" id="pwGo">Sign in</button></details><div class="err" id="err">' + esc(msg || '') + '</div><a href="#" id="pwChange" style="display:block;text-align:center;margin-top:10px;font-size:13px;color:inherit;opacity:.8">Change password</a></div>' + installHelp();
-    var done = function (r) { if (r && r.need_2fa) { var c = prompt('6-digit code from your authenticator app'); if (!c) return; return api('/api/auth/2fa', 'POST', { code: c.trim() }).then(done).catch(function (e) { $('#err').textContent = e.message; }); } start(); };
+    var done = async function (r) { if (r && r.need_2fa) { var c = await vasPrompt('6-digit code from your authenticator app'); if (!c) return; return api('/api/auth/2fa', 'POST', { code: c.trim() }).then(done).catch(function (e) { $('#err').textContent = e.message; }); } start(); };
     // PIN, then the person taps their name (assets/pin-staff.js).
     $('#pinGo').onclick = function () {
       var p = $('#pin').value; if (!p) return;

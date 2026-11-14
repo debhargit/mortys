@@ -1,3 +1,5 @@
+// The program's own message windows (assets/vas-ui.js), for a page that has not loaded them itself.
+(function(){ if (window.VasUI || document.querySelector('script[src^="/assets/vas-ui.js"]')) return; var s = document.createElement('script'); s.src = '/assets/vas-ui.js?v=20261110b'; (document.head || document.documentElement).appendChild(s); })();
 /* =============================================================================
    Morty's Auto Parts -- team chat (every staff screen)
    A chat button bottom-right on every staff screen (loaded by staff-assist.js)
@@ -834,8 +836,8 @@
       var me1 = function (k, v) { var b = {}; b[k] = v; api('PATCH', '/api/team/conversations/' + c.id + '/me', b).then(loadConvs); };
       var mu = host.querySelector('[data-mute]'); if (mu) mu.onchange = function () { me1('muted', mu.checked); };
       var pi = host.querySelector('[data-pin]'); if (pi) pi.onchange = function () { me1('pinned', pi.checked); };
-      var lv = host.querySelector('[data-leave]'); if (lv) lv.onclick = function () { if (confirm('Leave ' + c.title + '?')) api('DELETE', '/api/team/conversations/' + c.id + '/members/' + S.cfg.me.id).then(function () { closeChat(); loadConvs(); }).catch(function (e) { toast('Could not leave', e.message); }); };
-      var ar = host.querySelector('[data-arch]'); if (ar) ar.onclick = function () { if (c.archived_at || confirm('Close ' + c.title + '? Members can still read it but nobody can post.')) patch({ archived: !c.archived_at }); };
+      var lv = host.querySelector('[data-leave]'); if (lv) lv.onclick = async function () { if (await vasConfirm('Leave ' + c.title + '?')) api('DELETE', '/api/team/conversations/' + c.id + '/members/' + S.cfg.me.id).then(function () { closeChat(); loadConvs(); }).catch(function (e) { toast('Could not leave', e.message); }); };
+      var ar = host.querySelector('[data-arch]'); if (ar) ar.onclick = async function () { if (c.archived_at || (await vasConfirm('Close ' + c.title + '? Members can still read it but nobody can post.'))) patch({ archived: !c.archived_at }); };
       var ad = host.querySelector('[data-add]'); if (ad) ad.onclick = function () {
         modal('<h3>Add people to ' + esc(c.title) + '</h3>' + picker([], S.members.map(function (m) { return m.user_id; })) + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button class="vtc-btn ghost" data-close>Cancel</button><button class="vtc-btn" data-go>Add</button></div>', function (box, close) {
           var get = wirePicker(box);

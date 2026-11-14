@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Book a service · Morty's Auto Parts</title>
+<style>
+  :root{--red:#d62828;--navy:#0b1b2b;--ink:#1f2937;--muted:#6b7280;--line:#e5e7eb}
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#f3f4f6;color:var(--ink);margin:0;padding:16px;font-size:15px}
+  .wrap{max-width:520px;margin:0 auto}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px;box-shadow:0 2px 10px rgba(0,0,0,.04)}
+  h1{font-size:20px;margin:0 0 2px;color:var(--navy)}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:16px}
+  label{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:10px 0 4px;text-transform:uppercase;letter-spacing:.5px}
+  input,select,textarea{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;font-size:16px;font-family:inherit}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .req{color:var(--red)}
+  button{width:100%;margin-top:18px;padding:14px;border:0;border-radius:10px;background:var(--red);color:#fff;font-weight:800;font-size:16px;cursor:pointer}
+  button:disabled{opacity:.6}
+  .done{background:#dcfce7;color:#166534;padding:18px;border-radius:12px;text-align:center;font-weight:700}
+  .err{background:#fee2e2;color:#991b1b;padding:12px 14px;border-radius:8px;font-size:14px;margin-top:10px;display:none}
+</style>
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+</head>
+<body>
+<div class="wrap"><div class="card" id="card">
+  <h1>Book a service</h1>
+  <div class="sub">Morty's Auto Parts · 51 Red Hills Road, Kingston · Mon–Sat 8:00–5:30</div>
+  <form id="f" onsubmit="return false">
+    <div class="row">
+      <div><label>Name <span class="req">*</span></label><input id="name" required/></div>
+      <div><label>Phone <span class="req">*</span></label><input id="phone" required inputmode="tel"/></div>
+    </div>
+    <label>Email</label><input id="email" type="email" placeholder="optional"/>
+    <div class="row">
+      <div><label>Vehicle make</label><input id="make" placeholder="e.g. Toyota"/></div>
+      <div><label>Model</label><input id="model" placeholder="e.g. Corolla"/></div>
+    </div>
+    <div class="row">
+      <div><label>Year</label><input id="year" inputmode="numeric" placeholder="e.g. 2017"/></div>
+      <div><label>Service needed</label>
+        <select id="service_type">
+          <option value="">Choose…</option>
+          <option>Tyre change</option>
+          <option>Tyre service (rotate &amp; balance)</option>
+          <option>Oil change</option>
+          <option>Brakes</option>
+          <option>Diagnostics / check engine</option>
+          <option>Battery</option>
+          <option>A/C</option>
+          <option>General service</option>
+          <option>Other</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div><label>Preferred date</label><input id="preferred_date" type="date"/></div>
+      <div><label>Time</label><select id="time_slot"><option value="">Any</option><option>Morning (8–12)</option><option>Afternoon (12–5:30)</option></select></div>
+    </div>
+    <label>Notes</label><textarea id="notes" rows="3" placeholder="Anything we should know?"></textarea>
+    <div class="err" id="err"></div>
+    <button id="go">Request appointment</button>
+  </form>
+</div></div>
+<script>
+function val(id){ return (document.getElementById(id).value||'').trim(); }
+document.getElementById('go').addEventListener('click', async function(){
+  var err=document.getElementById('err'); err.style.display='none';
+  var name=val('name'), phone=val('phone');
+  if(!name||!phone){ err.textContent='Please enter your name and phone.'; err.style.display='block'; return; }
+  var btn=this; btn.disabled=true; btn.textContent='Sending…';
+  try{
+    var r=await fetch('/api/service',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      name:name, phone:phone, email:val('email')||null,
+      make:val('make')||null, model:val('model')||null, year:val('year')||null,
+      service_type:val('service_type')||null, preferred_date:val('preferred_date')||null,
+      time_slot:val('time_slot')||null, notes:val('notes')||null
+    })});
+    var d=await r.json();
+    if(!r.ok) throw new Error(d.error||'Could not submit');
+    document.getElementById('card').innerHTML='<div class="done">✓ Thank you, '+name.replace(/[<>&]/g,'')+'!<br/><span style="font-weight:400;font-size:14px">Your request is in. We will call or text to confirm your appointment.</span></div>';
+  }catch(e){ btn.disabled=false; btn.textContent='Request appointment'; err.textContent=e.message; err.style.display='block'; }
+});
+</script>
+</body>
+</html>

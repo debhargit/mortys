@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Department store · Morty's Auto Parts</title>
 <link rel="stylesheet" href="/assets/books.css">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
 <style>
   header{background:#0f172a}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px 12px}
@@ -21,6 +21,7 @@
   .bar{display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:8px}
   .bar label{font-size:12px;color:var(--muted);display:block}
 </style>
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
 <header><h1>🏬 Department store</h1><nav>
@@ -38,7 +39,7 @@
 </main>
 <div id="modal"></div>
 <div class="toast" id="toast"></div>
-<script src="/assets/books-common.js?v=20261019"></script>
+<script src="/assets/books-common.js?v=20261103"></script>
 <script>
 (function () {
   'use strict';
@@ -111,8 +112,8 @@
       if (val('m_default') && !l.is_default) body.is_default = true;
       api('/api/deptstore/locations/' + id, { method: 'PATCH', body: body }).then(function () { toast('Saved'); close(); stores(); }).catch(fail);
     };
-    if ($('#m_del')) $('#m_del').onclick = function () {
-      if (!confirm('Delete ' + l.name + '? Only possible when it holds no stock.')) return;
+    if ($('#m_del')) $('#m_del').onclick = async function () {
+      if (!(await vasConfirm('Delete ' + l.name + '? Only possible when it holds no stock.'))) return;
       api('/api/deptstore/locations/' + id, { method: 'DELETE' }).then(function () { toast('Deleted'); close(); stores(); }).catch(fail);
     };
   }

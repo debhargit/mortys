@@ -725,7 +725,7 @@ exports.register = function register(app, deps) {
       const v = all[k]; if (v == null || v === '') return '<span class="blank">&nbsp;</span>';
       return esc(v).replace(/\n/g, '<br>');
     });
-    return '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(tpl.title) + ' ' + esc(auto.number || '') + '</title><style>' +
+    return '<!doctype html><html><head><meta charset="utf-8"><link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml"><link rel="icon" href="/favicon.ico?v=vision2" sizes="any"><link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2"><title>' + esc(tpl.title) + ' ' + esc(auto.number || '') + '</title><style>' +
       'body{font-family:Arial,Helvetica,sans-serif;color:#111;max-width:760px;margin:24px auto;padding:0 24px;line-height:1.5}' +
       '.hd{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #d61f2b;padding-bottom:8px;margin-bottom:18px}' +
       '.hd b{font-size:18px}.hd small{color:#555}h1{font-size:20px;margin:10px 0}h2{font-size:16px}table{border-collapse:collapse;width:100%;margin:10px 0}' +

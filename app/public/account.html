@@ -93,10 +93,11 @@
     th,td{padding:8px 10px;font-size:12px}
   }
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b"></script>
 </head>
 <body>
 
@@ -518,7 +519,7 @@ async function renderAddresses(panel){
     '</div>';
   panel.querySelectorAll('[data-rmma]').forEach(function(b){
     b.addEventListener('click', async function(){
-      if (!confirm('Delete this address?')) return;
+      if (!(await vasConfirm('Delete this address?'))) return;
       await api('/api/my-addresses/' + b.dataset.rmma, { method:'DELETE' });
       show('addresses');
     });
@@ -536,7 +537,7 @@ async function addMyAddress(){
     is_default: document.getElementById('maDef').checked,
   };
   try { await api('/api/my-addresses', { method:'POST', body: body }); show('addresses'); }
-  catch(e){ alert(e.message); }
+  catch(e){ await vasAlert(e.message); }
 }
 
 async function renderChat(panel){
@@ -566,7 +567,7 @@ async function renderChat(panel){
 }
 async function sendMyMsg(){
   try { await api('/api/my-messages', { method:'POST', body:{ body: document.getElementById('chatInput').value } }); document.getElementById('chatInput').value = ''; show('chat'); }
-  catch(e){ alert(e.message); }
+  catch(e){ await vasAlert(e.message); }
 }
 
 async function renderVehicles(panel){
@@ -600,7 +601,7 @@ async function renderVehicles(panel){
     }).join('') + '</tbody></table>';
   panel.querySelectorAll('[data-vid]').forEach(function(b){
     b.addEventListener('click', async function(){
-      if (!confirm('Delete this saved vehicle?')) return;
+      if (!(await vasConfirm('Delete this saved vehicle?'))) return;
       await api('/api/vehicles/' + b.dataset.vid, { method:'DELETE' });
       show('vehicles');
     });
@@ -618,7 +619,7 @@ async function addVehicle(){
   try {
     await api('/api/vehicles', { method:'POST', body: body });
     show('vehicles');
-  } catch(e){ alert('Could not save: ' + e.message); }
+  } catch(e){ await vasAlert('Could not save: ' + e.message); }
 }
 
 async function saveProfile(){
@@ -692,14 +693,14 @@ async function addPasskey(){
     var opt=await api("/api/auth/passkey/register-options",{method:"POST",body:{}});
     var cred=await navigator.credentials.create({ publicKey:{ challenge:b64uToBuf(opt.challenge), rp:opt.rp, user:{id:b64uToBuf(opt.user.id),name:opt.user.name,displayName:opt.user.displayName}, pubKeyCredParams:opt.pubKeyCredParams, authenticatorSelection:opt.authenticatorSelection, timeout:opt.timeout, excludeCredentials:(opt.excludeCredentials||[]).map(function(c){return {type:c.type,id:b64uToBuf(c.id)};}) } });
     await api("/api/auth/passkey/register",{method:"POST",body:{credential:credForServer(cred),label:(navigator.platform||"Passkey")}});
-    alert("Passkey added. Next time you can sign in with it, no password needed.");
-  } catch(e){ if(e.name==="NotAllowedError") return; alert(e.message||"Could not add the passkey."); }
+    await vasAlert("Passkey added. Next time you can sign in with it, no password needed.");
+  } catch(e){ if(e.name==="NotAllowedError") return; await vasAlert(e.message||"Could not add the passkey."); }
 }
 async function forgotPassword(){
   var email=(document.getElementById("acEmail").value||"").trim();
-  if(!email){ email=prompt("Enter your account email and we will send a reset link:")||""; email=email.trim(); if(!email) return; document.getElementById("acEmail").value=email; }
+  if(!email){ email=(await vasPrompt("Enter your account email and we will send a reset link:"))||""; email=email.trim(); if(!email) return; document.getElementById("acEmail").value=email; }
   var err=document.getElementById("signinErr"); err.classList.remove("show");
-  try { var r=await api("/api/auth/request-reset",{method:"POST",body:{email:email}}); alert(r.message||"If that email has an account, a reset link is on its way."); if(r.dev_link) location.href=r.dev_link; }
+  try { var r=await api("/api/auth/request-reset",{method:"POST",body:{email:email}}); await vasAlert(r.message||"If that email has an account, a reset link is on its way."); if(r.dev_link) location.href=r.dev_link; }
   catch(e){ err.textContent=e.message||"Could not send the reset link."; err.classList.add("show"); }
 }
 loadProviders();

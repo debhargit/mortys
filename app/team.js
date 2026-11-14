@@ -848,6 +848,8 @@ function register(app, deps) {
     }
     return out;
   }
+  // Other modules (dayplan.js) add their own items to a person's calendar.
+  const extraSources = [];
   app.get('/api/team/events', requireAdmin, async (req, res) => {
     try {
       const from = new Date(String(req.query.from || '')), to = new Date(String(req.query.to || ''));
@@ -883,6 +885,7 @@ function register(app, deps) {
               WHERE x.application_id = a.id AND x.status = 'scheduled')`, [from, to, me(req)]).catch(() => ({ rows: [] }));   // already on my calendar as the interview's event
         for (const i of iv) extra.push({ source: 'interview', id: 'iv-' + i.id, title: 'Interview: ' + (i.name || 'applicant') + (i.title ? ' (' + i.title + ')' : ''), start: iso(i.interview_at), end: iso(new Date(new Date(i.interview_at).getTime() + 45 * 60000)), kind: 'meeting', link: '/hiring.html' });
       }
+      for (const f of extraSources) { try { extra.push(...(await f(req, from, to))); } catch (_) {} }
       res.json({ events, extra });
     } catch (e) { fail(res, e); }
   });
@@ -1280,7 +1283,7 @@ function register(app, deps) {
   }
   setTimeout(retention, 90000).unref(); setInterval(retention, 6 * 3600000).unref();
 
-  return { notice, emit, online };
+  return { notice, emit, online, useExtra(fn) { extraSources.push(fn); } };
 }
 
 module.exports = { register };

@@ -16,6 +16,7 @@
   .note{white-space:pre-wrap}
   .mono{font-family:ui-monospace,Consolas,monospace;font-size:12px}
   details summary{cursor:pointer}
+  .rhsteps{padding-left:22px} .rhsteps li{margin:8px 0;line-height:1.5}
   /* network map */
   #nmSvg{width:100%;height:auto;display:block;background:radial-gradient(circle at 50% 52%,rgba(37,99,235,.07),transparent 60%);border-radius:12px}
   .nml{fill:none;stroke-width:2.2} .nml.up{stroke:#16a34a;opacity:.55} .nml.down{stroke:#dc2626;stroke-dasharray:7 6} .nml.unknown{stroke:#f59e0b;opacity:.7} .nml.idle{stroke:#94a3b8;stroke-dasharray:3 6;opacity:.7}
@@ -30,10 +31,11 @@
   .nmd.up{background:#16a34a} .nmd.down{background:#dc2626} .nmd.unknown{background:#f59e0b} .nmd.idle{background:#94a3b8}
   @media (prefers-color-scheme: dark){ .nmn.down .nmc{fill:#450a0a} .nmn.unknown .nmc{fill:#422006} }
 </style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=vision2" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<script src="/assets/vas-ui.js?v=20261110b" data-chrome="page"></script>
 </head>
 <body>
 <header><h1>🛡 System management</h1><nav><a href="/security.html">Sign-in security</a><a href="/terminal.html">Terminals</a><a href="/admin.html">Admin</a></nav></header>
@@ -43,8 +45,12 @@
 </main>
 <div id="modal"></div>
 <div class="toast" id="toast"></div>
-<script src="/assets/books-common.js?v=20261019"></script>
+<script src="/assets/books-common.js?v=20261103"></script>
 <script src="/assets/doc-attach.js"></script>
+<script src="/assets/shared-resources-ui.js?v=20261106"></script>
+<script src="/assets/device-access-ui.js?v=20261106"></script>
+<script src="/assets/remote-help.js?v=20261105"></script>
+<script src="/assets/sys-net.js?v=20261113c"></script>
 <script>
 (function () {
   'use strict';
@@ -57,11 +63,14 @@
   function field(id, label, value, type, extra) { return '<div><label for="' + id + '">' + label + '</label><input id="' + id + '" type="' + (type || 'text') + '" value="' + esc(value == null ? '' : value) + '"' + (extra || '') + '></div>'; }
   function sel(id, label, opts, value) { return '<div><label for="' + id + '">' + label + '</label><select id="' + id + '">' + opts.map(function (o) { o = Array.isArray(o) ? o : [o, o.replace(/_/g, ' ')]; return '<option value="' + esc(o[0]) + '"' + (String(o[0]) === String(value == null ? '' : value) ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select></div>'; }
   function area(id, label, value, rows) { return '<div style="grid-column:1/-1"><label for="' + id + '">' + label + '</label><textarea id="' + id + '" rows="' + (rows || 3) + '">' + esc(value || '') + '</textarea></div>'; }
-  function confirmBox(text, yes) { modal('<h2>Please confirm</h2><p>' + esc(text) + '</p><div class="controls"><button class="primary" id="y">Yes</button><button id="x">Cancel</button></div>'); $('#x').onclick = close; $('#y').onclick = function () { close(); yes(); }; }
+  // Both are the program's shared windows (assets/vas-ui.js).
+  function confirmBox(text, yes) { vasConfirm(text, { ok: 'Yes' }).then(function (ok) { if (ok) { close(); yes(); } }); }
   function reasonBox(title, text, done) {
-    modal('<h2>' + esc(title) + '</h2><p>' + esc(text) + '</p><input id="why" style="width:100%"><div class="controls" style="margin-top:10px"><button class="primary" id="y">Go ahead</button><button id="x">Cancel</button></div>');
-    $('#x').onclick = close; $('#why').focus();
-    $('#y').onclick = function () { var w = val('why').trim(); if (!w) return toast('Give a reason'); close(); done(w); };
+    vasPrompt(text, '', { title: title, ok: 'Go ahead', placeholder: 'Reason' }).then(function (w) {
+      if (w == null) return;
+      w = w.trim(); if (!w) { toast('Give a reason'); return reasonBox(title, text, done); }
+      close(); done(w);
+    });
   }
   var staffOpts = function (sel1) { return '<option value="">—</option>' + staff.map(function (s) { return '<option value="' + s.id + '"' + (String(s.id) === String(sel1) ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join(''); };
   var nameOf = function (id) { var s = staff.find(function (x) { return x.id === id; }); return s ? s.name : ''; };
@@ -71,10 +80,13 @@
       me = m;
       var t = [];
       if (m.audit || m.security || m.support) t.push(['home', 'Overview']);
-      if (m.raise || m.support) t.push(['help', m.support ? 'Help desk' : 'IT help']);
+      if (m.raise || m.support) t.push(['help', m.support ? 'Help desk' : 'IT help'], ['remote', 'Remote help']);
+      if (m.support) t.push(['shared', 'Shared resources']);
       if (m.support) t.push(['assets', 'Equipment'], ['changes', 'Change log'], ['health', 'System health']);
-      if (m.security) t.push(['threats', 'Threats'], ['security', 'Security'], ['incidents', 'Incidents'], ['risks', 'Risks']);
+      if (m.security) t.push(['devices', 'Device access'], ['threats', 'Threats'], ['security', 'Security'], ['incidents', 'Incidents'], ['risks', 'Risks']);
       if (m.network) t.push(['network', 'Network']);
+      if (m.support || m.network || m.security) t.push(['terminals', 'Terminals']);
+      if (m.security || m.audit) t.push(['website', 'Website']);
       if (m.audit) t.push(['audit', 'Audit trail'], ['exceptions', 'Audit exceptions'], ['access', 'Access reviews']);
       if (!t.length) { $('#out').innerHTML = '<div class="card empty">Your account has no system-management or IT-help access.</div>'; return; }
       $('#tabs').innerHTML = t.map(function (x) { return '<button data-t="' + x[0] + '">' + x[1] + '</button>'; }).join('');
@@ -85,8 +97,8 @@
   }
   function mark() { all('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); }); history.replaceState(null, '', '#' + tab); }
   function show() {
-    mark(); $('#out').innerHTML = '<div class="empty">Loading…</div>';
-    ({ home: home, help: help, assets: assets, changes: changes, health: health, security: security, incidents: incidents, audit: auditTrail, exceptions: exceptionsTab, access: access, threats: threats, risks: risks, network: network }[tab] || home)();
+    mark(); if (window.SharedRes) SharedRes.stop(); if (window.RemoteHelp) RemoteHelp.stop(); if (window.SysNet) SysNet.stop(); $('#out').innerHTML = '<div class="empty">Loading…</div>';
+    ({ home: home, help: help, assets: assets, changes: changes, health: health, security: security, incidents: incidents, audit: auditTrail, exceptions: exceptionsTab, access: access, threats: threats, risks: risks, network: network, devices: function () { DeviceAccess.show($('#out')); }, remote: function () { RemoteHelp.show($('#out'), { ticketId: show.ticketId }); show.ticketId = undefined; }, shared: function () { SharedRes.show($('#out'), { hash: 'shared' }); }, terminals: function () { SysNet.terminals($('#out')); }, website: function () { SysNet.website($('#out')); } }[tab] || home)();
   }
 
   // ------------------------------------------------------------ overview --
@@ -101,6 +113,8 @@
         '<div class="tile click" data-go="help"><span class="k">Waiting for a technician</span><b>' + d.tickets.unassigned + '</b></div>',
         '<div class="tile"><span class="k">Average fix time (30 d)</span><b>' + (d.tickets.avg_fix_h == null ? '—' : d.tickets.avg_fix_h + ' h') + '</b></div>',
         '<div class="tile click' + (d.warranty_soon ? ' bad' : '') + '" data-go="assets"><span class="k">Warranties ending in 60 d</span><b>' + d.warranty_soon + '</b></div>');
+      if (d.remote && (d.remote.waiting || d.remote.connected)) tiles.push('<div class="tile click' + (d.remote.waiting ? ' bad' : '') + '" data-go="remote"><span class="k">Remote help waiting (connected)</span><b>' + d.remote.waiting + ' (' + d.remote.connected + ')</b></div>');
+      if (d.sharing && (d.sharing.failed || d.sharing.offline)) tiles.push('<div class="tile click bad" data-go="shared"><span class="k">Shared resources: failed jobs (24 h) / PCs offline</span><b>' + d.sharing.failed + ' / ' + d.sharing.offline + '</b></div>');
       if (d.audit) tiles.push('<div class="tile click' + (d.chain_ok ? '' : ' bad') + '" data-go="audit"><span class="k">Audit log</span><b>' + (d.chain_ok ? 'Intact' : 'TAMPERED') + '</b></div>',
         '<div class="tile click" data-go="exceptions"><span class="k">Last audit review</span><b>' + esc(d.last_audit_review || 'never') + '</b></div>',
         '<div class="tile click" data-go="access"><span class="k">Last access review</span><b>' + esc(d.last_access_review || 'never') + '</b></div>');
@@ -145,8 +159,10 @@
             area('ur', 'How it was fixed (needed to resolve)', t.resolution, 2) + '</div><div class="controls" style="margin-top:8px"><button class="primary" id="usv">Save</button>' + (t.asset_id ? '<button id="umt">Log a repair on the device</button>' : '') + '</div>' : '') +
         (mine && t.status === 'resolved' ? '<div class="note warn" style="margin-top:8px">IT says this is fixed. Is it? <select id="rate"><option value="">Rate the help…</option><option>5</option><option>4</option><option>3</option><option>2</option><option>1</option></select> <button class="sm primary" id="yes">Yes, fixed</button> <button class="sm" id="no">No, still broken</button></div>' : '') + '</div>' +
         '<div class="card"><h2>Conversation</h2>' + (d.notes.length ? d.notes.map(function (x) { return '<div class="note ' + (x.internal ? 'warn' : 'info') + '"><b>' + esc(x.user_name || '') + '</b> <small>' + dt(x.created_at) + (x.internal ? ' · IT only' : '') + '</small><br>' + esc(x.body) + '</div>'; }).join('') : '<div class="empty">No messages yet.</div>') +
-        '<textarea id="nb" rows="3" style="width:100%" placeholder="Write a message"></textarea><div class="controls" style="margin-top:6px"><button id="nadd">Send</button>' + (d.support ? '<label class="chk"><input type="checkbox" id="nint"> IT-only note</label>' : '') + '</div></div>';
+        '<textarea id="nb" rows="3" style="width:100%" placeholder="Write a message"></textarea><div class="controls" style="margin-top:6px"><button id="nadd">Send</button>' + (d.support && ['resolved', 'closed'].indexOf(t.status) < 0 ? '<button id="rreq">Ask to connect remotely</button>' : '') + (['resolved', 'closed'].indexOf(t.status) < 0 && t.requester_id === me.user_id ? '<button id="rshare">Share my screen with IT</button>' : '') + (d.support ? '<label class="chk"><input type="checkbox" id="nint"> IT-only note</label>' : '') + '</div></div>';
       $('#bk').onclick = help;
+      if ($('#rreq')) $('#rreq').onclick = function () { api('/api/sys/tickets/' + id + '/remote-request', 'POST', {}).then(function () { toast('Asked them to share their screen'); ticket(id); }).catch(fail); };
+      if ($('#rshare')) $('#rshare').onclick = function () { tab = 'remote'; show.ticketId = id; show(); };
       $('#nadd').onclick = function () { api('/api/sys/tickets/' + id + '/notes', 'POST', { body: val('nb'), internal: val('nint') }).then(function () { ticket(id); }).catch(fail); };
       if ($('#usv')) $('#usv').onclick = function () { api('/api/sys/tickets/' + id, 'PUT', { status: val('us'), priority: val('up'), assignee_id: val('ua'), category: val('uc'), asset_id: val('uas'), resolution: val('ur') }).then(function () { toast('Saved'); ticket(id); }).catch(fail); };
       if ($('#umt')) $('#umt').onclick = function () { maintenanceBox(t.asset_id, id, function () { ticket(id); }); };

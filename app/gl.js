@@ -17,8 +17,12 @@
 //                    Dr sales discounts; Dr COGS / Cr inventory at cost-at-sale
 //    sale_payment    Dr cash / cheques / card clearing / gift cards; Cr A/R
 //    sale_void       reverses the sale and its payments
-//    return          Dr sales returns, GCT; Cr discounts, refund account;
-//                    Dr inventory / Cr COGS for the units that came back
+//    return          the sale backwards: Dr sales returns, GCT; Cr discounts,
+//                    restocking fees, A/R; Dr inventory / Cr COGS for the units
+//                    that came back, at the cost they left at
+//    return_refund   Dr A/R; Cr cash drawer / card / bank / gift cards (credit
+//                    left on the customer's account posts nothing more)
+//    return_void, return_refund_void   reverse them
 //    account_payment Dr payment account; Cr A/R
 //    receipt         Dr inventory (landed); Cr GRNI (goods), landed-cost
 //                    accrual (freight, duty, ...); Dr supplier claims (damaged)
@@ -41,6 +45,17 @@
 //    commission      commission paid out
 //    ar_invoice      invoices raised on the books (rent, late fees): Dr A/R;
 //                    Cr the lines' income accounts, GCT
+//    work_order      a work order billed: Dr A/R; Cr labour, parts, GCT; taken
+//                    back (work_order_unbill) it is reversed
+//    wo_payment      paid at the service desk: Dr safe (cash) / bank / card;
+//                    Cr A/R; a voided payment is reversed (wo_payment_void)
+//    fa_acquire      a fixed asset bought outside the ledger or owned before
+//                    it: Dr cost; Cr accumulated depreciation to date and the
+//                    account paid from / Opening Balance Equity
+//    fa_run          a month's depreciation: Dr expense; Cr accumulated
+//    fa_dispose      sold or scrapped: Dr accumulated, proceeds; Cr cost; the
+//                    rest to gain / loss on disposal (each with a _void)
+//  Coverage (/api/gl/coverage) checks that every document reaches the chart.
 //  Classes (QuickBooks class tracking, gl_classes): each line may carry one.
 //  Till documents take their store location's class; bills, invoices, bank
 //  and journal lines carry the class picked on the line; reversals keep theirs.
@@ -130,10 +145,31 @@ function register(app, deps) {
     const id = rows[0].id;
     await c.query(`UPDATE gl_entries SET number = 'JE-' || lpad(id::text, 6, '0') WHERE id = $1`, [id]);
     for (const l of lines) {
-      await c.query(`INSERT INTO gl_lines (entry_id, account_id, amount, party, memo, class_id) VALUES ($1,$2,$3,$4,$5,$6)`,
-        [id, l.a, l.amt, l.party || null, l.memo ? String(l.memo).slice(0, 200) : null, (l.cls === undefined ? e.cls : l.cls) || null]);
+      await c.query(`INSERT INTO gl_lines (entry_id, account_id, amount, party, memo, class_id, asset_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [id, l.a, l.amt, l.party || null, l.memo ? String(l.memo).slice(0, 200) : null, (l.cls === undefined ? e.cls : l.cls) || null, (l.fa === undefined ? e.fa : l.fa) || null]);
     }
     return id;
+  }
+
+  // Petty cash vouchers (petty-voucher.js). A till payout or petty cash fund
+  // payout made for a voucher posts each voucher line to the account picked on
+  // it (no account: Till Payouts and Petty Expenses); the cash side stays the
+  // drawer or Petty Cash. Not a voucher (or no voucher tables yet): null.
+  async function voucherSplit(c, ch, via, id, amt, crAcct, cls, at, tail) {
+    const { rows: ok } = await c.query(`SELECT to_regclass('petty_voucher_lines') IS NOT NULL AS t,
+        EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'till_tasks' AND column_name = 'voucher_id') AS c`);
+    if (!ok[0].t || (via === 'task' && !ok[0].c)) return null;
+    const { rows } = await c.query(via === 'task'
+      ? `SELECT v.id, v.number, v.payee_name FROM till_tasks t JOIN petty_vouchers v ON v.id = t.voucher_id WHERE t.movement_id = $1 AND t.kind = 'payout' LIMIT 1`
+      : `SELECT v.id, v.number, v.payee_name FROM petty_vouchers v WHERE v.payout_id = $1 LIMIT 1`, [id]);
+    if (!rows.length) return null;
+    const v = rows[0], party = v.payee_name ? String(v.payee_name).trim().slice(0, 41) : null;
+    const { rows: ls } = await c.query(`SELECT account_id, amount, qty, detail FROM petty_voucher_lines WHERE voucher_id = $1 ORDER BY line_no, id`, [v.id]);
+    if (!ls.length) return null;
+    const lines = ls.map((l) => ({ a: l.account_id && ch.byId[l.account_id] ? l.account_id : ch.acct('petty_expense'), amt: n(l.amount), party,
+      memo: (n(l.qty) !== 1 ? n(l.qty) + ' x ' : '') + (l.detail || '') }));
+    lines.push({ a: crAcct, amt: -amt });
+    return { book: 'cash', at, ref: v.number, cls, memo: 'Petty cash voucher ' + v.number + (party ? ' · ' + party : '') + (tail || ''), lines };
   }
 
   // ------------------------------------------------------------ posters --
@@ -183,26 +219,32 @@ function register(app, deps) {
         `SELECT e.id FROM gl_entries e WHERE e.reversed_by IS NULL AND ((e.source_kind = 'sale' AND e.source_id = $1)
             OR (e.source_kind = 'sale_payment' AND e.source_id IN (SELECT id FROM sale_payments WHERE sale_id = $1)))`, [id]);
       if (!orig.length) return null;
-      const { rows: ls } = await c.query(`SELECT account_id, amount, party, memo, class_id FROM gl_lines WHERE entry_id = ANY($1::bigint[])`, [orig.map((o) => o.id)]);
+      const { rows: ls } = await c.query(`SELECT account_id, amount, party, memo, class_id, asset_id FROM gl_lines WHERE entry_id = ANY($1::bigint[])`, [orig.map((o) => o.id)]);
       return { book: 'sales', at: s[0].voided_at || new Date(), ref: s[0].receipt_number, memo: 'Void of sale ' + s[0].receipt_number,
-        lines: ls.map((l) => ({ a: l.account_id, amt: -n(l.amount), party: l.party, memo: l.memo, cls: l.class_id })), reversesAll: orig.map((o) => o.id) };
+        lines: ls.map((l) => ({ a: l.account_id, amt: -n(l.amount), party: l.party, memo: l.memo, cls: l.class_id, fa: l.asset_id })), reversesAll: orig.map((o) => o.id) };
     },
 
+    // A return is the sale's entry backwards: the customer is owed the credit
+    // (Cr A/R), the goods and GCT come back off sales, and the units go back
+    // into stock at the cost they left at. A restocking fee kept by the shop is
+    // income. How the credit was given back is posted separately (return_refund),
+    // the same way a sale and its payments are.
     async return(c, ch, id) {
       const { rows } = await c.query(
-        `SELECT r.*, s.receipt_number, s.customer_name, s.customer_id, s.location_id FROM pos_sale_returns r JOIN pos_sales s ON s.id = r.sale_id WHERE r.id = $1`, [id]);
+        `SELECT r.*, s.receipt_number, COALESCE(r.customer_name, s.customer_name) AS c_name, COALESCE(r.customer_id, s.customer_id) AS c_id, COALESCE(r.location_id, s.location_id) AS loc
+           FROM pos_sale_returns_all r LEFT JOIN pos_sales s ON s.id = r.sale_id WHERE r.id = $1`, [id]);
       if (!rows.length) return null;
-      const r = rows[0], party = custParty(r.customer_name, r.customer_id);
-      const refundAcct = ['account', 'charge'].includes(r.refund_method) ? ch.acct('ar') : ch.mapped('pay_method', r.refund_method, 'suspense');
+      const r = rows[0], party = custParty(r.c_name, r.c_id);
       const lines = [
-        { a: ch.acct('sales_returns'), amt: n(r.refund_subtotal_usd), memo: r.return_number },
+        { a: ch.acct('sales_returns'), amt: n(r.refund_subtotal_usd), party, memo: r.return_number },
         { a: ch.acct('sales_discounts'), amt: -n(r.refund_discount_usd) },
         { a: ch.acct('gct'), amt: n(r.refund_tax_usd) },
-        { a: refundAcct, amt: -n(r.refund_total_usd), party: refundAcct === ch.acct('ar') ? party : null, memo: 'Refund ' + r.refund_method },
+        { a: ch.byKey.restocking_fees || ch.acct('sales'), amt: -n(r.restock_fee_usd), memo: 'Restocking fee ' + r.return_number },
+        { a: ch.acct('ar'), amt: -n(r.refund_total_usd), party, memo: r.return_number },
       ];
       const { rows: items } = await c.query(
-        `SELECT ri.qty, p.category, p.img AS p_img, p.cogs_account_id, COALESCE(si.unit_cost, p.cost_usd, 0) AS cost
-           FROM pos_sale_return_items ri JOIN pos_sale_items si ON si.id = ri.sale_item_id LEFT JOIN products p ON p.img = si.product_img
+        `SELECT ri.qty, p.category, p.img AS p_img, p.cogs_account_id, COALESCE(ri.unit_cost, si.unit_cost, p.cost_usd, 0) AS cost
+           FROM pos_sale_return_items ri LEFT JOIN pos_sale_items si ON si.id = ri.sale_item_id LEFT JOIN products p ON p.img = COALESCE(ri.product_img, si.product_img)
           WHERE ri.return_id = $1`, [id]);
       for (const it of items) {
         const cost = r2(n(it.qty) * n(it.cost));
@@ -211,15 +253,37 @@ function register(app, deps) {
           lines.push({ a: it.cogs_account_id || ch.mapped('cogs_category', it.category, 'cogs'), amt: -cost });
         }
       }
-      return { book: 'sales', at: r.created_at, ref: r.return_number, memo: 'Return ' + r.return_number + ' on ' + r.receipt_number, lines, cls: ch.locClass(r.location_id) };
+      return { book: 'sales', at: r.created_at, ref: r.return_number, cls: ch.locClass(r.loc),
+        memo: 'Return ' + r.return_number + (r.receipt_number ? ' on ' + r.receipt_number : ' (no receipt)') + (party !== 'Cash Sales' ? ' · ' + party : ''), lines };
     },
+
+    // Giving the credit back: cash from the drawer, card, a cheque or transfer
+    // from the bank, or store credit (a gift card the shop now owes). Credit
+    // left on the customer's account moves no money and posts nothing: it is
+    // already in A/R from the return itself.
+    async return_refund(c, ch, id) {
+      const { rows } = await c.query(
+        `SELECT st.*, r.return_number, COALESCE(r.customer_name, s.customer_name) AS c_name, COALESCE(r.customer_id, s.customer_id) AS c_id, COALESCE(r.location_id, s.location_id) AS loc
+           FROM pos_return_settlements st JOIN pos_sale_returns_all r ON r.id = st.return_id LEFT JOIN pos_sales s ON s.id = r.sale_id WHERE st.id = $1`, [id]);
+      if (!rows.length || rows[0].method === 'account') return null;
+      const x = rows[0], party = custParty(x.c_name, x.c_id);
+      const from = x.method === 'cheque' ? ch.acct('bank') : ch.mapped('pay_method', x.method, 'suspense');
+      return { book: 'sales', at: x.created_at, ref: x.return_number, cls: ch.locClass(x.loc),
+        memo: (x.kind === 'credit_refund' ? 'Account credit paid out ' : 'Refund ') + x.method.replace('_', ' ') + ' on ' + x.return_number,
+        lines: [{ a: ch.acct('ar'), amt: n(x.amount_usd), party, memo: x.return_number },
+                { a: from, amt: -n(x.amount_usd), memo: x.method === 'store_credit' ? 'Store credit ' + (x.gift_card_code || '') : x.method }] };
+    },
+    async return_void(c, ch, id) { return reversal(c, 'return', id, `SELECT voided_at AS at, void_reason FROM pos_sale_returns_all WHERE id = $1`); },
+    async return_refund_void(c, ch, id) { return reversal(c, 'return_refund', id, `SELECT voided_at AS at, void_reason FROM pos_return_settlements WHERE id = $1`); },
 
     async account_payment(c, ch, id) {
       const { rows } = await c.query(`SELECT a.*, to_char(a.paid_on, 'YYYY-MM-DD') AS paid_day, u.name, u.default_class_id FROM account_payments a LEFT JOIN users u ON u.id = a.customer_id WHERE a.id = $1`, [id]);
       if (!rows.length) return null;
       const p = rows[0], party = custParty(p.name, p.customer_id);
-      return { book: 'sales', at: p.paid_day ? p.paid_day + 'T12:00:00-05:00' : p.created_at, ref: p.reference, memo: 'Account payment · ' + party, cls: p.default_class_id,
-        lines: [{ a: p.deposit_account_id || ch.mapped('pay_method', p.method, 'suspense'), amt: n(p.amount_usd) }, { a: ch.acct('ar'), amt: -n(p.amount_usd), party }] };
+      // A bad debt written off settles the balance like a payment but costs the business: Dr Bad Debts.
+      const off = p.method === 'writeoff';
+      return { book: 'sales', at: p.paid_day ? p.paid_day + 'T12:00:00-05:00' : p.created_at, ref: p.reference, memo: (off ? 'Bad debt written off · ' : 'Account payment · ') + party, cls: p.default_class_id,
+        lines: [{ a: off ? ch.acct('bad_debt') : p.deposit_account_id || ch.mapped('pay_method', p.method, 'suspense'), amt: n(p.amount_usd), memo: off ? p.notes : undefined }, { a: ch.acct('ar'), amt: -n(p.amount_usd), party }] };
     },
 
     async receipt(c, ch, id) {
@@ -265,7 +329,7 @@ function register(app, deps) {
       if (!rows.length) return null;
       const p = rows[0], party = (p.supplier || 'Supplier').slice(0, 41);
       return { book: 'purchases', at: p.paid_day ? p.paid_day + 'T12:00:00-05:00' : p.created_at, ref: p.reference || p.po_number, memo: 'Paid ' + party + ' · ' + p.po_number,
-        lines: [{ a: ch.acct('ap'), amt: n(p.amount_usd), party }, { a: ch.mapped('pay_out_method', p.method, 'bank'), amt: -n(p.amount_usd), memo: p.method }] };
+        lines: [{ a: ch.acct('ap'), amt: n(p.amount_usd), party }, { a: p.card_account_id || ch.mapped('pay_out_method', p.method, 'bank'), amt: -n(p.amount_usd), memo: p.method }] };
     },
 
     async till_open(c, ch, id) {
@@ -284,6 +348,10 @@ function register(app, deps) {
         : m.kind === 'payout' ? [ch.mapped('till_payout', m.reason, 'petty_expense'), ch.acct('cash_drawers')]
         : m.kind === 'float_in' ? [ch.acct('cash_drawers'), ch.acct('cash_safe')] : null;
       if (!pair) return null;
+      if (m.kind === 'payout') {
+        const pv = await voucherSplit(c, ch, 'task', id, amt, ch.acct('cash_drawers'), ch.locClass(m.location_id), m.created_at, ', paid out of the drawer (shift ' + m.session_id + ')');
+        if (pv) return pv;
+      }
       return { book: 'cash', at: m.created_at, ref: 'Shift ' + m.session_id, cls: ch.locClass(m.location_id), memo: { drop: 'Cash drop to safe', payout: 'Paid out of drawer', float_in: 'Float added' }[m.kind] + (m.reason ? ': ' + m.reason : ''),
         lines: [{ a: pair[0], amt }, { a: pair[1], amt: -amt }] };
     },
@@ -311,6 +379,10 @@ function register(app, deps) {
       const topUp = p.source_type === 'drawer' && p.fund_id && !p.category_id && !p.is_advance;
       const dr = topUp ? ch.acct('petty_cash') : p.is_advance ? ch.acct('staff_loans') : ch.mapped('till_payout', p.category || p.reason, 'petty_expense');
       const cr = p.source_type === 'fund' ? ch.acct('petty_cash') : ch.acct('cash_drawers');
+      if (!topUp && !p.is_advance) {
+        const pv = await voucherSplit(c, ch, 'payout', id, amt, cr, undefined, p.created_at, ', paid out of ' + (p.source_type === 'fund' ? 'petty cash' + (p.fund ? ' (' + p.fund + ')' : '') : 'the drawer'));
+        if (pv) return pv;
+      }
       const who = String((p.is_advance ? p.advance_to : p.paid_to) || '').slice(0, 41) || null;
       const memo = topUp ? 'Petty cash top-up from the drawer' + (p.fund ? ' (' + p.fund + ')' : '')
         : (p.is_advance ? 'Staff advance' : 'Paid out of ' + (p.source_type === 'fund' ? 'petty cash' + (p.fund ? ' (' + p.fund + ')' : '') : 'the drawer')) + ': ' + (p.category ? p.category + ' - ' : '') + p.reason;
@@ -384,8 +456,8 @@ function register(app, deps) {
       const { rows } = await c.query(`SELECT b.*, to_char(b.bill_date, 'YYYY-MM-DD') AS day, s.name AS supplier FROM ap_bills b JOIN suppliers s ON s.id = b.supplier_id WHERE b.id = $1`, [id]);
       if (!rows.length) return null;
       const b = rows[0], party = (b.supplier || 'Supplier').slice(0, 41), sign = b.kind === 'credit' ? -1 : 1;
-      const { rows: ls } = await c.query(`SELECT account_id, amount, description, class_id FROM ap_bill_lines WHERE bill_id = $1 ORDER BY id`, [id]);
-      const lines = ls.map((l) => ({ a: l.account_id, amt: sign * n(l.amount), memo: l.description, party, cls: l.class_id }));
+      const { rows: ls } = await c.query(`SELECT account_id, amount, description, class_id, asset_id FROM ap_bill_lines WHERE bill_id = $1 ORDER BY id`, [id]);
+      const lines = ls.map((l) => ({ a: l.account_id, amt: sign * n(l.amount), memo: l.description, party, cls: l.class_id, fa: l.asset_id }));
       if (n(b.gct_amount)) lines.push({ a: ch.acct('gct_input'), amt: sign * n(b.gct_amount), memo: 'GCT' });
       lines.push({ a: ch.acct('ap'), amt: -sign * n(b.total), party, memo: b.number });
       return { book: 'purchases', at: b.day + 'T12:00:00-05:00', ref: b.number || ((b.kind === 'credit' ? 'Credit ' : 'Bill ') + b.id), memo: (b.kind === 'credit' ? 'Supplier credit ' : 'Supplier bill ') + (b.number || '') + ' · ' + party, lines };
@@ -403,10 +475,10 @@ function register(app, deps) {
       const { rows } = await c.query(`SELECT t.*, to_char(t.txn_date, 'YYYY-MM-DD') AS day FROM bank_txns t WHERE t.id = $1`, [id]);
       if (!rows.length) return null;
       const t = rows[0], payee = t.payee ? String(t.payee).slice(0, 41) : null;
-      const { rows: ls } = await c.query(`SELECT account_id, amount, memo, class_id FROM bank_txn_lines WHERE txn_id = $1 ORDER BY id`, [id]);
+      const { rows: ls } = await c.query(`SELECT account_id, amount, memo, class_id, asset_id FROM bank_txn_lines WHERE txn_id = $1 ORDER BY id`, [id]);
       const out = t.kind === 'deposit' ? 1 : -1;   // the bank side: + money in, - money out
       const lines = [{ a: t.account_id, amt: out * n(t.amount), party: payee, memo: t.cheque_number ? 'Chq ' + t.cheque_number : t.memo }]
-        .concat(ls.map((l) => ({ a: l.account_id, amt: -out * n(l.amount), party: payee, memo: l.memo, cls: l.class_id })));
+        .concat(ls.map((l) => ({ a: l.account_id, amt: -out * n(l.amount), party: payee, memo: l.memo, cls: l.class_id, fa: l.asset_id })));
       const what = { expense: 'Payment', deposit: 'Deposit', transfer: 'Transfer' }[t.kind] || t.kind;
       return { book: 'cash', at: t.day + 'T12:00:00-05:00', ref: t.cheque_number ? 'Chq ' + t.cheque_number : (t.reference || what + ' ' + t.id), memo: what + (payee ? ' · ' + payee : '') + (t.memo ? ' · ' + t.memo : ''), lines };
     },
@@ -417,9 +489,9 @@ function register(app, deps) {
       const { rows } = await c.query(`SELECT i.*, to_char(i.invoice_date, 'YYYY-MM-DD') AS day, u.name FROM ar_invoices i LEFT JOIN users u ON u.id = i.customer_id WHERE i.id = $1`, [id]);
       if (!rows.length) return null;
       const i = rows[0], party = custParty(i.name, i.customer_id);
-      const { rows: ls } = await c.query(`SELECT account_id, amount, description, class_id FROM ar_invoice_lines WHERE invoice_id = $1 ORDER BY id`, [id]);
+      const { rows: ls } = await c.query(`SELECT account_id, amount, description, class_id, asset_id FROM ar_invoice_lines WHERE invoice_id = $1 ORDER BY id`, [id]);
       const lines = [{ a: ch.acct('ar'), amt: n(i.total), party, memo: i.number }]
-        .concat(ls.map((l) => ({ a: l.account_id, amt: -n(l.amount), memo: l.description, party, cls: l.class_id })));
+        .concat(ls.map((l) => ({ a: l.account_id, amt: -n(l.amount), memo: l.description, party, cls: l.class_id, fa: l.asset_id })));
       if (n(i.gct_amount)) lines.push({ a: ch.acct('gct'), amt: -n(i.gct_amount), memo: 'GCT' });
       return { book: 'sales', at: i.day + 'T12:00:00-05:00', ref: i.number, memo: (i.kind === 'late_fee' ? 'Late fee ' : 'Invoice ') + i.number + ' · ' + party, lines };
     },
@@ -446,12 +518,17 @@ function register(app, deps) {
         for (const l of s.lines || []) {
           const contractor = s.snapshot && s.snapshot.worker_type === 'contractor';
           if (l.kind === 'employer') {
+            // A benefit in kind (company vehicle, housing): taxed on the payslip, but nothing is paid to anyone.
+            if (l.notional) continue;
             // Paid by the business for the person: an expense, owed to the insurer / scheme until paid over.
             const pension = /^er_pension/.test(l.code);
             lines.push({ a: acctOf[l.code] || (pension ? ch.acct('pension_expense') : ch.acct('benefits_expense')), amt: n(l.amount), party: who, memo: l.label });
             lines.push({ a: pension ? ch.acct('pension_payable') : ch.acct('payroll_deductions_payable'), amt: -n(l.amount), party: (l.payee || who).slice(0, 41), memo: l.label });
             continue;
           }
+          // Already in the person's hand (cash tips kept): not the business's money, so no
+          // wages for it; net pay already leaves it out, and the tax on it is posted below.
+          if (l.kind === 'earning' && l.received) continue;
           if (l.kind === 'earning') lines.push({ a: acctOf[l.code] || (l.code === 'commission' ? ch.acct('commissions_payable') : contractor ? ch.acct('contract_labour') : ch.acct('wages')), amt: n(l.amount), party: who, memo: l.label });
           else lines.push({ a: acctOf[l.code] || ch.acct('payroll_deductions_payable'), amt: -n(l.amount), party: who, memo: l.label });
         }
@@ -532,15 +609,164 @@ function register(app, deps) {
       if (value - credit) lines.push({ a: ch.acct('inv_adjust'), amt: r2(value - credit), memo: d.claim_status === 'credited' ? 'Credit short of cost' : 'Claim rejected' });
       return { book: 'stock', at: d.resolved_at, ref: 'Claim ' + d.id, memo: 'Supplier claim ' + d.claim_status + ': ' + d.product_img + (d.supplier ? ' (' + d.supplier + ')' : ''), lines };
     },
+
+    // Workshop invoice: a work order billed (work_order_billings). Dr A/R the
+    // total; Cr labour to Sales - Labour and Services, parts to Sales - Parts,
+    // GCT. Parts drawn from stock are costed by the stock ledger (requisition).
+    async work_order(c, ch, id) {
+      const { rows } = await c.query(`SELECT b.*, w.wo_number, w.customer_name, w.customer_user_id FROM work_order_billings b JOIN work_orders w ON w.id = b.work_order_id WHERE b.id = $1`, [id]);
+      if (!rows.length) return null;
+      const b = rows[0], party = custParty(b.customer_name, b.customer_user_id);
+      return { book: 'sales', at: b.created_at, ref: b.wo_number, memo: 'Work order ' + b.wo_number + (party !== 'Cash Sales' ? ' · ' + party : ''),
+        lines: [{ a: ch.acct('ar'), amt: n(b.total), party, memo: b.wo_number },
+                { a: ch.acct('sales_services'), amt: -n(b.labor), party, memo: 'Labour' },
+                { a: ch.acct('sales'), amt: -n(b.parts), party, memo: 'Parts' },
+                { a: ch.acct('gct'), amt: -n(b.tax), memo: 'GCT' }] };
+    },
+    // Billing taken back (status moved back or cancelled): reverse that billing's entry.
+    async work_order_unbill(c, ch, id) {
+      const { rows } = await c.query(`SELECT bill_id FROM work_order_billings WHERE id = $1 AND kind = 'unbill'`, [id]);
+      if (!rows.length || !rows[0].bill_id) return null;
+      return reversal(c, 'work_order', rows[0].bill_id, `SELECT created_at AS at, 'billing taken back' AS void_reason FROM work_order_billings WHERE bill_id = $1 AND kind = 'unbill'`);
+    },
+    // Paid at the service desk: cash to the safe (it is not in a till drawer), others per Posting rules; Cr A/R.
+    async wo_payment(c, ch, id) {
+      const { rows } = await c.query(`SELECT p.*, w.wo_number, w.customer_name, w.customer_user_id FROM work_order_payments_all p JOIN work_orders w ON w.id = p.work_order_id WHERE p.id = $1`, [id]);
+      if (!rows.length) return null;
+      const p = rows[0], party = custParty(p.customer_name, p.customer_user_id), m = String(p.method || '').toLowerCase();
+      return { book: 'sales', at: p.received_at, ref: p.reference || p.wo_number, memo: 'Workshop payment ' + m + ' on ' + p.wo_number,
+        lines: [{ a: m === 'cash' ? ch.acct('cash_safe') : ch.mapped('pay_method', m, 'suspense'), amt: n(p.amount_usd), memo: m },
+                { a: ch.acct('ar'), amt: -n(p.amount_usd), party, memo: p.wo_number }] };
+    },
+    async wo_payment_void(c, ch, id) { return reversal(c, 'wo_payment', id, `SELECT voided_at AS at, void_reason FROM work_order_payments_all WHERE id = $1`); },
+
+    // ---- Fixed assets (assets.js) ----
+    // Bought outside the ledger or owned before it: Dr cost; Cr accumulated
+    // depreciation to date (opening); Cr the account paid from, or Opening
+    // Balance Equity. Dated when acquired, never before the ledger start.
+    async fa_acquire(c, ch, id) {
+      const { rows } = await c.query(`SELECT a.*, to_char(a.acquired_on, 'YYYY-MM-DD') AS day, k.asset_account_id, k.accum_account_id FROM fa_assets a JOIN fa_classes k ON k.id = a.class_id WHERE a.id = $1`, [id]);
+      if (!rows.length || rows[0].funding === 'in_ledger') return null;
+      const a = rows[0], start = await ledgerStartDay(c);
+      const day = start && a.day < start ? start : a.day;
+      const accum = a.accum_account_id ? n(a.opening_accum) : 0;
+      const other = a.funding === 'opening' ? ch.acct('opening_equity') : a.funding_account_id;
+      if (!other) throw new Error('Asset ' + a.number + ': choose the account it was paid from');
+      return { book: 'assets', at: day + 'T12:00:00-05:00', ref: a.number, cls: a.gl_class_id, fa: a.id, memo: 'Fixed asset ' + a.number + ' · ' + a.name + (a.funding === 'opening' ? ' (owned before the ledger)' : ''),
+        lines: [{ a: a.asset_account_id, amt: n(a.cost), memo: a.number + ' cost' },
+                { a: a.accum_account_id, amt: -accum, memo: a.number + ' depreciation to ' + (a.opening_through ? String(a.opening_through).slice(0, 7) : 'date') },
+                { a: other, amt: -(n(a.cost) - accum), memo: a.number }] };
+    },
+    async fa_acquire_void(c, ch, id) { return reversal(c, 'fa_acquire', id, `SELECT voided_at AS at, void_reason FROM fa_assets WHERE id = $1`); },
+    // A depreciation run: per asset, Dr its class's expense, Cr its accumulated depreciation; dated the last day of the run's month.
+    async fa_run(c, ch, id) {
+      const { rows: r } = await c.query(`SELECT *, to_char((month + INTERVAL '1 month' - INTERVAL '1 day')::date, 'YYYY-MM-DD') AS last_day, to_char(month, 'YYYY-MM') AS m FROM fa_runs WHERE id = $1`, [id]);
+      if (!r.length) return null;
+      const { rows: ds } = await c.query(
+        `SELECT a.id AS asset_id, a.number, a.name, a.gl_class_id, k.accum_account_id, k.expense_account_id, SUM(d.amount) AS amt, MIN(to_char(d.month, 'YYYY-MM')) AS m0, MAX(to_char(d.month, 'YYYY-MM')) AS m1
+           FROM fa_depreciation d JOIN fa_assets a ON a.id = d.asset_id JOIN fa_classes k ON k.id = a.class_id
+          WHERE d.run_id = $1 GROUP BY a.id, k.id ORDER BY a.number`, [id]);
+      const lines = [];
+      for (const d of ds) {
+        if (!d.accum_account_id || !d.expense_account_id) throw new Error('Asset ' + d.number + ': its class has no depreciation accounts');
+        const memo = d.number + ' ' + d.name.slice(0, 60) + ' ' + (d.m0 === d.m1 ? d.m0 : d.m0 + ' to ' + d.m1);
+        lines.push({ a: d.expense_account_id, amt: n(d.amt), memo, cls: d.gl_class_id, fa: d.asset_id }, { a: d.accum_account_id, amt: -n(d.amt), memo, cls: d.gl_class_id, fa: d.asset_id });
+      }
+      return { book: 'assets', at: r[0].last_day + 'T12:00:00-05:00', ref: 'Depreciation ' + r[0].m, memo: 'Depreciation for ' + r[0].m + ' (' + ds.length + ' assets)', lines };
+    },
+    async fa_run_void(c, ch, id) { return reversal(c, 'fa_run', id, `SELECT voided_at AS at, void_reason FROM fa_runs WHERE id = $1`); },
+    // Sold / scrapped: Dr accumulated depreciation, Dr what was received, Cr cost; the rest is a gain or a loss.
+    async fa_dispose(c, ch, id) {
+      const { rows } = await c.query(
+        `SELECT d.*, to_char(d.disposed_on, 'YYYY-MM-DD') AS day, a.id AS fa_id, a.number, a.name, a.cost, a.gl_class_id, k.asset_account_id, k.accum_account_id
+           FROM fa_disposals d JOIN fa_assets a ON a.id = d.asset_id JOIN fa_classes k ON k.id = a.class_id WHERE d.id = $1`, [id]);
+      if (!rows.length) return null;
+      const d = rows[0], accum = d.accum_account_id ? n(d.accum_at) : 0, proceeds = n(d.proceeds);
+      if (proceeds && !d.proceeds_account_id) throw new Error('Disposal of ' + d.number + ': choose the account the money went to');
+      const gain = r2(proceeds - (n(d.cost) - accum));
+      return { book: 'assets', at: d.day + 'T12:00:00-05:00', ref: d.number, cls: d.gl_class_id, fa: d.fa_id, memo: 'Fixed asset ' + d.kind.replace('_', ' ') + ': ' + d.number + ' · ' + d.name,
+        lines: [{ a: d.accum_account_id, amt: accum, memo: d.number + ' depreciation taken off' },
+                { a: d.proceeds_account_id, amt: proceeds, memo: d.number + ' proceeds' },
+                { a: d.asset_account_id, amt: -n(d.cost), memo: d.number + ' cost' },
+                { a: gain > 0 ? ch.acct('fa_gain') : ch.acct('fa_loss'), amt: -gain, memo: d.number + (gain > 0 ? ' gain' : ' loss') }] };
+    },
+    async fa_dispose_void(c, ch, id) { return reversal(c, 'fa_dispose', id, `SELECT voided_at AS at, void_reason FROM fa_disposals WHERE id = $1`); },
+
+    // ---- Investments and the share register (capital.js) ----
+    // An investment bought outside the ledger or held before it: Dr the
+    // investment account; Cr the account paid from, or Opening Balance Equity.
+    async inv_acquire(c, ch, id) {
+      const { rows } = await c.query(`SELECT i.*, to_char(i.acquired_on, 'YYYY-MM-DD') AS day FROM cap_investments i WHERE i.id = $1`, [id]);
+      if (!rows.length || rows[0].funding === 'in_ledger') return null;
+      const x = rows[0], start = await ledgerStartDay(c), day = start && x.day < start ? start : x.day;
+      const other = x.funding === 'opening' ? ch.acct('opening_equity') : x.funding_account_id;
+      if (!other) throw new Error('Investment ' + x.number + ': choose the account it was paid from');
+      return { book: 'assets', at: day + 'T12:00:00-05:00', ref: x.number, memo: 'Investment ' + x.number + ' · ' + x.name + (x.funding === 'opening' ? ' (held before the ledger)' : ''),
+        lines: [{ a: x.account_id, amt: n(x.cost), memo: x.number + ' cost' }, { a: other, amt: -n(x.cost), memo: x.number }] };
+    },
+    async inv_acquire_void(c, ch, id) { return reversal(c, 'inv_acquire', id, `SELECT voided_at AS at, void_reason FROM cap_investments WHERE id = $1`); },
+    // More bought, part sold (the book value of the part comes off; the rest is
+    // a gain or loss), revalued, share of the investee's profit (equity
+    // method), dividends (income; under the equity method they reduce the
+    // investment) and interest received.
+    async inv_event(c, ch, id) {
+      const { rows } = await c.query(
+        `SELECT e.*, to_char(e.event_date, 'YYYY-MM-DD') AS day, i.number, i.name, i.method, i.account_id AS inv_account
+           FROM cap_inv_events e JOIN cap_investments i ON i.id = e.investment_id WHERE e.id = $1`, [id]);
+      if (!rows.length) return null;
+      const e = rows[0], amt = n(e.amount), inv = e.inv_account, start = await ledgerStartDay(c), day = start && e.day < start ? start : e.day;
+      const cash = () => { if (!e.account_id) throw new Error(e.number + ': choose the account the money went to or came from'); return e.account_id; };
+      const label = { buy: 'bought', sell: 'sold', revalue: 'revalued', share_of_profit: 'share of profit', dividend: 'dividend', interest: 'interest' }[e.kind];
+      let lines;
+      if (e.kind === 'buy') lines = [{ a: inv, amt, memo: e.number + ' bought' }, { a: cash(), amt: -amt }];
+      else if (e.kind === 'sell') {
+        const gain = r2(amt - n(e.carrying));
+        lines = [{ a: amt ? cash() : null, amt, memo: e.number + ' proceeds' }, { a: inv, amt: -n(e.carrying), memo: e.number + ' book value sold' },
+                 { a: ch.acct('inv_gain'), amt: -gain, memo: e.number + (gain >= 0 ? ' gain' : ' loss') + ' on sale' }];
+      } else if (e.kind === 'revalue') lines = [{ a: inv, amt, memo: e.number + ' revalued' }, { a: ch.acct('inv_gain'), amt: -amt, memo: e.number + ' revaluation' }];
+      else if (e.kind === 'share_of_profit') lines = [{ a: inv, amt, memo: e.number + ' share of profit' }, { a: ch.acct('inv_share_profit'), amt: -amt, memo: e.number }];
+      else if (e.kind === 'dividend') lines = [{ a: cash(), amt, memo: e.number + ' dividend' }, { a: e.method === 'equity' ? inv : ch.acct('dividend_income'), amt: -amt, memo: e.number + ' dividend' }];
+      else lines = [{ a: cash(), amt, memo: e.number + ' interest' }, { a: ch.acct('interest_income'), amt: -amt, memo: e.number + ' interest' }];
+      return { book: 'assets', at: day + 'T12:00:00-05:00', ref: e.number, memo: 'Investment ' + e.number + ' · ' + e.name + ': ' + label + (e.note ? ' · ' + String(e.note).slice(0, 80) : ''), lines };
+    },
+    async inv_event_void(c, ch, id) { return reversal(c, 'inv_event', id, `SELECT voided_at AS at, void_reason FROM cap_inv_events WHERE id = $1`); },
+    // Shares issued: Dr where the money went (or Owner's Capital turned into
+    // shares); Cr Share Capital at par (all of it with no par value), the rest
+    // Share Premium. Bought back: Dr Share Capital the paid-in capital of the
+    // shares, the rest to Retained Earnings; Cr the account paid from.
+    // Opening holdings and transfers between holders post nothing.
+    async share_txn(c, ch, id) {
+      const { rows } = await c.query(
+        `SELECT t.*, to_char(t.txn_date, 'YYYY-MM-DD') AS day, k.name AS class_name, k.par_value, h.name AS holder, f.name AS from_holder
+           FROM cap_share_txns t JOIN cap_share_classes k ON k.id = t.class_id LEFT JOIN cap_shareholders h ON h.id = t.shareholder_id LEFT JOIN cap_shareholders f ON f.id = t.from_shareholder_id WHERE t.id = $1`, [id]);
+      if (!rows.length || !['issue', 'buyback'].includes(rows[0].kind) || !(n(rows[0].amount) > 0)) return null;
+      const t = rows[0], amt = n(t.amount), start = await ledgerStartDay(c), day = start && t.day < start ? start : t.day;
+      if (!t.account_id) throw new Error(t.number + ': choose the account');
+      const what = Number(t.shares).toLocaleString('en-US') + ' ' + t.class_name + ' shares';
+      if (t.kind === 'issue') {
+        const capital = n(t.par_value) > 0 ? Math.min(amt, r2(n(t.par_value) * n(t.shares))) : amt;
+        return { book: 'equity', at: day + 'T12:00:00-05:00', ref: t.number, memo: 'Shares issued ' + t.number + ': ' + what + ' to ' + t.holder,
+          lines: [{ a: t.account_id, amt, memo: t.number + ' ' + t.holder }, { a: ch.acct('share_capital'), amt: -capital, memo: t.number + ' ' + what }, { a: ch.acct('share_premium'), amt: -(amt - capital), memo: t.number + ' premium' }] };
+      }
+      return { book: 'equity', at: day + 'T12:00:00-05:00', ref: t.number, memo: 'Shares bought back ' + t.number + ': ' + what + ' from ' + t.from_holder,
+        lines: [{ a: ch.acct('share_capital'), amt: n(t.capital), memo: t.number + ' ' + what }, { a: ch.acct('retained_earnings'), amt: r2(amt - n(t.capital)), memo: t.number + ' paid over / under paid-in capital' },
+                { a: t.account_id, amt: -amt, memo: t.number + ' ' + t.from_holder }] };
+    },
+    async share_txn_void(c, ch, id) { return reversal(c, 'share_txn', id, `SELECT voided_at AS at, void_reason FROM cap_share_txns WHERE id = $1`); },
   };
+
+  async function ledgerStartDay(c) {
+    const { rows } = await c.query(`SELECT to_char((value::timestamptz AT TIME ZONE '${TZ}')::date, 'YYYY-MM-DD') AS d FROM warehouse_settings WHERE key = 'gl_start_at' AND value IS NOT NULL`);
+    return rows.length ? rows[0].d : null;
+  }
 
   async function reversal(c, kind, id, sql) {
     const { rows: e } = await c.query(`SELECT id, number, source_ref, memo FROM gl_entries WHERE source_kind = $1 AND source_id = $2`, [kind, id]);
     if (!e.length) return null;
     const { rows: v } = await c.query(sql, [id]);
-    const { rows: ls } = await c.query(`SELECT account_id, amount, party, memo, class_id FROM gl_lines WHERE entry_id = $1`, [e[0].id]);
+    const { rows: ls } = await c.query(`SELECT account_id, amount, party, memo, class_id, asset_id FROM gl_lines WHERE entry_id = $1`, [e[0].id]);
     return { book: 'cash', at: v[0].at, ref: e[0].source_ref, reverses: e[0].id, reversesAll: [e[0].id], memo: 'VOID of ' + e[0].number + ' (' + (e[0].memo || '') + ')' + (v[0].void_reason ? ' - ' + v[0].void_reason : ''),
-      lines: ls.map((l) => ({ a: l.account_id, amt: -n(l.amount), party: l.party, memo: l.memo, cls: l.class_id })) };
+      lines: ls.map((l) => ({ a: l.account_id, amt: -n(l.amount), party: l.party, memo: l.memo, cls: l.class_id, fa: l.asset_id })) };
   }
 
   // What is waiting to be posted, per source, from the ledger start.
@@ -553,8 +779,14 @@ function register(app, deps) {
             AND NOT COALESCE(s.voided, false) AND ${notPosted('sale_payment', 'p.id')}`;
       case 'sale_void': return `SELECT s.id FROM pos_sales s WHERE COALESCE(s.voided, false) AND s.created_at >= $1
             AND EXISTS (SELECT 1 FROM gl_entries e WHERE e.source_kind = 'sale' AND e.source_id = s.id) AND ${notPosted('sale_void', 's.id')}`;
-      case 'return': return `SELECT r.id FROM pos_sale_returns r WHERE r.created_at >= $1 AND ${notPosted('return', 'r.id')}`;
-      case 'account_payment': return `SELECT a.id FROM account_payments a WHERE a.created_at >= $1 AND ${notPosted('account_payment', 'a.id')}`;
+      case 'return': return `SELECT r.id FROM pos_sale_returns_all r WHERE r.created_at >= $1 AND r.voided_at IS NULL AND ${notPosted('return', 'r.id')}`;
+      case 'return_refund': return `SELECT st.id FROM pos_return_settlements st WHERE st.created_at >= $1 AND st.voided_at IS NULL AND st.method <> 'account' AND NOT st.legacy_posted
+            AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'return' AND g.source_id = st.return_id) AND ${notPosted('return_refund', 'st.id')}`;
+      case 'return_void': return `SELECT r.id FROM pos_sale_returns_all r WHERE r.voided_at IS NOT NULL AND r.voided_at >= $1
+            AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'return' AND g.source_id = r.id) AND ${notPosted('return_void', 'r.id')}`;
+      case 'return_refund_void': return `SELECT st.id FROM pos_return_settlements st WHERE st.voided_at IS NOT NULL AND st.voided_at >= $1
+            AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'return_refund' AND g.source_id = st.id) AND ${notPosted('return_refund_void', 'st.id')}`;
+      case 'account_payment': return `SELECT a.id FROM account_payments a WHERE a.created_at >= $1 AND a.method <> 'credit_note' AND ${notPosted('account_payment', 'a.id')}`;   // a credit note's credit is in A/R from the return itself
       case 'receipt': return `SELECT r.id FROM receipts r WHERE r.status = 'posted' AND r.posted_at >= $1 AND ${notPosted('receipt', 'r.id')}`;
       case 'bill': return `SELECT r.id FROM receipts r WHERE r.bill_status = 'confirmed' AND r.bill_confirmed_at >= $1 AND r.status = 'posted' AND ${notPosted('bill', 'r.id')}`;
       case 'po_invoice': return `SELECT po.id FROM purchase_orders po WHERE COALESCE(po.invoice_total_usd, 0) > 0 AND COALESCE(po.received_date, po.received_at, po.created_at) >= $1
@@ -599,12 +831,35 @@ function register(app, deps) {
       case 'payroll_loan_void': return `SELECT l.id FROM payroll_loans l WHERE l.voided_at IS NOT NULL AND l.voided_at >= $1 AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'payroll_loan' AND g.source_id = l.id) AND ${notPosted('payroll_loan_void', 'l.id')}`;
       case 'payroll_dedpay_void': return `SELECT p.id FROM payroll_ded_payments p WHERE p.voided_at IS NOT NULL AND p.voided_at >= $1 AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'payroll_dedpay' AND g.source_id = p.id) AND ${notPosted('payroll_dedpay_void', 'p.id')}`;
       case 'payroll_remit_void': return `SELECT r.id FROM payroll_remittances r WHERE r.voided_at IS NOT NULL AND r.voided_at >= $1 AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'payroll_remit' AND g.source_id = r.id) AND ${notPosted('payroll_remit_void', 'r.id')}`;
+      // Workshop: billings and payments from the ledger start.
+      case 'work_order': return `SELECT b.id FROM work_order_billings b WHERE b.kind = 'bill' AND b.created_at >= $1 AND b.total <> 0 AND ${notPosted('work_order', 'b.id')}`;
+      case 'work_order_unbill': return `SELECT u.id FROM work_order_billings u WHERE u.kind = 'unbill' AND u.created_at >= $1
+            AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'work_order' AND g.source_id = u.bill_id) AND ${notPosted('work_order_unbill', 'u.id')}`;
+      case 'wo_payment': return `SELECT p.id FROM work_order_payments_all p WHERE p.voided_at IS NULL AND p.received_at >= $1 AND p.amount_usd <> 0 AND ${notPosted('wo_payment', 'p.id')}`;
+      case 'wo_payment_void': return `SELECT p.id FROM work_order_payments_all p WHERE p.voided_at IS NOT NULL AND p.voided_at >= $1 AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'wo_payment' AND g.source_id = p.id) AND ${notPosted('wo_payment_void', 'p.id')}`;
+      // Fixed assets: whatever the register holds, once the ledger has started (an
+      // asset owned before the start posts on the start day).
+      case 'fa_acquire': return `SELECT a.id FROM fa_assets a WHERE a.funding IN ('account', 'opening') AND a.voided_at IS NULL AND $1::timestamptz IS NOT NULL AND ${notPosted('fa_acquire', 'a.id')}`;
+      case 'fa_acquire_void': return `SELECT a.id FROM fa_assets a WHERE a.voided_at IS NOT NULL AND $1::timestamptz IS NOT NULL AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'fa_acquire' AND g.source_id = a.id) AND ${notPosted('fa_acquire_void', 'a.id')}`;
+      case 'fa_run': return `SELECT r.id FROM fa_runs r WHERE r.voided_at IS NULL AND r.total > 0 AND $1::timestamptz IS NOT NULL AND ${notPosted('fa_run', 'r.id')}`;
+      case 'fa_run_void': return `SELECT r.id FROM fa_runs r WHERE r.voided_at IS NOT NULL AND $1::timestamptz IS NOT NULL AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'fa_run' AND g.source_id = r.id) AND ${notPosted('fa_run_void', 'r.id')}`;
+      case 'fa_dispose': return `SELECT d.id FROM fa_disposals d WHERE d.voided_at IS NULL AND $1::timestamptz IS NOT NULL AND ${notPosted('fa_dispose', 'd.id')}`;
+      case 'fa_dispose_void': return `SELECT d.id FROM fa_disposals d WHERE d.voided_at IS NOT NULL AND $1::timestamptz IS NOT NULL AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'fa_dispose' AND g.source_id = d.id) AND ${notPosted('fa_dispose_void', 'd.id')}`;
+      // Investments and the share register (capital.js): whatever the registers hold, once the ledger has started.
+      case 'inv_acquire': return `SELECT i.id FROM cap_investments i WHERE i.funding IN ('account', 'opening') AND i.voided_at IS NULL AND $1::timestamptz IS NOT NULL AND ${notPosted('inv_acquire', 'i.id')}`;
+      case 'inv_acquire_void': return `SELECT i.id FROM cap_investments i WHERE i.voided_at IS NOT NULL AND $1::timestamptz IS NOT NULL AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'inv_acquire' AND g.source_id = i.id) AND ${notPosted('inv_acquire_void', 'i.id')}`;
+      case 'inv_event': return `SELECT v.id FROM cap_inv_events v WHERE v.voided_at IS NULL AND (v.amount <> 0 OR v.carrying <> 0) AND $1::timestamptz IS NOT NULL AND ${notPosted('inv_event', 'v.id')}`;
+      case 'inv_event_void': return `SELECT v.id FROM cap_inv_events v WHERE v.voided_at IS NOT NULL AND $1::timestamptz IS NOT NULL AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'inv_event' AND g.source_id = v.id) AND ${notPosted('inv_event_void', 'v.id')}`;
+      case 'share_txn': return `SELECT t.id FROM cap_share_txns t WHERE t.voided_at IS NULL AND t.kind IN ('issue', 'buyback') AND t.amount > 0 AND $1::timestamptz IS NOT NULL AND ${notPosted('share_txn', 't.id')}`;
+      case 'share_txn_void': return `SELECT t.id FROM cap_share_txns t WHERE t.voided_at IS NOT NULL AND $1::timestamptz IS NOT NULL AND EXISTS (SELECT 1 FROM gl_entries g WHERE g.source_kind = 'share_txn' AND g.source_id = t.id) AND ${notPosted('share_txn_void', 't.id')}`;
     }
     return null;
   }
-  const ORDER = ['sale', 'sale_payment', 'sale_void', 'return', 'account_payment', 'receipt', 'bill', 'po_invoice', 'po_payment', 'till_open', 'till_movement', 'till_close', 'petty_payout', 'petty_advance_expensed', 'petty_movement', 'redemption_payout', 'gift_card', 'commission_accrual', 'commission', 'vendor_claim', 'ar_invoice', 'ap_bill', 'ap_payment', 'bank_txn',
-    'payroll_loan', 'payroll_run', 'payroll_payment', 'payroll_remit', 'payroll_dedpay', 'account_payment_void', 'ar_invoice_void', 'ap_bill_void', 'ap_payment_void', 'bank_txn_void',
-    'payroll_payment_void', 'payroll_run_void', 'payroll_remit_void', 'payroll_dedpay_void', 'payroll_loan_void', 'petty_payout_void'];
+  const ORDER = ['sale', 'sale_payment', 'sale_void', 'return', 'return_refund', 'account_payment', 'receipt', 'bill', 'po_invoice', 'po_payment', 'till_open', 'till_movement', 'till_close', 'petty_payout', 'petty_advance_expensed', 'petty_movement', 'redemption_payout', 'gift_card', 'commission_accrual', 'commission', 'vendor_claim', 'ar_invoice', 'ap_bill', 'ap_payment', 'bank_txn',
+    'payroll_loan', 'payroll_run', 'payroll_payment', 'payroll_remit', 'payroll_dedpay', 'work_order', 'wo_payment', 'fa_acquire', 'fa_run', 'fa_dispose', 'inv_acquire', 'inv_event', 'share_txn',
+    'account_payment_void', 'ar_invoice_void', 'ap_bill_void', 'ap_payment_void', 'bank_txn_void',
+    'payroll_payment_void', 'payroll_run_void', 'payroll_remit_void', 'payroll_dedpay_void', 'payroll_loan_void', 'petty_payout_void',
+    'return_refund_void', 'return_void', 'work_order_unbill', 'wo_payment_void', 'fa_dispose_void', 'fa_run_void', 'fa_acquire_void', 'share_txn_void', 'inv_event_void', 'inv_acquire_void'];
 
   // Daily stock adjustments from the stock ledger (complete days only).
   async function postStockDays(startAt, ch, userId) {
@@ -674,6 +929,23 @@ function register(app, deps) {
     } finally { running = false; lastRun = { at: new Date().toISOString(), ...out }; }
     return out;
   }
+  // Post now, as soon as a transaction is saved (server.js calls this after
+  // every change made through the API). Calls close together share one run; a
+  // call while a run is going schedules one more, so nothing saved waits for
+  // the sweep below, which stays as the backstop.
+  let kickTimer = null, kickAgain = false;
+  function kick() {
+    if (kickTimer) return;
+    kickTimer = setTimeout(async () => {
+      try {
+        if ((await setting('gl_auto_post', 'on')) !== 'on') return;
+        if (running) { kickAgain = true; return; }
+        do { kickAgain = false; await postAll(null); } while (kickAgain);
+      } catch (e) { console.warn('[gl] post on save', e.message); }
+      finally { kickTimer = null; if (kickAgain) { kickAgain = false; kick(); } }
+    }, 250);
+    if (kickTimer.unref) kickTimer.unref();
+  }
   const timer = setInterval(async () => {
     try { if ((await setting('gl_auto_post', 'on')) === 'on') await postAll(null); } catch (e) { console.warn('[gl] auto post', e.message); }
   }, 60000);
@@ -725,10 +997,24 @@ function register(app, deps) {
         const { rows: pa } = await c.query(
           `SELECT u.name AS party, SUM(a.amount_usd) AS v FROM account_payments a JOIN users u ON u.id = a.customer_id WHERE a.created_at < $1 GROUP BY 1`, [st[0].at]);
         for (const r of pa) lines.push({ a: ch.acct('ar'), amt: -n(r.v), party: custParty(r.party, 1), memo: 'Paid on account' });
-        const { rows: ap } = await c.query(
-          `SELECT COALESCE(s.name, 'Supplier') AS party, SUM(po.balance_due_usd) AS v FROM purchase_orders po LEFT JOIN suppliers s ON s.id = po.supplier_id
-            WHERE COALESCE(po.balance_due_usd, 0) > 0 AND po.status <> 'cancelled' GROUP BY 1`);
-        for (const r of ap) lines.push({ a: ch.acct('ap'), amt: -n(r.v), party: r.party.slice(0, 41), memo: 'Owed to supplier' });
+        // Billed work orders less what was paid on them at the service desk.
+        const { rows: wo } = await c.query(
+          `SELECT w.customer_name AS party, w.customer_user_id, SUM(CASE WHEN w.status IN ('billed', 'paid') THEN w.total_usd ELSE 0 END
+                  - COALESCE((SELECT SUM(p.amount_usd) FROM work_order_payments p WHERE p.work_order_id = w.id), 0)) AS v
+             FROM work_orders w GROUP BY 1, 2`);
+        for (const r of wo) if (r2(r.v)) lines.push({ a: ch.acct('ar'), amt: n(r.v), party: custParty(r.party, r.customer_user_id), memo: 'Owed on work orders' });
+        // Owed to suppliers: Payables' unpaid bills less credits, else purchase-order balances.
+        let ap;
+        if (books) {
+          const by = {};
+          for (const d of await books.apDocs(null, c.query.bind(c))) { const k = (d.supplier || 'Supplier').slice(0, 41); by[k] = (by[k] || 0) + (d.kind === 'credit' ? -1 : 1) * n(d.open); }
+          ap = Object.entries(by).map(([party, v]) => ({ party, v }));
+        } else {
+          ap = (await c.query(
+            `SELECT COALESCE(s.name, 'Supplier') AS party, SUM(po.balance_due_usd) AS v FROM purchase_orders po LEFT JOIN suppliers s ON s.id = po.supplier_id
+              WHERE COALESCE(po.balance_due_usd, 0) > 0 AND po.status <> 'cancelled' GROUP BY 1`)).rows;
+        }
+        for (const r of ap) if (r2(r.v)) lines.push({ a: ch.acct('ap'), amt: -n(r.v), party: r.party.slice(0, 41), memo: 'Owed to supplier' });
         const { rows: gr } = await c.query(
           `SELECT COALESCE(SUM((l.qty_received + l.qty_damaged) * COALESCE(l.unit_cost, 0) * COALESCE(r.fx_rate, 1)), 0) AS v
              FROM receipts r JOIN receipt_lines l ON l.receipt_id = r.id WHERE r.status = 'posted' AND r.bill_status <> 'confirmed'`);
@@ -878,7 +1164,7 @@ function register(app, deps) {
           UNION SELECT lower(name) FROM petty_cash_categories WHERE is_active
           UNION SELECT DISTINCT lower(reason) FROM cash_payouts WHERE source_type = 'drawer' AND category_id IS NULL AND fund_id IS NULL) x ORDER BY 1 LIMIT 80`);
       const keys = {
-        pay_method: [...new Set(['cash', 'cheque', 'card', 'bank', 'gift_card', 'store_credit', 'loyalty', 'gift_card_issue', ...pm.map((x) => x.k)])].filter((k) => !SKIP_PAY.includes(k)),
+        pay_method: [...new Set(['cash', 'cheque', 'card', 'bank', 'gift_card', 'store_credit', 'loyalty', 'gift_card_issue', ...pm.map((x) => x.k)])].filter((k) => !SKIP_PAY.includes(k) && k !== 'writeoff'),
         pay_out_method: [...new Set(['cash', 'cheque', 'bank', 'card', 'commission', ...po.map((x) => x.k)])],
         revenue_category: cats.map((x) => x.k), cogs_category: cats.map((x) => x.k),
         stock_reason: ['count', 'requisition', 'po_quick_receive', 'regrade', 'writeoff', 'vendor_claim', 'other'], till_payout: tp.map((x) => x.k),
@@ -945,7 +1231,7 @@ function register(app, deps) {
       const memo = String(b.memo || '').trim().slice(0, 300);
       if (memo.length < 3) throw httpError(400, 'Say what the entry is for');
       const raw = Array.isArray(b.lines) ? b.lines : [];
-      const lines = raw.map((l) => ({ a: parseInt(l.account_id, 10), amt: r2(n(l.debit) - n(l.credit)), party: l.party ? String(l.party).trim().slice(0, 41) : null, memo: l.memo ? String(l.memo).slice(0, 200) : null, cls: parseInt(l.class_id, 10) || null }))
+      const lines = raw.map((l) => ({ a: parseInt(l.account_id, 10), amt: r2(n(l.debit) - n(l.credit)), party: l.party ? String(l.party).trim().slice(0, 41) : null, memo: l.memo ? String(l.memo).slice(0, 200) : null, cls: parseInt(l.class_id, 10) || null, fa: parseInt(l.asset_id, 10) || null }))
         .filter((l) => l.a && l.amt);
       if (lines.length < 2) throw httpError(400, 'An entry needs at least two lines with amounts');
       const off = r2(lines.reduce((s, l) => s + l.amt, 0));
@@ -955,6 +1241,7 @@ function register(app, deps) {
         for (const l of lines) {
           if (!ch.byId[l.a] || !ch.byId[l.a].is_active) throw httpError(400, 'Unknown or inactive account');
           if (l.cls && !(await c.query(`SELECT 1 FROM gl_classes WHERE id = $1 AND is_active`, [l.cls])).rows.length) throw httpError(400, 'Unknown or retired class');
+          if (l.fa && !(await c.query(`SELECT 1 FROM fa_assets WHERE id = $1 AND status <> 'void'`, [l.fa])).rows.length) throw httpError(400, 'Unknown or voided fixed asset');
           if (['ar', 'ap'].includes(ch.byId[l.a].system_key) && !l.party) throw httpError(400, 'Lines on ' + ch.byId[l.a].name + ' need a customer or supplier name');
         }
         const { rows } = await c.query(`SELECT COALESCE(MAX(source_id), 0) + 1 AS n FROM gl_entries WHERE source_kind = 'manual'`);
@@ -985,7 +1272,7 @@ function register(app, deps) {
         const { rows: cl } = await c.query(`SELECT 1 FROM gl_periods WHERE month = date_trunc('month', $1::date)::date`, [date]);
         if (cl.length) throw httpError(409, 'The books for that month are closed: reverse into an open month');
         const newId = await insertEntry(c, ch, { book: e.book, kind: 'reversal', id: e.id, dateFixed: date, ref: e.number, reverses: e.id,
-          memo: 'Reversal of ' + e.number + ': ' + memo.slice(0, 200), lines: ls.map((l) => ({ a: l.account_id, amt: -n(l.amount), party: l.party, memo: l.memo, cls: l.class_id })), userId: req.session.userId });
+          memo: 'Reversal of ' + e.number + ': ' + memo.slice(0, 200), lines: ls.map((l) => ({ a: l.account_id, amt: -n(l.amount), party: l.party, memo: l.memo, cls: l.class_id, fa: l.asset_id })), userId: req.session.userId });
         await c.query(`UPDATE gl_entries SET reversed_by = $2 WHERE id = $1`, [e.id, newId]);
         return newId;
       });
@@ -1139,7 +1426,7 @@ function register(app, deps) {
       const from = dateArg(req.query.from), to = dateArg(req.query.to);
       if (!from || !to || from > to) throw httpError(400, 'Choose a from and to date');
       const { rows } = await query(
-        `SELECT a.id, a.code, a.name, a.type, a.qb_name, a.system_key,
+        `SELECT a.id, a.code, a.name, a.type, a.qb_name, a.system_key, a.parent_id,
                 COALESCE(SUM(l.amount) FILTER (WHERE e.entry_date < $1), 0) AS opening,
                 COALESCE(SUM(l.amount) FILTER (WHERE e.entry_date BETWEEN $1 AND $2 AND l.amount > 0), 0) AS debits,
                 COALESCE(-SUM(l.amount) FILTER (WHERE e.entry_date BETWEEN $1 AND $2 AND l.amount < 0), 0) AS credits,
@@ -1178,6 +1465,58 @@ function register(app, deps) {
     } catch (e) { fail(res, e); }
   });
 
+  // What customers owe on work orders: billed work orders less what was paid at the service desk.
+  const WO_OPEN_SQL = `SELECT COALESCE((SELECT SUM(total_usd) FROM work_orders WHERE status IN ('billed', 'paid')), 0)
+                            - COALESCE((SELECT SUM(amount_usd) FROM work_order_payments), 0)`;
+  // What is owed to suppliers, as Payables (books.js) works it out: every unpaid
+  // bill less unused supplier credits. Before books.js is wired in, the old
+  // purchase-order balances.
+  async function apOpen(q) {
+    if (books) return r2((await books.apDocs(null, q)).reduce((t, d) => t + (d.kind === 'credit' ? -1 : 1) * n(d.open), 0));
+    return r2((await q(`SELECT COALESCE(SUM(balance_due_usd), 0) AS v FROM purchase_orders WHERE status <> 'cancelled' AND COALESCE(balance_due_usd, 0) > 0`)).rows[0].v);
+  }
+  // The fixed asset register against the ledger: cost on the classes' asset
+  // accounts, and accumulated depreciation on their contra accounts.
+  async function fixedAssetChecks(q) {
+    const { rows } = await q(
+      `SELECT (SELECT COALESCE(SUM(l.amount), 0) FROM gl_lines l WHERE l.account_id IN (SELECT asset_account_id FROM fa_classes)) AS gl_cost,
+              (SELECT COALESCE(-SUM(l.amount), 0) FROM gl_lines l WHERE l.account_id IN (SELECT accum_account_id FROM fa_classes WHERE accum_account_id IS NOT NULL)) AS gl_accum,
+              (SELECT COALESCE(SUM(cost), 0) FROM fa_assets WHERE status = 'active') AS cost,
+              (SELECT COALESCE(SUM(a.opening_accum), 0) + COALESCE((SELECT SUM(d.amount) FROM fa_depreciation d JOIN fa_assets x ON x.id = d.asset_id WHERE x.status = 'active'), 0)
+                 FROM fa_assets a WHERE a.status = 'active') AS accum,
+              (SELECT COUNT(*)::int FROM fa_assets) AS assets`);
+    const x = rows[0];
+    if (!x.assets && !n(x.gl_cost) && !n(x.gl_accum)) return [];
+    return [
+      { key: 'fa_cost', label: 'Fixed assets at cost', gl: x.gl_cost, system: r2(x.cost),
+        note: 'Assets in the register (not disposed) at cost. A difference is usually a bill or cheque coded to an asset account for something not in the register, or an asset entered as already in the ledger that was not.' },
+      { key: 'fa_accum', label: 'Accumulated depreciation', gl: x.gl_accum, system: r2(x.accum),
+        note: 'Depreciation to date on the register\'s assets: brought-forward depreciation plus every run.' },
+    ];
+  }
+  // Investments and the share register (capital.js) against their accounts.
+  async function capitalChecks(q) {
+    let x;
+    try {
+      ({ rows: [x] } = await q(
+        `SELECT (SELECT COUNT(*)::int FROM cap_investments) AS investments, (SELECT COUNT(*)::int FROM cap_share_txns WHERE kind IN ('issue', 'buyback')) AS share_txns,
+                (SELECT COALESCE(SUM(l.amount), 0) FROM gl_lines l WHERE l.account_id IN (SELECT account_id FROM cap_investments)) AS gl_inv,
+                (SELECT COALESCE(SUM(i.cost), 0) FROM cap_investments i WHERE i.status <> 'void')
+                + (SELECT COALESCE(SUM(CASE e.kind WHEN 'buy' THEN e.amount WHEN 'sell' THEN -e.carrying WHEN 'revalue' THEN e.amount WHEN 'share_of_profit' THEN e.amount
+                                                   WHEN 'dividend' THEN CASE WHEN i.method = 'equity' THEN -e.amount ELSE 0 END ELSE 0 END), 0)
+                     FROM cap_inv_events e JOIN cap_investments i ON i.id = e.investment_id WHERE e.voided_at IS NULL AND i.status <> 'void') AS inv,
+                (SELECT COALESCE(-SUM(l.amount), 0) FROM gl_lines l JOIN gl_accounts a ON a.id = l.account_id WHERE a.system_key IN ('share_capital', 'share_premium')) AS gl_sh,
+                (SELECT COALESCE(SUM(CASE WHEN kind = 'issue' THEN amount ELSE -capital END), 0) FROM cap_share_txns WHERE voided_at IS NULL AND kind IN ('issue', 'buyback')) AS sh`));
+    } catch (_) { return []; }   // capital.js not set up on this till yet
+    const out = [];
+    if (x.investments || n(x.gl_inv)) out.push({ key: 'investments', label: 'Investments in other businesses', gl: x.gl_inv, system: r2(x.inv),
+      note: 'Book value of the holdings in the asset register (Investments): cost, more bought, revaluations and share of profit, less what was sold. A difference is usually a payment coded to an investment account that is not in the register.' });
+    if (x.share_txns || n(x.gl_sh)) out.push({ key: 'share_capital', label: 'Share capital and premium', gl: x.gl_sh, system: r2(x.sh),
+      note: 'Paid in for shares issued, less shares bought back, in the share register. Holdings entered as opening post nothing: their capital is already in the equity accounts.' });
+    return out;
+  }
+  let books = null;
+
   // Tie-out: each control account against the system's own record.
   app.get('/api/gl/tieout', ...can('acct.view'), async (req, res) => {
     try {
@@ -1189,10 +1528,11 @@ function register(app, deps) {
           note: 'Stock on hand at average cost. Differences come from cost changes on stock already held, sales of stock not on hand, and receiving outside the Receive screen.' },
         { key: 'ar', label: 'Accounts receivable', gl: gl.ar, system: await one(`SELECT (SELECT COALESCE(SUM(balance_due_usd), 0) FROM pos_sales WHERE NOT COALESCE(voided, false))
                                    + (SELECT COALESCE(SUM(total), 0) FROM ar_invoices WHERE voided_at IS NULL)
-                                   - (SELECT COALESCE(SUM(amount_usd), 0) FROM account_payments) AS v`),
-          note: 'Balances due on sales and invoices raised on the books (rent, late fees), less payments received on account.' },
-        { key: 'ap', label: 'Accounts payable', gl: -gl.ap, system: await one(`SELECT COALESCE(SUM(balance_due_usd), 0) AS v FROM purchase_orders WHERE status <> 'cancelled' AND COALESCE(balance_due_usd, 0) > 0`),
-          note: 'Balances due on purchase orders.' },
+                                   - (SELECT COALESCE(SUM(amount_usd), 0) FROM account_payments)
+                                   + (${WO_OPEN_SQL}) AS v`),
+          note: 'Balances due on sales, invoices raised on the books (rent, late fees) and billed work orders, less payments received on account and at the service desk.' },
+        { key: 'ap', label: 'Accounts payable', gl: -gl.ap, system: await apOpen(query),
+          note: books ? 'Unpaid supplier bills of every kind (confirmed goods receipts, purchase invoices, expense bills) less unused supplier credits, as Payables shows them.' : 'Balances due on purchase orders.' },
         { key: 'grni', label: 'Goods received, not billed', gl: -gl.grni, system: await one(
             `SELECT COALESCE(SUM((l.qty_received + l.qty_damaged) * COALESCE(l.unit_cost, 0) * COALESCE(r.fx_rate, 1)), 0) AS v
                FROM receipts r JOIN receipt_lines l ON l.receipt_id = r.id WHERE r.status = 'posted' AND r.bill_status <> 'confirmed'`),
@@ -1202,8 +1542,111 @@ function register(app, deps) {
         { key: 'cash_drawers', label: 'Cash in drawers', gl: gl.cash_drawers, system: null,
           note: 'Should be the floats and takings of drawers open now; zero when every drawer is closed through the cashier module.' },
         { key: 'suspense', label: 'Suspense', gl: gl.suspense, system: 0, note: 'Postings that did not add up. Should be zero: open the account to see what landed here.' },
+        ...(await fixedAssetChecks(query)),
+        ...(await capitalChecks(query)),
       ].map((x) => ({ ...x, gl: r2(x.gl), difference: x.system == null ? null : r2(n(x.gl) - n(x.system)) }));
       res.json({ checks });
+    } catch (e) { fail(res, e); }
+  });
+
+  // ------------------------------------------------------- coverage --
+  // Does every transaction reach the chart of accounts? For each kind of
+  // document: how many are in the ledger, waiting, or failing; entries whose
+  // document has since been deleted; documents changed after they were posted;
+  // posting rules that point at accounts that are missing or switched off; and
+  // money the system records that no posting rule covers.
+  const SOURCE_TABLE = { sale: 'pos_sales', sale_payment: 'sale_payments', return: 'pos_sale_returns_all', return_refund: 'pos_return_settlements', account_payment: 'account_payments_all', receipt: 'receipts', bill: 'receipts',
+    po_invoice: 'purchase_orders', po_payment: 'purchase_order_payments', till_open: 'till_sessions', till_close: 'till_sessions', till_movement: 'till_movements',
+    petty_payout: 'cash_payouts', petty_movement: 'petty_cash_movements', redemption_payout: 'redemption_instruments', gift_card: 'gift_card_transactions',
+    commission: 'commission_payouts', commission_accrual: 'commission_statements', vendor_claim: 'stock_dispositions', ar_invoice: 'ar_invoices', ap_bill: 'ap_bills',
+    ap_payment: 'ap_payments', bank_txn: 'bank_txns', payroll_run: 'payroll_runs', payroll_payment: 'payroll_payments', payroll_remit: 'payroll_remittances',
+    payroll_loan: 'payroll_loans', payroll_dedpay: 'payroll_ded_payments', work_order: 'work_order_billings', wo_payment: 'work_order_payments_all',
+    fa_acquire: 'fa_assets', fa_run: 'fa_runs', fa_dispose: 'fa_disposals', inv_acquire: 'cap_investments', inv_event: 'cap_inv_events', share_txn: 'cap_share_txns' };
+  // Every system account a posting rule asks for, read from the rules themselves so the list cannot fall behind.
+  const RULE_KEYS = [...new Set([...require('fs').readFileSync(__filename, 'utf8').matchAll(/ch\.acct\('([a-z_]+)'\)|ch\.mapped\('[a-z_]+', [^,]+, '([a-z_]+)'\)/g)].map((m) => m[1] || m[2]))].sort();
+  app.get('/api/gl/coverage', ...can('acct.view'), async (req, res) => {
+    try {
+      const start = await setting('gl_start_at', null);
+      if (!start) return res.json({ started: false });
+      const { rows: done } = await query(`SELECT source_kind, COUNT(*)::int AS n FROM gl_entries GROUP BY 1`);
+      const postedBy = Object.fromEntries(done.map((r) => [r.source_kind, r.n]));
+      const sources = [];
+      for (const k of ORDER) {
+        const { rows } = await query(`SELECT COUNT(*)::int AS n FROM (${pendingSql(k)}) x`, [start]);
+        const failing = [...errors.entries()].filter(([key]) => key.startsWith(k + ':')).map(([key, m]) => ({ source: key, error: m }));
+        sources.push({ kind: k, posted: postedBy[k] || 0, waiting: rows[0].n, failing });
+      }
+      if (postedBy.stock_day) sources.push({ kind: 'stock_day', posted: postedBy.stock_day, waiting: 0, failing: [] });
+
+      // In the ledger, but the document behind it has gone (deleted after posting).
+      const orphans = [];
+      for (const [kind, table] of Object.entries(SOURCE_TABLE)) {
+        const { rows } = await query(`SELECT e.id, e.number, e.source_id, e.source_ref, to_char(e.entry_date, 'YYYY-MM-DD') AS entry_date FROM gl_entries e
+            WHERE e.source_kind = $1 AND e.reversed_by IS NULL AND NOT EXISTS (SELECT 1 FROM ${table} t WHERE t.id = e.source_id) ORDER BY e.id LIMIT 25`, [kind]);
+        for (const r of rows) orphans.push({ kind, ...r });
+      }
+
+      // Posted, then changed: the document's amount now against what the ledger has.
+      const ch = await chart(query);
+      const drift = (await query(
+        `SELECT 'sale' AS kind, e.id, e.number, s.receipt_number AS ref, s.total_usd AS document, SUM(l.amount) AS ledger
+           FROM gl_entries e JOIN pos_sales s ON s.id = e.source_id JOIN gl_lines l ON l.entry_id = e.id AND l.account_id = $1
+          WHERE e.source_kind = 'sale' AND e.reversed_by IS NULL AND NOT COALESCE(s.voided, false) GROUP BY e.id, s.id HAVING abs(SUM(l.amount) - s.total_usd) >= 0.01
+         UNION ALL
+         SELECT 'ar_invoice', e.id, e.number, i.number, i.total, SUM(l.amount)
+           FROM gl_entries e JOIN ar_invoices i ON i.id = e.source_id JOIN gl_lines l ON l.entry_id = e.id AND l.account_id = $1
+          WHERE e.source_kind = 'ar_invoice' AND e.reversed_by IS NULL AND i.voided_at IS NULL GROUP BY e.id, i.id HAVING abs(SUM(l.amount) - i.total) >= 0.01
+         UNION ALL
+         SELECT 'ap_bill', e.id, e.number, b.number, b.total, -SUM(l.amount) * CASE WHEN b.kind = 'credit' THEN -1 ELSE 1 END
+           FROM gl_entries e JOIN ap_bills b ON b.id = e.source_id JOIN gl_lines l ON l.entry_id = e.id AND l.account_id = $2
+          WHERE e.source_kind = 'ap_bill' AND e.reversed_by IS NULL AND b.voided_at IS NULL GROUP BY e.id, b.id HAVING abs(abs(SUM(l.amount)) - b.total) >= 0.01
+         UNION ALL
+         SELECT 'work_order', e.id, e.number, w.wo_number, w.total_usd, SUM(l.amount)
+           FROM gl_entries e JOIN work_order_billings b ON b.id = e.source_id JOIN work_orders w ON w.id = b.work_order_id JOIN gl_lines l ON l.entry_id = e.id AND l.account_id = $1
+          WHERE e.source_kind = 'work_order' AND e.reversed_by IS NULL AND w.status IN ('billed', 'paid') GROUP BY e.id, w.id HAVING abs(SUM(l.amount) - w.total_usd) >= 0.01
+         ORDER BY 2 DESC LIMIT 100`, [ch.acct('ar'), ch.acct('ap')])).rows
+        .map((r) => ({ ...r, document: r2(r.document), ledger: r2(r.ledger), difference: r2(n(r.ledger) - n(r.document)) }));
+
+      // The chart: the accounts the posting rules use must exist and be active.
+      const problems = [];
+      const { rows: acc } = await query(`SELECT id, code, name, system_key, is_active FROM gl_accounts`);
+      const byKey = Object.fromEntries(acc.filter((a) => a.system_key).map((a) => [a.system_key, a]));
+      for (const k of RULE_KEYS) {
+        if (!byKey[k]) problems.push({ where: 'Posting rules', what: 'No account is set up for "' + k + '": documents that need it cannot post' });
+        else if (!byKey[k].is_active) problems.push({ where: 'Posting rules', what: byKey[k].code + ' ' + byKey[k].name + ' is switched off but the rules post to it' });
+      }
+      const inactive = (sql, where, label) => query(sql).then(({ rows }) => rows.forEach((r) => problems.push({ where, what: label(r) })));
+      await inactive(`SELECT m.kind, m.key, a.code, a.name FROM gl_map m JOIN gl_accounts a ON a.id = m.account_id WHERE NOT a.is_active`, 'Posting rules',
+        (r) => r.kind + ' "' + r.key + '" posts to ' + r.code + ' ' + r.name + ', which is switched off');
+      await inactive(`SELECT p.name, p.img, a.code, a.name AS acct FROM products p JOIN gl_accounts a ON a.id IN (p.income_account_id, p.cogs_account_id) WHERE NOT a.is_active LIMIT 50`, 'Products',
+        (r) => (r.name || r.img) + ' posts to ' + r.code + ' ' + r.acct + ', which is switched off');
+      await inactive(`SELECT k.name, a.code, a.name AS acct FROM fa_classes k JOIN gl_accounts a ON a.id IN (k.asset_account_id, k.accum_account_id, k.expense_account_id) WHERE k.is_active AND NOT a.is_active`, 'Fixed asset classes',
+        (r) => r.name + ' uses ' + r.code + ' ' + r.acct + ', which is switched off');
+      await inactive(`SELECT k.name FROM fa_classes k WHERE k.is_active AND k.method <> 'none' AND (k.accum_account_id IS NULL OR k.expense_account_id IS NULL)`, 'Fixed asset classes',
+        (r) => r.name + ' is depreciated but has no accumulated depreciation or expense account');
+      await inactive(`SELECT i.label, a.code, a.name AS acct FROM payroll_items i JOIN gl_accounts a ON a.id = i.gl_account_id WHERE NOT a.is_active`, 'Payroll items',
+        (r) => r.label + ' posts to ' + r.code + ' ' + r.acct + ', which is switched off');
+      const { rows: idle } = await query(`SELECT a.code, a.name, SUM(l.amount) AS bal FROM gl_lines l JOIN gl_accounts a ON a.id = l.account_id WHERE NOT a.is_active GROUP BY a.id HAVING SUM(l.amount) <> 0`);
+      for (const r of idle) problems.push({ where: 'Balances', what: r.code + ' ' + r.name + ' is switched off but still holds ' + r2(r.bal).toFixed(2) });
+      const { rows: unb } = await query(`SELECT e.number FROM gl_entries e JOIN gl_lines l ON l.entry_id = e.id GROUP BY e.id HAVING SUM(l.amount) <> 0 LIMIT 20`);
+      for (const r of unb) problems.push({ where: 'Journal', what: r.number + ' does not balance' });
+
+      // Money the system records that no posting rule takes to the ledger.
+      const outside = [];
+      const { rows: web } = await query(`SELECT COUNT(*)::int AS n, COALESCE(SUM(total_usd), 0) AS v FROM orders WHERE payment_status = 'paid' AND created_at >= $1`, [start]);
+      if (web[0].n) outside.push({ what: 'Website orders paid online', count: web[0].n, amount: r2(web[0].v),
+        note: 'Card money taken on the website (Stripe) goes nowhere in the ledger. If the order is rung up at the till when collected, record the online payment there as card; otherwise post a journal: Dr Card Settlements Clearing, Cr Sales.' });
+      // Work orders billed before the ledger started are not in an opening entry made before the workshop posted.
+      const { rows: op } = await query(`SELECT EXISTS (SELECT 1 FROM gl_lines l JOIN gl_entries e ON e.id = l.entry_id WHERE e.source_kind = 'opening' AND l.memo = 'Owed on work orders') AS has`);
+      if (!op[0].has) {
+        const { rows: wo } = await query(
+          `SELECT COALESCE((SELECT SUM(total) FILTER (WHERE kind = 'bill') - COALESCE(SUM(total) FILTER (WHERE kind = 'unbill'), 0) FROM work_order_billings WHERE created_at < $1), 0)
+                - COALESCE((SELECT SUM(amount_usd) FROM work_order_payments_all WHERE received_at < $1 AND (voided_at IS NULL OR voided_at >= $1)), 0) AS v`, [start]);
+        if (r2(wo[0].v)) outside.push({ what: 'Work orders owed at the ledger start', count: null, amount: r2(wo[0].v),
+          note: 'Billed work orders less workshop payments before the ledger started: not in the opening entry, so A/R in the ledger is short by this much. Post a journal: Dr Accounts Receivable, Cr Opening Balance Equity, dated the ledger start.' });
+      }
+
+      res.json({ started: true, start_at: start, sources, orphans, drift, problems, outside, rule_accounts: RULE_KEYS.length });
     } catch (e) { fail(res, e); }
   });
 
@@ -1327,7 +1770,8 @@ function register(app, deps) {
     } catch (e) { fail(res, e); }
   });
 
-  return { postAll };
+  // books.js registers after this module: it hands over Payables' bill list for the A/P tie-out and opening entry.
+  return { postAll, kick, useBooks: (b) => { books = b; } };
 }
 
 module.exports = { register };

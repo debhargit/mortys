@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Open a trade account · Morty's Auto Parts</title>
+<style>
+  :root{ --red:#d62828; --navy:#0b1b2b; --ink:#0f1720; --muted:#6b7280; --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --bad:#b91c1c; --ok:#16a34a; }
+  @media (prefers-color-scheme: dark){ :root{ --ink:#e5e7eb; --muted:#9ca3af; --bg:#0e141b; --card:#16202b; --line:#253241; --bad:#f87171; --ok:#22c55e; } }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--navy);color:#fff;padding:14px 16px}
+  header h1{font-size:19px;margin:0} header p{margin:2px 0 0;opacity:.8;font-size:13.5px}
+  main{max-width:720px;margin:0 auto;padding:16px 16px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 10px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  @media (max-width:560px){ .grid{grid-template-columns:1fr} }
+  label{display:block;font-size:13px;color:var(--muted);margin-bottom:3px}
+  input,select,textarea{font:inherit;width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+  textarea{min-height:70px}
+  .full{grid-column:1/-1}
+  .check{display:flex;gap:8px;align-items:flex-start;color:var(--ink);font-size:14px}
+  .check input{width:auto;margin-top:4px}
+  button{font:inherit;cursor:pointer;background:var(--red);color:#fff;border:0;border-radius:8px;padding:12px 22px;font-weight:700}
+  .err{color:var(--bad)} .ok{color:var(--ok)}
+  .hp{position:absolute;left:-9999px}
+  ul{margin:6px 0 0;padding-left:18px;color:var(--muted);font-size:14px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Open a trade account</h1>
+  <p>For garages, fleets, dealers and body shops</p>
+</header>
+<main>
+  <div class="card">
+    <b>Trade accounts get:</b>
+    <ul><li>Trade pricing on every part</li><li>Same-day delivery to your shop</li><li>Monthly credit on approved accounts</li><li>A named rep who knows your business</li></ul>
+  </div>
+  <form id="f" novalidate>
+    <div class="card">
+      <h2>Your business</h2>
+      <div class="grid">
+        <div class="full"><label for="business_name">Business name</label><input id="business_name" required></div>
+        <div><label for="business_type">Type of business</label><select id="business_type" required>
+          <option value="">Choose…</option><option value="garage">Garage or mechanic</option><option value="fleet">Fleet (taxis, buses, delivery)</option>
+          <option value="dealer">Parts dealer or reseller</option><option value="body_shop">Body shop</option><option value="other">Other</option></select></div>
+        <div><label for="trn">TRN (optional)</label><input id="trn" inputmode="numeric"></div>
+        <div class="full"><label for="address">Address</label><input id="address"></div>
+        <div><label for="parish">Parish</label><select id="parish"><option value="">Choose…</option></select></div>
+        <div><label for="years_trading">Years in business</label><input id="years_trading" type="number" min="0" max="100"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Who we speak to</h2>
+      <div class="grid">
+        <div class="full"><label for="contact_name">Your name</label><input id="contact_name" required></div>
+        <div><label for="phone">Phone or WhatsApp</label><input id="phone" type="tel" inputmode="tel" required placeholder="876-555-1234"></div>
+        <div><label for="email">Email (optional)</label><input id="email" type="email"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Buying and credit</h2>
+      <div class="grid">
+        <div><label for="monthly_spend">About how much a month on parts (J$)</label><input id="monthly_spend" type="number" min="0" step="1000"></div>
+        <div><label for="wants_credit">Account type</label><select id="wants_credit"><option value="no">Cash / pay as I buy</option><option value="yes">Monthly credit</option></select></div>
+        <div id="crWrap" class="full" style="display:none">
+          <div class="grid">
+            <div><label for="credit_requested">Credit limit wanted (J$)</label><input id="credit_requested" type="number" min="0" step="5000"></div>
+            <div></div>
+            <div class="full"><label for="references_text">Two trade references (business, contact, phone)</label><textarea id="references_text"></textarea></div>
+          </div>
+        </div>
+        <div class="full"><label for="how_heard">How did you hear about us? (optional)</label><input id="how_heard"></div>
+        <div class="full"><label for="notes">Anything else (optional)</label><textarea id="notes"></textarea></div>
+      </div>
+      <input class="hp" id="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+      <label class="check" style="margin-top:12px"><input type="checkbox" id="consent"> <span>I agree that Morty's Auto Parts may check these details and references, and contact me about this account.</span></label>
+    </div>
+    <button type="submit" id="go">Send application</button>
+    <p id="msg"></p>
+  </form>
+</main>
+<script>
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  ['Kingston','St. Andrew','St. Catherine','Clarendon','Manchester','St. Elizabeth','Westmoreland','Hanover','St. James','Trelawny','St. Ann','St. Mary','Portland','St. Thomas']
+    .forEach((p) => { const o = document.createElement('option'); o.value = o.textContent = p; $('parish').appendChild(o); });
+  $('wants_credit').onchange = () => { $('crWrap').style.display = $('wants_credit').value === 'yes' ? '' : 'none'; };
+  $('f').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const ids = ['business_name','business_type','trn','address','parish','years_trading','contact_name','phone','email','monthly_spend','wants_credit','credit_requested','references_text','how_heard','notes','website'];
+    const body = {}; ids.forEach((k) => { body[k] = $(k).value; }); body.consent = $('consent').checked;
+    $('go').disabled = true; $('msg').className = ''; $('msg').textContent = 'Sending…';
+    fetch('/api/public/trade-apply', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) })
+      .then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || 'Something went wrong'); return j; }))
+      .then(() => { $('f').innerHTML = '<div class="card"><h2 class="ok">Thank you, we have your application.</h2><p>We will call you within two working days. For anything urgent, call the shop.</p></div>'; window.scrollTo(0, 0); })
+      .catch((err) => { $('go').disabled = false; $('msg').className = 'err'; $('msg').textContent = err.message; });
+  });
+})();
+</script>
+</body>
+</html>

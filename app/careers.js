@@ -1117,7 +1117,7 @@ function register(app, deps) {
       '<p>This offer depends on satisfactory references and on you giving us your TRN, NIS number and a photo ID before you start.' + (o.respond_by ? ' Please let us know your answer by ' + escHtml(longDate(o.respond_by)) + '.' : '') + '</p>' +
       '<p>Yours sincerely,<br>Morty\'s Auto Parts Ltd</p>' +
       (o.status === 'accepted' ? '<p style="border-top:1px solid #ccc;padding-top:8px"><b>Accepted</b> by ' + escHtml(o.response_name || o.name || '') + ' on ' + escHtml(new Date(o.responded_at).toLocaleString('en-JM', { timeZone: 'America/Jamaica' })) + (o.response_ip ? ' (from ' + escHtml(o.response_ip) + ')' : ' (recorded by staff)') + '</p>' : '');
-    return whole ? '<!doctype html><html><head><meta charset="utf-8"><title>Offer of employment</title><style>body{font:14px/1.6 Arial,sans-serif;max-width:680px;margin:30px auto;color:#111}</style></head><body><h1 style="font-size:20px">Offer of employment</h1>' + body + '</body></html>' : body;
+    return whole ? '<!doctype html><html><head><meta charset="utf-8"><link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml"><link rel="icon" href="/favicon.ico?v=vision2" sizes="any"><link rel="apple-touch-icon" href="/apple-touch-icon.png?v=vision2"><title>Offer of employment</title><style>body{font:14px/1.6 Arial,sans-serif;max-width:680px;margin:30px auto;color:#111}</style></head><body><h1 style="font-size:20px">Offer of employment</h1>' + body + '</body></html>' : body;
   }
   app.post('/api/hr/applications/:id/offers', ...can('hr.manage'), async (req, res) => {
     try {

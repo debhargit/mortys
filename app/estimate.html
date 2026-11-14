@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Estimate · Morty's Auto Parts</title>
+<style>
+  :root { --red:#d62828; --navy:#0b1b2b; --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; }
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#f3f4f6;color:var(--ink);margin:0;padding:24px;font-size:13px}
+  .invoice{max-width:780px;margin:0 auto;background:#fff;border:1px solid var(--line);padding:36px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.05)}
+  .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid var(--navy);padding-bottom:18px;margin-bottom:18px}
+  .brand{display:flex;align-items:center;gap:14px}
+  .brand .logo{width:60px;height:60px;background:linear-gradient(135deg,var(--red),#9d2020);border-radius:12px;display:grid;place-items:center;color:#fff;font-weight:900;font-size:18px;letter-spacing:.5px}
+  .brand h1{margin:0;font-size:22px;color:var(--navy);letter-spacing:-.3px}
+  .brand .sub{font-size:11px;color:var(--muted);margin-top:2px}
+  .meta{text-align:right}
+  .meta .num{font-size:18px;font-weight:800;font-family:ui-monospace,Menlo,monospace;color:var(--red)}
+  .meta .lbl{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);font-weight:700}
+  .valid{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:16px}
+  .panels{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:18px}
+  .panels h4{margin:0 0 6px;font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);font-weight:700}
+  .panels b{font-size:14px}
+  .panels small{display:block;color:var(--muted);line-height:1.6}
+  table{width:100%;border-collapse:collapse;margin-bottom:18px;font-size:12.5px}
+  th{text-align:left;padding:8px 10px;background:var(--navy);color:#fff;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:700}
+  td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th.right,td.right{text-align:right}
+  .totals{margin-left:auto;width:300px;font-size:13.5px;margin-top:12px}
+  .totals .row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed var(--line)}
+  .totals .grand{border:0;background:var(--navy);color:#fff;padding:11px 14px;border-radius:6px;margin-top:8px;font-size:17px;font-weight:800;display:flex;justify-content:space-between}
+  .totals .grand b{color:#ffb703}
+  .terms{margin-top:22px;padding-top:14px;border-top:1px solid var(--line);font-size:10.5px;color:var(--muted);line-height:1.6}
+  .terms b{display:block;color:var(--ink);font-size:11px;margin-bottom:3px}
+  .sign{margin-top:26px;display:grid;grid-template-columns:1fr 1fr;gap:28px;font-size:11px;color:var(--muted)}
+  .sign .ln{border-top:1px solid #9ca3af;padding-top:4px}
+  .footer{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);text-align:center;color:var(--muted);font-size:11px;line-height:1.7}
+  .footer b{color:var(--ink);display:block;margin-bottom:4px;font-size:12px}
+  .actions{max-width:780px;margin:0 auto 20px;display:flex;gap:8px;justify-content:flex-end}
+  .actions button{padding:9px 16px;border:0;background:var(--red);color:#fff;font-weight:700;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit}
+  .actions button.gray{background:#6b7280}
+  .err{max-width:780px;margin:0 auto;background:#fee2e2;color:#991b1b;padding:14px 18px;border-radius:8px;font-size:14px}
+  @media print { body{background:#fff;padding:0} .invoice{box-shadow:none;border:0;padding:24px} .actions{display:none} }
+</style>
+<link rel="icon" href="/favicon.svg?v=vision2" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico?v=vision2" sizes="any">
+</head>
+<body>
+<div class="actions">
+  <button onclick="window.print()">🖨 Print / Save as PDF</button>
+  <button class="gray" onclick="window.close()">Close</button>
+</div>
+<div id="doc"></div>
+<script>
+function fmtMoney(n){ return '$' + Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtDate(s){ if(!s) return ''; return new Date(s).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+async function load(){
+  var p=new URLSearchParams(location.search); var id=p.get('id');
+  if(!id){ document.getElementById('doc').innerHTML='<div class="err">Missing ?id= in the URL.</div>'; return; }
+  try{
+    var rr=await fetch('/api/admin/requisitions/'+encodeURIComponent(id));
+    var d=await rr.json();
+    if(!rr.ok) throw new Error(d.error||'Could not load this estimate (are you signed in to the admin?)');
+    var sd={};
+    try{ var sr=await fetch('/api/admin/settings'); if(sr.ok){ sd=await sr.json(); } }catch(e){}
+    render(d.requisition, d.items||[], (sd&&sd.settings)||{});
+  }catch(e){ document.getElementById('doc').innerHTML='<div class="err">'+esc(e.message)+'</div>'; }
+}
+function render(r, items, s){
+  var veh=[r.vehicle_year,r.vehicle_make,r.vehicle_model].filter(Boolean).join(' ');
+  var num=r.req_number||('EST-'+r.id);
+  var validDays=(s.quote_valid_days!=null?s.quote_valid_days:14);
+  var validUntil=r.valid_until?fmtDate(r.valid_until):(r.created_at?fmtDate(new Date(new Date(r.created_at).getTime()+validDays*86400000)):'');
+  var laborSum=items.reduce(function(a,it){return a+Number(it.labor_usd||0);},0);
+  var partsSum=items.reduce(function(a,it){return a+Number(it.parts_usd||0);},0);
+  var total=(r.estimate_total_usd!=null)?Number(r.estimate_total_usd):items.reduce(function(a,it){return a+Number(it.total_usd||0);},0);
+  var website=s.website||'https://mortsautoparts.com';
+  var address=(s.address||'')+(s.country?', '+s.country:'');
+  document.getElementById('doc').innerHTML=
+   '<div class="invoice">'+
+    '<div class="head">'+
+      '<div class="brand">'+
+        (s.logo_url?'<img src="'+esc(s.logo_url)+'" style="width:60px;height:60px;object-fit:contain" alt=""/>':'<div class="logo">VA</div>')+
+        '<div><h1>'+esc(s.company_name||'Morty\'s Auto Parts')+'</h1>'+
+        '<div class="sub">'+esc(address)+'<br/>'+esc(s.phone||'')+' · '+esc(website)+'</div></div>'+
+      '</div>'+
+      '<div class="meta"><div class="lbl">Estimate</div><div class="num">'+esc(num)+'</div>'+
+        (r.created_at?'<div style="font-size:11px;color:var(--muted);margin-top:6px">Date: '+fmtDate(r.created_at)+'</div>':'')+
+        (r.advisor_name?'<div style="font-size:11px;color:var(--muted)">Advisor: '+esc(r.advisor_name)+'</div>':'')+
+      '</div>'+
+    '</div>'+
+    (validUntil?'<div class="valid">This estimate is valid until <b>'+esc(validUntil)+'</b> ('+validDays+' days). Prices may change after this date.</div>':'')+
+    '<div class="panels">'+
+      '<div><h4>Prepared for</h4><b>'+esc(r.customer_name||'')+'</b><small>'+esc(r.customer_phone||'')+(r.customer_email?'<br/>'+esc(r.customer_email):'')+'</small></div>'+
+      '<div><h4>Vehicle</h4><b>'+esc(veh||'—')+'</b><small>'+
+        (r.license_plate?'Plate: '+esc(r.license_plate)+'<br/>':'')+
+        (r.vehicle_vin?'VIN: '+esc(r.vehicle_vin)+'<br/>':'')+
+        (r.mileage_in?'Mileage: '+Number(r.mileage_in).toLocaleString()+' km':'')+
+      '</small></div>'+
+    '</div>'+
+    (r.complaint?'<div style="background:#fafafa;border-left:3px solid var(--red);padding:8px 12px;margin-bottom:14px;font-size:12.5px"><b style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)">Complaint / request:</b> '+esc(r.complaint)+'</div>':'')+
+    (r.recommended?'<div style="background:#fafafa;border-left:3px solid #f59e0b;padding:8px 12px;margin-bottom:14px;font-size:12.5px"><b style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)">Recommended:</b> '+esc(r.recommended)+'</div>':'')+
+    (items.length?
+      '<table><thead><tr><th>Description</th><th class="right">Hours</th><th class="right">Labour</th><th class="right">Parts</th><th class="right">Amount</th></tr></thead><tbody>'+
+      items.map(function(it){return '<tr><td><b>'+esc(it.description)+'</b></td><td class="right">'+(it.hours?Number(it.hours).toFixed(2):'—')+'</td><td class="right">'+fmtMoney(it.labor_usd)+'</td><td class="right">'+fmtMoney(it.parts_usd)+'</td><td class="right"><b>'+fmtMoney(it.total_usd)+'</b></td></tr>';}).join('')+
+      '</tbody></table>'
+      :'<p style="color:var(--muted);font-style:italic">No line items on this estimate yet.</p>')+
+    '<div class="totals">'+
+      '<div class="row"><span>Labour</span><span>'+fmtMoney(laborSum)+'</span></div>'+
+      '<div class="row"><span>Parts</span><span>'+fmtMoney(partsSum)+'</span></div>'+
+      '<div class="grand"><span>ESTIMATE TOTAL</span><b>'+fmtMoney(total)+'</b></div>'+
+    '</div>'+
+    (s.service_terms?'<div class="terms"><b>Terms</b>'+esc(s.service_terms)+'</div>':'')+
+    '<div class="sign">'+
+      '<div><div style="height:40px"></div><div class="ln">Customer approval signature</div></div>'+
+      '<div><div style="height:40px"></div><div class="ln">Date</div></div>'+
+    '</div>'+
+    '<div class="footer"><b>Thank you!</b>Questions about this estimate? Call '+esc(s.phone||'')+'</div>'+
+   '</div>';
+}
+load();
+</script>
+</body>
+</html>

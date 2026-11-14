@@ -19,10 +19,20 @@
   function modal(h) { $('#modal').innerHTML = '<div class="modal"><div class="card">' + h + '</div></div>'; }
   function close() { $('#modal').innerHTML = ''; }
   // The chart, and the classes (QuickBooks classes) lines can be tagged with; a page still works if classes cannot load.
-  var classes = [];
+  var classes = [], fixedAssets = [];
+  // The fixed assets a line can be for (repairs, fuel, rent of it): loaded with the chart; empty if they cannot load.
+  function loadAssets() {
+    return fetch('/api/assets/pick', { credentials: 'same-origin', headers: { Accept: 'application/json' } }).then(function (r) { return r.ok ? r.json() : { assets: [] }; })
+      .catch(function () { return { assets: [] }; }).then(function (r) { fixedAssets = r.assets || []; });
+  }
+  function assetOptions(selected) {
+    return '<option value="">—</option>' + fixedAssets.filter(function (a) { return a.status === 'active' || String(a.id) === String(selected); })
+      .map(function (a) { return '<option value="' + a.id + '"' + (String(selected) === String(a.id) ? ' selected' : '') + '>' + esc(a.number + ' ' + a.name) + '</option>'; }).join('');
+  }
   function loadAccounts() {
+    var fa = loadAssets();
     return Promise.all([api('/api/books/accounts'), fetch('/api/gl/classes', { credentials: 'same-origin', headers: { Accept: 'application/json' } }).then(function (r) { return r.ok ? r.json() : { classes: [] }; }).catch(function () { return { classes: [] }; })])
-      .then(function (r) { accounts = r[0].accounts; classes = r[1].classes || []; return accounts; });
+      .then(function (r) { accounts = r[0].accounts; classes = r[1].classes || []; return fa.then(function () { return accounts; }); });
   }
   function classOptions(selected) {
     return '<option value="">No class</option>' + classes.filter(function (c) { return c.is_active || String(c.id) === String(selected); })
@@ -30,7 +40,7 @@
   }
   // <option>s for an account picker: bank / cash accounts, or every account a line may use.
   function accountOptions(kind, selected) {
-    var list = accounts.filter(function (a) { return kind === 'bank' ? a.bank && a.system_key !== 'cash_drawers' : kind === 'bankonly' ? a.qb_type === 'BANK' : !a.ar_ap; });
+    var list = accounts.filter(function (a) { return kind === 'paybill' ? (a.bank && a.system_key !== 'cash_drawers') || a.card : kind === 'bank' ? a.bank && a.system_key !== 'cash_drawers' : kind === 'bankonly' ? a.qb_type === 'BANK' : !a.ar_ap; });
     return '<option value="">Choose…</option>' + list.map(function (a) { return '<option value="' + a.id + '"' + (String(selected) === String(a.id) ? ' selected' : '') + '>' + esc(a.code + ' ' + a.name) + '</option>'; }).join('');
   }
   function csv(name, rows) {
@@ -51,6 +61,6 @@
     return s.charAt(0).toUpperCase() + s.slice(1);
   }
   api('/api/books/shop').then(function (s) { shop = s; }).catch(function () {});
-  window.Books = { $: $, all: all, esc: esc, J: J, dt: dt, today: today, api: api, toast: toast, modal: modal, close: close, loadAccounts: loadAccounts, accountOptions: accountOptions, classOptions: classOptions, classes: function () { return classes; }, csv: csv, words: words,
+  window.Books = { $: $, all: all, esc: esc, J: J, dt: dt, today: today, api: api, toast: toast, modal: modal, close: close, loadAccounts: loadAccounts, accountOptions: accountOptions, classOptions: classOptions, classes: function () { return classes; }, assetOptions: assetOptions, loadAssets: loadAssets, csv: csv, words: words,
     shopName: function () { return (shop && shop.name) || 'Morty\'s Auto Parts'; }, shop: function () { return shop || {}; }, accounts: function () { return accounts; } };
 })();

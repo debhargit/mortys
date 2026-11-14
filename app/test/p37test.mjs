@@ -75,5 +75,50 @@ A('page list matches admin.html TILL_ONLY_PAGES', list.slice().sort().join() ===
 const raw = [];
 for (const p of fnList) if ((await tillOfflinePage(p).text()).includes('<title>' + p + ' ·')) raw.push(p);
 A('every till page has a plain name on the offline page' + (raw.length ? ' (missing: ' + raw.join(', ') + ')' : ''), !raw.length);
+// Demo mode: the till's pages on sample data, served by the website itself.
+const asset = (path) => path === '/payroll' ? new Response('<!doctype html><html><head><meta charset="utf-8"><title>Payroll</title></head><body>p</body></html>', { status: 200, headers: { 'content-type': 'text/html' } }) : new Response('nope', { status: 404 });
+till = 530;
+const DENV = Object.assign({ TILL_ORIGIN: 'https://till-down-demo.example' }, { ASSETS: { fetch: async (req) => asset(new URL(req.url).pathname) } });
+const demoGet = (path, cookie) => onRequest({ request: new Request('https://mortsautoparts.com' + path, { headers: cookie ? { cookie } : {} }), env: DENV, next: () => NEXT });
+r = await demoGet('/demo/');
+body = await r.text();
+A('/demo/ lists the demo modules', r.status === 200 && body.includes('href="/demo/payroll"') && body.includes('People &amp; HR') === false && body.includes('People & HR') && !body.includes('href="/demo/clock"'));
+r = await demoGet('/demo/payroll');
+A('/demo/payroll sets the session cookie and opens Payroll', r.status === 302 && loc(r) === '/payroll.html' && /^vision_demo=1; Path=\/;/.test(r.headers.get('set-cookie')) && !/Max-Age|Expires/i.test(r.headers.get('set-cookie')));
+A('/demo/<not a till page> is left alone', (await demoGet('/demo/shop')) === NEXT);
+A('no demo for the PIN and portal pages', (await demoGet('/demo/clock')) === NEXT);
+before = probes;
+r = await demoGet('/payroll.html', 'x=1; vision_demo=1');
+body = await r.text();
+A('in demo mode the website serves the page with the demo script first', r.status === 200 && /<head><script src="\/assets\/demo-mode\.js\?v=\d+"><\/script><meta/.test(body));
+A('demo mode never asks the till', probes === before);
+r = await demoGet('/payroll.html');
+A('without the cookie: the till as usual (here offline)', r.status === 503);
+r = await demoGet('/demo/leave', 'vision_demo=1');
+A('/demo/leave clears the cookie', r.status === 302 && loc(r) === '/admin.html' && /vision_demo=; .*Max-Age=0/.test(r.headers.get('set-cookie')));
+r = await demoGet('/till-admin', 'vision_demo=1');
+A('purchasing has no demo (till admin offline page)', r.status === 503);
+A('offline page offers the demo', (await tillOfflinePage('payroll').text()).includes('href="/demo/payroll"') && !(await tillOfflinePage('clock').text()).includes('/demo/'));
+
+// The demo script answers in the browser and never sends anything.
+const demoJs = fs.readFileSync(new URL('../assets/demo-mode.js', import.meta.url), 'utf8');
+const sent = [];
+const win = { location: { href: 'https://mortsautoparts.com/payroll.html', origin: 'https://mortsautoparts.com' }, addEventListener() {} };
+win.fetch = async (u) => { sent.push(String(u.url || u)); return new Response(JSON.stringify({ '/api/payroll/employees': { employees: [{ id: 3, name: 'Andre Campbell' }] }, '/api/payroll/runs/1': { run: { id: 1 } } }), { status: 200 }); };
+const doc = { readyState: 'complete', getElementById: () => null, createElement: () => ({ style: {}, setAttribute() {} }), body: { appendChild() {}, style: {} }, title: 'Payroll' };
+new Function('window', 'document', 'location', 'getComputedStyle', demoJs)(win, doc, win.location, () => ({ paddingTop: '0' }));
+let j = await (await win.fetch('/api/payroll/employees?all=1')).json();
+A('demo: a GET is answered from the sample data', j.employees && j.employees[0].name === 'Andre Campbell');
+j = await (await win.fetch('/api/payroll/runs/7')).json();
+A('demo: another record falls back to a recorded one', j.run && j.run.id === 1);
+const w = await win.fetch('/api/payroll/runs', { method: 'POST', body: '{}' });
+A('demo: a save is answered and not sent', w.status === 200 && (await w.json()).demo === true);
+A('demo: unknown data is a plain 404', (await win.fetch('/api/nothing/here')).status === 404);
+A('demo: only the sample data file was fetched', sent.length === 1 && /\/assets\/demo-data\.json/.test(sent[0]));
+const data = JSON.parse(fs.readFileSync(new URL('../assets/demo-data.json', import.meta.url), 'utf8'));
+A('sample data: no real admin email', !JSON.stringify(data).includes('@mortsautoparts.com'));
+A('sample data: the two copies match', fs.readFileSync(new URL('../public/assets/demo-data.json', import.meta.url), 'utf8') === JSON.stringify(data) && fs.readFileSync(new URL('../public/assets/demo-mode.js', import.meta.url), 'utf8') === demoJs);
+A('admin All modules links to the demo on the website only', html.includes("(ON_WEBSITE ? ' <a href=\"/demo/\""));
+
 A('admin.html links stay on the website', /function tillHref\(href\) \{\s*return href;/.test(html) && html.includes("var href = '/till-admin#tab=' + tab;"));
 A('public/admin.html matches', fs.readFileSync(new URL('../public/admin.html', import.meta.url), 'utf8').includes("var href = '/till-admin#tab=' + tab;"));

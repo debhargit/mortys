@@ -24,6 +24,8 @@
 //               what it has actually earned since it started.
 //  Health       ratios from the books rated against guide figures, with
 //               findings and recommendations; reports can be kept.
+//  Value        the balance sheet, owners' equity and how it moved, what the
+//               business is worth three ways, and recommendations.
 //
 //  Reading needs acct.view; changing anything needs acct.budget.
 // =============================================================================
@@ -1206,6 +1208,195 @@ function register(app, deps) {
       if (!rowCount) throw httpError(404, 'Not found');
       res.json({ ok: true });
     } catch (e) { fail(res, e); }
+  });
+  // ======================================================= BUSINESS VALUE ==
+  // What the business is worth and what the owners' stake in it is, from the
+  // books: the balance sheet on a day, how the owners' equity moved over the
+  // 12 months before it, three ways of putting a value on the business, and
+  // recommendations. Fixed rules, no AI: the same books give the same report.
+  // Money in the text is written {J:amount}, as in the health report.
+  //   Book value             assets less liabilities, as the ledger has them.
+  //   Adjusted net assets    book value, less half the cost of stock that has
+  //                          not sold in 12 months.
+  //   Earnings value         a year's EBITDA (profit before interest,
+  //                          depreciation and amortisation) times a multiple,
+  //                          less long-term debt, plus money on hand.
+  // The indicated value is never below adjusted net assets: an owner would
+  // sell the assets rather than the business for less.
+  const MULTIPLES = { low: 2.5, mid: 3.5, high: 4.5 };   // EBITDA multiples usual for a small parts retailer and workshop
+  function equityKind(a) {
+    if (a.system_key === 'opening_equity') return 'opening';
+    if (a.system_key === 'owner_drawings' || /draw/i.test(a.name)) return 'drawings';
+    if (a.system_key === 'retained_earnings' || /retained/i.test(a.name)) return 'retained';
+    return 'capital';
+  }
+  async function buildValue(o) {
+    const now = isDate(o.as_of) && o.as_of <= today() ? o.as_of : today();
+    if (!(await setting('gl_start_at', null))) return { ready: false, as_of: now, reason: 'The ledger has not been started, so there are no figures to value the business on yet.' };
+    const J = (v) => `{J:${r2(v)}}`, P = (v) => (v * 100).toFixed(1) + '%';
+    const mult = Object.assign({}, MULTIPLES);
+    if (o.multiple > 0 && o.multiple <= 20) { mult.mid = r2(o.multiple); mult.low = r2(Math.max(0.5, o.multiple - 1)); mult.high = r2(o.multiple + 1); }
+    const { rows: f } = await query(`SELECT to_char(MIN(entry_date), 'YYYY-MM-DD') AS d FROM gl_entries`);
+    const first = f[0].d;
+    if (!first || first > now) return { ready: false, as_of: now, reason: 'The ledger holds nothing on or before ' + now + '.' };
+    const yearAgo = addDays(now, -365), from = first > yearAgo ? addDays(first, -1) : yearAgo;   // the period is the day after "from" to "now"
+    const days = daysBetween(from, now), A = days > 0 ? 365 / days : 0;
+
+    // Every account's balance now and at the start of the period. Debits are +.
+    const { rows: acc } = await query(
+      `SELECT a.id, a.parent_id, a.code, a.name, a.type, a.qb_type, a.system_key,
+              COALESCE(SUM(l.amount) FILTER (WHERE e.entry_date <= $1), 0)::float AS bal,
+              COALESCE(SUM(l.amount) FILTER (WHERE e.entry_date <= $2), 0)::float AS bal0
+         FROM gl_accounts a JOIN gl_lines l ON l.account_id = a.id JOIN gl_entries e ON e.id = l.entry_id
+        WHERE e.entry_date <= $1 GROUP BY a.id ORDER BY a.code`, [now, from]);
+    // Main accounts, so a sub-account folds under its main account even when the main one has no postings.
+    const { rows: chart } = await query(`SELECT id, parent_id, code, name FROM gl_accounts`);
+    const G = {
+      cash: ['Money on hand', 'asset'], ar: ['Customers owe', 'asset'], stock: ['Stock at cost', 'asset'], other_ca: ['Other current assets', 'asset'],
+      fixed: ['Fixed assets (cost less depreciation)', 'asset'], other_a: ['Other assets', 'asset'],
+      cl: ['Current liabilities', 'liability'], ltl: ['Long-term liabilities', 'liability'], equity: ['Owners\' equity', 'equity'],
+    };
+    const groups = {};
+    for (const k in G) groups[k] = { key: k, label: G[k][0], side: G[k][1], lines: [], total: 0 };
+    const put = (k, a, v) => { if (Math.abs(v) < 0.005) return; groups[k].lines.push({ id: a.id, parent_id: a.parent_id, code: a.code, name: a.name, amount: r2(v) }); groups[k].total = r2(groups[k].total + v); };
+    let pl = 0, pl0 = 0, suspense = 0;
+    const eq = { opening: 0, capital: 0, drawings: 0, retained: 0 };
+    for (const a of acc) {
+      if (a.type === 'asset') {
+        const k = a.qb_type === 'BANK' || MONEY_KEYS.includes(a.system_key) ? 'cash' : a.qb_type === 'AR' ? 'ar' : a.system_key === 'inventory' ? 'stock'
+          : a.qb_type === 'OCASSET' ? 'other_ca' : a.qb_type === 'FIXASSET' ? 'fixed' : 'other_a';
+        put(k, a, a.bal);
+      } else if (a.type === 'liability') put(a.qb_type === 'LTLIAB' ? 'ltl' : 'cl', a, -a.bal);
+      else if (a.type === 'equity') {
+        put('equity', a, -a.bal);
+        const k = equityKind(a); eq[k] = r2(eq[k] - (a.bal - a.bal0));
+      } else { pl += a.bal; pl0 += a.bal0; }
+      if (a.system_key === 'suspense') suspense += a.bal;
+    }
+    if (Math.abs(pl) >= 0.005) { groups.equity.lines.push({ id: null, code: '', name: 'Profit not yet closed to equity', amount: r2(-pl) }); groups.equity.total = r2(groups.equity.total - pl); }
+    const assets = r2(['cash', 'ar', 'stock', 'other_ca', 'fixed', 'other_a'].reduce((t, k) => t + groups[k].total, 0));
+    const current = r2(['cash', 'ar', 'stock', 'other_ca'].reduce((t, k) => t + groups[k].total, 0));
+    const liabilities = r2(groups.cl.total + groups.ltl.total), netAssets = r2(assets - liabilities), equity = groups.equity.total;
+
+    // Fixed assets: the register's cost and depreciation against the ledger (assets.js).
+    let fa = null;
+    try {
+      const { rows } = await query(
+        `SELECT COUNT(*) FILTER (WHERE a.status = 'active')::int AS active, COALESCE(SUM(a.cost) FILTER (WHERE a.status = 'active'), 0)::float AS cost,
+                (SELECT to_char(MAX(r.month), 'YYYY-MM') FROM fa_runs r WHERE r.voided_at IS NULL) AS last_run
+           FROM fa_assets a`);
+      fa = rows[0];
+    } catch (_) { fa = null; }   // assets.js not set up on this till yet
+
+    // Profit for the period, by type, and a year's worth of it.
+    const plOf = (types) => r2(acc.filter((a) => types.includes(a.type)).reduce((t, a) => t + (a.bal - a.bal0), 0));
+    const income = -plOf(['income']), cogs = plOf(['cogs']), overheads = plOf(['expense', 'other_expense']), otherIncome = -plOf(['other_income']);
+    const net = r2(-(pl - pl0));
+    const ids = async (sql) => new Set((await query(sql)).rows.map((r) => r.id).filter(Boolean));
+    let interestIds = new Set();
+    try { interestIds = await ids(`SELECT id FROM gl_accounts WHERE system_key = 'interest_expense' UNION SELECT interest_account_id FROM loans`); }
+    catch (_) { interestIds = await ids(`SELECT id FROM gl_accounts WHERE system_key = 'interest_expense'`); }
+    const depIds = new Set(await depreciationIds());
+    const moved = (set) => r2(acc.filter((a) => set.has(a.id)).reduce((t, a) => t + (a.bal - a.bal0), 0));
+    const interest = moved(interestIds), depreciation = moved(depIds);
+    // A year's worth, scaled from the period; under four weeks of books is too little to scale.
+    const ebitda = r2(net + interest + depreciation), ebitdaY = days >= 28 ? r2(ebitda * A) : null, netY = days >= 28 ? r2(net * A) : null;
+
+    // Equity: where it started, what moved it, where it ended.
+    const eqOpen = r2(acc.filter((a) => a.type === 'equity').reduce((t, a) => t - a.bal0, 0) - pl0);
+    const movement = [
+      { key: 'profit', label: 'Profit for the period', amount: net },
+      { key: 'capital', label: 'Capital put in by the owners', amount: eq.capital },
+      { key: 'drawings', label: 'Drawings taken out by the owners', amount: eq.drawings },
+      { key: 'opening', label: 'Opening balances brought into the books', amount: eq.opening },
+      { key: 'retained', label: 'Profit closed to retained earnings', amount: r2(eq.retained) },
+    ].filter((m) => Math.abs(m.amount) >= 0.005);
+    const eqClose = r2(eqOpen + movement.reduce((t, m) => t + m.amount, 0));
+
+    // Stock that has not sold in 12 months (bought more than 12 months ago), at cost.
+    let slow = { lines: 0, cost: 0 };
+    try {
+      const { rows } = await query(
+        `SELECT COUNT(*)::int AS lines, COALESCE(SUM(p.stock_count * COALESCE(p.cost_usd, 0)), 0)::float AS cost
+           FROM products p
+          WHERE p.stock_count > 0 AND COALESCE(p.cost_usd, 0) > 0 AND p.created_at < ($1::date - 365)
+            AND NOT EXISTS (SELECT 1 FROM pos_sale_items i JOIN pos_sales s ON s.id = i.sale_id
+                             WHERE i.product_img = p.img AND s.created_at >= ($1::date - 365) AND NOT COALESCE(s.voided, false))`, [now]);
+      slow = { lines: rows[0].lines, cost: r2(rows[0].cost) };
+    } catch (_) {}
+    const slowWrite = r2(Math.min(slow.cost, Math.max(0, groups.stock.total)) * 0.5);
+    const adjustments = [];
+    if (slowWrite) adjustments.push({ label: 'Half the cost of stock that has not sold in 12 months (' + slow.lines + ' lines, ' + J(slow.cost) + ' at cost)', amount: -slowWrite });
+    const adjusted = r2(netAssets + adjustments.reduce((t, x) => t + x.amount, 0));
+
+    // Earnings value: needs at least a month of trading in the books.
+    const cash = groups.cash.total, debt = groups.ltl.total;
+    const earn = ebitdaY > 0
+      ? Object.fromEntries(Object.entries(mult).map(([k, m]) => [k, r2(ebitdaY * m - debt + Math.max(0, cash))])) : null;
+    const value = earn
+      ? { low: r2(Math.max(adjusted, earn.low)), mid: r2(Math.max(adjusted, earn.mid)), high: r2(Math.max(adjusted, earn.high)) }
+      : { low: adjusted, mid: adjusted, high: adjusted };
+    const basis = earn && earn.mid > adjusted ? 'earnings' : 'assets';
+    const goodwill = earn ? r2(Math.max(0, earn.mid - adjusted)) : 0;
+
+    // Measures.
+    const avgEq = (eqOpen + equity) / 2;
+    const roe = avgEq > 0 && days >= 28 ? netY / avgEq : null, roa = assets > 0 && days >= 28 ? netY / assets : null;
+    const de = equity > 0 ? liabilities / equity : null, eqRatio = assets > 0 ? equity / assets : null;
+    const measures = [
+      { label: 'Return on equity', shown: roe == null ? '–' : P(roe), guide: '15% or more', note: 'A year\'s profit against the owners\' average stake.' },
+      { label: 'Return on assets', shown: roa == null ? '–' : P(roa), guide: '8% or more', note: 'A year\'s profit against everything the business owns.' },
+      { label: 'Debt to equity', shown: de == null ? 'Negative equity' : de.toFixed(2), guide: '1 or less', note: 'What the business owes for every dollar the owners have in it.' },
+      { label: 'Equity ratio', shown: eqRatio == null ? '–' : P(eqRatio), guide: '40% or more', note: 'The share of the assets the owners, not lenders or suppliers, have paid for.' },
+      { label: 'EBITDA, a year', shown: days >= 28 ? J(ebitdaY) : '–', guide: 'positive and growing', note: 'Profit before interest, depreciation and amortisation: what buyers value a business on.' },
+    ];
+
+    // Recommendations.
+    const recs = [];
+    const rec = (rating, label, text) => recs.push({ rating, label, text });
+    if (Math.abs(r2(netAssets - equity)) >= 0.01) rec('poor', 'Books out of balance', `Assets less liabilities (${J(netAssets)}) do not equal the owners' equity (${J(equity)}). Find the entry that does not balance before relying on this report.`);
+    if (equity <= 0) rec('poor', 'Negative equity', `The business owes ${J(liabilities)}, more than everything it owns (${J(assets)}). On paper the owners' stake is ${J(equity)}. Put capital in, turn owner loans into capital, and use profit to pay down debt before taking on more.`);
+    else if (de != null && de > 2) rec('poor', 'Heavily borrowed', `The business owes ${de.toFixed(2)} dollars for every dollar the owners have in it. Pay down the dearest debt first and borrow only for things that pay for themselves.`);
+    else if (de != null && de > 1) rec('watch', 'Borrowing', `The business owes ${de.toFixed(2)} dollars for every dollar the owners have in it. Keep new borrowing for investments that earn more than they cost.`);
+    if (roe != null) {
+      if (roe < 0) rec('poor', 'Losing the owners\' money', `The business lost ${J(-netY)} a year on the owners' stake of about ${J(avgEq)}. Each month of losses takes value out of the business; the health report's actions on margin and overheads come first.`);
+      else if (roe < 0.10) rec('watch', 'Low return on equity', `The owners earn ${P(roe)} a year on their stake, less than the money would earn in a government bond or a fixed deposit. Lift margins, cut overheads, or release money tied up in stock and assets that do not earn.`);
+      else if (roe >= 0.15) rec('good', 'Good return on equity', `The owners earn ${P(roe)} a year on their stake. Decide on purpose how much profit to reinvest and how much to take out.`);
+    }
+    if (eq.drawings < 0 && net > 0 && -eq.drawings > net) rec('watch', 'Drawings above profit', `The owners took out ${J(-eq.drawings)} against a profit of ${J(net)} in the period, so their stake in the business shrank. Keep drawings within profit, or plan the shortfall.`);
+    else if (eq.drawings < 0 && net <= 0) rec('poor', 'Drawings while losing money', `The owners took out ${J(-eq.drawings)} while the business made a loss of ${J(-net)}. That draws down the business's capital: hold drawings until it is profitable again.`);
+    const obe = acc.find((a) => a.system_key === 'opening_equity');
+    if (obe && Math.abs(obe.bal) >= 1) rec('watch', 'Opening Balance Equity', `${J(-obe.bal)} sits in Opening Balance Equity, where the books put the balances brought in when the ledger started. Have your accountant move it to Owner's Capital and Retained Earnings with a journal, so the equity shows what the owners put in and what the business has earned.`);
+    if (slowWrite) rec(slow.cost > Math.max(0, groups.stock.total) * 0.2 ? 'poor' : 'watch', 'Slow stock', `${slow.lines} stock lines costing ${J(slow.cost)} have not sold in 12 months. A buyer would pay little for them. Clear them (Clearance), return them to suppliers where you can, and buy those lines only to order.`);
+    if (earn && basis === 'assets') rec('watch', 'Assets earning too little', `On its earnings the business is worth about ${J(earn.mid)}, less than its assets (${J(adjusted)}). The assets are not earning their keep: free up cash from stock and idle equipment, or lift profit.`);
+    if (!earn && days >= 28) rec('poor', 'No earnings to value', 'Over the period the business did not make a profit before interest and depreciation, so a buyer would pay no more than the assets are worth. Profitability comes first.');
+    if (basis === 'earnings' && goodwill > 0) rec('good', 'Goodwill', `The business is worth about ${J(goodwill)} more as a going concern than its assets alone: that is the value of its customers, name and trading. Protect it by keeping the key people and suppliers.`);
+    if (Math.abs(suspense) >= 1) rec('watch', 'Suspense', `${J(Math.abs(suspense))} is in Suspense. Until it is sorted into the right accounts every figure here is less reliable.`);
+    if (groups.fixed.total > 0 && fa && !fa.active) rec('watch', 'Fixed asset register', `The ledger holds ${J(groups.fixed.total)} of fixed assets but the register (Fixed assets) is empty, so nothing is being depreciated. Enter each asset as "already in the ledger" so depreciation runs each month.`);
+    else if (fa && fa.active && (!fa.last_run || fa.last_run < now.slice(0, 7) && fa.last_run < monthAdd(now, -1).slice(0, 7))) rec('watch', 'Depreciation not run', `Depreciation was last run for ${fa.last_run || 'no month yet'}. Run it on the Fixed assets page so the asset values and profit are right.`);
+    if (days < 28) rec('watch', 'Short history', `The books cover only ${days} ${days === 1 ? 'day' : 'days'}, too few to judge a year's profit, so the business is valued on its assets. Value it again after a full month or more.`);
+    else if (days < 330) rec('watch', 'Short history', `The books cover only ${days} days in this period, so the yearly figures are scaled up from them. Value the business again when there is a full year.`);
+    let healthActions = [];
+    try { const h = await buildHealth(); if (h.ready) healthActions = h.actions.slice(0, 4); } catch (_) {}
+
+    const order = { poor: 0, watch: 1, good: 2 };
+    recs.sort((a, b) => order[a.rating] - order[b.rating]);
+    return {
+      ready: true, as_of: now, period: { from: addDays(from, 1), to: now, days },
+      balance_sheet: { groups: Object.values(groups), chart, assets, current_assets: current, liabilities, net_assets: netAssets, equity },
+      equity: { opening: eqOpen, movement, closing: eqClose, check: r2(eqClose - equity) },
+      profit: { income, cogs, overheads, other_income: otherIncome, net, interest, depreciation, ebitda, net_year: netY, ebitda_year: ebitdaY },
+      valuation: { book: netAssets, adjustments, adjusted, multiples: mult, earnings: earn, debt, cash, value, basis, goodwill },
+      fixed_assets: fa, slow_stock: slow, measures, recommendations: recs, health_actions: healthActions,
+      notes: [
+        'Book value is what the ledger says the business owns less what it owes. It is only as good as the bookkeeping behind it.',
+        `Earnings value uses ${mult.low} to ${mult.high} times a year's EBITDA, the range small motor-parts and workshop businesses usually sell for; a valuer would refine it for the market, the lease and the people.`,
+        'This is a guide for the owners, not a formal valuation. For a sale, a loan or a partner buying in, have it done by a qualified valuer or your accountant.',
+      ],
+    };
+  }
+  app.get('/api/budget/value', ...VIEW, async (req, res) => {
+    try { res.json(await buildValue({ as_of: req.query.as_of, multiple: Number(req.query.multiple) || 0 })); } catch (e) { fail(res, e); }
   });
 }
 
