@@ -15,7 +15,7 @@
 import { readSession } from './session.js';
 
 const VV = 'vv';
-const ADMIN_PAGE = /^\/(admin|till-admin|accounting|assets|budget|documents|receivables|payables|banking|cards|loans-rent|report-balancing|payroll|clock|attendance|commission|training|hiring|people|franchise|franchisee|dispatch|fleet-wall|mobile|driver|cashier|warehouse|stockcash|report-planning|terminal|ai|system|security|legacy-import|supplier-admin|inventory-bulk|owner-controls|store-tax|roster|team|quotes-chase|replace-reminders|trade-accounts|staff-photos|petty-voucher|deptstore|clearance|messages|scorecard|supplier-scorecard|overseas-compare|shared|day|my-time|instruct\d*)(\.html)?\/?$|^\/demo(\/|$)/;
+const ADMIN_PAGE = /^\/(admin|till-admin|accounting|assets|budget|documents|receivables|payables|banking|cards|loans-rent|report-balancing|payroll|payslip|clock|attendance|commission|training|hiring|people|franchise|franchisee|dispatch|fleet-wall|mobile|driver|cashier|warehouse|stockcash|report-planning|terminal|ai|system|security|legacy-import|supplier-admin|inventory-bulk|owner-controls|store-tax|roster|team|quotes-chase|replace-reminders|trade-accounts|staff-photos|petty-voucher|deptstore|clearance|messages|scorecard|supplier-scorecard|overseas-compare|shared|day|my-time|instruct\d*)(\.html)?\/?$|^\/demo(\/|$)/;
 const BOT = /bot|crawl|spider|slurp|preview|facebookexternalhit|headless|lighthouse|pingdom|uptime|monitor|curl|wget|python|go-http|java\/|node-fetch|axios/i;
 const cut = (v, n) => (v == null ? null : String(v).slice(0, n));
 
