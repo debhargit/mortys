@@ -346,6 +346,26 @@ header.site .nav{gap:18px;padding:12px 0}
 .vh-stats span{font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:#cdd5e2}
 
 .hero-banner{display:none}
+/* desktop: compact finder card so the whole hero, stats band included, fits on screen */
+@media(min-width:881px){
+  .vh h1{font-size:3rem;margin-bottom:10px}
+  .vh-eyebrow{margin-bottom:8px}
+  .vh-lead{font-size:.96rem;margin-bottom:12px}
+  .vh-grid{padding-bottom:16px}
+  .vf{max-width:540px;border-radius:12px;border-top-width:4px}
+  .vf-tabs button{padding:8px 10px;font-size:.84rem}
+  .vf-panel{padding:10px 12px 8px}
+  .vf-row{gap:8px}
+  .vf-row2{margin-top:8px}
+  .vf label span{font-size:.64rem;margin-bottom:3px}
+  .vf select,.vf input{padding:7px 9px;font-size:.88rem;border-radius:7px}
+  .vf button[type=submit]{padding:8px 20px;font-size:.9rem;border-radius:7px}
+  .vf-note{margin-top:6px;font-size:.78rem}
+  .vh-alt{margin-top:10px;font-size:.85rem}
+  .vh-stats .container{padding-top:10px;padding-bottom:10px}
+  .vh-stats b{font-size:1.75rem}
+  .vh-art svg{max-height:440px;width:auto;max-width:100%;margin:0 auto}
+}
 @media(max-width:980px){
   .vh h1{font-size:3.2rem}
   .vh-grid{grid-template-columns:minmax(0,1fr) minmax(0,.7fr)}
